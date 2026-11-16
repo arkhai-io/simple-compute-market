@@ -309,7 +309,10 @@ async def test_a_delivered_rate_deal_buyer_stop_is_an_entitled_stop_that_dischar
 
 
 @pytest.mark.asyncio
-async def test_a_once_only_deal_payment_term_end_is_classified_the_term_end(tmp_path):
+async def test_a_once_only_deal_term_end_is_recorded_classified_and_torn_down(tmp_path):
+    """Past the Agreement's end, the storefront records its own term end and the
+    payments service's term end, both classified the term end, and drives the
+    deal's teardown."""
     payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
     async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled:
         negotiation_id, data = await accepted_once_deal(world)
@@ -327,7 +330,33 @@ async def test_a_once_only_deal_payment_term_end_is_classified_the_term_end(tmp_
     payments.observed_at = at
     async with recurring_world(tmp_path) as world, settlement(world, payments=payments, clock=lambda: at):
         await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
-        stop, classification = recorded_end(world.app.db.db_path, negotiation_id)
-    assert (stop.cause, stop.source_ref.startswith("payment-stop:")) == ("terms", True)
+        with transaction(world.app.db.db_path) as conn:
+            end = EndSession(conn)
+            requests = {request.source_ref.partition(":")[0]: request for request in end.requests(negotiation_id)}
+            classifications = {
+                kind: end.classification(negotiation_id, request.source_ref) for kind, request in requests.items()
+            }
+            selected = end.selected_end(negotiation_id)
+            terminations = [intent for intent in end.intents(negotiation_id) if intent.kind == "terminate"]
+            progress = end.read(negotiation_id).progress
+    assert set(requests) == {"payment-stop", "term-end"}
+    stop, own = requests["payment-stop"], requests["term-end"]
+    # The payments service ends the part at the whole second at or after the
+    # Agreement's end; the storefront's own term end is the Agreement's end.
+    assert (stop.cause, own.cause, own.ended_at) == ("terms", "terms", record.term_end)
     assert stop.ended_at >= record.term_end
-    assert classification.kind == "terms"
+    assert {kind: classification.kind for kind, classification in classifications.items()} == {
+        "payment-stop": "terms", "term-end": "terms",
+    }
+    assert selected.ended_at == record.term_end
+    assert filings(world.app.db.db_path, negotiation_id) == []
+    # The teardown is commanded and acknowledged, and the deal released: the
+    # restarted storefront's site holds no reservation, so the end completes
+    # with nothing to release.
+    # The authorities read records the payment stop before reconciliation
+    # records the term end, so the cycle's first physical end commands the
+    # termination at the stop's instant, and a termination is never restarted.
+    [termination] = terminations
+    assert termination.payload["at"] == stop.ended_at
+    assert termination.result is not None
+    assert progress == "released"

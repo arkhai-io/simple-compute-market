@@ -124,6 +124,22 @@ def test_a_floor_database_that_never_opened_a_store_gains_its_tables(tmp_path) -
     assert _snapshot(path) == _snapshot(fresh)
 
 
+def test_an_upgraded_database_gains_the_kits_empty_page_position(tmp_path) -> None:
+    """Deal servicing's page position is created by its own migration, empty,
+    so the first cycle after the upgrade starts from the first deal."""
+    path = create_floor_database(tmp_path / "floor.db")
+
+    report = migrate_storefront_database(path)
+
+    assert report.applied[-1] == "20261116_001_vm_servicing_page_position"
+    assert "servicing_page_position" in _snapshot(path)["tables"]
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("SELECT * FROM servicing_page_position").fetchall() == []
+    finally:
+        connection.close()
+
+
 def test_store_open_tables_already_present_are_left_as_they_are(tmp_path) -> None:
     path = create_floor_database(tmp_path / "delivered.db")
     connection = sqlite3.connect(path)

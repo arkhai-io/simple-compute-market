@@ -29,13 +29,12 @@ from market_deal_lifecycle.delivery import DeliveryEvidence
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_contracts.models import (
-    Accepted, CommitMessage, EvidenceItem, ListDealsRequest,
-    Pending, Rejected, SubmitResponse, Unknown,
+    Accepted, CommitMessage, EvidenceItem, Pending, Rejected, SubmitResponse, Unknown,
 )
 from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
-    LifecycleRouteServices, RespondentPoller, SellerDeal, SellerServicing,
-    SellerSession, SQLiteEvidenceStore, seller_retention,
+    LifecycleRouteServices, SellerDeal, SellerServicing, SellerSession, ServicingCycle,
+    SQLiteEvidenceStore, seller_retention,
 )
 from market_deal_servicing.end import EndService
 from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
@@ -56,6 +55,9 @@ logger = logging.getLogger(__name__)
 #: The configuration that composes the payments seller stage, without which an
 #: accepted payments deal, once-only or rate, cannot be serviced.
 PAYMENTS_SERVICING_FIELDS = "[Settlement].arkhai_payments service_url and service_identity"
+
+#: The servicing loop whose page position the kit keeps.
+SERVICING_LOOP = "deal-servicing"
 
 
 def instant(value: str) -> int:
@@ -79,8 +81,6 @@ class VmDealLifecycle:
         self.mediation_transport = mediation_transport
         self.evidence = SQLiteEvidenceStore(self.path)
         self.clients = {}
-        self.respondents = {}
-        self.continuation = None
         self.end = EndService(self.path, VmPhysicalEnd(db), clock=clock)
         self.ingress = DeliveryIngress(
             self.path, clock=clock, verify_site=self.verify_site, receipt_claim=self.receipt_claim,
@@ -273,90 +273,25 @@ class VmDealLifecycle:
         await self.seller.read(message.negotiation_id)
         return SubmitResponse(outcome=Accepted())
 
-    async def cycle(self, *, limit=100):
-        deals, self.continuation = await in_transaction(
-            self.path, lambda conn: SellerSession(conn).page(ListDealsRequest(
-                limit=limit, continuation=self.continuation,
-            )),
+    def servicing(self):
+        """The kit's servicing order over this lifecycle.
+
+        The lifecycle is its own respondent port. Its one recovery step reads
+        the site's lease end reports; its site-report correction applies the
+        compute family's site classifier.
+        """
+        return ServicingCycle(
+            self.path, domain="vms", loop=SERVICING_LOOP, seller=self.seller, end=self.end,
+            respondents=self, signer=self.signer, clock=lambda: self.clock(),
+            recovery=[("site-report recovery", lambda deal: self.recover_site_reports(deal.negotiation_id))],
+            resolve_site_corrections=lambda session, negotiation_id, now: resolve_site_corrections(
+                session, negotiation_id, now=now,
+            ),
         )
-        # Discovery precedes watch so both reuse the same prepared answer journal.
-        for deal in deals:
-            if deal.dispute is None or not self.credential_available(deal.dispute):
-                continue
-            agreement, raw = self.accepted(deal.negotiation_id)
-            account = PaymentSettlementData.parse(raw).mandate.to.root
-            key = (canonical_json(deal.dispute), account)
-            if key not in self.respondents:
-                adapter = self.dispute_adapter(deal.dispute_binding)
 
-                def resolve(case, *, authority=deal.dispute):
-                    with transaction(self.path) as conn:
-                        row = conn.execute(
-                            "SELECT deal FROM servicing_seller_deals WHERE json_extract(deal, '$.commitment_ref')=?",
-                            (case.commitment_ref,),
-                        ).fetchone()
-                    matched = SellerDeal.model_validate_json(row[0]) if row else None
-                    if matched is None or matched.dispute != authority:
-                        return None
-                    candidate = self.dispute_adapter(matched.dispute_binding)
-                    if candidate.agreement_digest != case.agreement_ref:
-                        raise ValueError("respondent case differs from accepted Agreement")
-                    return matched.negotiation_id, candidate
-
-                self.respondents[key] = RespondentPoller(
-                    self.path, authority=deal.dispute, read=adapter.respondent,
-                    resolve=resolve, signer=self.signer, clock=self.clock,
-                )
-        for poller in self.respondents.values():
-            try:
-                await poller.poll()
-            except Exception:
-                logger.exception("VM respondent discovery awaits recovery")
-        for deal in deals:
-            # The payment authority is read before a missed deadline is admitted,
-            # so a buyer stop it recorded while the storefront was down is the
-            # deal's end rather than seller non-delivery. Admission waits for that
-            # read itself, so a failed one delays the deadline to a later cycle.
-            try:
-                async for _ in self.seller.watch(deal.negotiation_id):
-                    pass
-            except Exception:
-                logger.exception("VM lifecycle watch awaits recovery for %s", deal.negotiation_id)
-
-            def admit_deadline(conn):
-                end = EndSession(conn)
-                record = end.read(deal.negotiation_id)
-                # A recovery sweep observes missed delivery, not a new admission.
-                # Re-admitting an unchanged phase invalidates concurrent CAS readers.
-                now = self.clock()
-                if now > record.deadline and (record.available_at is None or record.available_at > record.deadline):
-                    end.admit(deal.negotiation_id, record.phase, record.revision, now=now)
-            await in_transaction(self.path, admit_deadline)
-            try:
-                await self.recover_site_reports(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM site-report recovery awaits retry for %s", deal.negotiation_id)
-            try:
-                await self.end.drive_physical(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM physical end awaits recovery for %s", deal.negotiation_id)
-            try:
-                await in_transaction(self.path, lambda conn: resolve_site_corrections(
-                    EndSession(conn), deal.negotiation_id, now=self.clock(),
-                ))
-            except Exception:
-                logger.exception("VM end classification awaits recovery for %s", deal.negotiation_id)
-            try:
-                # The watch dispatched the filings journaled before it; this
-                # dispatches any the deadline or a site correction journaled since.
-                await self.seller.dispatch_filings(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM delivery-end filing awaits recovery for %s", deal.negotiation_id)
-            try:
-                await self.end.drive_physical(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM observed end awaits recovery for %s", deal.negotiation_id)
-        return len(deals)
+    async def cycle(self, *, limit=100):
+        """Service one page of deals in the kit's order; the page's size."""
+        return await self.servicing().cycle(limit=limit)
 
     def receipt_claim(self, negotiation_id, at):
         # Ingress holds its write transaction; this immutable binding read

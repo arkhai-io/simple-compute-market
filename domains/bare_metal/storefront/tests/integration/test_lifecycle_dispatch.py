@@ -1,6 +1,9 @@
-"""Bare-metal surrender races and signed release through the mounted application."""
+"""Bare-metal surrender races, the servicing cycle's kit order and signed release
+through the mounted application."""
 
 import asyncio
+import json
+import logging
 from types import SimpleNamespace
 
 import httpx
@@ -15,13 +18,19 @@ from compute_provisioning_contracts.lease_ends import (
     LeaseEndedEvent,
     sign_lease_end,
 )
+from market_alkahest import ALKAHEST_MECHANISM_ID
+from market_arkhai_mediation.client import MediationClient, MediationCredential
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_deal_lifecycle.adapters import PaymentSelector
+from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_client import LifecycleClient, LifecycleClientError
-from market_deal_lifecycle_contracts.models import CommitMessage
-from market_deal_servicing import EndSession
+from market_deal_lifecycle_contracts.models import CommitMessage, LifecycleCommand
+from market_deal_servicing import EndSession, PhysicalResult, SellerSession
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.journal import stable_ref
 from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
+from pydantic import SecretStr
 from site_trust import seeded_sites
 from storefront_client import StorefrontClient, StorefrontClientError
 
@@ -30,6 +39,7 @@ from integration.test_payment_settlement_client import (
     BUYER,
     Provisioning,
     SELLER,
+    _clone_row,
 )
 from integration.test_payment_settlement_client import enabled as enabled
 from integration.test_payment_settlement_client import harness as harness
@@ -237,6 +247,117 @@ async def test_end_during_create_adopts_and_terminates_once_without_waiting(harn
         assert end.selected_end(h.negotiation_id).actor == BUYER.identity
         assert not [intent for intent in end.intents(h.negotiation_id) if intent.kind == "filing"]
     assert h.payments.count("reverse") == 0
+
+
+class UnreachableSite:
+    """The end service's physical port, failing its first ``failures`` calls
+    as a site that cannot be reached, then reporting the resource released."""
+
+    def __init__(self, failures):
+        self.failures = failures
+        self.calls = 0
+
+    async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise ConnectionError("site unreachable")
+        return PhysicalResult(progress="released", done=True)
+
+
+def _mediation(h):
+    """Give the deal's dispute authority a usable credential whose client
+    reaches the mediation fixture."""
+    lifecycle = h.runtime.lifecycle
+    agreement = json.loads(lifecycle.agreement_bytes(h.negotiation_id))
+    authority = decode_terms(agreement["settlement"]["lifecycle"]).adjudication.dispute
+    mediation = MediationContractFake()
+    lifecycle.clients[authority.model_dump_json()] = MediationClient(
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=mediation.transport(),
+    )
+    lifecycle.credential_available = lambda candidate: candidate == authority
+    lifecycle.seller.credential_available = lifecycle.credential_available
+    return mediation
+
+
+@pytest.mark.asyncio
+async def test_a_failing_physical_end_still_dispatches_the_deals_filing_in_the_same_cycle(harness):
+    h = harness
+    h.serve()
+    await h.settle()
+    mediation = _mediation(h)
+    command = LifecycleCommand(negotiation_id=h.negotiation_id, operation_key="operator-failure", kind="delivery_end")
+    assert await h.runtime.lifecycle.seller.record_operator_end(
+        command, actor=ADMIN.identity, reason="fixture failure",
+    ) is None
+    site = UnreachableSite(failures=2)
+    h.runtime.lifecycle.end.physical = site
+
+    await h.runtime.lifecycle.cycle()
+
+    assert site.calls == 2
+    # The filing reached the authority, which holds its case, and its
+    # outcome is recorded against the journaled intent.
+    assert len(mediation.cases) == 1
+    assert mediation.entries[0]["entry"]["filing"]["request"]["cause"] == "payee"
+    with transaction(h.runtime.db.db_path) as conn:
+        [filing] = [intent for intent in EndSession(conn).intents(h.negotiation_id) if intent.kind == "filing"]
+    assert filing.result is not None
+
+
+@pytest.mark.asyncio
+async def test_an_uncommitted_surrender_gets_its_physical_end_from_the_cycle(harness):
+    """The buyer ends the deal before committing it, while the site cannot be
+    reached; the cycle, paging every registered deal, drives its end."""
+    h = harness
+    site = UnreachableSite(failures=1)
+    h.runtime.lifecycle.end.physical = site
+    async with peer(h) as buyer:
+        ack = await buyer.end_delivery(h.negotiation_id, operation_key="end")
+    assert ack.delivery.progress == "end_recorded"
+    assert site.calls == 1
+
+    assert await h.runtime.lifecycle.cycle() == 1
+
+    assert site.calls == 2
+    with transaction(h.runtime.db.db_path) as conn:
+        end = EndSession(conn)
+        assert end.read(h.negotiation_id).committed_at is None
+        [termination] = [intent for intent in end.intents(h.negotiation_id) if intent.kind == "terminate"]
+        assert end.read(h.negotiation_id).progress == "released"
+    assert termination.state == "done"
+    assert h.payments.count("get_transaction") == 0
+
+
+@pytest.mark.asyncio
+async def test_respondent_discovery_runs_once_per_authority_with_an_alkahest_deal_first(harness, caplog):
+    """An Alkahest deal under the payments deal's authority sorts first on the
+    page; discovery lists the authority's cases once, needing no payment account."""
+    h = harness
+    h.serve()
+    await h.settle()
+    mediation = _mediation(h)
+    alkahest, commitment = "0-alkahest", "a" * 64
+    assert alkahest < h.negotiation_id
+    _clone_row(h.runtime.db.db_path, "negotiation_threads", h.negotiation_id, alkahest)
+    with transaction(h.runtime.db.db_path) as conn:
+        end = EndSession(conn)
+        end.register(end.read(h.negotiation_id).model_copy(update={
+            "negotiation_id": alkahest, "commitment_ref": commitment, "revision": 0,
+        }))
+        sellers = SellerSession(conn)
+        sellers.register(sellers.read(h.negotiation_id).model_copy(update={
+            "negotiation_id": alkahest, "commitment_ref": commitment,
+            "payment": PaymentSelector(ALKAHEST_MECHANISM_ID),
+        }))
+
+    with caplog.at_level(logging.ERROR):
+        assert await h.runtime.lifecycle.cycle() == 2
+
+    assert [request.url.path for request in mediation.requests if request.url.path == "/respondent"] == [
+        "/respondent",
+    ]
+    assert not [record for record in caplog.records if "respondent discovery" in record.getMessage()]
 
 
 @pytest.mark.asyncio

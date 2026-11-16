@@ -19,7 +19,7 @@ from pathlib import Path
 
 from core_storefront import migrations as core_migrations
 from market_contact_exchange import migrations as contact_exchange_migrations
-from market_deal_servicing import create_payment_observations
+from market_deal_servicing import create_page_position, create_payment_observations
 from market_deal_servicing import create_schema as create_servicing_schema
 from market_pool_overrides import migrations as pool_override_migrations
 from market_schema_migrations import (
@@ -246,6 +246,17 @@ def _drop_accepted_site_generations(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE IF EXISTS bare_metal_accepted_site_generations")
 
 
+def _servicing_page_position(connection: sqlite3.Connection) -> None:
+    """Create deal servicing's page position and drop the lifecycle's own cursor.
+
+    The kit keeps each servicing loop's position, so the cursor the lifecycle
+    kept is read by nothing; dropping it loses only a rotation position, and the
+    next cycle starts from the first deal.
+    """
+    create_page_position(connection)
+    connection.execute("DROP TABLE bare_metal_lifecycle_cursor")
+
+
 FLOOR_IDS: tuple[str, ...] = (
     "20260604_000_listing_resource_timestamps",
     "20260604_004_negotiation_amount_text_columns",
@@ -307,6 +318,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         ),
         # Deal servicing's record of each successful payment observation's instant.
         Migration("bare-metal-storefront-0019-payment-observations", create_payment_observations),
+        Migration("bare-metal-storefront-0020-servicing-page-position", _servicing_page_position),
     ),
     floor_ids=FLOOR_IDS,
 )

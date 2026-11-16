@@ -1122,7 +1122,7 @@ Delivers the unified cycles. Implements D4's domain part and D6's migrations;
 requirement "Each deal's servicing steps run in one kit-owned order". Touches
 `domains/vms/storefront`, `domains/bare_metal/storefront`.
 
-- [ ] 7.1 VM: `VmDealLifecycle.cycle` (`deal_lifecycle.py`) calls the helper with its
+- [x] 7.1 VM: `VmDealLifecycle.cycle` (`deal_lifecycle.py`) calls the helper with its
       site-report recovery and classifier and its respondent port, dropping the cached
       pollers, the in-memory continuation and its own step order; VM thereby records its
       own term end. Append the servicing page-position migration to
@@ -1130,7 +1130,41 @@ requirement "Each deal's servicing steps run in one kit-owned order". Touches
       (application integration, `test_lifecycle_cycle.py`, `test_lifecycle_ends.py`): a
       physical failure does not skip filings; a once-only deal's term end is recorded and
       torn down; the page position survives a restart.
-- [ ] 7.2 Bare metal: `BareMetalLifecycle.cycle` (`lifecycle.py`) calls the helper with
+      Done: `VmDealLifecycle.servicing()` builds a `ServicingCycle` per cycle (domain
+      `vms`, loop `deal-servicing`, the lifecycle as its respondent port, its signer, one
+      recovery step `recover_site_reports`, `resolve_site_corrections` as the correction);
+      `cycle(limit=100)` runs it. `self.respondents`, `self.continuation`, the local
+      `resolve` and the in-lifecycle deadline admission are gone. The authorities read is
+      now `seller.read`, so VM's cycle no longer dispatches filings before its filing
+      step. Migration `20261116_001_vm_servicing_page_position` (`create_page_position`).
+      `test_lifecycle_cycle.py`, over `test_payment_settlement`'s harness, the composed
+      lifecycle over the application's database with its cycle called directly as the
+      `settlement-servicing` loop calls it — narrower than application integration, as
+      that file's other cycle cases are, since a cycle of one deal is reachable only by
+      a direct call: a
+      delivered deal with an administrator's failure end and filing journaled, its
+      dispute authority's client reaching the mediation fixture and its physical port
+      raising, has its filing filed at the authority (one case, cause `payee`, the intent
+      `done`/`accepted`) and the physical port called twice; with a second registered
+      deal past its Agreement's end, a cycle of one services the first and saves
+      position `payment-neg-1`, and a newly built `VmDealLifecycle` over the same
+      database (the restart, by construction, not an application restart) services the
+      second (its `term-end` recorded) and saves `NULL`, and its next cycle starts from
+      the first deal again (position `payment-neg-1`). The second deal's rows are written
+      through the kit's sessions, not negotiated. Application integration
+      (`test_lifecycle_ends.py`, the recurring world, restarted past the Agreement's end,
+      the cycle run through the typed admin client's `settlement-servicing` step) the
+      once-only case now
+      shows both the payment stop and the storefront's own `term-end` (at the term end,
+      `source="agreement"`), both classified `terms`, the selected end at the term end,
+      no filing, and the termination commanded and acknowledged: the first physical end
+      commands it at the payment stop's instant, since the authorities read records that
+      stop before reconciliation records the term end, and a termination never restarts;
+      the restarted world's site holds no reservation, so teardown completes with nothing
+      to release and the deal reads `released`. That case asserted the payment stop selected before; it is renamed.
+      `test_servicing_unreachable_authority.py` now expects the kit's discovery log line
+      naming the domain, step and authority.
+- [x] 7.2 Bare metal: `BareMetalLifecycle.cycle` (`lifecycle.py`) calls the helper with
       `recover_site` and its classifier and its respondent port, dropping its own
       reconciliation's term-end record (now the kit's) and its delivery re-drive (section
       8 moves it). Append to `migrations.py` a migration that creates the page-position
@@ -1139,12 +1173,98 @@ requirement "Each deal's servicing steps run in one kit-owned order". Touches
       still dispatches the deal's filing in the same cycle; an uncommitted surrender gets
       its physical end; respondent discovery runs once per authority with an Alkahest
       deal first on the page.
-- [ ] 7.3 Verify both migration chains (migration tests per
+      Done, differing from the plan in the re-drive: `BareMetalLifecycle.servicing()`
+      builds the cycle (domain `bare-metal`, loop `deal-servicing`, the lifecycle as its
+      port, `runtime.marketplace_signer`) with two recovery steps, `recover_delivery`
+      then `recover_site`. The re-drive stays a recovery step until section 8's routine
+      takes it: no other bare-metal loop re-drives a delivery, and
+      `test_lifecycle_dispatch.py`'s readiness-adoption cases, `test_delivery_path.py`'s
+      waiting-deal cases and the bare-metal lane's delivery depend on the cycle doing so.
+      Section 8 must remove it from the steps. `reconcile_local` and `committed` are gone
+      (the kit's); `dispute` is renamed `dispute_adapter`, the port's name, as VM's (its
+      two test callers follow). Migration `bare-metal-storefront-0020-servicing-page-position`
+      creates the set and drops `bare_metal_lifecycle_cursor`. `test_lifecycle_dispatch.py`,
+      over the payments harness's served application, its lifecycle's cycle called
+      directly as the `delivery-recovery` loop calls it, as that file's other cycle cases
+      do — narrower than application integration for the cycle itself, though the
+      surrender goes through the buyer's typed lifecycle client: a settled deal with an administrator's
+      failure end and filing journaled, its authority's client reaching the mediation
+      fixture, whose physical port raises, has its filing filed at the authority (one
+      case, cause `payee`, its outcome recorded on the intent — the fixture's answer here
+      is pending, not accepted as in VM's case) and the port called twice; a buyer's
+      surrender before commit, whose route-time physical end fails, is driven by the
+      cycle (the port's second call, the termination `done`, progress `released`, the
+      deal still uncommitted, no payment read); an Alkahest deal sorting first under the
+      payments deal's authority (its thread row cloned, its servicing rows written
+      through the kit's sessions) leaves one `/respondent` listing at the mediation
+      fixture and no discovery failure logged. Application integration
+      (`test_lifecycle_ends.py`, the recurring world restarted past the Agreement's end,
+      the cycle run through the typed admin client's `delivery-recovery` step): the
+      once-only case now asserts the storefront's own `term-end` at the term end, cause
+      `terms`, source `agreement`, classified `terms`, beside the payment stop it already
+      asserted.
+- [x] 7.3 Verify both migration chains (migration tests per
       `docs/guidance/repository/migration-chain-tests.md`): fresh and upgraded databases
       reach the same schema; bare metal's upgrade drops the old cursor table.
-- [ ] 7.4 Verification point: both storefronts' suites pass. End-to-end:
+      Done (library integration, real SQLite, no application): each chain's existing
+      fresh-versus-adopted, rerun and refusal cases pass with the new migration last. VM
+      `test_migration_chain.py`: an adopted floor database's last applied migration is
+      the page position's and its table exists, empty. Bare metal: a floor database whose
+      store never opened ends with `servicing_page_position` and no cursor, matching a
+      fresh one; a store-opened database holding the cursor with a row applies exactly
+      the later migrations, the page position's last, matches a fresh database, holds
+      no cursor and an empty position table (replacing the case that kept the cursor's
+      row). `docs/development/DEPLOYMENT_AND_CONFIG.md`'s list of migrations after the
+      floor names both, written here as the description of the current chains.
+- [x] 7.4 Verification point: both storefronts' suites pass. End-to-end:
       `e2e_vm_payment_deal`, the `e2e_vm_dispute_*` scenarios, `e2e_bare_metal_payment_deal`
       and the two recurring purchases step the servicing cycle.
+      Done: `make -C domains/vms/storefront test` (unit 1194 passed, 1 skipped;
+      integration 614 passed) and `make -C domains/bare_metal/storefront test` (655
+      passed), after the fresh-context fixes; `scripts/change-workflow run pre-commit`
+      passed with every functional hook before them, and again at the commit (recorded
+      in the handoff). End-to-end confirmed: those scenarios, and
+      `e2e_bare_metal_mock_deal`, step the loop that runs the cycle
+      (`settlement-servicing` in VM, `delivery-recovery` in bare metal), so a passing
+      pipeline is evidence the kit's order services them; none asserts the order or the
+      page position. Owed by validation: none. `run test-before` was not run: it runs
+      without the storefronts' environments; the new cases call the cycle, which at the
+      round's base had bare metal's single error handler (the filing case fails there)
+      and VM's in-memory position (the restart case fails there), by the code read, not a
+      run.
+      Fresh-context check: fixed — 7.2's note claimed the bare-metal once-only case
+      showed its own `term-end`, which it did not assert (now asserted); VM's teardown
+      comment and note claimed completion over an assertion admitting `tearing_down`
+      (now `released`, which it is); the restart case's "first deal untouched" showed
+      nothing, and its docstring's wrap to the first deal was unasserted (now a third
+      cycle); `e2e_bare_metal_publication`, which steps no servicing loop, named in 7.4;
+      7.4's missing pre-commit record and VM's unit suite; the cycle-calling cases
+      labelled application integration (now named for what they run); the per-cycle
+      build's rationale, which nothing needs (removed from both docstrings and the
+      note); `vm-storefront-fulfillment/architecture.md`'s term-end sentences, now stale,
+      added to 12.9; a broken docstring wrap; the bare-metal test's import order.
+      Declined: driving the filing and surrender cases through the admin loop route,
+      since the payments harnesses' other cycle cases call the cycle directly and a
+      cycle of one deal needs the direct call; importing `_clone_row` from the sibling
+      test module, as `test_payment_settlement_client.py`'s own cases share it.
+
+Section 7 handoff:
+
+- `scripts/change-workflow run pre-commit` passed at the commit, after the
+  fresh-context fixes, with every functional hook (relock, packaging, every suite).
+- Both cycles are `ServicingCycle`s built in each lifecycle's `servicing()`; the loop
+  names are still the old ones (`settlement-servicing` in VM runs `cycle()` beside the
+  worker; `delivery-recovery` in bare metal runs it), and the page-position row is
+  already keyed `deal-servicing`, the loop 9.1 registers.
+- Section 8 must remove `("delivery re-drive", self.recover_delivery)` from bare metal's
+  `servicing()` recovery steps when the shared re-drive replaces `recover_delivery`;
+  `test_lifecycle_dispatch.py`'s readiness-adoption cases and `test_delivery_path.py`'s
+  waiting-deal cases then need the re-drive's loop, not the cycle.
+- VM's term end now comes from the kit's reconciliation: past the Agreement's end the
+  cycle records `term-end` beside any payment `terms` stop, and the termination is
+  commanded at whichever end the first physical end of the cycle sees.
+- The bare-metal payments harness's `Provisioning` has no `get_lease`, so
+  `recover_site` logs a failure in every cycle there; harmless, as before.
 
 ## 8. One delivery re-drive routine
 
@@ -1307,7 +1427,9 @@ campaign index currency.
         cursor": the respondent cursor is the authority's, found by section 6's
         fresh-context check);
         `openspec/specs/vm-storefront-fulfillment/architecture.md`, "Evidence and delivery
-        ownership" (its respondent-poller sentence);
+        ownership" (its respondent-poller sentence, and its term-end sentences — bare metal
+        recording term ends while VM relies on site expiry — found by section 7's
+        fresh-context check);
         `openspec/specs/settlement-servicing/architecture.md`, "Current limits" (its
         respondent and term-end clause).
       - D5: `compute-delivery/architecture.md`, "Dispatch and recovery" and "Domain

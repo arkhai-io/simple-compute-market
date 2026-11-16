@@ -617,6 +617,12 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   `bare-metal-storefront-0019-payment-observations`). A rate deal past its delivery
   deadline before the upgrade has its deadline recorded only after the first payment
   observation the upgraded storefront makes.
+- Each compute storefront then creates deal servicing's `servicing_page_position`,
+  each servicing loop's page position, empty, which tolerates no table already
+  present (`20261116_001_vm_servicing_page_position`,
+  `bare-metal-storefront-0020-servicing-page-position`); the bare-metal migration
+  drops the lifecycle cursor in the same step, so its first cycle after the upgrade
+  starts from the first deal.
 - The storefronts drop the tables v0.3.0 kept frozen: the VM storefront's
   `compute_allocations`, `resources`, `hosts`, `resource_transition_events`,
   `compute_pool_members`, and `compute_capacity_pools` or

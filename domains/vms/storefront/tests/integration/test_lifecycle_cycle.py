@@ -1,4 +1,6 @@
-"""VM recovery cycles preserve admission CAS and finish report recovery."""
+"""VM servicing cycles run the kit's order: they preserve admission CAS, keep
+filings independent of physical failures, resume from the durable page position
+and finish report recovery."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -6,13 +8,18 @@ from unittest.mock import AsyncMock
 import pytest
 from compute_provisioning_contracts import LeaseEndedEvent, sign_lease_end
 from core_storefront.service_peers import ServicePeerTrust
-from market_deal_servicing import EndSession
+from market_arkhai_mediation.client import MediationClient, MediationCredential
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_deal_lifecycle.terms import decode_terms
+from market_deal_lifecycle_contracts.models import LifecycleCommand
+from market_deal_servicing import EndSession, SellerSession
 from market_deal_servicing.evidence import transaction
-from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
 from market_storefront import container
 from market_storefront.deal_lifecycle import VmDealLifecycle
+from pydantic import SecretStr
 
-from tests.integration.test_payment_settlement import LISTING, NEGOTIATION, make
+from tests.integration.test_payment_settlement import LISTING, NEGOTIATION, SELLER, make
 
 # Public deterministic development identity; never use on a public network.
 SITE = Ed25519Signer(b"\x51" * 32)
@@ -35,6 +42,101 @@ async def test_unchanged_cycles_preserve_a_concurrent_admission_revision(make):
         after = end.read(NEGOTIATION)
         assert after.revision == before.revision
         assert end.admit(NEGOTIATION, before.phase, before.revision, now=h.lifecycle.clock()).status == "admitted"
+
+
+class UnreachableSite:
+    """The end service's physical port when the site cannot be reached."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
+        self.calls += 1
+        raise ConnectionError("site unreachable")
+
+
+@pytest.mark.asyncio
+async def test_a_physical_failure_does_not_skip_the_deals_filing(make):
+    """A delivered deal ended by an administrator's failure end, its filing
+    journaled, whose site cannot be reached: the cycle still dispatches the
+    filing to the mediation authority and attempts the physical end again."""
+    h = await make()
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    agreement, _ = h.lifecycle.accepted(NEGOTIATION)
+    authority = decode_terms(agreement["settlement"]["lifecycle"]).adjudication.dispute
+    mediation = MediationContractFake()
+    h.lifecycle.clients[canonical_json(authority)] = MediationClient(
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=mediation.transport(),
+    )
+    h.lifecycle.credential_available = lambda candidate: candidate == authority
+    h.lifecycle.seller.credential_available = h.lifecycle.credential_available
+    command = LifecycleCommand(negotiation_id=NEGOTIATION, operation_key="operator-failure", kind="delivery_end")
+    assert await h.lifecycle.seller.record_operator_end(
+        command, actor=SELLER.identity, reason="fixture failure",
+    ) is None
+    site = UnreachableSite()
+    h.lifecycle.end.physical = site
+
+    await h.lifecycle.cycle()
+
+    assert site.calls == 2
+    assert len(mediation.cases) == 1
+    assert mediation.entries[0]["entry"]["filing"]["request"]["cause"] == "payee"
+    with transaction(h.lifecycle.path) as conn:
+        [filing] = [intent for intent in EndSession(conn).intents(NEGOTIATION) if intent.kind == "filing"]
+    assert (filing.state, filing.result["status"]) == ("done", "accepted")
+
+
+@pytest.mark.asyncio
+async def test_the_page_position_survives_a_restart(make):
+    """A restarted storefront's first cycle resumes after the page its last
+    cycle serviced, and the page after the last starts again from the first."""
+    h = await make()
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    later = NEGOTIATION + "-later"
+    now = h.lifecycle.clock()
+    with transaction(h.lifecycle.path) as conn:
+        end = EndSession(conn)
+        # A second registered deal, past its Agreement's end, sorting after the first.
+        end.register(end.read(NEGOTIATION).model_copy(update={
+            "negotiation_id": later, "commitment_ref": "later-commitment", "start_at": now - 7200,
+            "term_end": now - 3600, "committed_at": now - 7200, "delivery_deadline_seconds": None,
+            "available_at": now - 7100, "progress": "active", "revision": 0,
+        }))
+        SellerSession(conn).register(SellerSession(conn).read(NEGOTIATION).model_copy(update={
+            "negotiation_id": later, "commitment_ref": "later-commitment",
+        }))
+
+    assert await h.lifecycle.cycle(limit=1) == 1
+    with transaction(h.lifecycle.path) as conn:
+        assert not [request for request in EndSession(conn).requests(later)]
+        assert conn.execute("SELECT loop, continuation FROM servicing_page_position").fetchall() == [
+            ("deal-servicing", NEGOTIATION),
+        ]
+
+    restarted = VmDealLifecycle(h.db, h.lifecycle.signer, h.lifecycle.payments_coordinator,
+                                SimpleNamespace(config=h.lifecycle.dispute_config),
+                                fulfillment=h.lifecycle.fulfillment)
+    try:
+        assert await restarted.cycle(limit=1) == 1
+        with transaction(h.lifecycle.path) as conn:
+            assert [request.source_ref for request in EndSession(conn).requests(later)] == ["term-end"]
+            assert conn.execute("SELECT loop, continuation FROM servicing_page_position").fetchall() == [
+                ("deal-servicing", None),
+            ]
+        # After the last page, the next cycle starts again from the first deal.
+        assert await restarted.cycle(limit=1) == 1
+    finally:
+        await restarted.close()
+    with transaction(h.lifecycle.path) as conn:
+        assert conn.execute("SELECT loop, continuation FROM servicing_page_position").fetchall() == [
+            ("deal-servicing", NEGOTIATION),
+        ]
 
 
 @pytest.mark.asyncio

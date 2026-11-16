@@ -22,6 +22,7 @@ import logging
 
 import httpx
 import pytest
+from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import Accepted, Unknown
 from market_identity import TrustedIdentitySet
@@ -79,17 +80,19 @@ async def test_servicing_reads_running_while_the_pinned_authority_is_unreachable
     await h.delivered()
 
     # The respondent poll and the deal's watch both reach the authority and
-    # fail there. The poll's transport failure is logged for the next cycle to
-    # retry, the cycle completes, and nothing marks the deal for repair.
-    with caplog.at_level(logging.ERROR, logger="market_storefront.deal_lifecycle"):
+    # fail there. The poll's transport failure is logged, naming the authority,
+    # for the next cycle to retry, the cycle completes, and nothing marks the
+    # deal for repair.
+    with caplog.at_level(logging.ERROR, logger="market_deal_servicing.servicing"):
         assert await h.lifecycle.cycle() == 1
     assert {(host, path) for host, path in attempts} == {
         ("dispute.invalid", "/respondent"), ("dispute.invalid", "/record"),
     }
     assert tokens == {f"Bearer {CREDENTIAL}"}
+    authority = DisputeAuthority.model_validate(UNREACHABLE)
     assert [
         record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR
-    ] == ["VM respondent discovery awaits recovery"]
+    ] == [f"vms servicing step respondent discovery awaits recovery for authority {authority.identity}"]
     [summary] = (await h.lifecycle.seller.list()).deals
     assert summary.state == "running"
 

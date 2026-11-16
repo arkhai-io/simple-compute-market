@@ -277,5 +277,11 @@ async def test_a_once_only_deal_payment_term_end_is_the_term_end_and_a_later_wit
     [(stop, classification)] = [value for ref, value in ends.items() if ref.startswith("payment-stop:")]
     assert (stop.cause, classification.kind) == ("terms", "terms"), ends
     assert stop.ended_at >= record.term_end
+    # The storefront records its own term end at the Agreement's end, as every
+    # compute storefront's servicing cycle does.
+    own, own_classification = ends["term-end"]
+    assert (own.ended_at, own.cause, own.source, own_classification.kind) == (
+        record.term_end, "terms", "agreement", "terms",
+    )
     assert withdrawal.kind == "unentitled_withdrawal"
     assert withdrawn == []
