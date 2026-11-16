@@ -10,11 +10,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 from arkhai_vms_listings.reconciler import (
     ReconciliationScope,
     closed_available_listing_ids,
@@ -210,7 +210,7 @@ class AdminController:
                 self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
-                now=int(time.time()),
+                now=injected_time.now(),
             )
         except IdentityAuthorityError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -233,7 +233,7 @@ class AdminController:
                 StorefrontIdentityAuthority(self._db.db_path),
                 authority=authority,
                 subject=subject,
-                now=int(time.time()),
+                now=injected_time.now(),
             )
         except IdentityAuthorityError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -255,7 +255,7 @@ class AdminController:
                 self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
-                now=int(time.time()),
+                now=injected_time.now(),
             )
         except IdentityAuthorityError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -537,7 +537,7 @@ class AdminController:
     @staticmethod
     def _interrupt_time(value: str | None) -> str:
         if not value:
-            dt = datetime.now(timezone.utc)
+            dt = injected_time.now_datetime()
         else:
             raw = value.strip()
             if raw.endswith("Z"):

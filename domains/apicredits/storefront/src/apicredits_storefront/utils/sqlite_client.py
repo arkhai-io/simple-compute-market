@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from datetime import datetime
 from typing import Any
 
-from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
+from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient, store_timestamp
 
 from apicredits_storefront.settlement_repository import SettlementRepository
 from market_core import SettlementEvidence
@@ -158,7 +157,7 @@ class SQLiteClient(CoreSQLiteClient):
                     (
                         obligation_ref,
                         obligation_index,
-                        datetime.now().isoformat(),
+                        store_timestamp(),
                         escrow_uid,
                     ),
                 )

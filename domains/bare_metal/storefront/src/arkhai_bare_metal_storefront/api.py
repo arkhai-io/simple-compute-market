@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
+import injected_time
 from arkhai_bare_metal import CanonicalPrincipal
 from compute_provisioning_contracts.lease_ends import LEASE_ENDED_CALLBACK
 from arkhai_bare_metal.evidence_routes import (
@@ -1234,7 +1233,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
     runtime = _runtime(request)
     as_site = request.headers.get("x-market-role") == "service"
     if as_site:
-        now = int(time.time())
+        now = injected_time.now()
         await _principal(
             request=request,
             runtime=runtime,
@@ -1414,7 +1413,7 @@ async def admin_interrupt_deal(
         escrow_uid=negotiation_id,
         listing_id=agreement.listing_id,
         status="dry_run" if body.dry_run else result.outcome.status,
-        interrupted_at_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        interrupted_at_utc=injected_time.now_datetime().isoformat().replace("+00:00", "Z"),
         settlement_action=result.settlement_action,
         lifecycle_outcome=result.outcome.model_dump(mode="json"),
         delivery=result.delivery.model_dump(mode="json"),
@@ -1437,7 +1436,7 @@ async def capacity_released(
     """
     runtime = _runtime(request)
     operation = "fulfillment_capacity_released"
-    now = int(time.time())
+    now = injected_time.now()
     await _principal(
         request=request,
         runtime=runtime,
@@ -1473,7 +1472,7 @@ async def lease_ended(capacity_reservation_id: str, request: Request) -> dict[st
     if row is None:
         raise HTTPException(status_code=404, detail="reservation is not this storefront's")
     operation = LEASE_ENDED_CALLBACK["operation"]
-    now = int(time.time())
+    now = injected_time.now()
     await _principal(
         request=request, runtime=runtime, operation=operation,
         resource=capacity_reservation_id, expected_role="service",
@@ -1542,7 +1541,7 @@ async def rotate_marketplace_identity(
             _changing_identity_authority(runtime),
             request=body,
             operator=operator,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1569,7 +1568,7 @@ async def retire_marketplace_identity(
             _changing_identity_authority(runtime),
             request=body,
             operator=operator,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1608,7 +1607,7 @@ async def marketplace_identity_status(request: Request) -> IdentityStatusRespons
             StorefrontIdentityAuthority(runtime.db.db_path),
             authority=authority,
             subject=subject,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

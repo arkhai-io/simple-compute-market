@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import sqlite3
 import threading
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import httpx
@@ -240,6 +242,24 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
             "demand_data": {"recipient": SELLER_WALLET.lower()},
         }
     ]
+
+
+async def test_a_published_listing_holds_the_injected_instant(storefront, injected_source):
+    """Every time the listing's ordering and reconciliation read is the
+    storefront's process source, never a read of the wall clock."""
+    async with _started(_settlement()) as (listings, _public, _admin):
+        created = await listings.publish_from_quota(_supplied_escrows())
+
+    instant = datetime.fromtimestamp(injected_source.now(), timezone.utc)
+    with sqlite3.connect(storefront) as conn:
+        stamped = conn.execute(
+            "SELECT l.created_at, l.updated_at, b.last_reconciled_at FROM listings l"
+            " JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id"
+            " WHERE l.listing_id = ?",
+            (created.listing_id,),
+        ).fetchone()
+    stored = instant.replace(tzinfo=None).isoformat()
+    assert stamped == (stored, stored, instant.isoformat())
 
 
 async def test_a_seller_stating_only_a_key_publishes_the_keys_account_as_recipient(

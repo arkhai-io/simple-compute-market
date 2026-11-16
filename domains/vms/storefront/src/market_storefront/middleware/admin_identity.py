@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
 
+import injected_time
 from core_storefront.auth import (
     AuthenticatedPrincipal,
     AuthError,
@@ -52,7 +52,7 @@ def initialize_administrator_identities(
 ) -> None:
     """Idempotently materialize configured administrator trust pins."""
 
-    timestamp = int(time.time()) if now is None else now
+    timestamp = injected_time.now() if now is None else now
     authority = StorefrontIdentityAuthority(db_path)
     for subject, principals in get_administrator_configs().items():
         try:
@@ -470,7 +470,7 @@ async def administrator_identity_middleware(request: Request, call_next):
         if db is None:
             raise AuthError("authentication store unavailable", status_code=503)
         _storefront_signer()
-        now = int(time.time())
+        now = injected_time.now()
         claimed = _claimed_administrator(request)
         if claimed not in _active_administrators(db.db_path, now=now):
             raise AuthError(

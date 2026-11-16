@@ -8,10 +8,10 @@ import hashlib
 import json
 import logging
 import sqlite3
-import time
 from datetime import datetime
 from pathlib import Path
 
+import injected_time
 from arkhai_compute.end_classification import payment_actor
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 from market_alkahest import ALKAHEST_MECHANISM_ID
@@ -60,7 +60,7 @@ def instant(value: str) -> int:
 
 class VmDealLifecycle:
     def __init__(
-        self, db, signer, payments, disputes, *, clock=lambda: int(time.time()), fulfillment=None,
+        self, db, signer, payments, disputes, *, clock=injected_time.now, fulfillment=None,
         mediation_transport=None,
     ):
         self.db = db

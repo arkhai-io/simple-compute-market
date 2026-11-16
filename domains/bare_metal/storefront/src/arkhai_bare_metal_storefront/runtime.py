@@ -7,9 +7,10 @@ import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
+import injected_time
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
@@ -131,14 +132,6 @@ def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
     stage_event("claims", event, **fields)
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _unix_now() -> int:
-    return int(datetime.now(timezone.utc).timestamp())
-
-
 def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchdogPolicy:
     """The negotiation watchdog's timeout and sweep interval, as configured."""
     return NegotiationWatchdogPolicy(
@@ -223,12 +216,12 @@ class BareMetalStorefrontRuntime:
     )
     #: The time a confirmation's age is measured at.
     source_confirmation_clock: Callable[[], datetime] = field(
-        default=_utc_now, repr=False, compare=False
+        default=injected_time.now_datetime, repr=False, compare=False
     )
     #: The Unix-second clock deal servicing reads: end service's admission, the
     #: payment watch's observation instants and the delivery path's steps.
     lifecycle_clock: Callable[[], int] = field(
-        default=_unix_now, repr=False, compare=False
+        default=injected_time.now, repr=False, compare=False
     )
     #: The live Alkahest client map, which ``alkahest_chain_probe`` updates in
     #: place as it rebuilds a client; every consumer holds this one map.

@@ -501,22 +501,92 @@ time. Touches `domains/vms/storefront` (`admin_controller.py`, `payment_settleme
 `services/listing_service.py`, `utils/sqlite_client.py`), and `domains/apicredits`'
 shared package where the storefront reads it.
 
-- [ ] 4.1 Each storefront declares `arkhai-injected-time`, relocked; every direct
+- [x] 4.1 Each storefront declares `arkhai-injected-time`, relocked; every direct
   read converted as 3.2; the VM storefront's wall-time `EndService` constructions
   (`settlement_composition.py`'s terminal-settlement truncation, `failure_actions.py`'s
   fallback) and `request_delivery_end`'s default read the process source (D3).
   - Verify: `make check-time-reads` reports none of the three storefronts; each
     storefront's suite passes.
-- [ ] 4.2 Supply the read database times in each storefront's stores from the process
+  - Done: the three storefronts declare `arkhai-injected-time>=0.1.0` (and their
+    `published-packages.md` rows), relocked with `make lock`. All 47 reads were the
+    time of the world, none elapsed work: VM 27, bare metal 12, API credits 8. The VM
+    storefront's two wall-time `EndService` constructions, `request_delivery_end`'s
+    default and `VmDealLifecycle`'s clock read `injected_time.now`; the bare-metal
+    runtime's `lifecycle_clock` and `source_confirmation_clock` defaults are the
+    source (its private wall helpers removed), as are both storefronts'
+    listing-source check clocks and the API-credits issuance evidence clock. Each
+    writer keeps the text form it wrote: the naive stamps (the VM and API-credits
+    listing services, the escrow obligation binding) use core's
+    `store_timestamp()`, the aware ones `now_datetime()`. A listing's columns held
+    both forms before this change (core's updates naive, the bare-metal publication
+    and the VM carryover aware), and still do; they sort together, sharing their
+    first nineteen characters. `utils/zerotier.py`, which the plan names, holds no
+    wall read (its waits are already monotonic) and is untouched.
+    No version bump: all three storefronts were bumped on `dev` since the last
+    release, and `arkhai-core-storefront>=0.18.0`, which they already require, is
+    the unreleased version that adds `store_timestamp`.
+  - Outside the plan: `vm_delivery_records`' convergence list orders by
+    `updated_at, rowid` (3.2's ties). `domains/apicredits`' `credits_client.py` keeps
+    its two reads for section 6, which names it.
+  - Evidence: `make check-time-reads` lists none of the three (107 findings left);
+    `make -C domains/vms/storefront test` 1194 unit (1 skipped) and 606 integration
+    passed; `make -C domains/bare_metal/storefront test` 647 passed;
+    `make -C domains/apicredits/storefront test` 276 passed.
+- [x] 4.2 Supply the read database times in each storefront's stores from the process
   source (D13).
   - Verify: an application-integration test per storefront, through its typed client,
     with the process source injected at 1794821400 for the test: a deal or listing it
     writes holds 1794821400 in every read column.
-- [ ] 4.3 Section verification.
+  - Columns judged read: a listing's `created_at`/`updated_at` (core's lists order
+    by the first) and its binding's `last_reconciled_at`, which each storefront's own
+    code writes; the VM store's `vm_delivery_records.created_at`/`updated_at` (the
+    resume pass orders by the latter) and `processing_lease_until` (its claim
+    compares the lease with the store's time); escrows, threads and stage events are
+    core's store (3.3). Audit-only or read for presence alone: the API-credits
+    issuance progress's `created_at`/`updated_at` and `delivery_started_at` (a refund
+    reads only whether it is set), and its issuance evidence's stamps.
+  - Correction to the plan: the instant is the wall clock less 120 s, not
+    1794821400. The canonical client signs and checks responses on the wall clock
+    until section 7 converts it, so an instant hours from now fails the 300 s skew on
+    the signed hop; 120 s behind keeps every hop valid while each stamp is told apart
+    from a wall read. Each suite's `conftest.py` holds the `injected_source` fixture
+    (the VM and bare-metal ones came with section 3, the API-credits one here).
+  - Evidence, through `StorefrontClient` over ASGI: bare-metal
+    `test_http_publication_settlement.py::test_a_published_listing_holds_the_injected_instant`
+    (the administrator's publication step on the composed app) and API-credits
+    `test_alkahest_release_conditions.py::test_a_published_listing_holds_the_injected_instant`
+    (the started app, a seller's quota publication) are application integration.
+    The VM `test_listings_api.py::TestCreateListing::test_a_created_listing_holds_the_injected_instant`
+    is narrower: a FastAPI app holding only the listings router, its seller
+    middleware and a real `ListingService` over the migrated database, the existing
+    suite's fixture, not the composed storefront. Each reads the listing's two
+    columns and its binding's `last_reconciled_at` from the database and finds the
+    injected instant in its stored form. Library integration for the VM store:
+    `tests/integration/test_delivery_record_times.py` (a delivery record's
+    `created_at`/`updated_at` and convergence lease hold the source's instant as it is
+    set forward, and another worker's claim is refused until the source passes the
+    lease). They pass in the suites above. A deal's escrow, thread and stage-event
+    columns are core's store, asserted by 3.3's test, not through a storefront.
+- [x] 4.3 Section verification.
   - Unit and application integration: `make test-domains` (the three storefronts).
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: the three lanes' scenarios run the storefronts at wall time; no new
     scenario is owed.
+  - Evidence: the three storefronts' suites (4.1); `make test-domains` and the
+    pre-commit run, once over sections 3 and 4 together, as 3.4 records: every
+    functional hook passed, and of `pre-commit` only the citations check failed, on
+    closeout's `openspec/specs/injected-time/architecture.md`. After section 3 was
+    committed apart, the three storefronts were relocked with their declarations
+    (`make lock PROJECTS=…`), restoring the tree the run checked.
+  - Confirmed: no new end-to-end marker; the lanes run these storefronts at wall
+    time. No owed CI evidence.
+  - Handoff for sections 5–7: a storefront's store writes its text timestamps through
+    `core_storefront.sqlite_client.store_timestamp()`. A test through the canonical
+    client takes the suite's `injected_source` fixture, 120 s behind the wall clock,
+    until section 7 converts the clients; once it does, a test may inject any instant,
+    1794821400 included, since client and server then read one source. The session
+    that implemented sections 3 and 4 grew large; sections 5–7 are better started
+    fresh.
 
 ## 5. The site and provisioning read the process source
 

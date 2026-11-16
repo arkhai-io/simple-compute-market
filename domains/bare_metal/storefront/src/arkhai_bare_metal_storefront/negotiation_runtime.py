@@ -29,9 +29,10 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
+import injected_time
 from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
 from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract, SettlementStageTable
@@ -648,7 +649,9 @@ def build_bare_metal_negotiation_runtime(
         # This preview is for the exact price/build and admission only. The
         # final acceptance hook repeats it with the runtime's fixed clock and
         # rebuilds the plan from that horizon before anything is persisted.
-        preview = horizon_for(request.listing_record, message, selected_option, datetime.now(UTC))
+        preview = horizon_for(
+            request.listing_record, message, selected_option, injected_time.now_datetime()
+        )
         message = message.model_copy(update={"duration_seconds": preview.duration_seconds})
         pricing_seconds = (
             (rate_term_projections or {})[selected_option.settlement_schema](selected_option).period_seconds

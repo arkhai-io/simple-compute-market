@@ -15,10 +15,11 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
 
+import injected_time
 from market_core.schemas import settlement_option_schema
 from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
@@ -407,7 +408,7 @@ class VmPaymentsCoordinator:
         delivery = self.db
         entry = self._entry(agreement)
         start = datetime.fromisoformat(agreement["start_utc"].replace("Z", "+00:00"))
-        until = max(start, datetime.now(timezone.utc)) + timedelta(
+        until = max(start, injected_time.now_datetime()) + timedelta(
             seconds=float(config.settings.provisioning.timeout) + 60
         )
         claimed = await delivery.claim_vm_delivery(
