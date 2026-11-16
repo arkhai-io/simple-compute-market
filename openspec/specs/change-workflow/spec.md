@@ -1005,8 +1005,19 @@ Each review of a change MUST be written as one Markdown file in that change's
 `reviews/` directory, numbered in the order reviews are produced, and that file MUST
 be the only record of its findings. The records' order MUST be establishable, by
 number or, where two records of different kinds share a number, by their file
-times, and a record MUST NOT be overwritten. Each finding MUST state its lens, its
-basis, its severity, and the evidence it cites.
+times, and a record MUST NOT be overwritten. A record's number MUST follow every
+record and transcript in `reviews/` when it is written, and a record a skill writes
+itself — a validation's, a triage's external copy — MUST take the path the engine
+gives it, `scripts/change-workflow find --next-record <kind> <change>`, never a
+number it counts. Each finding MUST state its lens, its basis, its severity, and
+the evidence it cites.
+
+#### Scenario: Validation writes its record
+
+- **WHEN** a change's reviews hold records up to 69 and its log's latest line is seq
+  134
+- **THEN** validation writes the path `find --next-record validation` prints,
+  `70-validation.md`, and no number from the log
 
 #### Scenario: Two records share a number
 

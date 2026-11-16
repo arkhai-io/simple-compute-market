@@ -102,7 +102,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Review records
 
-- [CW-p2b2](spec.md#requirement-cw-p2b2-each-review-is-one-numbered-record) — each review is one never-overwritten numbered file in `reviews/`, the only record of its findings.
+- [CW-p2b2](spec.md#requirement-cw-p2b2-each-review-is-one-numbered-record) — each review is one never-overwritten numbered file in `reviews/`, the only record of its findings; a record a skill writes takes the engine's `find --next-record` path.
 - [CW-2nb2](spec.md#requirement-cw-2nb2-a-later-review-reads-earlier-findings-from-the-records) — later reviews read earlier findings and dispositions from the records, even when continuing a reviewer session.
 - [CW-ovuj](spec.md#requirement-cw-ovuj-review-records-are-untracked-and-their-durable-content-is-promoted) — `reviews/` is untracked and uncited by permanent documents; durable content is promoted at closeout.
 - [CW-5e24](spec.md#requirement-cw-5e24-a-reviews-transcript-is-kept-and-never-read-as-a-record) — a review's raw transcript may be kept, untracked, but no review or triage step reads it.

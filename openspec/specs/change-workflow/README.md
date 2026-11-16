@@ -1672,7 +1672,7 @@ used only by the engine and its shipped skills.
 
 | Interface | Tier |
 |---|---|
-| The subcommands `start`, `next`, `record`, `note`, `stop`, `review`, `find` (with `--records` and `--json`), `clone`, `clone-remove` (with `--base`), `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `run` (with `run validation`, `run cleanup`, and `--owed`), `config` (with `--json`), `config load`, `config parts` (with `--json`), `openspec`, `check config`, `check change`, `check index`, `check tasks`, `check push`, `check skills`, and `push` (with `--remote`); their flags, exit-status categories, and structured outputs | public |
+| The subcommands `start`, `next`, `record`, `note`, `stop`, `review`, `find` (with `--records`, `--next-record`, and `--json`), `clone`, `clone-remove` (with `--base`), `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `run` (with `run validation`, `run cleanup`, and `--owed`), `config` (with `--json`), `config load`, `config parts` (with `--json`), `openspec`, `check config`, `check change`, `check index`, `check tasks`, `check push`, `check skills`, and `push` (with `--remote`); their flags, exit-status categories, and structured outputs | public |
 | The repository's configuration, `.agents/workflow.toml`: its tables, keys, kinds, and placeholders | public input, versioned by the engine's release |
 | The closing line a hook or part ends with, and the marker a `start` prints last | internal: the shipped skills match the line, and the engine keeps the marker |
 | Those subcommands' report text for a person | outside the promise |

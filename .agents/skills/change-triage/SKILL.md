@@ -187,9 +187,10 @@ a change's clone, the owner's workspace's, which holds the history of every
 cleaned-up change.
 
 When the owner pastes a review from elsewhere, save it verbatim as the change's
-next numbered record, `NN-<kind>-external.md`, numbered after every file in
-`reviews/` and `reviews/transcripts/`, so later reviews read it as history. Never
-overwrite a record: if the name exists when you write, take the next number. Its
+next numbered record, at the path `scripts/change-workflow find --next-record
+<kind>-external <change>` prints when you write it, so later reviews read it as
+history; never count the number yourself, or take it from the log's `seq`. Never
+overwrite a record: if the path exists when you write, ask again. Its
 findings may carry no lens, basis, severity, or alternatives; you assign them in
 step 2 and say that you did.
 
@@ -262,8 +263,9 @@ For an implementation round, also take:
   triage finished is the earlier pass's, never this one's. Under orchestration the orchestrating session
   saves the notes as the round's record. Otherwise ask for them if the owner has
   not pasted them, naming that command so the owner can read what the notes are
-  about, and save them exactly as pasted as the next numbered record,
-  `NN-implementation-owner.md`. Notes the owner saved while no review awaited a
+  about, and save them exactly as pasted as the next numbered record, at the path
+  `scripts/change-workflow find --next-record implementation-owner <change>`
+  prints. Notes the owner saved while no review awaited a
   triage — on an earlier triage's fixes, or on a re-plan — are carried by the next
   round: its line in the workflow log names them under `carries`, and you triage
   them with the round's own notes, as points of their own.

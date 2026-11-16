@@ -670,8 +670,10 @@ run `make round-done`. Recompute only after the view closes; the computation the
 names validation and the implementation review, side by side.
 
 Save the owner's answer verbatim as the next `reviews/NN-implementation-owner.md`
-in the change's directory — the clone's, for a change worked there — choosing a
-number after all numbered records and transcripts and using exclusive creation.
+in the change's directory — the clone's, for a change worked there — at the path
+`scripts/change-workflow find --next-record implementation-owner <change>` prints
+there, never a number counted or taken from the log's `seq`, using exclusive
+creation.
 Never overwrite a record. If there are no findings, save the owner's actual reply
 so the reading is recorded. On restart with a view open, recover its round head
 from Git's view state and finish that reading; preserve notes already saved.
@@ -783,8 +785,9 @@ Misbehaviour of the workflow's own tooling that shows across steps — an answer
 delivered to the wrong session, a denial missing from a line, a table rule several
 steps trip, a computation result that contradicts the files — is yours to report,
 since no step sees it. Write it as the change's next numbered record,
-`reviews/NN-orchestrator.md`, in the clone for a change worked there, numbered
-after every record and transcript with an exclusive create, opening "Observations
+`reviews/NN-orchestrator.md`, in the clone for a change worked there, at the path
+`scripts/change-workflow find --next-record orchestrator <change>` prints there,
+with an exclusive create, opening "Observations
 of the orchestrating session", each observation with the log lines or files that
 show it. The next triage reads it as it reads the owner's notes. It is never
 commentary on a step's finding or a design question.

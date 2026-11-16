@@ -204,3 +204,44 @@ def test_no_base_is_read_from_another_changes_clone_or_one_that_recorded_none(
     clone = _marked(tmp_path / "clone", recorded)
 
     assert finder.landing_branch(clone, "shape-bounds") is None
+
+
+def test_the_next_record_is_numbered_after_every_record_and_transcript(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _tree(tmp_path, "shape-bounds/reviews/transcripts")
+    reviews = root / "openspec/changes/shape-bounds/reviews"
+    (reviews / "03-validation.md").write_text("", "utf-8")
+    (reviews / "transcripts/68-validate.jsonl").write_text("", "utf-8")
+    # The log's sequence numbers its lines, not records: it is never counted.
+    (reviews / "workflow.jsonl").write_text('{"seq": 134}\n', "utf-8")
+
+    assert finder.main(["--next-record", "validation", "shape-bounds"], root=root) == 0
+    assert capsys.readouterr().out == (
+        "openspec/changes/shape-bounds/reviews/69-validation.md\n")
+
+
+def test_a_change_with_no_records_yet_takes_the_first_number(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _tree(tmp_path, "archive/2026-10-14-shape-bounds")
+
+    assert finder.main(["--next-record", "closeout-external", "shape-bounds"], root=root) == 0
+    assert capsys.readouterr().out == (
+        "openspec/changes/archive/2026-10-14-shape-bounds/reviews/01-closeout-external.md\n")
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--next-record", "shape-bounds"],
+    ["--next-record", "Validation", "shape-bounds"],
+    ["--next-record", "../x", "shape-bounds"],
+    ["--next-record", "validation", "--json", "shape-bounds"],
+    ["--next-record", "validation", "--records", "shape-bounds"],
+])
+def test_a_malformed_next_record_request_is_a_usage_error(
+        tmp_path: Path, arguments: list[str]) -> None:
+    assert finder.main(arguments, root=_tree(tmp_path, "shape-bounds")) == 2
+
+
+def test_the_next_record_of_a_missing_change_is_refused(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert finder.main(["--next-record", "validation", "missing"], root=_tree(tmp_path)) == 1
+    assert "missing" in capsys.readouterr().err

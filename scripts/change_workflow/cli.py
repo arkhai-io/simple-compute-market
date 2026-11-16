@@ -342,6 +342,9 @@ def _parser() -> argparse.ArgumentParser:
     found.add_argument("--archived", action="store_true", help="refuse an active change")
     found.add_argument("--records", action="store_true",
                        help="its records: this checkout's, else the owner's workspace's")
+    found.add_argument("--next-record", metavar="KIND",
+                       help="the path of its next record of KIND, numbered after every "
+                            "record and transcript, as the engine numbers its own")
     find_.add_argument("--json", action="store_true",
                        help="print name, directory, archived, records, format, and base, the "
                             "branch the change lands on, as JSON")
@@ -635,7 +638,11 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
         if args.json and args.records:
             raise _Usage("--json prints the records of this checkout alone, so it takes no "
                          "--records")
+        if args.json and args.next_record:
+            raise _Usage("--next-record prints a path, so it takes no --json")
         flag = [f"--{name}" for name in ("active", "archived", "records") if getattr(args, name)]
+        if args.next_record:
+            flag = ["--next-record", args.next_record]
         return find.main, [*flag, *(["--json"] if args.json else []), args.change]
     if args.command == "clone" and args.change != "where":
         if args.where_change is not None:
