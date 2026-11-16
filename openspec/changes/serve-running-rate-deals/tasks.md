@@ -20,7 +20,7 @@ part; requirements "The seller half lists deals" and "Stop requests are distinct
 final stops" (`deal-lifecycle`). Touches `kit/deal-lifecycle-contracts`,
 `kit/deal-lifecycle-client`.
 
-- [ ] 1.1 In `kit/deal-lifecycle-contracts/src/market_deal_lifecycle_contracts/models.py`,
+- [x] 1.1 In `kit/deal-lifecycle-contracts/src/market_deal_lifecycle_contracts/models.py`,
       add the closed `EndingCode` (`release_pending`, `payment_running`, `case_open`) with
       each code's text in one exported mapping, and `DealSummary.ending: list[EndingCode]`
       defaulting empty. Retire `ReleasedReadShape` from `PaymentEvent`, `AuthorityView`
@@ -29,21 +29,69 @@ final stops" (`deal-lifecycle`). Touches `kit/deal-lifecycle-contracts`,
       Verify (unit, `tests/unit/test_models.py`): a once-only and a rate summary dump
       `parts`, `settles_through` and `ending` at their defaults; an unknown code is
       refused; every code has text.
-- [ ] 1.2 Replace `tests/unit/test_released_reads.py` and `released_0_1_0.py` with a test
+      Done: `EndingCode` and `ENDING_TEXT` (a read-only mapping) in `models.py`;
+      `ReleasedReadShape` is gone, so `PaymentEvent`, `AuthorityView` and `DealSummary`
+      dump every field; contracts 0.3.0. Beyond the plan, a `DealSummary` validator
+      lists each code once and only while the state is `ending`, as the delta's "ended
+      with no `ending`" reads. Unit (`test_models.py`, 54 passed with the suite): a
+      once-only summary dumps every field, `parts` and `ending` empty; a rate summary
+      with a requested stop dumps every field, its part every observation field with a
+      null `final_stop`, and its request every event field with a null
+      `settles_through`; an `AuthorityView` dumps an empty `parts` and a once-only
+      event's null `settles_through`; an unknown code, a code outside `ending` and a
+      repeated code are refused; every code has non-blank text. Stored servicing views
+      and journal rows written before this release omit those fields; they read back
+      with their defaults, and every comparison in `kit/deal-servicing` is between
+      parsed models, so none is affected. `kit/deal-servicing`, which serves the read
+      and list, raises its contracts bound in section 2, which bumps it anyway.
+- [x] 1.2 Replace `tests/unit/test_released_reads.py` and `released_0_1_0.py` with a test
       that this release's models read once-only, rate, ending and ended reads and pages
       as the storefront dumps them (D7). Verify (unit): the new test passes, and no test
       validates against the 0.1.0 models.
-- [ ] 1.3 `kit/deal-lifecycle-client`: raise its contracts bound, and expose each listed
+      Done: `tests/unit/test_shipped_reads.py` serializes each read and page as a
+      storefront's lifecycle route does (`canonical_json` of the model's JSON dump,
+      re-implemented in the test, since the contracts cannot import the route), decodes
+      it, and validates it back to the same model as the seller client does, for a
+      once-only, rate, ending and ended read and page (unit, passed). It is a round
+      trip, and would pass at the base too, where the omission was restored on read;
+      that every field is dumped is `test_models.py`'s evidence. Both 0.1.0 files are
+      removed; no test in the repository names them.
+- [x] 1.3 `kit/deal-lifecycle-client`: raise its contracts bound, and expose each listed
       deal's `ending` codes with their text through `SellerLifecycleClient.list` and its
       sync variant, so a caller renders the text without interpreting codes (D7). Verify
       (unit, `kit/deal-lifecycle-client/tests/test_client.py`): a page with an ending
       deal yields its codes and their text.
-- [ ] 1.4 Verification point: `kit/deal-lifecycle-contracts` and
+      Done, differing from the plan in where the text is joined: `DealSummary` carries an
+      `ending_reasons` property (each code with its `ENDING_TEXT`), not serialized, so
+      every reader of the contracts — this client, the storefronts, any CLI — renders the
+      same words and the client needed no wrapper type. The client takes contracts
+      `>=0.3.0` and version 0.2.0; its README names `ending` and `ending_reasons`. Unit
+      (`test_client.py`, 3 passed): over a mocked transport returning a decoded page
+      with an ending deal, both `SyncSellerLifecycleClient.list` and
+      `SellerLifecycleClient.list` send the list route's method and path, the
+      administrator role, the operation and the request's resource and parameters, and
+      return a page whose deal yields its codes and their text. The package's tests stay
+      flat in `tests/`, the path the plan names, rather than `tests/unit/`; moving its
+      one module is left out of this section.
+- [x] 1.4 Verification point: `kit/deal-lifecycle-contracts` and
       `kit/deal-lifecycle-client` suites (unit) pass; `make check-packaging` passes.
       End-to-end: no scenario asserts the new field yet; every scenario reading a seller
       lifecycle read through the typed client (`e2e_vm_recurring_purchase`,
       `e2e_bare_metal_recurring_purchase`, the `e2e_vm_dispute_*` scenarios) is pipeline
       evidence that the shipped client reads the new shapes.
+      Done: both suites pass (unit); `make check-packaging` and `make test` pass in
+      `scripts/change-workflow run pre-commit`, after `make lock` moved every lock to
+      contracts 0.3.0 and client 0.2.0. End-to-end corrected: no scenario asserts
+      `ending`, and none calls the seller client's `read` or `list`, so the list's new
+      shape has no pipeline evidence. The VM scenarios named read the buyer lifecycle
+      route through the buyer `LifecycleClient`, and the bare-metal scenario validates
+      the read with `LifecycleRead` itself; they are pipeline evidence that this
+      release's models read the `LifecycleRead` a storefront of the release serves.
+      `scripts/change-workflow run test-before` cannot show the new unit tests failing at
+      the base, since it runs without the package's environment (no pydantic); the
+      `test_models.py` and `test_client.py` cases name `ENDING_TEXT`, `EndingCode`,
+      `ending` or `ending_reasons`, which only this section adds, and the
+      `test_shipped_reads.py` round trips would pass at the base.
 
 ## 2. End service asks the adapter for every deal, holds changed answers, and lists *ended* truly
 
