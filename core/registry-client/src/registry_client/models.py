@@ -67,6 +67,30 @@ class HealthResponse:
         )
 
 
+@dataclass
+class AdminStatusResponse:
+    """Response body from GET /admin/status: the registry's time source,
+    ``{"source": "wall"}`` or ``{"source": "injected", "now": <Unix seconds>}``."""
+
+    time: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AdminStatusResponse":
+        return cls(time=dict(d["time"]))
+
+
+@dataclass
+class TimeSettingResponse:
+    """Response body from POST /admin/time: the instant the registry is set to."""
+
+    source: str
+    now: int
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TimeSettingResponse":
+        return cls(source=d["source"], now=int(d["now"]))
+
+
 # ---------------------------------------------------------------------------
 # Publishers
 # ---------------------------------------------------------------------------

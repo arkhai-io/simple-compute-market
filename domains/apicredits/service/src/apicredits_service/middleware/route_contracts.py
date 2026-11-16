@@ -2,7 +2,8 @@
 
 `kit/site` owns the capacity routes and their contracts, because it defines
 those paths. These are the credits service's own: issuance, key administration,
-and the consume/verify pair the gated service calls. They live here for the
+the consume/verify pair the gated service calls, and the operator's status and
+time-setting routes. They live here for the
 same reason -- the table belongs beside the router that defines the paths.
 
 Both tables are handed to one `SiteAuthMiddleware`, so every non-health route
@@ -38,6 +39,15 @@ _SELLER = frozenset({"seller"})
 _SELLER_OR_GATED = frozenset({"seller", "service"})
 #: Consume and verify only. The gated service's whole job.
 _GATED = frozenset({"service"})
+#: The administrator alone: `SiteRouteContract.permits` admits `admin` whatever
+#: a contract names, so a contract naming no role admits no one else.
+_ADMIN_ONLY: frozenset[str] = frozenset()
+
+#: The signed operations of the service's status and of its time-setting route.
+#: The time-setting operation alone is verified without its request
+#: timestamp's freshness, while the service's source is injected.
+CREDITS_SYSTEM_STATUS_OPERATION = "credits_system_status"
+CREDITS_TIME_OPERATION = "credits_system_time"
 
 
 def _contract(
@@ -139,4 +149,9 @@ CREDITS_ROUTE_CONTRACTS: tuple[SiteRouteContract, ...] = (
         _SELLER,
         path_resource="key_id",
     ),
+    _contract(
+        "GET", r"/api/v1/system/status", CREDITS_SYSTEM_STATUS_OPERATION, _ADMIN_ONLY
+    ),
+    # Mounted only under injected time; a wall-time service serves no such route.
+    _contract("POST", r"/api/v1/system/time", CREDITS_TIME_OPERATION, _ADMIN_ONLY),
 )

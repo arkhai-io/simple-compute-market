@@ -217,7 +217,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arkhai-apicredits-domain", specifier = ">=0.5.0" },
+    { name = "arkhai-apicredits-domain", specifier = ">=0.10.0" },
     { name = "arkhai-apicredits-middleware", extras = ["signed"] },
     { name = "arkhai-kit-site-client" },
     { name = "httpx", specifier = ">=0.28.1" },

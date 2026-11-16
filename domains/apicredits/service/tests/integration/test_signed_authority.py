@@ -626,10 +626,12 @@ _INJECTED_AT = 1794821400
 
 
 @pytest.fixture
-def injected_source() -> Iterator[InjectedTime]:
+def injected_source(signed_app) -> Iterator[InjectedTime]:
     """The process time source, injected at ``_INJECTED_AT``. Every party in
     this process — the service, its hosted ledger and the canonical clients —
-    reads it, so no hop is judged against the wall clock."""
+    reads it, so no hop is judged against the wall clock. Installed once the
+    service is composed, since its composition installs the source its
+    configuration names."""
     before = injected_time.installed()
     installed = InjectedTime(start=_INJECTED_AT)
     injected_time.install(installed)

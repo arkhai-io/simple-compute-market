@@ -227,8 +227,10 @@ def _service_error(response: httpx.Response) -> CreditsServiceError:
         payload = response.json()
     except ValueError:
         payload = {}
+    # The key routes name their reason `error`; the time route, as every time
+    # route does, names it `code`.
     return CreditsServiceError(
-        str(payload.get("error") or f"http_{response.status_code}"),
+        str(payload.get("error") or payload.get("code") or f"http_{response.status_code}"),
         str(payload.get("detail") or response.text[:200]),
         status_code=response.status_code,
     )
@@ -294,11 +296,17 @@ KEY_ADJUST_OPERATION = "credits_key_adjust"
 KEYS_LIST_OPERATION = "credits_keys_list"
 KEY_GRANTS_LIST_OPERATION = "credits_key_grants_list"
 KEY_USAGE_LIST_OPERATION = "credits_key_usage_list"
+SYSTEM_STATUS_OPERATION = "credits_system_status"
+SYSTEM_TIME_OPERATION = "credits_system_time"
 
 #: The role the storefront presents: it issues grants against settled deals
 #: and administers keys. Distinct from the gated application's `service`,
 #: which may only spend and check.
 STOREFRONT_ROLE = "seller"
+
+#: The role an operator presents, the only one the service's status and time
+#: routes admit.
+ADMIN_ROLE = "admin"
 
 #: The role the authority signs its responses with.
 AUTHORITY_RESPONSE_ROLE = "service"
@@ -309,13 +317,17 @@ class CreditsServiceClient:
 
     ``signer`` and ``expected_authorities`` select signed authentication:
     each request carries a marketplace identity v2 envelope signed in the
-    ``seller`` role, and every response -- refusals included -- is verified
+    ``caller_role``, and every response -- refusals included -- is verified
     as coming from a trusted authority principal. Omitting them falls back
     to the legacy ``X-Admin-Key`` shared secret.
 
     Both are kept because the service accepts exactly one of them at a
     time, chosen by its own configuration, so the two sides are flipped
     together and a deployment mid-flip must still be describable.
+
+    ``caller_role`` is the role a signed request asserts: the storefront's
+    ``seller`` by default, or ``admin`` for an operator reading the service's
+    status or setting its time.
     """
 
     def __init__(
@@ -327,6 +339,7 @@ class CreditsServiceClient:
         signer: Any | None = None,
         expected_authorities: Any | None = None,
         max_response_skew: int = 300,
+        caller_role: str = STOREFRONT_ROLE,
     ) -> None:
         if (signer is None) != (expected_authorities is None):
             raise ValueError(
@@ -340,6 +353,7 @@ class CreditsServiceClient:
         self._signer = signer
         self._expected_authorities = expected_authorities
         self._max_response_skew = max_response_skew
+        self._caller_role = caller_role
 
     @property
     def signing_enabled(self) -> bool:
@@ -386,7 +400,7 @@ class CreditsServiceClient:
         authenticated = sign_request(
             signer=self._signer,
             envelope=RequestEnvelope(
-                role=STOREFRONT_ROLE,
+                role=self._caller_role,
                 principal=self._signer.identity,
                 method=method,
                 operation=operation,
@@ -438,8 +452,8 @@ class CreditsServiceClient:
         answer cannot nominate the question it is answering.
 
         `expected_role` is `service`: the authority signs its responses in
-        the service role even though this client signs its requests as
-        `seller`. The kit's own `verify_authenticated_response` fixes that
+        the service role whatever role this client signs its requests in,
+        `seller` or `admin`. The kit's own `verify_authenticated_response` fixes that
         expectation to `seller` because it verifies storefronts, which is
         why it is not reused here.
         """
@@ -663,6 +677,41 @@ class CreditsServiceClient:
             timeout=timeout,
         )
         resp.raise_for_status()
+        return resp.json()
+
+    async def get_system_status(self, *, timeout: float = 10.0) -> dict[str, Any]:
+        """The service's status, ``{"time": {...}}``; the ``admin`` role alone reads it."""
+        resp = await self._call(
+            "GET",
+            "/api/v1/system/status",
+            operation=SYSTEM_STATUS_OPERATION,
+            resource="",
+            timeout=timeout,
+        )
+        if resp.is_error:
+            raise _service_error(resp)
+        return resp.json()
+
+    async def set_time(self, now: int, *, timeout: float = 10.0) -> dict[str, Any]:
+        """Set an injected service's time to ``now``, in Unix seconds, sent as given.
+
+        The ``admin`` role alone may; the service refuses anything but an
+        integer instant (422 ``invalid_time``) and an instant earlier than its
+        own (409 ``time_moves_forward``), raised as :class:`CreditsServiceError`
+        with the status. A wall-time service serves no such route. The request
+        is signed at this process's instant, which an injected service admits
+        outside the signing skew for this operation alone.
+        """
+        resp = await self._call(
+            "POST",
+            "/api/v1/system/time",
+            operation=SYSTEM_TIME_OPERATION,
+            resource="",
+            body={"now": now},
+            timeout=timeout,
+        )
+        if resp.is_error:
+            raise _service_error(resp)
         return resp.json()
 
     async def rollback_issuance(

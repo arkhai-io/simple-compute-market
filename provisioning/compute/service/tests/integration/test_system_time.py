@@ -148,6 +148,28 @@ async def test_a_termination_states_the_injected_instant(
     assert event.caller == STOREFRONT_SIGNER.identity
 
 
+@pytest.mark.parametrize(("source", "mounted"), (("injected", "True"), ("wall", "False")))
+def test_the_composition_mounts_the_time_route_only_under_injected_time(source, mounted):
+    """The composition root itself, started in a process of its own with
+    ``time.source`` set: its app serves ``POST /api/v1/system/time`` only when
+    injected."""
+    started = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import compute_provisioning_service.main as m; "
+            "print('/api/v1/system/time' in m.app.openapi()['paths'])",
+        ],
+        env={**os.environ, "PROVISIONING_TIME__SOURCE": source},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert started.returncode == 0, started.stderr
+    assert started.stdout.strip().splitlines()[-1] == mounted
+
+
 def test_a_service_started_with_a_misspelled_source_refuses_naming_it():
     """The composition root itself, started in a process of its own with
     ``time.source`` set through the loader's override layer."""

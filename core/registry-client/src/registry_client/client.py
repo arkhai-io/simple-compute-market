@@ -27,6 +27,7 @@ from registry_client.auth import (
     verify_authenticated_response,
 )
 from registry_client.models import (
+    AdminStatusResponse,
     FilterSpecResponse,
     HealthResponse,
     ListingListResponse,
@@ -35,10 +36,30 @@ from registry_client.models import (
     Publisher,
     PublisherListResponse,
     SystemStatsResponse,
+    TimeSettingResponse,
     UpdateListingRequest,
     ValidatePublishRequest,
     ValidatePublishResponse,
 )
+
+
+def _admin_headers(admin_key: str) -> dict[str, str]:
+    """The administrator bearer key the registry's ``/admin`` routes require,
+    in place of any read or write key the client carries."""
+    return {"Authorization": f"Bearer {admin_key}"}
+
+
+def _admin_answer(response: httpx.Response) -> Any:
+    """An ``/admin`` route's answer, which the registry returns unsigned, as a
+    bearer-authenticated route; a non-2xx status raises."""
+    if not response.is_success:
+        raise RegistryClientError(
+            response.request.method,
+            str(response.request.url),
+            response.status_code,
+            response.text,
+        )
+    return response.json()
 
 
 class _RegistryClientBase:
@@ -523,6 +544,27 @@ class RegistryClient(_RegistryClientBase):
     async def get_health(self) -> HealthResponse:
         return self._parse_health(await self._request("GET", "/api/v1/system/health"))
 
+    async def get_admin_status(self, *, admin_key: str) -> AdminStatusResponse:
+        """GET /admin/status with the administrator key: the registry's time source."""
+        response = await self._client.get(
+            self._url("/admin/status"), headers=_admin_headers(admin_key)
+        )
+        return AdminStatusResponse.from_dict(_admin_answer(response))
+
+    async def set_time(self, now: int, *, admin_key: str) -> TimeSettingResponse:
+        """POST /admin/time with the administrator key: set an injected registry
+        to ``now``, in Unix seconds, sent as given.
+
+        The registry refuses anything but an integer instant (422
+        ``invalid_time``) and an instant earlier than its own (409
+        ``time_moves_forward``), raised as :class:`RegistryClientError`; a
+        wall-time registry serves no such route (404).
+        """
+        response = await self._client.post(
+            self._url("/admin/time"), json={"now": now}, headers=_admin_headers(admin_key)
+        )
+        return TimeSettingResponse.from_dict(_admin_answer(response))
+
     async def get_system_stats(self) -> SystemStatsResponse:
         return self._parse_system_stats(
             await self._request("GET", "/api/v1/system/stats")
@@ -898,6 +940,20 @@ class SyncRegistryClient(_RegistryClientBase):
 
     def get_health(self) -> HealthResponse:
         return self._parse_health(self._request("GET", "/api/v1/system/health"))
+
+    def get_admin_status(self, *, admin_key: str) -> AdminStatusResponse:
+        """See ``RegistryClient.get_admin_status``."""
+        response = self._client.get(
+            self._url("/admin/status"), headers=_admin_headers(admin_key)
+        )
+        return AdminStatusResponse.from_dict(_admin_answer(response))
+
+    def set_time(self, now: int, *, admin_key: str) -> TimeSettingResponse:
+        """See ``RegistryClient.set_time``."""
+        response = self._client.post(
+            self._url("/admin/time"), json={"now": now}, headers=_admin_headers(admin_key)
+        )
+        return TimeSettingResponse.from_dict(_admin_answer(response))
 
     def get_system_stats(self) -> SystemStatsResponse:
         return self._parse_system_stats(self._request("GET", "/api/v1/system/stats"))

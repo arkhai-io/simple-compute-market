@@ -1602,6 +1602,11 @@ level, `site-capacity`'s "The site decides by its process's time source". Touche
     its skew of the same source (the storefronts' tests read it exactly, through
     the same signing at response time), and the refusal bodies' `code`, which
     the client does not surface.
+  - Amendment (section 11): `test_the_composition_mounts_the_time_route_only_under_injected_time`
+    starts the composition root in a process of its own with
+    `PROVISIONING_TIME__SOURCE` `injected` and `wall` and reads its OpenAPI
+    document: the route is served under injected time and not under wall time.
+    `make -C provisioning/compute/service test-integration` 550 passed.
 - [x] 10.2 The lease watchdog and the site follow injected time: a lease truncated to
   1794822300, the watchdog paused, the service set to 1794822300 and one watchdog cycle
   stepped, ends by expiry with effective instant and claimed deadline 1794822300; a
@@ -1689,7 +1694,7 @@ assembly), `core/registry-client`, `domains/apicredits/service` (`config.py`,
 `main.py`, its route contracts), and the credits service's client
 (`domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py`).
 
-- [ ] 11.1 The registry reads `TIME_SOURCE`, `"wall"` by default, refusing any other
+- [x] 11.1 The registry reads `TIME_SOURCE`, `"wall"` by default, refusing any other
   value naming it; installs the source and logs it when injected; serves
   `GET /admin/status` with the time
   section in both modes and, under injected time only, `POST /admin/time`, both behind
@@ -1698,7 +1703,38 @@ assembly), `core/registry-client`, `domains/apicredits/service` (`config.py`,
     a missing or wrong key refused `401` with the time unchanged, status in both modes,
     no setting route under wall time; a storefront publication signed at the injected
     instant is accepted after both are set 1800 s forward.
-- [ ] 11.2 The credits service reads `time.source`, refusing any other value naming
+  - Done: `Settings.time_source` (`TIME_SOURCE`, unset by default); `main.py`
+    installs `source_for(..., setting="TIME_SOURCE")` at module level before the
+    app is built, mounts `admin_routes.make_time_router()` (`POST /admin/time`)
+    only when that source is injected, and announces an injected source in its
+    lifespan. `admin_routes.status_router` serves `GET /admin/status`,
+    `{"time": {...}}`, in either mode; both routes sit behind
+    `require_admin_api_key` and answer unsigned, as the other `/admin` routes do,
+    the refusals `{"code", "detail"}`; the time route guards 404 should it be
+    mounted over a source that cannot be set. The registry chart is untouched: a
+    wall-time default needs no value, and the lanes that set `TIME_SOURCE` are
+    Compose stacks (section 16).
+  - Evidence. Unit, `core/registry/tests/unit/test_time_source.py` (the setting
+    unset and stated; the announcement once for injected, nothing for wall).
+    Application integration, `tests/integration/test_admin_time.py` through
+    `RegistryClient` with the administrator key, the source injected at
+    1794822300 and the time route mounted on the suite's shared app as an injected
+    registry mounts it: status reads T, `set_time(T + 1800)` answers it and status
+    follows, `set_time(T)` raises 409 with `"code":"time_moves_forward"` in the
+    body, `set_time(True)` 422 with `"code":"invalid_time"`; an empty or wrong
+    key is refused 401 on both routes and the source stays at T; under wall time,
+    installed explicitly, status reads `{"source": "wall"}` and `set_time` 404
+    (the guard's when an earlier test has mounted the route on the shared app,
+    routing's when the test runs alone); the composition root started in a
+    process of its own with `TIME_SOURCE` `injected` serves `POST /admin/time`,
+    and with `wall` does not; after
+    `set_time(T + 1800)` the seller-signed `publish_listing`, signed at T + 1800,
+    is accepted and the listing's `created_at` is T + 1800. The misspelled source:
+    the composition root started in a process of its own with
+    `TIME_SOURCE=injectd` exits with the component's exact refusal, a process
+    start, not application integration. `make -C core/registry test` 155 unit
+    and 172 integration.
+- [x] 11.2 The credits service reads `time.source`, refusing any other value naming
   it, installs the source, logs it when injected, so the site ledger it hosts follows
   injected time (`site-capacity`'s "The site decides by its process's time source"),
   and serves
@@ -1709,15 +1745,113 @@ assembly), `core/registry-client`, `domains/apicredits/service` (`config.py`,
     from 1794822300 to 1794823200 answers signed at 1794823200 and the status agrees; a
     `service`-role setting request is refused unauthorized with the time unchanged; 409
     and 422.
-- [ ] 11.3 The registry client and the credits service's client gain the setting call
+  - Done: `Settings.configured_time_source` (`time.source`, keys in any case);
+    `main.py` installs it at module level before the app is built, mounts
+    `system_controller.make_time_router()` only when it is injected, announces it
+    in the lifespan, and gives `SiteAuthMiddleware` the time operation. The
+    contracts `credits_system_status` (`GET /api/v1/system/status`) and
+    `credits_system_time` (`POST /api/v1/system/time`) sit beside the others,
+    admitting only `admin` (an empty role set, which `permits` reads as the
+    administrator alone); the status route answers `{"time": {...}}`. The hosted
+    site ledger reads the installed source (section 5).
+  - Evidence, application integration,
+    `domains/apicredits/service/tests/integration/test_system_time.py`: the real
+    `main.app` composed fresh from configuration with `time.source` stated through
+    the loader's override layer, as `test_signed_authority` composes it, through
+    `CreditsServiceClient` signed as the operator's `admin`. Composed injected,
+    with the scenario's source at 1794822300 installed in place of the one the
+    composition installed: status reads it; `set_time(1794823200)` answers it,
+    its signed answer verifying against the client's source at that instant;
+    status agrees; `set_time(1794822300)` raises 409 with reason
+    `time_moves_forward`, `set_time(True)` 422 with `invalid_time`. A client
+    signed as the gated application's `service` is refused 403 on both routes and
+    the time is unchanged. Composed under wall time, status reads `{"source":
+    "wall"}` and `set_time` raises 404 (the route unmounted, the request
+    authenticated against its contract first). The composed exemption (D14):
+    with the service at 1794822300, a setting signed by the operator 900 s ahead,
+    built by hand since the client signs at the process's instant, is admitted
+    and moves the source, and a status read signed there is refused 403 (raw
+    requests, statuses only). Composed injected, the lifespan logs the
+    announcement. The misspelled source refuses the composition root's start (a
+    process of its own, the exact refusal). The route parity test holds the
+    client's two operations to the contracts, the administrator alone admitted.
+    Unit, `tests/unit/test_time_source.py`: `configured_time_source` unset, a
+    scalar `time`, keys in any case. `make -C domains/apicredits test`: the
+    service 90, every other suite of the domain passing. Not shown at this
+    service's level: its hosted site ledger deciding by the injected instant,
+    which `kit/site`'s library tests (5.2) and provisioning's application test
+    (10.2) show for the same ledger over the process source.
+  - Outside the plan: composing the service now installs its configured source,
+    so section 6's `test_a_grant_and_its_spending_hold_the_injected_instant`,
+    whose fixture installed its source before composing, had it replaced by the
+    composition's wall source; its fixture now installs after the composition.
+- [x] 11.3 The registry client and the credits service's client gain the setting call
   and the status read; the registry client sends the administrator key.
   - Verify: `make test-registry-client`; the credits client's suite.
-- [ ] 11.4 Section verification.
+  - Done: `RegistryClient.get_admin_status(admin_key=...)` and
+    `set_time(now, admin_key=...)`, and their sync forms, send the
+    administrator key in place of any read key the client carries, unsigned, and
+    parse `AdminStatusResponse` and `TimeSettingResponse` (exported); a non-2xx
+    answer raises `RegistryClientError` with the status and body.
+    `CreditsServiceClient` gains `caller_role` (the storefront's `seller` by
+    default, `admin` for an operator), `get_system_status()` and `set_time(now)`,
+    raising `CreditsServiceError` with the status and, from a time route's
+    refusal, its `code` as the reason (the key routes' `error` stays first). The
+    registry's dev bound on its client rises to 0.13.0 and the credits service's
+    on the domain package to 0.10.0, the unreleased versions that add them.
+  - Evidence: unit, `core/registry-client/tests/test_admin_time.py` (over an
+    `httpx.MockTransport`: the setting posts `{"now"}` with the administrator key
+    alone and no signature; the sync status read and setting; a refusal's status
+    and body); `make -C core/registry-client test` 31 passed. The credits client
+    is exercised against the real service above; its domain suite (41) passes.
+- [x] 11.4 Section verification.
   - Application integration: `make test-registry`, `make test-registry-client`,
     `make test-domains` (the API-credits service).
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: section 15's fixture sets both once section 16 puts the lanes on
     injected time.
+  - Evidence: the suites in 11.1–11.3 and 10.1's amendment, after the
+    fresh-context fixes. `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes` before them: `after-functional-change`
+    and `pre-commit-functional` (every suite) passed; of `pre-commit` the
+    citations check failed on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9), and the local-imports
+    check on the parity test's new import (now at module level). On the final
+    tree: `after-functional-change` (`make lock`) and `pre-commit-functional`
+    (`make dist-clean`, `make check-packaging`, `make test`, every suite) passed,
+    and of `pre-commit` only the citations check failed, on that document.
+  - Confirmed: no end-to-end marker exercises these routes yet (sections 15 and
+    16). No owed CI evidence: the suites run in the workflows' existing jobs.
+  - Fresh-context check: it found a comment claiming the status operation is
+    verified without freshness (reworded: the time operation alone), the credits
+    time route's 404 guard unreachable there, since every test composes the
+    service fresh (removed; the registry's and provisioning's stay, their suites
+    sharing one app reach them), the composed exemption untested (the skewed
+    test above), `configured_time_source` untested here (unit tests added), the
+    registry's and provisioning's injected composition never run (a
+    process-start test of each, the route served injected and not under wall),
+    the wall-time 404's source in the registry depending on test order
+    (reworded), stale comments on the credits client's fixed `seller` role, the
+    contracts module's scope and the OpenAPI tag (fixed), and the sync
+    `set_time` unexercised (added). Declined: application-level evidence of the
+    credits service's hosted ledger (above, shown for the same ledger by 5.2 and
+    10.2); one `configured_time_source` for the two services and the storefront
+    kit, three packages with no shared dependency but the time component, which
+    names no configuration layout; the registry client's unit refusal test
+    beside the integration one, since it holds the client's own error
+    construction; a sync/async parity test for the registry client, a gap
+    before this section; and reading the registry refusal's `code` through the
+    client, whose error carries the body alone, as every registry route's does.
+  - Handoff for section 12 and later. Every service now installs at its
+    composition root and mounts its route only under injected time: the
+    storefronts by `[Time] source`, provisioning and the credits service by
+    `time.source`, the registry by `TIME_SOURCE`. The static check (section 12)
+    reads exactly those keys. Section 15's fixture reaches them through
+    `StorefrontClient.set_time`, `ComputeProvisioningClient.set_time`,
+    `RegistryClient.set_time(admin_key=...)` and `CreditsServiceClient(...,
+    caller_role="admin").set_time`, each with its status read; composing a
+    service in a test after installing a source replaces it with the
+    configured one.
 
 ## 12. Committed configuration outside the lanes never injects time
 
