@@ -27,7 +27,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-time-reads check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -641,6 +641,13 @@ load-candidate: _require-ar-project ## Load HEAD as a release candidate: store e
 # ---------------------------------------------------------------------------
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@python3 scripts/check_comment_hygiene.py
+
+# check-time-reads — one time source per process
+# (docs/guidance/engineering/implementation.md, "One time source per process"):
+# no direct wall-clock read in production source or the lane doubles. The forms
+# it refuses and its scope are scripts/check_time_reads.py's.
+check-time-reads: ## Fail on a direct wall-clock read (time.time, datetime.now, …) in production source or the lane doubles, naming each file and line
+	@python3 scripts/check_time_reads.py
 
 # ---------------------------------------------------------------------------
 # check-doc-citations — citations resolve (docs/guidance/engineering/documentation.md),

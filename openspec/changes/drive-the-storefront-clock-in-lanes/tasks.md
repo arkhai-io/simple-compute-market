@@ -190,7 +190,7 @@ Delivers the check and the engineering rule (D20). Implements the check half of
 `scripts/check_time_reads.py`, `scripts/tests/`, the root `Makefile`, and
 `docs/guidance/engineering/implementation.md`.
 
-- [ ] 2.1 Write `scripts/check_time_reads.py`: an AST scan of every project's `src/`
+- [x] 2.1 Write `scripts/check_time_reads.py`: an AST scan of every project's `src/`
   under `core/`, `kit/`, `domains/`, `provisioning/`, and of the lane doubles under
   `tools/payments-lane-double/`, `tools/mediation-lane-double/` and
   `tools/lane-double-controls/`, refusing `time.time`, `time.time_ns`,
@@ -204,19 +204,102 @@ Delivers the check and the engineering rule (D20). Implements the check half of
     import time`, `from datetime import datetime`, an alias), the permitted forms, and a
     clean file. Run it on the tree and record the count of findings per project in the
     task note, the round's work list.
-- [ ] 2.2 Write the engineering rule in `docs/guidance/engineering/implementation.md`,
+  - Done: names are resolved from every import in the module, wherever it sits
+    (an import inside a function binds too); a refused read counts whether called
+    or passed as a value (`clock=time.time`, `default_factory=datetime.now`), except
+    `gmtime`/`localtime`, refused only when called with no argument or with `None`
+    (which also converts the current instant; outside the design's wording, inside
+    its intent). Each read counts, two of one form on one line included. Scope:
+    each directory under the four roots holding a `pyproject.toml`, its `src/`
+    alone (nested projects, such as `core/buyer` under `core`, are their own), and
+    the three doubles; `tools/injected-time`, the other standalone components (the
+    relay's grant-admission plugin takes its clock as a constructor argument
+    defaulting to the wall clock, depends on no internal package, and runs on wall
+    time, D16), tests and environments are outside it, as the script's docstring
+    says. It prints each finding as `path:line: <form> …`, then the count per
+    project, and exits 1 on any. `make check-time-reads`, in no aggregate target.
+    Unit, `scripts/tests/test_check_time_reads.py` (53 tests: every refused form
+    under `import time`, `from time import …`, `import datetime` and `from datetime
+    import …`, and under an alias of the module and of the function or class; the
+    `None` forms; reads passed as values; the permitted forms — `monotonic`,
+    `perf_counter`, `sleep`, `gmtime`/`localtime` with an instant or uncalled,
+    `fromtimestamp`, a method or function merely named `now` or `time`; a clean
+    module; two reads of one form on one line; the scope over a written tree; the
+    command's output and exit), passes in `make test-release-tooling`. Each test
+    imports the module only this section adds, so against the round's base it
+    fails at collection. Not caught, none present in scope: star imports, a name
+    rebound locally (`DT = datetime.datetime`), `.now()` on a subclass or an
+    instance, and `gmtime`/`localtime` passed uncalled as a factory; a local named
+    like an imported module in the same module would be read as it.
+  - The tree, the round's work list: 207 findings in 37 projects (the design's
+    "about 221" counted by text):
+
+    | Findings | Project | Findings | Project |
+    |---|---|---|---|
+    | 6 | `core/buyer` | 3 | `kit/alkahest` |
+    | 26 | `core/registry` | 1 | `kit/arkhai-mediation` |
+    | 3 | `core/registry-client` | 1 | `kit/arkhai-payments` |
+    | 31 | `core/storefront` | 1 | `kit/contact-exchange` |
+    | 4 | `core/storefront-client` | 4 | `kit/deal-lifecycle-buyer` |
+    | 2 | `domains/apicredits` | 3 | `kit/deal-lifecycle-client` |
+    | 2 | `domains/apicredits/buyer` | 1 | `kit/delivery` |
+    | 2 | `domains/apicredits/middleware/python` | 4 | `kit/fulfillment` |
+    | 1 | `domains/apicredits/service` | 2 | `kit/identity` |
+    | 8 | `domains/apicredits/storefront` | 1 | `kit/negotiation-runtime` |
+    | 1 | `domains/bare_metal/buyer` | 1 | `kit/policy` |
+    | 1 | `domains/bare_metal/provisioning/adapter` | 5 | `kit/settlement-runtime` |
+    | 12 | `domains/bare_metal/storefront` | 14 | `kit/site` |
+    | 5 | `domains/vms/buyer` | 2 | `kit/site-client` |
+    | 1 | `domains/vms/negotiation` | 2 | `kit/storefront` |
+    | 1 | `domains/vms/provisioning/adapter` | 13 | `provisioning/compute` |
+    | 27 | `domains/vms/storefront` | 2 | `provisioning/compute/ansible` |
+    | 1 | `tools/lane-double-controls` | 1 | `provisioning/compute/client` |
+    | | | 12 | `provisioning/compute/service` |
+
+    `make check-time-reads` lists each by file and line. Projects the plan names
+    that report none: `kit/deal-servicing` (its `EndService`, `DealWatch`,
+    `DeliveryIngress`, `SellerServicing` and `RespondentPoller` take `clock` with
+    no default, so their wall reads are their compositions'), and
+    `domains/compute/delivery`,
+    `kit/capacity-publication`, `kit/pool-overrides`, `kit/resource-pools` and the
+    payments and mediation doubles hold none. No `time.ctime()`, `time.asctime()`
+    or one-argument `time.strftime(...)`, which also read the wall clock and are
+    outside the design's list, appears in scope.
+- [x] 2.2 Write the engineering rule in `docs/guidance/engineering/implementation.md`,
   a new section "One time source per process": a process reads the time of the world
   from one time source and nothing else; a duration of its own activity — a timeout,
   a backoff, an interval — is measured on the monotonic clock, which neither stops
   when time is held nor jumps when it is set (D20). Neutral example, no market
   concept.
   - Verify: `make check-guidance` passes.
-- [ ] 2.3 Section verification.
+  - Done: the section sits before "Operator lifecycle controls", with a billing
+    service's invoice stamp and its retry bound as the example, and says a
+    function taking a clock defaults it to the process's source for the time of the
+    world and to the monotonic clock for a duration; the file's opening
+    and the `implementation` tag's description in `docs/guidance/engineering/README.md`
+    name the new subject. `make check-guidance` passes. The `check-time-reads`
+    target's comment cites the section.
+- [x] 2.3 Section verification.
   - Unit: `make test-release-tooling` (the check's tests).
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: none; the check reads source only.
   - Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
     `scripts/tests/test_check_time_reads.py` runs and passes.
+  - Evidence: `make test-release-tooling` 3179 passed; `make check-guidance`
+    passes; `make check-time-reads` runs and reports the work list above (exit 1,
+    expected until section 7.5). `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes`: `after-functional-change` and
+    `pre-commit-functional` (every suite) passed; of `pre-commit`, only the
+    citations check failed, on `openspec/specs/injected-time/architecture.md`, which
+    closeout's promotion writes (18.9).
+  - Confirmed: no end-to-end marker exercises the check; the owed job runs
+    `make test-deployment-packaging`, whose `test-release-tooling` collects
+    `scripts/tests/`.
+  - Handoff for sections 3–7: run `make check-time-reads` for the exact list; its
+    counts are per project, so a section converts the projects it names until they
+    drop out of the summary. A read passed as a value (a clock default) is a
+    finding, so a `clock: Callable = time.time` default converts to
+    `injected_time.now`, and a `time.monotonic` default stays.
 
 ## 3. Storefront-side kits and core read the process source
 
