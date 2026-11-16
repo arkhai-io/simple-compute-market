@@ -601,7 +601,7 @@ async def persist_vm_settlement_outcome(
     if not isinstance(listing_id, str):
         raise TypeError("VM settlement listing input is missing")
     private = outcome.private_result if isinstance(outcome.private_result, dict) else {}
-    # A deferred delivery stays open for the fulfillment resume pass, which
+    # A deferred delivery stays open for the delivery-recovery loop, which
     # owns finishing it, so only a fulfilled or failed outcome is terminal; the
     # delivery path already recorded its own, which this leaves in place.
     if outcome.status != "deferred":
@@ -635,9 +635,9 @@ async def persist_vm_settlement_outcome(
         return
     if outcome.status == "deferred":
         # The VM exists and a step after it is pending: the escrow stays open
-        # for the fulfillment resume pass, which owns finishing it.
+        # for the delivery-recovery loop, which owns finishing it.
         logger.info(
-            "[SETTLE_JOB] Escrow %s left open for the fulfillment resume pass: %s",
+            "[SETTLE_JOB] Escrow %s left open for the delivery-recovery loop: %s",
             context.escrow_uid,
             outcome.reason,
         )

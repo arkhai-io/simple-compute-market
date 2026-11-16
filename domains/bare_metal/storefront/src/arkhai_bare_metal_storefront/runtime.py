@@ -174,6 +174,12 @@ class BareMetalStorefrontRuntime:
     payment_reconciliation_interval_seconds: float = field(
         default_factory=lambda: packaged_settings().payment_reconciliation_interval
     )
+    #: How often the kit's servicing cycle runs (``deal-servicing``) and unfinished
+    #: deliveries are re-driven (``delivery-recovery``); ``None`` runs each at the
+    #: payment reconciliation interval, so a configuration stating only that key
+    #: runs all three at it.
+    deal_servicing_interval_seconds: float | None = None
+    delivery_recovery_interval_seconds: float | None = None
     #: When an idle negotiation is abandoned, and how often that is swept for.
     negotiation_watchdog: NegotiationWatchdogPolicy = field(
         default_factory=lambda: _watchdog_policy(packaged_settings())
@@ -1026,5 +1032,7 @@ def build_runtime_from_configuration(
         source_confirmation_seconds=active.capacity.confirmation_window_seconds,
         settlement_servicing_interval_seconds=active.settlement_servicing_interval_seconds,
         payment_reconciliation_interval_seconds=active.payment_reconciliation_interval,
+        deal_servicing_interval_seconds=active.deal_servicing_interval_seconds,
+        delivery_recovery_interval_seconds=active.delivery_recovery_interval_seconds,
         negotiation_watchdog=_watchdog_policy(active),
     )

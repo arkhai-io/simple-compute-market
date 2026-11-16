@@ -1,8 +1,8 @@
 """Bare metal's re-drives of its mock-provisioned deals.
 
 The compute family's delivery re-drive, which bare metal's `delivery-recovery`
-loop runs, is what a restarted bare-metal storefront runs first: it drives every
-started, unfinished delivery from what its records hold. Bare metal's settlement
+loop runs, is how a restarted bare-metal storefront resumes its deliveries: it
+drives every started, unfinished delivery from what its records hold. Bare metal's settlement
 drives the deal once and returns, so a step of the loop meets the deal as a
 restart would, owning it alone. VM's re-drive would skip a deal its settlement
 call is still driving, so VM's recovery is exercised by a deal that waits for its

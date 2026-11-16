@@ -1,7 +1,7 @@
 """The compute family's one re-drive of unfinished deliveries, over domain ports.
 
-Each compute storefront's re-drive loop runs ``recover_deliveries`` over what
-its domain already has: the query that lists its unfinished deliveries, the
+Each compute storefront's ``delivery-recovery`` loop runs ``recover_deliveries``
+over what its domain already has: the query that lists its unfinished deliveries, the
 serialization that keeps two drives of one deal apart (VM's durable claim
 lease, bare metal's per-deal lock), and its settlement stage's re-check of the
 deal's evidence against its authority. The routine owns the

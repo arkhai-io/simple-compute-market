@@ -1,7 +1,7 @@
 """Restart-safe convergence for accepted VM storefront deliveries.
 
-Every unfinished delivery is driven again through the compute family's
-re-drive routine, which claims it, has its settlement stage re-check its
+The ``delivery-recovery`` loop drives every unfinished delivery again through
+the compute family's re-drive routine, which claims it, has its settlement stage re-check its
 evidence and drives it through the delivery path; the path reconciles the
 deal's records and recovers each step against the same resource: a
 reservation through its placement key, a dispatch through its recorded
@@ -140,7 +140,11 @@ async def resume_incomplete_fulfillments_once(
     lease_seconds: int = 60,
     composition: Any | None = None,
 ) -> int:
-    """Re-drive each unfinished delivery this pass can claim and re-check.
+    """Re-drive each unfinished delivery this pass can claim and re-check: one
+    cycle of the ``delivery-recovery`` loop, which its timer and an operator's
+    step both run. A failure of one delivery is contained inside the re-drive;
+    listing the incomplete deliveries failing fails the cycle, which the loop
+    controller records, and the timer carries on.
 
     ``capacity`` is the guarded capacity effects and ``fulfillment_client``
     the per-site fulfillment client; each is built from the storefront's
@@ -156,27 +160,6 @@ async def resume_incomplete_fulfillments_once(
         db, composition,
     )
     recovery = VmDeliveryRecovery(
-        db, composition, owner=owner or f"fulfillment-resume:{uuid.uuid4()}", lease_seconds=lease_seconds,
+        db, composition, owner=owner or f"delivery-recovery:{uuid.uuid4()}", lease_seconds=lease_seconds,
     )
     return await recover_deliveries(drive, recovery, limit=limit)
-
-
-async def _reconcile_payment_deals() -> None:
-    """Advance accepted payment deals a buyer has not settled (none without payments)."""
-    composition = _container.resolved_settlement_composition
-    coordinator = getattr(composition, "payments_coordinator", None)
-    if coordinator is not None:
-        await coordinator.reconcile_once()
-
-
-async def fulfillment_resume_cycle_once(*, sqlite_client: SQLiteClient) -> None:
-    """One cycle of the fulfillment-resume loop: re-drive every unfinished
-    accepted VM delivery, then advance accepted payment deals.
-
-    The loop's timer and an operator's step both run exactly this. A failure
-    of one delivery is contained inside the re-drive; a failure outside it --
-    listing the incomplete deliveries -- fails the cycle, which the loop
-    controller records, and the timer carries on.
-    """
-    await resume_incomplete_fulfillments_once(sqlite_client=sqlite_client)
-    await _reconcile_payment_deals()

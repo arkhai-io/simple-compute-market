@@ -157,7 +157,7 @@ async def recovered(tmp_path, payments, negotiation_id, *, at: int) -> Lifecycle
     """
     payments.observed_at = at
     async with recurring_world(tmp_path) as world, settlement(world, payments=payments, clock=lambda: at):
-        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+        await world.app.client.admin_run_lifecycle_cycle("deal-servicing")
     async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled:
         return await settled.buyer_lifecycle.read(negotiation_id)
 
@@ -212,7 +212,7 @@ async def test_an_unreadable_authority_at_the_deadline_records_nothing_until_a_l
     async with recurring_world(tmp_path) as world, settlement(
         world, payments=payments, clock=lambda: record.deadline + 60,
     ):
-        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+        await world.app.client.admin_run_lifecycle_cycle("deal-servicing")
         # The cycle asked the authority for the deal, and the read failed.
         assert payments.count("get_transaction") > reads
         with transaction(world.app.db.db_path) as conn:

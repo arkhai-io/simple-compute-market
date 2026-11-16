@@ -220,9 +220,8 @@ class RecurringSettlement:
 class _NoSettlementJobs:
     """The settlement worker of a composition holding no Alkahest jobs.
 
-    The settlement-servicing loop runs the deal lifecycle's cycle, then the
-    worker's; this world composes no Alkahest settlement, so its worker has
-    nothing to run.
+    The settlement-servicing loop runs the worker alone; this world composes no
+    Alkahest settlement, so its worker has nothing to run.
     """
 
     async def run_once(self) -> int:
@@ -269,8 +268,8 @@ async def settlement(
     billing at the payments engine and becomes available. ``payments`` is the
     payments service, a fresh engine unless a test passes the one an earlier
     storefront used, since the service outlives a storefront restart; ``clock``
-    is the deal lifecycle's, wall time unless given. The settlement-servicing
-    loop runs the lifecycle's recovery cycle, and the lifecycle routes are
+    is the deal lifecycle's, wall time unless given. The deal-servicing loop
+    runs the lifecycle's servicing cycle, and the lifecycle routes are
     mounted for the buyer's lifecycle client.
     """
     domain = world.app.db.domain_registry.resolve_mode("vm").contract

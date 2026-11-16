@@ -50,8 +50,10 @@ _PROMPTLY = 1.0
 #: is not composed: every loop but the capacity-event pollers' fan-out.
 _TIMED_LOOPS = {
     lifecycle.NEGOTIATION_WATCHDOG,
+    lifecycle.DEAL_SERVICING,
+    lifecycle.DELIVERY_RECOVERY,
+    lifecycle.PAYMENT_RECONCILIATION,
     lifecycle.SETTLEMENT_SERVICING,
-    lifecycle.FULFILLMENT_RESUME,
     lifecycle.SITE_PROJECTION_POLLER,
     lifecycle.PUBLICATION,
 }

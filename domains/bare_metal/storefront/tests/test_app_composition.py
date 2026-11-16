@@ -23,6 +23,7 @@ from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from settlement_compositions import alkahest_composition
 from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLifecycle
+from arkhai_bare_metal_storefront.lifecycle_steps import register_bare_metal_loops
 from arkhai_bare_metal_storefront.settlement_stages import DeclinedServicing
 from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
@@ -33,7 +34,7 @@ from arkhai_bare_metal_storefront.contribution import (
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import fulfill_bare_metal
 from arkhai_bare_metal_storefront.publication_composition import build_publication_cycle
-from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV
+from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV, BareMetalConfigurationError
 from arkhai_bare_metal_storefront.runtime import build_runtime_from_configuration
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -165,7 +166,10 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
         assert app.state.storefront_container.domain is runtime.domain
         started = runtime.loops.registered_loop_names()
     assert app.state.storefront_container is None
-    assert started == ["delivery_recovery", "negotiation_watchdog", "publication"]
+    assert started == [
+        "deal_servicing", "delivery_recovery", "negotiation_watchdog", "payment_reconciliation",
+        "publication", "settlement_servicing",
+    ]
     assert runtime.loops.registered_loop_names() == []
 
 
@@ -212,7 +216,14 @@ async def test_a_runtime_without_a_settlement_composition_has_no_settlement(
     )
 
     assert runtime.settlement_worker is None
-    assert "settlement-servicing" not in runtime.loops.step_routes()
+    # The four servicing loops are registered whatever is composed; with no
+    # worker and no payments, their steps have nothing to do.
+    assert await runtime.loops.run_cycle("settlement-servicing") == {
+        "loop": "settlement_servicing", "processed": 0,
+    }
+    assert await runtime.loops.run_cycle("payment-reconciliation") == {
+        "loop": "payment_reconciliation", "attempted": 0, "failed": 0,
+    }
     with pytest.raises(RuntimeError, match="no bare-metal settlement mechanism is configured"):
         runtime.settlement_service()
     health = await runtime.health()
@@ -541,6 +552,28 @@ def test_every_interval_and_term_is_read_from_configuration(monkeypatch, tmp_pat
     assert runtime.default_max_duration_seconds == 7200
     assert [clause.mechanism for clause in runtime.publication_clauses] == ["alkahest.v1"]
     assert runtime.negotiation_policies == ["escrow_shape_guard", "bisection"]
+
+
+def test_the_servicing_loops_run_at_their_own_intervals_or_payment_reconciliations(
+    monkeypatch, tmp_path
+):
+    """``deal-servicing`` and ``delivery-recovery`` run at the payment
+    reconciliation interval until each states its own key."""
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document.update(payment_reconciliation_interval=8, settlement_servicing_interval_seconds=12)
+    unstated = register_bare_metal_loops(_configured_runtime(monkeypatch, tmp_path, document))
+    document.update(deal_servicing_interval_seconds=5, delivery_recovery_interval_seconds=6)
+    stated = register_bare_metal_loops(_configured_runtime(monkeypatch, tmp_path, document))
+
+    assert (unstated["deal_servicing"], unstated["delivery_recovery"]) == (8, 8)
+    assert (stated["deal_servicing"], stated["delivery_recovery"]) == (5, 6)
+
+
+def test_a_servicing_interval_that_is_not_positive_seconds_is_refused_by_key(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document.update(delivery_recovery_interval_seconds=0)
+    with pytest.raises(BareMetalConfigurationError, match="delivery_recovery_interval_seconds"):
+        _configured_runtime(monkeypatch, tmp_path, document)
 
 
 def test_the_seller_chain_defaults_when_none_is_configured(monkeypatch, tmp_path):

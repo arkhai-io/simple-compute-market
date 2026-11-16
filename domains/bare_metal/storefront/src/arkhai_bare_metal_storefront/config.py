@@ -310,6 +310,10 @@ class BareMetalStorefrontSettings(_Section):
     negotiation_watchdog_interval: PositiveSeconds
     settlement_servicing_interval_seconds: PositiveSeconds
     payment_reconciliation_interval: PositiveSeconds
+    #: The kit's servicing cycle's interval; unstated, ``payment_reconciliation_interval``.
+    deal_servicing_interval_seconds: PositiveSeconds | None = None
+    #: The delivery re-drive's interval; unstated, ``payment_reconciliation_interval``.
+    delivery_recovery_interval_seconds: PositiveSeconds | None = None
     identity: StorefrontIdentitySettings = Field(default_factory=StorefrontIdentitySettings)
     # The payments key and the dispute credentials' tokens sit in these two when
     # the overlay states them.

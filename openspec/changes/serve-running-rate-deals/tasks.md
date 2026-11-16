@@ -1447,7 +1447,7 @@ Delivers D5's layout and D14's restart evidence; requirement "Both compute store
 one loop layout" (`market-composition`). Touches both storefronts' loop registration,
 their configuration, `e2e-tests`.
 
-- [ ] 9.1 Register `deal-servicing`, `delivery-recovery`, `payment-reconciliation` and
+- [x] 9.1 Register `deal-servicing`, `delivery-recovery`, `payment-reconciliation` and
       `settlement-servicing`, one job each, in
       `domains/vms/storefront/src/market_storefront/lifecycle_steps.py` and
       `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/lifecycle_steps.py`;
@@ -1458,21 +1458,161 @@ their configuration, `e2e-tests`.
       `test_app_composition.py` in bare metal): each reports the four loops; stepping
       `deal-servicing` runs one servicing cycle and re-drives no delivery; the new keys'
       defaults.
-- [ ] 9.2 Rename the loops in the lane stages that pause and step them (the 11 files
+      Done. Loop names `deal_servicing`, `delivery_recovery`, `payment_reconciliation`,
+      `settlement_servicing` (routes hyphenated, as every loop's are). VM: `lifecycle.py`
+      names the three new loops in place of `FULFILLMENT_RESUME`; `deal-servicing` runs
+      `lifecycle.cycle()`, `delivery-recovery` `resume_incomplete_fulfillments_once`
+      (reporting `redriven`), `payment-reconciliation` the coordinator's
+      `reconcile_once`, `settlement-servicing` the worker alone;
+      `fulfillment_resume_cycle_once` and `_reconcile_payment_deals` are gone. Keys:
+      `deal_servicing_interval_seconds` (unstated, `settlement_servicing_interval_seconds`)
+      and `delivery_recovery_interval_seconds` (unstated,
+      `fulfillment_resume_sweep_interval`, which `payment-reconciliation` reads), each
+      refused by key unless positive seconds (`utils/config.py`), as
+      `fulfillment_resume_sweep_interval` now is too, matching bare metal's
+      `payment_reconciliation_interval`. Both storefronts' `payment-reconciliation`
+      steps report the pass's `attempted` and `failed`. Bare metal:
+      `deal-servicing` runs `lifecycle.cycle()`, `delivery-recovery` the re-drive alone;
+      `deal_servicing_interval_seconds` and `delivery_recovery_interval_seconds` are
+      optional typed settings, unstated meaning `payment_reconciliation_interval`, at
+      which both jobs ran; the bare-metal chart's values schema is regenerated (`make
+      helm-values-schema`), so the umbrella chart and `bare-metal-storefront` take 0.5.0.
+      Both packaged `settings.toml` files say which interval each loop runs at. Beyond
+      the plan, the loops' first cycles now agree: every servicing loop in both
+      storefronts runs its first cycle one interval after its timer starts, where VM's
+      `fulfillment-resume` ran at once — the docstring's reason, an operator holding the
+      loops as the storefront starts, applies to each; a restarted storefront's first
+      re-drive is therefore an interval after start, 30 seconds by default, as bare
+      metal's already was. Bare metal now registers all four loops whatever it
+      composes, as VM does — `payment-reconciliation` had been registered only while
+      payments were composed and `settlement-servicing` only while a worker was — each
+      step reporting zero work when its job has nothing composed.
+      `docs/guidance/repository/deterministic-tests.md`'s loop table, which section 2B
+      left for this layout, and `docs/configuration.md`'s failure-policy paragraph name
+      the new loops. Evidence — VM (`test_lifecycle_status.py`): every loop startup
+      registers, the four among them, is reported paused through the typed client
+      (application integration); on the recurring world a deal left undelivered by an
+      unreachable site, the site then answering, is serviced by a `deal-servicing` step
+      through the typed admin client (page size at least one, the payment authority read
+      again) and stays undelivered — which shows the servicing step ran and delivered
+      nothing, though in this world a re-drive could not reach the fake site either (its
+      capacity is built from the configured sites, the unowned row of section 8), so that
+      `deal-servicing` never calls the re-drive is the unit case below; the intervals
+      `register_vm_loops` registers, called directly under settings overrides, are 45, 20,
+      20, 45 for the four with only the old keys stated and 7, 9, 20, 45 with the new
+      ones, and a zero `deal_servicing_interval_seconds` is refused naming the key. VM
+      unit (`test_lifecycle_advance_routes.py`): each of the four steps runs exactly its
+      one job — `deal-servicing` the cycle and neither the worker nor the re-drive — and
+      reports its loop; `test_loop_gate_wiring.py` gates the four. Bare metal
+      (`integration/test_lifecycle_dispatch.py`, application integration through the
+      typed admin client over the payments harness, rather than `test_app_composition.py`,
+      which has no deal): the four loops reported, paused; a `deal-servicing` step
+      reads the payment authority (page size 1) and leaves a ready fulfillment
+      `unstarted`, which a `delivery-recovery` step then re-drives to `active`
+      (`redriven` 1); the readiness cases step the loop each half needs.
+      `test_app_composition.py`: a configured runtime registers both new loops at
+      `payment_reconciliation_interval` (8) unstated and at their own keys (5, 6) stated;
+      a zero `delivery_recovery_interval_seconds` is refused naming the key.
+      `test_http_system.py` and `test_app_composition.py`'s loop lists name all four; a
+      storefront with no worker steps `settlement-servicing` with nothing swept, and one
+      with neither a worker nor payments steps both loops idle.
+- [x] 9.2 Rename the loops in the lane stages that pause and step them (the 11 files
       under `e2e-tests/tests/e2e/roles/` naming `fulfillment-resume`,
       `settlement-servicing` or `delivery-recovery`, and `held_loops.py` in bare metal's
       tests). Verify (unit, `e2e-tests/tests/unit/`): the stage modules pass; and by
       running the affected scenarios in their lanes.
-- [ ] 9.3 Restart recovery (D14, application integration, `test_restart_recovery.py` in
+      Done, correcting the plan's count: ten lane files name a loop, and bare metal's
+      `held_loops.py` names none. Renamed by what each step needs: the servicing cycle
+      is `deal-servicing` (`vms/purchase_driver.py`'s and `bare_metal/purchase_driver.py`'s
+      `servicing_loop`, `vms/test_vm_payment_deal.py`, `vms/lifecycle_deal.py`,
+      `vms/dispute/stages.py`, `bare_metal/test_bare_metal_mock_deal.py`'s site-report
+      read), VM's re-drive is `delivery-recovery` (`vms/delivery_timing_deal.py`), and the
+      Alkahest worker's steps stay `settlement-servicing`
+      (`bare_metal/publication_stages.py`, `vms/test_full_deal.py`), as does bare metal's
+      re-drive `delivery-recovery` (`recovery_stages.py`); `helpers/compute_deal.py`'s
+      example names `deal-servicing`. Docstrings naming the resume pass now name the
+      re-drive. Unit (`make -C e2e-tests test-unit`): 911 passed, 1 skipped. System:
+      `make -C e2e-tests test-e2e-vm` over `e2e_vm_payment_deal`,
+      `e2e_vm_recurring_purchase`, `e2e_deal` and the six `e2e_vm_dispute_*` markers, 178
+      passed, the stack taken down after; the bare-metal run is recorded in 9.4.
+- [x] 9.3 Restart recovery (D14, application integration, `test_restart_recovery.py` in
       bare metal and a new `test_restart_recovery.py` in VM): restarting the composed
       storefront over the same database with a running rate deal, an ending deal and a
       pending seller stop resumes each — the running deal stays served, the ending deal
       ends when its stop is read, the pending stop takes effect at its instant.
-- [ ] 9.4 Verification point: both storefronts' suites pass; `make check-packaging` passes.
+      Done, one deal per case, in a new `tests/integration/test_restart_recovery.py` in
+      each storefront (bare metal's flat `tests/test_restart_recovery.py` holds its
+      once-only Alkahest restarts, and the recurring world is the integration
+      directory's). Application integration: each storefront's recurring world settles
+      and delivers a rate deal through the typed buyer client, stops, and is composed
+      again over the same database with the same in-process payments engine, its loops
+      held and `deal-servicing` stepped through the typed admin client. Running: after
+      the restart a `deal-servicing` and a `delivery-recovery` step leave the on-demand
+      deal `active` in the buyer's typed lifecycle read, no end recorded, its part with no
+      final stop, nothing re-driven. Ending: the payer's stop submitted at the payments
+      engine while the storefront is down shows no recorded end in the buyer's typed read
+      until the restarted storefront's `deal-servicing` step, after which the read shows
+      the `payer` end, which the journal classifies `entitled_stop`. Pending seller stop:
+      a spot deal's payee stop with its 120-second notice, submitted while the storefront
+      is down, records no end at a step before its instant, and a step with the
+      lifecycle clock and the engine past the instant records the `payee` stop ended at
+      the instant, `entitled_stop` — read from the servicing journal, not the typed
+      client, since the storefront's clock is then ahead of the reader's. Each restarted
+      world's site is a fresh fake, so none asserts the teardown (section 3's handoff).
+      VM 3 passed (integration 623), bare metal 3 passed.
+- [x] 9.4 Verification point: both storefronts' suites pass; `make check-packaging` passes.
       End-to-end: every scenario stepping a renamed loop, among them `e2e_vm_payment_deal`,
       the `e2e_vm_dispute_*` scenarios, `e2e_vm_payment_purchase`,
       `e2e_bare_metal_mock_deal`, `e2e_bare_metal_payment_deal`,
       `e2e_bare_metal_publication` and the two recurring purchases.
+      Done: `make -C domains/vms/storefront test` (unit 1196 passed, 1 skipped;
+      integration 623 passed), `make -C domains/bare_metal/storefront test` (663 passed),
+      `make check-packaging` (passed), `make -C e2e-tests test-unit` (911 passed, 1 skipped).
+      System, each stack taken down after: the VM lane over `e2e_vm_payment_deal`,
+      `e2e_vm_recurring_purchase`, `e2e_deal` and the six `e2e_vm_dispute_*` markers (178
+      passed), and the bare-metal lane over `e2e_bare_metal_publication`,
+      `e2e_bare_metal_mock_deal`, `e2e_bare_metal_payment_deal` and
+      `e2e_bare_metal_recurring_purchase` (113 passed), both run before the fresh-context
+      fixes; those changed bare metal's registration only for a composition without
+      payments or a worker, which neither lane runs, VM's reconciliation step's report,
+      which no lane stage steps, and lane docstrings. End-to-end confirmed, as those runs show:
+      the scenarios above step the renamed loops (`e2e_vm_payment_purchase` steps none of
+      them), and are the pipeline's evidence for the layout once deployed; none asserts
+      the intervals or the restart cases, which are application integration only. Owed
+      by validation: none. `run test-before` was not run: it runs without the
+      storefronts' environments, and the new cases step routes (`deal-servicing`,
+      `delivery-recovery` as the re-drive alone) the base does not register.
+      `scripts/change-workflow run pre-commit` passed with every functional hook, after
+      the fresh-context fixes.
+      Fresh-context check: fixed — bare metal registering `payment-reconciliation` and
+      `settlement-servicing` only as composed, against the delta's same four loops (now
+      always, idle when unconfigured); VM's `fulfillment_resume_sweep_interval` read
+      unchecked though two loops now run at it (now refused unless positive seconds);
+      the two `payment-reconciliation` steps reporting differently (both now report
+      `attempted` and `failed`); the restart cases' ending stop read only from the
+      journal (now through the buyer's typed read too) and their loops not held (now
+      held); two lane docstrings calling the re-drive what a restarted storefront runs
+      first, untrue once its first cycle waits an interval; the constants' comment
+      placement; `TESTING.md` and `vm-storefront-fulfillment/architecture.md` passages
+      added to 12.9; and these notes' claims for the VM re-drive case, the interval
+      cases' level and the restart reads. Declined: correcting `core/storefront-client`'s
+      docstrings naming `fulfillment-resume`, which would take that published client a
+      version for a docstring — recorded as an unowned row; and reading the pending seller
+      stop through the typed client, whose clock would then be behind the storefront's.
+
+Section 9 handoff:
+
+- The four loops are `deal_servicing`, `delivery_recovery`, `payment_reconciliation` and
+  `settlement_servicing` in both storefronts, registered whatever is composed. Section
+  10's lane rows step `deal-servicing` for stops and teardown and `delivery-recovery`
+  for activation; the recurring purchases' drivers already name `deal-servicing`.
+- VM's re-drive still builds its capacity effects from the configured sites when
+  stepped as its loop (an unowned row), so a VM application test of a re-drive through
+  the loop's route cannot reach a fake site.
+- The restart cases build a fresh site fake per restarted world; a lane or test that
+  asserts teardown after a restart needs the site to outlive it (section 2A's handoff).
+- The chart is 0.5.0 (the bare-metal values schema accepts the two new keys);
+  `make helm-values-schema` regenerates it when the bare-metal settings change again.
 
 ## 10. Rate deals qualified in both lanes on lane time
 
@@ -1594,6 +1734,10 @@ campaign index currency.
         `StorefrontFulfillmentContext` (the re-drive's `redeliver` is one more) and "The
         lifecycle cycle drives waiting and pending deals" (now the re-drive's, through
         `deliver`), found by section 8's fresh-context checks;
+        `openspec/specs/vm-storefront-fulfillment/architecture.md`, "Evidence and
+        delivery ownership" (its "periodic resume pass", now the `delivery-recovery`
+        loop) and `docs/development/TESTING.md`'s "dispatched only by a resume-pass
+        step", found by section 9's fresh-context check;
         `openspec/specs/market-composition/architecture.md`, "Storefront composition kit"
         (the four loops); `docs/development/ARCHITECTURE.md`, "Operator lifecycle
         controls" (the loop layout); `openspec/specs/storefront-publication/configuration.md`,

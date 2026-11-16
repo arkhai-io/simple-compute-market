@@ -71,9 +71,9 @@ def scenario_driver(deal_driver: Any, *, host: str, pool_id: str, resource_id: s
 
 
 def servicing_step(storefront_admin_client: Any) -> dict:
-    """One cycle of the storefront's held ``settlement-servicing`` loop: respondent
+    """One cycle of the storefront's held ``deal-servicing`` loop: respondent
     discovery, the authority watch, then the physical end of a recorded end."""
-    return advance_storefront(storefront_admin_client, "settlement-servicing")
+    return advance_storefront(storefront_admin_client, "deal-servicing")
 
 
 def cases(rules: LaneDoubleRules, transaction: str) -> list[CaseView]:

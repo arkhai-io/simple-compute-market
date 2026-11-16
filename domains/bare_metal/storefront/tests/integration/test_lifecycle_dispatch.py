@@ -192,6 +192,8 @@ async def test_recovery_finishes_receipt_after_availability_was_recorded(harness
 
 @pytest.mark.asyncio
 async def test_recovery_never_adopts_readiness_after_buyer_end(harness):
+    """After the buyer's end the re-drive leaves the ready fulfillment alone, and
+    the servicing cycle tears it down."""
     h = harness
     provisioning = ReadyProvisioning(state="dispatching")
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
@@ -203,7 +205,8 @@ async def test_recovery_never_adopts_readiness_after_buyer_end(harness):
         ))
         await buyer.end_delivery(h.negotiation_id, operation_key="end")
         provisioning.state = "active"
-        await step(h, "delivery-recovery")
+        assert (await step(h, "delivery-recovery"))["redriven"] == 0
+        await step(h, "deal-servicing")
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "tearing_down"
         with transaction(h.runtime.db.db_path) as conn:
             assert EndSession(conn).read(h.negotiation_id).available_at is None
@@ -211,7 +214,50 @@ async def test_recovery_never_adopts_readiness_after_buyer_end(harness):
 
 
 @pytest.mark.asyncio
+async def test_the_four_servicing_loops_are_reported_and_deal_servicing_re_drives_nothing(harness):
+    """The storefront reports the four loops both compute storefronts run, each
+    held; a step of ``deal-servicing`` runs one servicing cycle — the payment
+    authority read — and leaves a ready fulfillment undelivered until
+    ``delivery-recovery`` re-drives it."""
+    h = harness
+    provisioning = ReadyProvisioning(state="dispatching")
+    object.__setattr__(h.runtime, "fulfillment_client", provisioning)
+    h.serve()
+    async with peer(h) as buyer:
+        await buyer.commit(CommitMessage(
+            negotiation_id=h.negotiation_id, commitment_ref=h.data.transaction_id,
+            operation_key="commit",
+        ))
+        provisioning.state = "active"
+        reads = h.payments.count("get_transaction")
+
+        serviced = await step(h, "deal-servicing")
+        undelivered = (await buyer.read(h.negotiation_id)).delivery.progress
+        async with StorefrontClient(
+            "http://test", signer=ADMIN, caller_role="admin",
+            expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
+            transport=httpx.ASGITransport(app=h.app),
+        ) as admin:
+            status = await admin.get_system_status()
+        redriven = await step(h, "delivery-recovery")
+        delivered = (await buyer.read(h.negotiation_id)).delivery.progress
+
+    assert {
+        name: loop["state"] for name, loop in status.lifecycle.items()
+        if name in ("deal_servicing", "delivery_recovery", "payment_reconciliation", "settlement_servicing")
+    } == {"deal_servicing": "paused", "delivery_recovery": "paused", "payment_reconciliation": "paused",
+          "settlement_servicing": "paused"}
+    assert serviced == {"loop": "deal_servicing", "processed": 1}
+    assert h.payments.count("get_transaction") > reads
+    assert undelivered == "unstarted"
+    assert redriven == {"loop": "delivery_recovery", "redriven": 1}
+    assert delivered == "active"
+
+
+@pytest.mark.asyncio
 async def test_failed_readiness_observation_retries_without_starving_site_recovery(harness):
+    """A re-drive whose result read fails leaves the deal for the next one, and
+    the servicing cycle's site recovery still reads the lease."""
     h = harness
     provisioning = DelayedResultProvisioning(state="dispatching")
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
@@ -223,8 +269,9 @@ async def test_failed_readiness_observation_retries_without_starving_site_recove
         ))
         provisioning.state = "active"
         await step(h, "delivery-recovery")
-        assert provisioning.lease_reads == 1
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "unstarted"
+        await step(h, "deal-servicing")
+        assert provisioning.lease_reads == 1
         await step(h, "delivery-recovery")
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "active"
     assert len(provisioning.begin_calls) == 1

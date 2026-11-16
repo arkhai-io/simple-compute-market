@@ -40,7 +40,7 @@ async def test_a_running_rate_deal_is_still_serviced_after_its_treatment_is_with
         payments.engine.submit(data.transaction_id, {
             "account": RATE_PAYER, "requestId": "buyer-stop", "event": {"kind": "stop"},
         })
-        await world.admin.admin_run_lifecycle_cycle("delivery-recovery")
+        await world.admin.admin_run_lifecycle_cycle("deal-servicing")
         with transaction(world.db.db_path) as conn:
             end = EndSession(conn)
             record = end.read(negotiation_id)

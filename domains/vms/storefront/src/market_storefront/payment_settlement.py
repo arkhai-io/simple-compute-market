@@ -283,7 +283,7 @@ class VmPaymentsCoordinator:
     async def reconcile_once(self, *, limit: int = 100) -> ReconciliationPass:
         """Advance accepted payment deals a buyer has not settled, without the buyer.
 
-        A deal with a delivery record belongs to the fulfillment resume sweep;
+        A deal with a delivery record belongs to the delivery-recovery loop;
         this pass takes the deals before that point and refunds left
         ``refunding``.
         """

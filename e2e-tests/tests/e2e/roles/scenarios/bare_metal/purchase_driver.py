@@ -314,10 +314,9 @@ class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
     recurring on-demand option on a whole host through ``market bare-metal
     buy``."""
 
-    #: The storefront loop whose lifecycle cycle reads its committed deals'
-    #: payments, drives their delivery and carries out their recorded ends at
-    #: the site.
-    servicing_loop = "delivery-recovery"
+    #: The storefront loop whose servicing cycle reads its committed deals'
+    #: payments and carries out their recorded ends at the site.
+    servicing_loop = "deal-servicing"
 
     def pool_settlement(self) -> dict[str, Any]:
         """The pool override's one settlement: a recurring on-demand option on

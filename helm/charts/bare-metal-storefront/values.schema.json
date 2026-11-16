@@ -400,6 +400,30 @@
             "null"
           ]
         },
+        "^[dD][eE][aA][lL]_[sS][eE][rR][vV][iI][cC][iI][nN][gG]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 62135596800.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "^[dD][eE][lL][iI][vV][eE][rR][yY]_[rR][eE][cC][oO][vV][eE][rR][yY]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 62135596800.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "^[iI][dD][eE][nN][tT][iI][tT][yY]$": {
           "additionalProperties": false,
           "type": [

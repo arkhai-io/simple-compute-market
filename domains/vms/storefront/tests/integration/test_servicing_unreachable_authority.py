@@ -10,7 +10,7 @@ as a variable; the harness passes the merged dispute document, not the files the
 storefront's loader would merge it from. Every
 mediation client sends through an injected transport raising the connection
 error a name that never resolves produces, so no network is needed. Servicing is
-stepped by calling the lifecycle's cycle, the step the ``settlement-servicing``
+stepped by calling the lifecycle's cycle, the step the ``deal-servicing``
 loop runs; the deal is then read through the canonical lifecycle client, as a
 buyer reads it. The servicing part of spec scenario "The VM lane has no
 mediation target".

@@ -149,7 +149,7 @@ class VmSettlementRepository:
         A deal qualifies when it has no delivery record and no refund, whether
         its evidence is missing, pending, or verified without a delivery start,
         or when a refund was left ``refunding``. A deal with a delivery record
-        belongs to the fulfillment resume sweep. The filter runs before the
+        belongs to the delivery-recovery loop. The filter runs before the
         limit, so completed deals never crowd out an unsettled one, and a
         malformed Agreement is skipped rather than failing the query.
         """

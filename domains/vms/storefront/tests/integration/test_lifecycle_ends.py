@@ -287,7 +287,7 @@ async def test_a_delivered_rate_deal_buyer_stop_is_an_entitled_stop_that_dischar
         settled.payments.engine.submit(data.transaction_id, {
             "account": RATE_PAYER, "requestId": "buyer-stop", "event": {"kind": "stop"},
         })
-        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+        await world.app.client.admin_run_lifecycle_cycle("deal-servicing")
         stop, classification = recorded_end(world.app.db.db_path, negotiation_id)
         assert stop.cause == "payer"
         assert classification.kind == "entitled_stop"
@@ -329,7 +329,7 @@ async def test_a_once_only_deal_term_end_is_recorded_classified_and_torn_down(tm
     at = record.term_end + 60
     payments.observed_at = at
     async with recurring_world(tmp_path) as world, settlement(world, payments=payments, clock=lambda: at):
-        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+        await world.app.client.admin_run_lifecycle_cycle("deal-servicing")
         with transaction(world.app.db.db_path) as conn:
             end = EndSession(conn)
             requests = {request.source_ref.partition(":")[0]: request for request in end.requests(negotiation_id)}

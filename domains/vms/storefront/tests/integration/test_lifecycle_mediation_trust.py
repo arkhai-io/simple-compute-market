@@ -6,7 +6,7 @@ lifecycle class, built by the harness from a dispute configuration document, and
 the payments service replaced at ``PaymentsClient`` by the kit's fake. Every
 mediation client sends through an injected transport that records the attempt and
 raises the connection error an unresolvable name produces. Servicing is stepped by
-calling the lifecycle's cycle, the step the ``settlement-servicing`` loop runs, and
+calling the lifecycle's cycle, the step the ``deal-servicing`` loop runs, and
 the deal is read through the canonical lifecycle client, as a buyer reads it.
 
 A mediation client loads its CA bundle when it is built, so a credential naming a

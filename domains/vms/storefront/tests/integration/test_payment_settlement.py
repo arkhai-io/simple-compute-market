@@ -41,6 +41,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.lifecycle_steps import payment_reconciliation_step
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -677,13 +678,11 @@ async def _restart(h, tmp_path, *, approved: bool):
 @pytest.mark.asyncio
 async def test_an_approved_payment_converges_after_restart_without_the_buyer(make, tmp_path):
     """The buyer approved, never settled, and the storefront restarted: the seller delivers."""
-    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
-
     h = await make()
     restarted = await _restart(h, tmp_path, approved=True)
 
-    # What the fulfillment resume loop runs each sweep; no buyer request is made.
-    await _reconcile_payment_deals()
+    # What the payment-reconciliation loop runs each cycle; no buyer request is made.
+    await payment_reconciliation_step()
     task = restarted.coordinator.tasks.get(NEGOTIATION)
     assert task is not None
     await task
@@ -696,18 +695,16 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(mak
     assert delivery["status"] == "ready"
 
     # A later pass finds nothing left to do.
-    await _reconcile_payment_deals()
+    await payment_reconciliation_step()
     assert restarted.delivery.starts == [NEGOTIATION]
 
 
 @pytest.mark.asyncio
 async def test_reconciliation_leaves_an_unapproved_payment_pending(make, tmp_path):
-    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
-
     h = await make()
     restarted = await _restart(h, tmp_path, approved=False)
 
-    await _reconcile_payment_deals()
+    await payment_reconciliation_step()
 
     assert restarted.delivery.starts == []
     assert await restarted.db.load_vm_delivery(negotiation_id=NEGOTIATION) is None

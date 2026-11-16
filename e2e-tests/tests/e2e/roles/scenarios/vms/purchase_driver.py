@@ -258,9 +258,9 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
     """VM's ``RecurringPurchaseDriver``, for the lane's purchase of a recurring
     on-demand option through ``market buy``."""
 
-    #: The storefront loop whose lifecycle cycle reads its committed deals'
+    #: The storefront loop whose servicing cycle reads its committed deals'
     #: payments and carries out their recorded ends at the site.
-    servicing_loop = "settlement-servicing"
+    servicing_loop = "deal-servicing"
 
     def listing_settlement(self) -> dict[str, Any]:
         """The listing's one settlement: a recurring on-demand option, paid
