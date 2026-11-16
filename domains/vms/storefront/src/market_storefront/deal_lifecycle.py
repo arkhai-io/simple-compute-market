@@ -53,6 +53,10 @@ from market_storefront.services.vm_fulfillment_planner import VERIFIED_EVIDENCE_
 
 logger = logging.getLogger(__name__)
 
+#: The configuration that composes the payments seller stage, without which an
+#: accepted payments deal, once-only or rate, cannot be serviced.
+PAYMENTS_SERVICING_FIELDS = "[Settlement].arkhai_payments service_url and service_identity"
+
 
 def instant(value: str) -> int:
     return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
@@ -92,6 +96,7 @@ class VmDealLifecycle:
             disputes=DisputeAdapterTable([(INTERFACE, self.dispute_adapter)]),
             credential_available=self.credential_available,
             watch_factory=self.watch, clock=clock,
+            missing_adapters={} if payments is not None else {"arkhai.payments.v1": PAYMENTS_SERVICING_FIELDS},
         )
 
     def accepted(self, negotiation_id):

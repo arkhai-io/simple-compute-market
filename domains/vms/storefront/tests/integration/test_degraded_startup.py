@@ -11,6 +11,8 @@ refusing until it is switched to answering; the composition itself is not
 patched. Nothing waits for a dependency: the storefront answers its health
 check, and system status, read through the typed client, reports each
 dependency degraded. Of the dependencies, only the chain is brought back here.
+A storefront whose configuration composes no payments stage starts the same
+way over a database holding an open payments deal, and reports the deal.
 
 Every key, address, and principal here is a deterministic development value,
 never used on a public network.
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import threading
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -28,6 +31,7 @@ import httpx
 import pytest
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_config.config_loader import ChainConfig
+from market_deal_lifecycle_client import SellerLifecycleClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient
 
@@ -41,11 +45,18 @@ from market_storefront.utils import config as storefront_config
 from market_storefront.utils import sqlite_client as sqlite_module
 from market_storefront.utils.migrations import migrate_storefront_database
 from tests._settings_overrides import replaced_setting
+from tests.integration.test_lifecycle_ends import accepted_once_deal
+from tests.integration.test_rate_delivery import accepted_recurring_deal, approve
+from tests.fake_site import TEST_MARKETPLACE_SIGNER
+from tests.publication_app import ADMIN_SIGNER as HARNESS_ADMIN
+from tests.recurring_world import recurring_world, settlement
 
 pytestmark = pytest.mark.asyncio
 
 _SEED = b"\x79" * 32
 SIGNER = Ed25519Signer(_SEED)
+#: The seed of the test harness's seller, ``TEST_MARKETPLACE_SIGNER``.
+_HARNESS_SEED = b"\x41" * 32
 ADMIN = Ed25519Signer(b"\x7a" * 32)
 _REGISTRY = Ed25519Signer(b"\x7b" * 32)
 _SITE = Ed25519Signer(b"\x7c" * 32)
@@ -133,12 +144,12 @@ async def lifecycle_registry(monkeypatch):
     await lifecycle.reset_for_tests()
 
 
-def _admin(app) -> StorefrontClient:
+def _admin(app, signer: Ed25519Signer = ADMIN, publisher: Ed25519Signer = SIGNER) -> StorefrontClient:
     return StorefrontClient(
         "http://seller",
-        signer=ADMIN,
+        signer=signer,
         caller_role="admin",
-        expected_publishers=TrustedIdentitySet(identities=(SIGNER.identity,)),
+        expected_publishers=TrustedIdentitySet(identities=(publisher.identity,)),
         transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
     )
 
@@ -218,6 +229,75 @@ async def test_the_storefront_starts_degraded_and_recovers_its_chain_without_a_r
     assert chain.constructed == ["anvil"]
     assert _alkahest(recovered)["ready"] is True
     assert _alkahest(recovered)["public_details"]["chain_probe"]["anvil"]["result"] == "reachable"
+
+
+@pytest.mark.parametrize("kind", ["rate", "once"])
+async def test_a_storefront_without_payments_servicing_starts_and_reports_its_open_payment_deals(
+    tmp_path, monkeypatch, lifecycle_registry, caplog, kind
+):
+    """Spec scenario "The payments section is removed while deals are open":
+    a storefront configured for payments settles a deal, one kind per case,
+    then restarts from a configuration whose settlement has no payments
+    section, so it composes no payments stage."""
+    async with recurring_world(tmp_path) as world, settlement(world) as settled:
+        negotiation_id, data = await (accepted_recurring_deal if kind == "rate" else accepted_once_deal)(world)
+        approve(settled, data)
+        # Nothing is placed, so the deal stays open: its commit is allowed and
+        # registered, and the site never answers.
+        settled.site.unreachable = True
+        await world.app.buyer.settle_agreement(negotiation_id)
+        await settled.delivered(negotiation_id)
+    await lifecycle.reset_for_tests()
+
+    # The restarted storefront is the same seller, signing its lifecycle
+    # answers as the Agreement's seller, and the administrator the first one
+    # registered stays durable, so it is configured with both.
+    monkeypatch.setenv(
+        "ARKHAI_IDENTITY_CREDENTIAL", base64.urlsafe_b64encode(_HARNESS_SEED).rstrip(b"=").decode()
+    )
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", None)
+    chain = _Chain()
+    app = server.build_vm_storefront_app(
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+        seams=server.VmCompositionSeams(
+            alkahest_client_constructor=chain.constructor, alkahest_json_rpc=chain.rpc,
+        ),
+    )
+    configuration = {
+        **_CONFIGURATION,
+        "identity": {
+            **_CONFIGURATION["identity"],
+            "principal": _principal(TEST_MARKETPLACE_SIGNER),
+            "administrators": {"operator": {"principals": [_principal(HARNESS_ADMIN)]}},
+        },
+        "db_path": str(tmp_path / "storefront.db"),
+    }
+    caplog.set_level(logging.WARNING, logger="market_storefront.server")
+    with ExitStack() as stack:
+        for key, value in configuration.items():
+            stack.enter_context(replaced_setting(key, value))
+        stack.enter_context(patch.dict(storefront_config.CHAINS, _CHAINS, clear=True))
+        async with app.router.lifespan_context(app):
+            async with _admin(app, HARNESS_ADMIN, TEST_MARKETPLACE_SIGNER) as admin:
+                health = await admin.get_health()
+                await admin.admin_pause_lifecycle_loops()
+                status = await admin.get_system_status()
+                seller = SellerLifecycleClient(admin)
+                listed = await seller.list()
+                read = await seller.read(negotiation_id)
+
+    reason = (
+        "repair required: arkhai.payments.v1 has no lifecycle adapter; "
+        "configure [Settlement].arkhai_payments service_url and service_identity"
+    )
+    # It starts, reports the deal at startup in its log and its status ...
+    assert health.checks["database"] == "ok"
+    assert f"Deal {negotiation_id} cannot be serviced: {reason}" in caplog.text
+    assert status.extra["unserviceable_deals"] == [{"negotiation_id": negotiation_id, "reason": reason}]
+    # ... and lists it repair required, its read naming the missing section.
+    [deal] = listed.deals
+    assert (deal.negotiation_id, deal.state) == (negotiation_id, "repair_required")
+    assert read.authority.outcome.reason == reason
 
 
 async def test_the_storefront_starts_while_a_chain_client_never_finishes_building(

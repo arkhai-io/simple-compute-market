@@ -1,12 +1,13 @@
 from unittest.mock import AsyncMock, Mock
 
-from market_deal_lifecycle.adapters import InterfaceRequest, PaymentSelector
+from market_deal_lifecycle.adapters import DisputeAdapterTable, InterfaceRequest, PaymentAdapterTable, PaymentSelector
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CaseRecord, DisputeEvent, LifecycleCommand, ListDealsRequest,
     OpenExtension, PaymentEvent, PaymentPartObservation, Unknown,
 )
 from market_deal_servicing import (
-    Classification, DeliveryRecord, EndSession, FinalRequest, PhysicalResult, SellerDeal, SellerSession,
+    Classification, DeliveryRecord, EndSession, FinalRequest, PhysicalResult, SellerDeal, SellerServicing,
+    SellerSession,
 )
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.watch import WatchSession
@@ -122,6 +123,44 @@ async def test_seller_pages_pinned_authority_repair_and_operator_end_filing(rig)
     assert adapter.submit.await_args_list[0].args[0] == adapter.submit.await_args_list[1].args[0]
     assert (await api.read("deal")).delivery.recorded_end is not None
     assert (await api.list()).deals[0].state == "ending"
+
+
+async def test_a_deal_whose_mechanism_has_no_adapter_composed_is_repair_required_until_released(rig):
+    # The storefront installs the deal's mechanism, but its configuration
+    # composed no adapter for it.
+    api = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([]),
+        disputes=DisputeAdapterTable([(rig["authority"].interface, lambda _: rig["dispute"])]),
+        credential_available=lambda _: False, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        missing_adapters={"fixture.payment.v1": "[Settlement].fixture"},
+    )
+    reason = "repair required: fixture.payment.v1 has no lifecycle adapter; configure [Settlement].fixture"
+
+    [summary] = (await api.list()).deals
+    assert summary.state == "repair_required"
+    # It is the repair reason before the deal's missing dispute credential.
+    assert (await api.read("deal")).authority.outcome.reason == reason
+    assert api.unserviceable() == [("deal", reason)]
+    # A storefront that names the mechanism yet composes its adapter has no
+    # unserviceable deal, and lists it by its authority's state.
+    composed = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([(rig["deal"].payment, lambda _: rig["payment"])]),
+        disputes=DisputeAdapterTable([(rig["authority"].interface, lambda _: rig["dispute"])]),
+        credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        missing_adapters={"fixture.payment.v1": "[Settlement].fixture"},
+    )
+    assert composed.unserviceable() == []
+    assert (await composed.list()).deals[0].state == "running"
+    # Nor does one naming no missing configuration for the mechanism.
+    unnamed = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([]), disputes=DisputeAdapterTable([]),
+        credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+    )
+    assert unnamed.unserviceable() == []
+
+    # A deal ended and released is not open.
+    record_buyer_end(rig, "deal", progress="released")
+    assert api.unserviceable() == []
 
 
 def record_buyer_end(rig, negotiation_id, *, progress):

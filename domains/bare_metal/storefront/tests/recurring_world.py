@@ -118,18 +118,20 @@ def payment_clauses(*, delivery_deadline_seconds: int | None = None) -> list[dic
     ]
 
 
-def _settlement_root(alkahest: Mapping[str, Any]) -> dict[str, Any]:
+def _settlement_root(alkahest: Mapping[str, Any], *, payments: bool = True) -> dict[str, Any]:
+    """The settlement root; without ``payments`` it configures Alkahest alone,
+    so the composition builds no payments stage."""
     return {
         "schema_version": 1,
-        "priority": ["alkahest.v1", MECHANISM],
+        "priority": ["alkahest.v1", MECHANISM] if payments else ["alkahest.v1"],
         "alkahest": dict(alkahest),
-        "arkhai_payments": {
+        **({"arkhai_payments": {
             "enabled": True,
             "service_url": "http://127.0.0.1:9",
             "service_identity": PAYMENTS_SERVICE.identity.model_dump(mode="json"),
             "fee_bps": 250,
             "development_auth": True,
-        },
+        }} if payments else {}),
     }
 
 
@@ -220,6 +222,7 @@ async def recurring_world(
     payments: FakePaymentsClient | None = None,
     clock: Callable[[], int] | None = None,
     serve: bool = False,
+    payments_section: bool = True,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -237,7 +240,10 @@ async def recurring_world(
     payments service outlives a storefront restart. ``clock`` is the runtime's
     lifecycle clock, wall time unless given. ``serve`` runs the app on a
     loopback port, its lifespan uvicorn's, so a buyer's own commands reach it
-    over HTTP; the world's clients then use that port too. A settled deal is
+    over HTTP; the world's clients then use that port too. Without
+    ``payments_section`` the settlement configures no payments section and
+    publishes no payment clause, as a storefront whose payments section was
+    removed restarts. A settled deal is
     delivered through the real delivery path: the world's site places,
     commits and activates its reservation, and provisioning reports its
     fulfillment active, so billing starts at the payments engine and the deal
@@ -258,7 +264,9 @@ async def recurring_world(
         )
         configured = runtime.settlement_composition
         registry = build_bare_metal_settlement_registry()
-        root = _settlement_root(configured.config.mechanisms["alkahest"].model_dump(mode="json"))
+        root = _settlement_root(
+            configured.config.mechanisms["alkahest"].model_dump(mode="json"), payments=payments_section,
+        )
         composition = dataclasses.replace(
             configured,
             registry=registry,
@@ -277,7 +285,7 @@ async def recurring_world(
         )
         clauses = [
             *(clause.model_dump(mode="json", exclude_none=True) for clause in runtime.publication_clauses),
-            *payment_clauses(delivery_deadline_seconds=clause_deadline),
+            *(payment_clauses(delivery_deadline_seconds=clause_deadline) if payments_section else []),
         ]
         runtime = dataclasses.replace(
             runtime,

@@ -44,6 +44,10 @@ from .settlement_stages import SettlementRequestError
 
 logger = logging.getLogger(__name__)
 
+#: The configuration that composes the payments seller stage, without which an
+#: accepted payments deal, once-only or rate, cannot be serviced.
+PAYMENTS_SERVICING_FIELDS = "[Settlement].arkhai_payments service_url and service_identity"
+
 
 class BareMetalLifecycle:
     def __init__(self, runtime):
@@ -55,16 +59,20 @@ class BareMetalLifecycle:
         self.clients = {}
         self.end = EndService(self.path, self, clock=self.clock)
         # An Alkahest deal authorizes delivery through its once-only adapter,
-        # since a mechanism with no adapter is never allowed.
+        # since a mechanism with no adapter is never allowed. A payments deal
+        # has one only while the composition builds its payments stage.
+        composition = runtime.settlement_composition
+        payments = composition is not None and composition.arkhai_payments_stage() is not None
         self.seller = SellerServicing(
             self.path,
             payments=PaymentAdapterTable([
-                (PaymentSelector("arkhai.payments.v1"), self.payment),
+                *([(PaymentSelector("arkhai.payments.v1"), self.payment)] if payments else []),
                 (PaymentSelector(ALKAHEST_MECHANISM_ID), self.alkahest_adapter),
             ]),
             disputes=DisputeAdapterTable([(INTERFACE, self.dispute)]),
             credential_available=self.credential_available,
             watch_factory=self.watch, clock=self.clock,
+            missing_adapters={} if payments else {"arkhai.payments.v1": PAYMENTS_SERVICING_FIELDS},
         )
         self.ingress = DeliveryIngress(
             self.path, clock=self.clock, verify_site=self.verify_site,

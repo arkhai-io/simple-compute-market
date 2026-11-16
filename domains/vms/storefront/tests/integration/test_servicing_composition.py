@@ -1,5 +1,7 @@
-"""VM authority observation through the composed watch and durable delivery view."""
+"""VM authority observation through the composed watch and durable delivery view,
+and the payments stage the composition builds over its servicing declaration."""
 
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -12,6 +14,52 @@ from market_deal_servicing.evidence import EvidenceSession, transaction
 from market_identity import Identity
 
 from tests.integration.test_payment_settlement import BUYER, SELLER, NEGOTIATION, make
+from tests.integration.test_rate_delivery import PAYER as RATE_PAYER
+from tests.integration.test_rate_delivery import accepted_recurring_deal, approve
+from tests.recurring_world import PAYMENTS_SERVICE, QUALIFIED, recurring_world, settlement
+
+
+@pytest.mark.asyncio
+async def test_the_composition_builds_its_payments_stage_over_its_declaration(tmp_path):
+    # The world's composition is built from a payments section carrying the
+    # servicing fields, as a deployment configures it, and is given no stage.
+    async with recurring_world(tmp_path) as world:
+        composition = world.app.composition
+        stage = composition.arkhai_payments_stage
+        declared = stage.rate_servicing.select("arkhai.payments.v1")
+    assert stage is not None
+    assert stage.rate_servicing is composition.rate_servicing
+    assert stage.config.service_identity == PAYMENTS_SERVICE.identity
+    assert declared.treatments == QUALIFIED
+
+
+@pytest.mark.asyncio
+async def test_a_running_rate_deal_is_still_serviced_after_its_treatment_is_withdrawn(tmp_path):
+    async with recurring_world(tmp_path) as world, settlement(world) as settled:
+        # The on-demand option names `returned` at its term end.
+        negotiation_id, data = await accepted_recurring_deal(world)
+        approve(settled, data)
+
+        # `returned` leaves the declaration, as a storefront restarted without
+        # it; `test_publication_loop.py` shows no new option naming it publishes.
+        world.declare(frozenset({"charged"}))
+
+        # The accepted deal is still delivered, and its buyer's stop serviced.
+        await world.app.buyer.settle_agreement(negotiation_id)
+        await settled.delivered(negotiation_id)
+        settled.payments.observed_at = int(time.time())
+        settled.payments.engine.submit(data.transaction_id, {
+            "account": RATE_PAYER, "requestId": "buyer-stop", "event": {"kind": "stop"},
+        })
+        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+        with transaction(world.app.db.db_path) as conn:
+            end = EndSession(conn)
+            record = end.read(negotiation_id)
+            stop = end.selected_end(negotiation_id)
+            classification = end.classification(negotiation_id, stop.source_ref)
+
+    assert record.available_at is not None
+    assert (stop.cause, classification.kind) == ("payer", "entitled_stop")
 
 
 @pytest.mark.asyncio

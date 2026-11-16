@@ -7,7 +7,7 @@ import base64
 import builtins
 import hashlib
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
@@ -148,7 +148,7 @@ class SellerServicing:
     def __init__(
         self, path: str | Path, *, payments: PaymentAdapterTable, disputes: DisputeAdapterTable,
         credential_available: Callable[[DisputeAuthority], bool], watch_factory: WatchFactory,
-        clock: Callable[[], int],
+        clock: Callable[[], int], missing_adapters: Mapping[str, str] | None = None,
     ):
         self.path = Path(path)
         self.payments = payments
@@ -156,6 +156,10 @@ class SellerServicing:
         self.credential_available = credential_available
         self.watch_factory = watch_factory
         self.clock = clock
+        # By mechanism, the configuration that would compose the adapter of a
+        # mechanism the storefront installs but whose configuration composed
+        # none; a deal of that mechanism names it in its repair reason.
+        self.missing_adapters = dict(missing_adapters or {})
         self.operations = SQLiteOperationStore(path)
 
     def _deal(self, negotiation_id: str) -> SellerDeal:
@@ -199,9 +203,15 @@ class SellerServicing:
             current_dispute = next(observations, None) if watch.dispute is not None else None
         rejected = next((item.outcome for item in self._filings(deal.negotiation_id)
                          if isinstance(item.outcome, Rejected)), None)
+        # A deal of a mechanism the storefront installs but whose configuration
+        # composed no adapter cannot be serviced at all, so that is its repair
+        # reason before any other.
+        unserviceable = watch.payment is None and deal.payment.mechanism in self.missing_adapters
         missing = deal.dispute is not None and not self.credential_available(deal.dispute)
-        if missing:
-            outcome: LifecycleOutcome = Rejected(reason="repair required: Agreement authority credential is missing")
+        if unserviceable:
+            outcome: LifecycleOutcome = Rejected(reason=self._unserviceable_reason(deal))
+        elif missing:
+            outcome = Rejected(reason="repair required: Agreement authority credential is missing")
         elif repair:
             outcome = Rejected(reason="repair required: respondent case: " + repair[0])
         elif rejected is not None:
@@ -216,13 +226,51 @@ class SellerServicing:
             )
         return AuthorityView(
             outcome=outcome,
-            state="repair_required" if missing or repair or rejected is not None else payment.state if payment else None,
+            state=(
+                "repair_required" if unserviceable or missing or repair or rejected is not None
+                else payment.state if payment else None
+            ),
             payouts=payment.payouts if payment else None,
             events=payment.events if payment else [], parts=payment.parts if payment else [],
             disputes=dispute.disputes if dispute else [],
             cases=dispute.cases if dispute else [], extensions=payment.extensions if payment else [],
             deadline=payment.deadline if payment else None,
         )
+
+    def _unserviceable_reason(self, deal: SellerDeal) -> str:
+        mechanism = deal.payment.mechanism
+        return (
+            f"repair required: {mechanism} has no lifecycle adapter; "
+            f"configure {self.missing_adapters[mechanism]}"
+        )
+
+    def unserviceable(self) -> builtins.list[tuple[str, str]]:
+        """Each open deal of a mechanism named in ``missing_adapters`` that has
+        no adapter composed, with its repair reason.
+
+        A deal is open until its resource is proven released after a recorded
+        end; every registered deal is read, committed or not, since an
+        uncommitted one still holds capacity a storefront must end.
+        """
+        found: builtins.list[tuple[str, str]] = []
+        continuation: str | None = None
+        while True:
+            with transaction(self.path) as conn:
+                deals, continuation = SellerSession(conn).page(
+                    ListDealsRequest(limit=100, continuation=continuation), committed_only=False,
+                )
+                ended = {
+                    deal.negotiation_id for deal in deals
+                    if EndSession(conn).selected_end(deal.negotiation_id) is not None
+                    and EndSession(conn).read(deal.negotiation_id).progress == "released"
+                }
+            for deal in deals:
+                if deal.negotiation_id in ended or deal.payment.mechanism not in self.missing_adapters:
+                    continue
+                if self.payments.resolve(PaymentBinding(deal.negotiation_id, deal.payment)) is None:
+                    found.append((deal.negotiation_id, self._unserviceable_reason(deal)))
+            if continuation is None:
+                return found
 
     async def watch(self, negotiation_id: str):
         deal = await asyncio.to_thread(self._deal, negotiation_id)

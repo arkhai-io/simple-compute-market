@@ -121,7 +121,10 @@ is open; until then it is `ending`, and `ending` names each outstanding conditio
 (`release_pending`, `payment_running`, `case_open`). `read` refreshes
 both records and returns physical progress even without a payment adapter. A
 missing dispute credential or unresolved local respondent case marks repair
-required. `RespondentPoller.repairs()` exposes bounded skipped-case diagnostics;
+required, and so does a deal of a mechanism named in `missing_adapters`, the
+mechanisms a storefront installs whose configuration composed no adapter: its
+reason names the configuration that would, and `unserviceable()` lists every
+such deal still open, for the storefront's startup report. `RespondentPoller.repairs()` exposes bounded skipped-case diagnostics;
 temporarily unresolvable local Agreements do not block later account-wide cases
 and retry independently of the listing cursor in a rotating arrival-order queue.
 Cases with no local registered commitment are skipped rather than retained as

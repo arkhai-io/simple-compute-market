@@ -2,13 +2,12 @@
 
 This world composes the real ``VmSettlementComposition`` over the publication
 harness. The composition installs the payments kit's recurring preset helper and
-term timing itself, and the negotiation runtime projects billing through the
-settlement registry by default. The composition builds no payments seller stage of
-its own, so the world builds one with ``servicing_stage`` over the composition's
-servicing declaration, as ``build_vm_settlement_composition`` does. Beyond that,
-the world supplies only what a deployment configures: the servicing declaration,
-the penalty multiple, and the pool's delivery deadline. Publication and
-negotiation then run through the served storefront and its typed client.
+term timing itself, and builds its payments seller stage over its own servicing
+declaration; the negotiation runtime projects billing through the settlement
+registry by default. The world supplies only what a deployment configures: the
+servicing declaration, the penalty multiple, and the pool's delivery deadline.
+Publication and negotiation then run through the served storefront and its typed
+client.
 
 Every account, key and address here is a deterministic development value; none
 may be used on a public network.
@@ -28,7 +27,6 @@ import httpx
 from core_storefront.aggregation import fill_first
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
-from market_arkhai_payments.seller import servicing_stage
 from market_capacity_publication import CapacityRuntime, CapacitySite
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from market_deal_lifecycle_client import LifecycleClient
@@ -261,9 +259,9 @@ async def settlement(
 ) -> AsyncIterator[RecurringSettlement]:
     """Compose the payments settle path over ``world``'s served storefront.
 
-    The composition gains its payments coordinator and deal lifecycle as
-    ``build_vm_settlement_composition`` builds them, over the world's
-    declaration, with the stage's payments client the in-process engine. The
+    The composition, its payments client the in-process engine, gains its
+    payments coordinator and deal lifecycle over its own stage, as
+    ``build_vm_settlement_composition`` builds them. The
     settle routes are mounted on the world's app, so a buyer settles through
     the typed client and delivery runs through the real delivery path and end
     service: the site places, commits and activates the deal's capacity, and
@@ -275,13 +273,10 @@ async def settlement(
     loop runs the lifecycle's recovery cycle, and the lifecycle routes are
     mounted for the buyer's lifecycle client.
     """
-    composition = world.app.composition
     domain = world.app.db.domain_registry.resolve_mode("vm").contract
     payments = payments or FakePaymentsClient(signer=PAYMENTS_SERVICE)
-    stage = servicing_stage(
-        composition.settlement_config.mechanism_config("arkhai_payments"),
-        client_for_owner=payments, rate_servicing=composition.rate_servicing,
-    )
+    composition = replace(world.app.composition, domain=domain, payments_client_for_owner=payments)
+    stage = composition.arkhai_payments_stage
     site = DeliverySite(SITE)
     capacity = delivery_capacity(site)
     provisioning = DeliveryProvisioning(site)
@@ -298,8 +293,7 @@ async def settlement(
     coordinator.lifecycle = lifecycle
     previous = container.resolved_settlement_composition
     container.resolved_settlement_composition = replace(
-        composition, domain=domain, arkhai_payments_stage=stage,
-        payments_coordinator=coordinator, lifecycle=lifecycle, worker=_NoSettlementJobs(),
+        composition, payments_coordinator=coordinator, lifecycle=lifecycle, worker=_NoSettlementJobs(),
     )
     world.app.app.include_router(settle_router)
     world.app.app.include_router(settlements_router)
@@ -371,9 +365,6 @@ async def recurring_world(
             },
             disputes=RegistryDisputePolicy(DisputeConfig(entries=[DISPUTE_ENTRY])),
             rate_servicing=servicing,
-            arkhai_payments_stage=servicing_stage(
-                config.mechanism_config("arkhai_payments"), rate_servicing=servicing,
-            ),
             delivery_deadline_for_pool=lambda _site, _pool: pool_deadline,
             default_penalty_periods=default_penalty_periods,
         )

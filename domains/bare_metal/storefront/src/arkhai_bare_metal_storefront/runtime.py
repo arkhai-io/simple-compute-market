@@ -730,6 +730,12 @@ class BareMetalStorefrontRuntime:
             if self.settlement_composition is not None
             else None
         )
+        # Each open deal the configuration composes no adapter for, with the
+        # configuration that would.
+        report["unserviceable_deals"] = [
+            {"negotiation_id": negotiation_id, "reason": reason}
+            for negotiation_id, reason in await asyncio.to_thread(self.lifecycle.seller.unserviceable)
+        ]
         return report
 
     def _disclosures(self) -> dict[str, dict[str, object]]:

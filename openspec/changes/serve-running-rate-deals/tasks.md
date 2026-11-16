@@ -728,7 +728,7 @@ Delivers D11 and D8; requirements "Each compute composition builds its payments 
 stage" and "A storefront reports deals its configuration cannot service"
 (`market-composition`). Touches `domains/vms/storefront`, `domains/bare_metal/storefront`.
 
-- [ ] 4.1 `domains/vms/storefront/src/market_storefront/settlement_composition.py`:
+- [x] 4.1 `domains/vms/storefront/src/market_storefront/settlement_composition.py`:
       `VmSettlementComposition` builds `arkhai_payments_stage` in `__post_init__` with
       `servicing_stage(..., rate_servicing=self.rate_servicing)`, as bare metal's does;
       `build_vm_settlement_composition` and `domains/vms/storefront/tests/recurring_world.py`
@@ -736,7 +736,23 @@ stage" and "A storefront reports deals its configuration cannot service"
       `domains/vms/storefront/tests/integration/test_servicing_composition.py`): a
       composition built from a configuration with the servicing fields has a stage over
       its declaration, with nothing supplied.
-- [ ] 4.2 At startup each storefront lists its open deals whose mechanism has no adapter
+      Done: `arkhai_payments_stage` is an `init=False` field the composition sets from
+      its payments section, its new `payments_client_for_owner` (the payments service's
+      client; `None` builds one from the section, as bare metal's does) and its
+      declaration; `build_vm_settlement_composition` builds the coordinator over the
+      composition's stage, and the recurring world gives the composition the in-process
+      engine as `payments_client_for_owner`. A `dataclasses.replace` builds the stage
+      again, an equal one, since the stage holds only its section, client factory and
+      declaration; the builder's comment says the coordinator keeps the first. Evidence:
+      `test_servicing_composition.py`, the served recurring world's composition, built
+      from a payments section with the servicing fields and given no stage, holds a stage
+      over its own declaration (`rate_servicing` the composition's, `charged` and
+      `returned` declared) and the section's receipt identity — composition
+      construction read through the served world, so narrower than application
+      integration; the application evidence that the composition-built stage services
+      deals is the recurring world's delivered cases (`test_rate_delivery.py`,
+      `test_lifecycle_ends.py`, `test_watchdog_buy.py`), which now run on it and pass.
+- [x] 4.2 At startup each storefront lists its open deals whose mechanism has no adapter
       composed, logs them naming the missing section, and adds them to its readiness
       report; each such deal lists repair required naming the missing section (D8). Files:
       the startup paths of both storefronts (VM `server.py` startup, bare metal
@@ -745,11 +761,103 @@ stage" and "A storefront reports deals its configuration cannot service"
       in VM and a new `test_unserviceable_startup.py` in bare metal): a storefront
       restarted with its payments section's servicing fields removed starts, reports the
       open once-only and rate deals, and lists them repair required.
-- [ ] 4.3 Verify withdrawal (application integration, `test_servicing_composition.py` in
+      Done: `SellerServicing` takes `missing_adapters`, by mechanism the configuration
+      that would compose an installed mechanism's adapter; a deal of such a mechanism
+      with no adapter is `repair_required`, its reason `repair required:
+      arkhai.payments.v1 has no lifecycle adapter; configure [Settlement].arkhai_payments
+      service_url and service_identity`, ahead of a missing dispute credential; a
+      mechanism not named keeps its earlier, non-repair outcome, which three kit tests
+      composing no adapter rely on. `unserviceable()` lists each such deal still open
+      (not released after a recorded end), paging every registered deal. VM's lifecycle names the
+      payments fields when no coordinator is composed; bare metal's composes the payments
+      adapter only while its composition builds a stage, and names them otherwise. Each
+      startup (`server.py`'s `_start_vm_services`, bare metal `server.py`'s
+      `_start_runtime`, where the runtime starts) logs a warning per deal, and each status
+      reports `unserviceable_deals` (VM's `SystemService` provider and
+      `VmSystemStatusResponse`; bare metal's `runtime.status` and
+      `BareMetalHealthResponse`), the typed client reading it in `extra`. Files differing
+      from the plan: the startup is bare metal's `server.py`, not `runtime.py`, which
+      holds its status; both status response models. Library integration
+      (`test_watch_and_seller.py`): such a deal lists `repair_required` with that reason
+      before its missing credential, `unserviceable()` names it, a composition naming the
+      mechanism but composing its adapter reports none and lists the deal `running`, one
+      naming no missing configuration reports none, and once ended and released the deal
+      is not reported; `kit/deal-servicing` 118 passed. Application integration,
+      one deal kind per case, each world settling one deal on its one listing: VM (`test_degraded_startup.py`) — the recurring
+      world settles a rate, or a once-only, payments deal with its site unreachable (so
+      it stays open), then the configured app starts over the same database with an
+      Alkahest-only settlement, configured as the same seller (its lifecycle routes sign
+      as the Agreement's seller) with the harness's administrator, which stays durable:
+      it starts, logs the deal with the reason, status reports it, and the
+      typed seller lifecycle client (`SellerLifecycleClient`) lists it `repair_required`
+      and reads its reason; bare metal (`test_unserviceable_startup.py`) — the same
+      observations, restarting its recurring world with `payments_section=False`, which
+      configures no payments section and publishes no payment clause; that restart
+      replaces the test runtime's composition rather than loading a configuration, so it
+      is narrower than VM's, which runs the configured app. "Servicing fields removed" is
+      a configuration with no payments section in both, the case a stage is not built
+      for.
+- [x] 4.3 Verify withdrawal (application integration, `test_servicing_composition.py` in
       each storefront): a running rate deal accepted under `returned` is still serviced
       after `returned` leaves the declaration, and no new option naming it publishes.
-- [ ] 4.4 Verification point: both storefronts' suites pass. End-to-end: every lane starts
+      Done: in each storefront's recurring world, an on-demand deal (naming `returned` at
+      its term end) is accepted and the declaration narrowed to `charged` in place, as a
+      restart under the narrower declaration would read it; the accepted deal then
+      settles, is delivered (available), and its payer's stop, read by a servicing cycle
+      (`settlement-servicing` in VM, `delivery-recovery` in bare metal), is recorded
+      `payer` and classified `entitled_stop` (application integration, passed). That no
+      new option naming `returned` publishes is the existing evidence, not repeated here:
+      VM's `test_publication_loop.py::test_publication_omits_recurring_options_whose_treatments_are_undeclared`
+      and bare metal's `tests/test_http_publication_rates.py`. "Serviced to its end" is
+      shown as far as the recorded end; the teardown is the doubles' (section 3's
+      handoff).
+- [x] 4.4 Verification point: both storefronts' suites pass. End-to-end: every lane starts
       both storefronts from their compositions; no scenario asserts the startup report.
+      Done: `make -C domains/vms/storefront test` (unit 1194 passed, 1 skipped;
+      integration 611 passed) and `make -C domains/bare_metal/storefront test` (652
+      passed); `make -C kit/deal-servicing test` (118). End-to-end confirmed: every lane
+      starts both storefronts from their compositions, VM's now building its own stage,
+      so any payments scenario (`e2e_vm_payment_deal`, the recurring purchases) is
+      evidence that the composition's stage services; none asserts the startup report or
+      `unserviceable_deals`. Owed by validation: none.
+      Fresh-context check: fixed — a test comment saying "no longer" (also refused by the
+      history-wording check); the two startup comments saying the list names the
+      configuration (the read does; the list shows the state); the application tests'
+      hand-built lifecycle list calls, now the typed `SellerLifecycleClient`, which also
+      reads the reason at application level; the kit case for a composition with the
+      adapter, which passed no `missing_adapters` and so showed nothing more than the
+      unnamed case; `test_degraded_startup.py`'s module docstring; 4.3's publication
+      checks, a weaker copy of the existing withdrawal tests, removed; and these notes'
+      claims. Declined: moving `PAYMENTS_SERVICING_FIELDS` into `kit/arkhai-payments`
+      beside `servicing_stage`, which would take that package a version and every
+      dependent a relock for one string each storefront states beside its own payments
+      composition; the startup warning and status entry written in each storefront, each
+      in its own status pattern (VM's providers report `None` on an error, as all its
+      providers do; bare metal's status computes its fields inline); the stage
+      `dataclasses.replace` builds again in `build_vm_settlement_composition` and the
+      recurring world, since the stage holds only its section, its client factory and the
+      composition's one declaration object, which is the agreement the requirement
+      guards, and a frozen composition holding its coordinator and lifecycle has no other
+      way to gain them; and the 4.1 case's level, which the plan set and its note states.
+
+Section 4 handoff:
+
+- `SellerServicing(missing_adapters=...)` is how a storefront says a mechanism is
+  installed but unconfigured; section 6's servicing helper pages deals through the same
+  seller half, so an unserviceable deal reaches it with no payment adapter, and its
+  authorities read must tolerate that (today the watch simply reads no payment).
+- Bare metal's lifecycle now composes the payments adapter only when its composition has
+  a stage; `BareMetalLifecycle.payment` still raises when called directly, which the
+  respondent discovery in `cycle` does (caught there). Section 7's respondent port should
+  not reach it for a deal without a stage.
+- Restarting VM's configured app over a recurring world's database needs the harness's
+  seller seed (`b"\x41" * 32`, `TEST_MARKETPLACE_SIGNER`) as its credential and the
+  harness's administrator: lifecycle routes refuse to sign as another seller, and
+  startup refuses an administrator configuration that drops a durable identity. Section
+  9.3's VM restart cases will meet both.
+- The VM composition is rebuilt by every `dataclasses.replace`, each time building an
+  equal stage; a test needing the composition's exact stage object reads it after its
+  last replace.
 
 ## 5. What the buyer is shown
 
