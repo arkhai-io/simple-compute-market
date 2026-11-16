@@ -96,7 +96,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -104,7 +104,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -134,7 +134,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-servicing"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -158,8 +158,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.5.0" },
+    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.3.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "pydantic", specifier = ">=2.7" },

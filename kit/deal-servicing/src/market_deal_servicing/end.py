@@ -18,7 +18,6 @@ from .evidence import in_transaction, transaction
 from .journal import (
     EndSession, JournalIntent, PhysicalProgress, stable_ref,
 )
-from .projection import SellerDeal, read_seller_deal
 
 
 class PhysicalResult(WireModel):
@@ -100,18 +99,9 @@ class EndService:
 
         The optional callback shares admission\'s transaction and performs no I/O.
         Financial evidence only narrows admission; a concurrent end invalidates
-        the expected revision before the protected write can run.
+        the expected revision before the protected write can run. The payment
+        adapter is asked for every phase of every deal, whatever its parts.
         """
-        if phase == DeliveryPhase.COMMIT:
-            refusal = await in_transaction(self.path, lambda conn: self._unserviceable(
-                read_seller_deal(conn, evidence.negotiation_id), evidence,
-            ))
-            if refusal is not None:
-                # Journaled through admission like the adapter's answer, so
-                # the refusal is durable under its operation identity.
-                return await in_transaction(self.path, lambda conn: self._authorize_delivery(
-                    phase, evidence, refusal, EndSession(conn), expected_revision,
-                ))
         if adapter is None:
             return DeliveryAuthorization(
                 status="refuse", reason="selected mechanism has no delivery adapter",
@@ -133,30 +123,6 @@ class EndService:
             return result
 
         return await in_transaction(self.path, authorize)
-
-    @staticmethod
-    def _unserviceable(deal: SellerDeal | None, evidence: DeliveryEvidence) -> DeliveryAuthorization | None:
-        """The refusal of a commit end service could not service once delivered.
-
-        End service watches no rate deal's stops, funding or pending seller
-        stop, so a delivered rate deal would run unserviced to its maximum
-        term. Every deal whose seller projection is not once-only is therefore
-        refused before the payment adapter is asked, whatever the servicing
-        declaration lists; no switch or injected servicer lifts it. A deal the
-        seller half never registered has no projection to read and is refused
-        without the code. See openspec/specs/deal-lifecycle/spec.md,
-        "Neutral delivery decisions delegate payment interpretation".
-        """
-        if deal is not None and deal.once_only:
-            return None
-        return DeliveryAuthorization(
-            status="refuse",
-            reason="the deal has no seller registration" if deal is None
-            else "rate servicing is not composed in this storefront",
-            code=None if deal is None else "rate_servicing_unavailable",
-            operation_id=f"{evidence.negotiation_id}:{DeliveryPhase.COMMIT.value}",
-            evidence_refs=[evidence.commitment_ref],
-        )
 
     @staticmethod
     def _journaled_billing(session: EndSession, negotiation_id: str) -> JournaledBillingStart | None:
@@ -189,9 +155,8 @@ class EndService:
             evidence.negotiation_id, phase, expected_revision, now=self.clock(),
         )
         if admission.status == "awaiting_observation":
-            # Nothing is admitted, but an answer that admits nothing stands
-            # unchanged: it is journaled at the same revision as before the
-            # deadline, where a changed answer would be refused.
+            # Nothing is admitted at the revision the deadline passed under,
+            # so an allow is held back; an answer that admits nothing stands.
             if financial.status == "allow":
                 financial = financial.model_copy(update={
                     "status": "pending", "reason": "the missed delivery deadline awaits a payment observation",
@@ -200,7 +165,6 @@ class EndService:
             financial = financial.model_copy(update={
                 "status": "pending" if admission.status == "retry" else "refuse",
                 "reason": "stale admission revision" if admission.status == "retry" else "delivery ended",
-                "code": None,
             })
         if phase == DeliveryPhase.DISCLOSE and financial.status == "allow":
             billing = [item for item in session.intents(evidence.negotiation_id) if item.kind == "billing"]
@@ -211,9 +175,31 @@ class EndService:
                 financial = financial.model_copy(update={
                     "status": "pending", "reason": "billing start requires same-key resolution",
                 })
+        key = f"{financial.operation_id}:{admission.revision}"
+        standing = session.intent(stable_ref(evidence.negotiation_id, "authorization", key))
+        if standing is not None and standing.state == "done":
+            # The first allow or refuse journaled for a phase at a revision
+            # stands for that revision. A rate adapter reads a fresh signed
+            # snapshot each time, so its answer can change while the revision
+            # stands still: a slow or stale read, or a stop the watch has not
+            # yet recorded. Answering pending, with nothing journaled, lets a
+            # changed answer only hold the phase back; the watch's record of an
+            # end moves the revision, and admission then answers. An end due by
+            # now is admission's own answer, not a changed one, and is returned
+            # as it is. Answers are compared by status alone, since a fresh
+            # read's evidence references differ every time.
+            answered = DeliveryAuthorization.model_validate(standing.result)
+            if answered.status == financial.status:
+                return answered.model_copy(update={"operation_id": standing.intent_ref})
+            if admission.status == "ended":
+                return financial.model_copy(update={"operation_id": standing.intent_ref})
+            return financial.model_copy(update={
+                "status": "pending", "operation_id": standing.intent_ref,
+                "reason": f"the answer journaled at this revision changed from {answered.status} to "
+                          f"{financial.status} ({financial.reason}); awaiting its observation",
+            })
         intent = session.journal(
-            evidence.negotiation_id, "authorization",
-            f"{financial.operation_id}:{admission.revision}",
+            evidence.negotiation_id, "authorization", key,
             {"phase": phase.value, "evidence": evidence.model_dump(mode="json")},
             not_before=record.committed_at,
         )

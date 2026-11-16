@@ -18,15 +18,15 @@ from market_deal_lifecycle.adapters import (
 )
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
-    Accepted, AuthorityView, DealPage, DealSummary, DeliveryView, EvidenceItem, LifecycleCommand, LifecycleOutcome,
-    FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Rejected, SubmitResponse,
-    Unknown,
+    Accepted, AuthorityView, DealPage, DealSummary, DeliveryView, EndingCode, EvidenceItem, LifecycleCommand,
+    LifecycleOutcome, FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Rejected,
+    SubmitResponse, Unknown,
 )
 from market_identity import Identity, canonical_json
 
 from .end import SQLiteOperationStore
 from .evidence import EvidenceSession, in_transaction, transaction
-from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, stable_ref
+from .journal import Classification, EndSession, FinalRequest, JournalIntent, PhysicalProgress, atomic, stable_ref
 from .projection import SellerDeal, read_seller_deal
 from .watch import DealWatch, WatchSession
 
@@ -268,22 +268,46 @@ class SellerServicing:
                 end = EndSession(conn)
                 delivery = end.read(deal.negotiation_id)
                 selected = end.selected_end(deal.negotiation_id)
+            open_cases = [case.case_ref for case in authority.cases if case.state != "closed"]
             state: LifecycleState = authority.state or "unstarted"
+            ending: list[EndingCode] = []
             if deal.once_only:
                 state = "running"
             if selected:
-                state = "ended" if delivery.progress == "released" else "ending"
+                ending = self._outstanding(authority, delivery.progress, open_cases)
+                state = "ending" if ending else "ended"
             if authority.state == "repair_required" or delivery.progress == "repair_required":
-                state = "repair_required"
+                state, ending = "repair_required", []
             summaries.append(DealSummary(
                 negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
                 domain=deal.domain, mechanism=deal.payment.mechanism, entitlements=deal.entitlements,
-                state=state, deadline=selected.ended_at if selected else authority.deadline or delivery.term_end,
+                state=state, ending=ending,
+                deadline=selected.ended_at if selected else authority.deadline or delivery.term_end,
                 parts=authority.parts, has_open_extension=bool(authority.extensions),
-                open_cases=[case.case_ref for case in authority.cases if case.state != "closed"],
-                filings=self._filings(deal.negotiation_id),
+                open_cases=open_cases, filings=self._filings(deal.negotiation_id),
             ))
         return DealPage(deals=summaries, continuation=continuation)
+
+    def _outstanding(
+        self, authority: AuthorityView, progress: PhysicalProgress, open_cases: builtins.list[str],
+    ) -> builtins.list[EndingCode]:
+        """What still keeps a deal with a recorded end from being ended.
+
+        A recorded end is physical and local; the deal is ended only once its
+        resource is proven released, the payment authority shows every part
+        stopped or past its end, so nothing more can bill, and the dispute
+        authority holds no open case, so nothing more can be ruled. A case
+        opened later makes it ending again.
+        """
+        now = self.clock()
+        ending: builtins.list[EndingCode] = []
+        if progress != "released":
+            ending.append("release_pending")
+        if any(part.final_stop is None and (part.end_at is None or part.end_at > now) for part in authority.parts):
+            ending.append("payment_running")
+        if open_cases:
+            ending.append("case_open")
+        return ending
 
     async def submit(
         self, command: LifecycleCommand, *, actor: Identity, reason: str | None = None,

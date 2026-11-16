@@ -455,8 +455,8 @@ class EndSession:
         outage included, nothing is recorded or filed. A once-only buyer ends at
         the storefront, and a deal with no seller projection has no payment
         watch, so both keep the deadline rule. See
-        openspec/specs/deal-lifecycle/spec.md, "Neutral delivery decisions
-        delegate payment interpretation".
+        openspec/specs/deal-lifecycle/spec.md, "Delivery authorization
+        delegates payment interpretation".
         """
         deal = read_seller_deal(self.conn, record.negotiation_id)
         if deal is None or deal.once_only:

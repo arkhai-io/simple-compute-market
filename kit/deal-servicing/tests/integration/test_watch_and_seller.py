@@ -1,11 +1,13 @@
 from unittest.mock import AsyncMock, Mock
 
-from market_deal_lifecycle.adapters import InterfaceRequest
+from market_deal_lifecycle.adapters import InterfaceRequest, PaymentSelector
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CaseRecord, DisputeEvent, LifecycleCommand, ListDealsRequest,
-    OpenExtension, Unknown,
+    OpenExtension, PaymentEvent, PaymentPartObservation, Unknown,
 )
-from market_deal_servicing import EndSession, PhysicalResult
+from market_deal_servicing import (
+    Classification, DeliveryRecord, EndSession, FinalRequest, PhysicalResult, SellerDeal, SellerSession,
+)
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.watch import WatchSession
 
@@ -120,3 +122,78 @@ async def test_seller_pages_pinned_authority_repair_and_operator_end_filing(rig)
     assert adapter.submit.await_args_list[0].args[0] == adapter.submit.await_args_list[1].args[0]
     assert (await api.read("deal")).delivery.recorded_end is not None
     assert (await api.list()).deals[0].state == "ending"
+
+
+def record_buyer_end(rig, negotiation_id, *, progress):
+    """The buyer's lawful end at 140, its resource at ``progress``."""
+    with transaction(rig["path"]) as conn:
+        end = EndSession(conn)
+        end.record_end(FinalRequest(
+            negotiation_id=negotiation_id, source_ref="buyer-end", ended_at=140, observed_at=140,
+            actor=rig["buyer"].identity, cause="buyer_surrender", source="buyer", evidence_refs=["buyer-end"],
+        ), now=150, classification=Classification(kind="buyer_surrender", evidence_refs=["buyer-end"]))
+        end.physical_progress(negotiation_id, progress)
+
+
+async def listed(rig, negotiation_id):
+    [summary] = [deal for deal in (await rig["service"]().list()).deals if deal.negotiation_id == negotiation_id]
+    return summary.state, summary.ending
+
+
+async def test_a_released_rate_deal_is_ended_only_once_every_part_has_stopped(rig):
+    rate = SellerDeal(
+        negotiation_id="rate", commitment_ref="rate-commitment", domain="fixture",
+        buyer=rig["buyer"].identity, payment=PaymentSelector("fixture.payment.v1"), dispute=rig["authority"],
+        once_only=False,
+    )
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="rate", commitment_ref="rate-commitment", seller=rig["seller"].identity,
+            start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
+        ))
+        SellerSession(conn).register(rate)
+    running = PaymentPartObservation(part="0", started_at=100, evidence_ref="rate-commitment:snapshot:1:140")
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[running])
+    await rig["watch"](deal=rate).poll()
+    # The buyer ended delivery at the storefront and the resource is released,
+    # while the buyer's stop has not reached the payment authority.
+    record_buyer_end(rig, "rate", progress="released")
+
+    assert await listed(rig, "rate") == ("ending", ["payment_running"])
+
+    # One part stops at the authority, the other reaches its end by now.
+    stop = PaymentEvent(
+        negotiation_id="rate", commitment_ref="rate-commitment", part="0", kind="stop", actor="payer-account",
+        at=145, cause="payer", sequence=1, authority_record_ref="rate-commitment:events:1:part:0",
+        settles_through="started_period",
+    )
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="ended", parts=[
+        running.model_copy(update={"final_stop": stop}),
+        PaymentPartObservation(part="1", started_at=100, end_at=150, evidence_ref="rate-commitment:snapshot:2:150"),
+    ])
+    await rig["watch"](deal=rate).poll()
+
+    assert await listed(rig, "rate") == ("ended", [])
+
+
+async def test_each_outstanding_condition_is_named_and_a_later_case_returns_a_deal_to_ending(rig):
+    filed = CaseRecord(case_ref="case", state="filed", record_ref="case-filed")
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted(), cases=[filed])
+    await rig["watch"]().poll()
+    record_buyer_end(rig, "deal", progress="tearing_down")
+
+    assert await listed(rig, "deal") == ("ending", ["release_pending", "case_open"])
+
+    closed = filed.model_copy(update={"state": "closed", "record_ref": "case-closed"})
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted(), cases=[closed])
+    await rig["watch"]().poll()
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).physical_progress("deal", "released")
+
+    assert await listed(rig, "deal") == ("ended", [])
+
+    later = CaseRecord(case_ref="later-case", state="filed", record_ref="later-filed")
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted(), cases=[closed, later])
+    await rig["watch"]().poll()
+
+    assert await listed(rig, "deal") == ("ending", ["case_open"])

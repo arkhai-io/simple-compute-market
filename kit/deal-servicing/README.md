@@ -57,7 +57,11 @@ remains the domain's assertion, never inferred from an end intent.
 transaction, then checks `expected_revision` and admission in a worker thread.
 Its optional `apply(session, authorization)` callback performs the protected local
 write in that same transaction and must not perform I/O. An adapter allow cannot
-override a stale revision or end. `begin_billing` owns the immutable billing key/evidence before I/O. Unknown
+override a stale revision or end. It asks the payment adapter for every deal, and
+the first allow or refuse journaled for a phase at a revision stands: an answer of
+another status at that revision returns `pending`, naming the change, and journals
+nothing, so a changed answer only holds the phase back until the revision moves.
+`begin_billing` owns the immutable billing key/evidence before I/O. Unknown
 results remain pending for same-key adapter resolution and block disclosure;
 a validated once-only adapter can return an accepted no-op. Delivery retains
 only the returned intent reference.
@@ -108,7 +112,11 @@ For an immutable binding read while ingress owns a write transaction, use
 `SellerSession(conn)` on a separate read connection: a session issues no DDL, so
 it opens no competing writer.
 
-`list` returns bounded keyset pages from durable watched views. `read` refreshes
+`list` returns bounded keyset pages from durable watched views. A deal with a
+recorded end is `ended` only once its resource is proven released, every payment
+part in its watched view has a final stop or an end at or before now, and no case
+is open; until then it is `ending`, and `ending` names each outstanding condition
+(`release_pending`, `payment_running`, `case_open`). `read` refreshes
 both records and returns physical progress even without a payment adapter. A
 missing dispute credential or unresolved local respondent case marks repair
 required. `RespondentPoller.repairs()` exposes bounded skipped-case diagnostics;

@@ -190,8 +190,8 @@ def test_a_deal_with_no_seller_projection_keeps_the_deadline_rule(rig):
 
 
 async def test_an_allow_is_pending_while_the_deadline_awaits_an_observation(rig):
-    # The door refuses only the commit, so a dispatch reaches the adapter,
-    # whose allow admission does not admit past the deadline.
+    # An undelivered rate deal's dispatch reaches the adapter, whose allow
+    # admission does not admit past the deadline.
     register(rig, "rate", once_only=False)
     adapter = AsyncMock()
     adapter.authorize.return_value = DeliveryAuthorization(
@@ -212,10 +212,16 @@ async def test_an_allow_is_pending_while_the_deadline_awaits_an_observation(rig)
     assert [(intent.kind, intent.state) for intent in intents] == [("authorization", "pending")]
 
 
-async def test_the_coded_commit_refusal_stands_while_the_deadline_awaits_an_observation(rig):
+async def test_a_commit_allowed_before_the_deadline_is_held_while_the_deadline_awaits_an_observation(rig):
+    # An undelivered rate deal whose commit was allowed and journaled before
+    # its deadline, and which never became available.
     register(rig, "rate", once_only=False)
     evidence = DeliveryEvidence(negotiation_id="rate", commitment_ref="rate-commitment")
     adapter = AsyncMock()
+    adapter.authorize.return_value = DeliveryAuthorization(
+        status="allow", reason="verified timely approved rate commitment", operation_id="rate:commit",
+        evidence_refs=["rate-commitment"],
+    )
 
     async def commit():
         _, _, revision, _ = journal(rig, "rate")
@@ -224,18 +230,22 @@ async def test_the_coded_commit_refusal_stands_while_the_deadline_awaits_an_obse
         )
 
     rig["clock"][0] = 150
-    refusal = await commit()
-    assert refusal.code == "rate_servicing_unavailable"
+    allowed = await commit()
+    assert allowed.status == "allow"
+    before = journal(rig, "rate")
 
-    # Past the deadline with no observation since: the same journaled answer,
-    # since a changed one at the same revision would be refused.
+    # Past the deadline with no observation since: the allow is held back at
+    # the same revision, and nothing is journaled, recorded or filed.
     rig["clock"][0] = 650
-    assert await commit() == refusal
+    held = await commit()
+    assert held.status == "pending" and "missed delivery deadline awaits a payment observation" in held.reason
+    assert journal(rig, "rate") == before
 
     await poll_at(rig, 660, view())
     rig["clock"][0] = 660
     ended = await commit()
-    assert (ended.status, ended.reason, ended.code) == ("refuse", "delivery ended", None)
-    adapter.authorize.assert_not_called()
-    [*_, latest] = [intent for intent in journal(rig, "rate")[1] if intent.kind == "authorization"]
+    assert (ended.status, ended.reason) == ("refuse", "delivery ended")
+    requests, intents, _, _ = journal(rig, "rate")
+    assert [item.source_ref for item in requests] == ["delivery-deadline"]
+    [*_, latest] = [intent for intent in intents if intent.kind == "authorization"]
     assert DeliveryAuthorization.model_validate(latest.result).reason == "delivery ended"

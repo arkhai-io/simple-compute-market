@@ -7,6 +7,7 @@ provisioning service.
 """
 
 import pytest
+from market_alkahest.payment_adapter import AlkahestOnceAdapter
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, ArkhaiPaymentsConfig
 from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.agreement import PaymentSettlementData
@@ -465,47 +466,68 @@ async def test_a_hosted_once_only_payment_deal_starts_billing_as_a_no_op(rig):
     assert peer.count("get_transaction") >= 4
 
 
-async def test_a_rate_deal_end_service_cannot_service_waits_in_repair_with_nothing_reserved(rig):
+def rate_deal(rig, **register):
+    """Make the rig's deal ``rate``, whose seller projection is not once-only."""
     rig.negotiation_id = "rate"
-    rig.register(once_only=False)
+    rig.register(once_only=False, **register)
 
-    first = await rig.drive()
+    async def valid(evidence):
+        return True
 
-    assert first.kind is OutcomeKind.REPAIR_REQUIRED
-    assert first.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
-    assert first.capacity_reservation_id is None and first.hook_disposition == "deferred"
-    [authorization] = intents(rig, "rate")
-    assert authorization.kind == "authorization" and first.evidence_ref == authorization.intent_ref
-    assert "reserve" not in rig.site.calls and rig.site.rows == {}
-    assert "authorize" not in rig.adapter.calls and rig.adapter.billing_keys == []
+    rig.adapter.inner = AlkahestOnceAdapter(
+        negotiation_id="rate", commitment_ref="commitment", validate_commitment=valid,
+    )
+
+
+async def test_a_rate_deal_commits_and_is_delivered(rig):
+    rate_deal(rig)
+
+    outcome = await rig.drive()
+
+    assert outcome.kind is OutcomeKind.CONVERGED and outcome.capacity_reservation_id == "res-1"
+    assert rig.adapter.authorized[0] == "commit"
+    assert rig.adapter.billing_keys == ["rate:billing-start"]
+    assert rig.record().available_at == rig.clock[0]
+
+
+async def test_a_changed_answer_while_a_rate_deal_waits_leaves_the_drive_pending(rig):
+    rate_deal(rig)
+    rig.clock[0] = rig.start - 7200
+    waiting = await rig.drive()
+    assert waiting.kind is OutcomeKind.WAITING
+    journaled = intents(rig, "rate")
+
+    # The commit is asked again while the deal waits, and the payment
+    # authority's answer has changed at the same revision.
+    rig.adapter.answers["commit"] = ["pending"]
+    held = await rig.drive()
+
+    assert held.kind is OutcomeKind.PENDING
+    assert "changed from allow to pending" in held.detail
+    assert intents(rig, "rate") == journaled
     assert requests(rig, "rate") == []
 
-    # The next drive asks end service again and receives the same answer.
-    second = await rig.drive()
-    assert second.kind is OutcomeKind.REPAIR_REQUIRED
-    assert second.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
-    assert second.evidence_ref == first.evidence_ref
-    assert rig.site.calls == [] and intents(rig, "rate") == [authorization]
+    # A later drive whose adapter allows again goes on waiting, then delivers.
+    assert (await rig.drive()).kind is OutcomeKind.WAITING
+    rig.clock[0] = rig.start
+    assert (await rig.drive()).kind is OutcomeKind.CONVERGED
 
 
-async def test_a_refused_rate_deal_past_its_deadline_stays_in_repair_until_a_payment_observation(rig):
+async def test_an_undelivered_rate_deal_past_its_deadline_waits_for_a_payment_observation(rig):
     # Committed 600 seconds before the Agreement start with a 600-second
     # delivery deadline, so the deadline falls 600 seconds after the start.
-    rig.negotiation_id = "rate"
-    rig.register(once_only=False, delivery_deadline_seconds=600)
+    rate_deal(rig, delivery_deadline_seconds=600)
     rig.clock[0] = rig.start + 100
-    first = await rig.drive()
-    assert first.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
+    await dispatched(rig)
+    rig.fulfillment.state = "dispatching"
 
     # Past the deadline, with no payment observation made since: the deal
-    # stays where it was, with no end recorded and nothing filed.
+    # stays pending, with no end recorded and nothing filed.
     rig.clock[0] = rig.start + 700
     waiting = await rig.drive()
-    assert waiting.kind is OutcomeKind.REPAIR_REQUIRED
-    assert waiting.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
-    assert waiting.evidence_ref == first.evidence_ref
+    assert waiting.kind is OutcomeKind.PENDING
     assert requests(rig, "rate") == []
-    assert [intent.kind for intent in intents(rig, "rate")] == ["authorization"]
+    assert "filing" not in {intent.kind for intent in intents(rig, "rate")}
 
     # The payment watch records an observation made after the deadline, which
     # showed no earlier end: the next drive finds the deadline's end.
@@ -515,7 +537,6 @@ async def test_a_refused_rate_deal_past_its_deadline_stays_in_repair_until_a_pay
     assert ended.kind is OutcomeKind.ENDED
     assert [request.source_ref for request in requests(rig, "rate")] == ["delivery-deadline"]
     assert "filing" in {intent.kind for intent in intents(rig, "rate")}
-    assert rig.site.rows == {}
 
 
 async def test_a_rate_deal_first_driven_past_its_deadline_is_pending_with_nothing_begun(rig):
@@ -530,16 +551,3 @@ async def test_a_rate_deal_first_driven_past_its_deadline_is_pending_with_nothin
         assert rig.progress.load(conn, "rate") is None
     assert requests(rig, "rate") == [] and intents(rig, "rate") == []
     assert rig.site.calls == []
-
-
-async def test_a_once_only_deal_beside_a_refused_rate_deal_drives_as_before(rig):
-    rig.negotiation_id = "rate"
-    rig.register(once_only=False)
-    assert (await rig.drive()).reason is RepairReason.RATE_SERVICING_UNAVAILABLE
-
-    rig.negotiation_id = "deal"
-    outcome = await rig.drive()
-
-    assert outcome.kind is OutcomeKind.CONVERGED
-    assert rig.adapter.authorized[0] == "commit"
-    assert list(rig.site.rows) == ["res-1"]

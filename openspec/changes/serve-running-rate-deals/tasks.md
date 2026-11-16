@@ -150,6 +150,44 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       integration) pass. End-to-end: `e2e_vm_recurring_purchase`,
       `e2e_bare_metal_recurring_purchase`.
 
+Section 2 handoff (in progress, uncommitted; no task checked yet):
+
+- Done in the worktree, suites passing: 2.1's end service (`_unserviceable` gone; a changed
+  answer at a revision whose phase is `done` returns `pending`, compared by status alone,
+  since a rate adapter's evidence references name each fresh snapshot; an end due by now
+  at the same revision is admission's own `refuse`, returned unjournaled rather than held
+  as a changed answer), `DeliveryAuthorization.code` and `RefusalCode` removed with
+  `kit/deal-lifecycle/tests/unit/test_delivery_authorization.py`, the journal docstring,
+  `test_changed_answer.py` replacing `test_rate_refusal.py`, `test_deadline_barrier.py`'s
+  refused setups rewritten; 2.2's `RATE_SERVICING_UNAVAILABLE` and its branch removed, the
+  refused-rate cases replaced in `test_drive_delivery.py` (where they were, not
+  `test_drive_commit.py` as the plan says) by a rate deal that commits and is delivered, a
+  changed answer while it waits for its start leaving the drive pending, and an
+  undelivered rate deal past its deadline; 2.3's `_list` with `ending` codes and its two
+  tests; 2.4's journal test in `test_final_stop.py`; the kit README. Versions:
+  `kit/deal-lifecycle` 0.5.0, `kit/deal-servicing` 0.4.0 (contracts `>=0.3.0`),
+  `domains/compute/delivery` 0.2.0, both storefronts 0.29.0 with their bounds raised and
+  VM's exact pin on bare metal moved; `make lock` run. `kit/deal-servicing` (114),
+  `kit/deal-lifecycle` (82) and `domains/compute/delivery` (130) pass.
+- Found larger than planned: both storefront suites fail four tests the plan does not
+  name, each asserting the removed refusal: `tests/integration/test_rate_delivery_refusal.py`
+  (three tests) and `tests/integration/test_watchdog_buy.py::test_a_watched_purchase_whose_commit_is_refused_is_never_watched`,
+  in each storefront. Neither storefront's recurring test world can deliver a deal once
+  the commit is allowed. In VM's (`tests/recurring_world.py`, `settlement`), placement
+  ends `capacity_unavailable`, and the end hand-off's and failure policy's capacity
+  runtime raises "No capacity site authority configured". In bare metal's, settle answers
+  500 because the world's `_OneSite` capacity client has no `site_names`
+  (`fulfillment_service.py`, `fulfill_bare_metal`); what its dispatch then needs is unknown.
+  The three deadline-recovery tests in each file are the storefronts' evidence for the
+  deadline barrier's scenarios on an undelivered rate deal, which the delta keeps.
+- Not started: 2.5's lane stages (the recurring purchases' stages and drivers, and
+  `e2e-tests/tests/unit/test_recurring_purchase_stages.py`'s order) and its lane runs.
+- The owner returned the change to planning, so the plan can give the storefront
+  recurring test worlds' rework (each world delivering a rate deal, and the four tests in
+  each storefront rewritten as delivered-deal and undelivered-deadline evidence) a section
+  of its own and resize 2.5. The work above is committed as a work in progress, its
+  storefront suites failing those four tests in each storefront, and no task is checked.
+
 ## 3. Every payment stop is classified
 
 Delivers lawful classification of payment stops in both domains. Implements D2, D3;

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from market_deal_lifecycle_contracts.models import (
     Accepted, Instant, LifecycleOutcome, Reference, Rejected, WireModel,
 )
-from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
+from pydantic import Field
 
 from .operations import OperationKeys
 from .terms import Version
@@ -49,32 +49,13 @@ class DeliveryEvidence(WireModel):
     ready: ReadyEvidenceRef | None = None
 
 
-#: Why end service refused a phase, where a caller must act on the cause rather
-#: than on the free-text reason. ``rate_servicing_unavailable``: end service
-#: services no rate deal, so it refuses to commit one.
-RefusalCode = Literal["rate_servicing_unavailable"]
-
-
 class DeliveryAuthorization(WireModel):
-    """A delivery phase's answer; ``code`` is set only on a refusal that names one.
-
-    An answer without a code dumps without the key: end service compares a
-    re-acknowledged answer with the one its journal holds, and an authorization
-    journaled without the key must still compare equal.
-    """
+    """A delivery phase's answer."""
 
     status: Literal["allow", "refuse", "pending"]
     reason: Reference
     operation_id: Reference
     evidence_refs: list[Reference]
-    code: RefusalCode | None = None
-
-    @model_serializer(mode="wrap")
-    def _omit_absent_code(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        data = dict(handler(self))
-        if self.code is None:
-            data.pop("code", None)
-        return data
 
 
 class BillingStartResult(WireModel):
