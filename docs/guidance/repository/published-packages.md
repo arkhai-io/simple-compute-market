@@ -104,8 +104,8 @@ uninstallable. Each package's version is the one its `pyproject.toml` declares.
 | `arkhai-kit-delivery` | `kit/delivery/` | `arkhai-injected-time`, `arkhai-kit-identity` |
 | `arkhai-kit-delivery-apprise` | `kit/delivery-apprise/` | `arkhai-kit-delivery` |
 | `arkhai-kit-fulfillment` | `kit/fulfillment/` | `arkhai-core`, `arkhai-injected-time`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations`, `arkhai-kit-site` |
-| `arkhai-kit-pool-overrides` | `kit/pool-overrides/` | `arkhai-kit-identity`, `arkhai-kit-schema-migrations`, `arkhai-kit-site-client` |
-| `arkhai-kit-resource-pools` | `kit/resource-pools/` | `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations` |
+| `arkhai-kit-pool-overrides` | `kit/pool-overrides/` | `arkhai-injected-time`, `arkhai-kit-identity`, `arkhai-kit-schema-migrations`, `arkhai-kit-site-client` |
+| `arkhai-kit-resource-pools` | `kit/resource-pools/` | `arkhai-injected-time`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations` |
 | `arkhai-kit-resource-pools-contracts` | `kit/resource-pools-contracts/` | `arkhai-kit-capability-admissibility`, `arkhai-kit-capability-shape` |
 | `arkhai-kit-resource-pools-client` | `kit/resource-pools-client/` | `arkhai-kit-resource-pools-contracts` |
 | `arkhai-kit-storefront` | `kit/storefront/` | `arkhai-core`, `arkhai-core-storefront`, `arkhai-injected-time`, `arkhai-kit-alkahest`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime` |

@@ -454,6 +454,25 @@ scheduler, repository and database defaults), `kit/alkahest`, `kit/arkhai-paymen
     base the core test fails at collection (`ModuleNotFoundError: injected_time`,
     `run test-before`), which shows less than a behavioural failure; the fulfillment
     test likewise imports only what the change adds.
+  - Round-1 triage fix (33 F1): the list above missed `kit/contact-exchange`'s
+    `contact_introductions.created_at`, the reveal time the retention sweep filters
+    and orders by, which an insert left to SQLite's `strftime(…,'now')` default
+    while the sweep's cutoff read the source. `insert_introduction` now writes it
+    from the source in the table's text form (`format_introduction_timestamp`); the
+    DDL default stays, since the v0.3.0 baseline is frozen and dropping it would
+    take a migration D13 does not ask for, and the redaction trigger, which only
+    keeps `created_at` unchanged, is untouched. Audit-only, keeping its default:
+    `contact_introduction_seller_dispatches.claimed_at`, which nothing reads.
+    Evidence, library integration,
+    `kit/contact-exchange/tests/integration/test_injected_time.py` (the baseline
+    schema over a real SQLite file, the source injected at 1794821400): a normal
+    insert holds the source's instant, and the retention service on its default
+    clock keeps the introduction one second before the window ends and redacts it
+    at the window's end, `payloads_deleted_at` that instant. `make -C
+    kit/contact-exchange test` 147 passed. With the insert's `created_at`
+    withdrawn the test fails, the row holding the wall clock's instant; `run
+    test-before` at `b44ba08b4` fails only at collection (`injected_time` absent
+    from its project-less environment).
 - [x] 3.4 Section verification.
   - Unit and library integration: `make test-kits`, `make test-core`, and
     `domains/compute/delivery`'s suite.
@@ -627,9 +646,10 @@ through the ORM only), `kit/resource-pools` (`db.py`), `kit/site-client`,
     request timestamps and response freshness reference (the provisioning client's
     `_unix_time` seam stays, reading the source); both mock outputs' timestamps.
   - Correction to the plan: `rate_limit.py` was already monotonic and is untouched;
-    `kit/resource-pools` holds no wall read and only audit-only times (5.2), so it
-    declares nothing; `provisioning/compute/ansible` declares nothing, its two reads
-    being elapsed work; `relays/db.py` and the migrations are untouched (5.2).
+    `kit/resource-pools` holds no wall read (it declares `arkhai-injected-time`
+    since the round-1 triage, for its reported times, 5.2);
+    `provisioning/compute/ansible` declares nothing, its two reads being elapsed
+    work; `relays/db.py` and the migrations are untouched (5.2).
   - Outside the plan, a defect the whole-second source exposes: a retired relay
     grant key's `grants_valid_until` counted only leases created strictly before the
     retirement, which sub-second stamps used to order. In one second the order is
@@ -642,7 +662,9 @@ through the ORM only), `kit/resource-pools` (`db.py`), `kit/site-client`,
     was retired"; whole-second times cannot tell before from after within one
     second, so the code takes the reading that never cuts a grant short, and the
     requirement wants a MODIFIED delta ("before, or in the same second as, its
-    retirement"), which this change does not yet carry.
+    retirement"). Round-1 triage (33 relay-key): the change now carries it,
+    `specs/physical-provisioning/spec.md`'s MODIFIED "Each relay holds its own
+    grant-signing key", with a same-second scenario; the code is unchanged.
   - Tests that compared a whole-second source stamp with a sub-second wall read now
     take an injected source: `kit/site`'s
     `test_a_first_activation_records_the_site_s_instant_and_moves_nothing` (a
@@ -684,12 +706,13 @@ through the ORM only), `kit/resource-pools` (`db.py`), `kit/site-client`,
     default: `capacity_buckets.created_at`, `capacity_reservations.updated_at`, the
     debits' two, `ansible_jobs.updated_at`, `credentials.created_at`, `relays`' two,
     the replay reservation's and trusted principal's `created_at`, the rotation
-    audit's `applied_at`, the definition imports' `imported_at`. Reported but
-    decided by nothing, so audit-only by D13's rule (a column something orders,
-    filters, expires by or compares): `capacity_events.occurred_at` (on the
-    capacity feed), `hosts.created_at`/`updated_at` (on a host's view) and
-    `resource_pools`' two (on a pool's view); under injected time they carry the
-    database's clock.
+    audit's `applied_at`, the definition imports' `imported_at`. Reported to
+    another party, so lane time by `injected-time`'s first requirement (an instant
+    sent to another party) though nothing decides by them, now defaulting from the
+    source beside their kept `server_default` (round-1 triage fix, 33 F2):
+    `capacity_events.occurred_at` (on the capacity feed),
+    `hosts.created_at`/`updated_at` (on a host's view) and `resource_pools`' two (on
+    a pool's view, `PoolResponse`).
   - Ties: a list ordered by one of these columns ties at one injected instant, as
     it already tied by the second under SQLite's `CURRENT_TIMESTAMP`; no tie-break
     was added (the lease-end outbox already breaks ties by `event_id`; the other
@@ -732,6 +755,60 @@ through the ORM only), `kit/resource-pools` (`db.py`), `kit/site-client`,
     asserted under injected time: the lease-end report outbox's stamps (written as
     the release-callback outbox's are), a principal's `valid_until`, and a key's
     `grant_key_activated_at`.
+  - Round-1 triage fix (33 F2), evidence, library integration, each with the source
+    injected: `kit/site/tests/integration/test_injected_time.py::test_the_capacity_feed_reports_the_source_s_instants`
+    (a hold's `reserved` event and its expiry's `released` event, read back through
+    `events_after`, carry the source's two instants) and
+    `provisioning/compute/tests/integration/test_host_authority.py::test_a_host_s_view_reports_the_process_source_s_instants`
+    (a registered host's view holds the source's instant in both columns; updated a
+    minute later, its `updated_at` moves and `created_at` stays) and
+    `kit/resource-pools/tests/integration/test_injected_time.py` (the same for a
+    pool's `PoolResponse`, through the pool service over a real SQLite database).
+    `kit/resource-pools` declares `arkhai-injected-time` (its
+    `published-packages.md` row names it) and is relocked; it needs no version
+    bump, 0.10.0 having been bumped since `marketplace-v0.3.0`'s 0.9.0. `make -C
+    kit/site test` 370 passed; `make -C provisioning/compute test` 536 passed;
+    `make -C kit/resource-pools test` 142 passed. With each column's source
+    default withdrawn, its test fails on the database's clock. The triage had
+    first left the pool columns audit-only on the premise that no response carried
+    them; the fresh-context check found `PoolResponse` does, which the triage's
+    disposition gave the same fix.
+  - Outside the plan, found by the round-1 triage's fresh-context check and fixed on
+    the owner's word (fresh-context D2): `kit/pool-overrides`' `pool_overrides`
+    stamped `created_at` and `updated_at` with SQLite's `STRFTIME(…,'now')`, and both
+    are returned to the operator's client (`PoolOverride`). The store's `replace` now
+    writes both from the source on insert and `updated_at` on conflict, in the
+    table's millisecond text form (`….000Z` for a whole-second instant); the DDL
+    defaults stay. The kit declares `arkhai-injected-time` (its
+    `published-packages.md` row names it) and is relocked; 0.3.0 already postdates
+    `marketplace-v0.3.0`'s 0.2.1, so no bump. Evidence, library integration,
+    `kit/pool-overrides/tests/integration/test_store.py::test_an_override_s_times_are_the_process_source_s_instants`
+    (the baseline schema over a real SQLite file, the source injected: an override
+    holds the source's instant in both times; replaced a minute later, `updated_at`
+    moves and `created_at` stays); `make -C kit/pool-overrides test` 83 passed; with
+    the insert's stamps withdrawn the test fails on the database's clock. The
+    existing `test_replacement_clears_unset_fields_and_keeps_created_at` now takes
+    the source and sets it a second on before replacing, since two whole-second
+    stamps in one second could not show `created_at` kept rather than rewritten.
+  - Round-1 triage fix verification (33 F1, 33 F2, 33 relay-key, fresh-context
+    D2). Library integration suites: `kit/contact-exchange` 147, `kit/site` 370,
+    `provisioning/compute` 536, `kit/resource-pools` 142, `kit/pool-overrides` 83,
+    each passed; each new test failed with its fix withdrawn (above and 3.3).
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`
+    on the final tree: `after-functional-change` (`make lock`) and
+    `pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make
+    test`, every suite) passed; of `pre-commit`, the index, tasks and skills
+    checks and `openspec validate --strict` passed, and only the citations check
+    failed, on closeout's `openspec/specs/injected-time/architecture.md` (18.9).
+    Fresh-context checks of the diff against `b44ba08b4`, run twice: the first
+    found the pool columns carried by `PoolResponse` (fixed above),
+    `kit/pool-overrides`' reported times (fixed on the owner's word), and three
+    nits (a comment's wrap, the contact-exchange note's reason for keeping the DDL
+    default, a test helper's place), all fixed; the second, over the pool fixes,
+    found no defect, and its nits on a line's wrap and the replacement test's
+    `created_at` assertion were fixed. Declined: naming the time source in
+    `kit/pool-overrides`' dependency header comment, which already lists only
+    some of its dependencies.
 - [x] 5.3 Section verification.
   - Unit and library integration: `make test-kits` (`kit/site`, `kit/resource-pools`,
     `kit/site-client`), `make test-compute-provisioning`,

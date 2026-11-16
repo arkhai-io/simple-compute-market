@@ -72,6 +72,7 @@ name = "arkhai-kit-pool-overrides"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "arkhai-kit-site-client" },
@@ -86,6 +87,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site-client" },

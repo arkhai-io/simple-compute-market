@@ -9,6 +9,7 @@ license = "MIT"
 # vocabulary through a contribution. Its typed client needs only a transport
 # offering `authenticated_request`, not the core client package.
 dependencies = [
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-schema-migrations>=0.1.0",
     "arkhai-kit-site-client",

@@ -7,6 +7,8 @@ and never letting a protected value reach a response.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from market_resource_pools.db import Base as PoolsBase
 from market_resource_pools.db import ResourcePool
@@ -52,6 +54,12 @@ class _Codec:
 
 def _connection(address: str = "192.0.2.10", **secrets: str) -> ConnectionSubmission:
     return ConnectionSubmission(kind="fake", version=1, public={"address": address}, secrets=secrets)
+
+
+def _instant(value: datetime) -> int:
+    """A stored time as Unix seconds: SQLite returns it naive, in UTC."""
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return int(aware.timestamp())
 
 
 @pytest.fixture
@@ -118,6 +126,22 @@ def test_no_ordinary_read_carries_a_protected_value(authority) -> None:
         assert "terc3s" not in rendered and "s3cret" not in rendered
         assert "rehto" not in rendered and "other" not in rendered
         assert set(view.connection.protected.values()) == {"reverse-v1"}
+
+
+def test_a_host_s_view_reports_the_process_source_s_instants(authority, source) -> None:
+    """A host's creation and last change are returned on its view, so they are
+    the source's instants, never the database's clock."""
+    registered_at = source.now() + 3600
+    source.set(registered_at)
+    registered = authority.register_host(HostCreate(host_id="h1", connection=_connection()))
+    assert _instant(registered.created_at) == registered_at
+    assert _instant(registered.updated_at) == registered_at
+
+    source.set(registered_at + 60)
+    authority.update_host("h1", HostUpdate(enabled=False))
+    updated = authority.get_host("h1")
+    assert _instant(updated.created_at) == registered_at
+    assert _instant(updated.updated_at) == registered_at + 60
 
 
 def test_lookup_hands_executors_the_protected_envelope(authority) -> None:

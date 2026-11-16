@@ -144,3 +144,22 @@ def test_the_columns_the_ledger_orders_by_hold_the_source_s_instant(
         bucket = db.query(CapacityBucket).one()
         assert _stored(reservation.created_at) == _utc(START)
         assert _stored(bucket.updated_at) == _utc(EXPIRY)
+
+
+def test_the_capacity_feed_reports_the_source_s_instants(
+    ledger: CapacityLedgerService, source: InjectedTime
+):
+    """An event's ``occurred_at`` is sent to subscribers, so it is the source's."""
+    _, before = ledger.events_after(0)
+    _hold(ledger, "0xfeed")
+    source.set(EXPIRY)
+    ledger.expire_due_holds()
+
+    events, _ = ledger.events_after(before)
+    assert [
+        (event["kind"], _stored(datetime.fromisoformat(event["occurred_at"])))
+        for event in events
+    ] == [
+        ("reserved", _utc(START)),
+        ("released", _utc(EXPIRY)),
+    ]

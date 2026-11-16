@@ -265,4 +265,11 @@ class CapacityEvent(Base):
     # this column, which is a different answer from `{}` ("admitted
     # against no categorical constraint").
     claim_attributes = Column(JSON, nullable=True)
-    occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Sent to subscribers on the capacity feed, so the process source's instant
+    # rather than the database's clock.
+    occurred_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
