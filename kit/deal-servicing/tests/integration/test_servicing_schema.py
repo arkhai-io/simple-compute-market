@@ -11,8 +11,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from market_deal_servicing import (
-    PAYMENT_OBSERVATIONS_SCHEMA, SERVICING_SCHEMA, EndSession, EvidenceSession, RespondentPoller,
-    SellerSession, WatchSession, create_payment_observations, create_schema,
+    PAGE_POSITION_SCHEMA, PAYMENT_OBSERVATIONS_SCHEMA, SERVICING_SCHEMA, EndSession, EvidenceSession,
+    RespondentPoller, SellerSession, WatchSession, create_page_position, create_payment_observations,
+    create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -110,6 +111,29 @@ def test_a_table_added_since_is_its_own_set_that_tolerates_nothing(tmp_path):
             create_payment_observations(conn)
 
 
+def test_the_page_position_is_its_own_set_and_survives_a_reopen(tmp_path):
+    """The servicing page position is created by an ordinary migration of its
+    own, and a position written in one connection is read in the next."""
+    path = tmp_path / "storefront.sqlite"
+    with transaction(path) as conn:
+        create_schema(conn)
+        create_payment_observations(conn)
+        create_page_position(conn)
+    assert _object_names(path) == _declared_names() | {
+        "servicing_payment_observations", "servicing_page_position",
+    }
+    assert not any("IF NOT EXISTS" in statement for statement in PAGE_POSITION_SCHEMA)
+    with pytest.raises(sqlite3.OperationalError, match="already exists"):
+        with transaction(path) as conn:
+            create_page_position(conn)
+    with transaction(path) as conn:
+        conn.execute("INSERT INTO servicing_page_position VALUES ('deal-servicing', 'deal-7')")
+    with transaction(path) as conn:
+        assert conn.execute("SELECT loop, continuation FROM servicing_page_position").fetchall() == [
+            ("deal-servicing", "deal-7"),
+        ]
+
+
 def test_opening_each_session_issues_no_ddl(tmp_path):
     path = tmp_path / "storefront.sqlite"
     with transaction(path) as conn:
@@ -141,7 +165,7 @@ def test_opening_a_session_on_a_database_without_its_tables_creates_none(tmp_pat
 async def test_the_respondent_poller_reads_through_the_chains_tables_and_creates_none(rig, tmp_path):
     def poller(path):
         return RespondentPoller(
-            path, authority=rig["authority"], account="seller-account", read=AsyncMock(),
+            path, authority=rig["authority"], read=AsyncMock(),
             resolve=lambda _case: None, signer=rig["seller"], clock=lambda: 150,
         )
 

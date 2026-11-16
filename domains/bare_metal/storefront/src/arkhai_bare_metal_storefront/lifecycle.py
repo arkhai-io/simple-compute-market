@@ -521,7 +521,7 @@ class BareMetalLifecycle:
                     return None
 
                 await RespondentPoller(
-                    self.path, authority=deal.dispute, account=self.payment(deal).data.mandate.to.root,
+                    self.path, authority=deal.dispute,
                     read=adapter.respondent, resolve=resolve, signer=self.runtime.marketplace_signer,
                     clock=self.clock,
                 ).poll()

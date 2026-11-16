@@ -8,7 +8,7 @@ from market_identity import Ed25519Signer
 
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndService, EndSession, SellerDeal, SellerServicing, SellerSession,
-    create_payment_observations, create_schema,
+    create_page_position, create_payment_observations, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -33,6 +33,7 @@ def rig(tmp_path):
         # The storefront chain's migrations, which a session does not run.
         create_schema(conn)
         create_payment_observations(conn)
+        create_page_position(conn)
         EndSession(conn).register(DeliveryRecord(
             negotiation_id="deal", commitment_ref="commitment", seller=seller.identity,
             start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,

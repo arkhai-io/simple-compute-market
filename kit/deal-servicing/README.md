@@ -124,9 +124,13 @@ missing dispute credential or unresolved local respondent case marks repair
 required, and so does a deal of a mechanism named in `missing_adapters`, the
 mechanisms a storefront installs whose configuration composed no adapter: its
 reason names the configuration that would, and `unserviceable()` lists every
-such deal still open, for the storefront's startup report. `RespondentPoller.repairs()` exposes bounded skipped-case diagnostics;
-temporarily unresolvable local Agreements do not block later account-wide cases
-and retry independently of the listing cursor in a rotating arrival-order queue.
+such deal still open, for the storefront's startup report. `RespondentPoller` lists
+one dispute authority's cases under the seller's credential there, its cursor
+record derived from the authority alone; it holds nothing beyond its tables and its
+inputs, so a servicing cycle builds it afresh. `RespondentPoller.repairs()` exposes
+bounded skipped-case diagnostics; temporarily unresolvable local Agreements do not
+block later authority-wide cases and retry independently of the listing cursor in a
+rotating arrival-order queue, and a resolved case clears its repair under any record.
 Cases with no local registered commitment are skipped rather than retained as
 repair rows. A payer claim matches only when its buyer request is the selected
 end; a superseded surrender receives contesting end evidence. Once-only
@@ -158,6 +162,30 @@ derived from the request by `interrupt_operation_key` when the caller sends none
 so a same-key retry changing either is refused by the evidence store. A failure journals its end before
 running the filing and the caller's physical drive side by side. A dry run
 classifies and records nothing.
+
+## Servicing cycle
+
+`ServicingCycle` is the one order in which a storefront's servicing loop services
+its deals, a page per `cycle()`. The domain contributes only its steps — its named
+recovery steps and its site-report correction, which applies its site-report
+classifier to one deal's pending site reports in the caller's transaction — and a
+`RespondentPort`: `credential_available(authority)` and `dispute_adapter(binding)`.
+The cycle takes the seller half, end service, the signer and the clock beside them.
+
+Each cycle first runs respondent discovery once per dispute authority on the page,
+whichever deal comes first, building a `RespondentPoller` over an
+`AgreementRespondent` adapter and resolving each listed case to its local deal
+itself: a case whose Agreement digest differs from the deal's adapter raises into
+the poller's repairs. A deal with no authority, or whose authority's credential is
+unusable, is left out, and one authority's failure skips no other. Then, for each
+deal: the authorities read (committed deals only, dispatching no filing), the
+recovery steps, the physical end, local reconciliation, site-report correction,
+filing dispatch, and the physical end again. Every step runs in its own error
+handler, logged with the domain, the step and the deal. Local reconciliation
+admits a missed delivery deadline and, once admission allows, records the deal's
+`term-end` final request at the Agreement's end, classified `terms`. Every
+registered deal is paged, committed or not, and the position is kept per loop in
+`servicing_page_position` once each page is serviced.
 
 ## Delivery ingress
 
@@ -201,7 +229,9 @@ already present, since a storefront database built while sessions created these
 tables may hold some of them. A table added since is its own set, applied by an
 ordinary migration later in the chain that tolerates nothing:
 `PAYMENT_OBSERVATIONS_SCHEMA`, the instant of each deal's latest successful
-payment observation, with `create_payment_observations(connection)` as its body.
+payment observation, with `create_payment_observations(connection)` as its body,
+and `PAGE_POSITION_SCHEMA`, each servicing loop's page position, with
+`create_page_position(connection)` as its body.
 
 ## First use
 

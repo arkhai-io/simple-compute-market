@@ -304,7 +304,7 @@ class VmDealLifecycle:
                     return matched.negotiation_id, candidate
 
                 self.respondents[key] = RespondentPoller(
-                    self.path, authority=deal.dispute, account=account, read=adapter.respondent,
+                    self.path, authority=deal.dispute, read=adapter.respondent,
                     resolve=resolve, signer=self.signer, clock=self.clock,
                 )
         for poller in self.respondents.values():

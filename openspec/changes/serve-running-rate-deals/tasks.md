@@ -981,7 +981,7 @@ Delivers the kit helper and its kit-owned state. Implements D4's kit part and D6
 requirement "Each deal's servicing steps run in one kit-owned order" (`deal-lifecycle`).
 Touches `kit/deal-servicing`.
 
-- [ ] 6.1 Add `kit/deal-servicing/src/market_deal_servicing/servicing.py`: a helper that
+- [x] 6.1 Add `kit/deal-servicing/src/market_deal_servicing/servicing.py`: a helper that
       takes the seller half, end service, the domain's recovery steps and site-report
       classifier, a respondent port (`credential_available(authority)`,
       `dispute_adapter(binding)`), the signer and the clock, and runs one page: respondent
@@ -993,7 +993,32 @@ Touches `kit/deal-servicing`.
       Verify (library integration, new `test_servicing_order.py`): a failing physical end
       still runs reconciliation, correction and filing; the step order; the term end
       recorded at the Agreement's end and not while admission awaits an observation.
-- [ ] 6.2 Respondent discovery in the helper: group the page's deals by dispute authority,
+      Done: `ServicingCycle(path, domain=, loop=, seller=, end=, respondents=, signer=,
+      clock=, recovery=[(name, step)], resolve_site_corrections=)`, `cycle(limit=100)`
+      returning the page's size; `RespondentPort` and `AgreementRespondent` (a respondent
+      adapter carrying `agreement_digest`) beside it, all exported. The domain's
+      site-report classifier enters as `resolve_site_corrections(session, negotiation_id,
+      now)`, the correction step that applies it, since both domains' corrections wrap
+      `arkhai_compute`'s, which the kit cannot import. The authorities read is
+      `SellerServicing.read` for a committed deal, which polls the watch and dispatches no
+      filing (`SellerServicing.watch` dispatches first, so the cycle does not use it).
+      Reconciliation is bare metal's `reconcile_local` moved into the kit (`term-end`,
+      `source="agreement"`, the record's seller as actor, the commitment as evidence).
+      Library integration (`test_servicing_order.py`, the rig's SQLite): the order, with
+      the seller half wrapped and end service doubled to record each step's moment, each
+      step seeing what the ones before it recorded (the first physical end no term end,
+      the correction and filing steps the term end, the second physical end too); with
+      the real seller half and end service, a deal with a journaled operator-end filing
+      whose physical port raises has its term end reconciled, its corrections run and its
+      filing dispatched (its result recorded), the port called twice and two failures
+      logged naming the domain, step and deal; a delivered rate deal records no term end
+      at 999 and `term-end` at 1000, observed 1005, classified `terms`, selected, no
+      filing, and a cycle at 1010 records no second one and logs nothing (a re-record
+      observed later would be refused); an undelivered rate deal past deadline and term end
+      with its payment authority unreadable records nothing, and once a read succeeds the
+      deadline and the term end are both recorded, the deadline selected; an uncommitted
+      surrendered deal is paged and driven twice with neither authority read.
+- [x] 6.2 Respondent discovery in the helper: group the page's deals by dispute authority,
       leave out deals with none or with an unusable credential, own the one `resolve`
       (a differing Agreement digest raises into the respondent repairs), and build
       `RespondentPoller` per authority with its record derived from the authority alone
@@ -1001,13 +1026,95 @@ Touches `kit/deal-servicing`.
       discovery per authority whatever deal comes first, an Alkahest deal included; one
       authority's failure logged and the other's still run; an unusable credential leaves
       the deal out and its other steps run; a digest mismatch lands in the repairs.
-- [ ] 6.3 Page position: add `servicing_page_position` (one row per loop) to
+      Done: `RespondentPoller` takes no `account`; its record is
+      `stable_ref("authority", "respondent", <authority identity>)`. An adapter that is
+      not an `AgreementRespondent` is not discovered; resolution raises "respondent case
+      differs from accepted Agreement" for a differing digest, as VM's did (bare metal's
+      returned `None`). Beyond the plan: a resolved case clears its repair under any
+      record (by case and commitment), since repairs a database holds under the earlier
+      account-and-authority record have no poller to clear them once the listing
+      restarts. To keep the storefront suites running at this commit, both storefronts'
+      own pollers stop passing `account` (one line each); section 7 replaces those
+      cycles. Library integration (`test_respondent.py`, five new cases): a page of six —
+      a deal under the first authority sorting first (registered with the Alkahest
+      selector, though discovery reads no deal's mechanism or account, so that label
+      shows only that it does not), a second under it, one under another authority, one
+      with no authority, the rig's deal, and one whose authority's adapter offers no
+      respondent discovery — lists once per discoverable authority, both listings before
+      any deal's recovery step, with one credential check per authority and no failure
+      logged; the authority of the page's first deal failing its listing logs the
+      domain, step and authority while the next authority still lists, after it, and
+      both deals' recovery steps run; an unusable credential lists nothing, the deal's
+      recovery runs, its payment authority is read, and the list shows it
+      `repair_required`; a mediation fixture deal whose adapter is bound to another
+      Agreement keeps both listed cases as repairs with that reason, logs no discovery
+      failure and appends nothing, and with the matching adapter both resolve, their
+      repairs clear and two answers are appended; a repair kept under an
+      account-derived record clears once its case resolves. The four existing cases
+      pass with the authority-only record.
+- [x] 6.3 Page position: add `servicing_page_position` (one row per loop) to
       `market_deal_servicing.schema` as its own schema set, created by an ordinary
       migration a storefront chain appends; the helper pages every registered deal and
       saves its position after each page (D6). Verify (library integration,
       `test_servicing_schema.py`): the set creates and the position survives a reopen.
-- [ ] 6.4 Verification point: `kit/deal-servicing` suites (unit, library integration) pass.
+      Done: `PAGE_POSITION_SCHEMA` (`loop TEXT PRIMARY KEY, continuation TEXT`, no `IF
+      NOT EXISTS`) and `create_page_position`, exported; the cycle pages with
+      `committed_only=False` and saves the continuation once the page is serviced, `NULL`
+      after the last page, so a storefront stopped mid-page services that page again
+      rather than skipping its rest. The test rig applies the set. Library integration
+      (`test_servicing_schema.py`): the set creates beside the others, refuses a second
+      application, and a position written in one connection reads in the next;
+      (`test_servicing_order.py`) three cycles of two over three deals, each a new
+      `ServicingCycle` over the same file, service `deal, deal-b`, then `deal-c`, then
+      `deal, deal-b`, the row ending `("deal-servicing", "deal-b")`, and a cycle of
+      another loop starts from the first deal and keeps its own row.
+- [x] 6.4 Verification point: `kit/deal-servicing` suites (unit, library integration) pass.
       End-to-end: none until section 7 composes the helper.
+      Done: `make -C kit/deal-servicing test` (typecheck clean; 130 passed), and
+      `scripts/change-workflow run pre-commit` passed with every functional hook, both
+      storefronts' suites among them with their pollers taking no `account`. Its rerun
+      after the fresh-context fixes (kit tests, one comment, these notes) passed every
+      suite but one unrelated test, `scripts/tests/test_change_clone.py::test_the_bootstrap_failed`
+      ("No child processes", a child-reaping race), which passed in the first run and in
+      `make test-release-tooling` run again (3123 passed). The kit's
+      README describes the cycle, the poller's record and the new set. Version: the kit
+      stays 0.4.0, the bump this change already took (section 5's handoff). End-to-end
+      confirmed: none. Owed by validation: none. `run test-before` was not run: it runs
+      without the kit's environment, and `test_servicing_order.py` and the new
+      `test_respondent.py` cases import `ServicingCycle`, which only this section adds.
+      Fresh-context check: fixed — the failing-authority case failed the page's second
+      authority, so it could not show a later authority still runs (now the first);
+      the term end's "once" was shown at one instant (now a later cycle too); the order
+      case swapped collaborators after construction (now injected) and the notes called
+      its seller half and end service real; the Alkahest label overclaimed; the
+      clearing of repairs under another record, the skip of an adapter with no
+      respondent discovery, discovery before the deal steps and a deal with no
+      authority were untested (now tested); tripwires inside discovery's handler only
+      logged (now recorded, and the cases assert no discovery failure); a test name
+      claiming several loops; a docstring claiming the deadline was admitted first; the
+      respondent comment's history wording; a constant splitting the imports; and two
+      passages of `deal-lifecycle/architecture.md` the poller's record makes stale,
+      added to 12.9. Declined: removing the non-respondent branch, which keeps an
+      authority whose interface lists no cases out of discovery (now tested); the
+      spec-heading citation in `servicing.py`, which holds once the archive merges the
+      delta, as section 2's was declined.
+
+Section 6 handoff:
+
+- `ServicingCycle` is what section 7 composes: each storefront passes its lifecycle as
+  the `RespondentPort` (VM's has `credential_available` and `dispute_adapter`; bare
+  metal's `dispute` must answer as `dispute_adapter`), its signer, its recovery steps
+  and its `resolve_site_corrections(session, negotiation_id, now)` — both storefronts'
+  existing resolvers take `now` by keyword, so each needs a positional adapter or a
+  signature change. Its tables need the storefront chain to apply
+  `create_page_position` (7.1, 7.2).
+- The cycle's authorities read is `SellerServicing.read`, not `watch`: VM's cycle
+  dispatched filings through `watch` before its own filing step; under the kit only
+  the filing step dispatches.
+- Bare metal's cycle carries its delivery re-drive (`recover_delivery`), which 7.2
+  says to drop while section 8 moves it; `test_delivery_path.py`'s waiting-deal cases
+  and the bare-metal lane's delivery depend on the cycle re-driving until section 8's
+  routine runs in a loop, so 7.2 may need to keep it as a recovery step until then.
 
 ## 7. Both storefront cycles run the kit's order
 
@@ -1195,7 +1302,10 @@ campaign index currency.
         admission" (payment-stop classification and the `terms` split).
       - D4, D6: `deal-lifecycle/architecture.md`, "Package and counterpart boundaries"
         (the kit's servicing order, respondent port and page position) and "Current
-        limits" (the respondent-lifetime and term-end bullet removed);
+        limits" (the respondent-lifetime and term-end bullet removed, and its "account
+        discovery continues"); "Buyer surrender and cases" ("advancing its account
+        cursor": the respondent cursor is the authority's, found by section 6's
+        fresh-context check);
         `openspec/specs/vm-storefront-fulfillment/architecture.md`, "Evidence and delivery
         ownership" (its respondent-poller sentence);
         `openspec/specs/settlement-servicing/architecture.md`, "Current limits" (its
