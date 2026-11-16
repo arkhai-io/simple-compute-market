@@ -118,6 +118,15 @@ places that matter, so read all of this first, in full:
   are where that change was worked: `scripts/change-workflow find --records
   <change>` prints where, this checkout's or, from a change's clone, the owner's
   workspace's, which holds the history of every cleaned-up change.
+- The repository's record of what has been deployed, where the change alters a
+  form a deployment may run — a record, a message, a configuration key's use.
+  Fetch the remote first, then read the record where the repository's guidance
+  names it: the compatibility the design owes is measured against what it says
+  was deployed, not against the branch the change lands on
+  (`docs/guidance/engineering/versioning.md#compatibility-is-owed-to-what-has-been-deployed`).
+  Where the guidance names no record, or the record is unclear, ask the owner for
+  the release policy before designing or leaving out any migration or
+  compatibility path.
 
 If a dependency gates `design` and has not reached `archived`, stop and tell
 the owner: designing now risks designing work the
@@ -184,7 +193,9 @@ an answer to one often reshapes the next. In full, a decision has:
 - **Alternatives.** Each option actually available, including doing nothing
   and deferring, with its trade-offs: what it costs, what it constrains later,
   which layer or authority boundary it touches (`ARCHITECTURE.md` vocabulary),
-  and what it does to wire, persistence, and deployment compatibility.
+  and what it does to wire, persistence, and compatibility with what the record
+  of deployment says was deployed. An option leaving out a migration or
+  compatibility path names the release it read.
 - **Recommendation.** Which option you recommend and why, and what would change
   your mind.
 
