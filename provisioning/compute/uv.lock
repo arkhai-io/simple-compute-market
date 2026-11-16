@@ -40,6 +40,7 @@ source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
@@ -64,6 +65,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.13.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.6.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
@@ -268,6 +270,7 @@ name = "arkhai-kit-site"
 version = "0.14.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },

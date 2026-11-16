@@ -51,7 +51,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-provisioning-adapter"
-version = "0.13.0"
+version = "0.13.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -59,6 +59,7 @@ dependencies = [
     { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
@@ -79,6 +80,7 @@ requires-dist = [
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -110,6 +112,7 @@ source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
@@ -128,7 +131,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.8.0"
+version = "0.8.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -139,7 +142,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.8.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -326,6 +329,7 @@ name = "arkhai-kit-site"
 version = "0.14.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },

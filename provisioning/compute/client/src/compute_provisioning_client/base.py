@@ -11,12 +11,12 @@ at each response's verification. The variants differ only in how they send.
 from __future__ import annotations
 
 import hashlib
-import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
 import httpx
+import injected_time
 from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
@@ -60,7 +60,9 @@ AuthorityTrust: TypeAlias = TrustedIdentitySet | Callable[[], TrustedIdentitySet
 
 
 def _unix_time() -> int:
-    return int(time.time())
+    """The process time source's instant: every request timestamp and the
+    reference a response's freshness is checked against."""
+    return injected_time.now()
 
 
 def wire_query(query: Mapping[str, Any] | None) -> dict[str, str]:

@@ -271,6 +271,7 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -734,6 +735,7 @@ name = "arkhai-kit-site"
 version = "0.14.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
@@ -749,16 +751,17 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.13.0"
+version = "0.13.1"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.13.1-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from typing import Any, Protocol
 from datetime import datetime, timedelta, timezone
 
+import injected_time
 from market_site.authority import SiteAuthorityPort
 
 from .release import (
@@ -229,7 +230,7 @@ class LeaseLifecycleService:
             )
         await self._request_release(reservation, end_context={
             "cause": "termination", "reason": getattr(body, "reason", None), "caller": caller,
-            "effective_at": int(datetime.now(timezone.utc).timestamp()),
+            "effective_at": injected_time.now(),
         })
         await self._drain_lease_end_reports()
         return self.get_lease(lease_id)
@@ -326,7 +327,7 @@ class LeaseLifecycleService:
     async def _run_cycle(self) -> dict:
         await self._drain_lease_end_reports()
         await self._drain_capacity_release_outbox()
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         grace_seconds = int(
             getattr(self._settings, "lease_watchdog_grace_period_seconds", 300)
         )
@@ -408,7 +409,7 @@ class LeaseLifecycleService:
         capacity_reservation_id = reservation["capacity_reservation_id"]
         if end_context is None:
             deadline = self._parse_utc(reservation.get("lease_end_utc"))
-            now = datetime.now(timezone.utc)
+            now = injected_time.now_datetime()
             end_context = ({
                 "cause": "expiry", "effective_at": int(deadline.timestamp()),
                 "claimed_deadline": int(deadline.timestamp()), "deadline_phase": "lease",

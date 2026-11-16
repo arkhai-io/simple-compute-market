@@ -28,6 +28,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
+import injected_time
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -52,6 +53,13 @@ logger = logging.getLogger(__name__)
 HostLookup = Callable[[str], ExecutionHost | None]
 
 _UNSET = object()
+
+
+def _utcnow() -> datetime:
+    """The process time source's instant as a job's retry time is stored: UTC
+    with no zone. A retry time is stored and compared later, so it is an
+    instant of the time of the world, not a duration of the engine's own."""
+    return injected_time.now_datetime().replace(tzinfo=None)
 
 
 class JobIdentityConflictError(ValueError):
@@ -174,7 +182,7 @@ class JobEngine:
         clears ``next_retry_at`` (so the next sweep cannot claim the job again)
         and enqueues it. Returns the number re-enqueued.
         """
-        now = datetime.utcnow()
+        now = _utcnow()
         with self._session_factory() as db:
             due = (
                 db.query(JobRecord)
@@ -374,7 +382,7 @@ class JobEngine:
             if job.status != JobStatus.queued.value:
                 # Cancelled (or otherwise finished) before it started.
                 return
-            if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
+            if job.next_retry_at and _utcnow() < job.next_retry_at:
                 # The retry scheduler re-enqueues it once the delay elapses.
                 return
             logger.info(
@@ -460,7 +468,7 @@ class JobEngine:
 
             message = outcome.error.message
             if job.retry_count < job.max_retries and outcome.error.retryable:
-                next_retry_at = datetime.utcnow() + timedelta(
+                next_retry_at = _utcnow() + timedelta(
                     seconds=self._retry_policy.delay_seconds(job.retry_count)
                 )
                 if self._transition(

@@ -19,9 +19,10 @@ from __future__ import annotations
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Iterable, Optional
 
+import injected_time
 from market_config import encrypt_secret
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -55,17 +56,21 @@ UNSET = _Unset()
 
 
 def _utcnow() -> datetime:
-    """Now, as the relay tables store times: UTC with no zone."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    """The process time source's instant, as the relay tables store times: UTC
+    with no zone."""
+    return injected_time.now_datetime().replace(tzinfo=None)
 
 
 def _grants_valid_until(
     key: RelayRetiredGrantKey, held: Iterable[RelayPortLease]
 ) -> datetime | None:
+    # Times are whole seconds, so a lease allocated in the second its key was
+    # retired may hold a grant that key signed: it counts, keeping the key
+    # valid for that grant rather than refusing a grant already installed.
     expiries = [
         lease.grant_expires_at
         for lease in held
-        if lease.grant_expires_at is not None and lease.created_at < key.retired_at
+        if lease.grant_expires_at is not None and lease.created_at <= key.retired_at
     ]
     return max(expiries, default=None)
 

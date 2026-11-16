@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 
+import injected_time
 from market_identity import (
     Identity,
     RotationRequest,
@@ -72,7 +72,7 @@ class SqlAlchemyProvisioningPrincipalAuthority:
         *,
         now: datetime | None = None,
     ) -> TrustedIdentitySet:
-        current_time = now or datetime.now(timezone.utc)
+        current_time = now or injected_time.now_datetime()
         with self._session_factory() as session:
             rows = (
                 session.query(ProvisioningTrustedPrincipal)
@@ -121,11 +121,11 @@ class SqlAlchemyProvisioningPrincipalAuthority:
             raise PrincipalRotationError("rotation subject or authority does not match")
         if not self.is_authorized(role, intent.current):
             raise PrincipalRotationError("rotation current principal is not active")
-        verification = verify_rotation(request, now=int(time.time()))
+        verification = verify_rotation(request, now=injected_time.now())
         if not verification.verified:
             raise PrincipalRotationError("both current and replacement proofs are required")
 
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         valid_until = now + timedelta(seconds=intent.overlap_seconds)
         try:
             with self._session_factory() as session:

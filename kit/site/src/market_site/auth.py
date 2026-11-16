@@ -36,11 +36,11 @@ import json
 import logging
 import re
 import threading
-import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+import injected_time
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, Response
 from market_identity import (
@@ -509,7 +509,7 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
         verification = verify_request(
             authenticated,
             body=body,
-            now=int(time.time()),
+            now=injected_time.now(),
             max_skew=self._max_timestamp_skew,
             expected_role=authenticated.role,
             expected_method=request.method,
@@ -734,7 +734,7 @@ def _signed_headers(
             operation=operation,
             resource=resource,
             request_id=request_id,
-            timestamp=int(time.time()),
+            timestamp=injected_time.now(),
             status=status_code,
             body_hash=canonical_body_hash(body),
         ),

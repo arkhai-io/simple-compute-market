@@ -6,6 +6,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from injected_time import InjectedTime
 from sqlalchemy import Column, MetaData, String, Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
@@ -964,20 +965,19 @@ def _file_ledger(path) -> CapacityLedgerService:
 
 
 def test_a_first_activation_records_the_site_s_instant_and_moves_nothing(
-    seeded: CapacityLedgerService,
+    seeded: CapacityLedgerService, source: InjectedTime,
 ):
     reservation_id = _committed(seeded, "0xactivate")
     before = seeded.get_reservation(reservation_id)
     events_before, _ = seeded.events_after(0)
     assert before["activated_at_utc"] is None
 
-    earliest = datetime.now(timezone.utc)
+    source.set(source.now() + 60)
     activated = seeded.activate_lease(reservation_id)
-    latest = datetime.now(timezone.utc)
 
     instant = datetime.fromisoformat(activated["activated_at_utc"])
     assert instant.utcoffset() == timedelta(0)
-    assert earliest <= instant <= latest
+    assert instant == datetime.fromtimestamp(source.now(), timezone.utc)
     assert {key: value for key, value in activated.items() if key != "activated_at_utc"} == {
         key: value for key, value in before.items() if key != "activated_at_utc"
     }

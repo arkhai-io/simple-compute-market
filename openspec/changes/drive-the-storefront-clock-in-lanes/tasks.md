@@ -602,19 +602,134 @@ through the ORM only), `kit/resource-pools` (`db.py`), `kit/site-client`,
 `db/models.py`), `provisioning/compute/client`, and the two provisioning adapters'
 `services/mock_output.py`.
 
-- [ ] 5.1 Each package declares `arkhai-injected-time`, relocked; every direct read
+- [x] 5.1 Each package declares `arkhai-injected-time`, relocked; every direct read
   converted as 3.2. `rate_limit.py`'s window is elapsed work (monotonic); the lease
   watchdog's due check, expiry context and `terminate_lease`'s effective instant read
   the process source (D3).
   - Verify: `make check-time-reads` reports none of these packages.
-- [ ] 5.2 Supply the read database times — hold expiry, lease end and activation, job
+  - Done: seven packages declare `arkhai-injected-time>=0.1.0`, with their
+    `published-packages.md` rows: `kit/site`, `kit/site-client`,
+    `provisioning/compute`, `provisioning/compute/client` (its allowlist lists it,
+    with the `import-roots` entry section 3 describes), `provisioning/compute/service`
+    and the VM and bare-metal provisioning adapters. Relocked with `make lock` (full).
+    46 reads converted: 44 time of the world, 2 elapsed work — the Ansible runner's
+    log-flush interval (`runner.py`) is now `time.monotonic()`. Time of the world:
+    the ledger's window start, hold expiry, release, activation and release-request
+    stamps, a lease end's default effective instant and the instant availability is
+    judged at; the lease watchdog's due check, expiry context, stalled-release grace
+    and `terminate_lease`'s effective instant; the job engine's retry time (naive
+    UTC, as stored, through its `_utcnow`); the relay allocator's lease stamp,
+    release, reconciliation cutoff and reuse quarantine, and the relay service's key
+    activation and retirement; the principal authority's validity check and rotation
+    verification; the provisioning and site middlewares' request verification,
+    response stamp and replay dispatch lease; both outboxes' attempt stamps and the
+    capacity-released lifecycle event's `occurred_at`; the site and provisioning clients'
+    request timestamps and response freshness reference (the provisioning client's
+    `_unix_time` seam stays, reading the source); both mock outputs' timestamps.
+  - Correction to the plan: `rate_limit.py` was already monotonic and is untouched;
+    `kit/resource-pools` holds no wall read and only audit-only times (5.2), so it
+    declares nothing; `provisioning/compute/ansible` declares nothing, its two reads
+    being elapsed work; `relays/db.py` and the migrations are untouched (5.2).
+  - Outside the plan, a defect the whole-second source exposes: a retired relay
+    grant key's `grants_valid_until` counted only leases created strictly before the
+    retirement, which sub-second stamps used to order. In one second the order is
+    lost, so a lease allocated in the retirement's second now counts
+    (`relays/service.py`, `<=`): the bound may be later than needed, never earlier
+    than a grant in use. `test_relay_administration.py` holds both sides under an
+    injected source (a lease a second later does not extend the key; one in the same
+    second does). For the round's triage: `physical-provisioning`'s requirement
+    (its spec, the retired key's validity) counts leases "allocated before the key
+    was retired"; whole-second times cannot tell before from after within one
+    second, so the code takes the reading that never cuts a grant short, and the
+    requirement wants a MODIFIED delta ("before, or in the same second as, its
+    retirement"), which this change does not yet carry.
+  - Tests that compared a whole-second source stamp with a sub-second wall read now
+    take an injected source: `kit/site`'s
+    `test_a_first_activation_records_the_site_s_instant_and_moves_nothing` (a
+    shared `source` fixture in a new `tests/integration/conftest.py`);
+    `kit/site-client`'s exact-retry test, which patched the module's `time.time`;
+    and, a defect left by section 3's fulfillment-claim conversion that failed
+    whenever the wall clock's fraction passed half a second, five tests in
+    `provisioning/compute/service`'s `test_fulfillment_convergence.py` (the backoff
+    deltas are now exact, and `_claim` measures a claim against the source). A
+    defect left by section 4, failing when two listings fell in one second: the
+    bare-metal storefront's `test_publication_cycle.py` read bindings ordered by a
+    listing's `created_at` then its random id; it now breaks the tie by `rowid`.
+  - Versions: `provisioning/compute/ansible` 0.8.1, `kit/site-client` 0.13.1 and the
+    bare-metal provisioning adapter 0.13.1 take patch bumps (each carried the
+    `marketplace-v0.3.0` version; no exact pins on them); `provisioning/compute/client`
+    (0.10.0, released) is left for section 10, whose `set_time` takes its minor
+    bump. The others were already bumped on `dev` since that release.
+  - Evidence: `make check-time-reads` lists none of these packages (61 findings
+    left, all in sections 6 and 7's packages but one, below).
+- [x] 5.2 Supply the read database times — hold expiry, lease end and activation, job
   scheduling and retry timing, relay grant expiry — from the process source (D13);
   audit-only columns keep their DDL default.
   - Verify: library integration tests in `kit/site` with an injected source: a hold
     expiring at 1794822300 lapses on the sweep after the source is set to 1794822300
     and not before (`site-capacity`'s "A hold expires at the set instant"); a lease due
     at an instant is listed due only once the source reaches it.
-- [ ] 5.3 Section verification.
+  - Columns judged read, now defaulting from the source beside their kept
+    `server_default`: `kit/site`'s `capacity_buckets.updated_at` (declarations are
+    listed in that order) and `capacity_reservations.created_at` (reservations
+    listed, and an escrow's latest held one found, in that order); the job
+    authority's `ansible_jobs.created_at` (the job list sorts by it); and both
+    provisioning outboxes' `created_at` (delivered in that order). Already
+    written by the application, now from the source: the ledger's text stamps
+    (`hold_expires_at`, `lease_start_utc`, `released_at`, `release_requested_at`,
+    `activated_at_utc`), relay leases' `created_at`/`released_at`, keys'
+    `retired_at`/`grant_key_activated_at`, `next_retry_at`, the replay
+    `dispatch_lease_expires_at`/`completed_at`, a principal's `valid_until`, and the
+    outboxes' attempt and delivery stamps. Audit-only, keeping the database
+    default: `capacity_buckets.created_at`, `capacity_reservations.updated_at`, the
+    debits' two, `ansible_jobs.updated_at`, `credentials.created_at`, `relays`' two,
+    the replay reservation's and trusted principal's `created_at`, the rotation
+    audit's `applied_at`, the definition imports' `imported_at`. Reported but
+    decided by nothing, so audit-only by D13's rule (a column something orders,
+    filters, expires by or compares): `capacity_events.occurred_at` (on the
+    capacity feed), `hosts.created_at`/`updated_at` (on a host's view) and
+    `resource_pools`' two (on a pool's view); under injected time they carry the
+    database's clock.
+  - Ties: a list ordered by one of these columns ties at one injected instant, as
+    it already tied by the second under SQLite's `CURRENT_TIMESTAMP`; no tie-break
+    was added (the lease-end outbox already breaks ties by `event_id`; the other
+    tables have no insertion-ordered key, and the service may run on PostgreSQL,
+    which has no `rowid`).
+  - Evidence, library integration, `kit/site/tests/integration/test_injected_time.py`
+    (the ledger over a real SQLite database its migration chain built, the source
+    injected): a hold expiring at 1794822300 is kept by the sweep at 1794822299 and
+    lapsed at 1794822300, its `released_at` that instant; a lease's start,
+    activation, release request and its lease-ended report's effective instant are
+    the source's instants; a reservation's `created_at` and a declaration's
+    `updated_at` hold the source's instant on insert, and the latter again on
+    update. Correction to the plan: the lease-due test is in
+    `provisioning/compute/service`'s
+    `test_ledger_lease_lifecycle.py::test_a_lease_is_due_only_once_the_process_s_time_reaches_its_end`,
+    not `kit/site`, because `list_lease_due` takes its instant from its caller; the
+    read is the lease lifecycle's. Library integration too (the lifecycle service
+    over the real ledger and fulfillment tables, no application, beside that file's
+    other tests): a lease ending at 1794822300 is left leased by a cycle at
+    1794822299 and ended by expiry at 1794822300. It shows the due check and the
+    expiry classification read the source; the recorded effective instant and
+    claimed deadline are the stored end, whatever clock is read. Run against the
+    pre-change wheels, before the wheelhouse was rebuilt, it failed as it should:
+    the wall clock is past 1794822300, so the first cycle released the lease.
+  - Evidence for the provisioning stores, library integration, each with the source
+    injected and held: `provisioning/compute`'s
+    `test_job_authority.py::test_a_job_s_creation_and_retry_are_the_process_source_s_instants`
+    (a job's `created_at` and the `next_retry_at` a retryable failure schedules are
+    the source's instants, and the retry sweep finds it due at that instant and not
+    a second before) and two tests in `test_relay_administration.py` (a lease's
+    `created_at` and `released_at` and a key's `retired_at`; the reconciliation
+    releases a lease only once the source passes its creation plus the grace); and
+    `provisioning/compute/service/tests/integration/test_injected_time.py` on the
+    service's migrated database (the release-callback outbox's `created_at`,
+    attempt and delivery stamps; a replay reservation's dispatch lease, claimed
+    again at its expiry and not a second before, and its `completed_at`). Not
+    asserted under injected time: the lease-end report outbox's stamps (written as
+    the release-callback outbox's are), a principal's `valid_until`, and a key's
+    `grant_key_activated_at`.
+- [x] 5.3 Section verification.
   - Unit and library integration: `make test-kits` (`kit/site`, `kit/resource-pools`,
     `kit/site-client`), `make test-compute-provisioning`,
     `make test-compute-provisioning-ansible`, `make test-provisioning`,
@@ -622,6 +737,37 @@ through the ORM only), `kit/resource-pools` (`db.py`), `kit/site-client`,
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: the lanes' lease and teardown stages run this code at wall time; no
     new scenario is owed.
+  - Evidence: `make -C kit/site test` 369 passed; `kit/site-client` 65;
+    `provisioning/compute` 535; `provisioning/compute/client` 86;
+    `provisioning/compute/ansible` 187 (4 skipped); `provisioning/compute/service`
+    622 unit and 541 integration before its two store tests were added (they pass
+    on their own); the VM provisioning adapter 292; the bare-metal one 137.
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`
+    on the final tree: `after-functional-change` (`make lock`) and
+    `pre-commit-functional` (`make check-packaging` and `make test`, every suite —
+    `make test-kits`, `make test-provisioning`, `make test-domains` with the three
+    storefronts, the API-credits service and the consumers whose locks moved)
+    passed; of `pre-commit`, only the citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9). Two earlier runs failed
+    on the convergence and publication-cycle tests the notes above describe.
+  - Fresh-context check: it found the relay requirement's wording (recorded above
+    for triage), stores with read columns no test held under injected time (the
+    job, relay, outbox and replay tests above were added), placeholder evidence, an
+    inconsistent classification of reported-only columns (now audit-only by one
+    rule), two overstated evidence claims (reworded), the lease-ended report's
+    instant untested (added), a schema built with `create_all` (the new kit/site
+    test now uses the migration chain), and a stale docstring (fixed). Declined:
+    moving the lease-due test out of the service suite, whose file already holds
+    the lifecycle's library integration tests the same way (section 10.2's
+    application test may make it redundant); and editing section 7's plan for
+    `domains/vms/negotiation`, left to the handoff below and 7.5.
+  - Confirmed: no new end-to-end marker; the lanes run this code at wall time. No
+    owed CI evidence.
+  - Handoff. A service suite installs its internal dependencies as wheels from
+    `.dist`, so after editing a kit or `provisioning/compute` run `make dist` (or
+    `make lock`) before that suite, or it tests the old code. `domains/vms/negotiation`'s
+    `time.localtime()` (`torch_arkhai_strategy.py`) is in no section's plan; 7.5
+    needs it gone.
 
 ## 6. The registry and the API-credits service read the process source
 

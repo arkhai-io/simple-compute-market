@@ -1,3 +1,4 @@
+import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -58,8 +59,11 @@ class CapacityReleaseCallbackOutbox(Base):
     capacity_reservation_id = Column(String, primary_key=True)
     attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
     last_error = Column(Text, nullable=True)
+    # Pending callbacks are delivered oldest first, so creation is stamped from
+    # the process's time source rather than the database's clock.
     created_at = Column(
         DateTime(timezone=True),
+        default=injected_time.now_datetime,
         server_default=func.now(),
         nullable=False,
     )
@@ -80,7 +84,14 @@ class LeaseEndReportOutbox(Base):
     parked = Column(Boolean, nullable=False, default=False, server_default="0")
     attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
     last_error = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Reports are read and delivered in creation order, so creation is stamped
+    # from the process's time source rather than the database's clock.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     last_attempted_at = Column(DateTime(timezone=True), nullable=True)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
 

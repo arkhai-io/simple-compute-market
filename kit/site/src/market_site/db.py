@@ -13,6 +13,7 @@ from __future__ import annotations
 import enum
 import uuid
 
+import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -106,8 +107,15 @@ class CapacityBucket(Base):
     attributes = Column(JSON, nullable=False, default=dict)
     enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Declarations are listed in the order they last changed, so the change is
+    # stamped from the process's time source rather than the database's clock;
+    # `created_at` is audit-only and keeps the database default.
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        onupdate=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
     )
 
 
@@ -185,7 +193,15 @@ class CapacityReservation(Base):
     # only that no activation is recorded: a reservation stored before the
     # column existed records none, and that says nothing about delivery.
     activated_at_utc = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Reservations are listed, and an escrow's latest held reservation found,
+    # in creation order, so creation is stamped from the process's time source;
+    # `updated_at` is audit-only.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

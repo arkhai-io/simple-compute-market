@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
+import injected_time
 from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
@@ -110,7 +110,7 @@ class SqlAlchemyProvisioningReplayStore:
         """Atomically resume one exact request after its dispatch lease expires."""
 
         principal = reservation.identity.principal
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         with self._session_factory() as session:
             updated = (
                 session.query(ProvisioningReplayReservation)
@@ -181,11 +181,11 @@ class SqlAlchemyProvisioningReplayStore:
             row.response_body_empty = response_body is EMPTY_BODY
             row.response_body = None if response_body is EMPTY_BODY else response_body
             row.response_media_type = response_media_type
-            row.completed_at = datetime.now(timezone.utc)
+            row.completed_at = injected_time.now_datetime()
             session.commit()
 
     def _lease_expiry(self) -> datetime:
-        return datetime.now(timezone.utc) + timedelta(
+        return injected_time.now_datetime() + timedelta(
             seconds=self._dispatch_lease_seconds
         )
 
@@ -291,7 +291,7 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         verification = verify_request(
             authenticated,
             body=body,
-            now=int(time.time()),
+            now=injected_time.now(),
             max_skew=self._max_timestamp_skew,
             expected_role=authenticated.role,
             expected_method=request.method,
@@ -603,7 +603,7 @@ def _signed_response_headers(
             operation=operation,
             resource=resource,
             request_id=request_id,
-            timestamp=int(time.time()),
+            timestamp=injected_time.now(),
             status=status_code,
             body_hash=canonical_body_hash(body),
         ),

@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import datetime, timezone
 
+import injected_time
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
 from compute_provisioning_ansible import MockPlaybook
 
@@ -45,7 +45,7 @@ def bare_metal_mock_output(playbook: MockPlaybook) -> str:
         "physical_host_id": params.physical_host_id or "",
         "ssh_user": params.ssh_user or DEFAULT_MOCK_SSH_USER,
         "escrow_uid": params.escrow_uid or "",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": injected_time.now_datetime().isoformat(),
         "status": "success",
     }
     if params.action == NODE_GRANT_ACCESS_ACTION:
