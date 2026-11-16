@@ -207,6 +207,7 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-contact-exchange" },
     { name = "arkhai-kit-deal-lifecycle" },
+    { name = "arkhai-kit-deal-lifecycle-client" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-deal-servicing" },
     { name = "arkhai-kit-delivery" },
@@ -367,7 +368,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.12.0"
+version = "0.13.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -380,7 +381,7 @@ dependencies = [
     { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_kit_alkahest-0.12.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.13.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -401,7 +402,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -414,7 +415,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -494,7 +495,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -502,12 +503,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-buyer"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -516,7 +517,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_buyer-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_buyer-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -534,19 +535,19 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-servicing"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -556,7 +557,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_servicing-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_servicing-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -882,6 +883,7 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-contact-exchange" },
     { name = "arkhai-kit-deal-lifecycle" },
+    { name = "arkhai-kit-deal-lifecycle-client" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-deal-servicing" },
     { name = "arkhai-kit-delivery" },
@@ -936,7 +938,7 @@ rl = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-core-buyer" },
-    { name = "arkhai-kit-deal-lifecycle-client" },
+    { name = "arkhai-kit-deal-lifecycle-buyer" },
     { name = "arkhai-vms-buyer" },
     { name = "jsonschema" },
     { name = "nest-asyncio" },
@@ -959,16 +961,17 @@ requires-dist = [
     { name = "arkhai-core-registry-client", specifier = ">=0.13.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
-    { name = "arkhai-kit-alkahest", specifier = ">=0.12.0" },
+    { name = "arkhai-kit-alkahest", specifier = ">=0.13.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.7.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.8.0" },
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.12.0" },
     { name = "arkhai-kit-config", specifier = ">=0.6.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.5.0" },
-    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.1.0" },
     { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-deal-servicing", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-deal-servicing", specifier = ">=0.3.0" },
     { name = "arkhai-kit-delivery", specifier = "==0.2.1" },
     { name = "arkhai-kit-delivery-apprise", specifier = "==0.1.1" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.6.0" },
@@ -1013,7 +1016,7 @@ provides-extras = ["rl", "jupyter", "lint"]
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-core-buyer", specifier = ">=0.6.0" },
-    { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.2.0" },
     { name = "arkhai-vms-buyer", specifier = ">=0.11.0" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },

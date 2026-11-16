@@ -134,7 +134,7 @@ Both compute buyers — `market buy` and `market negotiate` for VM, `bare-metal 
 
 **What the display claims.** It shows only what an authority enforces. Reserve is reserved funds, not spend and not a cap on a dishonest seller's billing. The penalty is a ceiling, taken from what the seller has earned and not yet been paid — at the start of a deal the setup charge, and nothing when nothing is held. A filed case shows the authority's per-part `held` or `not_held` answer, never a pending refund. A setup charge is owed from approval, kept by the seller if the buyer stops, and returned only when the seller never delivered. An option whose mechanism has no lifecycle adapter, Alkahest today, is shown as making no delivery promise rather than refused for lacking one. A setup charge and a refusal to deal with churners are the seller's pricing and policy, so neither buyer asks for a minimum-spend term.
 
-**One policy, one waiver per term.** The shipped default policy, `default_buyer_refusals`, refuses an option with a lifecycle adapter that has no delivery deadline, an on-demand option with no positive penalty, and a payee stop or term end that keeps the started period; both buyers compose it over the deal-lifecycle `AuthoritySelection`, refusing before ranking, and the seller's publication diagnostic reads the same policy and wording. Each refusal has its own waiver, and one table in `buyer_terms` holds the four with their flags, help and the shorthand `--allow-unprotected-terms`, so all three commands declare the same flags; only the deadline's waiver sets the deal-lifecycle allowance for a missing deadline. A single blanket waiver was rejected because it made a caller waive four protections to pass one. The waivers in force are recorded in run metadata as `compute_term_waivers` and named, with the refusal each waives, in both pre-approval disclosures. A resumed or recovered VM run reads its waivers from that record, the ones its selection was made under, and refuses waiver flags given to the resuming command, as it refuses a new shape or clause: a resume that could add a waiver would accept an option the run never chose under it.
+**One policy, one waiver per term.** The shipped default policy, `default_buyer_refusals`, refuses an option with a lifecycle adapter that has no delivery deadline, an on-demand option with no positive penalty, and a payee stop or term end that keeps the started period; both buyers compose it over the deal-lifecycle `AuthoritySelection`, refusing before ranking, and the seller's publication diagnostic reads the same policy and wording. Each refusal has its own waiver, and one table in `buyer_terms` holds the four with their flags, help and the shorthand `--allow-unprotected-terms`, so all three commands declare the same flags; only the deadline's waiver sets the deal-lifecycle allowance for a missing deadline. A single blanket waiver was rejected because it made a caller waive four protections to pass one. The waivers in force are recorded in run metadata as `compute_term_waivers` and named, with the refusal each waives, in both pre-approval disclosures. Payment approval applies the same run's policy: both buyers hand their run's `BuyerTermsPolicy` to the payments kit's `PaymentApproval`, which refuses at approval exactly the default refusals the run did not waive. Approval reads the waivers, not the policy's authority ranking: selection ranked the dispute authority against the listing's registry, which approval cannot see, and the exact mandate check binds it to the accepted option. A resumed or recovered VM run reads its waivers from that record, the ones its selection was made under, and refuses waiver flags given to the resuming command, as it refuses a new shape or clause: a resume that could add a waiver would accept an option the run never chose under it.
 
 **Duration.** A recurring purchase may omit its horizon; a reserved one names it, and `bare-metal buy` alone supplies its configured `default_duration_seconds` for a reserved option that names none. Whether an option is reserved is the mechanism's billing projection, a `total` unit, never a payment field the buyer reads, and the run records that the default applied. VM's commands take `--duration-seconds` beside `--duration-hours` and refuse both together before any identity or registry read.
 
@@ -146,8 +146,10 @@ API-credit buys preserve the accepted option, exact Agreement, and mandate rathe
 
 ## Delivery-only ends and case evidence
 
-VM `market end` and `market bare-metal teardown` compose the same
-`kit/deal-lifecycle-buyer` half and signed canonical client
+The canonical `end` verb, VM `market end` and `market bare-metal end`, is registered
+from the `kit/deal-lifecycle-buyer` half for both domains (`market bare-metal
+teardown` is its deprecated alias, keeping the progress-only output and exit 0 its
+callers parse), and a once-only deal's end composes the signed canonical client
 `end_delivery(negotiation_id)`. They require an accepted settlement-stage run and
 address its retained storefront, not a current listing. No caller-supplied `at`
 is allowed. The storefront signs its own durable receipt instant; same-key retry
@@ -166,10 +168,12 @@ end suppresses automatic payer filing. Original case ownership/adoption and
 separate pending/unknown progress survive restart. Payment and dispute calls
 report their own authority's answers; the storefront is no payment-command relay.
 
-Stop-then-hint with priced notice, rate-stop outage retry and buyer watchdog
-execution require the rate adapter. The common retry/evidence structure does not
-claim that production rate path exists. The display separates delivery
-acknowledgement, payment effect and case protection.
+A rate deal's `end` is the buyer's own stop, then a hint, keeping service through
+any priced notice and retrying a stop the payment authority could not receive under
+its same key
+([deal-lifecycle, "Buyer surrender and cases"](../deal-lifecycle/architecture.md#buyer-surrender-and-cases)).
+The display separates delivery acknowledgement, payment effect and case protection,
+and `end` exits nonzero when the governing outcome is not accepted.
 
 The buyer keeps signed acceptance before commitment, peer/site/authority bytes and
 its own delivery/access observations separately from seller assertions. It verifies
@@ -180,6 +184,72 @@ deals retain evidence. Export preserves exact bytes and superseded commitments.
 API credits checks full authority identity at selection/approval but composes no
 buyer lifecycle evidence/filing path. See
 [buyer surrender and cases](../deal-lifecycle/architecture.md#buyer-surrender-and-cases).
+
+## The buyer's watchdog
+
+If a rate deal's resource is lost while the seller's storefront is down, the buyer is
+charged until its own stop lands. The watchdog bounds that from the buyer's side, in
+the process the buyer already runs: there is no buyer daemon, so `buy --watchdog`
+stays in the foreground instead of returning at commit. Once the deal is available it
+probes, every `--watchdog-interval` seconds, whether the deal's disclosed SSH endpoint
+accepts a connection, and after `--watchdog-threshold` consecutive failed probes it
+sends the buyer's ordinary entitled stop and hint through the rate end above,
+journals the probe evidence it acted on, and exits. It also exits when the deal ends
+by any other path or the buyer stops it. The opt-in, interval and threshold are
+persisted per deal in the buyer's profile before commit, so resuming the
+run — VM's `market buy --from <run>`, bare metal's `market bare-metal buy --from
+<run>` — re-enters the loop after a restart where the deal is still running. The probe
+loop lives in the buyer half, and each domain injects its probe, so the kit learns no
+credential format.
+
+**The probe uses no credential.** It asks only whether the disclosed endpoint accepts
+a connection; an endpoint that accepts connections while refusing the buyer's key
+passes, so the watchdog covers one failure, the endpoint no longer accepting
+connections, not the buyer's workload or login. An authenticated probe was rejected:
+the stop the watchdog sends cannot be undone, and an authenticating probe would turn a
+key the buyer rotated, an exhausted connection limit or a slow login into that stop,
+and bring the buyer's credential into the loop.
+
+**The bound is conditional, and stated as one wherever the watchdog is described.**
+Only while the command runs, the loss of that endpoint is detected within at most
+`interval × threshold + probe timeout`; the authority's acknowledgement and any priced
+notice come after that, and billing runs until the stop lands. The bound holds
+because each probe starts on schedule: a probe and the loop's check that the deal has
+ended run side by side, each cut off at the probe timeout, the probe timeout never
+exceeds the interval (an opt-in with a shorter interval shortens the default timeout
+to it), and the schedule runs on a monotonic clock, so a wall-clock step cannot
+postpone a probe. The defaults are conservative — a 60-second interval, five probes
+and a 10-second timeout — because a transient outage must persist before an
+irreversible stop. The watchdog sends nothing the buyer could not send by hand and
+asks nothing new of the authority.
+
+**The status rests on the last probe.** Every probe, passed or failed, records its
+wall-clock instant per deal beside the opt-in. The buyer's deal read — `market
+delivery` in VM and `market bare-metal delivery` in bare metal, registered from the
+buyer half beside `end` — shows `monitored` while `now − last probe ≤ interval + probe
+timeout` plus a small fixed grace, `stopped` once the watchdog has journaled its stop,
+and `unmonitored` otherwise, a deal never opted in included. So a crashed, killed or
+hung loop reads as unmonitored, never as protected; the opt-in alone says only that
+the buyer asked for a monitor. The status is the buyer's knowledge of its own process:
+the buyer half computes it when it composes the read and the CLI displays it beside
+the lifecycle read; no lifecycle wire model carries it and the storefront neither sees
+nor reports it. The freshness rule compares a kept instant with the reader's wall
+clock, which a backward step makes look fresher by the step, an accepted limitation
+since the reader is another process.
+
+A stop the authority refuses is final under its operation key and leaves the deal
+billing: the watchdog exits with a `rejected` outcome, never `stopped`, names
+immediate surrender (`end --end-now-regardless`) as the buyer's remaining route
+without taking it, and `buy` exits nonzero, as `end` does for a stop the authority did
+not accept. The read still shows `stopped`, meaning the watchdog journaled its stop,
+beside the lifecycle read's payment state.
+
+While end service refuses every rate deal's commit no rate deal reaches `available`,
+so the loop, its stop and its status are proven without a delivered deal; the
+delivered-deal cases — the real `buy` probing from `available`, access lost with the
+storefront stopped yielding a single buyer stop, a killed command reading
+`unmonitored` once its last probe goes stale, and a resumed run reading `monitored` —
+run once rate servicing delivers rate deals.
 
 ## Current limits
 

@@ -6,22 +6,47 @@ not parsed JSON, so exporting evidence never reconstructs signed bytes.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 from market_identity import AuthenticatedRequest, AuthenticatedResponse, Identity
-from pydantic import Base64Bytes, BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    Base64Bytes, BaseModel, ConfigDict, Field, JsonValue, SerializerFunctionWrapHandler, model_serializer,
+    model_validator,
+)
 
 Reference = Annotated[str, Field(min_length=1)]
 Instant = Annotated[int, Field(strict=True, ge=0)]
 Amount = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]*)$")]
-CommandKind = Literal["start", "stop", "reverse", "dispute", "delivery_end", "append"]
-PaymentEventKind = Literal["start", "stop", "collect", "reverse", "award", "return", "extend", "lift"]
+CommandKind = Literal["start", "stop", "notice", "reverse", "dispute", "delivery_end", "append"]
+PaymentEventKind = Literal["start", "stop", "stop_request", "collect", "reverse", "award", "return", "extend", "lift"]
 DisputeEventKind = Literal["filed", "appended", "ruled", "closed"]
 LifecycleState = Literal["unstarted", "running", "ending", "ended", "repair_required"]
 
 
 class WireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class ReleasedReadShape(WireModel):
+    """A read model whose fields added since release 0.1.0 are omitted at their defaults.
+
+    Release 0.1.0's models forbid unknown fields, and its clients validate a
+    seller's lifecycle read and list with them. A once-only deal carries no
+    rate observation and no stop treatment, so leaving those fields out of the
+    dump keeps its read valid for those clients, while a reader of this version
+    restores the omitted defaults.
+    """
+
+    _omitted_at_default: ClassVar[frozenset[str]] = frozenset()
+
+    @model_serializer(mode="wrap")
+    def _released_shape(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for name in self._omitted_at_default:
+            if name in data and getattr(self, name) == type(self).model_fields[name].get_default(
+                    call_default_factory=True):
+                del data[name]
+        return dict(data)
 
 
 class LifecycleCommand(WireModel):
@@ -42,7 +67,9 @@ class EvidenceItem(WireModel):
     context: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-class PaymentEvent(WireModel):
+class PaymentEvent(ReleasedReadShape):
+    _omitted_at_default = frozenset({"settles_through"})
+
     negotiation_id: Reference
     commitment_ref: Reference
     part: Reference
@@ -55,6 +82,7 @@ class PaymentEvent(WireModel):
     extension_ref: Reference | None = None
     sequence: Annotated[int, Field(strict=True, ge=0)]
     authority_record_ref: Reference
+    settles_through: Literal["started_period", "last_boundary", "stop"] | None = None
 
     @model_validator(mode="after")
     def required_effect_fields(self) -> PaymentEvent:
@@ -202,13 +230,30 @@ class OpenExtension(WireModel):
     until: Instant | None
 
 
-class AuthorityView(WireModel):
+class PaymentPartObservation(WireModel):
+    """Verified payment bounds, with requests distinct from controlling ends."""
+
+    part: Reference
+    started_at: Instant | None = None
+    end_at: Instant | None = None
+    funded_through: Instant | None = None
+    initial_reservation: bool | None = None
+    pending_stop: PaymentEvent | None = None
+    final_stop: PaymentEvent | None = None
+    release_at: Instant | None = None
+    evidence_ref: Reference
+
+
+class AuthorityView(ReleasedReadShape):
+    _omitted_at_default = frozenset({"parts"})
+
     outcome: LifecycleOutcome
     # None means the adapter cannot supply a complete payout observation.
     # Completed parts use their first verified completion observation, not a forecast.
     payouts: dict[str, Instant | None] | None = None
     state: LifecycleState | None = None
     events: list[PaymentEvent] = Field(default_factory=list)
+    parts: list[PaymentPartObservation] = Field(default_factory=list)
     disputes: list[DisputeEvent] = Field(default_factory=list)
     cases: list[CaseRecord] = Field(default_factory=list)
     extensions: list[OpenExtension] = Field(default_factory=list)
@@ -262,7 +307,9 @@ class LifecycleRead(WireModel):
     filings: list[FilingProgress] = Field(default_factory=list)
 
 
-class DealSummary(WireModel):
+class DealSummary(ReleasedReadShape):
+    _omitted_at_default = frozenset({"parts"})
+
     negotiation_id: Reference
     commitment_ref: Reference
     domain: Reference
@@ -270,6 +317,7 @@ class DealSummary(WireModel):
     entitlements: dict[str, JsonValue]
     state: LifecycleState
     deadline: Instant | None = None
+    parts: list[PaymentPartObservation] = Field(default_factory=list)
     has_open_extension: bool
     open_cases: list[Reference]
     filings: list[FilingProgress] = Field(default_factory=list)

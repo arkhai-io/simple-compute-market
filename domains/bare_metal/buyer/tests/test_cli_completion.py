@@ -139,7 +139,7 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     def registry(_config, _identity):
         yield SimpleNamespace(get_listing=lambda _listing_id: listing)
 
-    seen: dict[str, Any] = {"negotiations": [], "acceptances": [], "settlements": []}
+    seen: dict[str, Any] = {"negotiations": [], "acceptances": [], "settlements": [], "approval_policies": []}
 
     def negotiate(**kwargs: Any) -> NegotiationOutcome:
         seen["negotiations"].append(kwargs)
@@ -167,7 +167,11 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     monkeypatch.setattr(cli, "registry_client", registry)
     monkeypatch.setattr(cli, "negotiate_with_seller", negotiate)
     monkeypatch.setattr(cli, "BUYER_STAGES", {option.settlement_schema: stage})
-    monkeypatch.setattr(cli, "payment_approval", lambda _config: object())
+    def approval(_config: Any, *, terms_policy: Any = None) -> object:
+        seen["approval_policies"].append(terms_policy)
+        return object()
+
+    monkeypatch.setattr(cli, "payment_approval", approval)
     return seen
 
 
@@ -196,6 +200,40 @@ def test_buy_records_dictionary_terms_when_the_deal_is_agreed(
     assert ended["status"] == "agreed"
     assert ended["accepted_provision_terms"] == _ACCEPTED_TERMS
     assert ended["transaction_id"] == "transaction-1"
+
+
+def test_the_accepted_agreement_is_shown_before_the_payment_is_approved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The accepted Agreement's money rows reach stderr before the settlement stage,
+    which approves the payment, is entered. The lane scenarios assert the rows'
+    content; this is where their order is proved."""
+    seen = _compose(monkeypatch, tmp_path, _PAYMENT,
+                    _payment_outcome(amount=1_000_000, duration_seconds=3600))
+    order: list[str] = []
+    echo, settle = cli.typer.echo, cli.BUYER_STAGES[_PAYMENT.settlement_schema].settle
+
+    def recorded_echo(message: Any = None, *args: Any, **kwargs: Any) -> None:
+        order.append(str(message))
+        echo(message, *args, **kwargs)
+
+    def recorded_settle(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+        order.append("<approval>")
+        return settle(**kwargs)
+
+    monkeypatch.setattr(cli.typer, "echo", recorded_echo)
+    cli.BUYER_STAGES[_PAYMENT.settlement_schema].settle = recorded_settle
+
+    result = _buy(3600)
+
+    assert result.exit_code == 0, result.output
+    assert len(seen["settlements"]) == 1
+    approval = order.index("<approval>")
+    title = order.index("Accepted Agreement: price, horizon and lifecycle terms before approval")
+    assert title < approval
+    shown = order[title:approval]
+    assert any(line.startswith("  Accepted price:") for line in shown), shown
+    assert any(line.startswith("  Initial reserve:") for line in shown), shown
 
 
 def _payment_outcome(
@@ -479,6 +517,15 @@ def test_each_waiver_used_is_recorded_and_named_before_approval(
                 "waived by --allow-no-delivery-deadline") in disclosure
         (named,) = [line for line in disclosure.splitlines() if "Waivers in force:" in line]
         assert [flag for flag in recorded if flag in named] == recorded
+    # Payment approval refuses by the same run's policy, so a waived term is
+    # not refused again after the seller accepts.
+    (policy,) = seen["approval_policies"]
+    assert sorted(policy.waivers) == sorted(
+        term for term, flag in (
+            ("no_delivery_deadline", "--allow-no-delivery-deadline"), ("no_penalty", "--allow-no-penalty"),
+            ("charged_preemption", "--allow-charged-preemption"), ("charged_term_end", "--allow-charged-term-end"),
+        ) if flag in recorded
+    )
 
 
 def test_a_run_without_waivers_records_none(

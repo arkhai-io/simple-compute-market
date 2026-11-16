@@ -218,7 +218,7 @@ def test_bare_metal_complete_deal(
     )
     assert first_access is SshOutcome.ACCEPTED
 
-    surrendered = recover("teardown")
+    surrendered = recover("end")["progress"]
     assert surrendered["delivery"]["status"] == "accepted", surrendered
     assert surrendered["acknowledgement"]["receipt_at"] is not None, surrendered
     teardown = wait_for_release(

@@ -16,6 +16,8 @@ class AuthoritySelection:
     Contexts declare the installed payment capabilities and dispute interfaces.
     The owning buyer composition supplies them, along with registry-local policy.
     A rank of None refuses the option; lower ranks prefer accepted authorities.
+    Each distinct refusal reason is kept, in the order first met, so a buyer
+    left with nothing to select can be told why.
     """
 
     def __init__(
@@ -25,8 +27,16 @@ class AuthoritySelection:
         self.authorities = {url.rstrip("/"): tuple(entries) for url, entries in authorities_by_registry.items()}
         self.contexts = dict(contexts)
         self.report = report
+        self.refusals: dict[str, None] = {}
 
     def rank(self, mechanism: str, lifecycle: object, *, registry_url: str = "") -> int:
+        try:
+            return self._rank(mechanism, lifecycle, registry_url=registry_url)
+        except ValueError as exc:
+            self.refusals.setdefault(str(exc))
+            raise
+
+    def _rank(self, mechanism: str, lifecycle: object, *, registry_url: str) -> int:
         context = self.contexts.get(mechanism, TermContext(mechanism=mechanism, has_adapter=False))
         if context.mechanism != mechanism:
             raise ValueError("selection context names another mechanism")

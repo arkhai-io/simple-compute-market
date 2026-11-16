@@ -135,7 +135,10 @@ from mechanism scope. Thin client kits — `kit/site-client`, `kit/resource-pool
 `kit/capacity-publication`, `kit/pool-overrides` and `kit/deal-servicing` are
 storefront-side kits in the same area as `kit/storefront`: composed by storefronts,
 never by a site or a buyer. Servicing owns end/admission/filing journals, watch
-cursors, respondent answers and seller evidence, not financial authority.
+cursors, respondent answers and seller evidence, not financial authority. The
+payments transaction adapter is stateless and mechanism-owned in `kit/arkhai-payments`;
+the journals its operations are recorded through, and the servicing of a running
+deal, belong to `kit/deal-servicing`'s end service, which the adapter never imports.
 
 The **buyer-side area**, `kit/deal-lifecycle-buyer`, depends only on foundation
 libraries/contracts and is consumed only by buyer compositions. Domains inject
@@ -912,8 +915,19 @@ The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(m
 The payments service owns ledger, fees, hold release/extensions and cash providers;
 the independent Agreement-named dispute authority owns cases, rulings and remedies. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain source evidence is the seller's verified delivery gate, distinct from
 mutable delivery journals and private results. Compute payment buyers send canonical
-`commit`; API credits retains settle. Once-only adapters read/watch and reverse,
-never start/stop. Shared lifecycle servicing retains independent payment/dispute
+`commit`; API credits retains settle. One payments transaction adapter serves every
+mandate by composition: shared verified reads, descriptor recording and refusal
+classification, `once` behaviour (reverse, extend, observations) for every deal, and
+rate behaviour (start, stop, notice, rate observations and pure delivery-phase
+authorization) composed in when the mandate has a time-rate part, whose
+`partialPeriod` terms let the payment authority price the period in progress
+([settlement servicing, "Charge-first payment settlement"](../../openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement)).
+Every monetary rate operation is recorded through the caller's operation store before
+it is sent. A servicing declaration enables recurring offers but not their execution:
+end service refuses to commit a rate deal while it services none, the one place
+delivery fails closed before rate servicing
+([deal-lifecycle, "One end instant, transactional admission"](../../openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission)).
+Shared lifecycle servicing retains independent payment/dispute
 cursors, current refresh outcomes and exact signed records. End service journals
 the earliest attributed request plus required filing/classification atomically and
 orders delivery admission through caller-session revision/CAS. It terminates due
@@ -1025,8 +1039,14 @@ Whether a `failed` aggregate is compensable is one predicate, `compute_provision
 Capacity is freed only behind a release guard. `kit/site`'s ledger consults a `CapacityReleaseGuard` inside every transaction that reclaims capacity: a release, a lapsed TTL hold, and a resize's supersede step. A refused reclaim changes nothing. The site cannot see what was delivered, so the guard is supplied by the provisioning composition. That guard, `FulfillmentReleaseGuard`, permits a `torn_down` aggregate, or an undelivered one whose provenance proof holds. Capacity therefore never returns to scheduling, whoever asks, until teardown is proven, nothing was dispatched, or an operator explicitly force-releases after external verification. The audit state distinguishes forced release from proven teardown.
 
 End service retains source/actor/cause/evidence even before a lease exists. Both
-compute buyer end verbs use receipt-time surrender through the canonical client;
-they do not invent payment stops or once refunds. A signed site end is retained
+compute buyers' canonical `end` verb (`market end`, `market bare-metal end`) uses
+receipt-time surrender through the canonical client for a once-only deal, inventing
+no payment stop or once refund; for a rate deal it is the buyer's own stop at the
+payment authority, then a hint, with service kept through any priced notice. A spot
+seller's `deals preempt` sends its notice as one stop the payment authority holds
+pending, and administrator interruption classifies preemption and failure in the
+shared seller half
+([deal-lifecycle, "Seller notice and administrator interruption"](../../openspec/specs/deal-lifecycle/architecture.md#seller-notice-and-administrator-interruption)). A signed site end is retained
 and returned verbatim, not reinterpreted as capacity return. Due ends terminate
 immediately; future ends truncate the immutable lease horizon. Storefront teardown goes through lease termination. A storefront never frees a delivered reservation's capacity itself. Buyer teardown at the bare-metal storefront terminates the lease at the reservation's site, which is the release path expiry takes. A repeated teardown finds the same `releasing` or `released` lease. The storefront marks its own lifecycle released only on the site's capacity-released callback.
 
@@ -1061,7 +1081,9 @@ operated sites and storefronts — for example, a site writing a declaration tha
 storefront release cannot yet read. Designs record where such ordering would matter,
 to be revisited once operators are no longer all known, at the first major release.
 How packages are versioned until then is
-[`package-versions.md`](../guidance/repository/package-versions.md#before-100).
+[`package-versions.md`](../guidance/repository/package-versions.md#before-100), and
+migration and backwards compatibility are engineered only for what has been deployed
+([`package-versions.md`, "Compatibility is owed to what a release has shipped"](../guidance/repository/package-versions.md#compatibility-is-owed-to-what-a-release-has-shipped)).
 
 ## Build, packaging, and initialization
 

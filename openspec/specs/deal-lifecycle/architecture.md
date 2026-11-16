@@ -37,8 +37,9 @@ part's own end plus the agreed dispute window, independently of approval expiry.
 Only the accepted dispute authority receives extend/lift permission and its cap
 is carried into every part (null means unbounded). Party stop entries derive only
 from entitlements; notice and partial-period treatment cannot be waived locally.
-The codec maps started_period/last_boundary/stop to charged/returned/prorated.
-Rate execution is not supplied by the once-only adapter.
+The codec maps started_period/last_boundary/stop to charged/returned/prorated,
+which the payment authority prices; the payments transaction adapter composes rate
+behaviour in only for a mandate with a rate part.
 
 The dispute authority advertises its minimum window as a nonnegative safe integer;
 the consumer does not substitute a fixed duration for that policy. Compute terms
@@ -141,9 +142,42 @@ that remedy. Physical teardown does not wait for filing, classification or rulin
 Due ends terminate now; future ends truncate at second precision or finer.
 Before dispatch, release only behind the site's guard; in-flight create is adopted
 then terminated. Queued teardown is never reported as released. Billing-start
-intent/key/evidence belongs to end service; delivery retains its reference. The
-neutral phase/evidence protocol exists, but once billing start is a validated
-no-op, and activation/rate/funding-timer consumers remain separate work.
+intent/key/evidence belongs to end service; delivery retains its reference. A
+once-only deal's billing start is a validated no-op.
+
+**End service refuses to commit a rate deal it cannot service.** A servicing
+declaration says which treatments the payment authority executes, not that the
+storefront services a delivered rate deal, and no storefront services one: a delivered
+rate deal would run with billing started and nobody acting on the buyer's stop,
+exhaustion or a pending seller stop. So `EndService.authorize_delivery` refuses the
+commit phase of any deal that is not once-only — `SellerDeal.once_only`, the committed
+seller projection every domain registers with the deal's delivery record, false or
+never set — before it asks the payment adapter and before the delivery path places
+any capacity. This is the one place delivery fails closed before rate servicing. The
+refusal does no I/O, is shared by both compute domains, is journaled through
+admission under its operation identity, and carries the closed code
+`rate_servicing_unavailable` on `DeliveryAuthorization`, which the compute delivery
+path reports as a repair reason
+([compute delivery, "Commit and hold adoption"](../compute-delivery/architecture.md#commit-and-hold-adoption)).
+It is unconditional, naming no seam, until rate servicing is composed and replaces it.
+
+**The deadline barrier.** A refused rate deal waits in repair, with nothing reserved
+by delivery, until the deadline rule above classifies non-delivery and files
+`delivery_end(cause=payee, delivered=false)`, which returns a priced setup part. A
+rate buyer ends at the payment authority, and its hint is a courtesy lost while the
+storefront is down, so end service learns of the stop only when the payment watch
+records the authority's final stop. For a deal that is not once-only, admission's
+missed-deadline branch therefore acts only on a successful payment observation made
+at or after the deadline that shows no lawful end effective at or before it. Until
+one is made admission answers `awaiting_observation` at the unchanged revision; end
+service keeps an answer that admits nothing and turns an allow into pending, so
+nothing is recorded or filed. Both domains' recovery reads the payment authority
+before it admits a deadline. The observation instant is the storefront-clock instant
+taken before each successful payment read, kept in `servicing_payment_observations`
+in the transaction that records what the read showed. An authority outage delays the
+setup's return while the buyer's money stays held at the authority. Once-only deals
+keep the rule without the barrier, since their buyer ends at the storefront and
+nothing earlier can go unobserved.
 
 ## Background readiness adoption
 
@@ -163,8 +197,11 @@ observe progress, but they are not required to drive it.
 
 ## Buyer surrender and cases
 
-`market end --from <run>` and `market bare-metal teardown` use the same lifecycle
-client through the buyer half, with recorded profile signer and storefront trust.
+The buyer's canonical `end` verb, `market end` and `market bare-metal end`, is
+registered from the buyer half (`register_end_command`) and uses the same lifecycle
+client in both domains, with recorded profile signer and storefront trust;
+`market bare-metal teardown` is its deprecated alias, printing a notice naming `end`.
+For a once-only deal `end` is the surrender below.
 end_delivery has no supplied at: the seller signs its durable receipt time and
 preserves it on retry. It ends delivery immediately, even before fulfillment or
 without a financial adapter. Once-only/Alkahest surrender invents no refund or stop;
@@ -181,9 +218,19 @@ is evidence a person weighs against the buyer's own records, and silence rules
 nothing. An uncertain surrender
 is retried under the same key before a claim is fixed; a selected earlier seller
 end suppresses automatic payer filing. Delivery acknowledgement, payment command
-and case protection are distinct outcomes. Rate stop-then-hint, notice-preserving
-service and outage retry execution require a rate adapter; the storefront is never
-a buyer payment-command relay.
+and case protection are distinct outcomes.
+
+A rate deal's normal end is the buyer's own stop: `end` journals the payer's stop at
+the payment authority, then sends a stable-key `hint`. With a nonzero payer notice it
+sends no `end_delivery`, and delivery continues until watch observes the effective
+stop and end service acts. A hint or read failure never changes the stop's outcome.
+When the payment authority cannot be reached, the buyer half keeps the journaled stop
+and retries it under the same key, and billing runs until it lands; the storefront is
+never a buyer payment-command relay and cannot stop the buyer's billing.
+`end --end-now-regardless` sends `end_delivery` after the stop, surrendering service
+before the paid notice expires, and escalation reuses the original stop. The buyer's
+watchdog sends the same stop
+([buyer orchestration, "The buyer's watchdog"](../buyer-orchestration/architecture.md#the-buyers-watchdog)).
 
 Case payloads include exact Agreement, commitment, terms, fixed claim and ordered
 exact evidence; no payment attachment is required. The mediation adapter alone
@@ -211,6 +258,37 @@ are skipped and local unresolved rows retry fairly. Deal watch uses the same
 case-keyed answer, waits rather than replacing it, and may advance on confirmed
 closure. Discount-only rulings do not end delivery. SCM preserves signed aggregate
 penalty answers without inventing per-part monetary decomposition.
+
+## Seller notice and administrator interruption
+
+A spot seller's notice is one command at the payment authority. It runs through the
+seller-authenticated, negotiation-keyed lifecycle `submit` as kind `notice`, admitted
+only when the accepted Agreement — never today's listing — grants the payee a stop
+entitlement and its adapter supports rate stops. It submits the stop at once with the
+explicit affected parts and an optional future `at`, which cannot shorten the
+authority's notice. The authority hosts the pending stop and its `partialPeriod`, so
+nothing schedules a stop locally and the storefront need not resume for it to take
+effect; the command returns the authority's pending stop and effective time, or
+pending, unknown or rejected, and a lost response is resolved by `read`. An earlier
+buyer stop wins at the authority, and repeating the notice cannot postpone it.
+Lifecycle `read` and `list` expose each part's pending and final stops
+(`authority.parts`). A stop request stays distinct from a final stop and never ends
+delivery; the routes omit the empty parts and treatment fields a once deal carries,
+so its read stays valid for clients of the released contracts. The operator verb is
+`deals preempt <negotiation-id>` in both storefront CLIs, through the typed seller
+lifecycle client, printing the authority's outcome unchanged. An on-demand refusal
+names `delivery_end` as the path for actual seller non-delivery only, and files
+nothing.
+
+Administrator interruption states its cause, `interruption_kind = preemption |
+failure`, beside a free-text reason. `kit/deal-servicing`'s seller half classifies it,
+and both compute storefronts mount the administrator route over that classification:
+preemption is `notice`, refused without a payee entitlement; failure journals the
+operator end, then files `delivery_end(cause=payee)` and drives physical teardown side
+by side. A rate deal, recognised by the committed `SellerDeal.once_only`, must state
+its kind; a once-only deal defaults to failure, as the released route's callers
+expect. The operation key is derived from the request when the caller sends none, and
+a same-key retry changing the administrator or reason is refused.
 
 ## Site evidence and retention
 
@@ -255,6 +333,25 @@ and agreed finite/unbounded caps constrain extensions. Late cases cannot recover
 paid-out money. Funding and scheduled rate stops are authority behavior, not local
 clock-derived corrections.
 
+The published per-part contract carries authorities per part — `{stop: [{account,
+notice, partialPeriod}], reverse, extend, start}`, `start` on rate parts — and
+`partialPeriod` ∈ `charged | returned | prorated | chosen` on stop entries, on every
+part end and on the pending and final stop records. An entitled stop takes effect at
+`max(at ?? now, now + senderNotice)` at authority receipt and is never backdated; the
+earliest pending stop wins and cannot be withdrawn; no stop privilege is implied by a
+role, and there is no payee waiver of payer notice or payer early release. Approval
+reserves the first batch; periods begin at the payee's `start` but stay reserved until
+the period ends or the part stops. Exhaustion stops every co-funded part at
+`fundedThrough`, and a part's `end` stops it, each with cause `terms`, even if no party
+acts. A stop's `settled` figures are not restated after a later reversal, so
+reconciliation reads the recorded reversals, and approval answers
+`409 insufficient_funds` when the payer cannot cover the first reservation. The
+producer's own qualification is closed at switch-on, never by a double: its
+independent HTTP run covered fixed payer and payee treatment only, not `chosen`, term
+ends or reverse; its stop-retry vectors are fixed-clock fixtures; and declaring any
+rate treatment presupposes that the payment authority executes the dispute entry's
+`chosen` stop, which hosted execution has not yet shown.
+
 Mediation verifies the case-carried Agreement against mandate.deal. Its one claim
 is delivery_end {ended_at, delivered, cause=payee|payer}. Signed concurrence binds
 the Agreement digest, exact claim and Agreement seller, framed through identity
@@ -288,8 +385,9 @@ not a payments response passed through. No SCM computed remedy substitutes.
 
 - The Agreement pins dispute origin and record key for deal/case life, potentially
   unbounded. No mid-deal address/key rotation is followed: a new origin is not
-  redirected to and a new signer fails verification. Payments receipt identity
-  overlap does not solve dispute identity history or signed successor hand-off.
+  redirected to and a new signer fails verification. A payments receipt key change
+  is a drained cutover and addresses neither dispute identity history nor a signed
+  successor hand-off.
 - VM caches respondent pollers by accepted authority/account; bare metal constructs
   them per cycle. Both persist cursor/answer state, but lifetimes differ. Bare metal
   records local term-end final requests after checking admission; VM's recovery
@@ -302,10 +400,11 @@ not a payments response passed through. No SCM computed remedy substitutes.
   access/revocation qualification is established by mock/in-process passes.
 - Hosted development mediation is on an older revision than the vendored contract.
   Isolated local real-authority runs do not upgrade or qualify that hosted target.
-- Production rate start/stop and stop/hint retry belong to rate servicing;
-  funding timers, revised-remedy execution and consolidated rate/ruling execution
-  qualification are later Goal 8 work. Current foundations and once-only case
-  filing/observation do not claim those outcomes.
+- No storefront services a running rate deal: end service refuses to commit one,
+  and funding timers, revised-remedy execution and consolidated rate/ruling
+  execution qualification are later Goal 8 work. Rate commands, the rate buyer end
+  and seller notice are proven against in-process authorities and the lane doubles,
+  never against a deployed authority.
 - API-credit options carry authorities/holds and validate authority identity, but
   their roles compose no lifecycle evidence/watch/respondent or buyer filing path.
   Reversal consequences for already-issued credits are unspecified.

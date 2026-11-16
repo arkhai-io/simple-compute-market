@@ -49,8 +49,10 @@ An architecture companion does not replace a normative requirement. When explana
 |---|---|
 | Peer mechanism registration, typed configuration, readiness, and account/credential separation | [Settlement configuration](settlement-configuration/spec.md) and [architecture](settlement-configuration/architecture.md) |
 | Exact Agreement bytes and shared opaque `settlement_data` persistence | [Negotiation protocol](negotiation-protocol/spec.md) |
-| Post-commitment counterparts, lifecycle terms, end/admission journals, evidence, cases and current limits | [Deal lifecycle architecture](deal-lifecycle/architecture.md) |
-| Mandate derivation, transaction identity, signed receipts/snapshots, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
+| Post-commitment counterparts, lifecycle terms, end/admission journals, seller notice, the rate buyer end, evidence, cases and current limits | [Deal lifecycle architecture](deal-lifecycle/architecture.md) |
+| Mandate derivation, rate and setup parts, the composed payments transaction adapter, transaction identity, signed receipts/snapshots, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
+| Recurring payments presets and the servicing declaration's doors | [Storefront publication](storefront-publication/spec.md) and [architecture](storefront-publication/architecture.md) |
+| The buyer's watchdog | [Buyer orchestration architecture](buyer-orchestration/architecture.md#the-buyers-watchdog) |
 | Negotiate → settle → provision composition and external payments authority | [Market composition](market-composition/spec.md) and [repository architecture](../../docs/development/ARCHITECTURE.md) |
 | Receipt-gated selected-site execution and idempotent credit issuance | [Physical provisioning](physical-provisioning/spec.md) and [API credits](api-credits/spec.md) |
 | Compute delivery order after verified settlement: Agreement window, authorization, activation before billing start, the undelivered hand-off and live credential reads | [Compute delivery](compute-delivery/spec.md) and [architecture](compute-delivery/architecture.md) |

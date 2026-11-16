@@ -135,6 +135,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _unix_now() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
+
+
 def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchdogPolicy:
     """The negotiation watchdog's timeout and sweep interval, as configured."""
     return NegotiationWatchdogPolicy(
@@ -220,6 +224,11 @@ class BareMetalStorefrontRuntime:
     #: The time a confirmation's age is measured at.
     source_confirmation_clock: Callable[[], datetime] = field(
         default=_utc_now, repr=False, compare=False
+    )
+    #: The Unix-second clock deal servicing reads: end service's admission, the
+    #: payment watch's observation instants and the delivery path's steps.
+    lifecycle_clock: Callable[[], int] = field(
+        default=_unix_now, repr=False, compare=False
     )
     #: The live Alkahest client map, which ``alkahest_chain_probe`` updates in
     #: place as it rebuilds a client; every consumer holds this one map.

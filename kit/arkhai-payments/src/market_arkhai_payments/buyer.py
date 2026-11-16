@@ -8,10 +8,14 @@ Agreement on the seller's behalf; attachment at approval is the buyer's own poli
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from market_core.schemas import Agreement
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
+from market_settlement_runtime.rate_publication import default_buyer_refusal, default_buyer_refused_terms
 from pydantic import ValidationError
+from market_deal_lifecycle.terms import TermContext
 
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
@@ -21,20 +25,35 @@ from market_arkhai_payments.agreement import (
 )
 from market_arkhai_payments.errors import (
     MandatePolicyError,
-    PaymentApprovalDeclined,
+    PaymentApprovalDeclined, PaymentApprovalInsufficientFunds, PaymentsAPIError,
     ReceiptVerificationError,
 )
-from market_arkhai_payments.mandates import check
+from market_arkhai_payments.mandates import SUPPORTED_PARTIAL_PERIODS, check
 from market_arkhai_payments.models import AccountId, Mandate
 from market_arkhai_payments.receipts import verify_receipt, verify_snapshot
 from market_arkhai_payments.seller import ClientForOwner
 from market_arkhai_payments.settlement_config import (
+    ARKHAI_PAYMENTS_MECHANISM,
     ArkhaiPaymentsConfig,
     ArkhaiPaymentsConfigurationError,
     payments_client_for_owner,
 )
 
 ConfirmPayment = Callable[[Mandate, str], bool]
+
+
+def approvable_terms(context: TermContext) -> TermContext:
+    """A buyer's payments term context, with the terms this helper can take.
+
+    It approves a rate part that a stop ends, each mandate encoding the stop
+    entries and term end its Agreement's partial-period treatments name, so a
+    buyer selects exactly the options whose mandate it can re-derive and approve.
+    """
+    if context.mechanism != ARKHAI_PAYMENTS_MECHANISM:
+        raise ValueError(f"{context.mechanism} is not {ARKHAI_PAYMENTS_MECHANISM}")
+    return replace(
+        context, has_stoppable_part=True, supported_partial_periods=SUPPORTED_PARTIAL_PERIODS,
+    )
 
 
 class PaymentApproval:
@@ -46,6 +65,7 @@ class PaymentApproval:
         payer_account: str,
         *,
         client_for_owner: ClientForOwner | None = None,
+        terms_policy: BuyerTermsPolicy | None = None,
     ) -> None:
         if (
             config.fee_bps is None
@@ -55,6 +75,7 @@ class PaymentApproval:
                 "payments fee policy and service identity are required"
             )
         self.config = config
+        self.terms_policy = terms_policy
         self.payer_account = AccountId.model_validate(payer_account).root
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
@@ -83,6 +104,18 @@ class PaymentApproval:
             agreement, self.config, expected_payer=self.payer_account
         )
         check(data.mandate, agreement, policy)
+        if policy.option.period is not None:
+            # Approval refuses the terms a default buyer refuses, less the ones
+            # this buyer's run waived. The dispute authority was ranked against
+            # the listing's registry at selection, which approval cannot see, and
+            # the mandate check above already binds it to the accepted option.
+            waivers = self.terms_policy.waivers if self.terms_policy is not None else frozenset()
+            refused = [
+                term for term in default_buyer_refused_terms(policy.lifecycle, has_adapter=True)
+                if term not in waivers
+            ]
+            if refused:
+                raise MandatePolicyError("; ".join(default_buyer_refusal(term) for term in refused))
         return agreement, data
 
     def approve(
@@ -102,7 +135,12 @@ class PaymentApproval:
         assert self.config.service_identity is not None
         attachment = agreement if self.config.attach_agreement else None
         with self._client_for_owner(self.payer_account) as client:
-            approved = client.approve(data.mandate, agreement=attachment)
+            try:
+                approved = client.approve(data.mandate, agreement=attachment)
+            except PaymentsAPIError as exc:
+                if exc.status_code == 409 and exc.code == "insufficient_funds":
+                    raise PaymentApprovalInsufficientFunds() from exc
+                raise
             self._require_proof(approved, agreement, data, "approval")
             snapshot = client.poll(data.transaction_id, timeout=timeout, interval=interval)
         if not verify_snapshot(

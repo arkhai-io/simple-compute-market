@@ -22,6 +22,7 @@ from market_core.schemas import (
 )
 
 from market_deal_lifecycle.terms import LifecycleTerms
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_arkhai_payments.canonical import wire_json
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.mandates import MandatePolicy, PaymentsOptionParams, derive_mandate
@@ -111,8 +112,10 @@ def _policy(
         ) from exc
     try:
         quote = agreed_price(agreement, project_billing=payments_billing_basis)
-        if quote.unit != "total" or quote.asset is None:
-            raise MandatePolicyError("the installed payments adapter requires an asset-bearing total quote")
+        option = selected_payment_option(agreement)
+        expected_unit = "per_period" if option.period is not None else "total"
+        if quote.unit != expected_unit or quote.asset is None:
+            raise MandatePolicyError("payments quote has a different accepted billing unit or no asset")
         return MandatePolicy(
             buyer_account=payer,
             option=selected_payment_option(agreement),
@@ -144,8 +147,15 @@ class PaymentSettlementData(BaseModel):
 
     @classmethod
     def for_agreement(
-        cls, agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig
+        cls, agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig,
+        *, rate_servicing: RateServicing | None = None,
     ) -> PaymentSettlementData:
+        # Materialization is the last door before money moves, so it checks the
+        # same declaration the publication and acceptance doors check: a rate
+        # option whose treatments or setup charge are undeclared here refuses with
+        # RateServicingUnavailable, even when it was accepted before a withdrawal.
+        selected_payment_option(agreement)
+        (rate_servicing or RateServicing()).require_option(agreement["settlement"])
         mandate = derive_mandate(dict(agreement), mandate_policy_for_agreement(agreement, config))
         return cls(mandate=mandate, transaction_id=transaction_id(mandate))
 

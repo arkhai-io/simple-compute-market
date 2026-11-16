@@ -46,7 +46,8 @@ incompatible change is declared.
 
 ## One change per branch
 
-One change is implemented per branch. Recording an open question or a note in
+One change is implemented per branch, and each change is mergeable on its own merits
+into the branch it lands on. Recording an open question or a note in
 another active change's documents, or writing the proposal of a follow-up change, on
 the current branch is not working that change: the edit lands with the current
 change. A prerequisite — a change this one must wait for — is proposed apart, since

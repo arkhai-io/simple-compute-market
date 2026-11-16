@@ -5,8 +5,9 @@ tags: [engineering, implementation]
 # Implementation
 
 How production code is written: what it guards against, what it builds rather than
-reuses, how a service's layers divide the work, which party decides, and how a
-long-running worker is driven by hand.
+reuses, how shared behaviour is composed and classes are related, how a service's
+layers divide the work, which party decides, and how a long-running worker is driven
+by hand.
 
 ## No speculative guard code
 
@@ -36,7 +37,20 @@ requirements state calls for the difference, one behaviour is chosen for both an
 composed from a component both use, rather than patching the part that showed the
 defect. Two importers that each give up on a failed upload in their own way, for
 example, share one retry policy from the library both import; each keeps only what
-its own source needs, such as its file format.
+its own source needs, such as its file format. Before adding behaviour to one of two
+parts that handle one concern, check whether the other has it or needs it, so the
+difference is not introduced in the first place.
+
+## Contradictory classes do not subclass one another
+
+A subclass keeps every promise its base makes; subclassing to refine or extend
+behaviour is fine. Two classes whose behaviours contradict — one refuses what the other
+does — do not subclass one another: they implement a shared interface, or derive from a
+common base that holds only what both do. Where behaviour is shared between classes
+that otherwise differ, prefer composing it in over inheriting it. A guard switched off
+by a subclass is the sign the hierarchy is inverted. A read-only document store that
+refuses writes, for example, is not the writable store's base with a subclass switching
+the refusal off; both implement one store interface, and the writable store adds writes.
 
 ## Thin controllers
 
@@ -106,6 +120,14 @@ party cannot rely on the counterparty running a particular client, or on that
 client filling a field sensibly. An input a party needs is derived by that party
 rather than taken from the other's message, and a message missing what it must carry
 is refused at the point that acts on it, rather than read as asking for less.
+
+A timestamp is its source's claim, never an authoritative fact. Any receiver — a
+dispute authority included — orders the messages it receives by its own arrival, and
+that order holds only for that receiver. No party can prove the order in which two
+messages were originated or sent unless the later is derived from the earlier, for
+example by carrying a digest of it. A design that needs an origin order between two
+parties' messages makes the later message carry that derivation; one that needs only a
+single authority's order relies on that authority's own recorded sequence.
 
 ## Operator lifecycle controls
 

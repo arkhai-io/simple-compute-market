@@ -134,6 +134,18 @@ only that operation's filing outcome, not unrelated filings' outcomes. Filing
 acknowledgement is not a ruling; physical end work never waits for it and sends
 no payment stop or reverse.
 
+`interrupt` is the administrator interruption every compute storefront's
+interrupt route calls. `interrupt_command` classifies it from the committed
+projection: kind `preemption` is the seller's `notice`, refused without the
+accepted payee entitlement; kind `failure` is an operator `delivery_end`; a rate
+deal must name its kind, a once-only deal defaults to failure, and both need a
+reason. Each of those refusals is an `InterruptRefused` raised before any effect.
+The administrator and reason are recorded as evidence under the operation's key,
+derived from the request by `interrupt_operation_key` when the caller sends none,
+so a same-key retry changing either is refused by the evidence store. A failure journals its end before
+running the filing and the caller's physical drive side by side. A dry run
+classifies and records nothing.
+
 ## Delivery ingress
 
 `DeliveryIngress.end_delivery` verifies the accepted buyer's market envelope and
@@ -167,13 +179,16 @@ does), or an existing database worker.
 
 ## Schema
 
-No session or poller creates a table. `SERVICING_SCHEMA` holds every table and
-index the library reads and writes as `CREATE ... IF NOT EXISTS` DDL, and a
-storefront composing it applies that DDL in a migration of its own chain, with
-`create_schema(connection)` as the migration's body, so that opening the
-library's sessions changes no schema. The statements tolerate tables already present, since a
-storefront database built while sessions created these tables on first use may
-hold some of them.
+No session or poller creates a table: a storefront composing the library applies
+its DDL in migrations of its own chain, so that opening the library's sessions
+changes no schema. `SERVICING_SCHEMA` holds the tables and indexes sessions once
+created on first use, as `CREATE ... IF NOT EXISTS` DDL, applied by one migration
+with `create_schema(connection)` as its body; the statements tolerate tables
+already present, since a storefront database built while sessions created these
+tables may hold some of them. A table added since is its own set, applied by an
+ordinary migration later in the chain that tolerates nothing:
+`PAYMENT_OBSERVATIONS_SCHEMA`, the instant of each deal's latest successful
+payment observation, with `create_payment_observations(connection)` as its body.
 
 ## First use
 
@@ -188,7 +203,29 @@ make -C kit/deal-servicing typecheck
 
 The example uses only public deterministic development identities and the
 vendored mediation kit's in-process fixture. It creates its own temporary SQLite
-database, verifies and captures opening/counteroffer/admin acceptance messages,
-then displays exact-byte retention, held-money protection, post-window pruning
+database through the storefront chain's migration bodies (`create_schema`,
+`create_payment_observations`), since no session creates a table, verifies and
+captures opening/counteroffer/admin acceptance messages, then displays exact-byte
+retention, held-money protection, post-window pruning
 and restart recovery. It needs no service, credentials, deployment selector or
 resident server. It is a library demonstration, not deployed-domain acceptance.
+
+`examples/preempt_first_use.py` sends the seller's notice through the typed seller
+lifecycle client, which both compute storefronts' `deals preempt` verb delegates
+to, over signed lifecycle routes backed by the payments kit's vendored authority
+and the mediation fixture. Its options are the shipped spot and on-demand presets
+under the lane-only servicing declaration in `examples/preempt.lane.toml`,
+approved by a default buyer; a charged variant is refused by a default buyer and
+approved only through per-term waivers. It shows a lost notice response read back
+as a pending stop, its same-key retry, the on-demand refusal naming
+`delivery_end`, a changed retry refused, a buyer refused as administrator, and an
+earlier payer stop kept as the winner. No rate delivery is installed. Its JSON is
+labelled lane-double evidence, never live evidence, with the installed payments
+contract's identity and hashes, the in-process target's mode, the control trace of
+each funding and lost response the fixture applied, and each observation's buyer
+waivers: none for the default buyer, each charged term by name for the charged
+variant. Its fixture asset is `USD/6`.
+`tests/integration/test_preempt_first_use.py` runs it with the kit's suite;
+`tests/integration/test_first_use_examples.py` runs the other examples the
+`first-use` target runs that hold a database, and `tests/unit/test_budget_first_use.py`
+the budget example.

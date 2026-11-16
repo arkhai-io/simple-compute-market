@@ -16,7 +16,7 @@ from pydantic import SecretStr
 
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndService, EndSession, PhysicalResult,
-    SellerDeal, SellerServicing, SellerSession,
+    SellerDeal, SellerServicing, SellerSession, create_payment_observations, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -40,6 +40,10 @@ async def main():
     has_credential = [True]
     with TemporaryDirectory(prefix="seller-api-") as root:
         path = Path(root) / "storefront.sqlite"
+        with transaction(path) as conn:
+            # The storefront chain's migrations, which no session runs.
+            create_schema(conn)
+            create_payment_observations(conn)
         physical = DemoDelivery()
         end = EndService(path, physical, clock=lambda: now[0])
         # Public deterministic fixture credential; never use on a public network.

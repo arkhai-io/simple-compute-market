@@ -642,9 +642,9 @@ delivered host's key (`ARKHAI_E2E_BARE_METAL_KNOWN_HOSTS_FILE`), and the registr
 purchase settings under `BARE_METAL`; without any of them it skips, naming it.
 
 It buys through `buy`, then reads the run back with `result`, `access`, and
-`teardown`, each given `--run-id` and the id `buy` printed. Every access attempt is
+`end`, each given `--run-id` and the id `buy` printed. Every access attempt is
 a fresh SSH process that reads no configuration and checks the host's key strictly
-against the pinned file. Teardown repeats `teardown --run-id` until the lease is
+against the pinned file. Teardown repeats `end --run-id` until the lease is
 `released`, failing at once on `teardown_failed` and at its bound with the last
 state. Revocation is proven only by that pinned host refusing the same key for its
 public key afterwards; a refused or timed-out connection, an unreachable host, or a

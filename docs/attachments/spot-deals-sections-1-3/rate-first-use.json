@@ -1,0 +1,286 @@
+{
+  "evidence_class": "fixture",
+  "before_activation": "allow",
+  "lost_start_response": "unknown",
+  "same_key_retry": "accepted",
+  "disclose": "allow",
+  "notice": "accepted",
+  "payer_stop": "accepted",
+  "pending": {
+    "outcome": {
+      "status": "accepted",
+      "records": [],
+      "filing": null
+    },
+    "payouts": {
+      "0": null,
+      "1": null
+    },
+    "state": "ending",
+    "events": [
+      {
+        "negotiation_id": "rate-first-use",
+        "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+        "part": "0",
+        "kind": "stop_request",
+        "actor": "terms",
+        "at": 1800000000,
+        "amount": null,
+        "cause": "terms",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 1,
+        "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:1",
+        "settles_through": null
+      },
+      {
+        "negotiation_id": "rate-first-use",
+        "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+        "part": "1",
+        "kind": "start",
+        "actor": "22222222-2222-4222-8222-222222222222",
+        "at": 1800000000,
+        "amount": null,
+        "cause": "payee",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 2,
+        "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:2",
+        "settles_through": null
+      },
+      {
+        "negotiation_id": "rate-first-use",
+        "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+        "part": "1",
+        "kind": "stop_request",
+        "actor": "22222222-2222-4222-8222-222222222222",
+        "at": 1800000000,
+        "amount": null,
+        "cause": "payee",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 3,
+        "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:3",
+        "settles_through": null
+      }
+    ],
+    "parts": [
+      {
+        "part": "1",
+        "started_at": 1800000000,
+        "end_at": 1800003600,
+        "funded_through": 1800000030,
+        "initial_reservation": true,
+        "pending_stop": {
+          "negotiation_id": "rate-first-use",
+          "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+          "part": "1",
+          "kind": "stop_request",
+          "actor": "22222222-2222-4222-8222-222222222222",
+          "at": 1800000030,
+          "amount": null,
+          "cause": "payee",
+          "case_ref": null,
+          "extension_ref": null,
+          "sequence": 3,
+          "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:3:part:1",
+          "settles_through": "last_boundary"
+        },
+        "final_stop": null,
+        "release_at": null,
+        "evidence_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:snapshot:3:1800000000"
+      }
+    ],
+    "disputes": [],
+    "cases": [],
+    "extensions": [],
+    "deadline": 1800000030
+  },
+  "ended": {
+    "outcome": {
+      "status": "accepted",
+      "records": [],
+      "filing": null
+    },
+    "payouts": {
+      "0": null,
+      "1": null
+    },
+    "state": "ended",
+    "events": [
+      {
+        "negotiation_id": "rate-first-use",
+        "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+        "part": "0",
+        "kind": "stop_request",
+        "actor": "terms",
+        "at": 1800000000,
+        "amount": null,
+        "cause": "terms",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 1,
+        "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:1",
+        "settles_through": null
+      },
+      {
+        "negotiation_id": "rate-first-use",
+        "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+        "part": "1",
+        "kind": "start",
+        "actor": "22222222-2222-4222-8222-222222222222",
+        "at": 1800000000,
+        "amount": null,
+        "cause": "payee",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 2,
+        "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:2",
+        "settles_through": null
+      },
+      {
+        "negotiation_id": "rate-first-use",
+        "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+        "part": "1",
+        "kind": "stop_request",
+        "actor": "22222222-2222-4222-8222-222222222222",
+        "at": 1800000000,
+        "amount": null,
+        "cause": "payee",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 3,
+        "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:3",
+        "settles_through": null
+      },
+      {
+        "negotiation_id": "rate-first-use",
+        "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+        "part": "1",
+        "kind": "stop_request",
+        "actor": "11111111-1111-4111-8111-111111111111",
+        "at": 1800000001,
+        "amount": null,
+        "cause": "payer",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 4,
+        "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:4",
+        "settles_through": null
+      }
+    ],
+    "parts": [
+      {
+        "part": "1",
+        "started_at": 1800000000,
+        "end_at": 1800003600,
+        "funded_through": 1800000001,
+        "initial_reservation": false,
+        "pending_stop": null,
+        "final_stop": {
+          "negotiation_id": "rate-first-use",
+          "commitment_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf",
+          "part": "1",
+          "kind": "stop",
+          "actor": "11111111-1111-4111-8111-111111111111",
+          "at": 1800000001,
+          "amount": null,
+          "cause": "payer",
+          "case_ref": null,
+          "extension_ref": null,
+          "sequence": 4,
+          "authority_record_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:events:4:part:1",
+          "settles_through": "started_period"
+        },
+        "release_at": 1800003601,
+        "evidence_ref": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf:snapshot:4:1800000030"
+      }
+    ],
+    "disputes": [],
+    "cases": [],
+    "extensions": [],
+    "deadline": 1800000001
+  },
+  "mandate": {
+    "mandate": {
+      "from": "11111111-1111-4111-8111-111111111111",
+      "to": "22222222-2222-4222-8222-222222222222",
+      "parts": [
+        {
+          "kind": "once",
+          "asset": "USD/2",
+          "amount": "25",
+          "hold": {
+            "afterStop": "PT1H"
+          },
+          "authorities": {
+            "stop": [],
+            "reverse": [
+              "22222222-2222-4222-8222-222222222222",
+              "33333333-3333-4333-8333-333333333333"
+            ],
+            "extend": [
+              "33333333-3333-4333-8333-333333333333"
+            ]
+          },
+          "maxHoldExtension": null,
+          "end": {
+            "at": 1800000000,
+            "partialPeriod": "returned"
+          }
+        },
+        {
+          "kind": "rate",
+          "asset": "USD/2",
+          "amount": "100",
+          "period": "PT60S",
+          "reserveAhead": "PT2M",
+          "hold": {
+            "afterStop": "PT1H"
+          },
+          "authorities": {
+            "stop": [
+              {
+                "account": "11111111-1111-4111-8111-111111111111",
+                "notice": "PT0S",
+                "partialPeriod": "charged"
+              },
+              {
+                "account": "22222222-2222-4222-8222-222222222222",
+                "notice": "PT30S",
+                "partialPeriod": "returned"
+              },
+              {
+                "account": "33333333-3333-4333-8333-333333333333",
+                "notice": "PT0S",
+                "partialPeriod": "chosen"
+              }
+            ],
+            "reverse": [
+              "22222222-2222-4222-8222-222222222222",
+              "33333333-3333-4333-8333-333333333333"
+            ],
+            "extend": [
+              "33333333-3333-4333-8333-333333333333"
+            ],
+            "start": [
+              "22222222-2222-4222-8222-222222222222"
+            ]
+          },
+          "maxHoldExtension": null,
+          "end": {
+            "at": 1800003600,
+            "partialPeriod": "returned"
+          }
+        }
+      ],
+      "deal": "fb8f81a22d6d1d8a1fefa832378d0cb00d0e66075ca4612381e5e2c800e62ea8",
+      "fee": {
+        "bps": 250
+      },
+      "nonce": "arkhai.payments.v1",
+      "expires": 1800000010
+    },
+    "transaction_id": "18587dbce1f34297c3ee6d8c5f8f75096e1df9d6a1cb9df8aa2c72808ee167bf"
+  }
+}

@@ -4,6 +4,7 @@ from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_core import SettlementStageTable
 from market_settlement_runtime import SettlementConfigurationRegistry
 from market_arkhai_payments import create_arkhai_payments_registration
+from market_arkhai_payments.buyer import approvable_terms
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
@@ -20,11 +21,12 @@ BUYER_STAGES = SettlementStageTable({ARKHAI_PAYMENTS_MECHANISM: PaymentStage()})
 def buyer_term_context(
     mechanism: str, *, waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> TermContext:
-    return TermContext(
+    context = TermContext(
         mechanism=mechanism, has_adapter=mechanism == ARKHAI_PAYMENTS_MECHANISM, compute=True,
         dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
         allow_missing_delivery_deadline=allows_missing_delivery_deadline(waivers),
     )
+    return approvable_terms(context) if mechanism == ARKHAI_PAYMENTS_MECHANISM else context
 
 
 def buyer_settlement_registry():
@@ -41,8 +43,13 @@ def buyer_lifecycle_disclosure(option, *, waivers: frozenset[DefaultRefusal] = f
     )
 
 
+def buyer_terms_policy(config, *, waivers: frozenset[DefaultRefusal] = frozenset()) -> BuyerTermsPolicy:
+    """The run's terms policy: its accepted authorities and the terms it waived."""
+    return BuyerTermsPolicy(AuthoritySelection(config.dispute_authorities_by_registry, contexts={
+        ARKHAI_PAYMENTS_MECHANISM: buyer_term_context(ARKHAI_PAYMENTS_MECHANISM, waivers=waivers),
+    }), waivers=waivers)
+
+
 def validate_authority(option, config, *, waivers: frozenset[DefaultRefusal] = frozenset()) -> None:
     """An explicit option ID does not bypass the buyer's authority or rights policy."""
-    BuyerTermsPolicy(AuthoritySelection(config.dispute_authorities_by_registry, contexts={
-        ARKHAI_PAYMENTS_MECHANISM: buyer_term_context(ARKHAI_PAYMENTS_MECHANISM, waivers=waivers),
-    }), waivers=waivers).rank(option, registry_url=config.registry_url)
+    buyer_terms_policy(config, waivers=waivers).rank(option, registry_url=config.registry_url)

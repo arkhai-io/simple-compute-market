@@ -11,6 +11,7 @@ from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTa
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndSession, SellerDeal, SellerServicing, SellerSession, create_schema,
+    create_payment_observations,
 )
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.journal import Classification, FinalRequest
@@ -51,8 +52,9 @@ def test_unresolved_original_remains_retryable_until_both_callers_adopt(tmp_path
                 )
 
             with transaction(path) as conn:
-                # The storefront chain's migration, which a session does not run.
+                # The storefront chain's migrations, which a session does not run.
                 create_schema(conn)
+                create_payment_observations(conn)
                 end = EndSession(conn)
                 end.register(DeliveryRecord(
                     negotiation_id="deal", seller=SELLER.identity, commitment_ref=fixture["transaction"],

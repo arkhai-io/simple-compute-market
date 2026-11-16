@@ -140,7 +140,7 @@ whichever ending ran. How a lease ends is shared only among scenarios that end
 the same way. The expiry stages back-date the lease, step one lease-watchdog
 cycle, and advance convergence to tearing down; the Alkahest set and the VM
 purchase run them. The bare-metal purchases end by the buyer's
-`market bare-metal teardown` in a stage of their own, which ends in the state
+`market bare-metal end` in a stage of their own, which ends in the state
 teardown completion starts from.
 
 The purchase's own stages are defined once, in
@@ -166,6 +166,26 @@ Each compute lane runs one buyer purchase against its payments double. VM's
 listing's binding to its resource outlives the listing, and ends its lease by
 expiry. Bare metal's is `e2e_bare_metal_payment_deal`, which inserts its own
 re-drive and seller refund between the shared stages.
+
+Each compute lane also runs one recurring purchase, VM's
+`e2e_vm_recurring_purchase` and bare metal's `e2e_bare_metal_recurring_purchase`,
+as lane-double evidence. A default buyer buys a recurring on-demand option
+through the shipped `buy` and approves its one-rate-part mandate; the lane's
+storefront configuration alone declares rate servicing for `charged` and
+`returned`, and end service, which services no rate deal, refuses the commit.
+The modules run the purchase stages through the buy, then those of
+`e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`: the approved
+mandate and the payer's reservation, the refused commit with nothing reserved at
+the site by delivery or started at the payments double (an acceptance hold the
+domain placed at negotiation lapses at its TTL), the per-period price, setup charge,
+initial reserve and maximum end the buy's stderr shows (that the buyer prints
+them before its settlement stage approves is each buyer's own test, not the
+lane's), the
+buyer's own `end`, whose payer's stop the storefront records as the deal's end
+with no filing, and the payer's balance restored. Nothing is delivered, so
+neither waits for the delivery deadline.
+`e2e-tests/tests/unit/test_recurring_purchase_stages.py` holds both modules to
+that order.
 
 Settlement by introduction is defined once the same way, in
 `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`: disclosure of the
@@ -231,7 +251,7 @@ project of its own:
   shared purchase stages, then receipt-gated mock access, readiness read through
   the storefront's settle wait on the negotiation, same-transaction and
   same-fulfillment re-drive through the canonical lifecycle `commit`, the
-  buyer's `market bare-metal teardown`, then the seller's separate refund of the
+  buyer's `market bare-metal end`, then the seller's separate refund of the
   still-held payment and restored whole-host capacity. Unless the last stage
   recorded the deal ended, the module's cleanup opens any mock gate still
   closed, finds the purchase in the buyer's run log, refunds it if the log
@@ -553,7 +573,7 @@ extend an accepted Agreement, move a clock, or accept late delivery.
   ends both leases by back-dating and stepped watchdog cycles.
 - `e2e_bare_metal_qualification` (observations 4 and 5) runs the normal cycle,
   then the successor and refusal cycle, which needs the first cycle's consumed
-  UID, each lease ended by the buyer's `market bare-metal teardown`. It checks no
+  UID, each lease ended by the buyer's `market bare-metal end`. It checks no
   GPU.
 - `e2e_real_provisioning_reapply` (observation 6) reapplies both hosts'
   canonical registrations, steps a publication cycle, and reads the consumed-UID

@@ -22,8 +22,9 @@ are command modules, whose factories are their one seam
 ([`testing-python.md`, "A command module's factories are its seam"](../engineering/testing-python.md#a-command-modules-factories-are-its-seam)).
 The bare-metal buyer CLI
 (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
-its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
-`payment_approval`. The other CLIs' tests, and one unit test in the bare-metal buyer
+its tests replace `fresh_identity`, `recovery_identity`, `registry_client`,
+`payment_approval`, `end_target`, `watchdog_journal`, `watchdog_probe` and
+`wait_clock`. The other CLIs' tests, and one unit test in the bare-metal buyer
 package, do not follow the rule: they replace library names and names the module
 imports, an unowned gap in
 [`ROADMAP.md`](../../development/ROADMAP.md), and are no model for a new test.

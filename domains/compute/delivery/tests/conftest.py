@@ -26,8 +26,12 @@ from compute_provisioning_contracts.contracts import lease_state_for_reservation
 from market_alkahest.payment_adapter import AlkahestOnceAdapter
 from market_capacity_publication import CapacityEffects, publication_binding
 from market_core import VersionedEnvelope
+from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_lifecycle.delivery import BillingStartResult, ReadyEvidenceRef
-from market_deal_servicing import DeliveryRecord, EndService, EndSession, PhysicalResult, create_schema
+from market_deal_servicing import (
+    DeliveryRecord, EndService, EndSession, PhysicalResult, SellerDeal, SellerSession, create_schema,
+    create_payment_observations,
+)
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer
 from market_site_client import SiteCapacityClientError, SiteCapacityUnauthenticatedResponseError
@@ -43,8 +47,9 @@ from compute_delivery.window import utc_text
 
 #: The Agreement start every scenario is built around, in Unix seconds.
 START = 1_800_000_000
-#: Public deterministic development seed; never use on a public network.
+#: Public deterministic development seeds; never use on a public network.
 SELLER = Ed25519Signer(bytes([2]) * 32)
+BUYER = Ed25519Signer(bytes([1]) * 32)
 SITE = "site-a"
 
 
@@ -366,7 +371,7 @@ class ScriptedAdapter:
         self.calls.append("read")
         return await self.inner.read()
 
-    async def authorize(self, phase, evidence):
+    async def authorize(self, phase, evidence, billing=None):
         self.calls.append("authorize")
         self.authorized.append(phase.value)
         if self.on_authorize is not None:
@@ -374,16 +379,16 @@ class ScriptedAdapter:
         scripted = self.answers.get(phase.value)
         if scripted:
             status = scripted.pop(0)
-            decision = await self.inner.authorize(phase, evidence)
+            decision = await self.inner.authorize(phase, evidence, billing)
             return decision.model_copy(update={"status": status, "reason": f"scripted {status}"})
-        return await self.inner.authorize(phase, evidence)
+        return await self.inner.authorize(phase, evidence, billing)
 
-    async def start_billing(self, operation_key, evidence):
+    async def start_billing(self, keys, evidence):
         self.calls.append("start_billing")
-        self.billing_keys.append(operation_key)
+        self.billing_keys.append(keys.operation_key)
         if self.billing_outcome is not None:
             return BillingStartResult(outcome=self.billing_outcome)
-        started = await self.inner.start_billing(operation_key, evidence)
+        started = await self.inner.start_billing(keys, evidence)
         if self.lose_billing:
             self.lose_billing -= 1
             raise ConnectionError("billing-start acknowledgement lost")
@@ -421,13 +426,22 @@ class Rig:
             return EndSession(conn).read(self.negotiation_id)
 
     def register(self, *, start: int = START, term_end: int | None = None, committed_at: int | None = None,
-                 delivery_deadline_seconds: int | None = None) -> None:
+                 delivery_deadline_seconds: int | None = None, once_only: bool = True) -> None:
+        """Register the deal's delivery record and its seller projection, as a domain does.
+
+        ``once_only=False`` registers a deal with a rate part, which end
+        service refuses to commit.
+        """
         with transaction(self.path) as conn:
             EndSession(conn).register(DeliveryRecord(
                 negotiation_id=self.negotiation_id, seller=SELLER.identity, commitment_ref="commitment",
                 start_at=start, term_end=start + 7200 if term_end is None else term_end,
                 committed_at=start - 600 if committed_at is None else committed_at,
                 delivery_deadline_seconds=delivery_deadline_seconds,
+            ))
+            SellerSession(conn).register(SellerDeal(
+                negotiation_id=self.negotiation_id, commitment_ref="commitment", domain="vms",
+                buyer=BUYER.identity, payment=PaymentSelector("alkahest.v1"), once_only=once_only,
             ))
 
 
@@ -439,6 +453,7 @@ def rig(tmp_path) -> Rig:
     # session does.
     with transaction(path) as conn:
         create_schema(conn)
+        create_payment_observations(conn)
     clock = [START + 1800]
     site = FakeSite(clock)
     fulfillment = FakeFulfillment(site)

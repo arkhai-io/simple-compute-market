@@ -611,6 +611,12 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   opened — deal servicing's, and the bare-metal lifecycle cursor — with
   `IF NOT EXISTS`, leaving any present as they are
   (`20261109_001_vm_store_open_tables`, `bare-metal-storefront-0017-store-open-tables`).
+- Each compute storefront then creates deal servicing's
+  `servicing_payment_observations`, empty, which tolerates no table already present
+  (`20261115_001_vm_payment_observations`,
+  `bare-metal-storefront-0019-payment-observations`). A rate deal past its delivery
+  deadline before the upgrade has its deadline recorded only after the first payment
+  observation the upgraded storefront makes.
 - The storefronts drop the tables v0.3.0 kept frozen: the VM storefront's
   `compute_allocations`, `resources`, `hosts`, `resource_transition_events`,
   `compute_pool_members`, and `compute_capacity_pools` or
