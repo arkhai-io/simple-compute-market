@@ -244,7 +244,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-client"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -255,7 +255,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_client-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_client-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -335,11 +335,11 @@ requires-dist = [
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.8.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.14.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-core-storefront-client", specifier = "==0.29.0" },
+    { name = "arkhai-core-storefront-client", specifier = "==0.30.0" },
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.8.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
     { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.1.0" },
@@ -425,7 +425,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.29.0"
+version = "0.30.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -433,7 +433,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.30.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -549,7 +549,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -560,7 +560,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

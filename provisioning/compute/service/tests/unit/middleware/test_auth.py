@@ -89,7 +89,7 @@ def identities(request):
     return _signer(request.param, 17), _signer(request.param, 23)
 
 
-def _app(storefront, authority, route_table=_ROUTE_TABLE):
+def _app(storefront, authority, route_table=_ROUTE_TABLE, time_setting_operation=None):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -112,6 +112,7 @@ def _app(storefront, authority, route_table=_ROUTE_TABLE):
         replay_store_provider=lambda: replay,
         principal_authority_provider=lambda: _PrincipalAuthority(storefront),
         route_table=route_table,
+        time_setting_operation=time_setting_operation,
     )
 
     async def mutation(_: Request):
@@ -152,6 +153,7 @@ def _headers(
     role: str = "seller",
     method: str = "POST",
     route_table=_ROUTE_TABLE,
+    timestamp: int | None = None,
 ) -> dict[str, str]:
     contract, resource = route_table.resolve(method, path, body)
     operation = contract.operation
@@ -164,7 +166,7 @@ def _headers(
             operation=operation,
             resource=resource,
             request_id=request_id,
-            timestamp=int(time.time()),
+            timestamp=int(time.time()) if timestamp is None else timestamp,
             body_hash=canonical_body_hash(body),
         ),
     )
@@ -357,6 +359,91 @@ def _counting(calls):
         return {"ok": True, "count": calls["count"]}
 
     return mutation
+
+
+# A time-setting route as the service declares one under injected time; the
+# middleware is told its operation, as the service's composition tells it.
+_TIME_SETTING = {
+    "method": "POST",
+    "path": "/api/v1/system/time",
+    "operation": "provisioning_system_time",
+    "roles": ["admin"],
+}
+
+
+@pytest.mark.parametrize("skew", (900, -900))
+def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(identities, skew):
+    storefront, authority = identities
+    table = assemble_service_route_table([_TIME_SETTING])
+    client, calls = _app(
+        storefront,
+        authority,
+        route_table=table,
+        time_setting_operation="provisioning_system_time",
+    )
+    client.app.add_api_route("/api/v1/system/time", _counting(calls), methods=["POST"])
+    skewed = int(time.time()) + skew
+
+    setting = client.post(
+        "/api/v1/system/time",
+        json={"now": skewed},
+        headers=_headers(
+            _ADMIN_SIGNER,
+            "/api/v1/system/time",
+            {"now": skewed},
+            request_id="set",
+            role="admin",
+            route_table=table,
+            timestamp=skewed,
+        ),
+    )
+    pause = client.post(
+        "/api/v1/system/lease-watchdog/pause",
+        json={},
+        headers=_headers(
+            _ADMIN_SIGNER,
+            "/api/v1/system/lease-watchdog/pause",
+            {},
+            request_id="pause",
+            role="admin",
+            route_table=table,
+            timestamp=skewed,
+        ),
+    )
+
+    assert setting.status_code == 200
+    assert pause.status_code == 403
+    assert pause.json() == {
+        "detail": "Marketplace authentication timestamp is outside the allowed skew"
+    }
+    assert calls["count"] == 1
+
+
+def test_the_time_setting_operation_keeps_its_freshness_unless_the_service_names_it(
+    identities,
+):
+    storefront, authority = identities
+    table = assemble_service_route_table([_TIME_SETTING])
+    client, calls = _app(storefront, authority, route_table=table)
+    client.app.add_api_route("/api/v1/system/time", _counting(calls), methods=["POST"])
+    skewed = int(time.time()) + 900
+
+    response = client.post(
+        "/api/v1/system/time",
+        json={"now": skewed},
+        headers=_headers(
+            _ADMIN_SIGNER,
+            "/api/v1/system/time",
+            {"now": skewed},
+            request_id="set",
+            role="admin",
+            route_table=table,
+            timestamp=skewed,
+        ),
+    )
+
+    assert response.status_code == 403
+    assert calls["count"] == 0
 
 
 def test_wrong_role_principal_and_body_fail_before_dispatch(identities):

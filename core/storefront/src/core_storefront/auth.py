@@ -31,6 +31,11 @@ from market_identity import (
 DEFAULT_MAX_TIMESTAMP_SKEW = 300
 DEFAULT_REPLAY_LEASE_SECONDS = 300
 
+#: The signed operation of the storefronts' time-setting request,
+#: ``POST /api/v1/admin/time``, and the resource it binds.
+ADMIN_TIME_OPERATION = "admin_time"
+ADMIN_TIME_RESOURCE = "time"
+
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
 IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
 IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
@@ -98,6 +103,18 @@ class ReplayStore(Protocol):
     ) -> ReplayClaim:
         """Atomically reserve, recover, or classify one verified request."""
 
+
+
+def admin_time_setting_operation() -> str | None:
+    """The administrator operation exempt from request freshness in this process.
+
+    Time can be set only on an injected source, so ``admin_time`` is exempt only
+    while the process source is injected; under wall time no operation is, and
+    every administrator request keeps its freshness check.
+    """
+    if injected_time.TimeRouteService(injected_time.installed()).settable:
+        return ADMIN_TIME_OPERATION
+    return None
 
 
 def _required_header(headers: Mapping[str, str], name: str) -> str:
@@ -170,13 +187,17 @@ async def authenticate_request(
     replay_lease_seconds: int = DEFAULT_REPLAY_LEASE_SECONDS,
     capture: EnvelopeCapture | None = None,
     raw_body: bytes | None = None,
+    time_setting_operation: str | None = None,
 ) -> AuthenticatedPrincipal:
     """Verify an exact role/principal binding and reserve replay before dispatch.
 
     Authorities must supply either one expected principal or the complete active
     principal set for a rotating subject. An exact retry is authenticated but has
     ``dispatch_allowed == False`` so a route can return its recorded outcome
-    without executing the mutation again.
+    without executing the mutation again. ``time_setting_operation``, when the
+    request is for that operation, verifies it without its timestamp's freshness
+    (``market_identity.verify_request``); an administrator surface passes
+    ``admin_time_setting_operation()``.
     """
 
     if (expected_principal is None) == (allowed_principals is None):
@@ -215,6 +236,7 @@ async def authenticate_request(
         expected_operation=operation,
         expected_resource=resource,
         expected_principals=expected_principals,
+        time_setting_operation=time_setting_operation,
     )
     if not signature_result.verified or signature_result.reservation is None:
         raise _verification_error(signature_result.code)

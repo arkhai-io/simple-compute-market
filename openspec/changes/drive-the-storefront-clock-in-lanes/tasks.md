@@ -1179,24 +1179,140 @@ storefront's authentication in `api.py`, `provisioning/compute/service`
 (`middleware/auth.py`), and `kit/site` (`auth.py`, the API-credits service's
 middleware).
 
-- [ ] 8.1 `market_identity` verifies a request without the timestamp's freshness only
+- [x] 8.1 `market_identity` verifies a request without the timestamp's freshness only
   when its caller names the operation as the time-setting one; signature, principal,
   context, body hash and the request-id reservation are verified as for every request
   (D14).
   - Verify: unit tests: a setting request 900 s off the verifier's instant verifies;
     the same skew on any other operation is refused `TIMESTAMP_SKEW`; a changed body,
     a wrong principal or a reused request id is refused on the setting operation.
-- [ ] 8.2 Each signed administrator surface above applies the exemption to its
+  - Done: `verify_request(..., time_setting_operation=None)`. The skew check is
+    skipped only when the caller names an operation and it equals
+    `expected_operation`, the route's own; the context check before it already
+    holds the signed operation to the route's, so a request signed for another
+    operation never reaches it. Principal, context, body hash, proof and replay
+    classification are unchanged. Unit, `kit/identity/tests/unit/test_envelopes.py`:
+    `test_the_time_setting_operation_alone_is_verified_without_freshness` (±900 s
+    verifies when named, `TIMESTAMP_SKEW` when not, and naming another operation
+    exempts nothing) and
+    `test_the_time_setting_operation_is_otherwise_verified_as_every_request` (a
+    changed body, a wrong principal, a forged timestamp, an exact retry and a
+    changed reuse, each on the named operation 900 s off). `make -C kit/identity
+    test` 168 passed. `run test-before` at `9491d9719` fails at collection
+    (`rfc8785` absent from its project-less environment), which shows nothing; at
+    the base the keyword does not exist, so each test would fail with a
+    `TypeError`.
+  - Versions: `kit/identity` 0.5.0 (new API; 3.1's note owed it here), with its 26
+    exact pins moved and `kit/site`'s lower bound raised to 0.5.0, since its
+    middleware passes the keyword. Four packages that still carried their
+    `marketplace-v0.3.0` versions change content with the moved pins, and each was
+    owed its minor bump by a later section of this round, so each takes it here
+    instead, once: `core/storefront-client` 0.30.0 (its exact pin in the
+    provisioning service moved), `kit/storefront` 0.11.0 (its exact pins in the
+    three storefronts moved), `provisioning/compute/client` 0.11.0 and
+    `domains/apicredits` 0.10.0. Sections 9–11 add their APIs within those
+    versions. Relocked with `make lock` (full); `make check-version-bumps` passes.
+    Outside the plan: the identity wheel's version is copied by hand into the root
+    `Makefile` (`IDENTITY_WHEEL`, which `dist-identity` checks) and into
+    `scripts/package-review-wheelhouse.sh` and its test; each now names 0.5.0,
+    which the first pre-commit run found (`dist-identity` refused the missing
+    0.4.0 wheel). `core/storefront-client/README.md`'s two pins, one stale before
+    this section, name 0.30.0 and 0.5.0.
+- [x] 8.2 Each signed administrator surface above applies the exemption to its
   time-setting operation alone — the storefronts' `admin_time`, provisioning's and the
   credits service's setting operation — and to no other route (D14).
   - Verify: unit tests per middleware: the setting operation is admitted skewed; the
     pause operation skewed by the same amount is refused.
-- [ ] 8.3 Section verification.
+  - Done: `core_storefront.auth` names the storefronts' setting operation,
+    `ADMIN_TIME_OPERATION = "admin_time"` with resource `ADMIN_TIME_RESOURCE =
+    "time"`, passes `time_setting_operation` through `authenticate_request`, and
+    offers `admin_time_setting_operation()`: `admin_time` while the installed source
+    is settable (`TimeRouteService(installed()).settable`, the same test that mounts
+    the route, D12), else `None`. The VM administrator middleware binds `POST
+    /api/v1/admin/time` to that contract and passes the helper's answer; the
+    bare-metal `_admin` and the API-credits `authenticate_admin` pass it on every
+    administrator request, which exempts only a request whose route is
+    `admin_time`. `ProvisioningAuthMiddleware` and `kit/site`'s `SiteAuthMiddleware`
+    take `time_setting_operation` in their constructor, `None` by default; sections
+    10 and 11 pass their operation from their composition under injected time. The
+    two forms differ because the storefronts authenticate in module functions with
+    no object their composition builds, so they read the installed source per
+    request, while the provisioning and site middlewares are constructed by a
+    composition that knows its source.
+  - Evidence. Unit: `core/storefront`'s `test_auth.py` (the helper under wall and
+    injected time; `authenticate_request` admits a named operation 900 s off and
+    refuses an unnamed one). The provisioning middleware, in its existing suite
+    under `tests/unit/middleware/test_auth.py`, which runs the real middleware over
+    an in-memory SQLite replay store (so narrower than application integration and
+    wider than a unit; the file's placement predates this section): over a route
+    table with a stand-in `provisioning_system_time` contract, named, the setting
+    is admitted at ±900 s and the lease-watchdog pause refused for skew; unnamed,
+    the setting is refused. Library integration, `kit/site`'s
+    `test_site_auth_middleware.py` (the same pair over the real middleware with a
+    stand-in `system_time` contract, the setting's response signed). The
+    storefronts', each an in-process app over the real administrator
+    authentication with a stand-in time route counting its calls: VM
+    `tests/integration/test_admin_api.py` (the admin router and middleware), bare
+    metal `tests/test_http_system.py` (the composed app, the stand-in calling the
+    module's `_admin`, which no public function wraps), API credits
+    `tests/integration/test_trading_pause_api.py` (the pause and system routers
+    with the response middleware). Their requests are raw, built by the canonical
+    client's `build_authenticated_request` at a chosen instant, since the client
+    signs at the process's own and cannot send a skewed one, and as a
+    rejection-path test's, only statuses are asserted: under injected time
+    `admin_time` is admitted at ±900 s with a signed response, the pause refused
+    and trading left open; under wall time `admin_time` is refused. Section 9's
+    application-integration tests set time through the client on the real route. Suites: `make -C
+    kit/site test` 373, `make -C core/storefront test` 232 (before its two unit
+    tests; 9 in `test_auth.py` after), provisioning middleware 56, `make -C
+    domains/vms/storefront test` 609 integration and its unit suite, `make -C
+    domains/bare_metal/storefront test` 650, `make -C domains/apicredits/storefront
+    test` 279.
+- [x] 8.3 Section verification.
   - Unit: `make test-kits` (`kit/identity`, `kit/site`), `make test-core`, the
     storefronts' and `make test-provisioning`'s middleware tests.
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: exercised by section 15's fixture once the lanes run injected
     (section 16).
+  - Evidence: the suites in 8.1 and 8.2. `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes` on the final tree: `after-functional-change`
+    (`make lock`) and `pre-commit-functional` (`make dist-clean`, `make
+    check-packaging`, `make test`, every suite, `make test-kits`, `make test-core`,
+    `make test-provisioning`, `make test-domains` and `make test-release-tooling`
+    among them) passed; of `pre-commit`, only the citations check failed, on
+    closeout's `openspec/specs/injected-time/architecture.md` (18.9). The first run
+    failed at `dist-identity` (the hand-kept version, 8.1's note).
+  - Confirmed: no end-to-end marker exercises the exemption yet; the lanes run on
+    wall time until section 16, and section 15's fixture is the first caller to
+    set time skewed. No owed CI evidence: the suites run in the workflows' existing
+    jobs.
+  - Fresh-context check: it found the storefront tests' raw requests unexplained
+    and asserting a refusal's body (now stated as rejection-path requests, the
+    client unable to sign at another instant, asserting statuses only), the
+    provisioning tests named unit though they run the middleware over SQLite
+    (the evidence note now says what they run), comments in `core_storefront.auth`
+    describing a route and a client method section 9 adds (reworded to what this
+    section holds), the bare-metal test not checking trading stayed open (added),
+    `core/storefront-client/README.md`'s stale pins (fixed), and the storefronts'
+    and services' different exemption forms unexplained (the reason is in 8.2's
+    note). Declined: the operation name defined in `core_storefront.auth` where the
+    client cannot import it, as `admin_pause` and the other administrator
+    operations are spelled in each storefront and the client today; moving the
+    provisioning middleware tests out of `tests/unit/`, whose file predates the
+    section; and the bare-metal stand-in route calling the module's private
+    `_admin`, the only path to its administrator authentication, which section 9's
+    real route makes testable through the client.
+  - Handoff for sections 9–11. The exemption is wired: a storefront's admin
+    authentication exempts `admin_time` whenever the installed source is an
+    `InjectedTime`, so section 9 needs only to bind `POST /api/v1/admin/time` to
+    the `ADMIN_TIME_OPERATION`/`ADMIN_TIME_RESOURCE` contract (the VM middleware
+    already maps the path) and have the canonical client sign the same pair.
+    Sections 10 and 11 pass their operation's name as `time_setting_operation` to
+    `ProvisioningAuthMiddleware` and `SiteAuthMiddleware` when their composition
+    installs an injected source. The four packages bumped here (8.1) need no
+    further bump for those sections' APIs. Any further change to `kit/identity`'s
+    version must move the `Makefile`'s `IDENTITY_WHEEL` and the review-wheelhouse
+    script with it.
 
 ## 9. The storefronts' setting, route, status and warning
 

@@ -20,7 +20,11 @@ from arkhai_bare_metal.evidence_routes import (
     BareMetalSignedLeaseReadyEvidence,
     evidence_resource,
 )
-from core_storefront.auth import AuthError, authenticate_request
+from core_storefront.auth import (
+    AuthError,
+    admin_time_setting_operation,
+    authenticate_request,
+)
 from core_storefront.identity_authority import (
     IdentityAuthorityError,
     StorefrontIdentityAuthority,
@@ -171,6 +175,7 @@ async def _principal(
     allowed_principals: tuple[Identity, ...] | None = None,
     body: Any = EMPTY_BODY,
     now: int | None = None,
+    time_setting_operation: str | None = None,
 ) -> Identity:
     bind_response_contract(request, operation=operation, resource=resource)
 
@@ -195,6 +200,7 @@ async def _principal(
             expected_principal=expected_principal,
             allowed_principals=allowed_principals,
             now=now,
+            time_setting_operation=time_setting_operation,
         )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -260,7 +266,8 @@ async def _admin(
 
     ``operation`` and ``resource`` are the ones the canonical storefront client
     signs for the route, the same on every storefront, so one administrator
-    client works against any of them.
+    client works against any of them. The time-setting operation, while it is
+    mounted, is verified without its timestamp's freshness.
     """
     return await _principal(
         request=request,
@@ -270,6 +277,7 @@ async def _admin(
         expected_role="admin",
         allowed_principals=runtime.admin_principals.identities,
         body=body,
+        time_setting_operation=admin_time_setting_operation(),
     )
 
 

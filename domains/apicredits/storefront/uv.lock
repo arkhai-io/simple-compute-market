@@ -140,7 +140,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -154,7 +154,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -215,14 +215,14 @@ requires-dist = [
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.6.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.12.0" },
     { name = "arkhai-kit-config", specifier = ">=0.5.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.6.0" },
     { name = "arkhai-kit-policy", specifier = ">=0.7.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.8.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.9.0" },
-    { name = "arkhai-kit-storefront", specifier = "==0.10.0" },
+    { name = "arkhai-kit-storefront", specifier = "==0.11.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = "~=0.115.8" },
     { name = "fastapi-utils", extras = ["all"], specifier = ">=0.8.0" },
@@ -310,7 +310,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.29.0"
+version = "0.30.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -318,7 +318,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.30.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -472,7 +472,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -483,7 +483,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -584,7 +584,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-storefront"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -597,7 +597,7 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
 ]
 wheels = [
-    { path = "arkhai_kit_storefront-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_kit_storefront-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]

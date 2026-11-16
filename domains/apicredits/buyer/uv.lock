@@ -181,7 +181,7 @@ requires-dist = [
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.5.0" },
     { name = "arkhai-kit-config", specifier = ">=0.5.0" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "eth-account", specifier = ">=0.13.0" },
@@ -196,7 +196,7 @@ dev = [{ name = "pytest", specifier = ">=8.0.0" }]
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -210,7 +210,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -377,7 +377,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -388,7 +388,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -215,6 +215,7 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         principal_authority_provider: Callable[[], Any],
         route_table: ProvisioningRouteTable,
         max_timestamp_skew: int = 300,
+        time_setting_operation: str | None = None,
     ) -> None:
         super().__init__(app)
         # The assembled table of every contributed route; a route outside it
@@ -226,6 +227,10 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         self._replay_store_provider = replay_store_provider
         self._principal_authority_provider = principal_authority_provider
         self._max_timestamp_skew = max_timestamp_skew
+        # The time-setting operation, named only by a service that mounts it,
+        # under injected time: its requests are verified without their
+        # timestamp's freshness, every other operation's with it.
+        self._time_setting_operation = time_setting_operation
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in EXCLUDED_PATHS:
@@ -299,6 +304,7 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
             expected_resource=resource,
             expected_principals=expected_principals,
             existing_replay=existing,
+            time_setting_operation=self._time_setting_operation,
         )
         if not verification.verified or verification.reservation is None:
             # Same reasoning as `market_site.auth`: the `detail` withholds

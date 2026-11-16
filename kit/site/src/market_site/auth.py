@@ -417,6 +417,7 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
         replay_store_provider: Callable[[], SiteReplayStore] | None = None,
         max_timestamp_skew: int = 300,
         excluded_paths: frozenset[str] = EXCLUDED_PATHS,
+        time_setting_operation: str | None = None,
     ) -> None:
         super().__init__(app)
         if max_timestamp_skew < 0:
@@ -428,6 +429,10 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
         self._replay_store_provider = replay_store_provider or (lambda: store)
         self._max_timestamp_skew = max_timestamp_skew
         self._excluded_paths = excluded_paths
+        # The time-setting operation, named only by a service that mounts it,
+        # under injected time: its requests are verified without their
+        # timestamp's freshness, every other operation's with it.
+        self._time_setting_operation = time_setting_operation
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self._excluded_paths:
@@ -519,6 +524,7 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
             existing_replay=replay_store.get(
                 authenticated.principal, authenticated.request_id
             ),
+            time_setting_operation=self._time_setting_operation,
         )
         if not verification.verified or verification.reservation is None:
             # The `detail` sent back is deliberately vague -- it says which
