@@ -26,7 +26,7 @@ from market_alkahest import (
     json_rpc_call,
     wallet_account_address,
 )
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, payments_livemode
 from market_capacity_publication import (
     RESOURCE_POOL,
     SiteDerivationLog,
@@ -254,6 +254,9 @@ class BareMetalStorefrontRuntime:
     #: relative limit.
     default_max_duration_seconds: int | None = None
     default_available_until_utc: str | None = None
+    #: Whether ``[Settlement.arkhai_payments]`` declares ``livemode = true``,
+    #: which startup warns of beside an injected time source.
+    payments_livemode: bool = False
     # Composes one publication cycle for the publication loop's timer and step;
     # None composes it from this runtime through ``compose_publication_cycle``.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
@@ -990,6 +993,7 @@ def build_runtime_from_configuration(
         publication_clauses_by_model=publication_clauses_by_model,
         default_max_duration_seconds=active.pricing.default_max_duration_seconds,
         default_available_until_utc=active.pricing.default_available_until_utc,
+        payments_livemode=payments_livemode(settlement_config),
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,

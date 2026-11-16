@@ -8,7 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
-from market_storefront_kit import StageEventRouteService
+from market_storefront_kit import StageEventRouteService, StorefrontTimeRouteService
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
@@ -56,6 +56,7 @@ class SystemController:
     async def system_status(self) -> VmSystemStatusResponse:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = trading_pause().paused
+        body["time"] = StorefrontTimeRouteService().status()
         return VmSystemStatusResponse(**body)
 
     @router.get(

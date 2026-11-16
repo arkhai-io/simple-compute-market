@@ -52,6 +52,8 @@ from market_settlement_runtime.rate_publication import (
     DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
     PenaltyPeriods,
 )
+from market_storefront_kit import TimeSourceSetting
+from market_storefront_kit import configured_time_source as kit_configured_time_source
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -285,6 +287,25 @@ class WalletSettings(_Section):
     private_key: str = Field(default="", repr=False, json_schema_extra={"secret": True})
 
 
+class TimeSettings(_Section):
+    """``[Time]``: the process's time source, ``"wall"`` unless set ``"injected"``.
+
+    Startup installs it before anything reads the time, through
+    :func:`configured_time_source`, and refuses any other value naming it.
+    """
+
+    source: TimeSourceSetting = "wall"
+
+
+def configured_time_source(source: Dynaconf | None = None) -> Any:
+    """The value ``[Time] source`` states, or ``None`` when unset.
+
+    Read alone, ahead of the whole model, since the source is installed before
+    the application is built.
+    """
+    return kit_configured_time_source(source or settings_source())
+
+
 class ChainSettings(_Section):
     """One ``[Chains.<name>]``: an EVM chain the storefront settles Alkahest on.
 
@@ -325,6 +346,7 @@ class BareMetalStorefrontSettings(_Section):
     delivery: dict[str, Any] | None = Field(default=None, repr=False)
     wallet: WalletSettings = Field(default_factory=WalletSettings)
     chains: dict[str, ChainSettings] = Field(default_factory=dict)
+    time: TimeSettings = Field(default_factory=TimeSettings)
 
     @field_validator("settlement", mode="before")
     @classmethod

@@ -363,6 +363,7 @@ dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-negotiation-runtime" },
+    { name = "pydantic" },
 ]
 
 [package.dev-dependencies]
@@ -382,6 +383,7 @@ requires-dist = [
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = ">=0.5.0" },
+    { name = "pydantic", specifier = ">=2.7" },
 ]
 
 [package.metadata.requires-dev]

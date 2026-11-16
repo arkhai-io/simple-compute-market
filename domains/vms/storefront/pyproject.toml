@@ -19,7 +19,7 @@ dependencies = [
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-kit-resource-pools-contracts>=0.4.0",
     "arkhai-core-registry-client>=0.13.0",
-    "arkhai-core-storefront-client>=0.27.0",
+    "arkhai-core-storefront-client>=0.30.0",
     "arkhai-core-storefront>=0.18.0",
     "arkhai-kit-capacity-publication==0.12.0",
     "arkhai-kit-pool-overrides==0.3.0",

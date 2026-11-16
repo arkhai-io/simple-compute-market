@@ -52,6 +52,22 @@ def test_settings_toml_provides_baseline_defaults():
     assert "use_site_projection_for_listings" not in packaged.get("capacity", {})
 
 
+def test_the_time_source_is_unset_by_default_and_read_in_any_case() -> None:
+    assert agent_config.configured_time_source(Dynaconf(environments=False)) is None
+    source = Dynaconf(environments=False)
+    source.set("Time", {"SOURCE": "injected"})
+
+    assert agent_config.configured_time_source(source) == "injected"
+
+
+def test_the_time_section_declares_its_two_sources_and_refuses_any_other() -> None:
+    assert agent_config.TimeConfigDeclaration().source == "wall"
+    assert agent_config.TimeConfigDeclaration(source="injected").source == "injected"
+    with pytest.raises(ValueError) as refused:
+        agent_config.TimeConfigDeclaration(source="injectd")
+    assert "[Time] source" in str(refused.value) and "injectd" in str(refused.value)
+
+
 def test_structured_settlement_publication_defaults_are_validated() -> None:
     source = Dynaconf(environments=False)
     source.set(

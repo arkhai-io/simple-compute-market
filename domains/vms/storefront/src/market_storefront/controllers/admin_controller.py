@@ -37,6 +37,7 @@ from core_storefront.models.system_models import (
 )
 from core_storefront.stage_log import stage_event
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
@@ -61,7 +62,10 @@ from market_storefront import lifecycle_steps as _lifecycle_steps  # noqa: F401 
 from market_storefront_kit import (
     LifecycleRouteError,
     StorefrontLifecycleRouteService,
+    StorefrontTimeRouteService,
+    TimeRouteError,
     TradingPauseRouteService,
+    time_refusal_body,
 )
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
@@ -97,6 +101,23 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 # `POOL_OVERRIDES_PATH`, the path the kit's client signs and the administrator
 # middleware binds, so the three name one path by construction.
 pool_overrides_router = APIRouter(tags=["admin"])
+
+# The time-setting route, a router of its own because the application mounts it
+# only while the process's source is injected; the administrator middleware
+# authenticates it as `admin_time`, without its timestamp's freshness.
+time_router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+@time_router.post("/time")
+async def set_time(request: Request) -> JSONResponse:
+    """Set the storefront's injected time to the instant the body carries."""
+    try:
+        answer = StorefrontTimeRouteService().set_time(await request.body())
+    except TimeRouteError as error:
+        return JSONResponse(
+            status_code=error.status_code, content=time_refusal_body(error)
+        )
+    return JSONResponse(content=answer)
 
 
 #: Route alias -> the loop's registered name. Aliases are hyphenated where loop

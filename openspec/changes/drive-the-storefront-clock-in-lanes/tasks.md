@@ -1262,7 +1262,15 @@ middleware).
     rejection-path test's, only statuses are asserted: under injected time
     `admin_time` is admitted at ±900 s with a signed response, the pause refused
     and trading left open; under wall time `admin_time` is refused. Section 9's
-    application-integration tests set time through the client on the real route. Suites: `make -C
+    application-integration tests set time through the client on the real route.
+  - Correction (section 9): the bare-metal test runs the composed application,
+    which under injected time now mounts the real time route ahead of the
+    stand-in, so its injected case sets time through the real route (900 s ahead
+    answers 200 and moves the source; 900 s behind answers 409, not the skew's
+    403, and leaves the source, so it passed authentication and was refused as an
+    earlier instant), the pause is sent before the setting, and the stand-in is
+    added only under wall time, where no route is mounted. The suite counts above
+    are section 8's; section 9's are in its notes. Suites: `make -C
     kit/site test` 373, `make -C core/storefront test` 232 (before its two unit
     tests; 9 in `test_auth.py` after), provisioning middleware 56, `make -C
     domains/vms/storefront test` 609 integration and its unit suite, `make -C
@@ -1327,12 +1335,47 @@ bindings (`domains/vms/storefront`'s `controllers/admin_controller.py`,
 `api.py`; `domains/apicredits/storefront`), their generated values schemas
 (`values_schema.py` and the charts' schemas it writes), and `core/storefront-client`.
 
-- [ ] 9.1 Each storefront reads `[Time] source`, `"wall"` by default, refusing any
+- [x] 9.1 Each storefront reads `[Time] source`, `"wall"` by default, refusing any
   other value naming it, and installs the process source at its composition root
   before anything reads time (D2).
   - Verify: unit tests per storefront configuration; an application-integration test
     that a storefront started with `"injectd"` refuses to start naming it.
-- [ ] 9.2 `kit/storefront` gains the framework-free time route service over the
+  - Done: `kit/storefront`'s new `time_controls` module holds what the three share:
+    `TIME_SOURCE_SETTING = "[Time] source"`, `install_time_source(value)` (the
+    component's `source_for` naming that setting, `"wall"` when unset, then
+    `install`), and `TimeSourceSetting`, a pydantic `Literal["wall", "injected"]`
+    whose before-validator refuses any other value with the component's message,
+    naming the setting and the value; the kit now declares `pydantic>=2.7`, which
+    it had only transitively. The kit's `configured_time_source(settings)` reads
+    the raw `[Time] source` from a loader's merged settings, keys in any case, and
+    each storefront's `configured_time_source()` passes it its own (the VM's and
+    the API credits' Dynaconf `settings`, the bare-metal `settings_source()`).
+    Each installs it at
+    module level in its `server.py`, immediately before the module-level `app` is
+    built, so the source is in place before anything reads the time and before the
+    application decides whether to mount the route. A misspelled value raises
+    `injected_time.InvalidTimeSource` at import, so the process does not start.
+    The bare-metal typed settings gain `time: TimeSettings` and the VM a
+    `TimeConfigDeclaration` for its values schema, each typed with
+    `TimeSourceSetting`; the API-credit storefront has no chart and no typed
+    model.
+  - Evidence. Unit: `kit/storefront`'s `tests/unit/test_time_controls.py`
+    (installation: unset → wall, `"injected"` → an injected source installed,
+    `"injectd"` refused naming both and leaving the installed source; the typed
+    setting; the raw read in any case), VM `tests/unit/test_config_loader.py`
+    (the raw read; the declaration), bare metal `tests/test_config_loader.py`
+    (unset → wall, `[Time] SOURCE = "injected"` read through the files,
+    `"injectd"` refused by the typed load naming both), API credits
+    `tests/unit/test_time_settings.py`. The refused start: each storefront's
+    `test_time_controls.py` starts its composition root in a process of its own
+    (`python -c "import <storefront>.server"`, the test's interpreter) with
+    `[Time] source = "injectd"` through the loader's override layer
+    (`STOREFRONT_TIME__SOURCE`, `APICREDITS_STOREFRONT_TIME__SOURCE`) and finds it
+    exits non-zero with `InvalidTimeSource` naming the setting and the value. That
+    is a process starting the module as `serve` imports it, before any
+    application exists, so it is not application integration, which the plan
+    named; no application can be driven, since none is built.
+- [x] 9.2 `kit/storefront` gains the framework-free time route service over the
   component's (1.5); each storefront binds it at `POST /api/v1/admin/time` behind its
   administrator authentication, mounted only under injected time (D5, D12).
   - Verify: application-integration tests per storefront through the canonical
@@ -1340,19 +1383,103 @@ bindings (`domains/vms/storefront`'s `controllers/admin_controller.py`,
     storefront's signed responses then carry 1794822300; an earlier instant answers
     `409 time_moves_forward`; `{"now": true}` answers `422 invalid_time`; a wall-time
     storefront serves no such route.
-- [ ] 9.3 The signed system status, `GET /api/v1/system/status`, carries the time
+  - Done: `StorefrontTimeRouteService(source=None)` over the component's
+    `TimeRouteService`, the installed source by default: `mounted`, `status()` and
+    `set_time(body)`, which raises the component's `TimeRouteError`;
+    `time_refusal_body(error)` is the refusal's body, `{"code", "detail"}`. Each
+    storefront binds it on a router of its own, mounted by its app builder only
+    when `StorefrontTimeRouteService().mounted` (the installed source is
+    injected): VM `admin_controller.time_router` behind the administrator
+    middleware (section 8 mapped the path), bare metal `api.time_router` through
+    `_admin`, API credits `controllers/time_controller.py` through
+    `authenticate_admin`. The handler passes the raw body to the route service, so
+    the value rule is the component's alone, and each storefront's response
+    middleware signs the answer after the set, at the new instant.
+  - Evidence, application integration, each storefront's `test_time_controls.py`
+    over its composed application and lifespan (VM and API credits from
+    configuration as their startup tests compose them, bare metal over a runtime
+    the test builds), through `StorefrontClient`: with the source injected at
+    1794822300 before the app is built, `set_time(1794823200)` answers
+    `injected`/1794823200 and the response, read through a recording transport,
+    is signed at 1794823200; `set_time(1794822300)` raises 409; `set_time(True)`
+    (the client sends the value as given) raises 422, and the instant stays
+    1794823200; with a wall source the same call raises 404. On bare metal and
+    API credits, whose time routes authenticate in the handler, a client signing
+    as a principal the storefront does not trust is refused 403 and the time is
+    unchanged (the VM's route sits behind the administrator middleware, whose
+    trust section 8's and the existing administrator tests hold). The plan's instant
+    is used: the client and the storefront read one process source (section 7).
+    Correction to the plan's example: the setting moves from 1794822300 to
+    1794823200, since a set to the instant already held would not show the move.
+- [x] 9.3 The signed system status, `GET /api/v1/system/status`, carries the time
   section in both modes; the canonical client's `get_system_status` reads it and gains
   `set_time` (D5).
   - Verify: application-integration tests for both modes through the client, for the
     VM and the bare-metal storefront at the same path and shape (`market-composition`'s
     "Both compute storefronts bind one route").
-- [ ] 9.4 Startup announcement and warning: an injected storefront logs its source at
+  - Done: `core_storefront`'s `HealthResponse` and the bare-metal
+    `BareMetalHealthResponse` gain `time: dict | None`, set on system status from
+    `StorefrontTimeRouteService().status()` by each storefront's status route
+    (absent from the liveness probes). The client's `HealthResponse` reads `time`;
+    `StorefrontClient.set_time(now)` and `SyncStorefrontClient.set_time(now)` post
+    `{"now": now}` signed as `admin_time`/`time` and return `TimeSettingResponse`
+    (`source`, `now`); the client names the pair itself, as it does every
+    administrator operation, since it cannot import the storefronts' core.
+  - Evidence: unit, `core/storefront-client`'s `test_health_response.py` (the
+    section in both modes) and `test_time_setting.py` (over an
+    `httpx.MockTransport`: the request is signed as `admin_time`/`time` at the
+    process's instant and verifies; 409 and 422 raise with their status); the VM
+    storefront's existing `tests/unit/test_storefront_client_parity.py` holds the
+    sync and async `set_time` to one signature. Application integration, the
+    three storefronts' tests above: status reads `{"source": "injected", "now":
+    1794822300}`, then 1794823200 after the set, and `{"source": "wall"}` under
+    wall time; the VM and bare-metal tests drive the same client methods at the
+    same path and read the same shapes.
+- [x] 9.4 Startup announcement and warning: an injected storefront logs its source at
   startup; one with an Arkhai payments section whose `livemode` is `true` logs a
   warning naming both settings, and starts (D2).
   - Verify: application-integration tests capture both log lines.
-- [ ] 9.5 Regenerate the storefronts' values schemas so the charts admit `[Time]`.
+  - Done: `announce_time_source(source, payments_livemode=..., logger=...)` logs
+    nothing for wall time; for injected time an INFO line naming `[Time] source`
+    and the held instant, and, with live payments, a WARNING naming `[Time]
+    source` and `[Settlement.arkhai_payments] livemode`. Each storefront calls it
+    in its lifespan's start (VM `_start_vm_services`, bare metal `_start_runtime`,
+    API credits `_start_api_credit_services`) with its payments mode, read by one
+    function the payments kit now offers beside the section it owns,
+    `market_arkhai_payments.payments_livemode(settlement)` (the raw `[Settlement]`
+    table, keys in any case, `True` only for a payments section stating
+    `livemode = true`): the VM and the API credits pass their settlement table;
+    bare metal's configuration builder stores it in a new runtime field,
+    `payments_livemode`. `kit/arkhai-payments` 0.8.0 already postdates the
+    release; the API-credit storefront's lower bound on it rises to 0.8.0, and the
+    three storefronts' on the client to 0.30.0, whose `set_time` their tests use.
+  - Evidence: unit, the kit's tests (wall silent; injected INFO; WARNING beside
+    live payments) and `kit/arkhai-payments`' `test_settlement_config.py` (the
+    read: absent, false, a string, a non-table and a live section in other
+    case). Application integration, each storefront's `test_time_controls.py`:
+    started injected with live payments, `caplog` holds both lines and the
+    storefront serves its status. VM and API credits state a disabled
+    `arkhai_payments` section with `livemode = true` in their configuration; bare
+    metal builds its runtime with `payments_livemode=True`, and its builder's
+    read is shown instead by `test_config_loader.py`, where the files' settlement
+    table gives `payments_livemode` the mode the composed payments stage holds;
+    the builder's call itself is not run by a test.
+- [x] 9.5 Regenerate the storefronts' values schemas so the charts admit `[Time]`.
   - Verify: `make -C helm test-render` passes.
-- [ ] 9.6 Section verification.
+  - Done: `make helm-values-schema` wrote `helm/values.schema.json`,
+    `helm/charts/storefront/values.schema.json` and
+    `helm/charts/bare-metal-storefront/values.schema.json`, each admitting
+    `time.source` as `"wall"` or `"injected"` (any case, `null` accepted as
+    everywhere). The charts' packaged files changed, so the umbrella and both
+    storefront charts move from 0.4.1 (bumped on `dev` since `marketplace-v0.3.0`'s
+    0.4.0) to 0.5.0, a minor step for an admitted key, and the umbrella's two
+    dependency pins with them. Each storefront chart's render test gains
+    `test_the_time_source_is_admitted_as_wall_or_injected_and_refused_otherwise`
+    (static configuration: both sources render, `"injectd"` is refused naming
+    `config.Time.source`, through the umbrella for the VM agent). `make -C helm
+    test-render` passes, its loader checks among it; the storefronts' drift tests
+    (`test_values_schema.py`) pass in their suites.
+- [x] 9.6 Section verification.
   - Unit and application integration: `make test-kits` (`kit/storefront`),
     `make test-core` (`core/storefront`, `core/storefront-client`),
     `make test-domains` (the three storefronts).
@@ -1362,6 +1489,52 @@ bindings (`domains/vms/storefront`'s `controllers/admin_controller.py`,
     section 16 puts the lanes on injected time.
   - Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — the
     chart render tests pass with the regenerated schemas.
+  - Evidence: `make -C kit/storefront test` 141, `make -C kit/arkhai-payments
+    test` 354, `make -C core/storefront-client test` passed, `make -C
+    domains/vms/storefront test` 1196 unit (1 skipped) and 613 integration, `make
+    -C domains/bare_metal/storefront test` 658, `make -C
+    domains/apicredits/storefront test` 285, `make -C helm test-render` passed.
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`,
+    before the fresh-context fixes: `after-functional-change` and
+    `pre-commit-functional` (every suite) passed, and of `pre-commit` only the
+    citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9). On the tree with the
+    fresh-context fixes: `after-functional-change` (`make lock`) and
+    `pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make
+    test`, every suite) passed; of `pre-commit`, the citations check failed as
+    before, and the local-imports check on the payments kit test's import, which
+    now sits at module level: `make check-local-imports CHANGE_BASE=dev` passes,
+    the file's 37 tests pass, and `make check-repository` fails only on the
+    citation.
+  - Confirmed: no end-to-end marker exercises the route yet (sections 15 and 16).
+    The owed job is right: `test-deployment-packaging` runs `make -C helm
+    test-render`, the regenerated schemas and the new render tests among it.
+  - Fresh-context check: it found the bare-metal and API-credit time routes'
+    authentication untested (a test of an untrusted principal added to each), the
+    9.4 claim that every storefront started from a live payments section (bare
+    metal sets its runtime field; reworded, and the builder's read shown through
+    the configuration test), section 8's correction placed among its counts and
+    naming a code its test does not check (reworded), a sync/async parity test
+    duplicating the VM storefront's (removed), the kit test repeating the
+    component's value and forward rules (trimmed to what the kit adds), the
+    `livemode` read and the `[Time] source` read written three ways (one each now:
+    `market_arkhai_payments.payments_livemode`, beside the section it reads, and
+    the kit's `configured_time_source`), the storefronts' client lower bounds
+    below the version their tests use (raised to 0.30.0), no render test of the
+    schema's new entry (added to both charts), and the misspelled-source test
+    called application integration (reworded). Declined: the route's operation,
+    resource and path spelled both in `core_storefront.auth` and the client, as
+    section 8 declined for `admin_time` (the client cannot depend on the
+    storefronts' core, and moving the pair into the client would make
+    `core_storefront` depend on the client).
+  - Handoff for sections 10–11. The storefronts' pattern carries over: install
+    the configured source at the composition root before the app is built, mount
+    the setting route only when `TimeRouteService(installed()).settable`, put
+    the component's `status()` on the status route, sign the answer after the
+    set, and announce in startup with the payments mode. A composed app reads the
+    source at build time, so a test installs its source before building the app
+    and restores it after. A storefront test that also wants its own stand-in at
+    `/api/v1/admin/time` under injected time is shadowed by the real route.
 
 ## 10. Provisioning's setting, route and status
 

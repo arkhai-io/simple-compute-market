@@ -21,6 +21,8 @@ from arkhai_bare_metal.evidence_routes import (
     evidence_resource,
 )
 from core_storefront.auth import (
+    ADMIN_TIME_OPERATION,
+    ADMIN_TIME_RESOURCE,
     AuthError,
     admin_time_setting_operation,
     authenticate_request,
@@ -96,11 +98,14 @@ from market_storefront_kit import (
     NegotiationControlRouteService,
     StageEventRouteService,
     StorefrontLifecycleRouteService,
+    StorefrontTimeRouteService,
+    TimeRouteError,
     TradingPauseRouteService,
     get_storefront_container,
     opening_proposal,
     refuse_introduction_fulfillment,
     refuse_introduction_settle,
+    time_refusal_body,
 )
 from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 
@@ -149,6 +154,10 @@ from .settlement_service import (
 )
 
 router = APIRouter()
+
+# The time-setting route, a router of its own because the application mounts it
+# only while the process's source is injected.
+time_router = APIRouter()
 
 
 def _runtime(request: Request) -> BareMetalStorefrontRuntime:
@@ -1266,6 +1275,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
             resource="system/status",
         )
     status = await runtime.status()
+    status["time"] = StorefrontTimeRouteService().status()
     if not as_site:
         overrides = runtime.pool_override_service()
         if overrides is not None:
@@ -1699,6 +1709,30 @@ async def pause(request: Request) -> AdminPauseResponse:
         body=await _request_body(request),
     )
     return TradingPauseRouteService(runtime.trading_pause).pause()
+
+
+@time_router.post("/api/v1/admin/time")
+async def set_time(request: Request) -> JSONResponse:
+    """Set the storefront's injected time to the instant the body carries.
+
+    Authenticated without the request timestamp's freshness, as the
+    time-setting operation is; the response is signed at the instant set.
+    """
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation=ADMIN_TIME_OPERATION,
+        resource=ADMIN_TIME_RESOURCE,
+        body=await _request_body(request),
+    )
+    try:
+        answer = StorefrontTimeRouteService().set_time(await request.body())
+    except TimeRouteError as error:
+        return JSONResponse(
+            status_code=error.status_code, content=time_refusal_body(error)
+        )
+    return JSONResponse(content=answer)
 
 
 @router.post("/api/v1/admin/resume", response_model=AdminPauseResponse)

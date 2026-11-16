@@ -17,6 +17,7 @@ from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, Identity, TrustedIdentitySet
 
+from market_storefront_kit import StorefrontTimeRouteService
 from storefront_client import StorefrontClient
 from storefront_client.auth import build_authenticated_request
 from storefront_client.client import StorefrontClientError
@@ -195,10 +196,10 @@ async def _skewed_admin_requests(
     Raw requests, as a rejection-path test's are: the canonical client signs at
     the process's instant, the storefront's own, and cannot send a request
     signed at another, so these are built with its request builder and only
-    their statuses are asserted. The time route is a stand-in behind the
+    their statuses are asserted. Under injected time the storefront's own time
+    route answers; under wall time it mounts none, so a stand-in behind the
     storefront's administrator authentication, which only this module's route
-    helpers reach, counting its calls, since that authentication is what is
-    under test.
+    helpers reach, takes its path, counting its calls.
     """
     runtime = _runtime(str(tmp_path / "storefront.db"))
     app = _app(runtime)
@@ -215,7 +216,8 @@ async def _skewed_admin_requests(
         calls.append(1)
         return {"set": len(calls)}
 
-    app.add_api_route("/api/v1/admin/time", set_time, methods=["POST"])
+    if not StorefrontTimeRouteService().mounted:
+        app.add_api_route("/api/v1/admin/time", set_time, methods=["POST"])
     setting = build_authenticated_request(
         signer=ADMIN_SIGNER,
         role="admin",
@@ -237,24 +239,27 @@ async def _skewed_admin_requests(
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://seller"
         ) as raw:
+            # The pause first: once the setting moves the time, an instant
+            # skewed from the old one may be fresh.
+            pause_response = await raw.post("/api/v1/admin/pause", headers=pause.headers)
             set_response = await raw.post(
                 "/api/v1/admin/time", content=setting.content, headers=setting.headers
             )
-            pause_response = await raw.post("/api/v1/admin/pause", headers=pause.headers)
     return set_response, pause_response, calls, runtime
 
 
-@pytest.mark.parametrize("skew", (900, -900))
+@pytest.mark.parametrize(("skew", "status"), ((900, 200), (-900, 409)))
 async def test_under_injected_time_the_time_setting_operation_alone_is_admitted_skewed(
-    tmp_path, injected_source, skew
+    tmp_path, injected_source, skew, status
 ) -> None:
-    setting, pause, calls, runtime = await _skewed_admin_requests(
-        tmp_path, at=injected_source.now() + skew
-    )
+    """Admitted either way: 900 s ahead sets the time, and 900 s behind is
+    refused only as an earlier instant, never for skew."""
+    start = injected_source.now()
+    setting, pause, _, runtime = await _skewed_admin_requests(tmp_path, at=start + skew)
 
-    assert setting.status_code == 200, setting.text
+    assert setting.status_code == status, setting.text
     assert setting.headers["X-Market-Signature"]
-    assert calls == [1]
+    assert injected_source.now() == max(start, start + skew)
     assert pause.status_code == 403
     assert runtime.trading_pause.paused is False
 

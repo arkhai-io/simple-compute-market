@@ -13,6 +13,8 @@ dependencies = [
     "arkhai-kit-deal-lifecycle>=0.1.0",
     "arkhai-kit-negotiation-runtime>=0.5.0",
     "alkahest-py==1.1.2",
+    # The typed `[Time] source` setting the storefronts' configuration models share.
+    "pydantic>=2.7",
 ]
 
 [build-system]
