@@ -290,9 +290,18 @@ that exercise it, the permanent documents it promotes, and the archive's merge o
 task. Its heading is `## N. Closeout`, exactly, and it is the list's last section:
 the next-step computation knows the closeout section by that title alone, so any
 other section, whatever its title says of closeout, is implemented by a round. An
-amended plan adds each new section before it, renumbering the closeout section
-and its tasks to stay last; `scripts/change-workflow check tasks <change>` fails a
-list whose closeout section is missing, repeated, or followed by another.
+amended plan adds each new section before it, numbered after the section it
+follows with a letter (`6a` after section 6), so the closeout section and its
+tasks keep the numbers other documents cite;
+`scripts/change-workflow check tasks <change>` fails a list whose closeout section
+is missing, repeated, or followed by another.
+
+**A return from closeout** for more implementation is amended the same way and no
+further: add one section before the closeout section for the work the return
+names, ending at its verification point, map it as one round of one session, and
+leave every other section, the closeout's checked tasks included, as it stands.
+Once that round's triage advances, the change goes on as after any last round:
+the pre-closeout review, then closeout.
 
 ## 5. Check the plan
 
