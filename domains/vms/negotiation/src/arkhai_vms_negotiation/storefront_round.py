@@ -20,12 +20,14 @@ from arkhai_vms_listings import (
     extract_compute_from_order,
 )
 from arkhai_vms_negotiation.amounts import (
-    BASIS_POINTS, has_rate_structure, multiplier_floor, quote_from_multiplier, shape_hourly_amount,
+    BASIS_POINTS, has_rate_structure, multiplier_floor, quote_from_multiplier,
+    selected_billing_basis, shape_hourly_amount,
 )
 from arkhai_vms_negotiation.policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
+from market_core.schemas import BillingProjection, PriceBasis
 from market_policy.listing_source import ListingSourceVerdict
 from market_policy.seller_round import SellerRoundResult
 from market_policy.scalar_policies import (
@@ -246,6 +248,7 @@ def _seller_reference_amount(
     default_min_price: Any = None,
     proposal: Any = None,
     requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
+    price_basis: PriceBasis = PriceBasis(unit="total"),
 ) -> int:
     """The multiplier reference, or legacy absolute reference for a flat listing.
 
@@ -269,7 +272,11 @@ def _seller_reference_amount(
         advertised = vm_listing_resource_shape(extract_compute_from_order(record))
         if requested_shape != advertised:
             raise ValueError("shape_commercially_infeasible: flat-priced listing is shape-fixed")
-    seconds = int(duration_seconds) if duration_seconds is not None else 3600
+    seconds = (
+        price_basis.period_seconds if price_basis.unit == "per_period"
+        else int(duration_seconds) if duration_seconds is not None else 3600
+    )
+    assert seconds is not None
     return math.floor(Fraction(per_hour) * seconds / 3600)
 
 
@@ -285,6 +292,7 @@ async def _run_default_seller_round_policy(
     chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
+    project_billing: BillingProjection | None = None,
 ) -> SellerRoundResult:
     """Run the default VM seller per-round policy hook."""
     if not strategy_label:
@@ -335,6 +343,11 @@ async def _run_default_seller_round_policy(
         listing_dict if isinstance(listing_dict, dict) else {},
         pinned,
     )
+    basis = (
+        selected_billing_basis(listing_dict, pinned, project_billing)
+        if project_billing is not None and _selected_option(listing, pinned) is not None
+        else PriceBasis(unit="total")
+    )
     reference_amount = (
         _seller_reference_amount(
             listing,
@@ -342,6 +355,7 @@ async def _run_default_seller_round_policy(
             default_min_price=default_min_price,
             proposal=pinned,
             requested_shape=requested_shape,
+            price_basis=basis,
         )
         if uses_scalar_amount else 0
     )
@@ -386,7 +400,7 @@ async def _run_default_seller_round_policy(
                 proposed = floor_bps
             quote_from_multiplier(
                 listing_dict, pinned, proposed,
-                int(requested_duration_seconds or 3600), requested_shape,
+                int(requested_duration_seconds or 3600), requested_shape, price_basis=basis,
             )
     chain_label = ",".join(
         type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__
@@ -409,6 +423,7 @@ class _DefaultSellerRoundHook:
     chain_config_paths: Mapping[str, str | None] | None = None
     extra_policy_paths: Iterable[str | Path] | None = None
     default_min_price: Any = None
+    project_billing: BillingProjection | None = None
 
     async def __call__(
         self,
@@ -431,6 +446,7 @@ class _DefaultSellerRoundHook:
             chain_config_paths=self.chain_config_paths,
             extra_policy_paths=self.extra_policy_paths,
             default_min_price=self.default_min_price,
+            project_billing=self.project_billing,
         )
 
 
@@ -440,6 +456,7 @@ def default_seller_round_hook(
     chain_config_paths: Mapping[str, str | None] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
+    project_billing: BillingProjection | None = None,
 ) -> SellerRoundHook:
     """Build the default VM seller round hook.
 
@@ -453,4 +470,5 @@ def default_seller_round_hook(
         chain_config_paths=chain_config_paths,
         extra_policy_paths=extra_policy_paths,
         default_min_price=default_min_price,
+        project_billing=project_billing,
     )

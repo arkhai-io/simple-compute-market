@@ -60,8 +60,8 @@ request envelope does not carry what that needs:
   on the operation rather than on how a proxy spelled the path. It also lets every replay
   row record its operation, which today's rows cannot.
 
-Before 1.0 the envelope may change incompatibly (`docs/development/RELEASING.md`,
-"Versioning policy"): a version 3 protocol identifier is defined beside version 2, and
+Before 1.0 the envelope may change incompatibly (`docs/guidance/engineering/versioning.md`,
+"A versioned contract is never changed in place"): a version 3 protocol identifier is defined beside version 2, and
 the release that introduces it may stop accepting version 2.
 
 `service-identity-signing` was found delivered by `add-nonchain-marketplace-identities`

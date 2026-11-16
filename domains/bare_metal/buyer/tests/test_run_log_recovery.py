@@ -7,8 +7,9 @@ real run log under one temporary state directory, and the deal is recovered from
 it, so a change to what the producer records that the consumer cannot read fails
 this test.
 
-Only the command module's own factories are replaced, as the command-module
-convention in ``docs/development/TESTING.md`` asks: ``fresh_identity``,
+Only the command module's own factories are replaced, as
+``docs/guidance/engineering/testing-python.md``, "A command module's factories
+are its seam", asks: ``fresh_identity``,
 ``registry_client``, and ``payment_approval`` for the purchase, and
 ``recovery_identity`` for the recovery. Configuration is a real file read by the
 real loader. The seller is a fake served over loopback HTTP: it verifies each

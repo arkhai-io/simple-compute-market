@@ -1,6 +1,6 @@
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= dev-env
-GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)
 # Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
 # is tagged per change alone: a commit tag would keep one image per validated commit.
 IMAGE_SUFFIX ?=

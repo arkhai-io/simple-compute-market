@@ -72,6 +72,8 @@ class NegotiateNewResponse(BaseModel):
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None
+    rate_structure_digest: str | None = None
+    pricing_pin: dict[str, Any] | None = None
 
 
 class RoundProposal(TypedDict, total=False):
@@ -103,6 +105,8 @@ class NegotiateContinueResponse(BaseModel):
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None
+    rate_structure_digest: str | None = None
+    pricing_pin: dict[str, Any] | None = None
 
 
 class NegotiationSummary(BaseModel):

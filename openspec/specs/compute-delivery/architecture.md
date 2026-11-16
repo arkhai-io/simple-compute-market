@@ -262,7 +262,7 @@ deal whose end took effect before delivery.
 - The lanes show a restart as one recovery-loop step and a seller failure before
   dispatch as a settlement placement that finds no capacity; acknowledgement gaps and
   a refused live commit are proven by library and application integration, since no
-  lane control injects them ([`TESTING.md`](../../../docs/development/TESTING.md#the-discipline-every-scenario-follows)).
+  lane control injects them ([`deal-scenarios.md`](../../../docs/guidance/repository/deal-scenarios.md#the-discipline-every-scenario-follows)).
 - A payment deal's `delivery_end` filing is not dispatched in a lane until the lanes
   run a mediation double; an Alkahest deal's filing is unsupported.
 

@@ -97,13 +97,19 @@ async def bare_metal_publication_candidate(
         raise CapacityBindingError(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
-    resource, pricing = published_listing_resource(_listing_resource(listing))
+    resource, pricing = published_listing_resource({
+        name: value for name, value in _listing_resource(listing).items()
+        if name not in ("max_duration_seconds", "available_until_utc")
+    })
+    terms: dict[str, Any] = {"pricing": pricing} if pricing is not None else {}
+    if listing.get("available_until_utc") is not None:
+        terms["available_until_utc"] = listing["available_until_utc"]
     payload = {
         **listing,
         "listing_resource": resource,
-        # Carried opaquely by core publication as a top-level term beside the
-        # common fields, so no registry or core code names a price.
-        "publication_terms": {"pricing": pricing} if pricing is not None else {},
+        # Carried opaquely by core publication as top-level terms beside the
+        # common fields, so no registry or core code names a price or a bound.
+        "publication_terms": terms,
     }
     return PublicationCandidate(listing_id, binding, payload)
 

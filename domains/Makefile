@@ -1,5 +1,6 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
+export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath ../build-constraints.txt)),$(error ../build-constraints.txt not found))
 
 .PHONY: test dist dist-release dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
@@ -171,7 +172,7 @@ dist-inference-gateway: dist-inference-domain ## Build arkhai-inference-gateway-
 	@ls $(DIST_DIR)/arkhai_inference_gateway_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-inference-gateway-service produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-buyer: dist-vms-listings dist-vms-negotiation dist-vms-settlement ## Build arkhai-vms-buyer (the `market` CLI) wheel into .dist/
+dist-buyer: dist-vms-listings dist-vms-negotiation dist-vms-settlement ## Build arkhai-vms-buyer (the VM buyer domain of the `market` CLI) wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd vms/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_vms_buyer-*-none-any.whl > /dev/null 2>&1 || \

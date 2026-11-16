@@ -79,12 +79,13 @@ only when `kit/site`'s boundary test forbids `market_resource_pools` and
   family only `apicredits_service` touches them, and only because the site ledger it
   composes reads pool rows: `db/database.py` imports `market_resource_pools.db` to
   create the table the ledger needs. Under
-  `ARCHITECTURE.md`'s scope rule a kit may know no family, and under the family-kit
+  `package-layers.md`'s scope rule a kit may know no family, and under the family-kit
   placement tests the authority fails the third-domain test as a repository-wide
   kit. Decide whether it becomes a compute family-kit distribution
   (`provisioning-pools` beside `hosts/` and `jobs/`, once
   `align-package-paths-with-layers` has placed the family kit) or stays
-  repository-wide with that finding recorded in "Where the current tree diverges".
+  repository-wide with that finding recorded in `package-layers.md`'s "Where the
+  current tree diverges".
   If it moves, the ledger's pool-facts port is what keeps `kit/site`
   repository-wide, and `apicredits_service` — which imports
   `market_resource_pools.db` directly in `db/database.py` — takes the port's

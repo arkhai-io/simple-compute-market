@@ -1,10 +1,11 @@
-# The package layer, scope, and kind rules of ARCHITECTURE.md, in the form
+# The package layer, scope, and kind rules of
+# docs/guidance/repository/package-layers.md, in the form
 # scripts/architecture.py reads. The prose is the contract; this file encodes
 # what no one package owns and records every known divergence with the change
 # that owns it. What a package owns about itself -- the distributions it may
 # depend on, and why it installs one it never imports -- is in its own
 # pyproject.toml, under [tool.arkhai.architecture].
-# See ARCHITECTURE.md, "Package and dependency layers".
+# What the layers are is ARCHITECTURE.md, "Package and dependency layers".
 
 version = 1
 

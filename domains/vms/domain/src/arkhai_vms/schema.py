@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from market_resource_pools_contracts import UtcAvailability, positive_duration_bound
 from market_core.schemas import SettlementOption, SettlementSelection
 
 from .capability_shapes import vm_listing_resource_shape
@@ -23,6 +24,11 @@ class VmListing(BaseModel):
     settlement_options: list[SettlementOption] | None = None
     demands: list[dict[str, Any]] = Field(default_factory=list)
     max_duration_seconds: int | None = Field(default=None, ge=1)
+    available_until_utc: UtcAvailability | None = None
+
+    _relative_bound = field_validator("max_duration_seconds", mode="before")(
+        positive_duration_bound
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -48,7 +54,7 @@ class VmMessage(BaseModel):
     """VM-domain negotiation message payload."""
 
     kind: Literal["compute.v1"] = VM_PROVISION_KIND
-    duration_seconds: int
+    duration_seconds: int | None = None
     ssh_public_key: str = Field(default="")
     start_utc: str | None = None
     compute_resource: dict[str, Any] | None = None

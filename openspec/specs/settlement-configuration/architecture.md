@@ -46,6 +46,25 @@ architecture](../market-composition/architecture.md#settlement-runtime-compositi
 There is no required convention protocol or speculative adapter dependency,
 including for seller-first or fused stages.
 
+What an accepted option means in money is the installed mechanism's to say, so
+neutral code never parses a mechanism's payment fields. A registration's
+`project_billing` labels an accepted option's money `total` or `per_period`, with the
+period, and core's `agreed_price` dispatches to it through the registry; its
+`present_payment` gives a buyer the quote, a separate setup charge and the initial
+reserve to display, and the registry refuses a presentation that changes accepted
+money. A missing hook refuses rather than guessing a total. Reading an accepted option
+needs only the installed code, not current enablement or readiness, since a deal
+accepted under a mechanism since disabled must still be read. A composition likewise
+maps each mechanism to the term timing its recurring options need at acceptance —
+period, approval window and lifecycle context — and refuses an option whose mechanism
+supplies none. Whether a composition services recurring options at all is its
+`[Settlement.rate_servicing]` declaration, which publication, acceptance and
+materialization read as one object and accepted-deal continuation never reads (see the
+[storefront publication architecture](../storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors)).
+The installed payments adapter projects and presents once-only options and refuses rate
+parameters, and Alkahest projects totals, so no recurring option is serviceable until a
+mechanism supplies its projections.
+
 ## Readiness, publication, and selection
 
 Preflight normalizes mechanism-owned checks into a public-safe result: canonical ID, configured, enabled, ready, blocker codes and messages, capabilities, and contract/schema versions. Mechanism detail is allowlisted. Status is observational: it does not publish, create transient browser actions, submit transactions, or mutate provider or settlement state.

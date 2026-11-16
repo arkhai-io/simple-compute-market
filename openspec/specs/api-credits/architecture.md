@@ -145,11 +145,11 @@ packaged command, `apicredits-service-migrate`, applies the authority
 library's migration chain before the application starts; the application only
 checks the database against the chain, refusing one the command has not
 migrated, and then runs the library's initialization of the profile's pool.
-See `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup".
+See `docs/guidance/repository/migrations-at-startup.md`.
 
-Every API-credit package resolves its internal dependencies from built wheels,
-not repository-relative editable paths or `pythonpath` fallbacks — see
-[The wheelhouse](../../../docs/development/BUILD_AND_PACKAGING.md#the-wheelhouse).
+Every API-credit package resolves its internal dependencies from built
+wheels, not repository-relative editable paths or `pythonpath`
+fallbacks — see `docs/guidance/repository/wheelhouse.md#the-wheelhouse`.
 
 ### Listing bindings and the bound pool
 

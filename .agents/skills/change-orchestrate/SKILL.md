@@ -144,7 +144,7 @@ The computation names where the change is worked before any step:
   `reviews/` though its branch is checked out nowhere, so a clone would start
   without them. Relay both routes as the reason gives them: check out its branch
   in the workspace and go on there without a clone, or move it into a clone by
-  hand, as `docs/agents/change-workflow.md` describes. Both are the owner's to
+  hand, as `docs/change-workflow-handbook.md` describes. Both are the owner's to
   carry out; recompute once they say it is done.
 - **`owner`, naming the workspace** — you were started in a clone of another
   change: tell the owner to start you in their workspace.
@@ -163,7 +163,8 @@ Always start a fresh run through its target, never the script directly: the targ
 checks the change, refuses while a round view is open, and passes `SECTIONS`,
 `FRESH`, `SESSION_ID`, and `HELM_ALL_SCENARIOS` on.
 An implementation run's `ARGUMENTS` carries a merge's conflicts to resolve or the
-owner's direction to its sections, in their words, with any routing note beside it
+owner's direction to its sections, and a merge run's (`make merge ARGUMENTS=<text>`)
+the owner's direction to the merge, in their words, with any routing note beside it
 marked as yours (where a stopped session's work waits, the path a granted rule
 names); the same direction goes in the log through `note` as well.
 Each implementation run starts a fresh session unless the owner directs the work to
@@ -335,8 +336,8 @@ direction with no `resolves`, since no run waits on it: `--by owner --next revie
 
 After a confirmed return to design, once the design step has finished, the
 computation names a design review of what it settled. The owner may waive that
-review; the design step's message recommends it when a criterion of the guide's
-"Waivers" holds. A recommendation the owner declines is a ledger line too, in the
+review; the design step's message recommends it when a criterion of
+`change-workflow`'s CW-q3dm holds. A recommendation the owner declines is a ledger line too, in the
 form below with their reason, appended uncommitted for the design review's triage
 to commit with its own (`change-triage`, step 6). Only on the owner's word, record a waiver as their
 direction to planning, naming no run:
@@ -365,10 +366,10 @@ the waiver to the ledger.
 When the owner waives parts of validation for later validations — "skip Helm and
 the pipeline for the rest of this change" — record their decision with no `--next`,
 naming the parts and the condition they are waived on, so validation finds it in the
-log ("Waivers" in the guide, "Waiving parts of validation"):
+log (`change-workflow`'s CW-e7lm):
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+scripts/change-workflow note <change> orchestrator --by owner --waives helm,pipeline --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
 ```
 
 Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only
@@ -438,7 +439,7 @@ detects it once the pull request is open.
 ### Interrupting and revisiting
 
 You stay free while a step runs, so the owner can reach you mid-step
-(`docs/agents/change-workflow.md`, "Interrupting a running step"). On their word
+(`change-workflow`'s CW-k2rv). On their word
 only, stop the run, naming the step when validation and a review run side by side:
 
 ```text
@@ -463,7 +464,7 @@ elsewhere. A stop commits nothing, and an interrupted review published nothing a
 is rerun, never resumed; a review the format check refused is rerun as above.
 
 The owner may revisit a finding a triage accepted by default, or the advancing exit
-it took (`docs/agents/change-workflow.md`, "Revisiting a default acceptance").
+it took (`change-workflow`'s CW-r8vz).
 Before its fixes, the revisit is their reply to the triage's question: relay it as
 any. After the triage finished, on their word, in this order:
 

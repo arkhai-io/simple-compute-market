@@ -2,8 +2,9 @@
 
 The core owns round sequencing and opaque acceptance checks. Shape-priced
 listings use the VM amount codec: policy scalars are basis points while accepted
-outcomes carry derived payments. Flat listings retain the per-hour amount
-contract, scaled by lease hours. The VM outcome also carries the lease duration.
+outcomes carry derived payments. Flat listings scale hourly bounds by the
+selected billing span: one period or the reserved term. A recurring horizon is
+optional; the VM outcome also carries the buyer's requested duration.
 
 Importing this module also installs the RL middleware registrar so
 ``rl``-named policies in buyer.toml resolve (core cannot import
@@ -16,6 +17,7 @@ from market_identity import EnvelopeCapture
 
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable, Optional
 
 from core_buyer.negotiation_client import (  # noqa: F401 — re-exports
@@ -34,13 +36,14 @@ from market_alkahest.schemas import EscrowProposal
 from market_core.schemas import SettlementPlan, SettlementSelection
 from market_policy.negotiation_middleware import NegotiationMiddleware
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_settlement_runtime.rate_publication import DefaultRefusal
 
-from arkhai_vms import VmProvisionTerms
+from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 
 from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
-from .negotiation_amounts import amount_codec
+from .negotiation_amounts import amount_codec, priced_unit_count
 
 
 def _validate_model(model_type, value):
@@ -130,18 +133,21 @@ def negotiate_with_seller(
     | None = validate_buyer_acceptance,
     capture: EnvelopeCapture | None = None,
     listing: dict[str, Any] | None = None,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
     Prices are per-hour bounds for the shape the buyer opens with. A
     seller-authenticated registry ``listing`` with a rate structure converts
     those bounds to basis points once; accepted terms determine the monetary
-    payment, which may not exceed ``max_price`` over the accepted duration.
-    Without a rate structure, lease hours scale the bounds to absolute amounts.
+    payment, which may not exceed ``max_price`` over one period for a recurring
+    option, or over the accepted duration for a reserved one. Without a rate
+    structure, the selected period or reserved lease hours scale the bounds.
 
     ``validate_acceptance`` defaults to the purchase table's entry guard. An
     introduction has no purchase entry and passes None; its command checks
-    the accepted plan itself.
+    the accepted plan itself. ``waivers`` are the run's default-refusal waivers,
+    which that guard names in the accepted disclosure.
     """
     duration_seconds: Optional[float] = None
     if resume is None:
@@ -156,14 +162,6 @@ def negotiate_with_seller(
                 "required for fresh negotiations"
             )
         duration_seconds = provision_terms.duration_seconds
-        # Translate per-hour bounds → absolute amounts (× duration / 3600).
-        # Listings broadcast per-hour rates; once the duration is fixed,
-        # the whole negotiation runs on absolute totals.
-        if duration_seconds is None or duration_seconds <= 0:
-            raise RuntimeError(
-                "provision_terms.duration_seconds must be > 0 to translate "
-                "per-hour bounds into absolute amounts."
-            )
 
     proposal_for_amount = settlement_selection or escrow_proposal
     opening_terms: Any = provision_terms
@@ -180,6 +178,23 @@ def negotiate_with_seller(
         )
         if proposal_for_amount is not None else None
     )
+    if validate_acceptance is validate_buyer_acceptance:
+        if listing is not None:
+            # A purchase holds the signed horizon to the authenticated listing's
+            # bounds and to what the buyer opened with; a resumed run opened with
+            # the seller's round-zero echo of the buyer's terms.
+            opening = opening_terms.model_dump(mode="json") if hasattr(opening_terms, "model_dump") else opening_terms
+            validate_acceptance = partial(
+                validate_buyer_acceptance, listing=listing,
+                requested_duration_seconds=(
+                    normalize_vm_provision_terms(opening).duration_seconds if opening is not None else None
+                ),
+                waivers=waivers,
+            )
+        else:
+            # Without a listing there are no bounds to hold the horizon to, but
+            # the accepted disclosure still names the run's waivers.
+            validate_acceptance = partial(validate_buyer_acceptance, waivers=waivers)
     core_outcome = _core_negotiate_with_seller(
         seller_url=seller_url,
         principal=principal,
@@ -188,7 +203,7 @@ def negotiate_with_seller(
         initial_price=initial_price,
         max_price=max_price,
         unit_count=(
-            float(duration_seconds) / 3600.0 if duration_seconds is not None else None
+            priced_unit_count(listing, proposal_for_amount, duration_seconds) if resume is None else None
         ),
         provision_terms=provision_terms,
         encode_escrow_proposal=encode_escrow_proposal,

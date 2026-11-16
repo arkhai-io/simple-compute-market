@@ -85,7 +85,9 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
 # same depth below /repo as below the repository root, so the lock's relative
 # wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
 # packages from the lock and reinstalls them, so a cached build of a
-# same-version wheel is never reused.
+# same-version wheel is never reused. The wheelhouse's digest
+# (scripts/wheelhouse_digest.py) keys the install's cache.
+ARG WHEELHOUSE_DIGEST
 COPY --chown=appuser:appuser .dist/ /repo/.dist/
 COPY --chown=appuser:appuser scripts/uv_project.py /repo/scripts/uv_project.py
 COPY --chown=appuser:appuser provisioning/compute/service/pyproject.toml provisioning/compute/service/uv.lock /repo/provisioning/compute/service/
@@ -111,10 +113,12 @@ RUN groupadd --gid ${APPUSER_GID} appuser && \
 WORKDIR /app
 RUN chown appuser:appuser /app
 
-# Podman can otherwise reuse these cross-stage COPY layers after the builder's
-# wheel installation changes. The Makefile derives this value from .dist.
-ARG DIST_FINGERPRINT=unknown
-LABEL org.arkhai.dist-fingerprint="${DIST_FINGERPRINT}"
+# The digest of the wheelhouse this image installed, which loading a release
+# candidate requires to be the digest of the wheelhouse it stores. Set before
+# the cross-stage copies, which Podman could otherwise reuse from a build of
+# another wheelhouse.
+ARG WHEELHOUSE_DIGEST
+LABEL org.arkhai.wheelhouse-digest="${WHEELHOUSE_DIGEST}"
 
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder --chown=appuser:appuser /home/appuser/ansible-venv /home/appuser/ansible-venv

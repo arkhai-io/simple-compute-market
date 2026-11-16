@@ -40,14 +40,16 @@ def is_record(path: str) -> bool:
     return bool(RECORD_PATH.match(path))
 
 
-def inert(path: str, inert_paths: Sequence[str] | None) -> bool:
-    """Whether `path`, relative to the root, lies under one of the inert paths. An
-    entry without a glob character names a directory or a file, matched whole, so
-    `docs/` covers `docs/a.md` and not `docsite/a.md`. An entry with one is a glob
-    pattern matched against the whole path, where `**` spans any number of
-    directories, so `**/README.md` covers every README, the root's included. With
-    none declared, no path is inert."""
-    return any(_matches(path, entry) for entry in inert_paths or ())
+def inert(path: str, inert_paths: Sequence[str]) -> bool:
+    """Whether `path`, relative to the root, lies under one of the inert paths, as the
+    configuration resolves them (`Configuration.repository_inert_paths`: its
+    declaration, or the workflow's default where it declares none). An entry without
+    a glob character names a directory or a file, matched whole, so `docs/` covers
+    `docs/a.md` and not `docsite/a.md`. An entry with one is a glob pattern matched
+    against the whole path, where `**` spans any number of directories, so
+    `**/README.md` covers every README, the root's included. Given no entry, as
+    under an empty declaration, no path is inert."""
+    return any(_matches(path, entry) for entry in inert_paths)
 
 
 _GLOB = re.compile(r"[*?\[]")
@@ -59,9 +61,10 @@ def _matches(path: str, entry: str) -> bool:
     return path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
 
 
-def exempting(inert_paths: Sequence[str] | None) -> Callable[[str], bool]:
+def exempting(inert_paths: Sequence[str]) -> Callable[[str], bool]:
     """Whether a path is a change's record or lies under the repository's inert
-    paths. A commit after a pre-closeout review, or a closeout correction, may change
+    paths, as `inert` reads them; a change's records are exempt even when no path is
+    inert. A commit after a pre-closeout review, or a closeout correction, may change
     only these without a validation, since closeout's own checks read them again
     before the archive; before then only changes' records are exempt, since an inert
     path the packaging checks read is checked by nothing but the next validation."""

@@ -24,6 +24,8 @@ class BareMetalBuyerConfig(BaseModel):
     registry_url: str = Field(min_length=1)
     registry_authority: str = Field(min_length=1)
     registry_principals: tuple[Identity, ...] = Field(min_length=1, max_length=2)
+    #: The lease ``bare-metal buy`` requests for a reserved option the buyer names
+    #: no duration for. A recurring option never takes it.
     default_duration_seconds: int = Field(default=3600, gt=0)
     default_max_rounds: int = Field(default=10, ge=1, le=100)
     timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)

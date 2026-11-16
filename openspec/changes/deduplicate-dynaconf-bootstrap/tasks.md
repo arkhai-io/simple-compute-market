@@ -20,7 +20,7 @@
 
 ## 4. Closeout
 
-- [x] 4.1 Complete the plan closeout required by `openspec/README.md#plan-closeout-requirements`: (1) run `make check-comment-hygiene` and directly review touched comments/docstrings for present-intent wording; (2) review every local import added or touched by this change and move it to module scope when safe, verifying any necessary local import against the real suite; (3) re-check every accepted design decision against documentation ownership and cross-reference rules; (4) compress completed task notes to final behavior, material validation, unresolved/deferred work, and permanent-documentation destinations while preserving any useful rationale in `design.md`; (5) update `docs/development/ROADMAP.md` if this change affects a roadmap goal, otherwise record explicitly in the design-promotion record that it has no roadmap impact; and (6) complete the design-promotion record for every material decision. Closeout passes: comment hygiene and `git diff --check` are clean; touched imports are covered by the repository-standard suites; documentation ownership, roadmap no-impact, task narrative compression, and the complete design-promotion record were rechecked.
+- [x] 4.1 Complete the plan closeout required by `docs/guidance/workflow/closeout.md`: (1) run `make check-comment-hygiene` and directly review touched comments/docstrings for present-intent wording; (2) review every local import added or touched by this change and move it to module scope when safe, verifying any necessary local import against the real suite; (3) re-check every accepted design decision against documentation ownership and cross-reference rules; (4) compress completed task notes to final behavior, material validation, unresolved/deferred work, and permanent-documentation destinations while preserving any useful rationale in `design.md`; (5) update `docs/development/ROADMAP.md` if this change affects a roadmap goal, otherwise record explicitly in the design-promotion record that it has no roadmap impact; and (6) complete the design-promotion record for every material decision. Closeout passes: comment hygiene and `git diff --check` are clean; touched imports are covered by the repository-standard suites; documentation ownership, roadmap no-impact, task narrative compression, and the complete design-promotion record were rechecked.
 
 ## 5. Review follow-up: strengthen the boundary evidence
 
@@ -37,7 +37,7 @@
 
 ## 6. Closeout after review follow-up
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
 - [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
       the comments this change added, including those tasks 5.1–5.4 touched, for any

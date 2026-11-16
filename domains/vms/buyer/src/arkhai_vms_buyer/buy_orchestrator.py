@@ -1,6 +1,6 @@
 """VM composition of discovery, negotiation and declared settlement stages.
 
-VM lease hours supply the core priced-unit count. The selected buyer entry
+The selected billing basis supplies the core priced-unit count. The selected buyer entry
 owns accepted-artifact validation, resource resolution and settlement effects.
 """
 
@@ -43,6 +43,7 @@ from core_buyer.orchestration import (
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
 from market_alkahest.schemas import EscrowProposal
+from market_settlement_runtime.rate_publication import DefaultRefusal
 
 from .arkhai_payments import AgreedTerms  # noqa: F401 — public VM summary
 from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn, encode_escrow_proposal
@@ -51,10 +52,10 @@ from .settlement_composition import (
     buyer_settlement_stages,
     resolve_buyer_settlement_policy,
     advertised_plan_validator,
-    validate_buyer_acceptance,
+    listing_acceptance_validator,
 )
 from .settlement_stages import BuyerStageContext
-from .negotiation_amounts import amount_codec
+from .negotiation_amounts import amount_codec, priced_unit_count
 
 
 def make_legacy_negotiate_hook(
@@ -68,8 +69,13 @@ def make_legacy_negotiate_hook(
     chain: Optional[list[Any]],
     revalidate_settlement: RevalidateSettlementFn | None = None,
     capture: EnvelopeCapture | None = None,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> NegotiateFn:
-    """Build the compute-instantiated negotiate hook over the core stage."""
+    """Build the compute-instantiated negotiate hook over the core stage.
+
+    ``waivers`` are the run's default-refusal waivers, named again in each
+    accepted Agreement's disclosure before approval.
+    """
 
     def codec_for(match: dict[str, Any], proposal: Any):
         # The same ceiling the core stage negotiates this match under.
@@ -80,7 +86,7 @@ def make_legacy_negotiate_hook(
         config=config,
         constraints=constraints,
         provision=provision,
-        unit_count=float(provision.duration_seconds) / 3600.0,
+        unit_count=lambda listing, proposal: priced_unit_count(listing, proposal, provision.duration_seconds),
         build_escrow_proposal=build_escrow_proposal,
         encode_escrow_proposal=encode_escrow_proposal,
         decode_provision_terms=VmProvisionTerms.model_validate,
@@ -89,7 +95,9 @@ def make_legacy_negotiate_hook(
         derive_prices=derive_prices,
         chain=chain,
         revalidate_settlement=revalidate_settlement,
-        validate_acceptance=validate_buyer_acceptance,
+        # Each match's own validator: the horizon is checked against the listing
+        # the buyer selected, beside the stage's acceptance check.
+        acceptance_validator=listing_acceptance_validator(provision.duration_seconds, waivers=waivers),
         advertised_plan_validator=advertised_plan_validator,
         accepted_listing_record=accepted_listing_record,
         amount_codec_factory=codec_for,

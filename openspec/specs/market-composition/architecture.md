@@ -71,7 +71,7 @@ label through the delegate's registry rather than a copy of the vocabulary; its
 SQL check on the column stays as a backstop, held equal to the registry's labels
 by a test.
 
-The direction and knowledge rules are held mechanically: `make check-architecture` classifies every project by layer, kind, and scope from its path and name, treats every import and every declared internal dependency as an edge, and fails on any the rules forbid that no owned exception row excuses (`docs/development/ARCHITECTURE.md`, "Package and dependency layers"). Ownership — whether a package holds the right responsibilities when every edge points a permitted way — remains review's.
+The direction and knowledge rules are held mechanically: `make check-architecture` classifies every project by layer, kind, and scope from its path and name, treats every import and every declared internal dependency as an edge, and fails on any the rules forbid that no owned exception row excuses (`docs/guidance/repository/package-layers.md`). Ownership — whether a package holds the right responsibilities when every edge points a permitted way — remains review's.
 
 ## The compute family vocabulary
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import replace
+from functools import partial
 from typing import Any
 
 import typer
@@ -13,6 +14,12 @@ from core_buyer.registry_config import registry_descriptors, resolve_indexer_url
 from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
+from market_settlement_runtime.buyer_terms import (
+    BuyerTermsPolicy, allows_missing_delivery_deadline, compute_disclosure, lifecycle_disclosure,
+    waiver_flags,
+)
+from market_settlement_runtime.horizon import check_accepted_horizon
+from market_settlement_runtime.rate_publication import DefaultRefusal
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
@@ -29,10 +36,12 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
 )
 
+from .cli_helpers import emit_lifecycle_disclosure
 from .chain_cli import chain_app
 from .common import refuse_retired_address_book_keys
 from .escrow_cli import escrow_app
 from .registry_listing import domain_listing_record
+from .pricing_record import retained_pricing_record
 from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
 
 
@@ -73,7 +82,9 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     The entry is the match's selected settlement option, from which the
     buyer's proposal was built. A shape-priced match also records what its
     amount codec reads, its family rates keyed as the domain record keys them,
-    so a resumed run converts its bounds against the same rates.
+    so a resumed run converts its bounds against the same rates. The listing's
+    capacity bounds are kept so a resumed run checks the signed horizon against
+    what was advertised, not a current listing.
     """
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
@@ -81,16 +92,82 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     match = domain_listing_record(match)
     record = buyer_stage(selected.selection.settlement_schema).listing_record(match)
     if match.get("rate_structure"):
-        record = {**record, **{key: match[key] for key in (
-            "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
-        ) if key in match}}
-    return record
+        record = {**record, **retained_pricing_record(match)}
+    return {**record, **{key: match[key] for key in ("max_duration_seconds", "available_until_utc")
+                         if match.get(key) is not None}}
 
 
-def validate_buyer_acceptance(outcome) -> None:
+def buyer_term_context(
+    mechanism: str, *, waivers: frozenset[DefaultRefusal] = frozenset(),
+) -> TermContext:
+    return TermContext(
+        mechanism=mechanism, has_adapter=mechanism == "arkhai.payments.v1", compute=True,
+        dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+        allow_missing_delivery_deadline=allows_missing_delivery_deadline(waivers),
+    )
+
+
+def buyer_lifecycle_disclosure(option, *, waivers: frozenset[DefaultRefusal] = frozenset()):
+    return lifecycle_disclosure(
+        option, context=buyer_term_context(option.settlement_schema), waivers=waivers,
+    )
+
+
+def buyer_compute_disclosure(option, **kwargs):
+    return compute_disclosure(option, registry=buyer_settlement_registry(), **kwargs)
+
+
+def disclose_accepted_agreement(
+    agreement, *, waivers: frozenset[DefaultRefusal] = frozenset(),
+) -> None:
+    """Show the accepted terms before approval, naming the run's waivers."""
+    emit_lifecycle_disclosure(
+        buyer_compute_disclosure(agreement.settlement, agreement=agreement)
+        + buyer_lifecycle_disclosure(agreement.settlement, waivers=waivers),
+        title="Accepted Agreement: price, horizon and lifecycle terms before approval",
+    )
+
+
+def validate_buyer_acceptance(
+    outcome, *, listing: Mapping[str, Any] | None = None,
+    requested_duration_seconds: int | None = None,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
+) -> None:
+    """Check a seller's acceptance before its Agreement is observed or approved.
+
+    With the advertised ``listing``, the signed horizon is held to its capacity
+    bounds at the Agreement's start and to the buyer's request, or to the default
+    bound when the buyer named none: the seller's own resolver protects only
+    against the seller's mistakes, not a counterparty signing other terms.
+    ``waivers`` are the run's, named in the accepted disclosure.
+    """
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
+    if listing is not None:
+        try:
+            check_accepted_horizon(
+                start_utc=outcome.agreement.start_utc,
+                duration_seconds=outcome.agreement.duration_seconds,
+                requested_duration_seconds=requested_duration_seconds,
+                max_duration_seconds=listing.get("max_duration_seconds"),
+                available_until_utc=listing.get("available_until_utc"),
+            )
+        except ValueError as exc:
+            raise RuntimeError(f"accepted horizon refused: {exc}") from exc
     buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
+    disclose_accepted_agreement(outcome.agreement, waivers=waivers)
+
+
+def listing_acceptance_validator(
+    requested_duration_seconds: int | None, *, waivers: frozenset[DefaultRefusal] = frozenset(),
+):
+    """Bind :func:`validate_buyer_acceptance` to each candidate listing."""
+    def for_match(match: Mapping[str, Any]):
+        return partial(
+            validate_buyer_acceptance, listing=match,
+            requested_duration_seconds=requested_duration_seconds, waivers=waivers,
+        )
+    return for_match
 
 
 def _alkahest_command_group():
@@ -163,8 +240,12 @@ def resolve_buyer_settlement_policy(
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
     registry_urls: str | None = None,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> BuyerSettlementPolicy:
-    """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
+    """Strictly resolve the common buyer ``[Settlement]`` hierarchy.
+
+    ``waivers`` are the default refusals this run waives, each by its own flag.
+    """
 
     document = dict(load_user_config() if config is None else config)
     if "settlement" in document:
@@ -197,14 +278,12 @@ def resolve_buyer_settlement_policy(
         config=settlement,
         registry=registry,
         stages=buyer_settlement_stages(),
-        option_preference=AuthoritySelection(authorities, contexts={
-            "arkhai.payments.v1": TermContext(
-                mechanism="arkhai.payments.v1", has_adapter=True, compute=True,
-                dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
-            ),
-        }, report=logging.getLogger(__name__).info),
+        option_preference=BuyerTermsPolicy(AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": buyer_term_context("arkhai.payments.v1", waivers=waivers),
+        }, report=logging.getLogger(__name__).info), waivers=waivers),
         public_context={
             "dispute_authorities_by_registry": authorities,
+            "compute_term_waivers": list(waiver_flags(waivers)),
         },
     )
 

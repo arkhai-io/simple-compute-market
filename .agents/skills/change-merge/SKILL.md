@@ -20,7 +20,10 @@ after the change: `<change> from <branch>`. The engine names the branch the owne
 gives it (`make merge FROM=<branch>`), else the branch the change's last finished
 merge recorded in its outcome's `landing`, else the branch the change's clone
 recorded as the one it lands on, and refuses to start with none. Invoked with no
-branch, ask the owner which branch the change will land on; never assume one.
+branch, ask the owner which branch the change will land on; never assume one. Words
+after the branch (`make merge ARGUMENTS=<text>`) are the owner's direction to this
+merge — a brief on what the branch brings in, or how to place it — which you follow
+as you would the owner's answer.
 
 **Every finished outcome records what you fetched**, as `landing`: `{"remote":
 <the remote you fetched from, as this checkout names it>, "branch": <the base>,
@@ -144,7 +147,10 @@ Read in full: the documents `scripts/change-workflow config load merge` prints; 
 `proposal.md`, `design.md`, and `tasks.md`, the section notes above all, which say
 which files each section owns and which suites and end-to-end scenarios prove it;
 the latest pre-closeout review and its triage, and after the archive the latest
-closeout review's and any merge review's too; and the latest validation record.
+closeout review's and any merge review's too; the latest validation record; and,
+for every capability the change touches, its `spec.md`, its companion, and every
+other Markdown file in its directory but its `index.md` — the capability's own
+guidance — which the merge reconciles, with the code, against both sides.
 
 ## 3. Merge
 
@@ -371,8 +377,8 @@ their evidence.
 **Validation.** The merged `HEAD` is validated before the exit you named — with the
 inert paths exempt before archive cleanup, records only before the merge review —
 and a failed validation brings the change back here to repair it. Only the owner
-waives it. Recommend a waiver only when a criterion of `docs/agents/change-workflow.md`'s
-"Waivers" holds, naming it and its evidence, and never after a reconciliation of
+waives it. Recommend a waiver only when a criterion of `change-workflow`'s CW-q3dm
+holds, naming it and its evidence, and never after a reconciliation of
 the change's own code. The waiver is the owner's direction past the guard to the
 exit you named — the merge review when you named it, archive cleanup otherwise — so
 a review you chose is not skipped with the validation: skipping both is the owner's

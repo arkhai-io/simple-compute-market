@@ -20,26 +20,36 @@ import typer
 from market_core.schemas import SettlementSelection
 from market_identity import TrustedIdentitySet
 from market_settlement_runtime import CompiledSettlementClause
+from market_settlement_runtime.buyer_terms import (
+    UNPROTECTED_TERMS_FLAG, UNPROTECTED_TERMS_HELP, WAIVERS_BY_TERM, term_waivers, waiver_flags,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from .buy_orchestrator import fetch_listing_dict
 from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
-from .cli_helpers import resolve_prices_from_matches
+from .cli_helpers import (
+    emit_lifecycle_disclosure,
+    requested_duration_seconds,
+    resolve_prices_from_matches,
+)
 from .common import resolve_negotiation_config
 from .deal_helpers import (
     load_negotiation_resume_point,
     make_publisher_trust_resolver,
+    recorded_waivers,
 )
 from .listing_cli import settlement_clause_error_message
-from .negotiation_amounts import priced_at_opening_shape
+from .negotiation_amounts import priced_at_opening_shape, retained_pricing_record
 from .opening_shape import SHAPE_HELP, SHAPE_OPTION, parse_shape_option, shape_excess
 from .registry_listing import domain_listing_record
 from .run_log import RunLog
 from .settlement_composition import (
     buyer_stage,
     resolve_buyer_settlement_policy,
+    buyer_compute_disclosure,
+    buyer_lifecycle_disclosure,
 )
 
 
@@ -134,14 +144,38 @@ def register(app: typer.Typer) -> None:
             "when the buyer crashed mid-round but the seller's "
             "thread state is still live.",
         ),
+        allow_no_delivery_deadline: bool = typer.Option(
+            False, WAIVERS_BY_TERM["no_delivery_deadline"].flag,
+            help=WAIVERS_BY_TERM["no_delivery_deadline"].help,
+        ),
+        allow_no_penalty: bool = typer.Option(
+            False, WAIVERS_BY_TERM["no_penalty"].flag, help=WAIVERS_BY_TERM["no_penalty"].help,
+        ),
+        allow_charged_preemption: bool = typer.Option(
+            False, WAIVERS_BY_TERM["charged_preemption"].flag,
+            help=WAIVERS_BY_TERM["charged_preemption"].help,
+        ),
+        allow_charged_term_end: bool = typer.Option(
+            False, WAIVERS_BY_TERM["charged_term_end"].flag,
+            help=WAIVERS_BY_TERM["charged_term_end"].help,
+        ),
+        allow_unprotected_terms: bool = typer.Option(
+            False, UNPROTECTED_TERMS_FLAG, help=UNPROTECTED_TERMS_HELP,
+        ),
         duration_hours: float | None = typer.Option(
             None,
             "--duration-hours",
             "-t",
             help="Lease duration the buyer wants (hours, fractional ok). "
-            "Required for fresh runs — sent on /negotiate/new and "
+            "Required for reserved; optional for recurring — sent on /negotiate/new and "
             "validated server-side against the listing's max_duration_seconds. "
-            "Resumed runs read it from the run-log.",
+            "Resumed runs read it from the run-log. Not with --duration-seconds.",
+        ),
+        duration_seconds_option: int | None = typer.Option(
+            None,
+            "--duration-seconds",
+            help="The lease duration in whole seconds; the same request as "
+            "--duration-hours, which it excludes.",
         ),
         start_utc: str | None = typer.Option(
             None,
@@ -166,6 +200,14 @@ def register(app: typer.Typer) -> None:
         (default: listed_price — pay what's published).
         """
         console = Console()
+        duration_seconds = requested_duration_seconds(
+            duration_hours=duration_hours, duration_seconds=duration_seconds_option,
+        )
+        waivers = term_waivers(
+            no_delivery_deadline=allow_no_delivery_deadline, no_penalty=allow_no_penalty,
+            charged_preemption=allow_charged_preemption, charged_term_end=allow_charged_term_end,
+            unprotected_terms=allow_unprotected_terms,
+        )
         requested_shape = parse_shape_option(shape)
         if from_run and requested_shape is not None:
             raise typer.BadParameter(
@@ -226,6 +268,15 @@ def register(app: typer.Typer) -> None:
                     "--ssh-public-key applies only to fresh negotiation; resume "
                     "uses persisted accepted provision terms"
                 )
+            if waivers:
+                raise typer.BadParameter(
+                    "default-refusal waivers apply only to fresh negotiation; resume "
+                    "uses the waivers its run recorded"
+                )
+            try:
+                waivers = recorded_waivers(from_run, signer=signer)
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
             resume_point = load_negotiation_resume_point(from_run, signer=signer)
             seller_url = seller_url or resume_point.seller_url
             listing_id = listing_id or resume_point.listing_id
@@ -251,6 +302,7 @@ def register(app: typer.Typer) -> None:
                     identity=identity,
                     action_capable=True,
                     registry_urls=registry_urls,
+                    waivers=waivers,
                 )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
@@ -366,16 +418,6 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
-        if resume_state is None and (duration_hours is None or duration_hours <= 0):
-            typer.secho(
-                "Fresh runs require --duration-hours (the buyer's lease ask).",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        duration_seconds = (
-            round(duration_hours * 3600) if duration_hours is not None else None
-        )
         requested_start_utc = _normalize_start_utc(start_utc)
 
         selected_settlement = None
@@ -397,6 +439,16 @@ def register(app: typer.Typer) -> None:
                     "settlement option"
                 )
 
+            try:
+                rows = buyer_compute_disclosure(
+                    selected_settlement.option, listing=listing_dict, duration_seconds=duration_seconds,
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
+            emit_lifecycle_disclosure(
+                rows + buyer_lifecycle_disclosure(selected_settlement.option, waivers=waivers),
+                title=f"Selected option {selected_settlement.option.option_id}: lifecycle terms",
+            )
             selected_stage = buyer_stage(
                 selected_settlement.selection.settlement_schema
             )
@@ -465,15 +517,14 @@ def register(app: typer.Typer) -> None:
         if selected_stage is not None and listing_dict is not None:
             listing_record = selected_stage.listing_record(listing_dict)
             if listing_dict.get("rate_structure"):
-                listing_record = {**listing_record, **{key: listing_dict[key] for key in (
-                    "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
-                ) if key in listing_dict}}
+                listing_record = {**listing_record, **retained_pricing_record(listing_dict)}
         elif resume_state is not None:
             listing_record = resume_point.listing_record
         else:
             listing_record = None
         run_log = RunLog.start(
             command="market negotiate",
+            compute_term_waivers=list(waiver_flags(waivers)),
             profile_id=identity.profile_id,
             principal=identity.principal,
             seller_url=seller_url,
@@ -543,11 +594,10 @@ def register(app: typer.Typer) -> None:
         escrow_proposal: EscrowProposal | None = None
         settlement_selection: SettlementSelection | None = None
         if resume_state is None:
-            assert duration_seconds is not None
             assert selected_settlement is not None
             assert resolved_ssh_public_key is not None
             provision_terms = make_vm_provision_terms(
-                duration_seconds=int(duration_seconds),
+                duration_seconds=duration_seconds,
                 start_utc=requested_start_utc,
                 ssh_public_key=resolved_ssh_public_key,
                 compute_resource=requested_shape,
@@ -610,6 +660,7 @@ def register(app: typer.Typer) -> None:
                 resolve_seller_principals=resolve_seller_principals,
                 capture=evidence_store().capture,
                 policy_params=negotiation_policy_params,
+                waivers=waivers,
                 validate_advertised_plan=(
                     selected_stage.plan_validator(listing_dict or {}, selected_settlement)
                     if selected_stage is not None and selected_settlement is not None

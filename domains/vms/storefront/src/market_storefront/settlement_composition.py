@@ -16,6 +16,11 @@ from typing import Any
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
+from market_settlement_runtime.rate_servicing import RateServicing
+from market_settlement_runtime.horizon import RateTermProjections
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS, ClausePublication, RatePresetHelper,
+)
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
@@ -99,6 +104,14 @@ class VmSettlementComposition:
     lifecycle: VmDealLifecycle | None = None
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
+    rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
+    rate_preset_helpers: Mapping[str, RatePresetHelper] = field(default_factory=dict, repr=False)
+    rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
+    delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
+        default=lambda _site, _pool: None, repr=False,
+    )
+    default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
+
     @property
     def seller_stages(self):
         return self.domain.settlement.seller_stages
@@ -153,11 +166,8 @@ class VmSettlementComposition:
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
-        merged_resources = {
-            **self.mechanism_resources, **resources,
-            "dispute_authorities": self.disputes.for_publication(),
-            "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
-        }
+        diagnose = resources.get("publication_diagnostic", lambda _entry: None)
+        merged_resources = {**self.mechanism_resources, **resources}
         compiled = (
             [
                 compile_settlement_publication_clause(
@@ -198,18 +208,22 @@ class VmSettlementComposition:
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
         statuses = {status.mechanism: status for status in readiness}
-        work = (
-            [
-                (
-                    statuses.get(clause.mechanism),
-                    {**merged_resources, "publication_clause": clause},
-                )
-                for clause in compiled
-            ]
+        work: list[tuple[MechanismReadiness | None, SettlementPublicationClause | None]] = (
+            [(statuses.get(clause.mechanism), clause) for clause in compiled]
             if compiled is not None
-            else [(status, merged_resources) for status in readiness]
+            else [(status, None) for status in readiness]
         )
-        for status, option_resources in work:
+        step = ClausePublication(
+            registry=self.configuration_registry,
+            config=self.settlement_config,
+            servicing=self.rate_servicing,
+            helpers=self.rate_preset_helpers,
+            authorities=self.disputes.for_publication(),
+            dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+            compute=True,
+            default_penalty_periods=self.default_penalty_periods,
+        )
+        for status, clause in work:
             if status is None:
                 raise RuntimeError(
                     "publication clause mechanism has no readiness status"
@@ -227,22 +241,18 @@ class VmSettlementComposition:
                     ",".join(blocker.code for blocker in status.blockers),
                 )
                 continue
-            envelope = self.configuration_registry.build_option(
-                status,
-                self.settlement_config,
-                role="seller",
-                resources=option_resources,
+            artifacts = step.publish(
+                status, clause,
+                resources=merged_resources,
+                delivery_deadline=lambda: self.delivery_deadline_for_pool(
+                    str(resources.get("origin", "")), resources.get("pool_id"),
+                ),
+                max_duration_seconds=resources.get("max_duration_seconds"),
+                available_until_utc=resources.get("available_until_utc"),
+                diagnose=diagnose,
             )
-            if not isinstance(envelope, Mapping):
-                raise RuntimeError(
-                    f"settlement option builder {status.mechanism} returned no envelope"
-                )
-            accepted_escrows.extend(
-                dict(item) for item in envelope.get("accepted_escrows", ())
-            )
-            settlement_options.extend(
-                dict(item) for item in envelope.get("settlement_options", ())
-            )
+            accepted_escrows.extend(artifacts.accepted_escrows)
+            settlement_options.extend(artifacts.settlement_options)
         # Nothing published is returned as such, with the readiness that
         # explains it: whether that refuses a listing, and how, is the caller's.
         return accepted_escrows, settlement_options, readiness
@@ -905,6 +915,8 @@ def build_vm_settlement_composition(
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
         disputes=disputes,
+        rate_servicing=settlement_config.rate_servicing,
+        default_penalty_periods=storefront_config.default_premature_stop_penalty_periods(),
         arkhai_payments_stage=payments_stage,
         payments_coordinator=VmPaymentsCoordinator(
             domain=domain, db=sqlite_client, stage=payments_stage

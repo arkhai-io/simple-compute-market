@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-negotiation"
-version = "0.6.0"
+version = "0.7.0"
 license = "MIT"
 description = "VM negotiation policies, the seller round, and the RL strategy, shared by the VM storefront and buyer."
 requires-python = ">=3.12,<3.14"
@@ -8,11 +8,11 @@ requires-python = ">=3.12,<3.14"
 # consumer opts in through its own `rl` extra, which pins the CPU index.
 dependencies = [
     "arkhai-vms>=0.8.0",
-    "arkhai-core>=0.4.0",
+    "arkhai-core>=0.6.0",
     "arkhai-vms-listings>=0.7.0",
     "arkhai-kit-alkahest>=0.7.0",
     "arkhai-kit-identity>=0.4.0",
-    "arkhai-kit-policy>=0.6.0",
+    "arkhai-kit-policy>=0.7.0",
 ]
 
 [build-system]

@@ -12,11 +12,15 @@ from arkhai_vms import normalize_vm_provision_terms, vm_listing_resource_shape
 from arkhai_vms.capability_shapes import canonical_vm_shape, flatten_vm_shape
 from arkhai_vms_listings import extract_compute_from_order
 from arkhai_vms_negotiation.amounts import (
-    BASIS_POINTS, has_rate_structure, quote_from_multiplier, shape_hourly_amount,
+    BASIS_POINTS, has_rate_structure, quote_from_multiplier, selected_billing_basis,
+    shape_hourly_amount,
 )
 from arkhai_vms_negotiation.policies import proposal_uses_scalar_amount
 from core_buyer.negotiation_client import NegotiationAmountCodec
-from market_core.schemas import settlement_option_schema
+from market_core.schemas import BillingProjection, settlement_option_schema
+
+from .pricing_record import retained_pricing_record, verify_pricing_acceptance, verify_pricing_reply
+from .settlement_composition import buyer_settlement_registry
 
 
 def _exact_price(price: Any) -> Fraction:
@@ -66,12 +70,34 @@ def priced_at_opening_shape(
     return record
 
 
+def priced_unit_count(
+    listing: Any, proposal: Any, duration_seconds: int | float | None,
+    *, project_billing: BillingProjection | None = None,
+) -> float:
+    """Scale hourly bounds by one billing period, never a recurring horizon."""
+    if hasattr(proposal, "model_dump"):
+        proposal = proposal.model_dump(mode="json")
+    if proposal and "option_id" in proposal:
+        proposal = {"settlement_selection": proposal}
+    if listing is not None and proposal and "settlement_selection" in proposal:
+        basis = selected_billing_basis(
+            listing, proposal, project_billing or buyer_settlement_registry().project_billing,
+        )
+        if basis.unit == "per_period":
+            assert basis.period_seconds is not None
+            return basis.period_seconds / 3600.0
+    if duration_seconds is None or duration_seconds <= 0:
+        raise ValueError("reserved selections require an explicit positive duration")
+    return float(duration_seconds) / 3600.0
+
+
 def amount_codec(
     listing: Any,
     proposal: Any,
     *,
     opening_terms: Any = None,
     max_price: Any = None,
+    project_billing: BillingProjection | None = None,
 ) -> NegotiationAmountCodec | None:
     """Use the seller-authenticated registry listing, never a storefront read.
 
@@ -83,7 +109,8 @@ def amount_codec(
     the payment, not the scalar ceiling or concessions.
 
     With ``max_price``, the per-hour ceiling, an acceptance whose derived
-    payment exceeds that ceiling over the accepted duration is refused: the
+    payment exceeds that ceiling over one period for a recurring option, or
+    over the accepted duration for a reserved one, is refused: the
     scalar bound alone does not cap the payment once the accepted shape can
     price above the opening one.
     """
@@ -95,6 +122,9 @@ def amount_codec(
         proposal = {"settlement_selection": proposal}
     if not proposal_uses_scalar_amount(listing, proposal):
         return None
+    project_billing = project_billing or buyer_settlement_registry().project_billing
+    basis = selected_billing_basis(listing, proposal, project_billing)
+    pricing_record = retained_pricing_record(listing)
 
     def effective(terms: Any, revision: Any):
         if hasattr(terms, "model_dump"):
@@ -134,20 +164,41 @@ def amount_codec(
             vm_listing_resource_shape(terms.compute_resource)
             if terms.compute_resource is not None else None
         )
-        duration = int(terms.duration_seconds)
-        amount = quote_from_multiplier(listing, proposal, value, duration, shape)
+        amount = quote_from_multiplier(
+            listing, proposal, value, terms.duration_seconds, shape, price_basis=basis,
+        )
         if ceiling is not None:
-            # The quote rounds up once to a whole base unit, so the ceiling
-            # admits that one rounding: a quote at the buyer's own scalar
-            # ceiling for its opening shape never exceeds it.
-            limit = math.ceil(ceiling * duration / 3600)
+            # The ceiling is per hour; a recurring payment is one period's price,
+            # a reserved one the whole term's. The quote rounds up once to a
+            # whole base unit, so the ceiling admits that one rounding: a quote
+            # at the buyer's own scalar ceiling for its opening shape never
+            # exceeds it.
+            seconds = basis.period_seconds if basis.unit == "per_period" else int(terms.duration_seconds)
+            assert seconds is not None
+            limit = math.ceil(ceiling * seconds / 3600)
             if amount > limit:
                 raise RuntimeError(
                     f"accepted payment {amount} exceeds the buyer's ceiling of "
-                    f"{limit} ({max_price} per hour for {duration}s)"
+                    f"{limit} ({max_price} per hour for {seconds}s)"
                 )
         return amount
 
+    def validate_reply(reply):
+        try:
+            verify_pricing_reply(pricing_record, reply)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    def validate_accepted(outcome, reply):
+        try:
+            verify_pricing_acceptance(
+                pricing_record, outcome.agreement, reply,
+                multiplier=outcome.negotiated_scalar, project_billing=project_billing,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
     return NegotiationAmountCodec(
         scalar_from_price=scalar, payment_from_scalar=payment, effective_terms=effective,
+        validate_reply=validate_reply, validate_accepted=validate_accepted,
     )

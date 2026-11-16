@@ -251,7 +251,6 @@ IDENTITY_FIELDS = (
 TERM_RESOURCE_FIELDS = (
     "access_methods",
     "min_duration_seconds",
-    "max_duration_seconds",
     # A price change refreshes the listing in place; the rate is outside the
     # shape digest, so it can never change a listing's identity.
     "asking_rate",
@@ -261,6 +260,7 @@ TERM_LISTING_FIELDS = (
     "settlement_options",
     "demands",
     "max_duration_seconds",
+    "available_until_utc",
 )
 
 UNCHANGED = "unchanged"
@@ -319,7 +319,7 @@ def compare_bare_metal_listing(
 
 def _normalized(value: Any, name: str) -> Any:
     # A list-valued term stored as absent and published as empty is one term.
-    if name != "max_duration_seconds" and value is None:
+    if name in ("accepted_escrows", "settlement_options", "demands", "access_methods") and value is None:
         return []
     return value
 

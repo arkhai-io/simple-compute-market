@@ -20,6 +20,7 @@ from core_storefront.identity_authority import (
 )
 
 from market_identity import Eip191Signer, TrustedIdentitySet
+from market_settlement_runtime import SettlementPublicationClause
 from settlement_compositions import alkahest_composition
 from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLifecycle
 from arkhai_bare_metal_storefront.settlement_stages import DeclinedServicing
@@ -31,6 +32,7 @@ from arkhai_bare_metal_storefront.contribution import (
 )
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import fulfill_bare_metal
+from arkhai_bare_metal_storefront.publication_composition import build_publication_cycle
 from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV
 from arkhai_bare_metal_storefront.runtime import build_runtime_from_configuration
 from arkhai_bare_metal_storefront.server import (
@@ -622,6 +624,46 @@ def test_publication_clauses_that_do_not_compile_are_refused_at_startup(
         _configured_runtime(monkeypatch, tmp_path, document)
 
 
+#: A configured clause; its asset is a deterministic development address, never
+#: to be used on a public network.
+_ALKAHEST_CLAUSE = {
+    "mechanism": "alkahest.v1",
+    "asset": "0x" + "9f" * 20,
+    "rate": "10",
+    "per": "hour",
+    "mechanism_input": {"chain": "anvil", "escrow_kind": "erc20_escrow_obligation_default"},
+}
+
+
+def test_per_model_clauses_reach_the_publication_cycle(monkeypatch, tmp_path):
+    """``[pricing.defaults.gpu.<model>]`` clauses are compiled at startup and
+    composed into the cycle as the tier between the pool's hints and
+    ``[pricing].settlements``; a model stating none adds no tier."""
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {"defaults": {"gpu": {"H100": {"settlements": [_ALKAHEST_CLAUSE]}, "A100": {}}}}
+
+    runtime = _configured_runtime(monkeypatch, tmp_path, document)
+    composed = build_publication_cycle(
+        runtime,
+        registry_configuration=runtime.registry_configuration,
+        cycle_factory=lambda **kwargs: kwargs,
+    )
+
+    assert {model: [clause.mechanism for clause in clauses]
+            for model, clauses in runtime.publication_clauses_by_model.items()} == {
+        "H100": ["alkahest.v1"]
+    }
+    assert composed["publication_clauses_by_model"] is runtime.publication_clauses_by_model
+
+
+def test_per_model_clauses_that_do_not_compile_are_refused_at_startup(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {"defaults": {"gpu": {"H100": {"settlements": [{"mechanism": "alkahest.v1"}]}}}}
+
+    with pytest.raises(RuntimeError, match=r"\[pricing\.defaults\.gpu\.H100\]\.settlements"):
+        _configured_runtime(monkeypatch, tmp_path, document)
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 async def test_a_configured_alkahest_section_composes_its_client_and_worker(
     monkeypatch, tmp_path, enabled
@@ -958,6 +1000,75 @@ def test_a_disabled_section_is_still_configured():
     assert composition.enabled_mechanisms == ("contact-exchange.v1",)
     assert composition.configures("alkahest.v1")
     assert composition.configures("contact-exchange.v1")
+
+
+def test_the_configured_rate_servicing_declaration_is_the_compositions():
+    """The seller root's ``rate_servicing`` tables are the one declaration
+    publication and acceptance read."""
+    root = {
+        "schema_version": 1,
+        "priority": ["contact-exchange.v1"],
+        "contact": CONTACT_SECTION,
+        "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
+    }
+
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(root)
+
+    assert composition.rate_servicing is composition.config.rate_servicing
+    declared = composition.rate_servicing.select("arkhai.payments.v1")
+    assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+
+
+def test_the_configured_penalty_multiple_is_the_compositions(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {**document.get("pricing", {}), "default_premature_stop_penalty_periods": 6}
+
+    composition = _configured_runtime(monkeypatch, tmp_path, document).settlement_composition
+
+    assert composition.default_penalty_periods == 6
+
+
+@pytest.mark.parametrize("pool_deadline", [900, None], ids=["pool", "none"])
+async def test_the_pool_port_s_deadline_for_the_candidate_reaches_the_option_builder(
+    monkeypatch, pool_deadline,
+):
+    """The composition looks the pool's deadline up for the candidate's site and
+    pool and hands it, or ``None``, to the option builder with the compute flag.
+    What a builder does with ``None`` is its mechanism's, tested there."""
+    lookups: list[tuple[str, str | None]] = []
+
+    def deadline(site: str, pool: str | None) -> int | None:
+        lookups.append((site, pool))
+        return pool_deadline
+
+    composition = replace(
+        BareMetalStorefrontSettlementComposition.from_raw_config(
+            {"schema_version": 1, "priority": ["contact-exchange.v1"], "contact": CONTACT_SECTION},
+            resources={"claimant_principal": COMPOSITION_SIGNER.identity},
+        ),
+        delivery_deadline_for_pool=deadline,
+    )
+    built: list[dict] = []
+    build_option = composition.registry.build_option
+
+    def recording(*args, resources, **kwargs):
+        built.append(dict(resources))
+        return build_option(*args, resources=resources, **kwargs)
+
+    monkeypatch.setattr(composition.registry, "build_option", recording)
+
+    await composition.publication_payload(
+        candidate={"host_id": "machine-1", "site_id": "site-a", "pool_id": "pool-1"},
+        clauses=[SettlementPublicationClause(
+            mechanism="contact-exchange.v1", asset="introduction",
+            mechanism_input={"profile": "default"},
+        )],
+        max_duration_seconds=3600,
+    )
+
+    assert lookups == [("site-a", "pool-1")]
+    (resources,) = built
+    assert (resources["compute"], resources["delivery_deadline_seconds"]) == (True, pool_deadline)
 
 
 def test_a_contact_only_root_composes_its_obligation_worker(monkeypatch, tmp_path):

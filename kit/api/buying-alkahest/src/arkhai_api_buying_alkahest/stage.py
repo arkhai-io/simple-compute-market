@@ -38,6 +38,7 @@ from market_alkahest.schemas import (
     accepted_token_address,
     primary_rate_value,
 )
+from market_alkahest.settlement_config import alkahest_billing_basis
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_identity import Signer
 from rich.console import Console
@@ -518,7 +519,7 @@ class AlkahestBuyerStage:
                 escrow_terms_list = derive_accepted_escrow_terms(
                     accepted_proposal=deal.accepted_escrow_proposal,
                     listing_record=deal.listing_record,
-                    agreed_amount=exact_agreed_amount(deal),
+                    agreed_amount=exact_agreed_amount(deal, project_billing=alkahest_billing_basis),
                     duration_seconds=0,
                     settlement_plan=deal.settlement_plan,
                     addr_config_path=chain.alkahest_addr_config,

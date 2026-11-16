@@ -24,6 +24,7 @@ from arkhai_vms_listings.pricing_resolution import (
 )
 from arkhai_vms_listings.reconciler import PoolHintResolutionSettings
 from market_alkahest import ALKAHEST_CONFIG_KEY, AlkahestSettlementConfig
+from market_resource_pools_contracts import positive_duration_bound
 from market_capability_admissibility import Declaration, parse_declaration
 from market_settlement_runtime import (
     SettlementConfigurationError,
@@ -57,12 +58,7 @@ RETIRED_PRICING_CONFIGURATION_KEYS: tuple[str, ...] = ("default_token_address",)
 
 def normalize_max_duration_seconds(value: Any) -> int | None:
     """Return a positive lease-duration ceiling, or None for unlimited."""
-    if value is None:
-        return None
-    if isinstance(value, str) and not value.strip():
-        return None
-    seconds = int(value)
-    return seconds if seconds > 0 else None
+    return positive_duration_bound(value)
 
 
 def parse_configured_admissibility_default() -> Declaration | None:
@@ -124,9 +120,8 @@ def pool_hint_resolution_settings(
 
     pricing = getattr(settings, "pricing", None)
     flat_default = GpuPricingFields(
-        max_duration_seconds=(
-            getattr(pricing, "default_max_duration_seconds", 0) or None
-        ),
+        max_duration_seconds=getattr(pricing, "default_max_duration_seconds", None),
+        available_until_utc=getattr(pricing, "default_available_until_utc", None),
         accepted_escrows=None,
         settlements=[
             clause.model_dump(mode="json", exclude_defaults=True)
@@ -143,6 +138,7 @@ def pool_hint_resolution_settings(
             fields = fields if isinstance(fields, dict) else {}
             defaults_by_model[str(model)] = GpuPricingFields(
                 max_duration_seconds=fields.get("max_duration_seconds"),
+                available_until_utc=fields.get("available_until_utc"),
                 accepted_escrows=fields.get("accepted_escrows"),
                 settlements=fields.get("settlements"),
             )

@@ -931,6 +931,102 @@
                   ]
                 }
               }
+            },
+            "^[rR][aA][tT][eE]_[sS][eE][rR][vV][iI][cC][iI][nN][gG]$": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[aA][lL][kK][aA][hH][eE][sS][tT]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "^[aA][rR][kK][hH][aA][iI]_[pP][aA][yY][mM][eE][nN][tT][sS]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "^[cC][oO][nN][tT][aA][cC][tT]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
             }
           }
         },
@@ -1100,6 +1196,44 @@
                 "null"
               ]
             },
+            "^[dD][eE][fF][aA][uU][lL][tT][sS]$": {
+              "additionalProperties": false,
+              "type": [
+                "object",
+                "null"
+              ],
+              "patternProperties": {
+                "^[gG][pP][uU]$": {
+                  "additionalProperties": {
+                    "additionalProperties": false,
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "patternProperties": {
+                      "^[sS][eE][tT][tT][lL][eE][mM][eE][nN][tT][sS]$": {
+                        "anyOf": [
+                          {
+                            "items": {
+                              "additionalProperties": true,
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            },
             "^[dD][eE][fF][aA][uU][lL][tT]_[mM][aA][xX]_[dD][uU][rR][aA][tT][iI][oO][nN]_[sS][eE][cC][oO][nN][dD][sS]$": {
               "anyOf": [
                 {
@@ -1108,6 +1242,23 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "^[dD][eE][fF][aA][uU][lL][tT]_[aA][vV][aA][iI][lL][aA][bB][lL][eE]_[uU][nN][tT][iI][lL]_[uU][tT][cC]$": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "^[dD][eE][fF][aA][uU][lL][tT]_[pP][rR][eE][mM][aA][tT][uU][rR][eE]_[sS][tT][oO][pP]_[pP][eE][nN][aA][lL][tT][yY]_[pP][eE][rR][iI][oO][dD][sS]$": {
+              "exclusiveMinimum": 0,
+              "type": [
+                "integer",
+                "null"
               ]
             }
           }

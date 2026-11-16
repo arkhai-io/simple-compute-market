@@ -61,7 +61,7 @@ None.
   `scripts/change_next_step.py`, and possibly `scripts/change_workflow/log.py`, and
   their tests under `scripts/tests/`.
 - `.agents/skills/change-orchestrate/SKILL.md`, the `change-workflow` spec and
-  architecture, and `docs/agents/change-workflow.md`.
+  architecture, and `docs/change-workflow-handbook.md`.
 
 ## Dependencies and Related Changes
 

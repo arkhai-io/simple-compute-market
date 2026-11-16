@@ -1,8 +1,9 @@
 """The grant-key stage route refuses a malformed body without quoting it.
 
-Level 1, per `docs/development/TESTING.md`: the framework-free route service
-over a mocked relay service. The body may carry a private key, so a refusal
-locates each problem and never repeats what was sent, a field name included.
+Unit level, per `docs/guidance/engineering/test-levels.md`: the framework-free
+route service over a mocked relay service. The body may carry a private key, so
+a refusal locates each problem and never repeats what was sent, a field name
+included.
 """
 
 from __future__ import annotations

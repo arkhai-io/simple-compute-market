@@ -27,13 +27,13 @@
 
 ## 5. Repository closeout
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
-Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/closeout.md`'s order.
 
 - [x] 5.1 **Comment hygiene:** direct review retained only current-state rationale; `make check-comment-hygiene` passed.
 - [x] 5.2 **Import placement:** inspect imports added or touched by this change, move them to module level wherever safe, and retain a local import only after proving a real circular import or deliberate lazy-load need with the owning VM storefront tests; do not broaden this into unrelated import cleanup.
-- [x] 5.3 **Permanent documentation compliance:** after code review and behavioral proof, synchronize the delta requirements into `openspec/specs/market-composition/spec.md`, `openspec/specs/storefront-publication/spec.md`, and `openspec/specs/test-compatibility/spec.md`; promote injection flow/rationale to `openspec/specs/market-composition/architecture.md` and `openspec/specs/storefront-publication/architecture.md`; record test ownership in `openspec/specs/test-compatibility/architecture.md` and `docs/development/TESTING.md#boundary-change-validation`; and update `docs/development/ARCHITECTURE.md#composition-from-above-and-below` with the current explicit storefront-contract boundary. Permanent documents describe the resulting system, not this change's history.
+- [x] 5.3 **Permanent documentation compliance:** after code review and behavioral proof, synchronize the delta requirements into `openspec/specs/market-composition/spec.md`, `openspec/specs/storefront-publication/spec.md`, and `openspec/specs/test-compatibility/spec.md`; promote injection flow/rationale to `openspec/specs/market-composition/architecture.md` and `openspec/specs/storefront-publication/architecture.md`; record test ownership in `openspec/specs/test-compatibility/architecture.md` and `docs/guidance/repository/package-layers.md#a-boundary-change`; and update `docs/development/ARCHITECTURE.md#composition-from-above-and-below` with the current explicit storefront-contract boundary. Permanent documents describe the resulting system, not this change's history.
       Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 5.4 **Narrative compression:** preserve all completed checkboxes, reduce completed-task notes to final behavior, material validation evidence, unresolved/deferred work, and permanent destinations, and move any durable alternative or review rationale into `design.md` before deleting duplicated narrative.
 - [x] 5.5 **Roadmap currency:** update `docs/development/ROADMAP.md` under the multi-domain storefront goal so current state says the VM and bare-metal roots both inject contracts and the remaining gap is explicit per-record domain/offering-mode selection and persistence owned by `multi-domain-storefront-composition`; keep the gap-to-change mapping current and record the exact roadmap destination in the design-promotion record.

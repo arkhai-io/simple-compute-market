@@ -17,7 +17,7 @@ dependencies = [
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-settlement-runtime>=0.8.0",
     "arkhai-kit-storefront==0.10.0",
-    "arkhai-kit-negotiation-runtime==0.7.0",
+    "arkhai-kit-negotiation-runtime==0.8.0",
     "fastapi~=0.115.8",
     # [all] carries typing-inspect, which fastapi_utils.cbv imports
     # unconditionally under pydantic v2.

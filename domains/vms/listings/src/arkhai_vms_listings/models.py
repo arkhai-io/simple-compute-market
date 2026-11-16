@@ -17,6 +17,7 @@ from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
 
 from market_alkahest.token import ERC20TokenMetadata
 from market_identity import Identity
+from market_resource_pools_contracts import UtcAvailability, positive_duration_bound
 from market_resource_pools_contracts.backing import CapacityBackingLabel
 
 #: The resource types a VM listing resource payload may name explicitly.
@@ -510,6 +511,12 @@ class Listing(BaseModel):
             "for ERC20 escrows; total payment is computed at agreement time "
             "as primary_rate * agreed_duration_seconds / 3600."
         ),
+    )
+
+    available_until_utc: UtcAvailability | None = None
+
+    _relative_bound = field_validator("max_duration_seconds", mode="before")(
+        positive_duration_bound
     )
 
     oracle_address: str | None = Field(

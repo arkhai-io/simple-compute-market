@@ -4,7 +4,7 @@ This directory describes the implemented system by capability.
 
 - `spec.md` is the normative, machine-validated contract: observable behavior, invariants, ownership, and acceptance scenarios.
 - `architecture.md` is optional durable explanatory context: conceptual models, design motivation, trade-offs, relationships, and current limits.
-- A capability organized by an index keeps that context in its `README.md` instead, its human-readable description with its diagrams, and has no `architecture.md`; its `index.md` lists its requirements by id under the parts and groups of its table of contents, with the ids it retired ([the pattern](../README.md#a-capability-organized-by-an-index)).
+- A capability organized by an index keeps that context in its `README.md` instead, its human-readable description with its diagrams, and has no `architecture.md`; its `index.md` lists its requirements by id under the parts and groups of its table of contents, with the ids it retired ([the pattern](../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index)).
 - [`docs/development/ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md) is the repository-wide map connecting the capabilities.
 - [`openspec/changes/`](../changes/) contains proposed transitions and temporary implementation plans.
 

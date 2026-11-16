@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -34,6 +34,7 @@ from arkhai_vms_negotiation.amounts import (
     multiplier_floor,
     quote_from_multiplier,
     rate_structure_digest,
+    selected_billing_basis,
 )
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
@@ -49,8 +50,10 @@ from market_capacity_publication import (
 )
 from market_core import MarketDomainContract
 from market_storefront.settlement_stages import resolve_proposal_stage
+from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_core.schemas import (
     Agreement,
+    BillingProjection,
     ProvisionTerms,
     SettlementObligation,
     SettlementOption,
@@ -58,6 +61,8 @@ from market_core.schemas import (
     SettlementSelection,
     settlement_option_schema,
 )
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_settlement_runtime.horizon import RateTermProjections, resolve_horizon
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -217,17 +222,23 @@ def seller_reference_amount(
     duration_seconds: int | None,
     proposal: Mapping[str, Any] | None = None,
     requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    project_billing: BillingProjection | None = None,
 ) -> int:
     """The seller's reference amount from the option ``proposal`` selects."""
     try:
         if has_rate_structure(listing):
             return multiplier_floor(_negotiation_settings())
+        projection = project_billing or build_storefront_settlement_registry().project_billing
+        selected = vm_storefront_round._selected_option(listing, proposal)
+        basis = selected_billing_basis(listing, proposal, projection) if selected is not None else None
         return vm_storefront_round._seller_reference_amount(
             listing,
             duration_seconds,
             default_min_price=_default_min_price(),
             proposal=proposal,
             requested_shape=requested_shape,
+            **({"price_basis": basis} if basis is not None else {}),
         )
     except ValueError as exc:
         if str(exc).startswith("shape_price_unavailable:"):
@@ -235,7 +246,9 @@ def seller_reference_amount(
         raise
 
 
-def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
+def _default_seller_round_hook(
+    domain: MarketDomainContract, project_billing: BillingProjection | None = None,
+) -> SellerRoundHook:
     """Build the default seller policy for a round.
 
     Built for each round so it reads the current negotiation settings. The
@@ -252,6 +265,7 @@ def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
         chain_config_paths=_chain_config_paths(),
         extra_policy_paths=_extra_policy_paths(),
         default_min_price=_default_min_price(),
+        project_billing=project_billing or build_storefront_settlement_registry().project_billing,
     )
 
 
@@ -361,11 +375,7 @@ def _agreement(
     terms: NegotiationTerms,
 ) -> AgreementTerms:
     return AgreementTerms(
-        duration_seconds=int(
-            terms.requested_duration_seconds
-            or listing_record.get("max_duration_seconds")
-            or 3600
-        ),
+        duration_seconds=int(terms.requested_duration_seconds or 0),
         start_utc=terms.requested_start_utc,
     )
 
@@ -696,27 +706,60 @@ def _with_agreement(
     return artifacts
 
 
+def _require_selected_rate_servicing(
+    listing: Mapping[str, Any], proposal: Mapping[str, Any] | None,
+    servicing: RateServicing | None,
+) -> None:
+    if proposal is None or "settlement_selection" not in proposal:
+        return
+    selection = SettlementSelection.model_validate(proposal["settlement_selection"])
+    options = listing.get("settlement_options") or []
+    if isinstance(options, str):
+        options = json.loads(options)
+    for option in options:
+        if option.get("option_id") == selection.option_id and settlement_option_schema(option) == selection.settlement_schema:
+            try:
+                (servicing or RateServicing()).require_option(option)
+            except RateServicingUnavailable as exc:
+                raise OfferUnfulfillableError(str(exc), listing_id=str(listing["listing_id"])) from exc
+            return
+
+
 def _build_response_artifacts(
     domain: MarketDomainContract,
     acceptance: Acceptance,
     accepted: bool,
     dispatch: AcceptedObligationDispatch,
     payments_stage: PaymentSellerStage | None = None,
+    project_billing: BillingProjection | None = None,
+    rate_servicing: RateServicing | None = None,
 ) -> Mapping[str, Any]:
     # Settlement artifacts carry the listing's site, mode, and source whatever
     # its backing; only capacity effects ask the backing to admit them.
     if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
+    _require_selected_rate_servicing(
+        acceptance.listing_record, acceptance.pinned_proposal, rate_servicing,
+    )
+    project_billing = project_billing or build_storefront_settlement_registry().project_billing
+    rate_identity = {"rate_structure_digest": rate_structure_digest(acceptance.listing_record)}
     payment_amount = acceptance.negotiated_scalar
     if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
         try:
             if accepted and acceptance.negotiated_scalar < multiplier_floor(_negotiation_settings()):
                 raise ValueError("multiplier_below_floor")
+            basis = selected_billing_basis(
+                acceptance.listing_record, acceptance.pinned_proposal, project_billing,
+            )
+            # A counter quotes one recurring period, not a made-up service term.
+            pricing_seconds = (basis.period_seconds if basis.unit == "per_period"
+                               else acceptance.agreement.duration_seconds)
             payment_amount = quote_from_multiplier(
                 acceptance.listing_record, acceptance.pinned_proposal,
-                acceptance.negotiated_scalar, acceptance.agreement.duration_seconds,
+                acceptance.negotiated_scalar, pricing_seconds,
                 vm_listing_resource_shape(acceptance.terms.decoded.compute_resource)
                 if getattr(acceptance.terms.decoded, "compute_resource", None) else None,
+                price_basis=basis,
             )
         except ValueError as exc:
             raise OfferUnfulfillableError(str(exc)) from exc
@@ -754,13 +797,18 @@ def _build_response_artifacts(
             raise OfferUnfulfillableError(str(exc)) from exc
         if data:
             artifacts["settlement_data"] = data
-        return artifacts
+        if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
+            artifacts["pricing_pin"] = {
+                "multiplier": str(acceptance.negotiated_scalar),
+                **rate_identity,
+            }
+        return {**artifacts, **rate_identity}
     state = acceptance.policy_state
     if not isinstance(state, Mapping):
-        return {}
+        return rate_identity
     proposal = state.get("accepted_escrow_proposal")
     if isinstance(proposal, Mapping):
-        return {"accepted_escrow_proposal": dict(proposal)}
+        return {"accepted_escrow_proposal": dict(proposal), **rate_identity}
     selection = state.get("accepted_settlement_selection")
     option = state.get("accepted_settlement_option")
     if isinstance(selection, Mapping) and isinstance(option, Mapping):
@@ -776,8 +824,8 @@ def _build_response_artifacts(
             listing=acceptance.listing_record,
             provision_terms=acceptance.terms.decoded,
         )
-        return {"settlement_selection": artifacts["settlement_selection"]}
-    return {}
+        return {"settlement_selection": artifacts["settlement_selection"], **rate_identity}
+    return rate_identity
 
 
 async def _persist_artifacts(
@@ -954,10 +1002,13 @@ def build_vm_negotiation_runtime(
     capacity_runtime: CapacityRuntime,
     site_projections: SiteProjectionState,
     seller_round_hook: SellerRoundHook | None = None,
+    project_billing: BillingProjection | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     arkhai_payments_stage: PaymentSellerStage | None = None,
     listing_source_check: ListingSourceCheckHook | None = None,
     source_confirmation_clock: Callable[[], datetime] | None = None,
+    rate_servicing: RateServicing | None = None,
+    rate_term_projections: RateTermProjections | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract.
 
@@ -969,6 +1020,7 @@ def build_vm_negotiation_runtime(
     (the current UTC time unless given).
     """
 
+    project_billing = project_billing or build_storefront_settlement_registry().project_billing
     dispatch = (
         {mechanism: build for mechanism, build in accepted_obligation_dispatch.items()
          if mechanism in domain.settlement.seller_stages}
@@ -1163,11 +1215,20 @@ def build_vm_negotiation_runtime(
         return shape, _decode_vm_terms(domain, wire)
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
+        proposal = next((round_.proposal for round_ in request.history
+                         if round_.proposal and "settlement_selection" in round_.proposal), None)
+        _require_selected_rate_servicing(request.listing_record, proposal, rate_servicing)
         shape, terms = await prepare_requested_shape(
             request.repository, request.listing_record, request.terms,
             partial=not any(round_.sender == "us" for round_ in request.history),
         )
-        policy = seller_round_hook or _default_seller_round_hook(domain)
+        if terms.requested_duration_seconds is None:
+            selected = vm_storefront_round._selected_option(request.listing_record, proposal)
+            if selected is None or selected_billing_basis(
+                request.listing_record, proposal, project_billing,
+            ).unit != "per_period":
+                raise OfferUnfulfillableError("reserved duration_seconds is required")
+        policy = seller_round_hook or _default_seller_round_hook(domain, project_billing)
         try:
             result = await policy(
                 listing=request.listing_record,
@@ -1264,11 +1325,34 @@ def build_vm_negotiation_runtime(
             negotiation_id=opening.negotiation_id,
             artifact_slot="message:rate-structure-pin",
             value={
-                "duration_seconds": opening.terms.requested_duration_seconds or 3600,
+                "duration_seconds": opening.terms.requested_duration_seconds,
                 "rate_structure_digest": rate_structure_digest(opening.listing_record),
             },
             registry=registry,
         )
+
+    def resolve_acceptance(acceptance: Acceptance) -> Acceptance:
+        option = vm_storefront_round._selected_option(
+            acceptance.listing_record, acceptance.pinned_proposal,
+        )
+        assert acceptance.accepted_at is not None
+        try:
+            horizon = resolve_horizon(
+                requested_duration_seconds=acceptance.terms.requested_duration_seconds,
+                requested_start_utc=acceptance.terms.requested_start_utc,
+                accepted_at=acceptance.accepted_at,
+                max_duration_seconds=acceptance.listing_record.get("max_duration_seconds"),
+                available_until_utc=acceptance.listing_record.get("available_until_utc"),
+                option=(SettlementOption.model_validate(option)
+                        if option is not None and acceptance.pinned_proposal is not None
+                        and "settlement_selection" in acceptance.pinned_proposal else None),
+                rate_terms=rate_term_projections or {},
+            )
+        except ValueError as exc:
+            raise OfferUnfulfillableError(str(exc), listing_id=acceptance.listing_id) from exc
+        return replace(acceptance, agreement=AgreementTerms(
+            duration_seconds=horizon.duration_seconds, start_utc=horizon.start_utc,
+        ))
 
     def storefront_is_paused() -> bool:
         return trading_pause().paused
@@ -1314,6 +1398,7 @@ def build_vm_negotiation_runtime(
                     vm_listing_resource_shape(terms.decoded.compute_resource)
                     if getattr(terms.decoded, "compute_resource", None) else None
                 ),
+                project_billing=project_billing,
             )
             if scalar
             else 0
@@ -1321,12 +1406,15 @@ def build_vm_negotiation_runtime(
         amount_from_proposal=_amount,
         proposal_from_amount=_proposal_from_amount,
         agreement_terms=_agreement,
+        resolve_acceptance=resolve_acceptance,
         build_artifacts=lambda acceptance, accepted: _build_response_artifacts(
             domain,
             acceptance,
             accepted,
             dispatch,
             arkhai_payments_stage,
+            project_billing,
+            rate_servicing,
         ),
         decision_wire=_decision_wire,
         listing_is_live=lambda record: (

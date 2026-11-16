@@ -25,6 +25,7 @@ from market_resource_pools import (
     read_site_declarations,
     resolve_asking_rates,
 )
+from market_resource_pools_contracts import CapacityBounds, capacity_bound_hint, resolve_capacity_bounds
 from market_resource_pools_contracts.backing import CapacityBacking
 from market_resource_pools_contracts.hints import raw_listing_shapes, raw_region
 
@@ -88,6 +89,9 @@ class SitePoolReading:
     asking_rates: Mapping[str, AskingRateResolution] = field(default_factory=dict)
     unreadable_asking_rates: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     unreadable_overrides: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    capacity_bounds: Mapping[str, CapacityBounds] = field(default_factory=dict)
+    unreadable_capacity_bounds: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    duration_conflicts: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     def published_asking_rates(self) -> dict[str, dict[str, dict[str, str]]]:
         """Each pool's published rates by shape digest."""
@@ -102,6 +106,9 @@ def read_site_pools(
     *,
     override_asking_rates: Mapping[str, Any] | None = None,
     override_problems: Mapping[str, tuple[str, ...]] | None = None,
+    override_bounds: Mapping[str, CapacityBounds] | None = None,
+    default_bounds: CapacityBounds = CapacityBounds(),
+    minimum_durations: Mapping[str, int] | None = None,
 ) -> SitePoolReading:
     """Read each projected pool's bare-metal admission and region.
 
@@ -136,6 +143,9 @@ def read_site_pools(
     asking_rates: dict[str, AskingRateResolution] = {}
     unreadable_rates: dict[str, tuple[str, ...]] = {}
     unreadable_overrides: dict[str, tuple[str, ...]] = {}
+    bounds: dict[str, CapacityBounds] = {}
+    unreadable_bounds: dict[str, tuple[str, ...]] = {}
+    duration_conflicts: dict[str, tuple[str, ...]] = {}
     for pool_id, problems in (override_problems or {}).items():
         if problems and admission.get(pool_id) == POOL_ADMITTED:
             admission[pool_id] = POOL_HELD
@@ -146,6 +156,23 @@ def read_site_pools(
             continue
         tags = _policy_tags(pool)
         regions[pool_id] = pool_region(tags)
+        try:
+            bounds[pool_id] = resolve_capacity_bounds(
+                (override_bounds or {}).get(pool_id, CapacityBounds()),
+                capacity_bound_hint(tags, BARE_METAL_OFFERING_MODE),
+                default_bounds,
+            )
+            low = (minimum_durations or {}).get(pool_id)
+            high = bounds[pool_id].positive_max_duration_seconds
+            if low is not None and high is not None and low > high and admission.get(pool_id) == POOL_ADMITTED:
+                admission[pool_id] = POOL_HELD
+                duration_conflicts[pool_id] = (
+                    f"min_duration_seconds {low} exceeds the effective maximum {high}",
+                )
+        except ValueError as exc:
+            if admission.get(pool_id) == POOL_ADMITTED:
+                admission[pool_id] = POOL_HELD
+                unreadable_bounds[pool_id] = (str(exc),)
         if raw_listing_shapes(tags, BARE_METAL_OFFERING_MODE) is not None:
             shapes_stated.append(pool_id)
         resolution = resolve_bare_metal_asking_rates(
@@ -175,6 +202,9 @@ def read_site_pools(
         asking_rates=asking_rates,
         unreadable_asking_rates=unreadable_rates,
         unreadable_overrides=unreadable_overrides,
+        capacity_bounds=bounds,
+        unreadable_capacity_bounds=unreadable_bounds,
+        duration_conflicts=duration_conflicts,
     )
 
 
