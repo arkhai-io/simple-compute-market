@@ -190,8 +190,11 @@ domains behave alike":
 - **Respondent discovery.** One poller per dispute authority, built per cycle over
   its durable cursor, replaces VM's cached pollers per authority and account and bare
   metal's per-authority poller taking the first deal's account, which failed the
-  whole authority's discovery when that deal named no account (an Alkahest deal). Planning confirms the poller
-  holds no state beyond its tables, and caches it if it does.
+  whole authority's discovery when that deal named no account (an Alkahest deal).
+  `RespondentPoller` holds no state beyond its tables and its constructor's inputs
+  (`kit/deal-servicing/src/market_deal_servicing/respondent.py`), so it is built per
+  cycle; its cursor record, today derived from the account and the authority, is
+  derived from the authority alone.
 - **The authorities read and paging.** Every registered deal is paged, so an
   uncommitted surrender still gets its physical end; the payments service and
   mediation are read for committed deals only; filings are sent only in the filing
@@ -293,7 +296,9 @@ and `DealSummary`, and `deal-lifecycle`'s "Stop requests are distinct from final
 stops, readable by released clients" is removed and added back without the omission
 and its 0.1.0 scenario. Spot's released-reads test becomes a test that the client
 shipped with the storefront reads once-only, rate, ending and ended deals. The
-single-deal `read` gains no `ending`.
+single-deal `read` gains no `ending`. Neither storefront CLI lists deals today — their
+`deals` group holds `preempt` alone — so the codes' text reaches operators through the
+typed seller client's list, and this change adds no list command.
 
 Rejected: a free-text reason, which carries one reason and invites matching on
 wording; no new field, which makes triage a read per deal; and staging the field's
@@ -337,10 +342,14 @@ The four cases spot could not run — the real `buy` with the opt-in from `avail
 access lost with the storefront stopped yielding a single buyer stop; a killed
 command reading `unmonitored` once its last probe goes stale; the resumed run reading
 `monitored` — run in both lanes on the lane-time helper: the buyer reads lane time from
-its lane-time file, so staleness is reached by setting time. Planning confirms how a
-lane discloses an endpoint the watchdog's TCP probe can reach and the harness can
-close, adding a harness-controlled listener if it cannot, and how a Compose lane stops
-the storefront.
+its lane-time file, so staleness is reached by setting time. The mock provisioning
+discloses no endpoint a probe can reach, so the harness opens a TCP listener on the
+compose host, where it and the buyer run, and the deal's mock fulfillment result
+discloses that listener; closing it is the access lost. The harness runs beside the
+lane's Compose project (`e2e-tests/Makefile` runs `docker compose` and `pytest` on the
+same host), so a lane fixture stops the storefront's Compose service and starts it again,
+waiting for it to report healthy, with the lane's Compose arguments passed to the
+harness in its environment.
 
 Rejected: application-integration tests alone, which cannot see the stopped
 storefront.
@@ -369,7 +378,10 @@ deal has earned so far, nothing in the first period without a setup charge.
 funding stop the buyer's delivery and read output and the watchdog's exit say the deal
 stopped because its balance could not reserve the next period, that a top-up cannot
 revive it, and that a new deal is needed. The buyer tells exhaustion apart with D2's
-classifier, from the payments service's record already in its read.
+classifier, from the payments service's record already in its read. The buyer half
+(`kit/deal-lifecycle-buyer`) is a kit and cannot import the compute family, so, as the
+watch does, it takes the classifier through a slot each compute buyer fills with
+`arkhai_compute`'s.
 
 Rejected: asking the storefront, which makes the seller the buyer's source for a fact
 the payments service records.
@@ -384,8 +396,9 @@ has its own waiver" states, instead of a buyer configuring the treatments it acc
 Restart recovery is built already: both cycles rebuild from the database and the
 authorities' records. Each domain proves it by restarting the composed storefront over
 the same database with a running rate deal, an ending deal and a pending seller stop,
-at application integration, which planning confirms against
-`docs/guidance/engineering/test-levels.md`.
+at application integration (`docs/guidance/engineering/test-levels.md`): the composed
+storefront, read through its typed lifecycle client, with the payments service a fake
+behind its client.
 
 ### D15 — Implementation cadence
 

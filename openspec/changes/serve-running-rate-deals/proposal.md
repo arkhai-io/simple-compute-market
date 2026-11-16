@@ -122,20 +122,20 @@ None.
 
 ### Knowledge to promote
 
-- D1: `deal-lifecycle`'s spec ("Neutral delivery decisions delegate payment interpretation") and architecture companion — the refusal's removal and a changed answer returned pending.
+- D1: `deal-lifecycle`'s spec ("Delivery authorization delegates payment interpretation") and architecture companion ("One end instant, transactional admission", "Current limits"); `compute-delivery`'s spec ("Protected delivery steps are authorized and admitted") and architecture companion ("Commit and hold adoption") — the refusal's removal and a changed answer returned pending.
 - D2: `deal-lifecycle`'s spec ("Cause classification is owned by end service") and architecture companion — the payment-stop classifier, its placement and the resolution of earlier pending stops.
 - D3: `deal-lifecycle`'s spec — the `terms` split by the Agreement's end.
-- D4: `deal-lifecycle`'s spec and architecture companion — the kit-owned servicing step order and the unified term end, respondent discovery and paging; `deal-lifecycle`'s and `vm-storefront-fulfillment`'s architecture "Current limits" lose the respondent and term-end differences; `docs/development/ROADMAP.md`'s Goal 8 current state likewise.
-- D5: `compute-delivery`'s spec and architecture companion — the shared re-drive; `market-composition`'s spec — the four-loop layout; `storefront-publication`'s configuration companion — the interval keys; `docs/development/ARCHITECTURE.md` — the loop layout both storefronts share.
+- D4: `deal-lifecycle`'s spec and architecture companion — the kit-owned servicing step order and the unified term end, respondent discovery and paging; `deal-lifecycle`'s and `settlement-servicing`'s architecture "Current limits" and `vm-storefront-fulfillment`'s "Evidence and delivery ownership" lose the respondent and term-end differences; `docs/development/ROADMAP.md`'s Goal 8 current state likewise.
+- D5: `compute-delivery`'s spec and architecture companion — the shared re-drive; `market-composition`'s spec and architecture companion ("Storefront composition kit") — the four-loop layout; `storefront-publication`'s configuration companion — the interval keys; `docs/development/ARCHITECTURE.md` — the loop layout both storefronts share.
 - D6: `deal-lifecycle`'s architecture companion — the kit-owned page position.
 - D7: `deal-lifecycle`'s spec ("The seller half lists deals", "Stop requests are distinct from final stops") — what *ended* means, the `ending` codes, and the read and list carrying every field; `deal-lifecycle`'s architecture companion loses the routes' omission of once-only deals' empty fields.
-- D8: `market-composition`'s spec — the startup report and withdrawal.
+- D8: `market-composition`'s spec and architecture companion ("Settlement runtime composition") — the startup report and withdrawal.
 - D9: `test-compatibility`'s spec and `docs/development/TESTING.md` — the rate lane rows on lane time.
 - D10: `test-compatibility`'s spec and `docs/development/TESTING.md` — the watchdog's delivered-deal cases.
-- D11: `market-composition`'s spec — both compositions build their payments seller stage.
+- D11: `market-composition`'s spec and architecture companion ("Settlement runtime composition") — both compositions build their payments seller stage.
 - D12: `settlement-servicing`'s spec — the loop's journal allowance.
-- D13: `buyer-orchestration`'s spec — the penalty's collectible bound and the funding-stop message.
+- D13: `buyer-orchestration`'s spec and architecture companion ("Compute terms before approval", "The buyer's watchdog") — the penalty's collectible bound and the funding-stop message.
 - D14: `buyer-orchestration`'s spec — the requirement reworded to the per-term waivers; restart recovery's evidence in `test-compatibility`'s companion.
 - D15: no permanent destination — the implementation cadence orders this change's own work.
-- `docs/guidance/workflow/changes.md` — a change taking on work another change owns names the move in its own proposal and in that change's row Notes (the owner's principle, stated in this design).
-- `docs/guidance/repository/package-versions.md` — a released client or CLI is not owed compatibility with a later storefront, provided the client shipped with that storefront reads everything it serves; backwards client compatibility stays supported through the staged deprecation pattern of `docs/guidance/engineering/versioning.md`, but is not owed (the owner's principle, stated in this design).
+- `docs/guidance/workflow/changes.md`, "Defects found during a change" — a change taking on work another change owns names the move in its own proposal and in that change's row Notes (the owner's principle, stated in this design).
+- `docs/guidance/repository/package-versions.md`, "Compatibility is owed to what a release has shipped" — a released client or CLI is not owed compatibility with a later storefront, provided the client shipped with that storefront reads everything it serves; backwards client compatibility stays supported through the staged deprecation pattern of `docs/guidance/engineering/versioning.md`, but is not owed (the owner's principle, stated in this design).
