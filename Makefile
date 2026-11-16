@@ -6,6 +6,13 @@ export UV_PYTHON := $(or $(shell cat .python-version 2>/dev/null),$(error .pytho
 # Every wheel builds with the build requirements build-constraints.txt pins; a
 # subproject's Makefile exports it too, since each also runs on its own.
 export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath build-constraints.txt)),$(error build-constraints.txt not found))
+# The orchestrator's session starts here but runs each step in a change's own
+# clone, whose Makefile exports its own path. Handing this checkout's path on would
+# tie a clone's builds to a file a branch switch here can delete, wherever the
+# clone's branch does not export it itself.
+ifneq ($(filter orchestrate,$(MAKECMDGOALS)),)
+unexport UV_BUILD_CONSTRAINT
+endif
 
 export UV_HTTP_RETRIES ?= 10
 
