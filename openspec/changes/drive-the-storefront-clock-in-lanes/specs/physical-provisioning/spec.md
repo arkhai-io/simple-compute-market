@@ -2,7 +2,7 @@
 
 ### Requirement: Provisioning time is configured and set on its system surface
 
-The compute provisioning service MUST install its process time source from `time.source`, `"wall"` by default or `"injected"`. Under injected time it MUST serve `POST /api/v1/system/time` behind its administrator authentication, taking `{"now": <Unix seconds>}`, answering `{"source": "injected", "now": <Unix seconds>}` and refusing an earlier instant with `409 time_moves_forward`; its system status MUST carry the time section. Its lease watchdog, lease termination and job engine MUST read the process time source for every instant they record or compare. The provisioning client MUST offer the setting call.
+The compute provisioning service MUST install its process time source from `time.source`, `"wall"` by default or `"injected"`. Under injected time it MUST serve `POST /api/v1/system/time` behind its administrator authentication, taking `{"now": <Unix seconds>}`, answering `{"source": "injected", "now": <Unix seconds>}` and refusing an earlier instant with `409 time_moves_forward` and an invalid body with `422 invalid_time`; its system status, `GET /api/v1/system/status`, MUST carry the time section. Its lease watchdog, lease termination and job engine MUST read the process time source for every instant they record or compare. The provisioning client MUST offer the setting call.
 
 #### Scenario: A truncated lease ends at the set instant
 

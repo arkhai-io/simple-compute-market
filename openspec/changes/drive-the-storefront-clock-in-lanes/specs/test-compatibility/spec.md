@@ -2,7 +2,7 @@
 
 ### Requirement: Every party in a lane shares one lane time the scenario sets
 
-Each Compose lane MUST run every party on injected time: every storefront, provisioning service, registry, the API-credits service and the sample app's middleware where the lane runs them, both doubles, and the buyer, with the harness's own signing clients reading its process source. One harness fixture MUST set every party at the session's start to the wall instant at that moment, and its set MUST move, in order, the harness's own source, each service, both doubles, the chain and the buyer's lane-time file to one instant, then read every party's status and fail naming any that does not report it. Lane time MUST only move forward and MUST never be reset; a stage MAY set any forward instant, and a backward set MUST fail naming the party and both instants. A party the run's profile names but cannot reach MUST fail the setup rather than skip.
+Each Compose lane MUST run every party on injected time: every storefront, provisioning service, registry, the API-credits service and the sample app where the lane runs them, both doubles, and the buyer, with the harness's own signing clients reading its process source. One harness fixture MUST set every party at the session's start to the wall instant at that moment, and its set MUST move, in order, the harness's own source, each service, both doubles and the sample app, the chain and the buyer's lane-time file to one instant, then read every party's status and fail naming any that does not report it, a party whose status has no time section among them. Lane time MUST only move forward and MUST never be reset; a stage MAY set any forward instant, and a backward set MUST fail naming the party and both instants. A party the run's profile names but cannot reach MUST fail the setup rather than skip.
 
 #### Scenario: Funds run out without waiting
 
@@ -13,6 +13,11 @@ Each Compose lane MUST run every party on injected time: every storefront, provi
 
 - **WHEN** a lane-time set leaves one registry at its previous instant
 - **THEN** the fixture fails naming that registry and the instant it reports
+
+#### Scenario: An older image ignores the setting
+
+- **WHEN** a lane configures injected time for a service image that predates the setting, which boots on wall time
+- **THEN** the session fixture fails naming that service, since its status has no time section
 
 #### Scenario: A module follows an advanced one
 
@@ -51,7 +56,22 @@ Each double MUST read time from the shared time component's injected source, set
 - **WHEN** two lanes run at once, in separate Compose projects or separate Helm validation namespaces, and one sets its lane time
 - **THEN** the other lane's parties still report their own instant
 
+### Requirement: The sample app follows lane time through a test control
+
+The API-credits sample app MUST install its process time source from `APICREDITS_SAMPLE_APP_TIME_SOURCE`, `"wall"` by default or `"injected"`, and its metering middleware MUST read that source for every timestamp it signs and every response it verifies. Under injected time the app MUST serve `POST /test/time` with `{"now": <Unix seconds>}` and a status reporting its source and now, behind a control bearer token from its environment, with the doubles' answers and refusals, through `lane-double-controls`' models and client; the metering gate MUST exclude those routes. The metering middleware MUST offer no time control of its own.
+
+#### Scenario: Metered calls continue after an advance
+
+- **WHEN** lane time is set 3600 s forward in the API-credits lane and the buyer calls `/api/forecast` with a funded key
+- **THEN** the middleware's signed consume request is accepted by the credits service and the call is charged one credit
+
+#### Scenario: The control is not metered
+
+- **WHEN** the harness sets the sample app's time with its control token
+- **THEN** the gate does not charge or refuse the request
+
 ## REMOVED Requirements
+
 
 ### Requirement: Each lane double reads a perceived clock the scenario advances
 

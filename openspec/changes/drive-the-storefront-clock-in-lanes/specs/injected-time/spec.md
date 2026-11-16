@@ -2,7 +2,7 @@
 
 ### Requirement: Each process reads the time of the world from one source
 
-Every production process MUST read the time of the world — any instant it stores, signs, sends to another party, or compares with an instant another party knows — from one process time source its composition root installs, and from no other read. The source MUST be wall time unless the process's configuration sets `time.source = "injected"`. A duration of the process's own activity — a timeout, a poll budget, a backoff, a rate-limiter window, a loop interval — MUST be measured on the monotonic clock. A repository check MUST refuse a direct wall-time read in production source and in the lane doubles: `time.time`, `time.time_ns`, `datetime.now`, `datetime.utcnow`, `datetime.today`, `date.today`, and argument-free `time.gmtime()` and `time.localtime()`.
+Every production process MUST read the time of the world — any instant it stores, signs, sends to another party, or compares with an instant another party knows — from one process time source its composition root installs, and from no other read. The source MUST be wall time unless the process's configuration sets `time.source = "injected"`; any other value MUST refuse startup, naming the setting and the value. A duration of the process's own activity — a timeout, a poll budget, a backoff, a rate-limiter window, a loop interval — MUST be measured on the monotonic clock. A repository check MUST refuse a direct wall-time read in production source and in the lane doubles: `time.time`, `time.time_ns`, `datetime.now`, `datetime.utcnow`, `datetime.today`, `date.today`, and argument-free `time.gmtime()` and `time.localtime()`.
 
 #### Scenario: A module reads the current instant
 
@@ -13,6 +13,11 @@ Every production process MUST read the time of the world — any instant it stor
 
 - **WHEN** a process bounds its own waiting while its injected time is held
 - **THEN** the bound elapses on the monotonic clock, and the held injected instant does not stop it
+
+#### Scenario: The source is misspelled
+
+- **WHEN** a process starts with `time.source = "injectd"`
+- **THEN** it refuses to start, naming `time.source` and `"injectd"`
 
 #### Scenario: A direct wall-time read is added
 
@@ -33,9 +38,23 @@ An injected source MUST return exactly the instant last set, in Unix seconds, un
 - **WHEN** an injected process at 1794822300 is set to 1794821400
 - **THEN** the set is refused with `time_moves_forward` and the process still reads 1794822300
 
+### Requirement: Lane time is an integer of Unix seconds read by one rule
+
+A time value — the setting request's and answer's `now`, the status section's `now`, and the lane-time file's `now` — MUST be a JSON integer from 0 to 253402300799, never a boolean, a float or a string. The component MUST provide the one parser every reader uses. A setting request whose body is not exactly `{"now": <valid value>}` MUST be refused `422 invalid_time` and change nothing.
+
+#### Scenario: A boolean is sent as the instant
+
+- **WHEN** a setting request carries `{"now": true}`
+- **THEN** it is refused `422 invalid_time` and the process's instant is unchanged
+
+#### Scenario: A fractional instant is sent
+
+- **WHEN** a setting request carries `{"now": 1794821400.5}`
+- **THEN** it is refused `422 invalid_time`
+
 ### Requirement: The component is standalone
 
-The time component MUST depend only on the standard library, name no market concept, and be published as its own distribution, with a structure test holding that boundary. It MUST provide the process source and its installation, the forward-only set, the lane-time file's reader and writer, and a framework-free route service answering a setting request and the status time section. A service's HTTP binding of that route service MUST stay the service's own.
+The time component MUST depend only on the standard library, name no market concept, and be published as its own distribution, with a structure test holding that boundary. It MUST provide the process source and its installation, the time value's parser, the forward-only set, the lane-time file's reader and writer, and a framework-free route service answering a setting request and the status time section. A service's HTTP binding of that route service MUST stay the service's own.
 
 #### Scenario: The component's boundary is checked
 

@@ -55,10 +55,19 @@ What exists:
   buyer configuration has an environment setting. The provisioning service mounts its
   mock controllers at `/test/*` only under its `mock` profile
   (`compute_provisioning_service/main.py`).
-- Each service already has an operator surface where its pause controls sit: the
-  storefronts' `/api/v1/admin/pause` and `/api/v1/admin/lifecycle/pause`,
-  provisioning's `/api/v1/system/lease-watchdog/pause` and
-  `/api/v1/system/fulfillment-convergence/pause`, the registry's `/api/v1/system/…`.
+- The storefronts and provisioning have an operator surface where their pause
+  controls sit, behind signed administrator requests: the storefronts'
+  `/api/v1/admin/pause` and `/api/v1/admin/lifecycle/pause`, provisioning's
+  `/api/v1/system/lease-watchdog/pause` and
+  `/api/v1/system/fulfillment-convergence/pause`. Their signed status is
+  `GET /api/v1/system/status`, the storefronts' read as `admin_system_status`
+  through the canonical client's `get_system_status`. The registry's administrator
+  surface is `/admin/api-keys`, behind the shared bearer key `REGISTRY_ADMIN_API_KEY`
+  (`core/registry/src/core_registry/api/api_key_auth.py`, `require_admin_api_key`);
+  its signed `/api/v1/system/*` routes admit only the marketplace roles, and it has no
+  status route. The API-credits service has no status route; its signed routes, held
+  by `kit/site`'s `SiteAuthMiddleware`, admit an `admin` role on every contract. The
+  sample app, an unpublished test-only project, has no operator surface at all.
 
 ## Decisions
 
@@ -105,8 +114,10 @@ Rejected:
 
 Each party takes one setting, `time.source = "wall" | "injected"`, `"wall"` by
 default, in its own configuration format: the storefronts' `[Time] source`,
-provisioning's `time.source`, the registry's `TIME_SOURCE`, the buyer's
-`[time] source`. The production image necessarily carries the control; production
+provisioning's and the API-credits service's `time.source`, the registry's
+`TIME_SOURCE`, the sample app's `APICREDITS_SAMPLE_APP_TIME_SOURCE`, the buyer's
+`[time] source`. A value other than `"wall"` or `"injected"` refuses startup, naming
+the setting and the value (17 F4). The production image necessarily carries the control; production
 configuration simply never sets `"injected"`, and nothing refuses it, since no party
 can recognise production. With `"injected"`, a process logs it at startup and reports
 it, with its current instant, on its status surface; a party with an Arkhai payments
@@ -116,8 +127,10 @@ local Helm release's values (D17), the production examples such as
 `helm/charts/bare-metal-storefront/examples/production-values.yaml`, and the shipped
 presets.
 
-A typed configuration model refuses an unknown key, so an older image given a lane
-configuration with this setting fails naming it rather than reading wall time.
+An older image ignores the setting and runs on wall time: the registry's settings
+ignore unknown keys and provisioning's Dynaconf accepts any. The session fixture
+refuses it, naming the party, since its status lacks the time section, reports wall
+time, or does not report the instant set (D7, D16; 17 F5).
 
 Rejected: a refusal coupled to `livemode`, which protects only the parties with
 payments configured while suggesting all are protected; a profile-gated setting,
@@ -168,28 +181,44 @@ replay windows once replay state is pruned against the clock.
 
 ### D5 — The time controls sit on each service's operator surface
 
-| Service | Setting route | Status |
-|---|---|---|
-| VM, bare-metal and API-credits storefronts | `POST /api/v1/admin/time` | `/api/v1/admin/status` |
-| Provisioning service | `POST /api/v1/system/time` | its system status |
-| Registry | `POST /api/v1/system/time` | its system status |
-| API-credits service and the sample app | on their existing operator surface, beside their status | their status |
+| Service | Setting route | Status | Administrator authentication |
+|---|---|---|---|
+| VM, bare-metal and API-credits storefronts | `POST /api/v1/admin/time` | `GET /api/v1/system/status` | signed |
+| Provisioning service | `POST /api/v1/system/time` | `GET /api/v1/system/status` | signed |
+| API-credits service | `POST /api/v1/system/time` | `GET /api/v1/system/status`, new | signed, `admin` role |
+| Registry | `POST /admin/time` | `GET /admin/status`, new | bearer `REGISTRY_ADMIN_API_KEY` |
 
-A request carries `{"now": <Unix seconds>}`. The answer is
+A request carries `{"now": <Unix seconds>}` (D11). The answer is
 `{"source": "injected", "now": <Unix seconds>}`; an instant earlier than the
-service's current one is refused `409 time_moves_forward`. Each status carries
-`{"time": {"source": "injected", "now": …}}` or `{"time": {"source": "wall"}}`. The
-route is mounted only on an instance configured for injected time (D12), behind the
-service's administrator authentication, exempt from request freshness alone (D14).
+service's current one is refused `409 time_moves_forward`, and a body other than a
+valid `{"now": …}` is refused `422 invalid_time`; neither changes anything. Each
+status carries `{"time": {"source": "injected", "now": …}}` or
+`{"time": {"source": "wall"}}`. The route is mounted only on an instance configured
+for injected time (D12), behind the service's administrator authentication.
+
+The storefronts' time section goes on their existing signed status, read through
+the canonical client's `get_system_status`; no new storefront status route (A1). The
+API-credits service gains two signed route contracts, the setting route admitting only
+`admin` and the status admitting `admin`, beside its existing contracts, since its
+middleware refuses a route without one (17 F2). The registry's control sits on its
+existing administrator surface beside `/admin/api-keys`, behind the shared bearer
+key, answering unsigned as those routes do; a bearer request carries no timestamp, so
+it needs no freshness exemption (17 F1). A signed administrator role on the registry
+is an unowned gap in the change index, for the change that adds its first production
+administrator function.
 
 The storefronts bind one kit-owned, framework-free route service in `kit/storefront`
 at the same path, as they bind the trading pause; the route service's generic part —
-the forward-only set and the status section — comes from the time component (D6).
-Each typed client — the storefront client, the provisioning client, the registry
-client — gains a `set_time` method and the status time section.
+the forward-only set, the value's validation and the status section — comes from the
+time component (D6). Each typed client — the storefront client, the provisioning
+client, the API-credits service's client, the registry client — gains a `set_time`
+method and the status time section; the registry client's send the administrator
+key.
 
-Rejected: a new `/test` base path. The doubles keep theirs (D18), since they are
-test-only tools.
+Rejected: a new `/test` base path for the services. The doubles and the sample app
+keep or take one (D18), since they are test-only tools. A signed administrator role
+on the registry for this control (17 F1): new identity surface — a trust set, its
+configuration, rotation — for a control present only under injected time.
 
 ### D6 — The time source is a standalone component
 
@@ -201,7 +230,8 @@ holds:
 
 - the process source: wall, or injected and frozen (D11);
 - its installation from a configured source;
-- the forward-only set, refusing an earlier instant;
+- the time value's validation (D11) and the forward-only set, refusing an earlier
+  instant;
 - the lane-time file's reader and writer, so the harness and the buyer share one
   definition of the file (D19);
 - a framework-free route service for the setting route and the status section.
@@ -221,8 +251,10 @@ every party; a lane provides its own configuration, so a missing party fails the
 setup rather than skipping. At the session's start the fixture sets every party to
 the wall time at that moment. `lane_time.set(T)` moves the harness's own source
 first, then each storefront, provisioning service, registry and the API-credits
-lane's services, then both doubles, then the chain (D15), then the buyer's file; it
-then reads every party's status and fails naming any that does not report T.
+service, then both doubles and, in the API-credits lane, the sample app (D18), then
+the chain (D15), then the buyer's file; it then reads every party's status and fails
+naming any that does not report T — an older image without a time section among them
+(D2).
 
 ### D8 — The scenario rule restated
 
@@ -248,9 +280,11 @@ Modified capabilities: `market-composition` (the storefronts' setting, route,
 status and warning), `physical-provisioning` (provisioning's), `site-capacity` (the
 site's expiry decisions at the process source), `registry-discovery` (the
 registry's), `buyer-orchestration` (the buyer's source and file),
+`api-credits` (the API-credits service's setting, route and status; 17 F2),
 `marketplace-identity` (the freshness exemption; signing clients read the process
-source), `test-compatibility` (lane time, the fixture, the doubles, the run modes,
-the lanes) and `deployment-state` (the static check, the local release on wall time).
+source), `test-compatibility` (lane time, the fixture, the doubles and the sample
+app's control, the run modes, the lanes) and `deployment-state` (the static check,
+the local release on wall time).
 New: `injected-time`. The stores that convert their database times
 (`kit/fulfillment`, `kit/resource-pools` among them) are held by `injected-time`'s
 requirement on read times (D13), not by deltas of their own capabilities.
@@ -278,8 +312,9 @@ Two rounds, then closeout.
 - **Round 2, the controls and the lanes**, two sessions:
   1. the setting routes, status sections, settings and the livemode warning in every
      service; the freshness exemption; the static configuration check;
-  2. the doubles, the fixture, the buyer's file, the chain, the run modes, the three
-     lanes, the hold-passed scenario, and the rule restated.
+  2. the doubles and the sample app's control, the fixture, the buyer's file, the
+     chain, the run modes, the three lanes, the hold-passed scenario, and the rule
+     restated.
 
 ### D11 — Injected time is frozen at an absolute instant
 
@@ -290,7 +325,13 @@ at slightly different moments, and nothing elapses unseen: an approval window, a
 delivery deadline or an Agreement's start arrives only when a stage sets time to it.
 
 The representation is Unix seconds, `{"now": 1794821400}`, in the lane-time file, the
-setting route's request and answer, and the status section. A process configured for
+setting route's request and answer, and the status section. `now` is a JSON integer
+from 0 to 253402300799, the last second of year 9999 and the largest instant a UTC
+`datetime` holds; a boolean, a float, a string, a value out of range, a missing `now`
+or any other member is invalid, read by one rule in the time component wherever the
+value is parsed (17 F4). Integer seconds match the signing protocol's integer
+timestamps, which would truncate a finer instant on every signed hop, and make the
+fixture's comparison exact. A process configured for
 injected time starts frozen at the wall instant it started and reports that on its
 status, until the session fixture sets it (D7). The lane starts from the wall time at
 the session's start, which keeps payments receipt-key pins, checked at the snapshot's
@@ -299,7 +340,9 @@ both.
 
 Rejected: a source running from the set instant at real rate, which lets parties
 drift by however far apart their settings landed and lets a wall-time wait slip
-through; an offset, which says nothing about which instant a party is at.
+through; an offset, which says nothing about which instant a party is at; fractional
+seconds (17 F4), truncated on every signed hop and needing a conversion rule each
+reader must share, for sub-second control no scenario needs.
 
 ### D12 — An instance's time is never changed live
 
@@ -337,7 +380,10 @@ upgrade for every operator, for a failure the integration tests catch.
 An advance of more than the skew crosses every signed hop: a harness that moves
 itself last signs at T and cannot verify a response stamped at T′; one that moves
 itself first signs at T′, which a service still at T refuses. So the setting
-operation alone skips the request timestamp's freshness check. Its signature, the
+operation alone skips the request timestamp's freshness check, on the services whose
+administrator requests are signed: the storefronts, provisioning and the API-credits
+service. The registry's bearer-authenticated control carries no timestamp and needs
+no exemption (D5; 17 F1). Its signature, the
 administrator principal, the operation, method and resource, and the request-id
 reservation are verified as for every request; an earlier instant is refused. Under
 D11 a replay is either an exact retry, which the reservation answers, or names an
@@ -348,7 +394,9 @@ verifies each response normally.
 Rejected: signing at T and verifying at T′ with a per-call clock in the harness's
 clients, a purpose-specific clock hidden in test code; advancing in steps within the
 skew, which takes thousands of rounds for a dispute window; a bearer control token on
-the admin surface, a second kind of administrator authentication.
+a signed admin surface, a second kind of administrator authentication there. The
+registry's bearer key is no second kind: it is the registry's only administrator
+authentication (17 F1).
 
 ### D15 — The chain follows lane time
 
@@ -414,14 +462,25 @@ existing control bearer token and `/test` path; their status reports
 `{"source", "now"}`. `tools/lane-double-controls`' models and client change with them,
 and the hold-passed scenario sets instants instead of advancing.
 
+The sample app is in the doubles' category, not the services': unpublished, installed
+only by the lanes (`published-packages.md`). It takes the same control (17 F2):
+`POST /test/time {"now"}` and a status reporting `{"source", "now"}`, behind a
+control bearer token from its own environment, excluded from the metering gate,
+mounted only under injected time, through `lane-double-controls`' models and
+client. The metering middleware, which is published, gains no control: it reads the
+process source its host installs, which the sample app installs from
+`APICREDITS_SAMPLE_APP_TIME_SOURCE` and a seller's application leaves on wall time.
+
 ### D19 — The harness and the buyer
 
 The harness installs an injected source in its own process; its signing clients read
 the process source, with no clock per client. The buyer takes `[time] source =
 "injected"` with `file = "<path>"`; the file holds `{"now": <Unix seconds>}`, which the
 harness writes through the component's writer, atomically (a temporary file, then a
-rename). A buyer configured for injected time whose file cannot be read refuses to
-start, naming the file.
+rename). The file is read by the time component's rule (D11). A buyer configured for
+injected time whose file cannot be read or holds an invalid value refuses to start,
+naming the file; a later read that fails fails the command, naming the file, and never
+falls back to wall time; `"injected"` without `file` refuses startup (17 F4).
 
 ### D20 — The check and the guidance
 
@@ -446,7 +505,9 @@ when it is set.
 
 All three Compose lanes run the doubles, and under D11 the doubles are frozen, so
 every party in each lane runs injected time, the API-credits lane's storefront,
-credits service and sample app's middleware included. The local Helm release stays on
+credits service and sample app included: the sample app's middleware signs every
+request to the credits service, so it shares lane time through the app's control
+(D18). The local Helm release stays on
 wall time (D17).
 
 Rejected: the API-credits lane on wall time, with its doubles on wall time: two modes
