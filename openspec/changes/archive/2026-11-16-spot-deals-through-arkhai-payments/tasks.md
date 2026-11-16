@@ -2471,7 +2471,11 @@ this change to implementation and review.
       the mandate requirement's MODIFIED text keeps the foundation's once clauses.
       Found, for the closeout review: D1's recommendation that the bare-metal
       example configuration price setup for hosts is not in the repository, and an
-      example configuration is outside closeout's paths.
+      example configuration is outside closeout's paths. Settled by closeout review
+      150 F2: no shipped configuration publishes a recurring option, so the
+      recommendation goes to activate-per-period-compute-servicing's operator
+      documentation for recurring offers, named in its change-index notes; D1 and its
+      promotion row say so.
 - [x] 7.10 **Guidance placement.** Read each guidance section this branch added,
       moved or rewrote since it branched against the layer test, adjacency and
       exception placement (docs/guidance/workflow/README.md#the-layers-of-guidance;
@@ -2494,6 +2498,12 @@ this change to implementation and review.
       in engineering's versioning.md, but the owner's and review 142's triage's
       destination is package-versions.md's existing section, so it stays.
       `make check-guidance`: OK, 104 guidance files.
+      Settled by closeout review 150 F1: the rule is engineering, in versioning.md's
+      "Compatibility is owed to what has been deployed", holding only against a named
+      record of what has been deployed and, where none is named, treating everything
+      released as deployed and settling the release policy with whoever decides
+      releases; package-versions.md states this repository's instance, the
+      `marketplace-v<semver>` release tags.
 - [x] 7.11 **Documentation citations.** Run
       make check-doc-citations CHANGE=spot-deals-through-arkhai-payments after
       promotion and resolve every match; run

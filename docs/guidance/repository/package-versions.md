@@ -37,10 +37,20 @@ configuration key or a hint it reads — is judged under the rules above, so a k
 release accepted keeps the meaning it had, or loses it only with the bump an
 incompatible change takes.
 
-Migration and backwards compatibility are engineered only for what has been deployed.
-A form no deployment has run — a kind of deal, a record, a key's use — owes no
-migration path, compatibility shim or recovery machinery until one does, so none is
-built ahead of it; what a deployment does run keeps the path it is owed.
+Migration and backwards compatibility are engineered only for what has been deployed,
+as
+[`versioning.md`, "Compatibility is owed to what has been deployed"](../engineering/versioning.md#compatibility-is-owed-to-what-has-been-deployed)
+states, and this repository's record of what has been deployed is its release tags. A
+marketplace release is tagged `marketplace-v<semver>` only once production runs it, on
+`releases/<semver>` with its bill of materials
+([the release handbook, "The release"](../../release-handbook.md#the-release);
+[`published-packages.md`, "The release record"](published-packages.md#the-release-record));
+the tags through `marketplace-v0.3.0` predate that record and sit on `main`. What the
+newest tag's release carried is deployed. A step fetches the release tags and reads
+them with `git log --tags --no-walk --decorate`, and a design that leaves out a
+migration or compatibility path names the tag it read. A form no tagged release
+carried — a kind of deal, a record, a key's use — owes no migration path, compatibility
+shim or recovery machinery.
 
 ## A version changes when its contents change
 

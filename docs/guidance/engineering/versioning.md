@@ -46,6 +46,22 @@ switch, and a release after that removes the old form. This is a path for deprec
 field, not a limit on how a contract may change: a field that changes meaning, or a
 structure replaced by a richer one, is judged under the rules above on its own merits.
 
+## Compatibility is owed to what has been deployed
+
+Migration paths, compatibility shims and recovery machinery are built only for forms a
+deployment has run: a kind of record, a message, a configuration key's use. A form
+changed again before any deployment ran it affects no one, so it is revised with no
+migration or deprecation and none is built ahead of it; a form a deployment does run
+keeps the path the rules above give it.
+
+The rule holds only against a named record of what has been deployed, such as a
+release tag cut only once production runs the release. A project relaxing
+compatibility under it names where that record is, and a design that leaves out a
+migration or compatibility path under it names the release it read. Where no record is
+named, or the record is unclear, everything released or published is treated as
+deployed, and the release policy is settled with whoever decides releases before a
+migration or compatibility path is designed or left out.
+
 ## The version numbers are the record
 
 Incompatibility is signalled by the version numbers and the versioned contracts alone;

@@ -66,9 +66,11 @@ bound into the option ID. A preset populates it from an explicitly configured se
 price and refuses an incomplete configuration rather than inventing an amount. A
 setup amount is the seller's choice in both domains, as storefront-publication's
 "Recurring publication checks servicing" says; there is no reason for it to differ
-between them, and the bare-metal example configuration and operator documentation
-recommend pricing setup for hosts, since provisioning a host is the cost churn
-imposes. Churn beyond the setup charge is the seller's to price differently or to
+between them, and pricing setup for hosts is recommended, since provisioning a host is
+the cost churn imposes. The recommendation is written in the bare-metal operator
+documentation for recurring offers when `activate-per-period-compute-servicing`
+publishes them: until then no shipped configuration publishes a recurring option, so
+no setup charge can be offered. Churn beyond the setup charge is the seller's to price differently or to
 refuse through its negotiation policy; neither domain has a required minimum spend.
 
 Setup is owed from approval because commitment triggers provisioning. A payment stop alone does not reverse it, and lawful preemption after delivery leaves it earned. A qualified delivery_end reverses setup iff delivered=false, for either cause, and keeps it iff true; site activation is not that fact. "For either cause" generalizes the filer, not the ground: setup returns only when the seller never delivered — by the seller's own filing, by its signature on the buyer's claim, or by a person ruling delivered=false on the buyer's evidence — and a buyer's stop, with or without a claim the seller does not sign, keeps it with the seller. The buyer is told before approval that the setup charge is kept if it stops and returns only when the seller never delivered, in those three ways. Parties file or concur through the dispute adapter, with no seller direct payment correction. A lawful controlling end keeps its attribution rather than becoming seller fault, but the claim's delivered value still governs setup.
@@ -1181,7 +1183,7 @@ implementation or at closeout, and is named with its heading.
 
 | Accepted decision | Permanent location, as promoted |
 |---|---|
-| D1–D2 rate derivation, the setup part, presets and the exact check | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`, "Charge-first payment settlement" (**Rate mandates**); `openspec/specs/storefront-publication/spec.md` and `architecture.md`, "Recurring payments presets" and "The servicing declaration and its three doors" (the shared composition wiring). D1's recommendation that the bare-metal example configuration price setup for hosts is not in the repository; the closeout review weighs it |
+| D1–D2 rate derivation, the setup part, presets and the exact check | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`, "Charge-first payment settlement" (**Rate mandates**); `openspec/specs/storefront-publication/spec.md` and `architecture.md`, "Recurring payments presets" and "The servicing declaration and its three doors" (the shared composition wiring). D1's recommendation that bare-metal sellers price setup for hosts: `openspec/changes/README.md`, `activate-per-period-compute-servicing`'s notes, for its operator documentation of recurring offers |
 | D3 external contract context | `openspec/specs/deal-lifecycle/architecture.md`, "External authorities" |
 | D4–D5 pure rate authorization, envelope consumption, operation identity, authority-priced `partialPeriod` and the journaled exceptional-end filing | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`, "Charge-first payment settlement" (**One transaction adapter, composed by part kind**, **The payment authority prices the period in progress**, **Rate authorization is pure**) |
 | D4's freshness window | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/settlement-configuration/configuration.md`, "Settlement consumer configuration and cutover" (`snapshot_freshness_seconds`) |
@@ -1205,7 +1207,7 @@ implementation or at closeout, and is named with its heading.
 | D24 the re-anchoring gap and the roadmap criteria | `openspec/changes/README.md`, the unowned gap row "A receipt key change drains every open payment deal"; `docs/development/ROADMAP.md`, Goal 8's unowned work, with the rotation criteria gone from this change's and convergence's rows |
 | D25 implementation cadence | No permanent destination: planning's |
 | D26 buyers update their receipt identity before approving after a switch | `openspec/specs/settlement-configuration/configuration.md`, "Settlement consumer configuration and cutover" |
-| Migration and backwards compatibility are engineered only for what has been deployed | `docs/guidance/repository/package-versions.md`, "Compatibility is owed to what a release has shipped"; pointer from `docs/development/ARCHITECTURE.md`, "Operators" |
+| Migration and backwards compatibility are engineered only for what has been deployed | `docs/guidance/engineering/versioning.md`, "Compatibility is owed to what has been deployed", the rule and its named record of what has been deployed; `docs/guidance/repository/package-versions.md`, "Compatibility is owed to what a release has shipped", this repository's instance, its release tags; pointer from `docs/development/ARCHITECTURE.md`, "Operators" |
 | Each change is mergeable on its own merits into the branch it lands on | `docs/guidance/workflow/changes.md`, "One change per branch" |
 | Before adding behaviour to one of two parts that handle one concern, check whether the other has it or needs it | `docs/guidance/engineering/implementation.md`, "Composition from one component"; linked from `docs/guidance/repository/family-kits.md`, "Sibling domains behave alike" |
 | A versioned contract's field is renamed or retired in stages | `docs/guidance/engineering/versioning.md`, "A field may be renamed or retired in stages" |
