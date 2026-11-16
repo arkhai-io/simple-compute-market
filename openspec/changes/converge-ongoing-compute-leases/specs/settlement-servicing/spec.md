@@ -2,7 +2,7 @@
 
 ### Requirement: Payment settlement is retryable and idempotent
 
-> **Owned by `serve-running-rate-deals-on-vm`.** The neutral lifecycle loop's allowance to journal observations and injected-adapter effects; kept until that change's design writes its delta.
+> **Owned by `serve-running-rate-deals`.** The neutral lifecycle loop's allowance to journal observations and injected-adapter effects; kept until that change's design writes its delta.
 
 Missing or pending payment evidence MUST return retryable pending without a protected effect. Repeated calls MUST reuse transaction and fulfillment or grant identities, return completed state idempotently, and re-drive nonterminal domain state rather than leave it pending. Receipt evidence and domain progress MUST remain domain-owned, not a local ledger or payment-servicing daemon. A neutral lifecycle loop MAY journal observations and injected-adapter effects, never balances.
 

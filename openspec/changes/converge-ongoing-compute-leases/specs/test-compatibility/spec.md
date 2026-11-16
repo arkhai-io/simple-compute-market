@@ -2,7 +2,7 @@
 
 ### Requirement: One rate-servicing matrix qualifies both compute lanes
 
-> **Owned by `serve-running-rate-deals-on-vm`.** Rows 0, 6, 7 and 9 in their reduced VM form and the scenario "A notice outlives servicing" in VM; kept until that change's design writes its delta. Stale in part: "Lane qualification identifies readiness and evidence class" names no landed requirement — runs are labelled lane-double evidence under "The in-lane payments double mirrors the service and proves its engine's surface"; the scenario "Interim spot needs explicit buyer policy" rests on an interim revision that does not exist, and rows 7 and 9 record the buyer policy the terms change ships.
+> **Owned by `serve-running-rate-deals`.** The baseline forms of rows 0, 6, 7 and 9 in both lanes and the scenario "A notice outlives servicing"; kept until that change's design writes its delta. Stale in part: "Lane qualification identifies readiness and evidence class" names no landed requirement — runs carry test-compatibility's two labels, lane-double evidence and live evidence, under "The in-lane payments double mirrors the service and proves its engine's surface", not three classes; the scenario "Interim spot needs explicit buyer policy" rests on an interim revision that does not exist — rows 7 and 9 run on the shipped `returned` presets with default buyers, a `charged` variant a separate observation waiving each charged term by name; "identity-rotation overlap/re-anchoring" in "The full matrix runs" is withdrawn (spot D17, D21); and row 10 also observes the on-demand notice refused naming `delivery_end` before the filing.
 
 VM and bare-metal lanes MUST execute the rate-servicing matrix against the runnable payment and mediation doubles, including spot's prepared entry points. Each row MUST record physical progress, financial work and kept evidence separately. Reports MUST follow "Lane qualification identifies readiness and evidence class"; no double run MUST be labelled live.
 
@@ -25,7 +25,7 @@ VM and bare-metal lanes MUST execute the rate-servicing matrix against the runna
 
 ### Requirement: Lane interruption is not durable restart evidence
 
-> **Owned by `serve-running-rate-deals-on-vm`.** The VM production-application rebuild; kept until that change's design writes its delta. The bare-metal rebuild stays here.
+> **Owned by `serve-running-rate-deals`.** Both domains' production-application rebuild; kept until that change's design writes its delta. This change extends the rebuilds to the filings, revisions and recovery envelopes it journals, and keeps the rule that lane pause is not restart evidence.
 
 Lane scenarios MUST use pause/resume and uncertain-response controls for cross-service convergence. Durable restart MUST be proven at integration level by rebuilding the production application over the same database in both compute domains. Pause/resume MUST NOT be reported as process restart; bare-metal lanes MUST retain their no-service-restart boundary.
 

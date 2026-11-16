@@ -2,7 +2,7 @@
 
 ### Requirement: Compute discovery consumes common lifecycle projections
 
-> **Owned by `offer-per-period-vm-terms`.** The registered `arkhai_payments.period` projection; kept until that change's design writes its delta.
+> **Stale.** The registered `arkhai_payments.period` projection already exists in the payments registration (`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`), landed by the archived `negotiate-open-ended-compute-terms`; task 1.2 confirms it.
 >
 > **Stale.** The common lifecycle projections, their missing-notice and malformed-term rules, and their same-option evaluation are the permanent `cli-query-language` requirement "Common settlement fields include the lifecycle projections" and the `deal-lifecycle` codec requirements, implemented by the archived foundation.
 

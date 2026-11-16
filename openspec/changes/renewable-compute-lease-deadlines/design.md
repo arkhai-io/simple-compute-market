@@ -44,12 +44,23 @@ deadline-only scope are settled.
   instant and accepted `delivery_deadline_seconds` and classifies a missed deadline as
   non-delivery at min(term end, max(start, commitment) + deadline)
   (`kit/deal-servicing/src/market_deal_servicing/journal.py`).
-- **The MVP's stopgap.** Goal 8's MVP publishes the deadline the seller's payments
-  clause configures (`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`,
-  which requires one on every compute option), and `offer-per-period-vm-terms` amends
-  `deal-lifecycle` to call it seller-configured and storefront-enforced. That parameter
-  is a lifecycle key owned by a settlement mechanism's model, which `deal-lifecycle`
-  forbids. No site enforces a deadline.
+- **Publication today.** `negotiate-open-ended-compute-terms` (archived) publishes a
+  compute option's deadline as the pool's effective value when the composition's
+  `delivery_deadline_for_pool` port supplies one, else the payments clause's own optional
+  `delivery_deadline_seconds`
+  (`kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py`,
+  `kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`), as the
+  permanent `deal-lifecycle` requirement "The delivery deadline is the availability term
+  the site or the clause sets" states. Neither compute composition wires the port
+  (`domains/vms/storefront/src/market_storefront/settlement_composition.py`,
+  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_composition.py`),
+  so every published deadline is the clause's, or none. The clause value is a lifecycle
+  key in a settlement mechanism's input; negotiate kept it out of neutral publication by
+  letting the mechanism apply the precedence, but the published term can still drift
+  from any capacity policy. The default buyer refuses an option without a deadline,
+  with `--allow-no-delivery-deadline` as its waiver
+  (`kit/settlement-runtime/src/market_settlement_runtime/buyer_terms.py`). No site
+  enforces a deadline.
 - **Pool facts.** `kit/site` still imports `kit/resource-pools` directly;
   `inject-site-pool-authority` replaces that edge with a session-scoped port. The
   site's pool projection already carries each pool's `policy_tags`
@@ -58,8 +69,8 @@ deadline-only scope are settled.
 ## Goals / Non-Goals
 
 **Goals:** bound capacity held between site commit and delivery; make activation
-and expiry race safely; publish the pool's deadline as the buyer's term and retire the
-seller-configured stopgap; keep payment classifications out of the site; leave old
+and expiry race safely; publish the pool's deadline as the buyer's term through the wired
+port and retire the clause fallback; keep payment classifications out of the site; leave old
 leases and API-credit quota holds unchanged.
 
 **Non-goals:** the activation instant, transition and typed views
@@ -161,11 +172,13 @@ edits it between them; the accepted value wins where the pool still grants it, a
 commit is refused where it does not, so no deal is silently given more time than it
 promised or less than it was promised.
 
-The value the MVP publishes from the seller's payments clause is a stopgap this change
-retires. Publication switches to the pool's value, `deal-lifecycle` is re-amended from
-the MVP's "seller-configured, storefront-enforced" wording to the pool's term enforced
-by the site, and the payments clause's `delivery_deadline_seconds` parameter is removed,
-so no settlement mechanism's model owns a lifecycle key. The storefront journal keeps
+The clause value publication falls back to today is retired. Each compute composition
+wires `delivery_deadline_for_pool` to the pool's effective value from the site's pool
+projection (D6); `deal-lifecycle`'s "The delivery deadline is the availability term the
+site or the clause sets" and "Lifecycle terms are part of the selected option" are
+re-amended to the pool's term enforced by the site; and the payments clause's
+`delivery_deadline_seconds` is removed, so no settlement mechanism's input carries a
+lifecycle key. The storefront journal keeps
 classifying a missed accepted deadline as non-delivery; the site adds capacity reclaim
 when the storefront is absent.
 
@@ -271,6 +284,34 @@ with actor, cause and source; the payment/dispute adapters still own all financi
 actions. This cause does not require an event before the seller files for failed
 delivery. Delivery admission must also honor an expiry claim that wins activation.
 
+### D6. Both compositions wire the pool port
+
+`delivery_deadline_for_pool(site, pool)` is the seam negotiate left: each compute
+composition supplies a function returning the pool's effective
+`delivery_deadline_seconds` — the validated override, else the provider's declared
+default — from the site's pool projection (`kit/site/src/market_site/projections.py`),
+or none where the pool resolves none or `activation_deadlines_enabled` is off. While the
+switch is off the published term and the site agree by both being absent, so wiring the
+port ships before the switch changes; the clause fallback's retirement waits until the
+port resolves a value wherever a seller relied on its clause. How a seller with a
+configured clause value migrates (the value dropped with a configuration refusal, or
+copied into a pool override) is open below.
+
+### D7. Whether the clause fallback is retired, or kept where no site enforces
+
+Open. Goal 8's earlier disposition (D2 (c1), 2026-11-10) had this change retire the
+payments clause's `delivery_deadline_seconds`, since it puts a lifecycle key in a
+mechanism's input. Negotiate's implementation triage later made the fallback
+permanent text: `deal-lifecycle`'s "The delivery deadline is the availability term the
+site or the clause sets" carries the site's deadline where the site enforces one and
+the clause's where it enforces none (owner record R21,
+`openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/reviews/01-implementation-owner.triage.md`).
+The design session decides between retiring the fallback once every compute site
+enforces (task 4.2c) and keeping it for a site that enforces none, recording why the
+lifecycle key may stay in that case. The default buyer's missing-deadline refusal is
+unchanged either way: the MVP keeps it as built, its sellers configuring a clause
+deadline (`switch-on-hosted-per-period-vm`).
+
 ## Rejected alternatives
 
 - Billing horizon or payee-advanced vouch — protects only an honest crashed seller,
@@ -292,10 +333,9 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
   seller activating late inside a long term had not failed; the pool's tag is now the
   value the option publishes, under one name, and the deadline's anchor is the deal's
   commitment instant rather than the storefront's own commit time.
-- The seller-configured payments-clause value as the permanent source (the MVP's
-  stopgap) — it puts a lifecycle key in a settlement mechanism's model, which
-  `deal-lifecycle` forbids, and lets the published term drift from the capacity policy
-  the site enforces.
+- The seller-configured payments-clause value as a permanent fallback (negotiate's
+  precedence today) — it keeps a lifecycle key in a settlement mechanism's input and
+  lets the published term drift from the capacity policy the site enforces.
 - Storefront-local scheduled stop — authority-hosted pending stops survive a dead
   storefront; the site deadline schedules neither notice nor billing.
 - A stored activation phase beside `activated_at_utc` — the activation contract derives
@@ -322,8 +362,8 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
 
 One site-focused implementation round after `inject-site-pool-authority`:
 delivery-deadline validation/provider declarations, the commit snapshot, conditional
-expiry and the lapse cause. Then the storefront round: the publication read, the commit
-carrying the accepted value and anchor, the stopgap's retirement and the
+expiry and the lapse cause. Then the storefront round: the port wiring in both compositions, the
+commit carrying the accepted value and anchor, the clause fallback's retirement and the
 `deal-lifecycle` re-amendment. Every commit and recovery caller is already wired, so
 this change owns its own enablement: it ships `activation_deadlines_enabled` false,
 qualifies every wired commit and recovery caller in explicitly enabled owned lanes,
@@ -348,6 +388,11 @@ with `unify-compute-delivery-path`.
 - **The activation-deadline column's name.** The landed schema has only
   `activated_at_utc`; this change adds one nullable column for the deadline, and its
   name is for the design session.
+- **Migrating a configured clause deadline (D6).** Whether retiring the payments
+  clause's `delivery_deadline_seconds` refuses a configuration that still sets it, or
+  copies it into a pool override, and in which release.
+- **Retiring or keeping the clause fallback (D7).** Against the permanent requirement
+  negotiate's owner record R21 wrote.
 - **Which specification owns the enablement switch.** The delta states the
   `activation_deadlines_enabled` requirement under `resource-pool-management`; it
   governs the site's commit rather than pool administration, and may belong under
@@ -364,7 +409,8 @@ dependency interfaces. D4's policy choices remain explicitly deferred.
 |---|---|
 | D1, D2 deadline, claim and admission | `openspec/specs/site-capacity/spec.md` and `openspec/specs/site-capacity/architecture.md`; capacity reservation in `docs/development/ARCHITECTURE.md` |
 | D3 declaration and validation | `openspec/specs/resource-pool-management/spec.md`; pool policy configuration in `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| D3 publication, restored source and retired clause parameter | `openspec/specs/storefront-publication/spec.md`, `openspec/specs/deal-lifecycle/spec.md`, `openspec/specs/settlement-configuration/spec.md` |
+| D3, D6 publication through the wired port, pool-and-site source and retired clause fallback | `openspec/specs/storefront-publication/spec.md`, `openspec/specs/deal-lifecycle/spec.md`, `openspec/specs/settlement-configuration/spec.md` |
+| D7 missing-deadline refusal for rate options | `openspec/specs/buyer-orchestration/spec.md`, if the refusal changes |
 | D3 retired abandoned-lease runbook | `docs/operator-handbook.md` |
 | D5 watchdog/event | `openspec/specs/physical-provisioning/spec.md`; recovery workers in `docs/development/ARCHITECTURE.md` |
 | D4 deferred renewal | Remains in this change; not promoted as current behavior |

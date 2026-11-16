@@ -1,46 +1,48 @@
 ## Why
 
 Goal 8's MVP changes land before this one. `switch-on-hosted-per-period-vm`, the
-last of them, declares per-period servicing in the VM production composition for
-the `charged` treatment only, makes Arkhai operators the dispute authority under a
-published policy with operator runbooks, records live evidence of the MVP's rows,
-and prepares the hosted target and its readiness check. It owns reduced, VM-only
-forms of this change's tasks 1.1–1.3, 2.3–2.4 and 3.1–3.4; each task below keeps
-only the residual work and builds on what that change leaves. Turning the MVP on
-does not complete Goal 8; this change's closeout does.
+last of them, declares rate servicing in the VM production composition for the
+treatments the shipped presets use, `[charged, returned]`, makes Arkhai operators
+the dispute authority under a published policy with operator runbooks, records live
+evidence of VM deals — including a preemption and a term end returning the
+unstarted remainder, the `chosen` dispute stop and reversal — and prepares the
+hosted target and its readiness check. It owns reduced, VM-only forms of this
+change's tasks 1.1, 1.2, 2.3–2.4 and 3.1–3.4 and of 1.3a's policy; each task below
+keeps only the residual work and builds on what that change leaves. Turning the MVP
+on does not complete Goal 8; this change's closeout does.
 
-What remains is the full product: bare metal switched on; the `returned` and
-`prorated` treatments executed live, so a seller's preemption returns the unstarted
-remainder; the mediation `delivery_end` revision and its mechanical rulings
-replacing the operator procedures where they apply; and convergence's consolidated
-matrix run against the hosted authorities in both domains.
+What remains is the full product: bare metal switched on; setup charges; the
+mediation `delivery_end` revision and its mechanical rulings replacing the operator
+procedures where they apply, with case extension and lifting on rate parts; and the
+consolidated matrix of `serve-running-rate-deals` and
+`converge-ongoing-compute-leases` run against the hosted authorities in both domains.
 
-Its external gate is the hosted payments deployment executing what the MVP does not
-use: `returned` and `prorated` on every stop entry and the term end, the dispute
-authority's stop entry with `chosen` treatment, hold extension and lifting on rate
-parts, and partial reversal after a stop; and the hosted mediation service running
-the vendored `delivery_end` revision. The contracts themselves are published and
-vendored (`kit/arkhai-payments/schema/SOURCE.md`,
-`kit/arkhai-mediation/schema/SOURCE.md`); a published schema alone is not
-deployment evidence. Unsupported terms fail closed: each composition's servicing
-declaration lists the treatments it has qualified, and publication, acceptance and
-materialization read that list. The payment authority computes every partial
-period, never a storefront corrective refund. No minimum spend or backdated payee
-stop is requested or awaited.
+The hosted payments service documents every `partialPeriod` treatment as executed,
+and runs the vendored revision on every deployment
+(`kit/arkhai-payments/schema/SOURCE.md`); `switch-on-hosted-per-period-vm`
+qualifies the treatments the presets use. Its external gates are now two: the hosted
+mediation service running the vendored `delivery_end` revision
+(`kit/arkhai-mediation/schema/SOURCE.md`) on the hosted targets, which mechanical
+remedies, case extension and lifting, and setup returns need; and a qualified real
+bare-metal host. A published schema alone is not deployment evidence. Unsupported
+terms fail closed: each composition's servicing declaration lists the treatments it
+has qualified, and publication, acceptance and materialization read that list. The
+payment authority computes every partial period, never a storefront corrective
+refund. No minimum spend or backdated payee stop is requested or awaited.
 
 ## What Changes
 
-- Confirm, with the payments service's maintainers, that the hosted target
-  executes the residual gate above, extending the answers the MVP obtained.
+- Confirm that the hosted targets run mediation on the vendored `delivery_end`
+  revision, and qualify on them what the MVP did not use: case extension and
+  lifting on rate parts, setup parts, and `prorated` if a preset offers it.
 - Requalify the in-lane doubles and the rate and dispute adapters against the
   vendored revision for the terms beyond the MVP, then verify the hosted target
   implements them.
-- Extend the VM composition's declared treatments to `returned` and `prorated`,
-  and declare servicing in the bare-metal production composition, only after the
-  deployment and consumer checks pass. Publication, acceptance and materialization
+- Declare servicing in the bare-metal production composition, and extend the VM
+  composition's declared treatments to `prorated` only if a preset offers it, only
+  after the deployment and consumer checks pass. Publication, acceptance and materialization
   stay fail-closed for any treatment a composition has not declared.
-- Re-run convergence's consolidated rate-servicing matrix in both double-backed
-  lanes, and run the residual payment and dispute flows against the hosted target
+- Re-run the consolidated rate-servicing matrix in both double-backed lanes, and run the residual payment and dispute flows against the hosted target
   with its agreed dispute authority. Lane-double evidence and live evidence stay
   separate.
 - Extend the MVP's published dispute-authority policy to mechanical rulings, and
@@ -63,15 +65,23 @@ None.
 ## Dependencies and scope
 
 Internal readiness gates: `switch-on-hosted-per-period-vm` (the VM declaration,
-the operators' policy and runbooks, the prepared hosted target),
-`spot-deals-through-arkhai-payments` (rate mechanics beyond `charged`, setup parts,
-presets, notice and identity re-anchoring), `converge-ongoing-compute-leases`
-(servicing and its consolidated matrix), `discover-open-ended-compute-listings`
-(discovery) and `renewable-compute-lease-deadlines` (the pool's delivery deadline,
-which the full product publishes and the site enforces). The foundation
-(`agreed-evidence-and-early-termination`), the payment and mediation doubles
-(`add-arkhai-payments-lane-double`) and unified delivery
-(`unify-compute-delivery-path`) have landed.
+the operators' policy and runbooks, the prepared hosted target, and the VM live
+evidence, which builds on `serve-running-rate-deals`' servicing in both domains),
+`converge-ongoing-compute-leases` (the rest of servicing and the consolidated
+matrix), `discover-open-ended-compute-listings` (discovery),
+`renewable-compute-lease-deadlines` (the pool's delivery deadline, which the full
+product publishes and the site enforces in place of the MVP's storefront-enforced
+clause deadline) and `offer-a-seller-chosen-payout-hold` (the seller-chosen payout
+hold and the penalty's collectibility rule; this change qualifies hosted whatever
+hold that change offers, such as a `for` hold shorter than the stop plus the dispute
+window). The foundation (`agreed-evidence-and-early-termination`), the payment and
+mediation doubles (`add-arkhai-payments-lane-double`), unified delivery
+(`unify-compute-delivery-path`), the terms (`negotiate-open-ended-compute-terms`)
+and the rate mechanics, presets, seller notice and buyer end
+(`spot-deals-through-arkhai-payments`) have landed. Identity re-anchoring across a
+receipt key change is not a gate: the archived spot change made a key change a
+drained cutover, and re-anchoring is unowned in Goal 8 of
+`docs/development/ROADMAP.md`.
 
 Internal dispute-adapter and mediation readiness includes `delivery_end` filings and
 the sole qualifying mechanical payee self-penalty, not seller-direct correction.

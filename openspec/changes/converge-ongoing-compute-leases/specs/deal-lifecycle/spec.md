@@ -21,7 +21,7 @@ End service MUST register one controller loop whose step runs physical work, bou
 
 ### Requirement: Physical completion requires proven recovery
 
-> **Owned by `serve-running-rate-deals-on-vm`.** The physical completion fact and its release proof; kept until that change's design writes its delta. The labelled administrator acknowledgement stays here.
+> **Owned by `serve-running-rate-deals`.** The physical completion fact and its release proof; kept until that change's design writes its delta. The labelled administrator acknowledgement stays here.
 
 End service MUST persist physical completion independently of money. It requires authenticated successful capacity-release evidence, proof of no dispatch, or labelled administrator acknowledgement. Unknown dispatch MUST be adopted and ended before automatic completion. Site lease_ended reports MUST remain end-intent evidence, never release proof.
 
@@ -61,7 +61,7 @@ Financial completion MUST require terminal required parts, resolved end work and
 
 ### Requirement: Lifecycle completion diagnostics are explicit
 
-> **Owned by `serve-running-rate-deals-on-vm`.** The meaning of *ending* and *ended* and the operator signal for a rate still running after a physical end; kept until that change's design writes its delta. The other diagnostics stay here.
+> **Owned by `serve-running-rate-deals`.** The meaning of *ending* and *ended* and the operator signal for a rate still running after a physical end; kept until that change's design writes its delta. The other diagnostics stay here.
 
 Seller read/list MUST expose both facts and evidence references, end revision, gap ages, pending operations/cases, repair reason and manual provenance. A due end with either fact false MUST be ending; both true MUST be ended. Permanent refusal or missing required evidence/credentials MUST show repair required without erasing facts. Pending self-penalty cases and billing after delivery end MUST be named. Warning thresholds MUST NOT disable servicing.
 
@@ -117,7 +117,7 @@ Rate servicing MUST keep verified funded-through as a replaceable timer, never s
 
 ### Requirement: Both storefronts compose the rate delivery adapter
 
-> **Owned by `serve-running-rate-deals-on-vm`.** The VM binding of the rate adapter and hook; kept until that change's design writes its delta. The bare-metal binding stays here; both scenarios restate `compute-delivery`'s landed "A truncation precedes activation" and "Every step recovers the same resource".
+> **Owned by `serve-running-rate-deals`.** Both domains' binding of the rate adapter and hook, now that the MVP servicing change covers VM and bare metal; kept until that change's design writes its delta. Both scenarios restate `compute-delivery`'s landed "A truncation precedes activation" and "Every step recovers the same resource".
 
 Both compositions MUST bind foundation's neutral authorization and billing-start contracts to spot's payment adapter and unified delivery's ports. End service MUST drive the shared journaled start effect from its loop. Composition MUST consume foundation's admission, start identity, evidence and correction contracts. Activation validation MUST accept the Agreement end or a verified earlier end recorded by end service, but MUST suppress start on activation failure or unexplained mismatch.
 
@@ -158,6 +158,8 @@ Recovery MUST use a seller export, original authority-bound credentials and an i
 
 ### Requirement: Rotation evidence has a durable servicing consumer
 
+> **Stale.** Withdrawn by the archived `spot-deals-through-arkhai-payments` D17 and D21: a receipt key change is a drained cutover, nothing re-anchors a running deal, and convergence consumes no re-anchoring evidence and reports no retiring-key dependency. Re-anchoring is an unowned gap in `docs/development/ROADMAP.md`'s Goal 8. Remove this requirement at this change's design review.
+
 During identity overlap the loop MUST request spot's verified re-anchoring evidence for running rate deals and persist it in the evidence store before retiring dependence on the old key. Seller read/list MUST expose unanchored rate deals and once-only must-drain dependencies as retirement repair reasons. Spot MUST remain the owner of verification and rotation policy.
 
 #### Scenario: A retiring key still anchors a running deal
@@ -168,6 +170,8 @@ During identity overlap the loop MUST request spot's verified re-anchoring evide
 ## MODIFIED Requirements
 
 ### Requirement: The seller half lists deals
+
+> **Stale in part.** "and rotation dependencies" is withdrawn with the rotation requirement above (spot D17, D21); the completion diagnostics stay.
 
 The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token and each deal's negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state, current deadline, open-extension flag and open cases, plus the completion diagnostics and rotation dependencies defined here. Once-only deals MUST run from verified commitment until delivery ends. Rejected required filings MUST remain terminal, set repair required, expose every filing outcome in read/list and MUST NOT auto-resubmit.
 

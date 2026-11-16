@@ -126,29 +126,33 @@ are open in `design.md`; no task below decides them.
   refused for exceeding the pool's current value is recorded as seller failure before
   dispatch, and that the existing `activation_lapse` hand-off covers a lease whose
   expiry claim won activation.
-- [ ] 4.2b Publish the pool's effective `delivery_deadline_seconds` — the validated
-  override or the provider's declared default — read from the site's pool projection
-  (`kit/site/src/market_site/projections.py`), as the option's
-  `lifecycle.delivery_deadline_seconds` in both compute storefronts' publication; a
-  pool resolving none publishes no deadline. Cover a pool edit between publication and
-  commit.
-- [ ] 4.2c Retire the payments clause's `delivery_deadline_seconds` parameter and its
-  compute-option requirement in
-  `kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`, with its
-  configuration migration and tests, so no settlement mechanism's model owns a
-  lifecycle key; the published value comes only from 4.2b.
+- [ ] 4.2b Wire `delivery_deadline_for_pool` in both compute compositions
+  (`domains/vms/storefront/src/market_storefront/settlement_composition.py`,
+  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_composition.py`)
+  to the pool's effective `delivery_deadline_seconds` — the validated override or the
+  provider's declared default — read from the site's pool projection
+  (`kit/site/src/market_site/projections.py`), so publication takes it as the option's
+  `lifecycle.delivery_deadline_seconds` (design D6); a pool resolving none, or the
+  switch off, supplies none. Cover a pool edit between publication and commit.
+- [ ] 4.2c If the design retires it (D7), retire the payments clause's `delivery_deadline_seconds` fallback in
+  `kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py` and the preset
+  helper's `RatePresetPricing.delivery_deadline_seconds` path
+  (`kit/arkhai-payments/src/market_arkhai_payments/presets.py`,
+  `kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py`), with the
+  configuration migration the design settles (D6) and tests, so no settlement
+  mechanism's input carries a lifecycle key; the published value comes only from 4.2b.
 - [ ] 4.2d Implement the re-amended `deal-lifecycle` delivery-deadline behaviour
-  ("The delivery deadline is the site's availability term" and "Lifecycle terms are
-  part of the selected option", as `offer-per-period-vm-terms` amends them) — from
-  the seller-configured, storefront-enforced stopgap to the pool's term published by
-  the storefront and enforced by the site — together with the `storefront-publication`
-  and `settlement-configuration` behaviour 4.2b and 4.2c change, as this change's
-  design session writes those deltas.
+  ("The delivery deadline is the availability term the site or the clause sets" and
+  "Lifecycle terms are part of the selected option", as the archived
+  `negotiate-open-ended-compute-terms` left them) — from the pool's value, else the
+  clause's, to the pool's term published by the storefront and enforced by the site —
+  together with the `storefront-publication` and `settlement-configuration` behaviour
+  4.2b and 4.2c change, as this change's design session writes those deltas.
 - [ ] 4.3 Run the compute library, contracts and client `make test` targets, focusing
   on `provisioning/compute/tests/integration/test_release.py` for real persistence
   and release orchestration. Run `make -C provisioning/compute/service test-integration`
   for service migration/API composition, and the affected storefront, delivery and
-  payments-kit suites for 4.2–4.2c. Unit targets cover only value/codec rules; do not
+  payments-kit suites for 4.2–4.2d. Unit targets cover only value/codec rules; do not
   use mocked ledger orchestration as race evidence. Run package typing checks where
   declared. Record commands, results and any unrun checks.
 - [ ] 4.4 Prepare first use through the existing site/compute typed clients with a
@@ -188,8 +192,8 @@ parts in `openspec/README.md#this-repositorys-closeout-parts`, in this order.
 - [ ] 5.4 **Narrative compression:** retain final behavior, material evidence,
   deferred renewal and permanent destinations; remove duplicate work narratives.
 - [ ] 5.5 **Roadmap currency:** update Goal 8 in `docs/development/ROADMAP.md` to name
-  activation deadlines, not renewable active leases, as delivered, and the MVP's
-  seller-configured deadline as retired. Record that buyer
+  activation deadlines, not renewable active leases, as delivered, the pool's deadline
+  as the published term, and the clause fallback as retired. Record that buyer
   guarantees come from authority actions and held-money disputes. Preserve the
   deferred separate-site-operator revisit condition in the owning change history.
 - [ ] 5.6 **Campaign index currency:** update this change's row and dependency graph
@@ -236,7 +240,8 @@ No promotion yet: this is the implementation plan, not implemented architecture.
 |---|---|
 | D1–D2 deadline, claim and admission | `openspec/specs/site-capacity/spec.md`, `openspec/specs/site-capacity/architecture.md`; capacity reservation in `docs/development/ARCHITECTURE.md` |
 | D3 delivery-deadline support/default/override validation | `openspec/specs/resource-pool-management/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| D3 publication read, restored deadline source and retired clause parameter | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-configuration/spec.md` |
+| D3, D6 the wired port, the pool-and-site deadline source and the retired clause fallback | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-configuration/spec.md` |
+| D7 the clause fallback retired or kept for a site that enforces none | `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D3 retired abandoned-lease runbook | `docs/operator-handbook.md` |
 | D5 watchdog, lease-end intent and proven-release distinction | `openspec/specs/physical-provisioning/spec.md`; recovery workers in `docs/development/ARCHITECTURE.md` |
 | D4 deferred renewal | Not promoted; retained in archived design with its revisit condition |

@@ -2,9 +2,9 @@
 
 ### Requirement: Production rate servicing requires a qualified hosted revision
 
-> **Owned by `switch-on-hosted-per-period-vm`.** The VM production declaration's hosted-revision gate and the scenario "Schema is published but target is older" for VM; kept until that change's design writes its delta. Bare metal and the treatments beyond `charged` stay here.
+> **Owned by `switch-on-hosted-per-period-vm`.** The VM production declaration's hosted gate for `[charged, returned]`, the `chosen` dispute stop and reversal, and the scenario "Schema is published but target is older" for VM; kept until that change's design writes its delta. Bare metal, setup parts, case extension and lifting, and `prorated` if a preset offers it stay here.
 
-> **Stale.** "A charged interim subset MAY activate only with explicit buyer-policy opt-in" contradicts the default buyer: the MVP's accepts a charged final period everywhere, and the full product's refuses it only on a seller's preemption and at the term end; each composition's servicing declaration instead lists its qualified treatments, and every undeclared treatment fails closed.
+> **Stale.** "A charged interim subset MAY activate only with explicit buyer-policy opt-in" no longer describes the product: the shipped presets charge only the buyer's own stop and return the unstarted remainder on a seller's preemption and at the term end, the default buyer refuses `charged` on those two ends (with a waiver each), and each composition's servicing declaration lists its qualified treatments, every undeclared treatment failing closed. "The hosted deployment supports the vendored per-part authority/hold revision" is documented by the payments service for every deployment; what remains to qualify hosted is the treatments and operations each declaration uses.
 
 Production compositions MUST NOT declare rate servicing until the hosted deployment supports the vendored per-part authority/hold revision and every offered stop term. Qualification MUST verify pending notices, offered partial-period billing, afterStop holds, post-stop partial reverse and extend/lift through real responses. A charged interim subset MAY activate only with explicit buyer-policy opt-in; other terms MUST fail closed.
 

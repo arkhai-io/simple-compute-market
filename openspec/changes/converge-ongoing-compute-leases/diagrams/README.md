@@ -5,7 +5,7 @@ The qualification matrix also includes maximum term, the seller emergency,
 identity-rotation overlap, the seller that never files, the late anchor, asserted
 availability and a case over paid-out money (rows 9–13). Rows 7 and 9 record the
 buyer acceptance policy the terms change ships.
-`serve-running-rate-deals-on-vm` qualifies reduced forms of rows 0, 6, 7 and 9 in
+`serve-running-rate-deals` qualifies reduced forms of rows 0, 6, 7 and 9 in
 the VM lane — charged treatment, no setup part, no funding timer — without
 promoting these diagrams; they show the full product and are promoted at this
 change's closeout. Diagram 06 shows the seller's opt-in funding timer; with the

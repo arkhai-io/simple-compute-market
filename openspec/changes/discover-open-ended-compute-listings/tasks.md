@@ -4,9 +4,9 @@ Design-stage plan, not implementation evidence. Use verification jurisdictions i
 `docs/development/TESTING.md`; new acceptance test implementation requires maintainer
 approval. No tests are added by this reconciliation.
 
-This plan builds on Goal 8's MVP change `offer-per-period-vm-terms`, which lands
-first. Tasks taken whole, or already implemented, keep their numbers as plain lines;
-a task taken in part keeps its checkbox with the residual work (design D5).
+Tasks whose work already landed in an archived change keep their numbers. A task
+landed wholly before this plan is a plain line; one whose landing the design session
+confirms keeps its checkbox, unticked, naming where it landed (design D5).
 
 ## 1. Reverify dependency contracts
 
@@ -15,18 +15,24 @@ projections and their exact-option correlation locally
 (`kit/settlement-runtime/src/market_settlement_runtime/clauses.py`) and pushes them to
 the registry (`core/registry/src/core_registry/filter-spec.yaml`).
 
-1.2 — moved to `offer-per-period-vm-terms`: the `arkhai_payments.period` field, its
-typed missing-period and billing-kind representation, and the class semantics its
-recipes document. The Alkahest splitter exclusion stays with 1.4 and 3.1.
+- [ ] 1.2 Confirm D3's typed billing-kind and missing-period representation — landed
+  in `negotiate-open-ended-compute-terms` (archived): the payments registration's
+  `arkhai_payments.period`, absent for once-only options, and
+  `arkhai_payments.billing_kind`, `total` or `per_period` with a setup part beside a
+  rate staying `per_period`
+  (`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`). Record the
+  class semantics the recipes (3.1) document over it; any needed public grammar change
+  is explicit and validated first. Preserve the existing Alkahest splitter exclusion
+  without inventing stop entitlements (1.4, 3.1).
 
-- [ ] 1.3 Reverify the landed carrier from `store-registry-listings-as-published` for
-  `available_until_utc` only, including whether it keeps an explicit null apart from
-  an absent field (design D1), the filter-spec edits of `publish-shape-bounds`, and
+- [ ] 1.3 Reverify the carrier `store-registry-listings-as-published` (archived)
+  landed for `available_until_utc`, including that it keeps an explicit null apart from
+  an absent field (design D1), which its retention of published payloads suggests, the filter-spec edits of `publish-shape-bounds`, and
   `drop-escrow-from-shared-wire`'s pushdown state. Record local versus server
   predicate ownership before 2.1a.
 - [ ] 1.4 In `kit/alkahest/src/market_alkahest/settlement_config.py`, expose public
   billing-kind and release-condition eligibility projections using the
-  representation `offer-per-period-vm-terms` defined. Verify recipient eligibility
+  representation 1.2 confirms. Verify recipient eligibility
   and splitter exclusion in `kit/alkahest/tests/unit/test_settlement_config.py`;
   shared discovery must not inspect arbiter trees or invent lifecycle entitlements.
 
@@ -40,26 +46,35 @@ recipes document. The Alkahest splitter exclusion stays with 1.4 and 3.1.
   `test_listings_filtering.py` and `test_listings.py`. Prove known-unlimited versus
   unknown semantics and round-trip publication using the canonical typed registry
   client.
-- [ ] 2.1a After 1.3 and `negotiate-open-ended-compute-terms` task 2.2, declare UTC
-  `available_until_utc` and its lower-bound filter on the dependency's carrier. Prove
+- [ ] 2.1a After 1.3, declare UTC `available_until_utc` in the registry schema and its
+  lower-bound filter on the landed carrier; both compute storefronts already publish
+  the field (`negotiate-open-ended-compute-terms`, archived, its task 2.2). Prove
   UTC instant comparison, equivalent timezone-normalized instants, unknown
   availability failing an explicit minimum, and round-trip publication, on the same
   targets as 2.1.
 
-2.2 — moved to `offer-per-period-vm-terms`: the local `arkhai_payments.period` field.
-The common `early_termination.*`/`adjudication.*` fields, the asset-correlated
-penalty projection and their registry pushdown are already present (1.1); the period
-predicate stays local (design D2).
-
-2.3 — moved to `offer-per-period-vm-terms`: unit preservation of asking rate, option
-rate and billing period.
+- [ ] 2.2 Confirm the local `arkhai_payments.period` field in buyer query and selection,
+  retaining eligible advertised option IDs through selection — landed in
+  `negotiate-open-ended-compute-terms` (archived). The common
+  `early_termination.*`/`adjudication.*` fields, the asset-correlated penalty projection
+  and their registry pushdown are already present (1.1); the period predicate stays
+  local (design D2). Prove local and server survivor parity for a clause mixing the
+  period with pushed predicates in `core/tests/unit/test_query_dsl.py` and
+  `core/registry/tests/unit/test_option_aware_filters.py`, if not already covered.
+- [ ] 2.3 Confirm unit preservation — landed in `negotiate-open-ended-compute-terms`
+  (archived) through the agreed-price accessor and `pricing.asking_rate` with its
+  period: asking rate's declared period, option rate's `per` and billing period remain
+  distinct. Cover sub-hour billing against an hourly rate where missing, without
+  inventing an hourly amount carrier; do not change approval/dispute timing field
+  meanings. Unit verification belongs in query/registration projection suites.
 
 ## 3. Class shortcut and first use
 
-- [ ] 3.1 In `domains/vms/buyer/src/arkhai_vms_buyer` and
+- [ ] 3.1 Document, in `docs/buyer-quickstart.md`, a `--resource`/`--settlement` recipe
+  per class over 1.2's billing kind and the common entitlement projections. Then, in
+  `domains/vms/buyer/src/arkhai_vms_buyer` and
   `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer`, add `--class`, compiled to
-  the same typed predicates `offer-per-period-vm-terms`'s recipes document, with
-  1.4's Alkahest projections. Conjoin class with every explicit alternative, require
+  the same typed predicates the recipes document, with 1.4's Alkahest projections. Conjoin class with every explicit alternative, require
   a payer entitlement for recurring presets, and exclude the prepaid splitter from
   reserved. Reuse explanation's deterministic sanitized output; never enable a
   disabled mechanism or relax a no-match class. Update the recipe documentation to
@@ -67,8 +82,9 @@ rate and billing period.
   explanation suites, including `domains/vms/buyer/tests/test_explain_cli.py` and
   the bare-metal buyer tests. Reverify actual package paths before editing.
 - [ ] 3.2 Prepare committed mixed-option fixtures using existing lane tooling and the
-  payments and mediation lane doubles, reusing `offer-per-period-vm-terms`'s VM
-  per-period listing. Each domain has two capacity bounds and reserved/on-demand/spot
+  payments and mediation lane doubles, reusing the per-period options the recurring
+  purchase scenarios publish
+  (`e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`). Each domain has two capacity bounds and reserved/on-demand/spot
   options with differing prices and notices; include one negative correlation
   listing. Driver entry point is each buyer's discover/buy command with
   `--class spot --explain`, then purchase with omitted horizon. Record exact runnable
@@ -109,7 +125,8 @@ order. Code defects return to implementation; do not promote planned behavior.
 - [ ] 4.9 **Promotion:** after code review promote the design table to registry spec/
   architecture, CLI-query-language spec, settlement-configuration spec and buyer spec/
   architecture; archive merges the delta-covered specs. D2 needs no new promotion:
-  its projections are already permanent and the period field is the MVP's. Repository
+  its projections are already permanent and the period field landed with
+  `negotiate-open-ended-compute-terms`; the recipes go to `docs/buyer-quickstart.md`. Repository
   architecture and capability-index entries need no change; record that disposition.
 - [ ] 4.10 **Documentation citations:** run
   `make check-doc-citations CHANGE=discover-open-ended-compute-listings`, resolve

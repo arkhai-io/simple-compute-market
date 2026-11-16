@@ -1,28 +1,34 @@
 # Tasks — activate deployment-qualified per-period servicing
 
 Pending implementation plan. `switch-on-hosted-per-period-vm` owns reduced, VM-only
-forms of tasks 1.1–1.3, 2.3–2.4 and 3.1–3.4; each keeps its number here with only the
-residual work, building on that change's VM `[charged]` declaration, operator policy
-and runbooks, prepared hosted target and readiness check. Hosted deployment must
-execute `returned`/`prorated`, the `chosen` dispute stop, rate-part extend/lift and
-post-stop partial reversal. Seller delivery_end is a journaled dispute filing with a
-qualifying mechanical payee self-penalty, never seller payment correction. No seller
-restitution entry or several-stop-entries payments dependency remains. Product
-implementation stays with its owners.
+forms of tasks 1.1, 1.2, 2.3–2.4 and 3.1–3.4, and the MVP's operator-ruled form of
+1.3a's policy; each keeps its number here with only the residual work, building on
+that change's VM `[charged, returned]` declaration, operator policy and runbooks,
+prepared hosted target, readiness check and VM live evidence. The rate mechanics,
+presets, seller notice and buyer end landed in the archived
+`spot-deals-through-arkhai-payments`; servicing comes from `serve-running-rate-deals`
+and `converge-ongoing-compute-leases`. Hosted payments documents every
+`partialPeriod` treatment as executed; the remaining external gates are hosted
+mediation on the vendored `delivery_end` revision and a qualified real bare-metal host.
+Seller delivery_end is a journaled dispute filing with a qualifying mechanical payee
+self-penalty, never seller payment correction. No seller restitution entry or
+several-stop-entries payments dependency remains. Product implementation stays with
+its owners.
 
 ## 1. Internal readiness and hosted revision gate
 
-- [ ] 1.1 Verify `switch-on-hosted-per-period-vm`, spot mechanics/publication (the
-      `returned`/`prorated` derivation per declared treatment, setup parts, identity
-      re-anchoring), servicing and its consolidated matrix, discovery and the
-      delivery-deadline change have closed out. Recheck accepted contracts against
+- [ ] 1.1 Verify `switch-on-hosted-per-period-vm`, `converge-ongoing-compute-leases`
+      and its consolidated matrix, discovery, the delivery-deadline change and
+      `offer-a-seller-chosen-payout-hold` have closed out; the rate mechanics and
+      setup parts landed in the archived `spot-deals-through-arkhai-payments`, and
+      identity re-anchoring is unowned, a key change being a drained cutover. Recheck accepted contracts against
       those landed revisions and the VM declaration already shipped before any
       production declaration edit.
-- [ ] 1.2 Confirm, extending the answers `switch-on-hosted-per-period-vm` obtained from
-      the payments service's maintainers, that the intended hosted target executes
-      `returned` and `prorated` on every stop entry and the term end, the dispute stop
-      entry with `chosen` treatment, hold extension and lifting on rate parts, and
-      partial reversal after stop. The vendored schema and vectors
+- [ ] 1.2 Confirm, beyond what `switch-on-hosted-per-period-vm` qualified hosted on VM
+      (`charged`, `returned`, the `chosen` dispute stop, reversal while running and
+      after a stop), that the intended hosted targets run mediation on the vendored
+      `delivery_end` revision and execute hold extension and lifting on rate parts,
+      setup parts, and `prorated` if a preset offers it, in both domains. The vendored schema and vectors
       (`kit/arkhai-payments/schema/payments.schema.json`,
       `kit/arkhai-payments/test-vectors/payments.json`,
       `kit/arkhai-payments/schema/SOURCE.md`) already carry them; re-vendor through the
@@ -31,8 +37,8 @@ implementation stays with its owners.
       deployed target leaves this gate blocked.
 - [ ] 1.3 Re-run the vendored vectors against the double and
       `kit/arkhai-payments/tests` for the treatments and operations beyond the MVP's:
-      `returned`/`prorated` mapping (SCM last_boundary/stop), the `chosen` dispute-stop
-      entry, afterStop holds with extend/lift and partial reverse before/after stop.
+      the `prorated` mapping (SCM stop) if a preset offers it, setup parts, afterStop
+      holds with extend/lift and partial reverse before/after stop.
       Classify divergences by owner; repair compatibility without weakening product
       guarantees. Verify fail-closed refusal of every treatment a composition has not
       declared, absolute maximum terms with their own partialPeriod and no rounding,
@@ -63,13 +69,14 @@ implementation stays with its owners.
 
 - [ ] 2.1 Run both compute lanes against the payment/mediation doubles using the
       existing scenario runner under `e2e-tests/tests/e2e/roles/scenarios`. Include
-      convergence's full rate matrix, the MVP's four VM rows, spot's prepared entry
+      the full rate matrix of `serve-running-rate-deals` and convergence, the MVP's
+      lane rows in both domains, spot's prepared entry
       points and declaration coverage; reuse its lane-clock and integration-restart
       evidence boundaries, not a second qualification matrix. Label every run
       lane-double evidence.
 - [ ] 2.2 Validate fail-closed behavior outside lane profiles with focused
       composition/config integration coverage for bare metal and for every treatment
-      a composition has not declared; the VM `[charged]` case is the MVP's.
+      a composition has not declared; the VM `[charged, returned]` case is the MVP's.
 - [ ] 2.3 Extend the hosted test target `switch-on-hosted-per-period-vm` prepared,
       through the same setup tooling, to bare-metal capacity and personas and to the
       hosted mediation authority. Confirm selectors before seeding; record deployment
@@ -86,9 +93,10 @@ implementation stays with its owners.
 
 ## 3. Hosted evidence and production enablement
 
-- [ ] 3.1 Beyond the MVP's live rows, run bare-metal live complete deals and the
+- [ ] 3.1 Beyond the MVP's VM live rows, run bare-metal live complete deals and the
       residual hosted payment/dispute matrix in design D4: priced payer stop plus
-      hint, authority `returned`/`prorated` partialPeriod billing, setup once, seller
+      hint, authority partialPeriod billing in bare metal (and `prorated` if
+      offered), setup once, seller
       notice surviving storefront absence, read-before-timer-end where the funding
       timer is enabled, delivery_end dispute filing and sole qualifying mechanical
       payee ruling, buyer-half same-key outage stop retry with billing until landing,
@@ -97,16 +105,18 @@ implementation stays with its owners.
       observations. Use supported test controls for uncertainty/restart; annotate
       races/outages qualified only in the double. Every required live scenario must
       pass or remain explicitly blocking activation.
-- [ ] 3.1a Run the completion scenario: an unconfigured buyer, one that changed no
-      acceptance setting, takes an on-demand and a spot deal live under the shipped
-      presets, and a live preemption returns the unstarted remainder.
+- [ ] 3.1a Run the completion scenario in bare metal: an unconfigured buyer, one that
+      changed no acceptance setting, takes an on-demand and a spot deal live under the
+      shipped presets, and a live preemption returns the unstarted remainder. The VM
+      run is `switch-on-hosted-per-period-vm`'s; re-run it if the hosted revision
+      changed since.
 - [ ] 3.2 For the runs of 3.1 and 3.1a, record actual authority effects, physical
       recovery, kept evidence and remaining holds/cases per run, with public-safe
       target/revision provenance. Close created deals, recover resources and stop
       owned setup resources after evidence collection. Never relabel double
       conformance as live behavior.
-- [ ] 3.3 Extend the VM production composition's declared treatments to `returned` and
-      `prorated`, and declare the bare-metal production composition's treatments, in
+- [ ] 3.3 Declare the bare-metal production composition's treatments, and extend
+      either composition's list to `prorated` only if a preset offers it, in
       their owned composition/config-generation paths. Verify publication, acceptance
       and materialization all enforce each list. Preserve identity/mode and original
       authorities for running deals; use existing drain/cutover rules if a
@@ -114,8 +124,8 @@ implementation stays with its owners.
 - [ ] 3.3a Replace, in `docs/operator-handbook.md`, the operator runbooks the
       mechanical rulings supersede, keeping the procedures for filings outside the
       mechanical guards.
-- [ ] 3.4 Requalify convergence's startup/withdrawal contract under the bare-metal
-      declaration and the extended VM list; verify accepted terms and authorities
+- [ ] 3.4 Requalify the startup/withdrawal contract of `serve-running-rate-deals`
+      under the bare-metal declaration and any extended VM list; verify accepted terms and authorities
       remain unchanged. Run focused composition tests in both storefronts, affected
       config/schema/Helm render tests, kit contract tests and affected typing checks.
       Run `make check-packaging` before code review; fix changed comments/import
