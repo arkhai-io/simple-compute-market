@@ -25,11 +25,25 @@ the world from one source". Touches a new project, `tools/injected-time/`
 `.github/workflows/tests.yml`, the release declaration
 (`manifests/release-components.json`), and `docs/development/ARCHITECTURE.toml`.
 
-- [ ] 1.1 Create `tools/injected-time/` as a standalone component, laid out as
+- [x] 1.1 Create `tools/injected-time/` as a standalone component, laid out as
   `tools/frp-grant-admission/` is (`README.md`, `LICENSE`, `pyproject.toml`,
   `Makefile`, `src/injected_time/`, `tests/unit/`), standard library only (D6).
   - Verify: `make -C tools/injected-time build` builds its wheel.
-- [ ] 1.2 The process source: `now()` returning Unix seconds; wall by default; an
+  - Done: distribution `arkhai-injected-time` 0.1.0, import `injected_time`, MIT,
+    `requires-python >=3.11`, no runtime dependency; dev group `pytest` and `mypy`.
+    Its `make test` runs `mypy src --strict` then the unit suite, as
+    `tools/lane-double-controls` does; `make build` writes to its own `dist/` unless
+    given `DIST_DIR`. The README is the component's interface (value, sources, time
+    file, route service). Locked with `make lock PROJECTS=tools/injected-time`
+    (12 packages, all from PyPI); a direct `python3 scripts/uv_project.py lock` was
+    denied in this unattended run, and the make target runs the same command after
+    `make dist`. The build evidence is the same `make build` reached through the
+    root's `dist-injected-time` (`make -C tools/injected-time build` was denied:
+    only `make -C <package> test` is admitted): `make dist`, run by `make
+    check-packaging`, printed `cd tools/injected-time && make build
+    DIST_DIR=…/.dist` and built `arkhai_injected_time-0.1.0-py3-none-any.whl`. The
+    default `dist/` output, with no `DIST_DIR`, was not exercised.
+- [x] 1.2 The process source: `now()` returning Unix seconds; wall by default; an
   injected form frozen at the instant last set, starting at the wall instant it was
   installed; installation from a configured source value, `"wall"` or `"injected"`,
   refusing any other value naming the setting and the value; the forward-only set,
@@ -37,40 +51,137 @@ the world from one source". Touches a new project, `tools/injected-time/`
   - Verify: unit tests: wall reads follow the wall clock; an injected source returns
     the set instant until the next set while real time passes; a backward set is
     refused and the instant is unchanged; `"injectd"` is refused naming it.
-- [ ] 1.3 The value rule: one parser for `{"now": <value>}` — a JSON integer from 0 to
+  - Done: `injected_time.source` — `WallTime`, `InjectedTime(start=None)` with
+    `set(instant)` (a lock makes the forward check and the assignment one step;
+    setting the current instant again succeeds), `source_for(value, setting=…)`
+    (`InvalidTimeSource` naming both), `install`/`installed`/`now`, and
+    `TimeMovesForward` carrying both instants. Both sources take the wall clock
+    through their constructor (`wall`, `time.time` by default), the seam a test
+    moves. Unit, `tests/unit/test_source.py`, passes. "While real time passes" is
+    driven in fake time, not spent (`test-determinism.md`): with a fake wall clock
+    moved an hour and a day between reads, an injected source still reads the
+    instant it started at or was last set to, while a wall source follows every
+    move in whole seconds; the real wall instant a default source starts at is
+    bracketed by two real wall reads.
+- [x] 1.3 The value rule: one parser for `{"now": <value>}` — a JSON integer from 0 to
   253402300799, never a boolean, float or string, no missing `now`, no other member —
   reporting `invalid_time` (D11).
   - Verify: unit tests for each invalid form (`true`, `1794821400.5`,
     `"1794821400"`, `-1`, `253402300800`, `{}`, an extra member) and the two bounds.
-- [ ] 1.4 The lane-time file's reader and writer: the writer writes `{"now": …}`
+  - Done: `injected_time.value` — `parse_time(raw)` for a JSON body,
+    `read_time(document)` for a parsed one, `check_instant(value)` for a bare value,
+    all one rule, plus `time_document(instant)`. Beyond the listed forms it also
+    refuses `1794821400.0`, `null`, a member stated twice (the json module would keep
+    the last), a non-object, and a body that is not JSON. Bytes are decoded as
+    strict UTF-8 first, since `json.loads` would detect UTF-16 and UTF-32: invalid
+    UTF-8 and a valid document encoded as UTF-16 or UTF-32 are refused. Unit,
+    `tests/unit/test_value.py`, passes.
+- [x] 1.4 The lane-time file's reader and writer: the writer writes `{"now": …}`
   atomically (a temporary file in the same directory, then a rename); the reader reads
   it on every call through 1.3's parser and raises, naming the file, on a missing,
   unreadable or invalid file (D19).
   - Verify: unit tests: a reader sees each write at its next read; every invalid file
     raises naming its path; a reader never observes a partial write.
-- [ ] 1.5 The framework-free route service: a setting request answered
+  - Done: `injected_time.time_file.TimeFile(path)` — `now()` reads on every call
+    (`TimeFileError` naming the path), `write(instant)` writes a temporary file
+    beside the target, fsyncs it and `os.replace`s it, removing it on any failure.
+    The component calls it a time file: the lane is this repository's use, and the
+    component names none. A `TimeFile` is itself a source (`name` `injected`), so the
+    buyer (section 14) installs `TimeFile(path)` directly. Library integration (the
+    public API over real files in a temporary directory, so in
+    `tests/integration/`, not `unit/` as the plan said),
+    `tests/integration/test_time_file.py`, passes. What it shows of "never a partial
+    write": a handle opened before a write still reads the whole previous document
+    (the file is replaced, never written into), a write leaves nothing beside the
+    file, and a write whose rename fails leaves the target untouched. It does not
+    show the rename's atomicity, which is `os.replace`'s within one directory, nor
+    tell a rename from a delete-then-create; the code does the former.
+- [x] 1.5 The framework-free route service: a setting request answered
   `{"source": "injected", "now": …}`, refused `409 time_moves_forward` or
   `422 invalid_time` with nothing changed; the status section, `{"source": "injected",
   "now": …}` or `{"source": "wall"}` (D5, D6).
   - Verify: unit tests for each answer and refusal and both status forms.
-- [ ] 1.6 The structure test holding the boundary: no import of a repository package or
+  - Done: `injected_time.routes.TimeRouteService(source)` — `status()`,
+    `set_time(body)` raising `TimeRouteError(status_code, code, detail)`, and
+    `settable`, true only for an `InjectedTime`, which a binding reads to mount the
+    setting route only under injected time. `set_time` takes the raw body, so a body
+    that is not JSON is 422 `invalid_time` on every service rather than whatever its
+    framework answers. Unit, `tests/unit/test_routes.py`, passes.
+- [x] 1.6 The structure test holding the boundary: no import of a repository package or
   a third-party distribution (`injected-time`'s "The component is standalone").
   - Verify: the structure test passes, and fails on a planted import of `httpx` and of
     `market_identity`.
-- [ ] 1.7 Put the component in the release set and the wheelhouse: declare it in
+  - Done: `tests/unit/test_structure.py` passes. The planted imports are shown
+    without editing the tree: the same check run over a source tree the test writes
+    finds `import httpx`, `from market_identity import …` and a function-local
+    `import httpx`. It also holds that `pyproject.toml` declares no dependency and
+    that the lock resolves nothing but the component and PyPI.
+- [x] 1.7 Put the component in the release set and the wheelhouse: declare it in
   `manifests/release-components.json` so `make dist` and `make dist-release` build it;
   add `make test-injected-time` to the root `test` target and the Tests workflow's
   matrix; admit a dependency on it from every architecture layer in
   `docs/development/ARCHITECTURE.toml` (D6).
   - Verify: `make dist` puts its wheel in `.dist`; `make test-injected-time` passes;
     `make check-packaging` passes.
-- [ ] 1.8 Section verification.
+  - Done: the declaration's first entry, since it depends on nothing and everything
+    will depend on it; the root's `dist-injected-time` is in `dist-release-set`
+    (so `dist` and `dist-release` build it) and in `dist-ci`; `test-injected-time`
+    follows `test-frp-grant-admission` in `test` and in `tests.yml`'s matrix, which
+    `scripts/tests/test_tests_workflow.py` holds in order. Outside the plan:
+    `docs/guidance/repository/published-packages.md` gains the component's table row
+    now, not at closeout, because `scripts/tests/test_publish_matrix.py` fails a
+    declared distribution with no row.
+  - Correction to the plan, no edit to `ARCHITECTURE.toml`: `make check-architecture`
+    skips `tools/` (`[conventions] skip`), so `arkhai-injected-time` is not a project
+    in its model, and a package declaring or importing it forms no internal edge —
+    the layer, scope, dependency and kind-allowlist rules never see it, and naming it
+    in a kind allowlist would fail the check's configuration rule, which refuses a
+    distribution that is not a project. The one rule that sees it is a package's own
+    allowlist: it counts as a third-party distribution, so each package with
+    `allowed-dependencies` adds `arkhai-injected-time` to them in its own
+    `pyproject.toml` when its section declares it, as `package-layers.md` places
+    that list. D6's intent, every package may depend on it, holds with no rules-file
+    row; its wording, "`make check-architecture` gains the allowance", is the
+    round's triage's to amend, and closeout's promotion promises no such allowance.
+  - Evidence: `make test-injected-time` (unit and library integration, 80 passed,
+    mypy clean); `make
+    check-packaging` passes, its wheelhouse holding the wheel; `make
+    test-release-tooling` (the scripts' unit and static configuration tests, the
+    publish table, the wheel-set dry runs and the matrix among them) 3126 passed.
+- [x] 1.8 Section verification.
   - Unit: `make test-injected-time`.
   - `make check-packaging`; `scripts/change-workflow run pre-commit
     drive-the-storefront-clock-in-lanes`, whose functional checks pass.
   - End-to-end: none; nothing depends on the component yet.
   - Owed by validation: `tests.yml`, job `test · test-injected-time` — the job exists
     and passes.
+  - Confirmed: no end-to-end marker exercises the component; the owed job is in
+    `tests.yml`'s matrix, a workflow `scripts/ci_evidence.py` lists.
+  - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`:
+    `after-functional-change` and `pre-commit-functional` (every suite) passed;
+    `pre-commit`'s default checks and strict OpenSpec validation passed, and of
+    `check-repository` only the citations check failed, on
+    `openspec/specs/injected-time/architecture.md` (written at closeout, 18.9) and
+    `scripts/check_time_reads.py` with its test, which section 2 creates.
+  - The component's tests import only what the section adds, so against the round's
+    base each fails at collection, which shows less than a behavioural failure.
+  - Handoff for sections 3–7. `injected_time.now` is the default a clock parameter
+    takes; it reads the installed source at each call, so a test passing its own
+    clock is unaffected. The source returns whole seconds, wall included: a read
+    converted from `time.time()` or `datetime.now(...)` loses its fraction, which
+    matters only where something ordered or compared sub-second instants, judged per
+    read. A `datetime` is `datetime.fromtimestamp(injected_time.now(),
+    timezone.utc)`; if that repeats widely, a helper may join the component (still
+    0.1.0, unreleased). A package declaring the component needs `make dist` before
+    its relock, its row's internal deps in `published-packages.md` gain
+    `arkhai-injected-time` (`test_publish_matrix.py` holds them), and, if it has
+    `allowed-dependencies`, that list gains it too: `core`, `domains/compute`,
+    `kit/identity`, `kit/settlement-runtime`, `kit/schema-migrations`,
+    `kit/deal-servicing`, `kit/deal-lifecycle`, `kit/deal-lifecycle-contracts`,
+    `kit/deal-lifecycle-client`, `kit/deal-lifecycle-buyer`, `kit/contact-exchange`,
+    `kit/capability-shape`, `kit/capability-pricing`, `kit/capability-admissibility`,
+    `kit/resource-pools-contracts`, `kit/resource-pools-client`,
+    `provisioning/compute/contracts` and `provisioning/compute/client`.
 
 ## 2. The wall-time read check and its guidance
 

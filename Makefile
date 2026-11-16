@@ -21,6 +21,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
+.PHONY: test-injected-time dist-injected-time
 .PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
 .PHONY: dist-arkhai-core-registry dist-release-set dist-apicredits-sample-app
 .PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
@@ -44,7 +45,7 @@ dist-release: ## Build the wheel set a release carries.
 
 # Every internal wheel but the lane doubles' control contract and the API-credit
 # sample app.
-dist-release-set:dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
+dist-release-set:dist-injected-time dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
 
 # The release set and the two wheels only tests depend on, which the lanes'
 # images install from .dist: the lane doubles' control contract, for the e2e
@@ -52,7 +53,7 @@ dist-release-set:dist-storefront-client dist-identity dist-core dist-arkhai-core
 # its image in the API-credit lane.
 dist: dist-release-set dist-lane-double-controls dist-apicredits-sample-app
 
-dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls dist-apicredits-sample-app ## Build repository-owned Python wheels without fetching separately released artifacts.
+dist-ci: dist-injected-time dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls dist-apicredits-sample-app ## Build repository-owned Python wheels without fetching separately released artifacts.
 
 dist-domains: dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-storefront-client dist-registry-client dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel the release set carries through the domain aggregate
 	cd domains && $(MAKE) dist-release DIST_DIR=$(DIST_DIR)
@@ -158,6 +159,12 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_config-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-config produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-injected-time: ## Build the standalone time component's wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd tools/injected-time && $(MAKE) build DIST_DIR=$(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_injected_time-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-injected-time produced a platform-specific wheel" && exit 1)
+
 dist-lane-double-controls: ## Build the lane doubles' control-contract wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd tools/lane-double-controls && $(MAKE) build DIST_DIR=$(DIST_DIR)
@@ -178,7 +185,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-lane-double-controls test-payments-lane-double test-mediation-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-injected-time test-lane-double-controls test-payments-lane-double test-mediation-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-domains:
 	$(MAKE) -C domains test
@@ -220,6 +227,11 @@ test-frp-grant-admission-frp: ## Run the frps admission plugin against the real 
 
 test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests with its runtime dependencies at their declared floors
 	$(MAKE) -C tools/frp-grant-admission test-floor
+
+# The standalone time component under tools/: its type check, then its unit tests,
+# the structure test holding its standard-library-only boundary among them.
+test-injected-time:
+	$(MAKE) -C tools/injected-time test
 
 # The lane doubles' control contract under tools/: the committed lane CA and leaves,
 # its type check, then its unit and integration suite.
