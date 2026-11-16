@@ -1860,7 +1860,7 @@ configuration outside the lanes never injects time". Touches `scripts/tests/` (a
 static configuration test) and, read only, the charts' defaults,
 `helm/local-values.yaml`, the charts' production examples, and the shipped presets.
 
-- [ ] 12.1 A static configuration test reads every committed configuration outside the
+- [x] 12.1 A static configuration test reads every committed configuration outside the
   lanes' own — chart defaults, `helm/local-values.yaml`, each chart's
   `examples/*values*.yaml`, the shipped storefront and buyer presets — the way their
   consumers read them, and fails naming the file and the party where any sets the time
@@ -1868,7 +1868,46 @@ static configuration test) and, read only, the charts' defaults,
   (`docs/guidance/repository/static-configuration-tests.md`).
   - Verify: it passes on the tree, and fails on a planted `[Time] source = "injected"`
     in `helm/charts/bare-metal-storefront/examples/production-values.yaml`.
-- [ ] 12.2 Section verification.
+  - Done: `scripts/tests/test_committed_time_sources.py`, a static configuration
+    test in the scripts' suite, beside `test_committed_stack_values.py`, since it
+    spans charts, Compose stacks and packaged service settings. It reads the
+    umbrella's and every chart's `values.yaml`; both local releases' values
+    (`helm/local-values.yaml`, `helm/bare-metal-release-values.yaml`); the
+    production examples — every chart's `examples/*values*.yaml`, the seller's
+    and the registry's production Compose stacks (`compose/seller.yml`,
+    `compose/registry.yml`) and `config.registry.env.example`; and the shipped
+    presets — each service's packaged `settings.toml`, provisioning's packaged
+    profiles (`config/*.yml`, which its image loads by default), and the
+    storefront files committed for an operator that no lane mounts
+    (`storefront.bob.toml`, `storefront.credits.toml`). Each is parsed as its
+    consumer parses it (YAML, TOML, or `KEY=VALUE` lines), keys in any case, and
+    searched for `time.source` under any spelling of its section, `TIME_SOURCE`,
+    or an override variable ending `_TIME__SOURCE`, in a mapping or a Compose
+    `KEY=VALUE` list; each refusal names the file and the setting's dotted path,
+    which names the party. A listed file that is missing fails, and so does a
+    glob that stops finding the bare-metal production example or provisioning's
+    `config.yml` and `config-seller.yml`.
+  - Correction to the plan's list: no buyer preset ships (the buyer is a binary
+    with no packaged configuration), so none is read. Left out as the lanes'
+    own: their Compose files, `dev-env/`, `storefront.*.lane.toml`, and the
+    storefront files the lanes share with the full local stack,
+    `storefront.alice.toml` (the VM lane) and `storefront.dev.toml` (the
+    bare-metal lane, with `dev-env/bare-metal/buyer.toml`); the end-to-end
+    runner's profiles, which configure no party; and `helm/fixtures/`, the
+    charts' render fixtures. The search reads the files rather than what Helm or
+    Compose would render, so it refuses a setting even where a chart would drop
+    it (the registry chart renders a fixed list of keys), stricter than a render
+    and with no tool gate.
+  - Evidence, static configuration: `make test-release-tooling` 3184 passed,
+    among them the tree test (no refusal), the files-and-families test, and the
+    planted cases over copies under a temporary root, the committed tree never
+    edited: the bare-metal production example with `config.Time.source` or
+    `config.time.source` set to `"injected"` is refused naming that file and
+    path; provisioning's packaged `config-seller.yml` with `time.source`, a
+    Compose service with `PROVISIONING_TIME__SOURCE=injected` in its
+    environment list, and an env file with `TIME_SOURCE=injected` are refused, a
+    `wall` source is not.
+- [x] 12.2 Section verification.
   - `make test-release-tooling`; `scripts/change-workflow run pre-commit
     drive-the-storefront-clock-in-lanes`.
   - End-to-end: pre-review validation's scenarios against the local Helm release run in
@@ -1876,6 +1915,39 @@ static configuration test) and, read only, the charts' defaults,
     section 15's wall mode exists.
   - Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — the
     static configuration test runs and passes.
+  - Confirmed: no end-to-end marker exercises the check. The local Helm
+    release's values set no time source, so every party defaults to wall time;
+    no test reads each party's status there yet, which section 15's wall mode
+    owes ("The local release is validated"). The owed job is right:
+    `test-deployment-packaging` runs `make test-release-tooling`, which collects
+    `scripts/tests/`.
+  - Evidence: `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes` on the first form of the test:
+    `after-functional-change` and `pre-commit-functional` (every suite) passed,
+    and of `pre-commit` only the citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9). On the final tree, the
+    same: `after-functional-change` (`make lock`) and `pre-commit-functional`
+    (`make dist-clean`, `make check-packaging`, `make test`, every suite) passed,
+    and of `pre-commit` only the citations check failed, on that document.
+  - Fresh-context check: it found packaged provisioning profiles, the production
+    Compose stacks and the registry's env example outside the check, and
+    `storefront.bob.toml` and `storefront.credits.toml` wrongly called the
+    lanes' own (all now read); the `TIME_SOURCE` form matched in no file its
+    consumer reads (it now reads the env example and Compose environments,
+    where it is read); the docstring calling every lane injected and the
+    runner's profiles the lanes' (reworded), `helm/fixtures/` unnamed (named),
+    the glob's results unasserted (asserted), and the local release's wall time
+    claimed from defaults (reworded). Declined: moving the test to
+    `helm/tests/`, since it reads Compose stacks and packaged service settings
+    too, as `test_committed_stack_values.py` does from this suite; and rendering
+    with Helm and Compose, which would drop keys the files state and gate the
+    test on both tools, where a parse refuses more and needs neither.
+  - Handoff for section 16: `storefront.alice.toml` and `storefront.dev.toml`
+    (with `dev-env/bare-metal/buyer.toml`) are mounted both by a lane and by the
+    full local stack, so setting injected time in them puts the full local stack
+    on injected time too, a mode D16, D17 and D21 do not name for it. Section 16
+    either gives each lane an overlay of its own for those parties, as Bob's
+    `storefront.bob.lane.toml` is, or settles the full local stack's mode.
 
 ## 13. The doubles and the sample app take injected time
 
