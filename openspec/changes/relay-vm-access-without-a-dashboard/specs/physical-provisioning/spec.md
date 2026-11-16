@@ -64,7 +64,7 @@ A pool's relay reference determines which relay a newly created VM receives. It 
 
 A host's pool assignment, a pool's relay reference, and a relay's address or port MUST NOT change while any affected host holds an active lease, unless the relay is the same on both sides of the change. The buyer holds a rendezvous address and a port; both are delivered, and a remote port is not portable between relays, so a rebinding that moved existing VMs would strand every buyer on the affected hosts and request ports the new relay may already have leased.
 
-Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating active workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables.
+Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating active workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables. A change on the relay's side — its address or port, or its token — drains the relay instead, since it affects every pool referencing it: the operator disables the relay, waits until it reports drained, makes the change, and re-enables it. A refusal under this rule MUST state the drain at the scope that clears it: the pool for a pool's relay reference or a host's pool, the relay for a relay's address, port, or token.
 
 #### Scenario: A pool's relay reference is changed while VMs are running
 
@@ -84,7 +84,12 @@ Rebinding is therefore drain-then-change: disabling a pool already excludes it f
 #### Scenario: A relay is repointed while it carries leases
 
 - **WHEN** a relay's address or port is updated and it holds an active lease
-- **THEN** the update is rejected
+- **THEN** the update is rejected, and the refusal tells the operator to disable the relay, wait until it reports drained, make the change, and re-enable it
+
+#### Scenario: A pool's relay reference change is refused
+
+- **WHEN** a change to a pool's relay reference is rejected because a host in the pool holds an active lease
+- **THEN** the refusal tells the operator to disable the pool, wait for its leases to be released, make the change, and re-enable it
 
 #### Scenario: A VM is torn down after its pool was rebound
 
@@ -97,7 +102,7 @@ A relay's admission token MUST NOT be written into an accepted operation's persi
 
 An accepted operation MUST carry the relay reference and the leased remote port. The relay's address and admission token MUST be resolved immediately before the job's variables are written, so that a token rotated after acceptance takes effect on the next execution, including a retry of a job accepted before the rotation.
 
-A relay that is absent, disabled, or holds no token at execution MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically.
+A relay that is absent, or holds no token at execution, MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically. A disabled relay MUST NOT fail a job that holds a lease on it, whether the job adds the delivery's proxy or removes it: disabling a relay drains it, and a drain lets every leased delivery run to its end.
 
 The rendered variables file holds the decrypted token and MUST have the same lifetime and access restrictions as other decrypted secret material on the execution path.
 
@@ -118,8 +123,62 @@ The rendered variables file holds the decrypted token and MUST have the same lif
 
 #### Scenario: A relay becomes unusable between acceptance and execution
 
-- **WHEN** the referenced relay is disabled or its token cleared before the job executes
+- **WHEN** the referenced relay is absent or holds no token when the job executes
 - **THEN** the job fails as a configuration error and is not retried
+
+#### Scenario: A relay is disabled between acceptance and execution
+
+- **WHEN** the relay a job's lease names is disabled after the job is accepted and before it executes
+- **THEN** the job executes, whether it creates the delivery or tears it down
+
+### Requirement: Disabling a relay drains it
+
+Disabling a relay MUST drain it: it stops new work on the relay and lets the work already holding a lease on it run to its end, for a VM guest and a bare-metal grant alike. While a relay is disabled, no host in a pool referencing it MAY be among the hosts taking new delivery that the compute composition reports to the site authority, so no claim is admitted against, placed on, or projected enabled for those hosts' declarations; and fulfillment preparation MUST refuse to lease a port on it. A create whose lease was allocated before the disable, and every teardown and reclaim of a delivery leased on the relay, MUST run. Once a relay is disabled, no lease is allocated on it, so the set of its active leases only shrinks.
+
+Disabling MUST be reversible. Enabling the relay again MUST return its pools' hosts to new delivery and allow allocation on it, whether or not it has drained; disabling removes no proxy, releases no lease, and changes neither the token nor a grant key.
+
+Removing the relay server is its operator's, outside this repository, once the relay has drained. Nothing in the provisioning service deletes a relay: a drained relay's row is kept, disabled, as the record its leases, retired keys, and pool references point at, and it keeps holding its rendezvous, so a server later reinstated at the same rendezvous is the same relay, enabled again.
+
+#### Scenario: A relay is disabled while it carries deliveries
+
+- **GIVEN** a relay holding active leases for a VM guest and a bare-metal grant
+- **WHEN** an operator disables the relay
+- **THEN** no new claim is admitted against or placed on a declaration of a host in a pool referencing it, those declarations are projected not enabled, and the guest's teardown and the grant's reclaim run when their leases end and release their ports
+
+#### Scenario: A claim reaches fulfillment on a disabled relay
+
+- **WHEN** fulfillment preparation runs for a pool whose relay is disabled
+- **THEN** it refuses before leasing a port, naming the relay
+
+#### Scenario: A relay disabled by mistake is enabled again before it drains
+
+- **GIVEN** a disabled relay still holding active leases
+- **WHEN** an operator enables it again
+- **THEN** its pools' hosts take new delivery again, allocation on it resumes, and the deliveries it carried were never interrupted
+
+#### Scenario: The definition document stops listing a drained relay
+
+- **WHEN** a relay definition document that listed a relay is reconciled without it
+- **THEN** the relay is left as it is, neither deleted nor changed
+
+### Requirement: A relay reports whether it has drained
+
+Every relay read the administrator receives MUST report the relay's number of active leases as `active_lease_count`, and whether it has drained as `drained`: true exactly when the relay is disabled and holds no active lease. An enabled relay MUST NOT be reported drained. Whether a released lease's grant has expired MUST NOT bear on it: a released lease has no proxy left to admit, and once the relay's server, or on a shared relay its keys, is removed, no grant it signed admits anything. The relay's operator relies on `drained` to know the relay may be removed.
+
+#### Scenario: A disabled relay still carries a lease
+
+- **WHEN** the administrator reads a disabled relay holding one active lease
+- **THEN** the read reports `active_lease_count` 1 and `drained` false
+
+#### Scenario: A disabled relay's last lease is released
+
+- **WHEN** the administrator reads a disabled relay after its last active lease is released, while that lease's grant has not yet expired
+- **THEN** the read reports `active_lease_count` 0 and `drained` true
+
+#### Scenario: An enabled relay holds no lease
+
+- **WHEN** the administrator reads an enabled relay holding no active lease
+- **THEN** the read reports `drained` false
 
 ### Requirement: Relay port leases are unique per relay
 
@@ -197,11 +256,16 @@ A relay MUST remain usable after the document that established it is removed or 
 
 ### Requirement: Ansible fulfillment adapter
 
-The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `vm_host` and `vm_target`, and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job; the resolved playbook is the pool's `playbook_path` when the pool states one, and otherwise the service's `vm_playbook_path` as configured when the job is prepared. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
 
 Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
 
-The fulfillment request's `connectivity` field MUST NOT carry relay configuration. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. Any remaining `connectivity` content is opaque metadata the adapter forwards to the Ansible job unchanged and never interprets, and is not a sizing or feasibility requirement.
+A VM fulfillment request MUST NOT say how its guest is reached, and the adapter MUST refuse one that carries a `connectivity` field or any other field the request does not declare. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request: a request-supplied relay would make a fleet-wide fact depend on a caller's configuration and would let two requests for one host disagree about how that host is reached. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. The refusal happens while the request is prepared, inside the transaction that would accept it, so a refused request is never stored and nothing it carried, such as a relay credential, is kept at rest.
+
+#### Scenario: A request supplies relay configuration
+
+- **WHEN** a fulfillment request's payload carries a `connectivity` field, such as a relay address, domain, or dashboard credential
+- **THEN** validation reports the request invalid, `begin_fulfillment` refuses it, and no fulfillment is accepted, no job is dispatched, and the request is not stored
 
 #### Scenario: Pool configuration changes after create dispatch
 
@@ -216,7 +280,7 @@ The fulfillment request's `connectivity` field MUST NOT carry relay configuratio
 #### Scenario: VM teardown is dispatched
 
 - **WHEN** teardown begins for an accepted VM fulfillment
-- **THEN** the adapter targets the recorded `vm_host` and `vm_target` from fulfillment metadata
+- **THEN** the adapter targets the recorded `host_id` and `executor_target` from fulfillment metadata
 
 #### Scenario: A committed dimension is present
 
@@ -233,7 +297,7 @@ The fulfillment request's `connectivity` field MUST NOT carry relay configuratio
 - **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
 - **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
 
-#### Scenario: A request supplies relay configuration
+#### Scenario: A VM pool states no playbook
 
-- **WHEN** a fulfillment request's `connectivity` field carries a relay address, domain, or dashboard credential
-- **THEN** the value does not select a relay, and the relay referenced by the pool is used instead
+- **WHEN** a VM job is prepared for a pool whose provider configuration states no `playbook_path`
+- **THEN** the job's stored parameters carry the service's `vm_playbook_path` as configured at preparation

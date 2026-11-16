@@ -283,11 +283,10 @@ window be edited in the document and reconciled like anything else.
 They differ in one rule, deliberately. A pool omitted from its document is
 disabled, because the document declares what the deployment offers and a pool it
 no longer names should not be scheduled. A relay omitted from its document is
-*retained*, because disabling one breaks every pool referencing it and every
-live tunnel on it — a far worse outcome than a stale row, and one an operator
-editing an unrelated entry would not expect. Retention is also what makes a
-relay established from a document and then administered through the API one
-relay rather than two.
+*retained*, because relays are also created through the API and never appear in
+the document: omission cannot mean "drain" without recording which relays the
+document established, and that would make a relay established from a document
+and one administered through the API two kinds of relay rather than one (D4).
 
 **Digest granularity is the whole document, and the token is why that is safe.**
 A per-entry digest would avoid reconciling entry A because entry B changed. It is
@@ -512,7 +511,9 @@ From the above, exactly one rule covers every way a relay binding can change:
 No new primitive is needed. Disabling a pool is already specified as a draining
 operation: it excludes the pool from new scheduling without invalidating
 existing reservations or active workloads. So rebinding is disable, wait for
-leases to clear, rebind, re-enable.
+leases to clear, rebind, re-enable. A change on the relay's side — its address,
+port, or token — affects every pool on it, and drains the relay itself, which
+disabling a relay does (D1, D5).
 
 Rejecting the change while leases are held is preferred to accepting it and
 reissuing every buyer's connection string. A reissue is not something this
@@ -539,10 +540,11 @@ acceptance, which is exactly the value that no longer works.
 
 So the accepted operation carries `relay_id` and the leased `remote_port`, and
 the address and token are resolved immediately before the job's variables are
-written. A relay that has been disabled, deleted, or had its token cleared
-between acceptance and execution fails the job rather than retrying: the
-configuration is wrong, not the moment, and a retry against unchanged
-configuration would fail identically.
+written. A relay that is absent, or holds no token, at execution fails the job
+rather than retrying: the configuration is wrong, not the moment, and a retry
+against unchanged configuration would fail identically. A disabled relay fails
+no job holding a lease on it: disabling is the relay's drain, which lets leased
+work run to its end (D1).
 
 The resolved variables file is secret material for the same reason a decrypted
 host key file is, and gets the same treatment: it is created owner-only and
@@ -568,6 +570,203 @@ Attaching release to individual code paths — teardown, cancellation, expiry �
 was the earlier shape and is what produced an allocator whose comments claimed
 every terminal outcome released while nothing called it at all. One observer of
 terminal state is both correct and checkable.
+
+The decisions below settle how a relay is drained and retired, and the handling
+of the rendered variables file. Removing a relay server is its operator's,
+outside this repository; this repository's part is the drain, and a stated
+condition telling that operator the drain has finished.
+
+### D1 — Disabling a relay drains it, and is reversible
+
+Disabling a relay stops new work on it and lets every delivery already holding
+a lease on it run to its end, for a VM guest and a bare-metal grant alike:
+
+1. **New deliveries are kept off.** The compute composition leaves the hosts of
+   every pool referencing a disabled relay out of the hosts taking new delivery
+   it reports to the site authority, the seam a disabled host already uses. No
+   claim is then admitted against, placed on, or projected enabled for those
+   hosts' declarations. `kit/site` does not change; the compute family composes
+   its own host and relay facts.
+2. **No port is leased on it.** Fulfillment preparation refuses a disabled
+   relay before leasing, as `check_relay_usable` already does.
+3. **Every leased job runs.** Execution no longer refuses a disabled relay: a
+   create whose lease was allocated before the disable, and every teardown and
+   reclaim, run. A relay that is absent, or holds no token or active grant key,
+   is still refused.
+
+Because a lease is allocated only at fulfillment acceptance, and acceptance
+refuses a disabled relay, the set of a disabled relay's active leases only
+shrinks. "Drained" is therefore a stable condition the relay's operator can rely
+on (D2).
+
+Disabling is reversible at any time, before or after the relay drains. It
+removes no proxy, releases no lease, and changes neither the token nor a grant
+key, so enabling the relay again returns its pools' hosts to new delivery and
+allows allocation; the deliveries it carried were never interrupted. A claim
+that reached acceptance while it was disabled was refused, which is the cost of
+a mistaken disable. Enabling a relay whose server has been removed sells
+capacity nothing can deliver, and the service cannot tell — it never verifies a
+relay server exists — so the procedure (D5) enables only a relay whose server
+runs.
+
+This replaces what disabling did before: a stop refusing every job at
+execution, removals included, as a configuration error that is not retried.
+Teardowns failed, so guests stayed up and buyers kept access past their lease
+end. A create accepted before the disable failed too, and a failed fulfillment
+holds its capacity and its lease until an operator verifies the host and forces
+the release, so the drain stalled on in-flight creates as well as teardowns.
+And a buyer could still claim capacity on the relay's pools, to be refused at
+acceptance.
+
+Rejected:
+
+- *Exempting removals only* fixes teardown, and leaves in-flight creates
+  failing and holding their leases, and buyers admitted only to be refused.
+- *Leaving the deliverability filter out* still converges, and keeps selling
+  capacity the relay will refuse.
+- *Holding a claim placed before the disable at acceptance until the relay is
+  enabled again*, as a disabled host holds a create, never completes: a drain
+  ends with the server gone. Admitting it instead would allocate after the
+  disable, and "drained" would stop being stable.
+- *A separate draining state beside an emergency stop* (enabled, draining,
+  disabled) contradicts the owner's direction that disabling is the drain, and
+  migrates a schema `marketplace-v0.3.0` carries.
+
+### D2 — The relay read states whether the relay has drained
+
+Every relay read the administrator receives — the list, the read, and every
+write's response — reports `active_lease_count` and `drained`. `drained` is true
+exactly when the relay is disabled and holds no active lease; an enabled relay
+is never drained.
+
+```json
+{"id": "site-a", "label": "Site A buyers", "relay_addr": "relay.example.com",
+ "relay_port": 7000, "vm_port_range_start": 6100, "vm_port_range_count": 100,
+ "enabled": false, "token_configured": true,
+ "active_lease_count": 0, "drained": true,
+ "grant_keys": {"active": {"kid": "Yt3…", "public_key": "MCowBQYDK2VwAyEA…",
+                           "activated_at": "2026-11-01T08:00:00"},
+                "staged": null, "retired": []}}
+```
+
+The condition is a contract for the relay's operator's tooling, outside this
+repository, so it is stated and computed where the lifecycle rule lives rather
+than rebuilt from lease rows by every reader; the service can then refine it
+without that tooling changing. The count shows a drain's progress; the holdings
+read still names what holds it open. Both are computed from
+`relay_port_leases`, so nothing is persisted. The fields are additive:
+`RelayResponse` does not forbid unknown fields, so a client from
+`marketplace-v0.3.0` reading a newer service ignores them.
+
+`drained` does not wait for released leases' grants to expire. A lease is
+released only with its capacity — after a teardown that removed the proxy, an
+operator's forced release after verifying the host, or a hold that lapsed
+before any create — so a released lease has no proxy to admit. A grant is
+verified only by the relay's admission plugin with that relay's keys, so once
+the server, or on a shared relay its keys, is removed, no grant it signed admits
+anything. A relay enabled again instead keeps the allocator's quarantine on
+reused ports.
+
+Rejected: *the holdings read alone* leaves the meaning of "drained" in tooling
+this repository cannot see; *a count alone* still leaves the rule to the
+reader; *a lifecycle state* (`enabled`, `draining`, `drained`) states `enabled`
+twice and invites a value a client written against three would misread; *a
+notification* needs an administrator channel the service does not have.
+
+### D3 — A drained relay's row is kept, disabled, and never deleted
+
+Nothing deletes a relay. Once its server is gone, its row stays, disabled, as
+the record its leases, retired keys, and pool references point at, following
+pools, which are never hard-deleted so that what references them stays
+resolvable. It keeps holding its rendezvous, so a server later reinstated at the
+same address and port is the same relay: enabled again, its token rotated and a
+key staged. Pools still referencing it stay out of new delivery (D1) until they
+are pointed at another relay, which is allowed once it holds no lease.
+
+Rejected: *deleting a drained, unreferenced row* discards the lease history and
+the reuse quarantine with it, and a document still listing the relay recreates
+it at its next reconciliation; *deleting only rows that never held a lease* is
+tidiness for a mistyped relay, which an update already corrects, since a relay
+with no lease may change its address.
+
+### D4 — A relay the definition document stops listing is left as it is
+
+Relays are also created through the API, outside the document, so omission
+cannot mean "drain": it would disable every API-created relay at the next
+reconciliation, and telling the two apart would need a provenance column, a
+migration of a deployed schema, and two kinds of relay where the specification
+promises one.
+
+A relay the document lists follows the host convention for `enabled`: an entry
+omitting it enables the relay. Such a relay is drained, and enabled again,
+through the document with `enabled: false`; a disable made through the API is
+reverted when the document next changes. The procedure says so (D5).
+
+### D5 — The relay drain is the pool drain at the relay's scope
+
+Disabling a pool drains one pool, before that pool's relay reference changes or
+a host moves to a pool on another relay. Disabling a relay drains every pool on
+it, before the relay is retired, moves its address or port, or has its token
+rotated. One lifecycle — stop new work, let existing work finish — at two
+scopes; section 1B's "no new drain primitive" holds, since the relay's existing
+`enabled` takes the meaning a pool's already has.
+
+A refusal under the rebinding rule names the drain at the scope that clears it:
+the pool for a pool's relay reference or a host's pool, the relay for a relay's
+address, port, or token. `docs/seller-frp-setup.md` rotates a token by
+disabling the relay, waiting for `drained`, rotating, and enabling it again, and
+"Changing a relay later" names both scopes.
+
+Retiring a relay, as the procedure states it:
+
+1. Disable the relay — through the document when the document lists it (D4).
+2. Wait until the relay read reports `drained: true`; the holdings read names
+   what holds it open.
+3. The relay's operator removes the server, or, on a shared relay, removes this
+   relay's active and retired keys and its range from the admission plugin.
+4. Point any pool still referencing it at another relay.
+5. Enable a relay again only when its server runs.
+
+The procedure goes beside the relay's existing administration, in
+`docs/seller-frp-setup.md` and the relay operations runbook
+(`docs/development/VALIDATION_RUNBOOK.md` §28); the contract is D2's field, in
+`physical-provisioning`'s specification.
+
+Rejected: one generic refusal hint, which on a relay-side refusal sends the
+operator to disable each pool on the relay in turn.
+
+### D6 — The variables file's handling meets its requirement, with no revisit trigger
+
+The rendered variables file holds the decrypted relay token, and
+`physical-provisioning` requires it to have the lifetime and access
+restrictions of other decrypted secret material on the execution path. It
+does: `write_extra_vars` creates it owner-only (`0600`) and `O_EXCL` under a
+uuid name in the process temporary directory, and the executor removes it in a
+`finally` covering success, failure, timeout, and cancellation, as it removes
+decrypted key files. Task 2A.7 is met as the system stands.
+
+Neither revisit trigger `contain-embedded-host-key-material`'s D3 named is
+recorded against this change. A provisioning container is never shared between
+users, by design; a user who opens one to others, by adding their own SSH keys
+or running their own tunnel to let others in, has stepped outside what this
+repository and its deployment provide. A third secret file per run bears on
+code structure — one per-run directory removed in one action against three
+cleanup paths — not on confidentiality, since each file is protected the same
+way however many there are; that note stays in the archived design where it was
+made.
+
+### D7 — Implementation cadence
+
+One round, one session, then the remaining closeout. The round covers: execution
+stops refusing a disabled relay; the compute composition leaves a disabled
+relay's pools' hosts out of new delivery; the relay read reports
+`active_lease_count` and `drained`; the rebinding refusals name the drain's
+scope; the seller relay guide and the relay runbook carry the procedure; and
+task 2A.7 is ticked. Every part meets at one acceptance boundary — a disabled
+relay drains, for both domains — so one review covers it. Closeout then resumes
+its remaining parts. Two rounds were weighed and rejected: the composition
+filter uses the seam host disabling already uses, so nothing in the round is
+risky enough to review apart.
 
 ## Alternatives considered
 
@@ -595,15 +794,17 @@ safety net beneath whichever authority is chosen.
 
 ## Migration
 
-None. The dev cluster has never run a live-fire provisioning test and is
-deployed in mock mode, so no host has been initialized against the relay and
-none carries an accumulated `/etc/frp/frpc.toml`. The split into two client
-configurations has no existing population to move.
+When this change was designed, no host had been initialized against a relay and
+none carried an accumulated `/etc/frp/frpc.toml`, so the split into two client
+configurations had no population to move.
 
-Recorded rather than left implicit because the question is reasonable and the
-answer is not obvious from the code: a reader seeing one configuration file
-become two would expect a migration, and its absence is a fact about the
-deployment rather than an oversight.
+The relay mechanism has since reached a release: `marketplace-v0.3.0`, the
+newest release tag, carries the relay package, its schema, and the resolver that
+refuses a disabled relay at execution. The drain (D1–D5) changes no schema and
+no stored form: the relay read's new fields are computed, and the deliverability
+filter and the resolver change behaviour only. So no migration is owed against
+that release; a deployment running it gains a drain that works where disabling
+used to strand buyers.
 
 ## Verification
 
@@ -686,8 +887,11 @@ write a pool can already set `playbook_path`, which is arbitrary playbook
 execution on every host in that pool; setting a relay token is not a greater
 privilege than one already held.
 
-**What deletes a relay, and what happens to its leases?** *Returned to design
-(task 1A.7).*
+**What deletes a relay, and what happens to its leases?** *Resolved: nothing
+deletes a relay; disabling drains it (D1–D5).* The account below is what was
+read when the question returned to design.
+
+*Returned to design (task 1A.7).*
 
 A relay with live leases cannot simply be removed — the proxies it carries
 outlive the row, and a deletion that orphans leases loses the record of which
@@ -751,8 +955,10 @@ Questions for the design:
    it: the operator handbook's procedure, and the contract the operator's
    tooling relies on.
 
-**Does the variables file's handling need anything further?** *Returned to
-design (task 2A.7).*
+**Does the variables file's handling need anything further?** *Resolved: no
+(D6).* The account below is what was read when the question returned to design.
+
+*Returned to design (task 2A.7).*
 
 The rendered variables file holds the decrypted relay token. It is created
 owner-only and `O_EXCL` under a random name in the process temporary directory,
