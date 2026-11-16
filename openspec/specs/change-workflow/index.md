@@ -58,7 +58,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Sections and sessions
 
-- [CW-5r7l](spec.md#requirement-cw-5r7l-a-section-is-a-verifiable-slice) — each section is a coherent slice ending at a verification point; `tasks.md` prescribes no session distribution.
+- [CW-5r7l](spec.md#requirement-cw-5r7l-a-section-is-a-verifiable-slice) — each section is a coherent slice ending at a verification point; `tasks.md` prescribes no session distribution; its last section, titled exactly `Closeout`, is the closeout section.
 - [CW-5h8e](spec.md#requirement-cw-5h8e-evidence-only-a-push-produces-is-owed-by-validation) — evidence only a push produces is owed by validation and never gates a task's completion.
 - [CW-0ia3](spec.md#requirement-cw-0ia3-an-implementation-session-starts-fresh-unless-the-owner-continues-one) — implementation starts in a fresh session unless the owner names an earlier one to continue.
 - [CW-al17](spec.md#requirement-cw-al17-the-implementation-cadence-is-settled-in-design-and-mapped-by-the-plan) — design settles the cadence of sessions and rounds; planning orders sections by it and reports the mapping.

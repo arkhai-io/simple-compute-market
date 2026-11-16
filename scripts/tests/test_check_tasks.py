@@ -27,6 +27,10 @@ WELL_FORMED = """## 1. First
 
 - [ ] 2A.1 Open.
   - [ ] 2A.2 Nested.
+
+## 3. Closeout
+
+- [ ] 3.1 Archive.
 """
 
 
@@ -64,6 +68,39 @@ def test_tasks_under_an_unnumbered_heading_after_a_section_are_not_checked() -> 
 
 def test_a_section_id_is_matched_whatever_its_case() -> None:
     assert nxt.task_problems("## 5A. Fifth\n\n- [ ] 5a.1 Lower.\n- [ ] 5A.2 Upper.\n") == []
+
+
+def test_a_list_ending_with_its_closeout_section_has_no_closeout_problem() -> None:
+    assert nxt.closeout_problems(WELL_FORMED) == []
+
+
+def test_a_list_with_no_section_titled_closeout_is_named_at_its_last_section() -> None:
+    text = WELL_FORMED.replace("## 3. Closeout", "## 3. Plan closeout")
+
+    assert nxt.closeout_problems(text) == [
+        "line 15: no section is titled `Closeout`; the task list ends with its closeout "
+        "section, `## N. Closeout`"]
+
+
+def test_a_section_after_the_closeout_section_is_named() -> None:
+    text = WELL_FORMED + "\n## 3b. Closeout's fixes\n\n- [ ] 3b.1 Fix.\n"
+
+    assert nxt.closeout_problems(text) == [
+        "line 19: section 3b follows the closeout section; the closeout section is the "
+        "task list's last"]
+
+
+def test_a_second_closeout_section_is_named() -> None:
+    text = WELL_FORMED.replace("## 2. Second", "## 2. Closeout")
+
+    assert nxt.closeout_problems(text) == [
+        "line 15: a second section is titled `Closeout`",
+        "line 10: section 2A follows the closeout section; the closeout section is the "
+        "task list's last"]
+
+
+def test_a_list_without_numbered_headings_has_no_closeout_problem() -> None:
+    assert nxt.closeout_problems("## Tasks\n\n- [ ] 1.1 One.\n") == []
 
 
 def _repository(tmp_path: Path, text: str | None) -> Path:

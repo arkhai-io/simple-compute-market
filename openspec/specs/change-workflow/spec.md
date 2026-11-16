@@ -482,13 +482,28 @@ checked; one that failed or was inconclusive MUST be brought to the owner.
 Each `tasks.md` section MUST be a coherent slice that can be verified, sized by
 what it changes and what proves it, and MUST end at a verification point. The plan
 MUST NOT prescribe in `tasks.md` how sections are distributed across agent sessions
-or review rounds.
+or review rounds. The task list's last section MUST be its closeout section, headed
+`## N. Closeout` exactly; the engine MUST know the closeout section by that title
+alone, and its task-list check MUST fail a list with sections that has none so
+titled, more than one, or one followed by another section.
 
 #### Scenario: Planning writes a section
 
 - **WHEN** planning writes a section of the task list
 - **THEN** the section ends with a verification task naming the evidence that
   proves it, and the task list names no session or round
+
+#### Scenario: A section's title mentions closeout
+
+- **WHEN** a task list's section 6 is "Qualification scenarios and pre-closeout
+  review" and its section 7 is "Closeout"
+- **THEN** section 6 is implemented by a round, and closeout implements section 7
+
+#### Scenario: A section follows the closeout section
+
+- **WHEN** an amended plan adds section 12b after "## 12. Closeout"
+- **THEN** `scripts/change-workflow check tasks <change>` fails, naming section 12b,
+  and the next-step computation routes on no section of the list
 
 ### Requirement: CW-5h8e Evidence only a push produces is owed by validation
 

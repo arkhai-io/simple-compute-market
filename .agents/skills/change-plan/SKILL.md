@@ -287,7 +287,12 @@ them, each named by its heading and made specific to this change:
 the roadmap goal and gap row it closes, its index row, the end-to-end scenarios
 that exercise it, the permanent documents it promotes, and the archive's merge or
 `--skip-specs`. Dependents are released at archive cleanup, not by a closeout
-task.
+task. Its heading is `## N. Closeout`, exactly, and it is the list's last section:
+the next-step computation knows the closeout section by that title alone, so any
+other section, whatever its title says of closeout, is implemented by a round. An
+amended plan adds each new section before it, renumbering the closeout section
+and its tasks to stay last; `scripts/change-workflow check tasks <change>` fails a
+list whose closeout section is missing, repeated, or followed by another.
 
 ## 5. Check the plan
 

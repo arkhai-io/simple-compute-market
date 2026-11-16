@@ -109,7 +109,7 @@ change-history: ## Copy an archived change's records and the validation evidence
 check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
 	@$(CHANGE_WORKFLOW) check index
 
-check-tasks: ## Fail if a task of a change's task list sits under another section's heading: a heading is missing or the task misplaced (CHANGE=<change>)
+check-tasks: ## Fail if a task of a change's task list sits under another section's heading — a heading is missing or the task misplaced — or its closeout section, titled Closeout, is missing, repeated, or not its last (CHANGE=<change>)
 	@$(CHANGE_WORKFLOW) check tasks "$(CHANGE)"
 
 check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills

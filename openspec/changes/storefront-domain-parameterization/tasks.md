@@ -25,7 +25,7 @@
 - [x] 4.2 Verify no operator selection or package-topology input was introduced: leave `domains/vms/storefront/settings.toml`, `domains/vms/storefront/src/market_storefront/utils/config.py`, Compose files, `helm/`, `domains/vms/storefront/Dockerfile`, `pyproject.toml`, and `uv.lock` unchanged except an explicitly justified test-target inclusion. Confirm existing VM and Alkahest configuration, routes, default command, wheel dependencies, and deployment renders require no migration step.
 - [ ] 4.3 Re-run at closeout; any remaining failure belongs to the bare-metal contribution and is recorded against `bare-metal-and-credits-domain-stacks` 4a. The bare-metal reference suite was run after integration: `39 passed, 9 failed`. Failures expose existing canonical-principal, authenticated-opening, health-identity, and typed settlement-plan incompatibilities in the unfinished `market-platform-bare-metal-10-storefront-composition` prerequisite; this change does not weaken or bypass those contracts.
 
-## 5. Repository closeout
+## 5. Closeout
 
 Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 

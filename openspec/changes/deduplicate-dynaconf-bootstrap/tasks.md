@@ -18,7 +18,7 @@
   Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 3.3 Update `openspec/changes/deduplicate-dynaconf-bootstrap/design.md` with the design-promotion record and final validation evidence; scan the two consumers for obsolete duplicate profile/include constructors; run strict OpenSpec validation when the repository tool is available. The active change passes `npx @fission-ai/openspec@latest validate deduplicate-dynaconf-bootstrap --strict`; repository-wide `validate --all --strict` reports 76 passed and 11 failures in other active changes, so those baseline failures are deferred outside this change.
 
-## 4. Closeout
+## 4. Closeout before the review follow-up
 
 - [x] 4.1 Complete the plan closeout required by `docs/guidance/workflow/closeout.md`: (1) run `make check-comment-hygiene` and directly review touched comments/docstrings for present-intent wording; (2) review every local import added or touched by this change and move it to module scope when safe, verifying any necessary local import against the real suite; (3) re-check every accepted design decision against documentation ownership and cross-reference rules; (4) compress completed task notes to final behavior, material validation, unresolved/deferred work, and permanent-documentation destinations while preserving any useful rationale in `design.md`; (5) update `docs/development/ROADMAP.md` if this change affects a roadmap goal, otherwise record explicitly in the design-promotion record that it has no roadmap impact; and (6) complete the design-promotion record for every material decision. Closeout passes: comment hygiene and `git diff --check` are clean; touched imports are covered by the repository-standard suites; documentation ownership, roadmap no-impact, task narrative compression, and the complete design-promotion record were rechecked.
 
@@ -35,7 +35,7 @@
       added to module level unless a verified circular import or a recorded lazy-load
       reason keeps it local. Closeout only confirms both.
 
-## 6. Closeout after review follow-up
+## 6. Closeout
 
 Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 

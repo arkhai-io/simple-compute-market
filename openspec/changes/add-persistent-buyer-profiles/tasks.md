@@ -71,7 +71,7 @@
       added to module level unless a verified circular import or a recorded lazy-load
       reason keeps it local. Closeout only confirms both.
 
-## 10. Plan closeout
+## 10. Closeout
 
 Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
