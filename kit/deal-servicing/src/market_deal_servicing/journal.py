@@ -195,6 +195,16 @@ class EndSession:
                ORDER BY ended_at, source_ref COLLATE BINARY""", (negotiation_id,),
         )]
 
+    def classification(self, negotiation_id: str, source_ref: str) -> Classification | None:
+        """A recorded final request's classification; ``None`` while its slot is pending."""
+        row = self.conn.execute(
+            "SELECT classification FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
+            (negotiation_id, source_ref),
+        ).fetchone()
+        if row is None:
+            raise KeyError(source_ref)
+        return Classification.model_validate_json(row[0]) if row[0] is not None else None
+
     def selected_end(self, negotiation_id: str) -> FinalRequest | None:
         requests = self.requests(negotiation_id)
         return requests[0] if requests else None

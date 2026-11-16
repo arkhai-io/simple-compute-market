@@ -6,10 +6,12 @@ a public network. State is invocation-owned SQLite and HTTP is in process.
 
 import json
 import threading
+import time
 from datetime import datetime, timezone
 
 import httpx
 import pytest
+from arkhai_vms import make_vm_provision_terms
 from arkhai_vms_buyer.lifecycle import buyer_lifecycle
 from compute_provisioning_client import ComputeProvisioningClient
 from compute_provisioning_contracts import LeaseEndedEvent, sign_lease_end
@@ -18,7 +20,8 @@ from core_storefront.service_peers import ServicePeerTrust
 from fastapi import FastAPI
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
-from market_arkhai_payments import PaymentApproval
+from market_arkhai_payments import PaymentApproval, PaymentSettlementData
+from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_buyer import FileEvidenceStore
 from market_deal_lifecycle_client import LifecycleClient, LifecycleClientError
@@ -35,7 +38,11 @@ from market_storefront.controllers.lease_reports import router
 from market_storefront.middleware.service_peer_auth import (
     service_peer_callback_middleware,
 )
+from market_storefront.failure_actions import FulfillmentFailureContext, apply_fulfillment_failure_policy
 from market_storefront.services.capacity_client import AggregateFulfillmentClient
+from tests._settings_overrides import settings_overrides
+from tests.integration.test_rate_delivery import PAYER as RATE_PAYER
+from tests.integration.test_rate_delivery import _published, accepted_recurring_deal, approve
 from tests.integration.test_payment_settlement import (
     BUYER,
     LISTING,
@@ -46,6 +53,7 @@ from tests.integration.test_payment_settlement import (
     _config,
 )
 from tests.integration.test_payment_settlement import make as make
+from tests.recurring_world import MECHANISM, PAYMENTS_SERVICE, delivery_capacity, recurring_world, settlement
 
 SITE = Ed25519Signer(b"\x51" * 32)
 RESERVATION = "fixture-vm-reservation"
@@ -223,3 +231,103 @@ async def test_hosted_buyer_commit_and_end_capture_signed_push_retry_and_pull(ma
 
     finally:
         container.resolved_service_peer_trust = None
+
+
+def recorded_end(path, negotiation_id):
+    """The deal's selected end and its classification, ``None`` while pending."""
+    with transaction(path) as conn:
+        end = EndSession(conn)
+        selected = end.selected_end(negotiation_id)
+        return selected, end.classification(negotiation_id, selected.source_ref)
+
+
+def filings(path, negotiation_id):
+    with transaction(path) as conn:
+        return [intent for intent in EndSession(conn).intents(negotiation_id) if intent.kind == "filing"]
+
+
+async def accepted_once_deal(world):
+    """Negotiate the world's once-only payments option to acceptance through the buyer's typed client."""
+    listing = await _published(world)
+    option = next(
+        option for option in listing["settlement_options"]
+        if option["settlement"]["schema"] == MECHANISM and "period" not in option["settlement"]
+    )
+    reply = await world.app.buyer.negotiate_new(
+        listing_id=listing["listing_id"],
+        # The whole hour at the clause's 2.5 an hour, in base units.
+        initial_amount=2_500_000,
+        provision_terms=make_vm_provision_terms(
+            duration_seconds=3600, ssh_public_key="ssh-ed25519 test",
+        ).model_dump(mode="json"),
+        settlement_selection={
+            "option_id": option["option_id"], "expiration_unix": 2_147_483_647,
+            "settlement": {"schema": MECHANISM, "payer_account": RATE_PAYER},
+        },
+        selection_only=True,
+    )
+    assert reply["action"] == "accept"
+    negotiation_id = reply["agreement"]["negotiation_id"]
+    thread = await world.app.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    raw = thread["settlement_data"]
+    return negotiation_id, PaymentSettlementData.parse(json.loads(raw) if isinstance(raw, str) else raw)
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_rate_deal_buyer_stop_is_an_entitled_stop_that_discharges_a_later_failure(tmp_path):
+    async with recurring_world(tmp_path) as world, settlement(world) as settled:
+        negotiation_id, data = await accepted_recurring_deal(world)
+        approve(settled, data)
+        await world.app.buyer.settle_agreement(negotiation_id)
+        await settled.delivered(negotiation_id)
+
+        # The on-demand buyer stops at the payment authority; the servicing
+        # cycle reads it there and records the stop.
+        settled.payments.observed_at = int(time.time())
+        settled.payments.engine.submit(data.transaction_id, {
+            "account": RATE_PAYER, "requestId": "buyer-stop", "event": {"kind": "stop"},
+        })
+        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+        stop, classification = recorded_end(world.app.db.db_path, negotiation_id)
+        assert stop.cause == "payer"
+        assert classification.kind == "entitled_stop"
+
+        # Provisioning then reports the resource failed: the failure is
+        # recorded under the buyer's classified end, and nothing is filed.
+        with settings_overrides(**{"fulfillment.failure_policy.actions": ["release_capacity"]}):
+            await apply_fulfillment_failure_policy(world.app.db, FulfillmentFailureContext(
+                negotiation_id=negotiation_id, reason="provisioning_failed", source="settlement_provisioning",
+            ), capacity=delivery_capacity(settled.site))
+        source = "fulfillment-failure:" + negotiation_id
+        with transaction(world.app.db.db_path) as conn:
+            end = EndSession(conn)
+            [failure] = [request for request in end.requests(negotiation_id) if request.source_ref == source]
+            classification = end.classification(negotiation_id, source)
+        assert failure.controlling_source_ref == stop.source_ref
+        assert classification.kind == "entitled_stop"
+        assert filings(world.app.db.db_path, negotiation_id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_once_only_deal_payment_term_end_is_classified_the_term_end(tmp_path):
+    payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
+    async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled:
+        negotiation_id, data = await accepted_once_deal(world)
+        assert all(part.root.kind == "once" for part in data.mandate.parts)
+        approve(settled, data)
+        await world.app.buyer.settle_agreement(negotiation_id)
+        await settled.delivered(negotiation_id)
+        with transaction(world.app.db.db_path) as conn:
+            record = EndSession(conn).read(negotiation_id)
+    assert record.available_at is not None
+
+    # Past the Agreement's end the payments service records the part's term
+    # end; the storefront, restarted then, reads it in its servicing cycle.
+    at = record.term_end + 60
+    payments.observed_at = at
+    async with recurring_world(tmp_path) as world, settlement(world, payments=payments, clock=lambda: at):
+        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+        stop, classification = recorded_end(world.app.db.db_path, negotiation_id)
+    assert (stop.cause, stop.source_ref.startswith("payment-stop:")) == ("terms", True)
+    assert stop.ended_at >= record.term_end
+    assert classification.kind == "terms"

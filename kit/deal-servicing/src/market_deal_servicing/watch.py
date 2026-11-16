@@ -16,7 +16,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import Identity, IdentityScheme, canonical_json
 
 from .evidence import EvidenceSession, RetentionObservation, in_transaction, transaction
-from .journal import Classification, EndSession, FinalRequest, atomic, stable_ref
+from .journal import Classification, EndSession, FilingIntent, FinalRequest, atomic, stable_ref
 
 
 class WatchSession:
@@ -125,14 +125,34 @@ class DealWatch:
         if prior is not None:
             if request.model_copy(update={"observed_at": prior.observed_at}) != prior:
                 raise ValueError("controlling payment stop changes its recorded end")
+            # A stop recorded with its classification pending, because no
+            # classifier was composed or it could not classify the stop, keeps
+            # its recorded end; only the pending slot is resolved, once, when
+            # the classifier classifies it.
+            if end.classification(self.negotiation_id, prior.source_ref) is None:
+                classification = self.classify_payment_end(event)
+                if classification is not None:
+                    end.resolve_correction(
+                        self.negotiation_id, prior.source_ref, end.read(self.negotiation_id).revision,
+                        evidence=prior.evidence_refs, classification=classification,
+                        filing_intent=self._failure_filing(end, prior, classification),
+                    )
             return
         classification = self.classify_payment_end(event)
         end.record_end(
             request, now=self.clock(), classification=classification,
             pending_classification=classification is None,
-            filing_intent=(end.failure_filing(
-                request, now=self.clock(), delivered=end.read(self.negotiation_id).available_at is not None,
-            ) if classification is not None and not classification.lawful else None),
+            filing_intent=self._failure_filing(end, request, classification),
+        )
+
+    def _failure_filing(
+        self, end: EndSession, request: FinalRequest, classification: Classification | None,
+    ) -> FilingIntent | None:
+        """A seller failure's filing, journaled with its classification; a lawful end files nothing."""
+        if classification is None or classification.lawful:
+            return None
+        return end.failure_filing(
+            request, now=self.clock(), delivered=end.read(self.negotiation_id).available_at is not None,
         )
 
     def _observe(

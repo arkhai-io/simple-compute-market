@@ -43,11 +43,12 @@ def rig(tmp_path):
     dispute.read.return_value = AuthorityView(outcome=Accepted())
     credentials = [True]
 
-    def watch(deal=deal, payment=payment, dispute=dispute):
+    def watch(deal=deal, payment=payment, dispute=dispute, **options):
         return DealWatch(
             path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
             seller_account="seller-account", actor=lambda _: authority_signer.identity, clock=lambda: clock[0],
+            **options,
         )
 
     def service():

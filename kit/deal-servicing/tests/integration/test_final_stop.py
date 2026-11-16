@@ -1,11 +1,13 @@
 """The watch records a part's final stop once, by authority record, outside its cursor."""
 
 import json
+from unittest.mock import MagicMock
 
 from market_deal_lifecycle_contracts.models import Accepted, AuthorityView, PaymentEvent, PaymentPartObservation
 
 from market_deal_servicing import EndSession
 from market_deal_servicing.evidence import transaction
+from market_deal_servicing.journal import Classification
 
 
 def stop(kind="stop", at=140, sequence=1):
@@ -86,6 +88,60 @@ async def test_the_journal_holds_the_stop_and_the_selected_end_and_no_money(rig)
             "UNION ALL SELECT record FROM servicing_delivery")]
     assert not [name for name in columns if any(word in name for word in MONEY)], columns
     assert not [key for key in set().union(*map(keys, journaled)) if any(word in key for word in MONEY)]
+
+
+def recorded_classification(rig):
+    with transaction(rig["path"]) as conn:
+        end = EndSession(conn)
+        [request] = end.requests("deal")
+        return request, end.classification("deal", request.source_ref), end.read("deal").revision
+
+
+def entitled_stop(event):
+    return Classification(kind="entitled_stop", evidence_refs=[event.authority_record_ref])
+
+
+async def test_a_pending_stop_is_resolved_once_a_classifier_classifies_it(rig):
+    # A watch with no classifier records the stop with its slot pending.
+    rig["payment"].read.return_value = view(final=stop())
+    await rig["watch"]().poll()
+    pending, classification, _ = recorded_classification(rig)
+    assert classification is None
+
+    classify = MagicMock(side_effect=entitled_stop)
+    await rig["watch"](classify_payment_end=classify).poll()
+    resolved, classification, revision = recorded_classification(rig)
+    assert resolved == pending
+    assert classification == Classification(kind="entitled_stop", evidence_refs=["commitment:events:1:part:1"])
+    with transaction(rig["path"]) as conn:
+        assert [intent for intent in EndSession(conn).intents("deal") if intent.kind == "filing"] == []
+
+    # Resolved, the slot is neither classified nor written again.
+    await rig["watch"](classify_payment_end=classify).poll()
+    assert recorded_classification(rig) == (pending, classification, revision)
+    assert classify.call_count == 1
+
+
+async def test_a_pending_stop_resolved_as_a_seller_failure_journals_its_filing(rig):
+    rig["payment"].read.return_value = view(final=stop())
+    await rig["watch"]().poll()
+    failure = MagicMock(side_effect=lambda event: Classification(
+        kind="unentitled_withdrawal", evidence_refs=[event.authority_record_ref],
+    ))
+    await rig["watch"](classify_payment_end=failure).poll()
+    _, classification, _ = recorded_classification(rig)
+    assert classification.kind == "unentitled_withdrawal"
+    with transaction(rig["path"]) as conn:
+        [filing] = [intent for intent in EndSession(conn).intents("deal") if intent.kind == "filing"]
+    assert filing.payload["kind"] == "delivery_end"
+
+
+async def test_a_stop_the_classifier_still_cannot_classify_stays_pending(rig):
+    rig["payment"].read.return_value = view(final=stop())
+    await rig["watch"]().poll()
+    _, _, revision = recorded_classification(rig)
+    await rig["watch"](classify_payment_end=lambda _: None).poll()
+    assert recorded_classification(rig)[1:] == (None, revision)
 
 
 async def test_a_replay_changing_the_recorded_stop_is_refused(rig):

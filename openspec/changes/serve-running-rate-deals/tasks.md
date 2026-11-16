@@ -598,20 +598,45 @@ requirement "Cause classification is owned by end service" (`deal-lifecycle`). T
 `domains/compute` (`arkhai_compute`), `kit/deal-servicing`, both storefronts' watch
 factories.
 
-- [ ] 3.1 `domains/compute/src/arkhai_compute/end_classification.py`: add
+- [x] 3.1 `domains/compute/src/arkhai_compute/end_classification.py`: add
       `classify_payment_stop(event, *, entitlements, term_end)` per D2's table, `terms`
       split by the Agreement's end (D3), returning a kind or `None` for pending. Verify
       (unit, `domains/compute/tests/test_end_classification.py`): each cause, an
       unentitled payer or payee stop pending, an unknown cause pending, `terms` one second
       before, at and after the end.
-- [ ] 3.2 `kit/deal-servicing/src/market_deal_servicing/watch.py`, `_record_payment_stop`:
+      Done: the classifier reads the event through a `PaymentStop` protocol (`cause`,
+      `at`), since the family package's allowlist admits only the shape kit, and returns
+      a `ClassificationKind` string or `None`. Unit (`test_end_classification.py`, 24
+      passed with the module): payer, payee, authority and an early `terms` stop of a deal
+      entitling both parties; a payer or payee stop with only the other party entitled,
+      and with none, pending; an unknown cause pending; `terms` one second before
+      (`exhaustion`), at and after (`terms`) the end. `arkhai-compute` 0.3.0; both
+      storefronts take `>=0.3.0`; `make lock` run.
+- [x] 3.2 `kit/deal-servicing/src/market_deal_servicing/watch.py`, `_record_payment_stop`:
       when the stop's record exists with a pending classification and the classifier now
       classifies it, resolve it through `EndSession.resolve_correction` at the record's
       revision, lawful and with no filing (D2). Verify (library integration,
       `test_final_stop.py`): a pending stop recorded without a classifier is resolved on a
       later poll with one; the recorded end is unchanged; a resolved one is not resolved
       twice.
-- [ ] 3.3 Pass `classify_payment_stop`, bound to `deal.entitlements` and the Agreement's
+      Done: `EndSession.classification(negotiation_id, source_ref)` reads a recorded
+      request's slot (`None` while pending); the watch resolves only a pending slot,
+      taking the record's revision inside the observation's transaction. A non-lawful
+      classification carries its failure filing as at record time (`_failure_filing`,
+      shared by both paths); the compute classifier returns only lawful kinds. The kit
+      README says so. The rig's watch factory passes keyword options through to
+      `DealWatch`. Library integration (`test_final_stop.py`, through `DealWatch.poll`
+      against the rig's SQLite): a stop recorded by a watch with no classifier is pending;
+      a later poll with one resolves it `entitled_stop`, the request unchanged and no
+      filing journaled; a third poll calls the classifier no more and leaves the
+      classification and the revision unchanged; a classifier still answering `None`
+      leaves the slot and the revision as they were; a pending stop a classifier resolves
+      as a seller failure journals its one `delivery_end` filing. `kit/deal-servicing` 117
+      passed.
+      `run test-before` exits at collection (no `market_deal_lifecycle` in its
+      environment), as for section 1; at the base `EndSession.classification` and the
+      resolution do not exist.
+- [x] 3.3 Pass `classify_payment_stop`, bound to `deal.entitlements` and the Agreement's
       start plus `duration_seconds`, through `DealWatch(classify_payment_end=...)` in
       `domains/vms/storefront/src/market_storefront/deal_lifecycle.py` (`watch`) and
       `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/lifecycle.py`
@@ -620,11 +645,82 @@ factories.
       classified an entitled stop, and a provisioning failure after it journals no
       `delivery_end` filing; a once-only deal's payment term end is classified the term
       end, and in bare metal a site withdrawal after it files nothing.
-- [ ] 3.4 Verification point: `domains/compute` tests (unit), `kit/deal-servicing`
+      Done, differing from the plan in bare metal's failure: each watch factory binds the
+      classifier to the deal's entitlements and the Agreement's start (truncated to whole
+      seconds, as each storefront registers its term end) plus `duration_seconds`, and
+      wraps a kind in a `Classification` naming the stop's authority record. Application
+      integration, on each storefront's recurring world (`tests/recurring_world.py`):
+      VM (`test_lifecycle_ends.py`, two new cases) — a delivered on-demand deal's payer
+      stop, submitted at the payments engine and read by a `settlement-servicing` cycle,
+      is recorded `payer` and classified `entitled_stop`; the VM failure policy's
+      `release_capacity` (`apply_fulfillment_failure_policy`, given the world's capacity
+      runtime, as `test_lifecycle_failures.py` calls it) then records the provisioning
+      failure correlated to that stop, classified `entitled_stop`, with no filing; a
+      delivered once-only payments deal, the storefront restarted past the Agreement's end
+      with the payments engine there, has its payment-stop end recorded `terms` at or
+      after the term end and classified `terms`. Bare metal (`test_lifecycle_ends.py`, two
+      new cases) — the same payer stop, read by a `delivery-recovery` cycle, is
+      `entitled_stop`; bare metal records no provisioning failure for a delivered deal, so
+      its seller failure after the stop is the site's signed withdrawal (`force_release`),
+      pushed to the app's lease-ended callback through a typed client, classified
+      `unentitled_withdrawal`, with the stop still selected and no filing; for the
+      once-only deal restarted past its end, the payment stop is recorded and classified
+      `terms`, and a withdrawal after the term end is classified `unentitled_withdrawal`
+      and files nothing. `RecurringWorld` in bare metal now exposes its `runtime`, whose
+      site trust the withdrawal seeds, and its `app`, which the site's client calls. Both
+      storefront suites pass (VM integration 607, bare metal 649).
+- [x] 3.4 Verification point: `domains/compute` tests (unit), `kit/deal-servicing`
       (library integration), both storefronts' lifecycle suites (application
       integration) pass. End-to-end: `e2e_vm_payment_deal`, `e2e_bare_metal_payment_deal`
       and the two recurring purchases record classified ends; none asserts the
       classification.
+      Done: `make -C domains/compute test` (24), `make -C kit/deal-servicing test` (116),
+      `make -C domains/vms/storefront test-integration` (607) and `make -C
+      domains/bare_metal/storefront test` (649) pass, and `scripts/change-workflow run
+      pre-commit` passed with every functional hook, every suite among them. End-to-end
+      corrected: neither payment deal records a payment stop — VM's ends by an
+      administrator interruption, bare metal's by the buyer's teardown and a seller
+      refund — so only
+      `e2e_vm_recurring_purchase` and `e2e_bare_metal_recurring_purchase` record a
+      payment stop this section classifies (the payer's, now `entitled_stop`); neither
+      asserts the classification, so no scenario is evidence for it. Owed by validation:
+      none.
+      Fresh-context check: fixed — the bare-metal world's comment saying no route carries
+      a site report (the withdrawal now goes through the lease-ended callback, not the
+      ingress directly); a test comment claiming bare metal's own term-end record falls at
+      the payment stop's instant, which the test never checks; the watch's and its test's
+      comments explaining a pending slot by an earlier release rather than its state; the
+      once-only bare-metal case not showing how the withdrawal was classified (now
+      asserted); the untested seller-failure resolution branch (now a kit case); and
+      3.4's reason for bare metal's payment deal. Declined: the two storefronts' identical
+      `classify` closures, since the family classifier cannot build the kit's
+      `Classification` under its allowlist and a shared wrapper would need a package both
+      storefronts and the kit admit for two lines; `EndSession.classification` beside the
+      storefronts' and compute delivery's own `classification_for` readers, which are
+      outside this section and left as they are; the VM failure step calling
+      `apply_fulfillment_failure_policy` rather than a provisioning-failure route, as
+      `test_lifecycle_failures.py` does, since VM has no route reporting a teardown
+      failure; and `domains/compute/tests/` being flat, as it was.
+
+Section 3 handoff:
+
+- The kit's resolution path: `DealWatch._record_payment_stop` resolves a pending slot only
+  (`EndSession.classification` is `None`), at the record's revision read inside the
+  observation's transaction, and its revision moves once. Section 6's helper reads the
+  authorities through the same watch, so it needs nothing more for D2.
+- Each storefront binds the classifier in its `watch` factory with the term end computed
+  from the Agreement, truncated as each registers it; the payments mandate's part end is
+  `ceil(start + duration)`, so for a fractional start the payment stop lands a second after
+  the registered term end and still classifies `terms`. Section 7's unified term end
+  (D4) records the storefront's own `term-end` request beside it.
+- Bare metal's once-only case shows both its own `term-end` request and the payment stop
+  recorded; which sorts first depends on the start's fraction, so the case asserts the
+  payment stop's classification, not that it is selected.
+- VM's recurring world's `DeliveryProvisioning` has no `terminate_lease`, so the physical
+  end after a stop logs "VM physical end awaits recovery" in these cases; nothing asserts
+  teardown there. Section 9.3's restart cases, which do, will need it.
+- Bare metal's `WorldProvisioning` has no `get_lease`, so a cycle's `recover_site` logs a
+  failure in the recurring world; the same applies to cases asserting site recovery.
 
 ## 4. Compositions build their payments stage and report deals they cannot service
 

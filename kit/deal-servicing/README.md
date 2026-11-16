@@ -86,7 +86,9 @@ Authorities without respondent discovery use a stable evidence append. Never-att
 uncertain attempts replay the original key first so an earlier acknowledgement
 survives a closed-case race. Payment-stop classification is an injected,
 evidence/entitlement-based hook: without it the correction remains pending,
-never inferred lawful from event kind. A complete retention projection can also
+never inferred lawful from event kind. A stop recorded pending is resolved, once,
+through `resolve_correction` when a later read finds the hook classifying it; its
+recorded end never changes. A complete retention projection can also
 be injected with `seller_retention(path, negotiation_id, clock=...)`; a failed
 authority read never supplies a new pruning observation. The payment adapter's
 optional `AuthorityView.payouts` maps every part to a verified completion observation

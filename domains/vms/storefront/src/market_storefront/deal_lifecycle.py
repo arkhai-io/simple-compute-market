@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from arkhai_compute.end_classification import payment_actor
+from arkhai_compute.end_classification import classify_payment_stop, payment_actor
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from market_alkahest.payment_adapter import AlkahestOnceAdapter
@@ -33,7 +33,7 @@ from market_deal_lifecycle_contracts.models import (
     Pending, Rejected, SubmitResponse, Unknown,
 )
 from market_deal_servicing import (
-    DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
+    Classification, DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
     LifecycleRouteServices, RespondentPoller, SellerDeal, SellerServicing,
     SellerSession, SQLiteEvidenceStore, seller_retention,
 )
@@ -227,11 +227,17 @@ class VmDealLifecycle:
                 authority=authority,
             )
 
+        term_end = instant(agreement["start_utc"]) + agreement["duration_seconds"]
+
+        def classify(event):
+            kind = classify_payment_stop(event, entitlements=deal.entitlements, term_end=term_end)
+            return Classification(kind=kind, evidence_refs=[event.authority_record_ref]) if kind else None
+
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
             seller_account=data.mandate.to.root if data is not None else "",
-            actor=actor, clock=self.clock,
+            actor=actor, clock=self.clock, classify_payment_end=classify,
             observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 

@@ -7,8 +7,10 @@ import hashlib
 import json
 import logging
 import sqlite3
+from datetime import datetime
 
 from arkhai_compute.end_classification import (
+    classify_payment_stop,
     payment_actor,
     resolve_site_corrections as pending_site_corrections,
     site_classification as classify_journal,
@@ -202,10 +204,17 @@ class BareMetalLifecycle:
                 authority_account=deal.dispute.account if deal.dispute else None, authority=authority,
             )
 
+        start = int(datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00")).timestamp())
+        term_end = start + agreement.duration_seconds
+
+        def classify(event):
+            kind = classify_payment_stop(event, entitlements=deal.entitlements, term_end=term_end)
+            return Classification(kind=kind, evidence_refs=[event.authority_record_ref]) if kind else None
+
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
-            seller_account=account, actor=actor, clock=self.clock,
+            seller_account=account, actor=actor, clock=self.clock, classify_payment_end=classify,
             observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 

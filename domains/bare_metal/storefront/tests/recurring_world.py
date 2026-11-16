@@ -187,6 +187,11 @@ class RecurringWorld:
     provisioning: WorldProvisioning
     #: The app's loopback base URL when it is served, for a buyer's own commands.
     url: str | None = None
+    #: The runtime the app composes, whose site trust a test seeds before a
+    #: site calls the app, and whose lifecycle clock it reads.
+    runtime: Any = None
+    #: The app, for a caller the world builds no client for, such as a site.
+    app: Any = None
 
     def declare(self, treatments: frozenset[str] | None, *, setup: bool = False) -> None:
         """Declare ``treatments`` for payments, or withdraw its declaration."""
@@ -293,6 +298,7 @@ async def recurring_world(
                 ) as buyer, LifecycleClient(url, BUYER_SIGNER, publisher) as buyer_lifecycle:
                     world = RecurringWorld(
                         admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning, url,
+                        runtime=runtime, app=app,
                     )
                     world.declare(treatments)
                     yield world
@@ -310,6 +316,7 @@ async def recurring_world(
             ) as buyer_lifecycle:
                 world = RecurringWorld(
                     admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning,
+                    runtime=runtime, app=app,
                 )
                 world.declare(treatments)
                 yield world

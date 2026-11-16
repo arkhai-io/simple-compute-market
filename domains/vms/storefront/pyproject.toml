@@ -8,7 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-compute>=0.2.0",
+    "arkhai-compute>=0.3.0",
     "arkhai-compute-delivery>=0.2.0",
     "arkhai-kit-arkhai-mediation>=0.3.0",
     "arkhai-kit-deal-servicing>=0.4.0",
