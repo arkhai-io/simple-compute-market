@@ -371,23 +371,27 @@ evidence. Each lane's storefront configuration
 seller publishes a recurring on-demand option: VM's on a listing of the
 scenario's own resource, bare metal's through a pool override. A default buyer
 with no wallet buys it through the shipped `market buy` or `market bare-metal
-buy`, which approves the mandate and commits. End service services no rate deal,
-so it refuses the commit and nothing is delivered.
+buy`, which approves the mandate and commits, and the storefront delivers it.
 
-The scenarios run the shared buyer-purchase stages through the buy, then the
-recurring stages (`tests/e2e/roles/helpers/recurring_purchase_stages.py`): the
-mandate is one rate part charging one period's price and the payer's balance fell
-by the receipt's reserve; after one servicing step the storefront's lifecycle
-read shows the deal committed and never active, delivery reserved nothing at the
-site (VM's acceptance hold stays `reserved` until its TTL lapses), and the
-payments double records no rate start; the buy's stderr showed the per-period price, setup charge, initial reserve and maximum end (`market buy`,
-still polling a delivery that never comes, is stopped first; that they precede
-the settlement stage that approves is proved by each buyer's own tests, not
-here); the
-buyer's own `end` stops the payment, and the storefront records the payer's end
-with no filing; and the payer's balance is restored. The seller's refund refuses
-a rate deal, so a failed run's cleanup ends an approved deal by the buyer's own
-`end` too. Neither waits for the delivery deadline.
+The scenarios run the shared buyer-purchase stages, the canonical deal's
+delivery and teardown stages with their mock gates, and the recurring stages
+(`tests/e2e/roles/helpers/recurring_purchase_stages.py`): the mandate is one
+rate part charging one period's price and the payer's balance fell by the
+receipt's reserve; the fulfillment converges and the settlement reads ready;
+once the storefront's servicing has been stepped, the payments double records
+the rate part started, and one start event, no earlier than the whole second of
+the site's activation of the lease (the double records whole seconds), and the
+storefront's lifecycle read shows the deal active; the buy's stderr showed the
+per-period price, setup charge, initial reserve and maximum end (that they
+precede the settlement stage that approves is proved by each buyer's own tests,
+not here); the buyer's own `end` stops the payment inside the started period,
+which it charges, and the storefront records the payer's end with no filing;
+once a servicing step has carried out that end at the site (bare metal's hint
+already has, VM's servicing cycle does), the lease is released through the
+shared teardown stages; and the payer's balance is down by exactly one period's
+price. The seller's refund refuses a rate deal, so a failed run's
+cleanup ends an approved deal by the buyer's own `end` too. Neither waits for
+the delivery deadline.
 
 ### Real bare-metal provisioning
 

@@ -4,14 +4,15 @@ A recurring purchase buys a seller's recurring on-demand option in
 ``arkhai.payments.v1`` through the domain's own buyer CLI (``market buy``,
 ``market bare-metal buy``) with a default buyer, against a lane whose storefront
 declares rate servicing for ``charged`` and ``returned``. That declaration is a
-lane fixture, never a shipped default: it lets the seller publish the option and
-accept it, not service it. End service services no rate deal, so it refuses the
-commit: the buyer approves and commits, and the deal is never delivered. The
-seller's refund refuses a rate deal, so the buyer ends the deal by its own
-``end``, the payer's stop at the payments double and a hint to the storefront,
-and its whole reservation returns. The result is lane-double evidence of the
-money a buyer is shown and approves for a per-period Agreement and of the
-refused commit, never of rate delivery.
+lane fixture, never a shipped default. End service asks the payments adapter
+whether to deliver the committed deal, so the deal is delivered: the site
+activates it, then the storefront starts the rate part at the payments double,
+then the deal is available. The buyer ends the deal by its own ``end``, the
+payer's stop at the payments double and a hint to the storefront; the stop
+charges the started period, and the storefront records the payer's end and
+tears the delivery down. The result is lane-double evidence of the money a buyer
+is shown and approves for a per-period Agreement, of rate delivery and of the
+buyer's end.
 
 A recurring purchase module declares, in order, each by subclassing it with an
 empty body:
@@ -20,19 +21,23 @@ empty body:
   ``Stage00c2``, a mock lane's ``Stage00e``, ``Stage00f1``, which seeds the
   supply through the driver, and ``Stage00h``), then its own listing stage,
   which writes ``seller_listing_id`` and ``listing_published``;
-- ``Purchase01`` to ``Purchase03`` of ``buyer_purchase_stages.py``: the payer's
-  balance, the listing discovered, the purchase command run to its commit;
-- ``Recurring04`` to ``Recurring08`` here.
+- ``Purchase01`` to ``Purchase04`` of ``buyer_purchase_stages.py``, arming the
+  create gate (``Stage07a``) before the buy and releasing and draining it
+  (``Stage08b2``) after the correlation, then ``Recurring04``'s mandate;
+- the canonical deal's delivery, ``Stage09a`` to ``Stage09c``, with its own
+  stage closing the listing (``Stage09a2``) before ``Stage09b``, then
+  ``Recurring05``'s rate start, ``Purchase09``'s end of the purchase command,
+  and ``Recurring06``'s accepted money;
+- the buyer's end: ``Stage09c2`` arming the teardown gate, ``Recurring07``,
+  ``Stage11a2`` and ``Stage11b``'s teardown, then ``Recurring08``'s balance.
 
 ``tests/unit/test_recurring_purchase_stages.py`` holds every recurring purchase
-module to that order. Nothing is delivered, so no mock gate is armed and no
-stage from fulfillment onwards runs.
+module to that order.
 
 What differs between domains reaches a stage through the ``deal_driver``
 fixture, a ``RecurringPurchaseDriver``: the buyer purchase's driver, the
-storefront loop that services the domain's deals, how the domain's purchase
-command ends once its commit is accepted, and the storefront's lifecycle read
-as the purchase's buyer.
+storefront loop that services the domain's deals, and the storefront's
+lifecycle read as the purchase's buyer.
 """
 
 from __future__ import annotations
@@ -52,11 +57,11 @@ from market_deal_lifecycle_contracts.models import Accepted, LifecycleRead
 from tests.e2e.roles.helpers.buyer_purchase_stages import (
     PurchaseDriver,
     PurchaseState,
-    accepted_purchase,
     available_balances,
 )
 from tests.e2e.roles.helpers.cleanup import CleanupStep
-from tests.e2e.roles.helpers.compute_deal import advance_storefront
+from tests.e2e.roles.helpers.compute_deal import advance_storefront, assert_lease_watchdog_held
+from tests.e2e.roles.helpers.compute_deal_stages import utc_instant
 from tests.e2e.roles.helpers.domain_deal import assert_market_run_succeeded, require_state
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_client,
@@ -133,19 +138,21 @@ def check_recurring_option(option: SettlementOption, *, delivery_deadline_second
 class RecurringPurchaseState(PurchaseState):
     """What a recurring purchase's stages hand each other, beside the purchase's.
 
-    ``Recurring04`` writes the purchase's ``negotiation_id``, ``settlement_id``,
-    ``settlement_ref``, ``agreement`` and ``payment_settlement``, as a buyer
-    purchase's correlation does, and ``Recurring07`` its
-    ``_buyer_teardown_requested`` before the buyer's end.
+    ``Purchase04``'s correlation writes the purchase's ``negotiation_id``,
+    ``settlement_id``, ``agreement`` and ``payment_settlement``, which
+    ``Recurring04`` checks, and ``Recurring07`` writes
+    ``_buyer_teardown_requested`` before the buyer's end and
+    ``teardown_fulfillment_id`` once the teardown is dispatched.
     """
 
     #: The payments double's receipt gross for the transaction: what approval
     #: reserved from the payer.
     receipt_gross: Optional[int] = None
-    #: End service refused the commit, and nothing was delivered or started.
-    _commit_refused: bool = False
-    #: The purchase command has ended, and the accepted money its stderr shows was read.
-    _purchase_run_closed: bool = False
+    #: The payments double started the rate part no earlier than the whole
+    #: second of the site's activation, and the storefront reads the deal active.
+    _rate_started: bool = False
+    #: The ended purchase command's stderr showed the accepted money.
+    _accepted_money_shown: bool = False
     #: What the buyer's ``end`` printed once its payer's stop was accepted.
     buyer_end: Optional[dict[str, Any]] = None
 
@@ -153,14 +160,9 @@ class RecurringPurchaseState(PurchaseState):
 class RecurringPurchaseDriver(PurchaseDriver, Protocol):
     """What a domain supplies to a recurring purchase, beside a purchase's part."""
 
-    #: The storefront's site ledger, read for the deal's reservations.
-    site_capacity: Any
-    #: The storefront loop that services the domain's committed deals.
+    #: The storefront loop whose cycle services the domain's committed deals:
+    #: it reads their payments and carries out their recorded ends at the site.
     servicing_loop: str
-
-    def close_purchase_run(self, run: Any, deal_state: Any) -> None:
-        """End the domain's purchase command once its commit is accepted,
-        asserting what it recorded of a deal that is never delivered."""
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         """The storefront's lifecycle read of the deal, as its buyer reads it."""
@@ -196,12 +198,12 @@ def recurring_purchase_cleanup(
     purchase_cli: Any, deal_driver: RecurringPurchaseDriver, deal_state: RecurringPurchaseState,
 ) -> list[CleanupStep]:
     """Whatever the stages left: a purchase command still running, and an
-    approved payment still reserved at the payments double.
+    approved payment still reserved or running at the payments double.
 
-    The seller's refund refuses a rate deal, so a reservation the stages left
-    is released by the buyer's own ``end``, the one ``Recurring07`` runs. Its
-    stop is journaled under one operation key, so running it again after a
-    partial end resumes that stop rather than sending a second one.
+    The seller's refund refuses a rate deal, so a payment the stages left is
+    stopped by the buyer's own ``end``, the one ``Recurring07`` runs. Its stop
+    is journaled under one operation key, so running it again after a partial
+    end resumes that stop rather than sending a second one.
     """
     def stop_purchase_command() -> None:
         if deal_state.purchase_run is not None:
@@ -230,23 +232,25 @@ class Recurring04_MandateApproved:
     def test_r04_the_buyer_approved_one_rate_part_charging_one_periods_price(
         self, payments_config, deal_state: RecurringPurchaseState,
     ):
-        """The run's Agreement and mandate, and what the payments double approved.
+        """The correlated Agreement's mandate, and what the payments double approved.
 
-        The run's events correlate one paid deal (``accepted_purchase``), and
-        its mandate is one rate part charging one period's price per period.
-        The double's snapshot and receipt verify against the
-        receipt keys the payments configuration trusts, bound to that Agreement
-        and mandate; the receipt reserves whole periods of that price, and the
-        payer's available balance fell by exactly the receipt's gross, while
-        nothing else spends from the payer account (a topology guarantee this
-        scenario cannot check, so it is logged beside the result).
+        ``Purchase04`` correlated the run's events as one paid deal; its
+        mandate is one rate part charging one period's price per period. The
+        double's snapshot and receipt verify against the receipt keys the
+        payments configuration trusts, bound to that Agreement and mandate;
+        the receipt reserves whole periods of that price, and the payer's
+        available balance fell by exactly the receipt's gross, while nothing
+        else spends from the payer account (a topology guarantee this scenario
+        cannot check, so it is logged beside the result). Read before
+        ``Stage09a`` converges the fulfillment, so before delivery can start
+        the rate part.
         """
-        require_state(deal_state, "purchase_run", "seller_listing_id", "purchase_option_id",
-                      "payer_available_before")
+        require_state(deal_state, "purchase_run", "negotiation_id", "settlement_id",
+                      "agreement", "payment_settlement", "payer_available_before")
         run = deal_state.purchase_run
-        negotiation_id, agreement, data = accepted_purchase(
-            run, listing_id=deal_state.seller_listing_id, option_id=deal_state.purchase_option_id,
-        )
+        negotiation_id = deal_state.negotiation_id
+        agreement = deal_state.agreement
+        data = deal_state.payment_settlement
 
         mandate = data.mandate.model_dump(mode="json", by_alias=True, exclude_none=True)
         assert len(mandate["parts"]) == 1, (
@@ -294,88 +298,92 @@ class Recurring04_MandateApproved:
             f"payer {payer}'s available balance fell by {dropped}; approval of "
             f"{data.transaction_id} reserved {gross} {ASSET}"
         )
-        deal_state.negotiation_id = negotiation_id
-        deal_state.settlement_id = data.transaction_id
-        # The negotiation is what every storefront resolves a payments deal by.
-        deal_state.settlement_ref = negotiation_id
-        deal_state.agreement = agreement
-        deal_state.payment_settlement = data
         deal_state.receipt_gross = gross
         log.info("[r04] Run %s: Agreement %s, transaction %s: one rate part of %s %s per %s",
                  run.run_id, negotiation_id, data.transaction_id, PERIOD_GROSS, ASSET, PERIOD)
 
 
 # ===========================================================================
-# The refused commit
+# Delivery
 # ===========================================================================
 
-class Recurring05_CommitRefused:
-    def test_r05_end_service_refused_the_commit_and_nothing_is_delivered(
+def _unix_second(instant: datetime) -> int:
+    """The whole Unix second ``instant`` falls in: the payments double records
+    its instants in whole seconds, so one it records after ``instant`` is no
+    earlier than this."""
+    return int(instant.timestamp())
+
+
+class Recurring05_RateStartedAfterActivation:
+    def test_r05_the_rate_part_started_after_the_sites_activation(
         self, storefront_admin_client, payments_config,
         deal_driver: RecurringPurchaseDriver, deal_state: RecurringPurchaseState,
     ):
-        """The commit was accepted, and end service refused to deliver the deal.
+        """The delivered deal's rate part started after the site activated it.
 
         One pass of the storefront loop that services the domain's deals runs
-        first, so what is read follows the storefront's own servicing as well
-        as the commit's drive. The lifecycle read names the committed
-        transaction, and shows delivery never active, no end and no filing;
-        delivery reserved nothing at the site; and the payments double
-        records no rate start, neither the part's start nor a start event.
-        End service refuses before delivery touches capacity, so a domain
-        that holds capacity at acceptance (VM, when its lane configures a
-        hold TTL) still lists that hold, under ``<negotiation>:hold`` and
-        ``reserved``, until it lapses; any other reservation for the
-        negotiation was placed, committed or leased by delivery. Why end
-        service refused, its repair reason, is read by no storefront
-        interface, so its own tests prove it.
+        first, so what is read follows the storefront's own servicing of a
+        running rate deal as well as the delivery's drive. The lease
+        ``Stage09c`` recorded names the site's activation; the payments double
+        records the part started, and one start event, no earlier than the
+        whole second of that activation, since delivery starts billing only once
+        the site has activated the deal. The double records whole seconds, so a
+        start within the activation's own second passes either way; each
+        storefront's ``test_rate_delivery.py`` proves billing starts from the
+        recorded activation. The lifecycle read
+        names the committed transaction and shows the deal active, with no end
+        and no filing.
         """
-        require_state(deal_state, "negotiation_id", "settlement_id", "payer_account")
+        require_state(deal_state, "negotiation_id", "settlement_id", "payer_account",
+                      "settlement_status", "deal_lease")
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
-        read = deal_driver.lifecycle_read(deal_state.negotiation_id)
-        assert read.commitment_ref == deal_state.settlement_id, read
-        assert read.delivery.progress != "active", read.delivery
-        assert read.delivery.recorded_end is None, read.delivery
-        assert read.filings == [], read.filings
-        held = deal_driver.site_capacity.reservations_for_negotiation(deal_state.negotiation_id)
-        acceptance_hold = f"{deal_state.negotiation_id}:hold"
-        delivered = [
-            reservation for reservation in held
-            if (reservation.get("deal_ref") or {}).get("placement_key") != acceptance_hold
-            or reservation.get("state") != "reserved"
-        ]
-        assert delivered == [], f"delivery holds capacity for the refused deal: {delivered}"
+        lease = deal_state.deal_lease.refresh()
+        activated = _unix_second(utc_instant(lease.get("activated_at_utc")))
 
         snapshot = _snapshot(payments_config, deal_state.payer_account, deal_state.settlement_id)
         (part,) = snapshot["parts"]
-        assert "started" not in part, part
-        kinds = [event.get("event", {}).get("kind") for event in snapshot["events"]]
-        assert "start" not in kinds, snapshot["events"]
-        deal_state._commit_refused = True
-        log.info("[r05] Agreement %s committed under transaction %s and not delivered: "
-                 "progress %s, no reservation by delivery (acceptance holds: %d), no rate start",
-                 deal_state.negotiation_id, deal_state.settlement_id, read.delivery.progress,
-                 len(held))
+        assert part.get("started") is not None, f"the double records no rate start: {part}"
+        assert int(part["started"]) >= activated, (
+            f"the rate part started at {part['started']}, before the site activated the "
+            f"deal at {lease.get('activated_at_utc')}: {part}"
+        )
+        starts = [event for event in snapshot["events"]
+                  if event.get("event", {}).get("kind") == "start"]
+        assert len(starts) == 1, snapshot["events"]
+        assert int(starts[0]["receivedAt"]) >= activated, (starts, lease)
+
+        read = deal_driver.lifecycle_read(deal_state.negotiation_id)
+        assert read.commitment_ref == deal_state.settlement_id, read
+        assert read.delivery.progress == "active", read.delivery
+        assert read.delivery.recorded_end is None, read.delivery
+        assert read.filings == [], read.filings
+        deal_state._rate_started = True
+        log.info("[r05] Agreement %s delivered under transaction %s: activated %s, rate part "
+                 "started %s, progress %s", deal_state.negotiation_id, deal_state.settlement_id,
+                 lease.get("activated_at_utc"), part["started"], read.delivery.progress)
 
 
-class Recurring06_PurchaseRunClosed:
+class Recurring06_AcceptedMoneyShown:
     def test_r06_the_purchase_command_showed_the_accepted_money(
         self, deal_driver: RecurringPurchaseDriver, deal_state: RecurringPurchaseState,
     ):
-        """The purchase command ends, having shown the buyer the money it approved.
+        """The ended purchase command showed the buyer the money it approved.
 
-        How the domain's command ends once its commit is accepted is the
-        driver's. Its stderr holds the accepted Agreement's terms: the
-        per-period price, the setup charge, the initial reserve — the receipt's
-        gross, what approval took from the payer — and the maximum accepted end,
-        the Agreement's start plus its duration. This stage observes only that
+        ``Purchase09`` waited for the command to end, once the settlement read
+        ready. Its stderr holds the accepted Agreement's terms: the per-period
+        price, the setup charge, the initial reserve — the receipt's gross,
+        what approval took from the payer — and the maximum accepted end, the
+        Agreement's start plus its duration. This stage observes only that
         stderr holds them, not when they were printed; each buyer's own tests
         prove they precede its settlement stage, which approves (bare metal's
         ``test_cli_completion.py``, VM's ``test_buy_orchestrator.py``).
         """
-        require_state(deal_state, "purchase_run", "_commit_refused", "agreement", "receipt_gross")
+        require_state(deal_state, "purchase_run", "_rate_started", "agreement", "receipt_gross")
         run = deal_state.purchase_run
-        deal_driver.close_purchase_run(run, deal_state)
+        assert run.exited, (
+            f"{deal_driver.buy_command} run {run.run_id} is still running; Purchase09 waits "
+            "for it to end"
+        )
         agreement = deal_state.agreement
         start = datetime.fromisoformat(str(agreement["start_utc"]).replace("Z", "+00:00"))
         end = start + timedelta(seconds=int(agreement["duration_seconds"]))
@@ -393,7 +401,7 @@ class Recurring06_PurchaseRunClosed:
             f"{deal_driver.buy_command} run {run.run_id} did not show {missing}; "
             f"its stderr:\n{shown[-3000:]}"
         )
-        deal_state._purchase_run_closed = True
+        deal_state._accepted_money_shown = True
         log.info("[r06] Run %s showed the accepted per-period price, setup, reserve and end",
                  run.run_id)
 
@@ -403,21 +411,34 @@ class Recurring06_PurchaseRunClosed:
 # ===========================================================================
 
 class Recurring07_BuyerEnds:
-    def test_r07_the_buyers_end_stops_the_payment_and_the_seller_records_the_payers_end(
-        self, purchase_cli, payments_config,
+    def test_r07_the_buyers_end_charges_the_started_period_and_begins_the_teardown(
+        self, purchase_cli, payments_config, provisioning_client, storefront_admin_client,
         deal_driver: RecurringPurchaseDriver, deal_state: RecurringPurchaseState,
     ):
-        """The buyer's ``end`` stops the payment; the storefront records the payer's end.
+        """The buyer's ``end`` stops the payment, and the storefront ends the delivery.
 
         The normal end of a rate deal: the payer's stop at the payments double,
         accepted, then a hint, which makes the storefront read the double. The
-        stop takes effect at once, with no payer notice and nothing started, so
-        the part is stopped by the payer with nothing held or reserved. The
-        storefront records the payer's stop as the deal's end, before the
-        delivery deadline, so it files no seller non-delivery: the scenario
-        does not wait for that deadline.
+        stop takes effect at once, with no payer notice, inside the started
+        period, which it charges: the part is stopped by the payer, charging
+        one period's price to the payee and reserving nothing more. On the
+        hint's read the storefront records the payer's stop as the deal's end,
+        before the delivery deadline, so it files no seller non-delivery: the
+        scenario does not wait for that deadline.
+
+        One pass of the storefront loop that services the domain's deals then
+        runs the cycle its timer would, which carries out a recorded end at the
+        site; bare metal's hint has already carried it out, and VM's leaves it
+        to that cycle. Either way the end leaves the lease ``releasing``, never
+        released, so ``Stage11b``'s own lease cycle is what releases it, and one
+        convergence advance dispatches the teardown, the state ``Stage11b``
+        starts from, as a buyer purchase's teardown does (``Purchase10``).
         """
-        require_state(deal_state, "_purchase_run_closed", "negotiation_id", "settlement_id")
+        require_state(deal_state, "_accepted_money_shown", "purchase_run", "payer_account",
+                      "negotiation_id", "settlement_id", "deal_lease", "lease_id",
+                      "reserved_resource_id")
+        # The release is Stage11b's own lease cycle, not the timer's.
+        assert_lease_watchdog_held(provisioning_client)
         deal_state._buyer_teardown_requested = True
         run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
         assert_market_run_succeeded(run, command=deal_driver.teardown_command)
@@ -425,34 +446,64 @@ class Recurring07_BuyerEnds:
         progress = EndDeliveryProgress.model_validate(ended["progress"])
         assert progress.mode == "normal_stop", progress
         assert isinstance(progress.payment, Accepted), progress
+        deal_state.buyer_end = ended
 
         snapshot = _snapshot(payments_config, deal_state.payer_account, deal_state.settlement_id)
         (part,) = snapshot["parts"]
-        assert "started" not in part, part
-        assert part.get("stop", {}).get("cause") == "payer", part
-        assert (part["held"], part.get("reserved", "0")) == ("0", "0"), part
+        stop = part.get("stop") or {}
+        assert (stop.get("cause"), stop.get("partialPeriod")) == ("payer", "charged"), part
+        assert part.get("reserved", "0") == "0", part
+        assert int(part["held"]) + int(part["released"]) == PERIOD_GROSS, part
 
         read = deal_driver.lifecycle_read(deal_state.negotiation_id)
         assert read.delivery.recorded_end is not None, read.delivery
         assert read.delivery.recorded_end.cause == "payer", read.delivery
         assert read.filings == [], read.filings
-        deal_state.buyer_end = ended
-        log.info("[r07] Buyer ended Agreement %s: payer's stop accepted, end recorded at %s, "
-                 "no filing", deal_state.negotiation_id, read.delivery.recorded_end.ended_at)
+
+        advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
+        # The cycle files nothing for an end the payer's stop recorded.
+        filings = deal_driver.lifecycle_read(deal_state.negotiation_id).filings
+        assert filings == [], filings
+        lease = deal_state.deal_lease.refresh()
+        assert lease.get("status") == "releasing", (
+            "the buyer's end should leave the lease releasing for the lease "
+            f"lifecycle's own cycle to release: {lease}"
+        )
+        status = deal_driver.purchase_fulfillment(deal_state.negotiation_id)
+        fulfillment_id = str(status.get("fulfillment_id") or "")
+        assert fulfillment_id and fulfillment_id == lease.get("fulfillment_id"), (status, lease)
+        pending = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
+        assert pending.get("state") == "teardown_dispatch_pending", pending
+
+        provisioning_client.advance_fulfillment_convergence_cycle()
+        dispatched = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
+        assert dispatched.get("state") == "tearing_down", dispatched
+        assert deal_state.deal_lease.resource_consumed(
+            storefront_admin_client, deal_state.reserved_resource_id
+        )
+        deal_state.teardown_fulfillment_id = fulfillment_id
+        log.info("[r07] Buyer ended Agreement %s: payer's stop accepted charging the started "
+                 "period, end recorded at %s with no filing; lease %s releasing, fulfillment %s "
+                 "tearing down", deal_state.negotiation_id, read.delivery.recorded_end.ended_at,
+                 deal_state.lease_id, fulfillment_id)
 
 
-class Recurring08_PayerBalanceRestored:
-    def test_r08_the_payers_available_balance_is_restored(
+class Recurring08_PayerChargedOnePeriod:
+    def test_r08_the_payer_paid_one_periods_price(
         self, payments_config, deal_state: RecurringPurchaseState,
     ):
-        """The unearned reservation returned: the payer's available balance is
-        what ``Purchase01`` read, while nothing else spends from the account."""
+        """The started period was charged and the rest of the reservation
+        returned: the payer's available balance is what ``Purchase01`` read,
+        less one period's price, while nothing else spends from the account."""
         require_state(deal_state, "buyer_end", "payer_account", "payer_available_before")
         payer = str(deal_state.payer_account)
         with buyer_payments_client(payments_config, payer) as client:
             after = available_balances(client.get_balance(payer))
-        assert after == deal_state.payer_available_before, (
+        before = deal_state.payer_available_before
+        expected = {**before, ASSET: before.get(ASSET, 0) - PERIOD_GROSS}
+        assert after == expected, (
             f"payer {payer}'s available balance is {after} after the buyer's stop; it was "
-            f"{deal_state.payer_available_before} before the purchase"
+            f"{before} before the purchase, and one period costs {PERIOD_GROSS} {ASSET}"
         )
-        log.info("[r08] Payer %s available restored to %s", payer, after)
+        log.info("[r08] Payer %s available %s: one period's %s %s charged", payer, after,
+                 PERIOD_GROSS, ASSET)

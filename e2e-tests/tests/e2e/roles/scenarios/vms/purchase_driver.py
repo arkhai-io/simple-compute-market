@@ -253,17 +253,13 @@ class VmPurchaseDriver(VmPurchaseParts, VmComputeDealDriver):
         assert status.fulfillment_id == deal_state.fulfillment_id, status
 
 
-#: How long ``market buy`` is given to read its settlement once after its commit.
-FIRST_SETTLEMENT_POLL_SECONDS = 30.0
-
-
 @dataclass(kw_only=True)
 class VmRecurringPurchaseDriver(VmPurchaseDriver):
     """VM's ``RecurringPurchaseDriver``, for the lane's purchase of a recurring
-    on-demand option through ``market buy``, which end service refuses to
-    commit."""
+    on-demand option through ``market buy``."""
 
-    #: The storefront loop that watches its committed deals' payments.
+    #: The storefront loop whose lifecycle cycle reads its committed deals'
+    #: payments and carries out their recorded ends at the site.
     servicing_loop = "settlement-servicing"
 
     def listing_settlement(self) -> dict[str, Any]:
@@ -279,25 +275,6 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
         # The listing states the recurring payments settlement alone.
         assert len(listing.settlement_options) == 1, listing.settlement_options
         check_recurring_option(option, delivery_deadline_seconds=delivery_deadline_seconds())
-
-    def close_purchase_run(self, run: Any, deal_state: Any) -> None:
-        """``market buy`` polls its settlement until delivery, which never
-        comes: still running, it has read the settlement at least once and
-        never read it ready, and it is stopped here, as a buyer stops a
-        command waiting on a delivery its seller cannot make."""
-        run.wait_for_event("settlement_poll", timeout=FIRST_SETTLEMENT_POLL_SECONDS)
-        events = run.read_events()
-        assert not run.exited, (
-            f"{self.buy_command} run {run.run_id} ended rc={run.returncode} while delivery "
-            f"was refused; last events {[event.get('event') for event in events[-6:]]}"
-        )
-        assert not [event for event in events if event.get("event") == "run_ended"], events[-6:]
-        polled = [
-            (event.get("body") or {}).get("status")
-            for event in events if event.get("event") == "settlement_poll"
-        ]
-        assert "ready" not in polled, polled
-        run.terminate()
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         async def read() -> LifecycleRead:

@@ -30,9 +30,7 @@ from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
 
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
-from tests.e2e.roles.helpers.buyer_purchase_stages import PURCHASE_RUN_EXIT_SECONDS
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
-from tests.e2e.roles.helpers.domain_deal import assert_market_run_succeeded, ordered_events
 from tests.e2e.roles.helpers.mediation import (
     buyer_dispute_credential_toml,
     buyer_mediation_environment,
@@ -52,7 +50,6 @@ from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
     BARE_METAL,
     MACHINE_ADDRESS,
-    WHOLE_HOST_CAPACITY,
     BareMetalComputeDealDriver,
     BareMetalDealLease,
 )
@@ -315,10 +312,11 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
 class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
     """Bare metal's ``RecurringPurchaseDriver``, for the lane's purchase of a
     recurring on-demand option on a whole host through ``market bare-metal
-    buy``, which end service refuses to commit."""
+    buy``."""
 
-    #: The storefront loop that reads its committed deals' payments and drives
-    #: their delivery.
+    #: The storefront loop whose lifecycle cycle reads its committed deals'
+    #: payments, drives their delivery and carries out their recorded ends at
+    #: the site.
     servicing_loop = "delivery-recovery"
 
     def pool_settlement(self) -> dict[str, Any]:
@@ -334,16 +332,6 @@ class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
         assert len(listing.settlement_options) == 1, listing.settlement_options
         self.check_payments_listing(listing, option)
         check_recurring_option(option, delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS)
-
-    def close_purchase_run(self, run: Any, deal_state: Any) -> None:
-        """``market bare-metal buy`` ends once the seller accepts its commit,
-        recording the deal it committed; nothing it records is delivery."""
-        run.wait(timeout=PURCHASE_RUN_EXIT_SECONDS)
-        assert_market_run_succeeded(run, command=self.buy_command)
-        (ended,) = ordered_events(run.read_events(), "run_ended")
-        self.check_run_ended(ended, deal_state)
-        # The whole machine is still free: nothing was reserved for the deal.
-        assert self.available_units() == WHOLE_HOST_CAPACITY["units"]
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         return LifecycleRead.model_validate(self.fulfillment.delivery(negotiation_id))

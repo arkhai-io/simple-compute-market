@@ -181,7 +181,7 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       requirement admits as a journaled observation, so the check leaves them out; and
       the deal is the rig's once-only registration with a rate-shaped part (a
       `funded_through` and a payer stop), not a deal registered as rate.
-- [ ] 2.5 (Moved to section 2B; not implemented here.) The two recurring-purchase scenarios
+- [x] 2.5 (Moved to section 2B; not implemented here.) The two recurring-purchase scenarios
       (`e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_recurring_purchase.py`,
       `.../bare_metal/test_bare_metal_recurring_purchase.py`, their stages in
       `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`) assert a refused
@@ -191,6 +191,8 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       period charged, and the seller's read shows the buyer's end; keep the waits they
       make today. Verify (unit, `e2e-tests/tests/unit/test_recurring_purchase_stages.py`)
       and by running both scenarios in their lanes.
+      Done through section 2B, which carries this task resized (2B.1–2B.3); checked
+      so section 2 reads complete, and its text is history.
 - [x] 2.6 Verification point: `kit/deal-lifecycle`, `kit/deal-servicing` and
       `domains/compute/delivery` suites (unit, library integration) pass. The storefronts'
       suites are section 2A's verification point, which this section's work leaves
@@ -431,7 +433,7 @@ Implements D1 in the lanes; requirement "A recurring purchase is delivered end t
 each compute lane" (`test-compatibility`), whose lane-time clause section 10 meets.
 Touches `e2e-tests`.
 
-- [ ] 2B.1 Rewrite the refused-commit stages in
+- [x] 2B.1 Rewrite the refused-commit stages in
       `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py` and their drivers in
       `e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_recurring_purchase.py` and
       `.../bare_metal/test_bare_metal_recurring_purchase.py`, changing only what the
@@ -442,14 +444,109 @@ Touches `e2e-tests`.
       `delivery_end` filing. Update the stage order
       `e2e-tests/tests/unit/test_recurring_purchase_stages.py` holds. Verify (unit,
       `e2e-tests/tests/unit/`): the stage modules pass.
-- [ ] 2B.2 Run both scenarios in their lanes. Verify (system):
+      Done, more than the refusal's removal, as the handoff below found: each module
+      now composes the payment purchase's delivery and teardown stages. Order:
+      readiness and the domain's listing; `Purchase01`, `Purchase02`, `Stage07a`,
+      `Purchase03`, `Purchase04`, `Stage08b2`, `Recurring04_MandateApproved` (now
+      checking `Purchase04`'s correlation rather than re-correlating, and read before
+      `Stage09a` so before delivery can start the rate part); `Stage09a`, the domain's
+      `Stage09a2` (VM's capacity-event step, bare metal's `BareMetalPublicationClosesListing`,
+      which `Stage09b` requires and the handoff did not name), `Stage09b`, `Stage09c`;
+      `Recurring05_RateStartedAfterActivation` (one servicing step, then the double's
+      part `started` and its one start event no earlier than the lease's
+      `activated_at_utc`, to the whole second, and the lifecycle read `active` with no
+      end or filing), `Purchase09`, `Recurring06_AcceptedMoneyShown` (the stderr check
+      on the ended run); `Stage09c2`, `Recurring07_BuyerEnds` (the buyer's `end`; the
+      part stopped by the payer with `partialPeriod` `charged`, nothing reserved, and
+      held plus released one period's price; the lifecycle read's payer end and no
+      filing, read on the hint before any step; one servicing step, still no filing;
+      then `Purchase10`'s lease checks — `releasing`,
+      `teardown_dispatch_pending`, one convergence advance to `tearing_down`, the
+      resource still held), `Stage11a2`, `Stage11b`, `Recurring08_PayerChargedOnePeriod`
+      (available down by exactly `PERIOD_GROSS`). `Purchase05` is not run: its debit
+      check is a once-only payment's, and `Recurring04` is the rate part's. Each
+      module's cleanup opens the gates, stops the buy, ends an unended deal by the
+      buyer's stop, removes both mock rules (bare metal also drains provisioning and
+      removes the pool override). `close_purchase_run`, `_commit_refused`,
+      `RecurringPurchaseDriver.site_capacity` and VM's `FIRST_SETTLEMENT_POLL_SECONDS`
+      are gone; the stage module's, both scenario modules', both drivers',
+      `e2e-tests/README.md`'s and both `e2e-tests/pyproject.toml` markers'
+      recurring-purchase text and `test_buyer_purchase_stages.py`'s docstring
+      describe delivery. The unit check's
+      handoff reads bare metal's `publication_stages.py` beside the shared stages, as
+      `test_compute_deal_stages.py` does, so `Stage09a2`'s write is seen. Unit
+      (`make -C e2e-tests test-unit`, 911 passed, 1 skipped), among them
+      `test_recurring_purchase_stages.py`'s order and handoff checks for both modules.
+- [x] 2B.2 Run both scenarios in their lanes. Verify (system):
       `e2e_vm_recurring_purchase` and `e2e_bare_metal_recurring_purchase` pass, each
       leaving no payment hold, mock rule or held loop.
-- [ ] 2B.3 Verification point: the `e2e-tests` unit suite and both lane runs pass.
+      Done: `make -C e2e-tests test-e2e-vm E2E_MODULE=e2e_vm_recurring_purchase` (28
+      passed) and `make -C e2e-tests test-e2e-bare-metal
+      E2E_BARE_METAL_MODULE=e2e_bare_metal_recurring_purchase` (28 passed), system
+      level against each lane's Compose stack with mock provisioning and the payments
+      double, each run twice (before and after the fresh-context fixes, the second at
+      the committed stages) and each stack taken down after. In every run the double
+      recorded the rate start in the same whole second as the site's activation
+      (second runs: VM activated 16:25:23.70Z, started 1794846323; bare metal
+      16:26:54.09Z, 1794846414), so the lane check passed at equality and does not
+      show the start followed the activation within that second; that order is each
+      storefront's `test_rate_delivery.py` (application integration: billing starts
+      from the recorded activation), and section 10's lane time may separate them.
+      The payer ended 250000 USD/6 down. Each module's cleanup deleted both mock rules,
+      removed the pool override in bare metal, and every hold resumed. "No payment
+      hold" — the spec's clean-up rule — is read as nothing reserved for the payer and
+      nothing the stages left running: the same requirement demands the started period
+      charged, which the double holds for the payee until its release instant (the
+      stop asserts held plus released one period), as a once-only purchase's payment
+      stays held until the lane ends; the owner may read it otherwise at triage. The
+      recorded end is read on the hint, before the servicing step; the lease is read
+      `releasing` only after the step, so the lanes do not show which move began the
+      teardown (by the code, bare metal's hint drives the physical end and VM's
+      lifecycle cycle does).
+- [x] 2B.3 Verification point: the `e2e-tests` unit suite and both lane runs pass.
       End-to-end: `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase`.
+      Done: as 2B.1 and 2B.2. End-to-end confirmed: `e2e_vm_recurring_purchase` and
+      `e2e_bare_metal_recurring_purchase`, which validation's pipeline (`make
+      run-e2e`) also runs, are evidence for sections 2, 2A and 2B once deployed. Owed by
+      validation: none. `scripts/change-workflow run pre-commit` passed with every
+      functional hook. `run test-before` was not run: the stage modules are lane
+      scenarios, which fail at the round's base only against a stack, where end
+      service refused the commit `Recurring05` now asserts delivered.
+      Fresh-context check: fixed — the two `e2e-tests/pyproject.toml` marker
+      descriptions still describing the refusal; `test-compatibility/architecture.md`'s
+      two refusal passages missing from 12.9 (added to its D9 entry); `Recurring07`
+      reading the recorded end only after the servicing step, so the hint's effect was
+      unmeasured (now read before it); `Recurring07` reading `purchase_run` and
+      `payer_account` unnamed to `require_state`; "no earlier than that activation"
+      claimed beyond the whole-second check, in the stage, the state field and the
+      README; the README reading Recurring05's step as causal; bare metal's cleanup
+      docstring omitting its drain; and these notes' timing, hint and hold claims.
+      Declined: splitting `Recurring07`, whose end, step and lease checks are one
+      ending as `Purchase10` is; sharing `Purchase10`'s lease-check body with it, which
+      the handoff planned as a copy and no rule forbids; and `deterministic-tests.md`'s
+      bare-metal loop table, which omitted `delivery-recovery` before this change and is
+      left to section 9's loop layout (handoff below).
 
-Section 2B handoff (not started; no code written, no task checked), from reading the
-stages after sections 2 and 2A were committed:
+Section 2B handoff:
+
+- The handoff below, written before 2B started, held: the composed stages are the
+  ones it names, plus the domain's `Stage09a2`, which `Stage09b` requires. Its
+  "`Recurring08`" and stage names are superseded by those in 2B.1's note.
+- Section 10 rewrites these modules on lane time. What it keeps: the stage order the
+  unit check holds (`EXPECTED_ORDER`), `Recurring04` read before `Stage09a`, and the
+  servicing steps in `Recurring05` and `Recurring07`, whose loop becomes
+  `deal-servicing` after section 9's rename. The `driver.servicing_loop` names
+  (`settlement-servicing` in VM, `delivery-recovery` in bare metal) are the two
+  places section 9.2 must rename for these modules.
+- `docs/guidance/repository/deterministic-tests.md`'s bare-metal loop table omits
+  `delivery-recovery`, which these modules step; section 9's new loop layout is
+  where the table is next made current.
+- The lanes run in about 15 seconds of stages once images are built; the image build
+  dominates. Each lane's stack must come down (`make -C e2e-tests e2e-<lane>-down`)
+  before the other's starts: they share host ports.
+
+Section 2B handoff, kept as history (written before 2B started, from reading the
+stages after sections 2 and 2A were committed):
 
 - Delivering the recurring deal in a lane is more than the refusal's removal. Every
   compute-lane module holds fulfillment convergence and the lease watchdog
@@ -824,7 +921,11 @@ campaign index currency.
       - D8, D11: `market-composition/architecture.md`, "Settlement runtime composition".
       - D9, D10: `docs/development/TESTING.md`, "The canonical compute deal" (the
         recurring-purchase paragraph rewritten; the rate rows and the watchdog cases on
-        lane time).
+        lane time). Also describing the recurring purchase as refused, found by
+        section 2B's fresh-context check: `openspec/specs/test-compatibility/architecture.md`,
+        "The in-lane payments double" ("no lane delivers a rate deal yet") and
+        "Ordinary Arkhai purchase evidence" (the recurring purchase "through commit
+        and no further", its balance restored).
       - D12: the `settlement-servicing` spec, by the archive.
       - D13: `openspec/specs/buyer-orchestration/architecture.md`, "Compute terms before
         approval" (the penalty bound) and "The buyer's watchdog" (the funding-stop exit),
