@@ -237,6 +237,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
                         help="run a pre-closeout review without a passing validation of HEAD")
+    review.add_argument("--arguments", default="",
+                        help="the owner's direction to this review, in their words: where to "
+                             "look harder, never a narrower review; recorded on its log line")
     stop_ = commands.add_parser(
         "stop", help="stop the change's run in progress, in its clone when it has one, which "
                      "is logged `stopped`")
@@ -818,7 +821,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         _round_view_closed(root)
         line = review_and_log(args.change, args.kind, root=wrapper.root, base=args.base,
                               model=args.model or None, effort=args.effort or None,
-                              fresh=args.fresh, unvalidated=args.unvalidated)
+                              fresh=args.fresh, unvalidated=args.unvalidated,
+                              direction=args.arguments.strip() or None)
         if line["outcome"] != "stopped":
             print(f"Review written to {line['record']}", file=sys.stderr)
         return _logged(line)

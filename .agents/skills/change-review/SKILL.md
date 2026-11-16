@@ -19,6 +19,13 @@ You are told the **review kind** (`design`, `implementation`, `pre-closeout`,
 `closeout`, or `merge`), the **change**, and for the later kinds the **base** branch
 the change is measured against.
 
+You may also be given **the owner's direction** to this review, in their words: a
+place to look harder, such as a part of the change or a concern they hold. Answer
+it — say in your assessment what you found where it points, a finding where
+something is wrong — and still review the whole change in this skill's format,
+asking every question of section 2. A direction never narrows the review, never
+settles a finding for you, and never excuses a question you would otherwise ask.
+
 ## Running unattended
 
 A review runs unattended through `make review`, on the review's models in order:

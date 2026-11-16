@@ -257,6 +257,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-1dld](spec.md#requirement-cw-1dld-a-run-with-no-available-model-stops-and-a-waiting-run-resumes-on-its-own) — a run with no available model stops; network errors retry without fallback; waiting runs resume on their model.
 - [CW-clhl](spec.md#requirement-cw-clhl-a-review-names-a-reviewer-other-than-its-rows-first) — a review on a fallback model names its reviewer; a reviewer session continues only on the same harness.
 - [CW-d1sm](spec.md#requirement-cw-d1sm-the-owner-may-override-one-reviews-model) — the owner may name any model or effort for one hand-run review, marked as an override, without fallback.
+- [CW-f0cs](spec.md#requirement-cw-f0cs-the-owner-may-direct-one-review-where-to-look-harder) — the owner may give one review a direction in their words, carried on its prompt and log line; it never narrows the review.
 - [CW-w2ld](spec.md#requirement-cw-w2ld-the-orchestrating-sessions-model-is-the-configurations) — the orchestrating session starts on the model and effort the configuration's `models.orchestrator` names.
 
 ### Cost

@@ -176,8 +176,10 @@ with the answer instead. Never continue a session on your own judgement.
 For `review`, run `make review CHANGE=<change> KIND=<computed-kind>`, in the clone
 likewise: the review runs on its row's models, Codex first and Claude when Codex is
 unavailable. Never set `REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's
-choice for a review run by hand, outside the row's policy. For
-`validate-and-review`, start validation with `UNATTENDED=1` and the review with its
+choice for a review run by hand, outside the row's policy. The owner's direction
+to a review — where it should look harder — goes on its run as `ARGUMENTS`, in
+their words, and in the log through `note` as well; the review's line records it.
+For `validate-and-review`, start validation with `UNATTENDED=1` and the review with its
 computed `KIND` side by side. When a validation, a review, or both carry `reading`,
 the owner reads the round in the workspace while they run ("Carry an
 implementation round"). Wait for both outcomes before triage and keep their

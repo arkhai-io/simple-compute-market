@@ -2497,6 +2497,22 @@ The orchestrating session MUST NOT name one.
 - **THEN** the review runs on that model alone, and its record and log line mark it
   as the owner's override
 
+### Requirement: CW-f0cs The owner may direct one review where to look harder
+
+The owner MAY give one review run a direction in their words, through the review
+command's `--arguments` (the convenience target's `ARGUMENTS`). The reviewer's
+prompt MUST carry it, and every log line of that run MUST record it as `direction`.
+The reviewer MUST answer it and MUST still review the whole change in the review
+format, asking every question of its kind: a direction never narrows a review.
+
+#### Scenario: The owner points a pre-closeout review at the guidance edits
+
+- **WHEN** the owner runs a pre-closeout review with the direction "check the
+  guidance edits sit where the new layers put them"
+- **THEN** the reviewer's prompt carries those words, the review answers them
+  beside every other question of a pre-closeout review, and the run's log line
+  records them as its `direction`
+
 ### Requirement: CW-w2ld The orchestrating session's model is the configuration's
 
 The configuration MUST name the orchestrating session's model and effort, and the
