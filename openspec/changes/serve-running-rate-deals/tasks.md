@@ -108,7 +108,7 @@ steps are authorized and admitted" (`compute-delivery`), "Payment settlement is 
 and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
 `kit/deal-servicing`, `domains/compute/delivery`.
 
-- [ ] 2.1 `kit/deal-servicing/src/market_deal_servicing/end.py`: remove `_unserviceable`
+- [x] 2.1 `kit/deal-servicing/src/market_deal_servicing/end.py`: remove `_unserviceable`
       and its call; in `_authorize_delivery`, when the phase's intent at this revision is
       already `done` and the new answer differs, return `pending` naming the changed
       answer and journal nothing (D1). Remove `DeliveryAuthorization.code`
@@ -122,7 +122,24 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       proceeds; once a recorded end moves the revision, admission answers ended. Rewrite
       `test_deadline_barrier.py`'s refused-deal setups as undelivered rate deals, keeping
       its three scenarios.
-- [ ] 2.2 `domains/compute/delivery/src/compute_delivery/path.py` and `outcome.py`: remove
+      Done: `_unserviceable` and its call are gone; a phase whose authorization at this
+      revision is `done` and whose new answer differs by status returns `pending` naming
+      both answers, with nothing journaled. Answers compare by status alone, since a rate
+      adapter's evidence references name each fresh snapshot. An end due by now at the
+      same revision is admission's own `refuse`, returned unjournaled rather than held
+      as a changed answer. `DeliveryAuthorization.code` and `RefusalCode` are removed,
+      with `kit/deal-lifecycle/tests/unit/test_delivery_authorization.py`, which tested
+      only the code's omission. Library integration (`test_changed_answer.py`, replacing
+      `test_rate_refusal.py`): a rate commit asks the adapter and journals its allow;
+      `allow` then `pending` and `allow` then `refuse` return `pending` with the journal
+      unchanged and nothing raised, and a later identical `allow` proceeds; once a
+      recorded end moves the revision admission answers ended; an end due at the same
+      revision is admission's answer; a once-only deal's unchanged answer reads the
+      journal as before. `test_deadline_barrier.py` keeps its three scenarios on an
+      undelivered rate deal. `kit/deal-lifecycle` 0.5.0, `kit/deal-servicing` 0.4.0
+      (contracts `>=0.3.0`); `kit/deal-servicing` 114 passed, `kit/deal-lifecycle` 82
+      passed.
+- [x] 2.2 `domains/compute/delivery/src/compute_delivery/path.py` and `outcome.py`: remove
       `RepairReason.RATE_SERVICING_UNAVAILABLE` and the code branch in `_authorized`;
       every refusal with no end due is `repair_required(no_accepted_deal)`. Verify
       (library integration, `domains/compute/delivery/tests/integration/test_drive_delivery.py`,
@@ -130,7 +147,13 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       refused-rate cases are replaced by a rate deal that commits and is delivered, a
       changed answer while it waits for its start leaving the drive pending, and an
       undelivered rate deal past its deadline.
-- [ ] 2.3 `kit/deal-servicing/src/market_deal_servicing/seller.py`, `_list`: a deal with a
+      Done: the reason and its branch are gone; a refusal with no end due is
+      `repair_required(no_accepted_deal)`. Library integration (`test_drive_delivery.py`,
+      130 passed with the suite): a rate deal commits and is delivered; a changed answer
+      while it waits for its start leaves the drive pending; an undelivered rate deal past
+      its deadline waits for a payment observation; one first driven past its deadline is
+      pending with nothing begun. `domains/compute/delivery` 0.2.0.
+- [x] 2.3 `kit/deal-servicing/src/market_deal_servicing/seller.py`, `_list`: a deal with a
       selected end is `ended` only when `progress == "released"`, every part in the
       authority view has a `final_stop` or an `end_at` at or before now, and no case is
       open; otherwise `ending`, with `ending` naming each outstanding code (D7). Verify
@@ -138,9 +161,26 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       still runs is `ending` with `payment_running`; tearing down with an open case gives
       `release_pending` and `case_open`; all clear gives `ended` with no codes; a case
       filed after `ended` returns `ending`.
-- [ ] 2.4 Verify D12 (library integration, `test_final_stop.py`): after the watch records a
+      Done: `_list` computes the outstanding codes in `_outstanding`; a repair-required
+      deal lists no codes. Library integration (`test_watch_and_seller.py`, through
+      `SellerServicing.list`): a released rate deal whose part still runs is `ending`
+      with `payment_running`, and `ended` with no codes once one part has a final stop and
+      the other an `end_at` by now; a deal torn down with a filed case is `ending` with
+      `release_pending` and `case_open`, `ended` once the case closes and the resource is
+      released, and `ending` with `case_open` when a later case is filed. The kit README
+      names the codes.
+- [x] 2.4 Verify D12 (library integration, `test_final_stop.py`): after the watch records a
       rate part's final stop, the servicing tables hold the stop and the selected end and
       no balance, funded amount or amount owed.
+      Done: with the authority's view carrying a collection amount and a funded boundary,
+      the watch records the stop as the selected end, and no `servicing_` table has a
+      money-named column and no journaled request, intent or delivery record a money-named
+      key (library integration, passed). Narrower than the task reads in two ways: the
+      watch's stored observation views (`servicing_watch`, `servicing_observations`) keep
+      the authority's view as read, its amount and funded boundary included, which D12's
+      requirement admits as a journaled observation, so the check leaves them out; and
+      the deal is the rig's once-only registration with a rate-shaped part (a
+      `funded_through` and a payer stop), not a deal registered as rate.
 - [ ] 2.5 (Moved to section 2B; not implemented here.) The two recurring-purchase scenarios
       (`e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_recurring_purchase.py`,
       `.../bare_metal/test_bare_metal_recurring_purchase.py`, their stages in
@@ -151,13 +191,36 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       period charged, and the seller's read shows the buyer's end; keep the waits they
       make today. Verify (unit, `e2e-tests/tests/unit/test_recurring_purchase_stages.py`)
       and by running both scenarios in their lanes.
-- [ ] 2.6 Verification point: `kit/deal-lifecycle`, `kit/deal-servicing` and
+- [x] 2.6 Verification point: `kit/deal-lifecycle`, `kit/deal-servicing` and
       `domains/compute/delivery` suites (unit, library integration) pass. The storefronts'
       suites are section 2A's verification point, which this section's work leaves
       failing four tests in each storefront until 2A rewrites them. End-to-end: none at
       this level; section 2B carries the recurring purchases.
+      Done: `kit/deal-servicing` (114), `kit/deal-lifecycle` (82) and
+      `domains/compute/delivery` (130) pass, unit and library integration, at the work in
+      progress committed before the replan; this section commits only its task notes, so
+      `scripts/change-workflow run pre-commit` runs its inert-path checks, and the
+      functional hooks, every suite with them, run at 2A's commit, once the storefront
+      suites pass. End-to-end confirmed: no scenario exercises this section alone; the
+      recurring purchases (section 2B) are its pipeline evidence. Owed by validation:
+      none.
+      Fresh-context check: it found the 2.4 note broader than its test (corrected above);
+      permanent documents describing the removed refusal missing from 12.9 (added to its
+      D1 entry); and comments left false by the refusal's removal, outside the plan —
+      `domains/bare_metal/storefront/storefront.dev.toml` and
+      `domains/vms/storefront/storefront.bob.lane.toml` (fixed with section 2A's commit,
+      which runs the functional hooks), `domains/compute/delivery/pyproject.toml`'s
+      version-history comment on its servicing bound (fixed with 2A), and
+      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/purchase_driver.py`'s docstring and
+      `e2e-tests/README.md`'s recurring-purchase paragraph (section 2B, which rewrites
+      that scenario). Declined: the citation in `journal.py` of the delta's heading, which
+      holds once the archive merges it; a stronger assertion in the undelivered-deadline
+      case of `test_drive_delivery.py`, whose later `ended` already shows the barrier;
+      and the "as before" test name, the delta scenario's own words.
 
-Section 2 handoff (in progress, uncommitted; no task checked yet):
+Section 2 handoff, kept as history: written when the work in progress was returned to
+planning, before the replan; tasks 2.1–2.4 and 2.6 were checked afterwards against that
+committed work.
 
 - Done in the worktree, suites passing: 2.1's end service (`_unserviceable` gone; a changed
   answer at a revision whose phase is `done` returns `pending`, compared by status alone,
@@ -559,7 +622,15 @@ campaign index currency.
         rule; the deadline barrier's "refused rate deal" wording) and "Current limits"
         (the "No storefront services a running rate deal" bullet);
         `openspec/specs/compute-delivery/architecture.md`, "Commit and hold adoption"
-        (the `rate_servicing_unavailable` repair reason).
+        (the `rate_servicing_unavailable` repair reason). Also describing the removed
+        refusal, found by section 2's fresh-context check: `docs/development/ARCHITECTURE.md`,
+        "Settlement servicing"; `openspec/specs/settlement-servicing/architecture.md`,
+        "Charge-first payment settlement" and "Current limits";
+        `openspec/specs/settlement-servicing/configuration.md`, "Seller servicing budget
+        diagnostics"; `openspec/specs/settlement-configuration/configuration.md`,
+        "Settlement consumer configuration and cutover";
+        `openspec/specs/storefront-publication/architecture.md`, "The servicing
+        declaration and its three doors".
       - D2, D3: `deal-lifecycle/architecture.md`, "One end instant, transactional
         admission" (payment-stop classification and the `terms` split).
       - D4, D6: `deal-lifecycle/architecture.md`, "Package and counterpart boundaries"
