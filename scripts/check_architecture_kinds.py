@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail if a package depends outside its allowlist or a plugin is imported.
 
-Rules (docs/development/ARCHITECTURE.md, "Kind"):
+Rules (docs/guidance/repository/package-layers.md, "Kind"):
 
 - ``kind_allowlist``: a ``contracts`` or ``client`` package depending on
   something its kind's allowlist in docs/development/ARCHITECTURE.toml does not

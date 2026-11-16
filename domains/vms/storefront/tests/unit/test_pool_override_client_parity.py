@@ -1,10 +1,11 @@
 """Sync and async clients expose the same pool-override contract.
 
-`docs/development/TESTING.md` requires this check with the owning service, which
-owns the contract-validation boundary. The pool-override methods are the kit's
-client extension over the core client's generic transport; an operator's CLI
-uses the sync variant and a scenario may use either, so a method present on only
-one variant would be found by whichever caller reached for the other.
+`docs/guidance/engineering/integration-tests.md#sync-and-async-client-parity`
+requires this check with the owning service, which owns the contract-validation
+boundary. The pool-override methods are the kit's client extension over the core
+client's generic transport; an operator's CLI uses the sync variant and a
+scenario may use either, so a method present on only one variant would be found
+by whichever caller reached for the other.
 """
 
 from __future__ import annotations

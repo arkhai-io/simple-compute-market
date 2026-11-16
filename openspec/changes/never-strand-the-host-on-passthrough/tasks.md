@@ -244,9 +244,9 @@ checked against it here.
 
 ## 8. Closeout
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
-Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/closeout.md`'s order.
 
 - [x] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` from the
       repository root and resolve every match. Then read the new shell,

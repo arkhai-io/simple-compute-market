@@ -308,7 +308,7 @@ def advance_fulfillment_to(
 ) -> dict:
     """Advance convergence until a fulfillment reaches ``expected``.
 
-    No sleeps, per `docs/development/TESTING.md`'s async test discipline:
+    No sleeps, per `docs/guidance/engineering/test-determinism.md#no-sleeps`:
     each iteration is one *explicit* advance, and the only thing between
     iterations is a request the test made.
 

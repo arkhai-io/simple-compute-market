@@ -54,6 +54,15 @@ class WatchSession:
             (negotiation_id, record_ref, view.model_dump_json()),
         )
 
+    def record_payment_observation(self, negotiation_id: str, commitment_ref: str, observed_at: int) -> None:
+        """Record a successful payment observation's instant, keeping the latest."""
+        self.conn.execute(
+            """INSERT INTO servicing_payment_observations VALUES (?,?,?)
+               ON CONFLICT(negotiation_id,commitment_ref) DO UPDATE
+               SET observed_at=MAX(observed_at,excluded.observed_at)""",
+            (negotiation_id, commitment_ref, observed_at),
+        )
+
     def save(self, negotiation_id: str, record_ref: str, sequence: int, view: AuthorityView) -> None:
         if sequence < self.cursor(negotiation_id, record_ref):
             raise ValueError("authority cursor regresses")
@@ -127,8 +136,9 @@ class DealWatch:
         )
 
     def _observe(
-        self, record_ref: str, view: AuthorityView, *, dispute: bool,
+        self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None,
     ) -> list[PaymentEvent | DisputeEvent]:
+        """Journal what one verified view shows; ``observed_at`` is a payment read's instant."""
         if not isinstance(view.outcome, Accepted):
             return []
         events: list[PaymentEvent | DisputeEvent] = []
@@ -230,12 +240,16 @@ class DealWatch:
                     self._record_payment_stop(end, event)
                 cursor = event.sequence
                 fresh.append(event)
+            if observed_at is not None:
+                # In the transaction that recorded every final stop the view
+                # carried, so admission never reads the instant without them.
+                watch.record_payment_observation(self.negotiation_id, self.commitment_ref, observed_at)
             watch.save(self.negotiation_id, record_ref, cursor, view)
             return fresh
 
-    def _refresh(self, record_ref: str, view: AuthorityView, *, dispute: bool):
+    def _refresh(self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None = None):
         try:
-            fresh = self._observe(record_ref, view, dispute=dispute)
+            fresh = self._observe(record_ref, view, dispute=dispute, observed_at=observed_at)
         except ValueError as exc:
             view = AuthorityView(outcome=Rejected(reason=str(exc)))
             fresh = []
@@ -244,11 +258,20 @@ class DealWatch:
         return view, fresh
 
     async def poll(self) -> tuple[list[AuthorityView], list[PaymentEvent | DisputeEvent]]:
+        """Read each authority and journal what it shows.
+
+        A verified payment read also records its instant, taken before the read
+        is sent: the authority answers no earlier, so a stop it had recorded by
+        then is in the view. A failed, unverified or refused read records none.
+        """
         views = []
         fresh: list[PaymentEvent | DisputeEvent] = []
         if self.payment is not None:
+            observed_at = self.clock()
             payment = await self.payment.read()
-            payment, events = await asyncio.to_thread(self._refresh, self.payment_record, payment, dispute=False)
+            payment, events = await asyncio.to_thread(
+                self._refresh, self.payment_record, payment, dispute=False, observed_at=observed_at,
+            )
             views.append(payment)
             fresh.extend(events)
         if self.dispute is not None and self.dispute_record is not None:

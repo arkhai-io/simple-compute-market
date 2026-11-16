@@ -24,7 +24,6 @@ from market_core.schemas import (
 from market_deal_lifecycle.terms import LifecycleTerms
 from market_settlement_runtime.rate_servicing import RateServicing
 from market_arkhai_payments.canonical import wire_json
-from market_arkhai_payments.contracts import get_contract
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.mandates import MandatePolicy, PaymentsOptionParams, derive_mandate
 from market_arkhai_payments.models import AccountId, Mandate
@@ -151,13 +150,12 @@ class PaymentSettlementData(BaseModel):
         cls, agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig,
         *, rate_servicing: RateServicing | None = None,
     ) -> PaymentSettlementData:
-        option = selected_payment_option(agreement)
-        if option.period is not None:
-            declaration = (rate_servicing or RateServicing()).select(ARKHAI_PAYMENTS_MECHANISM)
-            if declaration.contract_revision != str(get_contract().metadata["schema_sha256"]):
-                raise MandatePolicyError("rate servicing does not select the installed payments contract")
-            if declaration.publication == "proposed" and (config.livemode or config.service_identity is None):
-                raise MandatePolicyError("proposed rate servicing requires a pinned non-live authority")
+        # Materialization is the last door before money moves, so it checks the
+        # same declaration the publication and acceptance doors check: a rate
+        # option whose treatments or setup charge are undeclared here refuses with
+        # RateServicingUnavailable, even when it was accepted before a withdrawal.
+        selected_payment_option(agreement)
+        (rate_servicing or RateServicing()).require_option(agreement["settlement"])
         mandate = derive_mandate(dict(agreement), mandate_policy_for_agreement(agreement, config))
         return cls(mandate=mandate, transaction_id=transaction_id(mandate))
 

@@ -31,7 +31,7 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
 )
-from arkhai_bare_metal_storefront.settlement_stages import legacy_alkahest_option
+from arkhai_bare_metal_storefront.settlement_stages import SettlementRequestError, legacy_alkahest_option
 from datetime import datetime, timezone
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
@@ -1148,6 +1148,23 @@ PAYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
 
 
+def _payment_composition(payments, service_identity):
+    """The storefront's payments composition trusting ``service_identity`` alone."""
+    return BareMetalStorefrontSettlementComposition.from_raw_config(
+        {
+            "priority": ["arkhai.payments.v1"],
+            "arkhai_payments": {
+                "enabled": True,
+                "service_url": "http://127.0.0.1:3180",
+                "development_auth": True,
+                "service_identity": service_identity.model_dump(mode="json"),
+                "fee_bps": 0,
+            },
+        },
+        payments_client_for_owner=payments,
+    )
+
+
 async def _payment_deal(tmp_path, *, provisioning=None) -> SimpleNamespace:
     """An accepted ``arkhai.payments.v1`` deal whose payment is not yet
     approved: its storefront runtime, the parties' signers, the payments fake,
@@ -1160,19 +1177,7 @@ async def _payment_deal(tmp_path, *, provisioning=None) -> SimpleNamespace:
     domain = get_market_domain_contract()
     migrate_storefront_database(tmp_path / "payment.db")
     db = SQLiteClient(str(tmp_path / "payment.db"), domain=domain)
-    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
-        {
-            "priority": ["arkhai.payments.v1"],
-            "arkhai_payments": {
-                "enabled": True,
-                "service_url": "http://127.0.0.1:3180",
-                "development_auth": True,
-                "service_identity": receipt_signer.identity.model_dump(mode="json"),
-                "fee_bps": 0,
-            },
-        },
-        payments_client_for_owner=payments,
-    )
+    composition = _payment_composition(payments, receipt_signer.identity)
     params = {"payee_account": PAYEE, "window": "PT1H", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
     option = SettlementOption(
@@ -1362,6 +1367,52 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
     ):
         await restarted.fulfillment_service().status(
             negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+
+async def test_a_receipt_identity_cutover_refuses_a_deal_the_removed_identity_approved(
+    tmp_path,
+):
+    """A receipt key change is a cutover: a storefront restarted trusting only
+    the new identity re-proves no deal the old one approved, so its stored
+    receipt is refused and nothing is reserved or provisioned again."""
+    deal = await _payment_deal(tmp_path)
+    runtime, db, domain = deal.runtime, deal.db, deal.domain
+    negotiation_id, buyer, data = deal.negotiation_id, deal.buyer, deal.data
+    capacity, provisioning = deal.capacity, deal.provisioning
+    request = BareMetalSettleRequest(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    deal.payments.serve(build_signed_receipt(signer=deal.receipt_signer, mandate=data.mandate))
+    verified = await runtime.settlement_service().verify(
+        escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
+    )
+    assert verified.status_code == 200
+    delivered = await runtime.fulfillment_service().status(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    assert delivered["state"] == "active"
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+    # A public deterministic development key; never use it on a public network.
+    new_identity = Ed25519Signer(bytes.fromhex("56" * 32)).identity
+    switched = replace(
+        runtime,
+        db=SQLiteClient(db.db_path, domain=domain),
+        settlement_composition=_payment_composition(deal.payments, new_identity),
+    )
+    with pytest.raises(
+        BareMetalFulfillmentError, match="stored payment receipt is invalid"
+    ):
+        await switched.fulfillment_service().status(
+            negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    with pytest.raises(
+        SettlementRequestError, match="stored payment receipt does not prove this Agreement"
+    ):
+        await switched.settlement_service().verify(
+            escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
         )
     assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
 

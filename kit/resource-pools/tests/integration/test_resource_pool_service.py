@@ -1,8 +1,8 @@
 """
 Library integration tests for ResourcePoolService.
 
-Scope (per TESTING.md — a library's public service API against a real
-embedded database):
+Scope (library integration, per docs/guidance/engineering/test-levels.md — a
+library's public service API against a real embedded database):
   - CRUD: create/get/list/replace/patch/enable/disable
   - Tag-filtered lookup
   - Provider config validation (required fields; unknown providers rejected)

@@ -78,7 +78,8 @@ approval. No tests are added by this reconciliation.
 
 ## 4. Closeout
 
-Documentation-only, following `openspec/README.md#plan-closeout-requirements` in
+Documentation-only, following `docs/guidance/workflow/closeout.md`, with this
+repository's parts in `openspec/README.md#this-repositorys-closeout-parts`, in
 order. Code defects return to implementation; do not promote planned behavior.
 
 - [ ] 4.1 **Comment hygiene:** run `make check-comment-hygiene` and confirm comments

@@ -226,7 +226,7 @@ For an implementation round, also take:
   only if the owner waives the rule, judging the changes between the commits: name
   both, summarize what changed (`git log --oneline <reviewed>..<validated>` and the
   paths of `git diff --stat <reviewed> <validated>`), and ask. Recommend the waiver
-  when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds — here,
+  when a criterion of `change-workflow`'s CW-q3dm holds — here,
   typically, that the two commits differ only in records or documentation —
   naming the criterion and the paths; with none holding, recommend none. Record a
   waiver in the triage file of each record involved and as one ledger line
@@ -263,7 +263,10 @@ For an implementation round, also take:
   saves the notes as the round's record. Otherwise ask for them if the owner has
   not pasted them, naming that command so the owner can read what the notes are
   about, and save them exactly as pasted as the next numbered record,
-  `NN-implementation-owner.md`.
+  `NN-implementation-owner.md`. Notes the owner saved while no review awaited a
+  triage — on an earlier triage's fixes, or on a re-plan — are carried by the next
+  round: its line in the workflow log names them under `carries`, and you triage
+  them with the round's own notes, as points of their own.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and then each commit the owner made
   while reading, which the pull above brought in, as a point after them; and
@@ -285,7 +288,9 @@ corrections, or new decision numbers — for issues a review already named.
 
 Then read what you need to judge the findings: the documents
 `scripts/change-workflow config load triage` prints, every file in the change, earlier reviews and their triage, and the code,
-specifications, and guidance each finding cites.
+specifications, and guidance each finding cites — with each cited specification, its
+companion and every other Markdown file in its capability's directory but its
+`index.md`, the capability's own guidance — before deciding a fix.
 
 ## 2. Check every finding
 
@@ -316,14 +321,13 @@ For each finding, open what it cites and decide:
   A defect a finding shows outside the change's stated scope is an `edit` or a
   `fix` when its fix is understood and small beside the change, recorded in the
   task notes or the triage record; one that is large, or not understood well enough
-  to fix without a design of its own, is `none`, recorded where `AGENTS.md`'s
-  "Deferred work" says — its own change, or an unowned gap
-  (`openspec/README.md#defects-found-during-a-change`).
+  to fix without a design of its own, is `none`, recorded where deferred work goes
+  (`docs/guidance/workflow/working-model.md#deferred-work`) — its own change, or an
+  unowned gap (`docs/guidance/workflow/changes.md#defects-found-during-a-change`).
 - **Section:** the `tasks.md` section the finding concerns, when it concerns one.
 - **Default acceptance:** whether the finding is accepted by default or discussed.
   It is accepted by default when every condition of the default rule holds
-  (`change-workflow`'s CW-d5ac; `docs/agents/change-workflow.md`, "Default
-  acceptance"), and discussed otherwise:
+  (`change-workflow`'s CW-d5ac), and discussed otherwise:
   - it comes from a review — not a validation record, the owner's notes, or the
     orchestrating session's observations;
   - its severity, as triaged, is not `blocking`;
@@ -408,7 +412,7 @@ still without a disposition and ask about it. The owner may answer several at on
 or say to batch the rest; never propose it.
 
 The default acceptances reach the owner in one table, the form
-`docs/agents/change-workflow.md`'s "Default acceptance" gives — each finding's
+`change-workflow`'s CW-t9bx gives — each finding's
 label, its severity, the finding in one line, and its outcome:
 
 ```markdown
@@ -555,7 +559,8 @@ acceptances' outcomes are carried out with the rest.
 - **task:** append it to `tasks.md` in the section it concerns, amending rather than
   replacing, with the finding cited in its note.
 - **none:** nothing to carry out, except for a large or vague out-of-scope defect
-  (step 2): record it where `AGENTS.md`'s "Deferred work" says, and name where in
+  (step 2): record it where deferred work goes
+  (`docs/guidance/workflow/working-model.md#deferred-work`), and name where in
   the finding's `Result`.
 - **fix, at a closeout triage:** the change is archived, and its code was reviewed
   and validated before closeout, so a closeout triage makes documentation fixes
@@ -585,7 +590,9 @@ acceptances' outcomes are carried out with the rest.
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
-  committing (its step 5): the focused suites, `scripts/change-workflow run
+  committing (its step 5): the focused suites, a fix's new test run against the
+  commit before it with `scripts/change-workflow run test-before` where it should
+  fail there, `scripts/change-workflow run
   pre-commit <change>`, whose hooks follow from the paths the fixes change — a fix
   only under the repository's inert paths runs `pre-commit` alone — staging what
   the hooks rebuilt (before closeout its citations check may report only files the
@@ -595,7 +602,8 @@ acceptances' outcomes are carried out with the rest.
   fresh-context compliance check of the diff against the `HEAD` recorded at the
   start. In the fix's task
   note, record each check as `change-implement` records a section's evidence: each
-  suite with its level as `TESTING.md` defines them and its result, each hook's
+  suite with its level as `docs/guidance/engineering/test-levels.md` defines them
+  and its result, each hook's
   closing line, and what the fresh-context check found and what was fixed or declined —
   so the next review and validation can see what the fix was proven by.
   Commit, as one commit
@@ -625,8 +633,8 @@ interface's operations, or the change's scope — so the reviews just triaged no
 longer describe the change, naming the decisions that changed; advancing when the
 fixes are corrections the reviewer would only confirm.
 
-Advancing is the default exit (`docs/agents/change-workflow.md`, "Default
-acceptance"): when you recommend it, take it without asking, and report it in your
+Advancing is the default exit (`change-workflow`'s CW-9pbk): when you recommend
+it, take it without asking, and report it in your
 final report beside the table of default acceptances, with the reason, so the
 owner can revisit it (step 7). When you recommend another round, argue it and ask,
 the table riding on the question (step 3); the owner's answer chooses. The exit is
@@ -717,8 +725,8 @@ status, and say what that review reads.
 The owner may revisit a default acceptance, or the advancing exit you took, after
 this triage finished. The orchestrating session then stops any step started after
 it, records the owner's direction naming this run (`--resumes`), and resumes this
-session with the owner's words (`docs/agents/change-workflow.md`, "Revisiting a
-default acceptance"): a message resuming a finished triage is that revisit.
+session with the owner's words (`change-workflow`'s CW-r8vz): a message resuming
+a finished triage is that revisit.
 
 1. **Check again**: the branch carries the change and the worktree is clean, and,
    for an implementation round, `scripts/change-workflow check round-view` passes.

@@ -190,8 +190,9 @@ class TestCreateVmViaClient:
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
         # Wait on the job reaching a terminal state, not on the clock. The
         # dispatch seam fires when the job *starts*; a sleep here was racing
-        # the playbook call it then asserts on, and `TESTING.md` prohibits
-        # sleeps as background synchronisation for exactly that reason.
+        # the playbook call it then asserts on, and
+        # `docs/guidance/engineering/test-determinism.md` prohibits sleeps as
+        # background synchronisation for exactly that reason.
         await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         fake_ansible.start_playbook.assert_called_once()

@@ -279,6 +279,29 @@ def _cloned(root: Path, base: str) -> Path:
     return root
 
 
+@pytest.mark.parametrize("given,arguments", [
+    ([], None),
+    (["FROM=main"], "from main"),
+    (["ARGUMENTS=the owner's note"], "the owner's note"),
+    (["FROM=main", "ARGUMENTS=the owner's note"], "from main the owner's note"),
+])
+def test_the_merge_target_passes_its_branch_and_the_owners_direction(
+        tmp_path: Path, given: list[str], arguments: str | None) -> None:
+    (command,) = _make_n("merge", "CHANGE=X", *given)
+    printed = subprocess.run(
+        ["sh", "-c", command.replace(f"{COMMAND} start", "printf '%s\\n'")],
+        cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
+
+    assert printed == ["merge", "X", *(["--arguments", arguments] if arguments else [])]
+
+
+def test_the_owners_direction_follows_the_recorded_branch(tmp_path: Path) -> None:
+    root = _cloned(tmp_path, "dev")
+    log_file(root)
+
+    assert merge_arguments(root, CHANGE, "read the brief") == "from dev read the brief"
+
+
 def test_a_change_worked_in_place_with_no_recorded_merge_needs_its_branch(
         tmp_path: Path) -> None:
     """CW-s3ju, "A change worked in place merges with no base given"."""

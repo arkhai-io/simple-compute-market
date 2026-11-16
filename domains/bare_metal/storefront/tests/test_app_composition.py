@@ -19,7 +19,7 @@ from core_storefront.identity_authority import (
     StorefrontIdentityAuthority,
 )
 
-from market_identity import Eip191Signer, TrustedIdentitySet
+from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from settlement_compositions import alkahest_composition
 from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLifecycle
@@ -1009,6 +1009,13 @@ def test_the_configured_rate_servicing_declaration_is_the_compositions():
         "schema_version": 1,
         "priority": ["contact-exchange.v1"],
         "contact": CONTACT_SECTION,
+        # Development fixture: a disabled payments section still services
+        # accepted deals, so it yields the seller stage. The identity is the
+        # public all-sevens development key, never used on a public network.
+        "arkhai_payments": {
+            "enabled": False, "service_url": "http://127.0.0.1:9",
+            "service_identity": Ed25519Signer(b"\x07" * 32).identity.model_dump(mode="json"),
+        },
         "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
     }
 
@@ -1017,6 +1024,12 @@ def test_the_configured_rate_servicing_declaration_is_the_compositions():
     assert composition.rate_servicing is composition.config.rate_servicing
     declared = composition.rate_servicing.select("arkhai.payments.v1")
     assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+    # Materialization reads the same declaration, and the payments kit's preset
+    # helper and timing projection are installed beside it.
+    stage = composition.arkhai_payments_stage()
+    assert stage is not None and stage.rate_servicing is composition.rate_servicing
+    assert set(composition.rate_preset_helpers or {}) == {"arkhai.payments.v1"}
+    assert set(composition.rate_term_projections or {}) == {"arkhai.payments.v1"}
 
 
 def test_the_configured_penalty_multiple_is_the_compositions(monkeypatch, tmp_path):

@@ -106,7 +106,9 @@ places that matter, so read all of this first, in full:
   are design input).
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
   and its companion when one exists — `README.md` where the capability has an
-  `index.md`, which you read too, and `architecture.md` elsewhere.
+  `index.md`, which you read too, and `architecture.md` elsewhere — and every
+  other Markdown file in its directory but its `index.md`: the capability's own
+  guidance.
 - The code the design cites, and the code it would change. Read enough of it to
   check every factual claim the design makes about the current system.
 - Each change listed in the row's `Depends on`, at least its `proposal.md` and
@@ -201,7 +203,8 @@ of the owner's attention:
 - **Judgement** — the options trade real values against each other and no
   written principle or precedent picks one. Present these one at a time, in full.
 - **Consequence** — the answer follows from a decision already settled, or from
-  a principle in `ARCHITECTURE.md`. Name what it follows from.
+  a principle in `ARCHITECTURE.md` or `docs/guidance/engineering/`. Name what it
+  follows from.
 - **Convention** — the answer follows from how the nearest existing precedent
   does the same thing (a sibling hint, kit, or configuration key). Cite the
   precedent.
@@ -213,7 +216,8 @@ so the owner can confirm the batch or pull one out for discussion.
 Never ask the owner where documentation should live, at which test level a
 behaviour is proven, or which evidence a section records: state each as a
 provisional answer — the documentation destination in `proposal.md`, the test
-level from `TESTING.md` — for planning and review to confirm or move.
+level from `docs/guidance/engineering/test-levels.md` — for planning and review to
+confirm or move.
 
 ### Do not argue from absence of a caller alone
 
@@ -263,7 +267,8 @@ rationale.
 When the owner states a principle that settles a decision, apply it to the
 remaining open decisions before presenting them, and say where it applied.
 Principles the owner states that no document records are candidates for
-`ARCHITECTURE.md`; list them for the owner when the design is settled.
+`ARCHITECTURE.md`, or for `docs/guidance/engineering/` where one holds in any
+repository; list them for the owner when the design is settled.
 
 When the owner's input changes or reverses your recommendation, append one line
 to the change's `interventions.jsonl` with the decision as the finding:
@@ -319,13 +324,14 @@ When every decision is settled, and before writing anything:
   decisions added it, and whether any of it gives the change a new prerequisite
   or a second domain, subsystem, or acceptance boundary. Ask the owner
   explicitly whether any of it should be split into its own change, as
-  `openspec/README.md#defects-found-during-a-change` frames it: a small,
+  `docs/guidance/workflow/changes.md#defects-found-during-a-change` frames it: a small,
   understood defect fix, or unification the architecture favours, belongs in the
   change; work that is large, or not understood well enough to fix without a
   design of its own, is split. A change that can close out on its own is
   preferred to one waiting on another.
 - **List the principles the owner stated** that no permanent document records,
-  for promotion to `ARCHITECTURE.md`.
+  for promotion to `ARCHITECTURE.md`, or to `docs/guidance/engineering/` where one
+  holds in any repository.
 - **Settle the implementation cadence** with the owner, as a decision like any
   other: how many rounds implement the work, what each round covers before its
   review, and how many sessions implement each — in terms of the work, since the
@@ -349,7 +355,7 @@ Only when the owner says the design is settled:
   change's implementation cadence.
 - Keep under `## Open Questions` only what is genuinely deferred, each with what
   would trigger revisiting it. A question may not stay open while a task
-  prescribes its answer (`openspec/README.md#open-questions-and-prescribed-tasks`).
+  prescribes its answer (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`).
 - Amend `proposal.md` when scope, non-goals, capabilities, or impact moved, and
   keep its `## Permanent documentation impact` and `### Knowledge to promote`
   naming the permanent destination of every material decision: a bullet starting
@@ -378,7 +384,7 @@ once the design review's triage records that the change advances.
 The design phase ends with a design review, not with this skill. Tell the owner
 the design is ready for review and leave the status `in design`. Finishing after a
 return to design, recommend that the owner waive another design review when a
-criterion of `docs/agents/change-workflow.md`'s "Waivers" holds — what this session
+criterion of `change-workflow`'s CW-q3dm holds — what this session
 settled is confined to one requirement's wording, or to a choice the design review
 already weighed — naming the criterion and its evidence; with none holding,
 recommend none. Only the owner waives, and the orchestrating session writes the

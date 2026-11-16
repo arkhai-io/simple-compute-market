@@ -29,6 +29,11 @@ allow = [
   "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
   "Bash(git merge-base*)", "Bash(git check-ignore*)",
+  # Any step may refresh its view of the remote's branches and tags, so one
+  # reading the release record (the marketplace-v* tags) or the landing branch
+  # reads the current one. A fetch moves remote-tracking refs and tags only,
+  # never the worktree or a local branch.
+  "Bash(git fetch origin*)", "Bash(git fetch workspace*)",
   "Bash(scripts/change-workflow next*)", "Bash(scripts/change-workflow cost*)",
   "Bash(scripts/change-workflow log*)", "Bash(scripts/change-workflow config *)",
   "Bash(scripts/change-workflow record*)",
@@ -204,7 +209,6 @@ deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
 skill = "change-merge"
 allow = [
   "Edit", "Write", "Task",
-  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
   "Bash(git merge --no-edit origin/*)", "Bash(git merge --no-edit workspace/*)",
   "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
@@ -244,7 +248,5 @@ allow = [
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
   "Bash(scripts/change-workflow history*)", "Bash(scripts/change-workflow run *)",
   "Bash(make helm-values-schema)",
-  # Archive cleanup fetches the branch the change's last merge brought in, to record it.
-  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
 ]
 deny = ["Bash(gh pr create*)"]

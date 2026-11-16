@@ -427,16 +427,34 @@ def test_the_installed_projection_bills_a_once_option_as_one_total() -> None:
 
 
 @pytest.mark.parametrize("params", [
-    {"period": "PT15M"}, {"period": "PT1M", "reserve_ahead_seconds": 1800}, {"setup_amount": "500"},
+    {"period": "PT15M", "reserve_ahead_seconds": 1800},
+    {"period": "PT15M", "reserve_ahead_seconds": 1800, "setup_amount": "500"},
 ])
-def test_the_installed_projection_refuses_rate_parameters_rather_than_label_them_a_total(
+def test_the_installed_projection_bills_a_complete_rate_option_per_period(
     params: dict[str, Any],
 ) -> None:
-    # The installed adapter services once parts only; a rate option labelled a
-    # total would be charged its one period's price for the whole term.
+    # A setup charge beside the rate does not make the option a total: the
+    # accepted amount is still one period's price.
     project = create_arkhai_payments_registration().project_billing
     assert project is not None
-    with pytest.raises(ValueError, match="Extra inputs"):
+    assert project(_with_params(payment_terms.option(), **params)) == PriceBasis(
+        unit="per_period", period="PT15M", period_seconds=900,
+    )
+
+
+@pytest.mark.parametrize(("params", "rule"), [
+    ({"period": "PT15M"}, "must appear together"),
+    ({"reserve_ahead_seconds": 1800}, "must appear together"),
+    ({"setup_amount": "500"}, "setup_amount requires a rate part"),
+])
+def test_the_installed_projection_refuses_an_incomplete_rate_rather_than_label_it_a_total(
+    params: dict[str, Any], rule: str,
+) -> None:
+    # A rate option projected as a total would charge its one period's price
+    # for the whole term, so an unpaired rate never falls back to total.
+    project = create_arkhai_payments_registration().project_billing
+    assert project is not None
+    with pytest.raises(ValueError, match=rule):
         project(_with_params(payment_terms.option(), **params))
 
 

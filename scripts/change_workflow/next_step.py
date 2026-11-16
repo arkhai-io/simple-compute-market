@@ -364,9 +364,10 @@ def _merging(root: Path) -> bool:
     return merge.returncode == 0
 
 
-def _inert_paths(root: Path) -> tuple[str, ...] | None:
-    """The repository's inert paths, from its workflow configuration."""
-    return config.load(root).inert_paths
+def _inert_paths(root: Path) -> tuple[str, ...]:
+    """The repository's inert paths, from its workflow configuration: the workflow's
+    default where it declares none."""
+    return config.load(root).repository_inert_paths()
 
 
 def _uncommitted(root: Path, path: Path) -> bool:
@@ -608,7 +609,7 @@ class Computation:
                  bootstrap: Callable[[Path], Bootstrap] = bootstrap_state,
                  merging: Callable[[Path], bool] = _merging,
                  join: Join = ROUND_JOIN,
-                 inert_paths: Callable[[Path], Sequence[str] | None] = _inert_paths) -> None:
+                 inert_paths: Callable[[Path], Sequence[str]] = _inert_paths) -> None:
         self.root = root
         self.state = State(change)
         # Read once, and checked whole as the configuration always is: a malformed
@@ -845,7 +846,7 @@ class Computation:
                 f"{state.change}'s branch is not checked out here, but its records are in "
                 "this workspace's reviews/, which a clone would start without: check out "
                 f"its branch here and go on in the workspace, or move it into a clone by "
-                "hand as docs/agents/change-workflow.md describes",
+                "hand as docs/change-workflow-handbook.md describes",
                 routes=["work it in the workspace", "move it into a clone by hand"])
         return self.clone_step(
             f"{state.change}'s branch is checked out neither here nor in a clone of its own",
@@ -1285,8 +1286,11 @@ class Computation:
         review are no evidence that the owner read the round.
         """
         state = self.state
-        mine = [r for r in state.records if r.number > current.get("after", 0)]
-        kinds = {r.review_kind or r.kind for r in mine}
+        own = [r for r in state.records if r.number > current.get("after", 0)]
+        # Notes the round carries are triaged with it but are not its reading.
+        carried = set(current.get("carries") or ())
+        mine = [r for r in state.records if r.number in carried and not r.triaged] + own
+        kinds = {r.review_kind or r.kind for r in own}
         in_clone = state.workspace is not None
         base = again.reviewed_commit if again and self.fixed_since(again) else None
         if again is None:
@@ -1349,7 +1353,11 @@ class Computation:
         if unknown := [s for s in round_sections if s not in by_id]:
             return self.unclassified(f"the agreed round names sections the task list lacks: "
                                      f"{', '.join(unknown)}")
-        if ROUND in members:
+        # A review awaiting its triage is triaged before the round's open sections
+        # are implemented: its findings may change what is left to do.
+        awaiting = any(r.review_kind == "implementation" and not r.triaged
+                       for r in state.records if r.number > current.get("after", 0))
+        if ROUND in members and not awaiting:
             for session in current["sections"]:
                 # The closeout section is closeout's, never a round's to implement.
                 if any(not by_id[str(s)].complete and not by_id[str(s)].closeout

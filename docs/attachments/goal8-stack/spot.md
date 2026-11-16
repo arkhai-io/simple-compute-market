@@ -1,42 +1,37 @@
-# Spot-deals stack replay
+# Spot-deals replay onto `dev`
 
-Parent: the replayed terms PR. Backup: `pre-rebase/spot-deals` at `73871d286`.
-The publication-fixture correction `cd5050158` is inherited from the terms PR,
-where its declaration gate first appears. The other three commits are replayed
-in order, with no duplicated registry or resize history and no merge commit.
+Base: `dev` after the open-ended-terms change (PR #351) merged. The four commits of
+sections 1–3 (PR #354) were rebased onto it, to `a701e6803`. Section 4 with its
+permanent tests, the shared runway rule and refusal classes (the 8 commits of PR
+#370), and compute buyers' selection of spot and on-demand options (the 5 commits of
+PR #372, task 2.7) had been stacked on the pre-rebase branch; they were
+cherry-picked onto `a701e6803` in order, authorship kept, to `dab8d06b8`. There is
+no merge commit.
 
-The campaign-index conflict keeps dev's archived delivery-path status and related
-current dependencies while recording spot's implementation of sections 1–3 only.
-Sections 4–6 and maintainer design review remain pending. The composition conflict
-keeps the incoming typed `selected_clause` local alongside the terms PR's current
-publication inputs. A joined argument line from that resolution is split again.
-There is no rate-library behavior change beyond the original three commits.
+Conflicts and their resolution:
 
-Validation follows fresh wheels and each consumer's `reinit`. Complete existing
-`tests` trees run with `uv run --frozen --no-sync pytest tests -q --tb=short`, with
-shell proxies removed for HTTP application tests:
+- `domains/vms/storefront/pyproject.toml` and its lock: the lifecycle client moves to
+  runtime dependencies for `deals preempt`; `dev`'s newer dev-dependency pins are
+  kept and the client's redundant dev entry dropped. `make dist` then
+  `make check-locks`: every lock current.
+- `kit/settlement-runtime/src/market_settlement_runtime/horizon.py`: `dev`'s
+  `parse_utc`, `bound_seconds` and `check_accepted_horizon` are kept beside the
+  incoming `minimum_rate_duration_seconds`, whose use in `resolve_horizon` merged
+  cleanly with the whole-second start and its floor.
+- Both buyers' `settlement_composition.py`: the per-term `waivers` signature is kept
+  with task 2.7's `approvable_terms(context)` return.
+- `domains/bare_metal/buyer/tests/test_buyer_composition.py`: `dev`'s deadline-waiver
+  test is kept; the recurring-option test moves to `test_recurring_options.py`.
 
-| Package | Result |
-|---|---|
-| Arkhai payments | 221 passed |
-| Deal lifecycle contracts | 37 passed |
-| Deal servicing | 70 passed |
-| VM storefront | 1724 passed, 1 skipped |
-| Bare-metal storefront | 610 passed |
-| Payments `make test` | passed: typing including examples, vectors, generated models and all 221 tests |
-| Deal servicing `make typecheck` | passed, 12 source files |
-| VM storefront `mypy src` | 129 errors in 32 files; dev has 136 in 33 files |
-| VM settlement composition focused mypy | passed, 1 file |
-| Bare-metal settlement composition focused mypy | passed, 1 file; existing untyped dependency imports excluded |
-| `make check-comment-hygiene` | passed |
-| `make check-packaging` | passed |
-
-Deal lifecycle contracts declares no independent typing target. Whole-project VM
-typing remains owned by [`type-core-packages`](../../../openspec/changes/type-core-packages/).
-The existing spot commit narrows and types the composition path, reducing its
-baseline diagnostics. No new permanent tests were added during replay. No deployed
-end-to-end or browser qualification was performed; the rebase does not enable an
-installed recurring declaration or implement the remaining spot scope.
+Suites after the replay, before round 1's triage: deal-lifecycle 82,
+deal-lifecycle-buyer 22, deal-lifecycle-client 2, deal-lifecycle-contracts 37,
+deal-servicing 70, settlement-runtime 302, bare-metal storefront 631 and VM
+storefront 1785 (1 skipped) passed. The payments kit (287 passed, 5 failed, 9 typing
+errors), the bare-metal buyer (66 passed, 2 failed) and the VM buyer's
+`test_recurring_option_selection.py` (failed at collection) were red, every failure
+the servicing declaration's earlier shape or the open-ended-terms change's once-only
+guards. Round 1's triage reconciled them; its evidence is in the change's task
+notes ("Round 1 triage fixes").
 
 First use:
 
@@ -47,7 +42,5 @@ make -C kit/arkhai-payments first-use-rate
 
 The committed [prepared target](../spot-deals-sections-1-3/index.md#scope-and-prepared-first-use)
 owns in-process state, deterministic development payer/payee accounts, fixture
-signing and an injected clock. Rerun observations were authorization `allow`, lost
-start response `unknown`, same-key retry `accepted`, disclosure `allow`, notice
-`accepted` and payer stop `accepted`. It uses no secrets, server, container or
-persistent external state and does not qualify live payment or mediation.
+signing and an injected clock. It uses no secrets, server, container or persistent
+external state and does not qualify live payment or mediation.

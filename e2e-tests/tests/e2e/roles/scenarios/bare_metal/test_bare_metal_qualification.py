@@ -6,7 +6,7 @@ made as an external-topology extension of the bare-metal lane's buyer purchase
 (``test_bare_metal_payment_deal.py``): a profiled buyer with no wallet buys the
 real-provisioning target's whole machine through ``market bare-metal buy`` in
 ``arkhai.payments.v1``, against the payments target the run names
-(``PAYMENTS``), and ends it through ``market bare-metal teardown``.
+(``PAYMENTS``), and ends it through ``market bare-metal end``.
 
 The module runs once per cycle (``cleanup_cycle``), in order, on one machine:
 

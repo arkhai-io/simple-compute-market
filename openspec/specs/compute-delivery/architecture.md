@@ -140,6 +140,23 @@ nothing is released, since the site answers a found and a newly placed reservati
 alike. A reservation the site holds is recorded even when an end won meanwhile,
 because the end operation releases what is recorded.
 
+Commit authorization comes first, before any reserve or hold adoption, so a commit
+end service refuses touches no capacity. End service refuses to commit a rate deal
+while the storefront services none
+([deal-lifecycle, "One end instant, transactional admission"](../deal-lifecycle/architecture.md#one-end-instant-transactional-admission)),
+and tells the path why through the closed `code` on its `DeliveryAuthorization`: the
+path maps `rate_servicing_unavailable` to `repair_required(rate_servicing_unavailable)`,
+and every other refused commit stays `no_accepted_deal`, never read from the free-text
+reason. The refused deal holds nothing delivery reserved; an acceptance hold the
+domain placed at negotiation, VM's under a positive `hold_ttl_seconds`, is left to
+lapse at its TTL. Each later drive asks end service again and receives the same
+journaled answer, so a storefront that gains rate servicing before the delivery
+deadline delivers the deal on its next drive. Once the deadline passes, end service's
+deadline rule, behind its payment observation barrier, records seller non-delivery and
+journals the filing; the path answers `pending` while admission awaits that
+observation. A refusal by end service is not a site refusal: only the site's refusal
+of a commit enters [the end hand-off](#the-end-hand-off).
+
 ### Dispatch and recovery
 
 Dispatch is recorded through the progress port before `begin_fulfillment` is called.
@@ -262,7 +279,7 @@ deal whose end took effect before delivery.
 - The lanes show a restart as one recovery-loop step and a seller failure before
   dispatch as a settlement placement that finds no capacity; acknowledgement gaps and
   a refused live commit are proven by library and application integration, since no
-  lane control injects them ([`TESTING.md`](../../../docs/development/TESTING.md#the-discipline-every-scenario-follows)).
+  lane control injects them ([`deal-scenarios.md`](../../../docs/guidance/repository/deal-scenarios.md#the-discipline-every-scenario-follows)).
 - A payment deal's `delivery_end` filing is not dispatched in a lane until the lanes
   run a mediation double; an Alkahest deal's filing is unsupported.
 

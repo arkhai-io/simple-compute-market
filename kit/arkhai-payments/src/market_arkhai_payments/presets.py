@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from decimal import Decimal
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from market_core.schemas import (
@@ -11,21 +10,17 @@ from market_core.schemas import (
 )
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_deal_lifecycle.terms import Adjudication, LifecycleTerms, TermContext, encode_terms
-from market_settlement_runtime.horizon import RateTermTiming
+from market_settlement_runtime.horizon import RateTermProjections, RateTermTiming
 from market_settlement_runtime.presentation import amount_rate_quote
-from market_settlement_runtime.rate_publication import RatePresetPricing, RatePresetRequest, RatePresetRefusal
+from market_settlement_runtime.rate_publication import (
+    RatePresetHelper, RatePresetPricing, RatePresetRefusal, RatePresetRequest,
+)
 
-from .contracts import get_contract
-from .mandates import PaymentsOptionParams, duration_seconds
+from .mandates import SUPPORTED_PARTIAL_PERIODS, PaymentsOptionParams, duration_seconds
 from .models import AccountId
-from .settlement_config import ARKHAI_PAYMENTS_MECHANISM, ArkhaiPaymentsPublicationInput, payments_billing_basis
-
-SUPPORTED_PARTIAL_PERIODS = frozenset({"charged", "returned", "prorated", "chosen"})
-
-
-def rate_contract_revision() -> str:
-    """The exact installed schema identity a servicing declaration must select."""
-    return str(get_contract().metadata["schema_sha256"])
+from .settlement_config import (
+    ARKHAI_PAYMENTS_MECHANISM, ArkhaiPaymentsPublicationInput, clause_rate_minor_units, payments_billing_basis,
+)
 
 
 def rate_context(authorities: Sequence[DisputeEntry], lifecycle: LifecycleTerms) -> TermContext:
@@ -47,6 +42,23 @@ def rate_term_timing(option: SettlementOption, *, authorities: Sequence[DisputeE
     return RateTermTiming(basis.period_seconds, params.approval_seconds, rate_context(authorities, lifecycle))
 
 
+def payments_rate_wiring(
+    authorities: Callable[[], Sequence[DisputeEntry]],
+) -> tuple[Mapping[str, RatePresetHelper], RateTermProjections]:
+    """The preset helper and timing projection a compute composition installs.
+
+    Both are installed by default and stay dark until the composition declares
+    rate servicing: publication, acceptance and materialization each refuse a
+    rate option whose treatments the declaration does not list. ``authorities``
+    is read at each projection, so a later change to the offered dispute
+    authorities is seen without rebuilding the composition.
+    """
+    return (
+        {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()},
+        {ARKHAI_PAYMENTS_MECHANISM: lambda option: rate_term_timing(option, authorities=authorities())},
+    )
+
+
 class PaymentsRatePresetHelper:
     """Encode resolved terms; no domain defaults, horizon choices or servicing switch."""
 
@@ -64,18 +76,7 @@ class PaymentsRatePresetHelper:
         settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM,
                       "payee_account": params.payee_account, "period": preset.period,
                       "reserve_ahead_seconds": preset.reserve_ahead_seconds}
-        # Hourly clause prices are major units; other unit prices are already
-        # base units, as in the once publication encoder.
-        if clause.per == "hour":
-            precision = int(params.asset.rsplit("/", 1)[1]) if "/" in params.asset else 0
-            value = Decimal(clause.rate) * (Decimal(10) ** precision)
-            if value != value.to_integral_value():
-                raise ValueError("payment rate exceeds asset precision")
-            minor = int(value)
-        else:
-            if not clause.rate.isdecimal():
-                raise ValueError("payment unit rate must be integer base units")
-            minor = int(clause.rate)
+        minor = clause_rate_minor_units(clause.rate, clause.per, params.asset)
         price = SettlementPrice(asset=params.asset, rates=[RateValue(field="amount", per=clause.per, value=minor)])
         candidate = SettlementOption(
             option_id=derive_settlement_option_id(price=price, settlement=settlement),
@@ -92,15 +93,19 @@ class PaymentsRatePresetHelper:
             quote, params.approval_seconds, adjudication,
             rate_context(authorities, LifecycleTerms(adjudication=adjudication)),
             supports_setup_delivery_end=True,
+            delivery_deadline_seconds=params.delivery_deadline_seconds,
         )
 
     def build(self, request: RatePresetRequest) -> SettlementOption | RatePresetRefusal:
-        if request.servicing.mechanism != ARKHAI_PAYMENTS_MECHANISM or request.servicing.contract_revision != rate_contract_revision():
-            return RatePresetRefusal("rate_contract_unavailable", "servicing declaration differs from the installed payments contract")
+        # derive_rate_preset checked the declaration's treatments and setup flag
+        # before calling here, and acceptance and materialization check them
+        # again; this encoder checks only that it was handed its own mechanism's.
+        if request.servicing.mechanism != ARKHAI_PAYMENTS_MECHANISM:
+            return RatePresetRefusal("rate_servicing_undeclared", "servicing declaration names another mechanism")
         params = ArkhaiPaymentsPublicationInput.model_validate(request.clause.mechanism_input)
         preset = request.preset
         encoded = PaymentsOptionParams(
-            payee_account=params.payee_account, approval_window=params.approval_window or params.window,
+            payee_account=params.payee_account, approval_window=params.approval_term,
             deposit_agreement=params.deposit_agreement, period=preset.period,
             reserve_ahead_seconds=preset.reserve_ahead_seconds, setup_amount=preset.setup_amount,
         )
@@ -108,9 +113,7 @@ class PaymentsRatePresetHelper:
                       **encoded.model_dump(mode="json", exclude_none=True, exclude={"window"})}
         # Retain the clause's advertised rate, not a finite-horizon total. The
         # accepted monetary quote is pinned separately by signed acceptance.
-        precision = int(params.asset.rsplit("/", 1)[1]) if "/" in params.asset else 0
-        minor = (int(Decimal(request.clause.rate) * (Decimal(10) ** precision))
-                 if request.clause.per == "hour" else int(request.clause.rate))
+        minor = clause_rate_minor_units(request.clause.rate, request.clause.per, params.asset)
         price = SettlementPrice(asset=params.asset, rates=[
             RateValue(field="amount", per=request.clause.per, value=minor),
         ])

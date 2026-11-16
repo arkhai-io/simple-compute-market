@@ -552,10 +552,24 @@ def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
     assert path.name == "05-pre-closeout.md"
 
 
-def test_with_no_inert_path_declared_a_document_commit_needs_validating(
+def test_with_no_inert_path_declared_a_document_commit_admits_the_next_review(
         tmp_path: Path) -> None:
-    """CW-n7ra: the engine reads no inert path of its own."""
+    """CW-n7ra: where a repository declares none, the workflow's default makes
+    `openspec/` and every Markdown file inert."""
     root = _triaged_pre_closeout(tmp_path, CONFIGURED)
+
+    path = run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
+                      changed_since=lambda *_: DOCUMENTS,
+                      runner=writing(review_text("pre-closeout")))
+
+    assert path.name == "05-pre-closeout.md"
+
+
+def test_with_an_empty_declaration_a_document_commit_needs_validating(
+        tmp_path: Path) -> None:
+    """CW-n7ra: an empty declaration replaces the default, and no path is inert."""
+    root = _triaged_pre_closeout(tmp_path, CONFIGURED.replace(
+        "[repository]\n", "[repository]\ninert-paths = []\n"))
 
     with pytest.raises(ReviewError, match="openspec/changes/README.md"):
         run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,

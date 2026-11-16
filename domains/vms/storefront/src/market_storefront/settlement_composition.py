@@ -17,8 +17,7 @@ from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
 from market_settlement_runtime.rate_servicing import RateServicing
-from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
-from market_arkhai_payments.settlement_config import ARKHAI_PAYMENTS_MECHANISM
+from market_arkhai_payments.presets import payments_rate_wiring
 from market_settlement_runtime.horizon import RateTermProjections
 from market_settlement_runtime.rate_publication import (
     DEFAULT_PREMATURE_STOP_PENALTY_PERIODS, ClausePublication, RatePresetHelper,
@@ -106,25 +105,25 @@ class VmSettlementComposition:
     lifecycle: VmDealLifecycle | None = None
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
+    # `build_vm_settlement_composition` builds `arkhai_payments_stage` with this
+    # same declaration, so materialization admits exactly what publication and
+    # acceptance admit; a caller supplying its own stage owns that agreement.
     rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
-    rate_preset_helpers: Mapping[str, RatePresetHelper] = field(
-        default_factory=lambda: {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()}, repr=False,
-    )
-    rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
+    # ``None`` installs the payments kit's helper and projection; an explicit
+    # mapping, empty included, replaces them.
+    rate_preset_helpers: Mapping[str, RatePresetHelper] | None = field(default=None, repr=False)
+    rate_term_projections: RateTermProjections | None = field(default=None, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
     )
     default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
 
     def __post_init__(self) -> None:
-        if self.arkhai_payments_stage is not None:
-            self.arkhai_payments_stage.rate_servicing = self.rate_servicing
-        if not self.rate_term_projections:
-            object.__setattr__(self, "rate_term_projections", {
-                ARKHAI_PAYMENTS_MECHANISM: lambda option: rate_term_timing(
-                    option, authorities=self.disputes.for_publication(),
-                ),
-            })
+        helpers, projections = payments_rate_wiring(self.disputes.for_publication)
+        if self.rate_preset_helpers is None:
+            object.__setattr__(self, "rate_preset_helpers", helpers)
+        if self.rate_term_projections is None:
+            object.__setattr__(self, "rate_term_projections", projections)
 
     @property
     def seller_stages(self) -> SettlementStageTable[Any]:
@@ -231,7 +230,7 @@ class VmSettlementComposition:
             registry=self.configuration_registry,
             config=self.settlement_config,
             servicing=self.rate_servicing,
-            helpers=self.rate_preset_helpers,
+            helpers=self.rate_preset_helpers or {},
             authorities=self.disputes.for_publication(),
             dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
             compute=True,
@@ -924,7 +923,7 @@ def build_vm_settlement_composition(
     payments_config = settlement_config.mechanism_config("arkhai_payments")
     # Accepted payment deals are serviced whether or not new payment options
     # are published, so the stage follows the servicing fields, not `enabled`.
-    payments_stage = servicing_stage(payments_config)
+    payments_stage = servicing_stage(payments_config, rate_servicing=settlement_config.rate_servicing)
     composition = VmSettlementComposition(
         domain=domain,
         repository=repository,

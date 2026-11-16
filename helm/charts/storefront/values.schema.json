@@ -1088,6 +1088,14 @@
                     "null"
                   ]
                 },
+                "^[sS][nN][aA][pP][sS][hH][oO][tT]_[fF][rR][eE][sS][hH][nN][eE][sS][sS]_[sS][eE][cC][oO][nN][dD][sS]$": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 300,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "^[aA][tT][tT][aA][cC][hH]_[aA][gG][rR][eE][eE][mM][eE][nN][tT]$": {
                   "type": [
                     "boolean",

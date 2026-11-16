@@ -137,6 +137,7 @@ async def buyer_lifecycle(
         agreement.negotiation_id, commitment_ref,
         PaymentBinding(agreement.negotiation_id, PaymentSelector(mechanism)), dispute,
         Identity.model_validate(agreement.buyer), Identity.model_validate(agreement.seller),
+        rate=option.settlement.get("period") is not None,
     )
     try:
         async with _EvidencePeer(
@@ -144,7 +145,7 @@ async def buyer_lifecycle(
         ) as peer:
             yield BuyerLifecycle(
                 deal=lambda _: deal, peer=peer, operations=store, evidence=store,
-                end_journal=store.end_journal,
+                end_journal=store.end_journal, watchdog=store.watchdog,
                 payments=PaymentAdapterTable([(deal.payment.selector, lambda _: payment)] if payment else []),
                 disputes=DisputeAdapterTable(dispute_entries),
             )

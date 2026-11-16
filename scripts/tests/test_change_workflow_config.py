@@ -4,6 +4,7 @@ fields' kinds, how they resolved, a step's documents, and validation's plan."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -327,7 +328,8 @@ cleanup = ["make teardown"]
     assert fields["repository.protected-branches"] == {
         "field": "repository.protected-branches", "status": "declared", "value": []}
     assert fields["repository.inert-paths"] == {"field": "repository.inert-paths",
-                                                "status": "absent"}
+                                                "status": "default",
+                                                "value": ["openspec/", "**/*.md"]}
     assert fields["hooks.pre-commit-functional"]["value"] == ["make test"]
     assert fields["defaults.skills"] == {"field": "defaults.skills", "status": "disabled",
                                          "reason": "this repository keeps no agent skills"}
@@ -341,6 +343,23 @@ cleanup = ["make teardown"]
     assert fields["models.implement"]["status"] == "absent"
     assert fields["review.format-retries"] == {"field": "review.format-retries",
                                                "status": "default", "value": 1}
+
+
+@pytest.mark.parametrize("text,inert_paths", [
+    # CW-n7ra: with no declaration, the workflow's default.
+    ("", ("openspec/", "**/*.md")),
+    ("[repository]\nprotected-branches = []\n", ("openspec/", "**/*.md")),
+    ('[repository]\ninert-paths = ["docs/", "assets/"]\n', ("docs/", "assets/")),
+    # An empty declaration replaces the default too: no path is inert.
+    ("[repository]\ninert-paths = []\n", ()),
+])
+def test_a_declaration_of_inert_paths_replaces_the_default(text: str,
+                                                           inert_paths: tuple[str, ...]) -> None:
+    assert _checked(text).repository_inert_paths() == inert_paths
+
+
+def test_with_no_file_the_inert_paths_are_the_default(tmp_path: Path) -> None:
+    assert config.load(tmp_path).repository_inert_paths() == config.DEFAULT_INERT_PATHS
 
 
 def test_a_review_may_send_a_refused_draft_back_never() -> None:
@@ -395,6 +414,86 @@ design = ["docs/development/ROADMAP.md"]
 
     assert main(["config", "load", "common"], root=tmp_path) == 0
     assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "openspec/README.md"]
+
+
+def _guidance(root: Path, *paths: str) -> None:
+    for path in paths:
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("# x\n", "utf-8")
+
+
+def test_a_directory_entry_expands_in_sorted_order_in_its_place(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-l7hn's scenario "A directory entry": the Markdown files beneath it,
+    recursively, in sorted path order, where the directory was; files of another
+    kind are not documents, and a document named twice is printed once."""
+    configured(tmp_path, """
+[load]
+common = ["AGENTS.md", "docs/guidance/", "openspec/README.md"]
+design = ["docs/guidance/workflow/closeout.md", "docs/ROADMAP.md"]
+""")
+    _guidance(tmp_path, "docs/guidance/workflow/closeout.md", "docs/guidance/README.md",
+              "docs/guidance/engineering/comments.md", "docs/guidance/engineering/a/deep.md",
+              "docs/guidance/engineering/diagram.svg")
+
+    assert main(["config", "load", "design"], root=tmp_path) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "AGENTS.md", "docs/guidance/README.md", "docs/guidance/engineering/a/deep.md",
+        "docs/guidance/engineering/comments.md", "docs/guidance/workflow/closeout.md",
+        "openspec/README.md", "docs/ROADMAP.md"]
+
+
+def _unreadable(root: Path) -> None:
+    _guidance(root, "docs/guidance/closed/x.md")
+    (root / "docs/guidance/closed").chmod(0)
+    if os.access(root / "docs/guidance/closed", os.R_OK):
+        (root / "docs/guidance/closed").chmod(0o755)
+        pytest.skip("this user reads a directory whatever its mode, as root does")
+
+
+@pytest.mark.parametrize("arrange,named", [
+    (lambda root: None, "docs/guidance/, which does not exist"),
+    (lambda root: _guidance(root, "docs/guidance"), "docs/guidance/, which is a file"),
+    (lambda root: _guidance(root, "docs/guidance/notes.txt"),
+     "docs/guidance/, which holds no Markdown file"),
+    (lambda root: (root / "docs/guidance/empty").mkdir(parents=True),
+     "docs/guidance/, which holds no Markdown file"),
+    (_unreadable, "docs/guidance/, which cannot be read"),
+])
+def test_a_directory_entry_naming_nothing_is_refused_naming_it(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], arrange, named: str) -> None:
+    """CW-l7hn's scenario "A directory entry names nothing": refused as an error,
+    naming the entry, with no partial list printed."""
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md", "docs/guidance/"]\n')
+    arrange(tmp_path)
+
+    try:
+        assert main(["config", "load", "common"], root=tmp_path) == 1
+    finally:
+        if (tmp_path / "docs/guidance/closed").exists():
+            (tmp_path / "docs/guidance/closed").chmod(0o755)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("ERROR: load names the directory ")
+    assert named in captured.err
+
+
+def test_a_literal_entry_naming_no_file_is_still_printed(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A literal entry resolves as it always has: the engine does not look for its
+    file, so an adopting repository's configuration means what it meant."""
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md", "docs/missing.md"]\n')
+
+    assert main(["config", "load", "common"], root=tmp_path) == 0
+
+    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "docs/missing.md"]
+
+
+def test_an_absent_or_empty_list_loads_nothing(tmp_path: Path) -> None:
+    assert config.load(tmp_path).documents("design", tmp_path) == []
+    assert _checked("[load]\ncommon = []\n").documents("design", tmp_path) == []
 
 
 # `config parts <change>`: validation's plan.
@@ -494,6 +593,36 @@ def test_the_plan_reads_as_lines(tmp_path: Path, capsys: pytest.CaptureFixture[s
         ["local", "run", "evidence", ".snapshot/validation/"],
         ["helm", "run", "after", "local", "evidence", ".snapshot/validation/"],
     ]
+
+
+def test_the_plan_names_the_owners_waivers(tmp_path: Path,
+                                           capsys: pytest.CaptureFixture[str]) -> None:
+    """A part the owner waived names the decision, whose condition validation judges."""
+    configured(tmp_path, PARTS)
+    _change(tmp_path, TASKS)
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--waives", "helm,pipeline",
+                 "--decision", "waive helm and the pipeline while no chart changes",
+                 "--reason", "the owner's words"], root=tmp_path) == 0
+    capsys.readouterr()
+
+    assert main(["config", "parts", CHANGE], root=tmp_path) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert main(["config", "parts", CHANGE, "--json"], root=tmp_path) == 0
+    runs = json.loads(capsys.readouterr().out)["runs"]
+
+    assert lines[1].split()[:7] == ["pipeline", "waived", "by", "the", "owner", "at", "seq"]
+    assert lines[-1].startswith("helm") and "no chart changes" in lines[-1]
+    assert [run["name"] for run in runs if "waived" in run] == ["pipeline", "helm"]
+
+
+def test_a_waiver_names_declared_parts(tmp_path: Path,
+                                       capsys: pytest.CaptureFixture[str]) -> None:
+    configured(tmp_path, PARTS)
+    _change(tmp_path, TASKS)
+
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--waives", "smoke",
+                 "--decision", "d", "--reason", "r"], root=tmp_path) != 0
+    assert "does not declare: smoke" in capsys.readouterr().err
 
 
 def test_no_section_owes_ci_evidence(tmp_path: Path,

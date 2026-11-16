@@ -240,8 +240,8 @@ class ComputeDeliveryPath:
             deal = _Deal(nid, record, window, accepted, progress)
             if admission.status == "ended":
                 return await self._ended(deal)
-            if admission.status == "retry":
-                return self._outcome(OutcomeKind.PENDING, deal, detail="stale admission revision")
+            if admission.status != "admitted":
+                return self._not_admitted(deal, admission)
         else:
             try:
                 progress = read_progress(snapshot.recorded)
@@ -669,8 +669,8 @@ class ComputeDeliveryPath:
         )
         if admission.status == "ended":
             return await self._ended(deal)
-        if admission.status == "retry":
-            return self._outcome(OutcomeKind.PENDING, deal, detail="stale admission revision")
+        if admission.status != "admitted":
+            return self._not_admitted(deal, admission)
         try:
             activated = await self._capacity.activate_lease(
                 deal.accepted.binding, capacity_reservation_id=reservation_id,
@@ -876,8 +876,12 @@ class ComputeDeliveryPath:
 
         A refusal because an end is due goes to the end hand-off; an unknown
         or pending answer leaves the deal pending, and the next drive resolves
-        the same authorization; any other refusal is the payment authority's
-        refusal of the commitment, which no retry changes.
+        the same authorization. A refusal coded ``rate_servicing_unavailable``
+        is end service declining to commit a deal it could not service: the
+        deal waits in repair with nothing reserved, and each drive asks again.
+        Any other refusal is the payment authority's refusal of the
+        commitment, which no retry changes. No authorization refusal enters
+        the end operation; only a due end does.
         """
         nid = deal.negotiation_id
         revision = await self._transaction(lambda conn: EndSession(conn).read(nid).revision)
@@ -891,9 +895,25 @@ class ComputeDeliveryPath:
             return await self._ended(deal)
         if authorization.status == "pending":
             return self._outcome(OutcomeKind.PENDING, deal, detail=authorization.reason)
-        return self._repair_deal(
-            deal, RepairReason.NO_ACCEPTED_DEAL, authorization.operation_id, authorization.reason,
+        reason = (
+            RepairReason.RATE_SERVICING_UNAVAILABLE if authorization.code == "rate_servicing_unavailable"
+            else RepairReason.NO_ACCEPTED_DEAL
         )
+        return self._repair_deal(deal, reason, authorization.operation_id, authorization.reason)
+
+    def _not_admitted(self, deal: _Deal, admission: Admission) -> DeliveryOutcome:
+        """Pending, with nothing done, for an admission that neither admits nor ends.
+
+        A stale revision is resolved by the next drive. A missed delivery
+        deadline awaits a payment observation made at or after it; once the
+        payment watch records one, the next admission records the deal's end,
+        the deadline's or an earlier lawful one, and the next drive finds it.
+        """
+        detail = (
+            "stale admission revision" if admission.status == "retry"
+            else "the missed delivery deadline awaits a payment observation"
+        )
+        return self._outcome(OutcomeKind.PENDING, deal, detail=detail)
 
     def _end_due(self, conn: sqlite3.Connection, nid: str) -> bool:
         session = EndSession(conn)
@@ -917,7 +937,10 @@ class ComputeDeliveryPath:
         """Journal the end, its evidence and its filing in one transaction.
 
         Admission runs first so a missed delivery deadline is established
-        before this end could obscure it. The path supplies the failure's own
+        before this end could obscure it, except while admission holds the
+        deadline of a deal that is not once-only for a payment observation; that
+        end is then recorded later and, being earlier, is still selected. The
+        path supplies the failure's own
         classification from what it observed, and adopts an earlier lawful end
         that is already due as the controlling one, filing no self-penalty for
         it; otherwise the end is a seller failure whose ``delivery_end`` filing

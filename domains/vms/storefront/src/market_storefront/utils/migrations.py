@@ -19,6 +19,7 @@ from pathlib import Path
 
 from core_storefront import migrations as core_migrations
 from market_contact_exchange import migrations as contact_exchange_migrations
+from market_deal_servicing import create_payment_observations
 from market_deal_servicing import create_schema as create_servicing_schema
 from market_pool_overrides import migrations as pool_override_migrations
 from market_schema_migrations import (
@@ -240,6 +241,8 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         Migration("20261106_002_vm_credentials_cleared", _clear_vm_credentials),
         Migration("20261109_001_vm_store_open_tables", _create_store_open_tables),
         Migration("20261109_002_vm_frozen_inventory_dropped", _drop_frozen_inventory),
+        # Deal servicing's record of each successful payment observation's instant.
+        Migration("20261115_001_vm_payment_observations", create_payment_observations),
     ),
     floor_ids=FLOOR_IDS,
 )

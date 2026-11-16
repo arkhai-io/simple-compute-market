@@ -780,6 +780,9 @@ async def publication_app(
                             composition.accepted_obligation_dispatch()
                             if contacts is not None else None
                         ),
+                        # The composition's stage, as the composition root hands
+                        # it; the double composes none.
+                        "arkhai_payments_stage": getattr(composition, "arkhai_payments_stage", None),
                         **(negotiation_options or {}),
                     },
                 )

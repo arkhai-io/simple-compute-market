@@ -14,6 +14,7 @@ from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
 from market_core.schemas import AgreedPrice, Agreement
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
 
 from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
@@ -47,12 +48,19 @@ def payer_selection(selected):
 
 
 def payment_buyer(policy) -> PaymentApproval:
+    """The run's approval, honouring the terms its settlement policy waived.
+
+    The policy's option preference is the run's terms policy; a policy without
+    one approves only what a default buyer accepts.
+    """
     section = load_user_config().get("vms", {})
+    preference = getattr(policy, "option_preference", None)
     return PaymentApproval(
         ArkhaiPaymentsConfig.model_validate(
             policy.config.mechanism_config("arkhai_payments")
         ),
         AccountId.model_validate(section.get("payer_account")).root,
+        terms_policy=preference if isinstance(preference, BuyerTermsPolicy) else None,
     )
 
 
@@ -95,10 +103,11 @@ def settle_payment(
     deadline = time.monotonic() + timeout
 
     async def commit():
+        # ``timeout`` bounds the whole wait; each request keeps the lifecycle
+        # client's own timeout, so a wait nearly spent still sends its commit.
         async with buyer_lifecycle(
             agreement_bytes=raw, settlement_data=settlement_data, seller_url=seller_url,
             signer=signer, publishers=resolve_seller_principals(), approval=buyer,
-            timeout=timeout,
         ) as lifecycle:
             message = CommitMessage(
                 negotiation_id=negotiation_id, commitment_ref=transaction,
@@ -154,21 +163,36 @@ def make_payment_settle_hook(
             )
             if not confirm_settlement(terms, match):
                 return BuyResult(status="exited", reason="user_declined")
-        final = settle_payment(
-            buyer=payment_buyer(policy),
-            agreement_bytes=outcome.agreement_bytes,
-            settlement_data=outcome.settlement_data or {},
-            seller_url=seller_url,
-            principal=config.principal,
-            signer=config.signer,
-            resolve_seller_principals=make_publisher_trust_resolver(
-                config=config, listing=match
-            ),
-            negotiation_id=outcome.negotiation_id,
-            timeout=timeout,
-            interval=interval,
-            on_event=on_event,
-        )
+        try:
+            final = settle_payment(
+                buyer=payment_buyer(policy),
+                agreement_bytes=outcome.agreement_bytes,
+                settlement_data=outcome.settlement_data or {},
+                seller_url=seller_url,
+                principal=config.principal,
+                signer=config.signer,
+                resolve_seller_principals=make_publisher_trust_resolver(
+                    config=config, listing=match
+                ),
+                negotiation_id=outcome.negotiation_id,
+                timeout=timeout,
+                interval=interval,
+                on_event=on_event,
+            )
+        except TimeoutError as exc:
+            # A wait that runs out, the approval's poll, the commit's or the
+            # settle status's, ends the run ``timeout``, as the Alkahest hook's
+            # does; a payment approved by then is resumed from the run's log.
+            return BuyResult(
+                status="timeout",
+                seller_url=seller_url,
+                negotiation_id=outcome.negotiation_id,
+                agreed_amount=outcome.agreed_amount,
+                escrow_uid=outcome.negotiation_id,
+                reason=str(exc),
+                rounds=outcome.rounds,
+                attempts=negotiation.attempts,
+            )
         return BuyResult(
             status=final.get("status", "failed"),
             seller_url=seller_url,

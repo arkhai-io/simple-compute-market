@@ -20,14 +20,14 @@ ENV UV_HTTP_RETRIES=10
 RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-ARG DIST_FINGERPRINT=unknown
-LABEL org.arkhai.builder-dist-fingerprint="${DIST_FINGERPRINT}"
 
 # The lock is used as committed: the project's pyproject and lock sit at the
 # same depth below /repo as below the repository root, so the lock's relative
 # wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
 # packages from the lock and reinstalls them, so a cached build of a
-# same-version wheel is never reused.
+# same-version wheel is never reused. The wheelhouse's digest
+# (scripts/wheelhouse_digest.py) keys the install's cache.
+ARG WHEELHOUSE_DIGEST
 COPY .dist/ /repo/.dist/
 COPY scripts/uv_project.py /repo/scripts/uv_project.py
 COPY domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock /repo/domains/vms/storefront/
@@ -75,9 +75,12 @@ WORKDIR /app
 
 EXPOSE 9993/udp
 
-# Bind cross-stage application layers to the exact internal wheel set.
-ARG DIST_FINGERPRINT=unknown
-LABEL org.arkhai.dist-fingerprint="${DIST_FINGERPRINT}"
+# The digest of the wheelhouse this image installed, which loading a release
+# candidate requires to be the digest of the wheelhouse it stores. Set before
+# the cross-stage copy, which Podman could otherwise reuse from a build of
+# another wheelhouse.
+ARG WHEELHOUSE_DIGEST
+LABEL org.arkhai.wheelhouse-digest="${WHEELHOUSE_DIGEST}"
 
 COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"

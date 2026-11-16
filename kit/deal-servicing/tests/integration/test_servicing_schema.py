@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from market_deal_servicing import (
-    SERVICING_SCHEMA, EndSession, EvidenceSession, RespondentPoller, SellerSession, WatchSession,
-    create_schema,
+    PAYMENT_OBSERVATIONS_SCHEMA, SERVICING_SCHEMA, EndSession, EvidenceSession, RespondentPoller,
+    SellerSession, WatchSession, create_payment_observations, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -95,10 +95,26 @@ def test_the_schema_completes_a_database_holding_only_some_servicing_tables(tmp_
     assert _snapshot(path) == _snapshot(fresh)
 
 
+def test_a_table_added_since_is_its_own_set_that_tolerates_nothing(tmp_path):
+    """The payment observations table is created by an ordinary migration of
+    its own, after the store-open set and outside it."""
+    path = tmp_path / "storefront.sqlite"
+    with transaction(path) as conn:
+        create_schema(conn)
+        create_payment_observations(conn)
+    assert _object_names(path) == _declared_names() | {"servicing_payment_observations"}
+    assert "servicing_payment_observations" not in _declared_names()
+    assert not any("IF NOT EXISTS" in statement for statement in PAYMENT_OBSERVATIONS_SCHEMA)
+    with pytest.raises(sqlite3.OperationalError, match="already exists"):
+        with transaction(path) as conn:
+            create_payment_observations(conn)
+
+
 def test_opening_each_session_issues_no_ddl(tmp_path):
     path = tmp_path / "storefront.sqlite"
     with transaction(path) as conn:
         create_schema(conn)
+        create_payment_observations(conn)
     before = _snapshot(path)
     statements = []
     with transaction(path) as conn:

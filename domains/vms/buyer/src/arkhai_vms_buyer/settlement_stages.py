@@ -307,16 +307,21 @@ class PaymentsBuyerStage:
         deal, log = context.deal, context.log
         if deal.agreement_bytes is None or deal.settlement_data is None:
             raise ValueError("run has no accepted Agreement and payment mandate")
-        final = settle_payment(
-            buyer=payment_buyer(context.resolve_policy()),
-            agreement_bytes=deal.agreement_bytes, settlement_data=deal.settlement_data,
-            seller_url=deal.seller_url, principal=deal.buyer_principal,
-            signer=context.signer,
-            resolve_seller_principals=context.resolve_seller_principals,
-            negotiation_id=deal.negotiation_id, timeout=context.timeout,
-            interval=context.poll_interval,
-            on_event=lambda stage, body: log.event(stage, **body),
-        )
+        try:
+            final = settle_payment(
+                buyer=payment_buyer(context.resolve_policy()),
+                agreement_bytes=deal.agreement_bytes, settlement_data=deal.settlement_data,
+                seller_url=deal.seller_url, principal=deal.buyer_principal,
+                signer=context.signer,
+                resolve_seller_principals=context.resolve_seller_principals,
+                negotiation_id=deal.negotiation_id, timeout=context.timeout,
+                interval=context.poll_interval,
+                on_event=lambda stage, body: log.event(stage, **body),
+            )
+        except TimeoutError as exc:
+            # A wait that runs out ends the resumed run ``timeout``, as a fresh
+            # buy's does; the run stays resumable from its log.
+            final = {"status": "timeout", "reason": str(exc)}
         log.end(final.get("status") or "unknown", escrow_uid=deal.negotiation_id)
         context.console.print(Panel(str(final), title="Settlement complete"))
         if final.get("status") != "ready":

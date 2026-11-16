@@ -597,6 +597,12 @@ def test_the_configured_rate_servicing_declaration_is_the_compositions(tmp_path)
         "schema_version": 1,
         "priority": [],
         "alkahest": {"enabled": False},
+        # Development fixture: a disabled payments section still services
+        # accepted deals, so it yields the seller stage.
+        "arkhai_payments": {
+            "enabled": False, "service_url": "http://127.0.0.1:9",
+            "service_identity": _SELLER_SIGNER.identity.model_dump(mode="json"),
+        },
         "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
     }
 
@@ -611,6 +617,12 @@ def test_the_configured_rate_servicing_declaration_is_the_compositions(tmp_path)
     assert composition.rate_servicing is composition.settlement_config.rate_servicing
     declared = composition.rate_servicing.select("arkhai.payments.v1")
     assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+    # Materialization reads the same declaration, and the payments kit's preset
+    # helper and timing projection are installed beside it.
+    assert composition.arkhai_payments_stage is not None
+    assert composition.arkhai_payments_stage.rate_servicing is composition.rate_servicing
+    assert set(composition.rate_preset_helpers or {}) == {"arkhai.payments.v1"}
+    assert set(composition.rate_term_projections or {}) == {"arkhai.payments.v1"}
 
 
 def test_the_configured_penalty_multiple_is_the_compositions(tmp_path):

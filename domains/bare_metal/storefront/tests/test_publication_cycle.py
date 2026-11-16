@@ -10,7 +10,8 @@ run polls every site first, as the lane steps ``site-projections`` before
 publication; a site that has never answered is a storefront restarted while it
 was unreachable.
 
-This is not integration evidence under ``docs/development/TESTING.md``. The
+This is not integration evidence under
+``docs/guidance/engineering/test-levels.md``. The
 bare-metal storefront is an application, and the site authority and the
 registry are this repository's own services rather than external boundaries,
 so these tests prove how a run orchestrates, persists, closes, holds, and
@@ -1805,11 +1806,12 @@ def alkahest_publication(tmp_path, monkeypatch, signer):
     Returns the composition and the configured publication clauses, as the
     runtime holds them from ``[pricing].settlements``. The deal token's metadata
     is cached where the option builder reads it, so the real Alkahest option
-    builds without a chain to ask.
+    builds without a chain to ask. A runtime restarted over the same
+    ``tmp_path`` rewrites the same cache.
     """
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     tokens = tmp_path / "cache" / "arkhai" / "tokens"
-    tokens.mkdir(parents=True)
+    tokens.mkdir(parents=True, exist_ok=True)
     (tokens / f"{DEAL_CHAIN_ID}.json").write_text(
         json.dumps(
             {

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from core_storefront import migrations as core_migrations
 from market_contact_exchange import migrations as contact_exchange_migrations
+from market_deal_servicing import create_payment_observations
 from market_deal_servicing import create_schema as create_servicing_schema
 from market_pool_overrides import migrations as pool_override_migrations
 from market_schema_migrations import (
@@ -304,6 +305,8 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
             "bare-metal-storefront-0018-drop-accepted-site-generations",
             _drop_accepted_site_generations,
         ),
+        # Deal servicing's record of each successful payment observation's instant.
+        Migration("bare-metal-storefront-0019-payment-observations", create_payment_observations),
     ),
     floor_ids=FLOOR_IDS,
 )

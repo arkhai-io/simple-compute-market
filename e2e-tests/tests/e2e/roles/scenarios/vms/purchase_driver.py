@@ -10,15 +10,20 @@ records as it ends. ``VmPurchaseDriver`` is the lane's, over
 ``VmComputeDealDriver``: its listing's resource and its one
 ``arkhai.payments.v1`` settlement. The lease view is the canonical deal's,
 which finds a VM hold by its negotiation whatever the settlement mechanism.
+``VmRecurringPurchaseDriver`` is the lane's recurring purchase, whose listing's
+one settlement is a recurring on-demand option.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from market_core.schemas import SettlementOption, compute_rate_total
+from market_deal_lifecycle_client import LifecycleClient
+from market_deal_lifecycle_contracts.models import LifecycleRead
 
 from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
@@ -35,6 +40,10 @@ from tests.e2e.roles.helpers.payments import (
     payment_config_toml,
     payment_setting,
 )
+from tests.e2e.roles.helpers.recurring_purchase_stages import (
+    check_recurring_option,
+    recurring_settlement,
+)
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import (
     E2E_DEAL_GPU_COUNT,
     VmComputeDealDriver,
@@ -43,6 +52,7 @@ from tests.e2e.roles.scenarios.vms.composed_listing import (
     delivery_deadline_seconds,
     payments_settlement,
 )
+from tests.e2e.roles.scenarios.vms.conftest import _buyer_signer, _publisher_trust
 
 #: The listed price of an hour of the purchase's VM, in USD/6 base units:
 #: ``payments_settlement``'s rate of 1.00 USD an hour.
@@ -241,3 +251,58 @@ class VmPurchaseDriver(VmPurchaseParts, VmComputeDealDriver):
         assert status.status == "ready", status
         assert status.tenant_credentials, f"tenant_credentials missing from settlement status: {status}"
         assert status.fulfillment_id == deal_state.fulfillment_id, status
+
+
+#: How long ``market buy`` is given to read its settlement once after its commit.
+FIRST_SETTLEMENT_POLL_SECONDS = 30.0
+
+
+@dataclass(kw_only=True)
+class VmRecurringPurchaseDriver(VmPurchaseDriver):
+    """VM's ``RecurringPurchaseDriver``, for the lane's purchase of a recurring
+    on-demand option through ``market buy``, which end service refuses to
+    commit."""
+
+    #: The storefront loop that watches its committed deals' payments.
+    servicing_loop = "settlement-servicing"
+
+    def listing_settlement(self) -> dict[str, Any]:
+        """The listing's one settlement: a recurring on-demand option, paid
+        through Arkhai payments to the lane's seller account."""
+        return recurring_settlement(
+            seller_account=self.seller_account,
+            delivery_deadline_seconds=delivery_deadline_seconds(),
+        )
+
+    def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
+        assert listing.listing_resource["gpu_model"] == self.gpu_model, listing
+        # The listing states the recurring payments settlement alone.
+        assert len(listing.settlement_options) == 1, listing.settlement_options
+        check_recurring_option(option, delivery_deadline_seconds=delivery_deadline_seconds())
+
+    def close_purchase_run(self, run: Any, deal_state: Any) -> None:
+        """``market buy`` polls its settlement until delivery, which never
+        comes: still running, it has read the settlement at least once and
+        never read it ready, and it is stopped here, as a buyer stops a
+        command waiting on a delivery its seller cannot make."""
+        run.wait_for_event("settlement_poll", timeout=FIRST_SETTLEMENT_POLL_SECONDS)
+        events = run.read_events()
+        assert not run.exited, (
+            f"{self.buy_command} run {run.run_id} ended rc={run.returncode} while delivery "
+            f"was refused; last events {[event.get('event') for event in events[-6:]]}"
+        )
+        assert not [event for event in events if event.get("event") == "run_ended"], events[-6:]
+        polled = [
+            (event.get("body") or {}).get("status")
+            for event in events if event.get("event") == "settlement_poll"
+        ]
+        assert "ready" not in polled, polled
+        run.terminate()
+
+    def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
+        async def read() -> LifecycleRead:
+            async with LifecycleClient(
+                str(settings.SELLER.API_URL), _buyer_signer(), _publisher_trust(),
+            ) as peer:
+                return await peer.read(negotiation_id)
+        return asyncio.run(read())

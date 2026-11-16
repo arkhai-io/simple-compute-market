@@ -59,6 +59,8 @@ The implemented scheduling baseline remains deterministic two-level round-robin 
 
 ## Fulfillment acceptance and dispatch acknowledgement
 
+The fulfillment kit owns provider-neutral acceptance orchestration, whose preparation performs no external provider I/O. Domain adapters own provider-specific payloads and metadata interpretation; provisioning composition supplies the database unit of work and the concrete providers; storefront code does not import provider-specific types.
+
 Fulfillment acceptance freezes provider input before external side effects. One transaction serializes acceptance, loads the selected resource and provider configuration, prepares the provider-specific envelope, and persists it with `dispatch_pending`. Preparation receives that transaction's session for local resource claims, so a rejected request rolls back both its acceptance and any claim. Opening a second write transaction from preparation would wait on the acceptance transaction's SQLite writer lock; committing a claim independently would leave it behind after rejection. Validation uses the same preparation with acquisition disabled. Dispatch happens after commit. A second short transaction records normalized provider metadata and advances the aggregate to `dispatching`. The acknowledgement gap is intentional: recovery redispatches the immutable envelope with the same executor idempotency key, allowing the provider to return the original job.
 
 Shared orchestration never interprets Ansible fields. Teardown receives a provider-neutral settlement-result view, while the Ansible adapter validates its own metadata and derives the exact target it created.

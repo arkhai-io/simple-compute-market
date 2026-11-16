@@ -315,8 +315,8 @@ for refused in host_definitions_path relay_definitions_path inventory_path inven
         fail "$label"
     fi
 done
-# Each chart's own render tests (docs/development/TESTING.md, "Chart Render
-# Tests"), so this one target runs every render check. The storefront and
+# Each chart's own render tests (docs/guidance/repository/chart-render-tests.md,
+# "Where they live and how they run"), so this one target runs every render check. The storefront and
 # bare-metal storefront charts' tests also load a rendered document with that
 # storefront's own loader when its environment exists (make init-storefront;
 # make -C domains/bare_metal/storefront init); without it they say so and skip.

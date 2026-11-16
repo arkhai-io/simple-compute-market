@@ -91,13 +91,13 @@ def test_a_recovery_command_names_a_known_command_and_a_run() -> None:
 @pytest.mark.parametrize(
     "arguments,expected",
     [
-        (("bare-metal", "teardown", "--run-id", _RUN_ID), _RUN_ID),
-        (("bare-metal", "teardown", f"--run-id={_RUN_ID}"), _RUN_ID),
+        (("bare-metal", "end", "--run-id", _RUN_ID), _RUN_ID),
+        (("bare-metal", "end", f"--run-id={_RUN_ID}"), _RUN_ID),
         (("settle", "--from", _RUN_ID), _RUN_ID),
         (("settle", f"--from={_RUN_ID}"), _RUN_ID),
         (("bare-metal", "buy", "listing-1"), None),
-        (("bare-metal", "teardown", "--run-id="), None),
-        (("bare-metal", "teardown", "--run-id"), None),
+        (("bare-metal", "end", "--run-id="), None),
+        (("bare-metal", "end", "--run-id"), None),
     ],
 )
 def test_a_command_is_bound_to_the_run_it_names(arguments, expected) -> None:
@@ -118,7 +118,7 @@ def test_a_recovery_reads_the_run_buy_recorded_not_a_log_it_writes(tmp_path: Pat
     recovery = MarketRun(
         run_dir=run_dir,
         pre_existing_run_ids=frozenset({"earlier", _RUN_ID}),
-        _run_id=run_id_from_args(recovery_command("teardown", bought.run_id)),
+        _run_id=run_id_from_args(recovery_command("end", bought.run_id)),
     )
     assert recovery.run_id == _RUN_ID
 

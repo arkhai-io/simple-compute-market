@@ -94,7 +94,7 @@ can reach, and gives people and bots the same small set of verbs to drive it.
 - A pull-request status published by the engine.
 - The remote entry point.
 - The workflow's specification, architecture companion, and
-  `docs/agents/change-workflow.md`.
+  `docs/change-workflow-handbook.md`.
 
 ## Dependencies and Related Changes
 

@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 from market_settlement_runtime.rate_servicing import RateServicing
-from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
+from market_arkhai_payments.presets import payments_rate_wiring
 from market_settlement_runtime.horizon import RateTermProjections
 from market_settlement_runtime.rate_publication import (
     DEFAULT_PREMATURE_STOP_PENALTY_PERIODS, ClausePublication, RatePresetHelper,
@@ -128,11 +128,13 @@ class BareMetalStorefrontSettlementComposition:
 
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES
+    # The payments stage is built with this same declaration, so materialization
+    # admits exactly what publication and acceptance admit.
     rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
-    rate_preset_helpers: Mapping[str, RatePresetHelper] = field(
-        default_factory=lambda: {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()}, repr=False,
-    )
-    rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
+    # ``None`` installs the payments kit's helper and projection; an explicit
+    # mapping, empty included, replaces them.
+    rate_preset_helpers: Mapping[str, RatePresetHelper] | None = field(default=None, repr=False)
+    rate_term_projections: RateTermProjections | None = field(default=None, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
     )
@@ -155,16 +157,14 @@ class BareMetalStorefrontSettlementComposition:
         stage = servicing_stage(
             self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY),
             client_for_owner=self.payments_client_for_owner,
+            rate_servicing=self.rate_servicing,
         )
-        if stage is not None:
-            stage.rate_servicing = self.rate_servicing
         object.__setattr__(self, "payments_stage", stage)
-        if not self.rate_term_projections:
-            object.__setattr__(self, "rate_term_projections", {
-                ARKHAI_PAYMENTS_MECHANISM: lambda option: rate_term_timing(
-                    option, authorities=self.disputes.for_publication(),
-                ),
-            })
+        helpers, projections = payments_rate_wiring(self.disputes.for_publication)
+        if self.rate_preset_helpers is None:
+            object.__setattr__(self, "rate_preset_helpers", helpers)
+        if self.rate_term_projections is None:
+            object.__setattr__(self, "rate_term_projections", projections)
 
     @classmethod
     def from_raw_config(
@@ -277,7 +277,7 @@ class BareMetalStorefrontSettlementComposition:
             registry=self.registry,
             config=self.config,
             servicing=self.rate_servicing,
-            helpers=self.rate_preset_helpers,
+            helpers=self.rate_preset_helpers or {},
             authorities=self.disputes.for_publication(),
             dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
             compute=True,

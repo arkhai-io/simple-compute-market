@@ -32,12 +32,11 @@ Highest priority wins.
 
 | Priority | Source | Example |
 |----------|--------|---------|
-| 1 | `ARKHAI_*` environment variables | `ARKHAI_RPC__URL=https://…` |
+| 1 | `ARKHAI_*` environment variables, including those the project's `.env` file supplies (a variable already set wins over the file's) | `ARKHAI_RPC__URL=https://…` |
 | 2 | `config-<profile>.yml` files (secrets injected here) |
 | 3 | `config.yml` (in `CONFIG_DIRECTORY`) | base env config |
-| 4 | `.env` file | local development overrides |
-| 5 | `.secrets.toml` | local secrets (gitignored) |
-| 6 | `settings.toml` | project defaults / schema |
+| 4 | `.secrets.toml` | local secrets (gitignored) |
+| 5 | `settings.toml` | project defaults / schema |
 
 ### Config directory and profiles
 
@@ -60,7 +59,8 @@ ACTIVE_PROFILES=staging,staging-secrets
 ### Shared payment-scenario configuration
 
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
-`e2e_vm_payment_deal` and `e2e_vm_payment_purchase`, and the qualification modules
+`e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase` and
+`e2e_bare_metal_recurring_purchase`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -250,6 +250,15 @@ services run the mock profile unless `PROVISIONING_MODE=real`. Every lane runs
 the payments and mediation lane doubles, and the VM lane's scenarios include the
 six [VM dispute controls](#vm-dispute-controls) modules.
 
+To run the lanes in GitHub Actions, push the current branch and run `make run-e2e`
+from the repository's root with an authenticated `gh` CLI on PATH, then run `make
+fetch-e2e-logs` there to wait for
+the run and download its diagnostics. When the commit already has a run, pass the
+newest run ID seen before dispatching as `E2E_AFTER_RUN`, so the earlier run is not
+taken while the new one is still unlisted. How the fetch selects its run, and where
+the logs land, is
+[`TESTING.md`'s "System Integration Tests"](../docs/development/TESTING.md#4-system-integration-tests-end-to-end).
+
 ### Hosted VM servicing
 
 `e2e_vm_payment_deal` runs in the VM lane. It publishes a hosted-only one-hour VM
@@ -351,6 +360,35 @@ back-dating it and stepping one lease-watchdog cycle. The listing names its own
 resource, host, pool and GPU model, and its payment stays held in the double
 until the lane ends.
 
+### Recurring purchases
+
+`e2e_vm_recurring_purchase` runs in the VM lane and
+`e2e_bare_metal_recurring_purchase` in the bare-metal lane, each as lane-double
+evidence. Each lane's storefront configuration
+(`domains/vms/storefront/storefront.bob.lane.toml`,
+`domains/bare_metal/storefront/storefront.dev.toml`) declares rate servicing for
+`charged` and `returned`, a lane fixture no shipped configuration carries, so the
+seller publishes a recurring on-demand option: VM's on a listing of the
+scenario's own resource, bare metal's through a pool override. A default buyer
+with no wallet buys it through the shipped `market buy` or `market bare-metal
+buy`, which approves the mandate and commits. End service services no rate deal,
+so it refuses the commit and nothing is delivered.
+
+The scenarios run the shared buyer-purchase stages through the buy, then the
+recurring stages (`tests/e2e/roles/helpers/recurring_purchase_stages.py`): the
+mandate is one rate part charging one period's price and the payer's balance fell
+by the receipt's reserve; after one servicing step the storefront's lifecycle
+read shows the deal committed and never active, delivery reserved nothing at the
+site (VM's acceptance hold stays `reserved` until its TTL lapses), and the
+payments double records no rate start; the buy's stderr showed the per-period price, setup charge, initial reserve and maximum end (`market buy`,
+still polling a delivery that never comes, is stopped first; that they precede
+the settlement stage that approves is proved by each buyer's own tests, not
+here); the
+buyer's own `end` stops the payment, and the storefront records the payer's end
+with no filing; and the payer's balance is restored. The seller's refund refuses
+a rate deal, so a failed run's cleanup ends an approved deal by the buyer's own
+`end` too. Neither waits for the delivery deadline.
+
 ### Real bare-metal provisioning
 
 `e2e_bare_metal_real_provisioning` runs the canonical complete deal against a
@@ -400,8 +438,11 @@ dedicated to the run. The VM host's listing, which the VM module creates unless
 an earlier module did, states `PAYMENTS.DISPUTE_WINDOW_SECONDS` as its payments
 option's dispute coverage, so a target whose dispute authority advertises a short
 minimum filing window can be bought under a short hold; the bare-metal machine's
-listing states the coverage its storefront's own configuration gives. Run each
-through `test-module`, observation 6 after the other two on the same stack:
+listing states the coverage its storefront's own configuration gives. Set the VM
+listing's delivery allowance, `PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, before the
+offer is published, with `PAYMENTS.DISPUTE_WINDOW_SECONDS` covering it plus the
+authority's minimum filing window. Run each through `test-module`, observation 6
+after the other two on the same stack:
 
 ```bash
 make test-module MODULE=e2e_vm_qualification ACTIVE_PROFILES=local,real-provisioning-target
@@ -415,7 +456,7 @@ make test-module MODULE=e2e_real_provisioning_reapply ACTIVE_PROFILES=local,real
   both leases ended by back-dating and a stepped watchdog cycle.
 - `e2e_bare_metal_qualification` (observations 4 and 5): the normal cycle,
   then a successor whose reclaim refuses a planted foreign descendant until
-  fixture-only repair, each ended by `market bare-metal teardown`. Without the
+  fixture-only repair, each ended by `market bare-metal end`. Without the
   bare-metal host's `cleanup_qualification` its working-data stages and the
   refusal cycle skip, and both observations are unproven.
 - `e2e_real_provisioning_reapply` (observation 6): both hosts' registrations
@@ -571,7 +612,7 @@ storefront's settle wait on the negotiation. Delivery reads use that purchase's
 signer and fulfillment transport. Re-drive recovers the original run's retained
 profile and repeats canonical lifecycle `commit`, keeping both transaction and
 fulfillment unchanged; there is no bare-metal settle command. The buyer's
-`market bare-metal teardown` then ends delivery and starts mock reclaim, after
+`market bare-metal end` then ends delivery and starts mock reclaim, after
 which the seller's refund reverses the still-held once payment, and the site's
 capacity release is proven separately. Unless the last stage recorded the deal
 ended, the module's cleanup first opens any mock gate still closed, then finds
@@ -596,9 +637,8 @@ Alkahest mock-deal scenario remains selected unchanged.
 ## CI/CD
 
 The repository's [`E2E` workflow](../.github/workflows/e2e.yml) runs the three
-lanes, each as its own job, nightly and on demand. See "System Integration Tests"
-in [`TESTING.md`](../docs/development/TESTING.md#4-system-integration-tests-end-to-end)
-for dispatching it on a branch and fetching its logs.
+lanes, each as its own job, nightly and on demand. [End-to-end lanes](#end-to-end-lanes)
+gives dispatching it on a branch and fetching its logs.
 
 ---
 
