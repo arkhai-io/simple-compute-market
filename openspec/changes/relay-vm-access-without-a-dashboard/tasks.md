@@ -213,6 +213,12 @@ were done at; the open ones name none of the moved files.
       section 2's reconciliation behaviour is settled, then implement the
       decision or record why it stays deferred. This is a decision task, not an
       instruction to implement one of the three.
+      *Returned to design (2026-11-16).* The owner's direction: disabling a relay
+      is its drain, and removing the relay server is its operator's, outside this
+      repository. Closeout found that disabling a relay currently fails every
+      teardown on it, so the drain cannot work as built. `design.md`, "What
+      deletes a relay", has the findings and the questions; design replaces this
+      task with the work it settles.
 - [x] 1A.8 Reject an update that would duplicate another relay's rendezvous,
       with both relay identifiers named. The unique constraint would catch it,
       but a constraint violation surfacing as a 500 is not an administration
@@ -414,6 +420,10 @@ rest nor withheld from a read.
       as a per-run `known_hosts` if SSH host-key checking is enabled, or a
       provisioning container shared with another user. Ticking this task is a
       decision for this change's closeout.
+      *Returned to design (2026-11-16).* The owner's direction: a provisioning
+      container is never shared between users, by design, and a user who opens
+      one to others has stepped out of scope. `design.md`, "Does the variables
+      file's handling need anything further?", has the question.
 
 **Validation:** `make test` in `provisioning/compute/service`.
 
@@ -1105,6 +1115,13 @@ shares no code with this change, and neither depends on the other.
 
 169 of 177 tasks complete. What remains is listed below and is not padding: two
 decision gates and closeout.
+
+**Returned to design (2026-11-16)** for those two gates, on the owner's
+direction. Closeout found that disabling a relay fails every teardown on it,
+and the owner directed that disabling be the relay's drain, with the relay
+server's removal left to its operator outside this repository. Design settles
+both gates and adds the work they need. Planning, implementation, and closeout
+follow from there.
 
 **Done — the service.** The relay resource, its controller, encryption at rest
 under the profile key, the redacted/execution reader split, preserve-on-absent,

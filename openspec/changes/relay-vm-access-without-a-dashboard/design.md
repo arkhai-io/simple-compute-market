@@ -686,15 +686,97 @@ write a pool can already set `playbook_path`, which is arbitrary playbook
 execution on every host in that pool; setting a relay token is not a greater
 privilege than one already held.
 
-**What deletes a relay, and what happens to its leases?**
+**What deletes a relay, and what happens to its leases?** *Returned to design
+(task 1A.7).*
 
-Not decided. A relay with live leases cannot simply be removed — the proxies it
-carries outlive the row, and a deletion that orphans leases loses the record of
-which ports on that rendezvous are bound. The plausible answers are refusing
+A relay with live leases cannot simply be removed — the proxies it carries
+outlive the row, and a deletion that orphans leases loses the record of which
+ports on that rendezvous are bound. The plausible answers were refusing
 deletion while any lease is held, disabling rather than deleting in the manner
 hosts already use, or cascading a release that does not correspond to anything
 actually torn down on the relay.
 
-Deferred because the first relay will not be deleted and the answer is a
-lifecycle decision that wants the reconciliation behaviour settled first. What
-this change owes is that the schema does not foreclose any of the three.
+*The owner's direction (2026-11-16):* the relay needs a drain, and disabling a
+relay is that drain. Removing the relay server itself is not this repository's:
+the relay's operator removes it, outside this repository, once the relay has
+drained. So this repository's part is the drain and a way for the relay's
+operator to know it has finished. What remains to design is how that seam
+works.
+
+What the current system does, read at closeout:
+
+- **Nothing deletes a relay.** The relay routes have no delete, and the
+  definition document's reconciliation creates or corrects a relay but never
+  removes one it no longer lists. The schema forbids deletion anyway once a
+  relay has leased a port. `relay_port_leases.relay_id` and `pool_relays.relay_id`
+  reference the relay with no cascade, and lease rows are never removed: a
+  released row is reused for its port, so the port's history stays in the
+  index.
+- **Disabling a relay blocks its teardowns, which a drain cannot allow.** This
+  is a defect. A VM teardown takes its relay from the lease, and so does a
+  bare-metal reclaim. At execution the family's relay resolver refuses a
+  disabled relay for every job naming one, including a removal that adds no
+  proxy and needs no token. The refusal is a configuration error, so the job is
+  not retried. Disabling a relay with live leases therefore fails every
+  teardown on it: guests stay up and their proxies stay registered, so buyers
+  keep access past their lease end until the relay is re-enabled. Hosts already
+  get this right: a disabled host refuses a create but not a teardown.
+- **A relay's `enabled` is declarable.** The definition document carries
+  `enabled`, and reconciliation may correct it, so a relay's operator can start
+  a drain from the document without an API call.
+- **The holdings read shows each lease's state.** `GET /api/v1/relays/{id}/leases`
+  reports each lease's `released_at`, so "drained" is observable today as "no
+  lease unreleased". No field states it directly.
+- **Task 1B.5 said not to add a drain primitive.** Its reasoning was that a
+  disabled pool already stops new scheduling without touching active workloads,
+  and rebinding is disable the pool, wait, rebind, re-enable. A relay drain
+  overlaps that, so the design should say how the two relate: whether a relay
+  drain is the relay-side form of the same lifecycle, and which one an operator
+  uses when.
+
+Questions for the design:
+
+1. What a disabled relay refuses (new allocations and creates) and what it
+   still lets run (teardowns, reclaims, and lease release), for both compute
+   domains.
+2. How the relay's operator knows the drain has finished: the holdings read as
+   it stands, or a stated drained condition on the relay's own read. Whether
+   that condition also waits for released grants to expire.
+3. What becomes of the relay's row once its server is gone: kept disabled as
+   the history its leases reference, or something else the schema would have to
+   allow.
+4. What a relay the definition document stops listing means: left as it is (the
+   current behaviour), or drained.
+5. What the relay's operator does, in order, and where this repository states
+   it: the operator handbook's procedure, and the contract the operator's
+   tooling relies on.
+
+**Does the variables file's handling need anything further?** *Returned to
+design (task 2A.7).*
+
+The rendered variables file holds the decrypted relay token. It is created
+owner-only and `O_EXCL` under a random name in the process temporary directory,
+and the executor removes it on every ending of a run.
+`contain-embedded-host-key-material`'s D3 kept that layout, and named two
+triggers for revisiting it: a third secret file per run, or a provisioning
+container shared with another user.
+
+*The owner's direction (2026-11-16):* a provisioning container is never shared
+between users, by design. A user who adds their own SSH keys to it, or runs
+their own FRP to let others in, has stepped outside what this repository and
+its deployment provide. That is out of scope, and no trigger should be framed
+around it.
+
+Read at closeout: the third-file trigger is not about confidentiality. Each
+file is protected the same way whether there are two or three. The trigger is a
+code-structure heuristic: once three files with separate owners each need their
+own removal on every ending of a run, one owner-only directory per run, removed
+in one action, becomes simpler than three cleanup paths. A process killed
+outright (out of memory, `SIGKILL`) skips the executor's `finally`, but the
+provisioning chart mounts nothing at the temporary directory, so the file lives
+in the container's writable layer and goes when the container is replaced.
+Decrypted key files behave the same way.
+
+Questions for the design: whether the requirement is met as the system stands,
+with no revisit trigger recorded against this change; and whether the
+code-structure note belongs anywhere at all.
