@@ -103,6 +103,7 @@ def test_the_route_service_sets_its_source_and_a_refusal_carries_its_code() -> N
 
 def test_the_configured_source_is_read_from_the_time_section_in_any_case() -> None:
     assert configured_time_source({}) is None
+    assert configured_time_source({"time": "injected"}) is None
     assert configured_time_source({"time": {"SOURCE": "injected"}}) == "injected"
     assert configured_time_source({"time": {"source": "injectd"}}) == "injectd"
 

@@ -429,9 +429,10 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
         self._replay_store_provider = replay_store_provider or (lambda: store)
         self._max_timestamp_skew = max_timestamp_skew
         self._excluded_paths = excluded_paths
-        # The time-setting operation, named only by a service that mounts it,
-        # under injected time: its requests are verified without their
-        # timestamp's freshness, every other operation's with it.
+        # The time-setting operation: while the process source is injected, the
+        # only source a time can be set on, its requests are verified without
+        # their timestamp's freshness; every other operation's, and its own
+        # under wall time, with it.
         self._time_setting_operation = time_setting_operation
 
     async def dispatch(self, request: Request, call_next):
@@ -524,7 +525,11 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
             existing_replay=replay_store.get(
                 authenticated.principal, authenticated.request_id
             ),
-            time_setting_operation=self._time_setting_operation,
+            time_setting_operation=(
+                self._time_setting_operation
+                if injected_time.TimeRouteService(injected_time.installed()).settable
+                else None
+            ),
         )
         if not verification.verified or verification.reservation is None:
             # The `detail` sent back is deliberately vague -- it says which

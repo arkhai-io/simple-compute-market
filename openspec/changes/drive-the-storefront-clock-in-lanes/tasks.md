@@ -1263,6 +1263,11 @@ middleware).
     `admin_time` is admitted at ±900 s with a signed response, the pause refused
     and trading left open; under wall time `admin_time` is refused. Section 9's
     application-integration tests set time through the client on the real route.
+    Suites: `make -C kit/site test` 373, `make -C core/storefront test` 232
+    (before its two unit tests; 9 in `test_auth.py` after), provisioning
+    middleware 56, `make -C domains/vms/storefront test` 609 integration and its
+    unit suite, `make -C domains/bare_metal/storefront test` 650, `make -C
+    domains/apicredits/storefront test` 279.
   - Correction (section 9): the bare-metal test runs the composed application,
     which under injected time now mounts the real time route ahead of the
     stand-in, so its injected case sets time through the real route (900 s ahead
@@ -1270,12 +1275,17 @@ middleware).
     403, and leaves the source, so it passed authentication and was refused as an
     earlier instant), the pause is sent before the setting, and the stand-in is
     added only under wall time, where no route is mounted. The suite counts above
-    are section 8's; section 9's are in its notes. Suites: `make -C
-    kit/site test` 373, `make -C core/storefront test` 232 (before its two unit
-    tests; 9 in `test_auth.py` after), provisioning middleware 56, `make -C
-    domains/vms/storefront test` 609 integration and its unit suite, `make -C
-    domains/bare_metal/storefront test` 650, `make -C domains/apicredits/storefront
-    test` 279.
+    are section 8's; section 9's are in its notes.
+  - Correction (section 10): `ProvisioningAuthMiddleware` and `SiteAuthMiddleware`
+    now exempt the operation their constructor names only while the installed
+    source is settable, the storefronts' rule, so a composition names its
+    operation in either mode and a wall-time process exempts nothing (the
+    provisioning service's app and route table are built once at import, and
+    its tests share them). Their tests install an injected source for the
+    exempt case and add one with the operation named under wall time, refused
+    for skew; the provisioning test's stand-in moved to its own path and
+    operation, since the family's contracts now declare `/api/v1/system/time`.
+    Section 10's notes hold the suites' counts after it.
 - [x] 8.3 Section verification.
   - Unit: `make test-kits` (`kit/identity`, `kit/site`), `make test-core`, the
     storefronts' and `make test-provisioning`'s middleware tests.
@@ -1545,28 +1555,129 @@ level, `site-capacity`'s "The site decides by its process's time source". Touche
 `controllers/system_controller.py`, the system status), and
 `provisioning/compute/client`.
 
-- [ ] 10.1 The service reads `time.source`, `"wall"` by default, refusing any other
+- [x] 10.1 The service reads `time.source`, `"wall"` by default, refusing any other
   value naming it, installs the source at startup, logs it when injected, and mounts
   `POST /api/v1/system/time` behind its administrator authentication only under
   injected time; `GET /api/v1/system/status` carries the time section (D2, D5, D12).
   - Verify: application-integration tests through the provisioning client: set,
     `409 time_moves_forward`, `422 invalid_time`, status in both modes, no route under
     wall time, `"injectd"` refused.
-- [ ] 10.2 The lease watchdog and the site follow injected time: a lease truncated to
+  - Done: `Settings.configured_time_source` reads `time.source` as stated (keys in
+    any case; a `time` that is not a table states none); `main.py` installs
+    `source_for(..., setting="time.source")` at module level, before the app is
+    built, so a misspelled value refuses the import naming the setting and the
+    value, and mounts `make_time_router()` (`POST /api/v1/system/time`, in
+    `controllers/system_controller.py`) only when that source is injected; the
+    lifespan calls `announce_time_source`, an INFO line under injected time (the
+    service has no payments section, so no warning). The family contracts declare
+    the route as `PROVISIONING_TIME_OPERATION` (`provisioning_system_time`),
+    administrator only, with `TimeSettingResponse` and `SystemStatusResponse.time`;
+    the status service fills the section from the component's route service; the
+    middleware is given the operation and exempts it only while the source is
+    injected (8.2's correction). Under wall time the contract stays in the table,
+    so a signed request is authenticated and then finds no route, a signed 404, as
+    a wall-time VM storefront answers its unmounted route. The route also refuses
+    404 should it be mounted over a source that cannot be set, which only this
+    suite does (below).
+  - Evidence. Unit, `tests/unit/test_time_source.py`: `configured_time_source`
+    unset, a scalar `time`, keys in any case, a misspelled value returned as
+    stated; `announce_time_source` logs once for an injected source, naming
+    `time.source` and the instant, and nothing for wall. `tests/unit/test_route_binding.py`
+    counts the time router as mounted, since this wall-time process does not
+    mount it. Application integration, `tests/integration/test_system_time.py`
+    through `ComputeProvisioningClient` as the administrator, the source injected
+    at 1794822240 and the time router mounted on the suite's shared app as the
+    service mounts it (`mount_unless_served`, as the suite mounts the mock
+    profile's routers): status reads 1794822240, `set_time(T)` answers
+    `injected`/T and status follows, `set_time(T - 60)` raises 409 with the
+    refusal's "moves only forward" detail, `set_time(True)` raises 422, status
+    still T; under wall time, installed explicitly, status reads `{"source":
+    "wall"}` and `set_time` raises 404 (from the guard, the router being mounted
+    on the shared app by then; the production 404 is routing's). The misspelled
+    source: the composition root started in a process of its own (`python -c
+    "import compute_provisioning_service.main"`, `PROVISIONING_TIME__SOURCE=injectd`)
+    exits with the component's exact refusal, `time.source is "wall" or
+    "injected", not 'injectd'`, a process start, not application integration.
+    Not asserted: the answer's signed timestamp, which the client verifies within
+    its skew of the same source (the storefronts' tests read it exactly, through
+    the same signing at response time), and the refusal bodies' `code`, which
+    the client does not surface.
+- [x] 10.2 The lease watchdog and the site follow injected time: a lease truncated to
   1794822300, the watchdog paused, the service set to 1794822300 and one watchdog cycle
   stepped, ends by expiry with effective instant and claimed deadline 1794822300; a
   termination under injected time states the injected effective instant
   (`physical-provisioning`'s scenarios).
   - Verify: application-integration tests through the provisioning client, mock
     executor.
-- [ ] 10.3 The client gains `set_time` and the status time section.
+  - Done, application integration, `test_system_time.py`: a lease committed
+    through the ledger, as the lease suites' `_committed` does (no route commits a
+    lease), then truncated to 1794822300 through the site client's
+    `truncate_lease`, with the source at 1794822240 and the watchdog paused
+    through the client; a `check_leases` step releases nothing;
+    `set_time(1794822300)`; the next step releases it, and the seller-signed lease
+    read returns one signed lease-ended report, verified against the service's
+    principal, with cause `expiry` and effective instant and claimed deadline
+    1794822300. A lease terminated by the seller after `set_time(1794822300)`
+    reports cause `termination` at 1794822300. `test_ledger_lease_lifecycle.py`'s
+    library test (5.2) stays: it holds the lifecycle's classification without the
+    application.
+- [x] 10.3 The client gains `set_time` and the status time section.
   - Verify: `make test-compute-provisioning-client`.
-- [ ] 10.4 Section verification.
+  - Done: `ComputeProvisioningClient.set_time(now)` and the sync form post
+    `{"now": now}` signed as the contract's operation and parse
+    `TimeSettingResponse`; `get_system_status` parses the section through the
+    contracts' model. The client's contracts bound rises to 0.14.0, the unreleased
+    version that adds them. Unit, `tests/unit/test_client.py::test_the_time_setting_answers_its_model`
+    (both forms, the request verified against the family route table's contract);
+    `make -C provisioning/compute/client test` 88 passed.
+- [x] 10.4 Section verification.
   - Application integration: `make test-provisioning`,
     `make test-compute-provisioning-client`.
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: section 15's fixture sets provisioning once section 16 puts the lanes
     on injected time; serve-running's funds-exhausted rows exercise 10.2's path.
+  - Evidence: `make -C provisioning/compute/service test` 634 unit and 548
+    integration, `make -C provisioning/compute/client test` 88, `make -C
+    provisioning/compute/contracts test` 157, `make -C kit/site test` 374, `make -C
+    kit/storefront test` 141, each passed after the fresh-context fixes.
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`
+    before those fixes: `after-functional-change` and `pre-commit-functional`
+    (every suite) passed, and of `pre-commit` only the citations check failed, on
+    closeout's `openspec/specs/injected-time/architecture.md` (18.9). On the
+    final tree, the same: `after-functional-change` (`make lock`) and
+    `pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make
+    test`, every suite) passed, and of `pre-commit` only the citations check
+    failed, on that document.
+  - Confirmed: no end-to-end marker exercises the route yet (sections 15 and 16).
+    No owed CI evidence: the suites run in the workflows' existing jobs.
+  - Fresh-context check: it found the route bound in both modes against the
+    delta's "mounted only on an instance configured for injected time" (it is now
+    mounted only under injected time, the tests mounting it as the service
+    does), comments calling the wall-time 404 an unrouted path's (reworded),
+    `configured_time_source` reading a scalar `time` as the source, here and in
+    the kit (it now states none) and untested (unit tests added), the
+    announcement test under `integration/` (moved to `unit/`), section 8's
+    counts reading as this section's (moved back into 8.2's evidence), the
+    refusal codes unasserted (the 409's detail is asserted; the client surfaces
+    no code, said above) and the misspelled-source test matching any line naming
+    the setting (it now matches the component's whole refusal), the lease end
+    written straight to the ledger where the site route can truncate it (the
+    test truncates through the site client), the contracts module's `__all__` and
+    docstring missing the time model (added), and the wall-time tests relying on
+    the default source (they install wall time). Declined: moving the
+    provisioning middleware tests out of `tests/unit/`, whose file predates the
+    change, as section 8 declined; writing the "exempt only while injected" rule
+    once rather than in `core_storefront.auth`, the provisioning middleware and
+    the site middleware, since each is one expression over the component's own
+    `TimeRouteService(...).settable`, in packages with no shared dependency but
+    the component; and importing `_committed` and the `seller` fixture from
+    `test_leases_api`, as `test_lease_end_reports` does.
+  - Handoff for section 11. The provisioning pattern fits a service whose app
+    is built once at import: install at module level, mount the time router
+    only when injected, keep the contract in the authentication table, guard the
+    handler, and let tests mount the router on the shared app. The credits
+    service hosts the site, so `SiteAuthMiddleware`'s `time_setting_operation`
+    is its seam; the registry's bearer route needs no exemption (D14).
 
 ## 11. The registry's and the API-credits service's setting, route and status
 

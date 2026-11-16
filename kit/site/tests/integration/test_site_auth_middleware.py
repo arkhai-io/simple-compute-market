@@ -27,6 +27,7 @@ import uuid
 from typing import Any
 
 import httpx
+import injected_time
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
@@ -797,13 +798,25 @@ async def _set_and_read_skewed(
     return setting, snapshot
 
 
+@pytest.fixture
+def injected_source():
+    """The process source, injected at the wall instant, restored afterwards."""
+    before = injected_time.installed()
+    source = injected_time.InjectedTime()
+    injected_time.install(source)
+    yield source
+    injected_time.install(before)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("skew", (900, -900))
-async def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(skew):
+async def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(
+    injected_source, skew
+):
     calls: list[int] = []
     setting, snapshot = await _set_and_read_skewed(
         _time_app(calls, time_setting_operation="system_time"),
-        int(time.time()) + skew,
+        injected_source.now() + skew,
     )
 
     assert setting.status_code == 200, setting.text
@@ -816,11 +829,28 @@ async def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(ske
 
 
 @pytest.mark.asyncio
-async def test_the_time_setting_operation_keeps_its_freshness_unless_the_service_names_it():
+async def test_an_unnamed_time_setting_operation_keeps_its_freshness(injected_source):
     calls: list[int] = []
     setting, _ = await _set_and_read_skewed(
-        _time_app(calls, time_setting_operation=None), int(time.time()) + 900
+        _time_app(calls, time_setting_operation=None), injected_source.now() + 900
     )
+
+    assert setting.status_code == 403
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_under_wall_time_the_named_operation_keeps_its_freshness():
+    calls: list[int] = []
+    before = injected_time.installed()
+    injected_time.install(injected_time.WallTime())
+    try:
+        setting, _ = await _set_and_read_skewed(
+            _time_app(calls, time_setting_operation="system_time"),
+            int(time.time()) + 900,
+        )
+    finally:
+        injected_time.install(before)
 
     assert setting.status_code == 403
     assert calls == []

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta, timezone
 
+import injected_time
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -361,35 +362,48 @@ def _counting(calls):
     return mutation
 
 
-# A time-setting route as the service declares one under injected time; the
-# middleware is told its operation, as the service's composition tells it.
+# A stand-in time-setting route under an operation of its own, which the
+# middleware is told, as the service's composition tells it its own.
 _TIME_SETTING = {
     "method": "POST",
-    "path": "/api/v1/system/time",
-    "operation": "provisioning_system_time",
+    "path": "/api/v1/system/stand-in-time",
+    "operation": "stand_in_time",
     "roles": ["admin"],
 }
+_TIME_SETTING_PATH = "/api/v1/system/stand-in-time"
+
+
+@pytest.fixture
+def injected_source():
+    """The process source, injected at the wall instant, restored afterwards."""
+    before = injected_time.installed()
+    source = injected_time.InjectedTime()
+    injected_time.install(source)
+    yield source
+    injected_time.install(before)
 
 
 @pytest.mark.parametrize("skew", (900, -900))
-def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(identities, skew):
+def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(
+    identities, injected_source, skew
+):
     storefront, authority = identities
     table = assemble_service_route_table([_TIME_SETTING])
     client, calls = _app(
         storefront,
         authority,
         route_table=table,
-        time_setting_operation="provisioning_system_time",
+        time_setting_operation="stand_in_time",
     )
-    client.app.add_api_route("/api/v1/system/time", _counting(calls), methods=["POST"])
-    skewed = int(time.time()) + skew
+    client.app.add_api_route(_TIME_SETTING_PATH, _counting(calls), methods=["POST"])
+    skewed = injected_source.now() + skew
 
     setting = client.post(
-        "/api/v1/system/time",
+        _TIME_SETTING_PATH,
         json={"now": skewed},
         headers=_headers(
             _ADMIN_SIGNER,
-            "/api/v1/system/time",
+            _TIME_SETTING_PATH,
             {"now": skewed},
             request_id="set",
             role="admin",
@@ -419,21 +433,22 @@ def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(identitie
     assert calls["count"] == 1
 
 
-def test_the_time_setting_operation_keeps_its_freshness_unless_the_service_names_it(
-    identities,
-):
-    storefront, authority = identities
+def _skewed_stand_in_setting(time_setting_operation, skewed):
+    storefront, authority = _signer("ed25519", 17), _signer("ed25519", 23)
     table = assemble_service_route_table([_TIME_SETTING])
-    client, calls = _app(storefront, authority, route_table=table)
-    client.app.add_api_route("/api/v1/system/time", _counting(calls), methods=["POST"])
-    skewed = int(time.time()) + 900
-
+    client, calls = _app(
+        storefront,
+        authority,
+        route_table=table,
+        time_setting_operation=time_setting_operation,
+    )
+    client.app.add_api_route(_TIME_SETTING_PATH, _counting(calls), methods=["POST"])
     response = client.post(
-        "/api/v1/system/time",
+        _TIME_SETTING_PATH,
         json={"now": skewed},
         headers=_headers(
             _ADMIN_SIGNER,
-            "/api/v1/system/time",
+            _TIME_SETTING_PATH,
             {"now": skewed},
             request_id="set",
             role="admin",
@@ -441,6 +456,25 @@ def test_the_time_setting_operation_keeps_its_freshness_unless_the_service_names
             timestamp=skewed,
         ),
     )
+    return response, calls
+
+
+def test_an_unnamed_time_setting_operation_keeps_its_freshness(injected_source):
+    response, calls = _skewed_stand_in_setting(None, injected_source.now() + 900)
+
+    assert response.status_code == 403
+    assert calls["count"] == 0
+
+
+def test_under_wall_time_the_named_operation_keeps_its_freshness():
+    before = injected_time.installed()
+    injected_time.install(injected_time.WallTime())
+    try:
+        response, calls = _skewed_stand_in_setting(
+            "stand_in_time", int(time.time()) + 900
+        )
+    finally:
+        injected_time.install(before)
 
     assert response.status_code == 403
     assert calls["count"] == 0

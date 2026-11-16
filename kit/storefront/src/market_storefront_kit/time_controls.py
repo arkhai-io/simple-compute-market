@@ -56,11 +56,12 @@ def configured_time_source(settings: Any) -> Any:
     ``settings`` is the loader's merged settings, read through its ``get``;
     the section's keys are read in any case, as every storefront reads its
     configuration. The value is returned as stated, for
-    :func:`install_time_source` to judge.
+    :func:`install_time_source` to judge; a ``[Time]`` that is not a table
+    states no source.
     """
     section = settings.get("time")
     if not hasattr(section, "items"):
-        return section
+        return None
     return {str(key).lower(): item for key, item in section.items()}.get("source")
 
 
