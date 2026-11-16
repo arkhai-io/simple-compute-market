@@ -95,12 +95,18 @@ final stops" (`deal-lifecycle`). Touches `kit/deal-lifecycle-contracts`,
 
 ## 2. End service asks the adapter for every deal, holds changed answers, and lists *ended* truly
 
+Replanned against the reviewed design after implementation returned the change to
+planning (its handoff below): this section is now the kit and compute-delivery slice,
+tasks 2.1–2.4. The storefronts' rate-delivery evidence is section 2A, and the lane
+scenarios that were 2.5 are section 2B. 2.5's text is kept for history and is not
+implemented here.
+
 Delivers delivery for rate deals and the seller list's meaning of *ended*. Implements D1,
 D7's list part and D12's evidence; requirements "Delivery authorization delegates payment
 interpretation", "The seller half lists deals" (`deal-lifecycle`), "Protected delivery
 steps are authorized and admitted" (`compute-delivery`), "Payment settlement is retryable
 and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
-`kit/deal-servicing`, `domains/compute/delivery`, `e2e-tests`.
+`kit/deal-servicing`, `domains/compute/delivery`.
 
 - [ ] 2.1 `kit/deal-servicing/src/market_deal_servicing/end.py`: remove `_unserviceable`
       and its call; in `_authorize_delivery`, when the phase's intent at this revision is
@@ -119,9 +125,11 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
 - [ ] 2.2 `domains/compute/delivery/src/compute_delivery/path.py` and `outcome.py`: remove
       `RepairReason.RATE_SERVICING_UNAVAILABLE` and the code branch in `_authorized`;
       every refusal with no end due is `repair_required(no_accepted_deal)`. Verify
-      (library integration, `domains/compute/delivery/tests/integration/test_drive_commit.py`):
-      the refused-rate case is replaced by a changed-answer case that leaves the drive
-      pending, and a rate deal commits.
+      (library integration, `domains/compute/delivery/tests/integration/test_drive_delivery.py`,
+      where the refused-rate cases are — corrected from `test_drive_commit.py`): the
+      refused-rate cases are replaced by a rate deal that commits and is delivered, a
+      changed answer while it waits for its start leaving the drive pending, and an
+      undelivered rate deal past its deadline.
 - [ ] 2.3 `kit/deal-servicing/src/market_deal_servicing/seller.py`, `_list`: a deal with a
       selected end is `ended` only when `progress == "released"`, every part in the
       authority view has a `final_stop` or an `end_at` at or before now, and no case is
@@ -133,7 +141,7 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
 - [ ] 2.4 Verify D12 (library integration, `test_final_stop.py`): after the watch records a
       rate part's final stop, the servicing tables hold the stop and the selected end and
       no balance, funded amount or amount owed.
-- [ ] 2.5 The two recurring-purchase scenarios
+- [ ] 2.5 (Moved to section 2B; not implemented here.) The two recurring-purchase scenarios
       (`e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_recurring_purchase.py`,
       `.../bare_metal/test_bare_metal_recurring_purchase.py`, their stages in
       `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`) assert a refused
@@ -144,11 +152,10 @@ and idempotent" (`settlement-servicing`). Touches `kit/deal-lifecycle`,
       make today. Verify (unit, `e2e-tests/tests/unit/test_recurring_purchase_stages.py`)
       and by running both scenarios in their lanes.
 - [ ] 2.6 Verification point: `kit/deal-lifecycle`, `kit/deal-servicing` and
-      `domains/compute/delivery` suites (unit, library integration) pass; both storefronts'
-      lifecycle suites (`domains/vms/storefront/tests/integration/test_lifecycle_*.py`,
-      `domains/bare_metal/storefront/tests/integration/test_lifecycle_*.py`, application
-      integration) pass. End-to-end: `e2e_vm_recurring_purchase`,
-      `e2e_bare_metal_recurring_purchase`.
+      `domains/compute/delivery` suites (unit, library integration) pass. The storefronts'
+      suites are section 2A's verification point, which this section's work leaves
+      failing four tests in each storefront until 2A rewrites them. End-to-end: none at
+      this level; section 2B carries the recurring purchases.
 
 Section 2 handoff (in progress, uncommitted; no task checked yet):
 
@@ -187,6 +194,71 @@ Section 2 handoff (in progress, uncommitted; no task checked yet):
   each storefront rewritten as delivered-deal and undelivered-deadline evidence) a section
   of its own and resize 2.5. The work above is committed as a work in progress, its
   storefront suites failing those four tests in each storefront, and no task is checked.
+
+## 2A. Both storefronts deliver a rate deal in their recurring test worlds
+
+Delivers each storefront's application-level evidence that a rate deal is committed,
+activated, billed and made available once end service no longer refuses it, and that an
+undelivered rate deal still meets the deadline barrier. Implements D1 at application
+integration; requirements "Delivery authorization delegates payment interpretation"
+(`deal-lifecycle`) and "Protected delivery steps are authorized and admitted"
+(`compute-delivery`). Touches the two storefronts' test worlds and tests only
+(`domains/vms/storefront/tests/`, `domains/bare_metal/storefront/tests/`). Sections 3.3
+and 9.3 build their delivered rate deals on these worlds.
+
+- [ ] 2A.1 VM: make `domains/vms/storefront/tests/recurring_world.py`'s `settlement`
+      deliver a rate deal — its fake site places and commits the deal's capacity, and the
+      storefront's capacity runtime, which the end hand-off and the failure policy also
+      use, resolves the world's site authority — so a committed recurring deal reaches
+      activation, the payments fake's rate `start` and availability. Verify (application
+      integration): a new case drives a recurring deal to `available` with its billing
+      start journaled after the site's activation.
+- [ ] 2A.2 Bare metal: give `domains/bare_metal/storefront/tests/recurring_world.py`'s
+      `_OneSite` capacity client what `fulfillment_service.py`'s `fulfill_bare_metal` needs
+      (`site_names`, then whatever its dispatch needs, found by running it), so settle no
+      longer answers 500 and a committed recurring deal reaches activation, the payments
+      fake's rate `start` and availability. Verify (application integration): as 2A.1, in
+      bare metal.
+- [ ] 2A.3 In each storefront, rewrite `tests/integration/test_rate_delivery_refusal.py` as
+      `test_rate_delivery.py`: its refused-commit test becomes a rate deal delivered, with
+      billing starting after activation; its three deadline-recovery tests keep their
+      scenarios on a rate deal left undelivered (the storefront's evidence for the
+      deadline barrier: a deadline admitted after a payment observation, a buyer's stop
+      recorded while the storefront was down winning over the deadline, and an unreadable
+      authority leaving the deal unended). Rewrite
+      `test_watchdog_buy.py::test_a_watched_purchase_whose_commit_is_refused_is_never_watched`
+      for the delivered deal: the watched purchase is monitored from `available` (D1;
+      the watchdog requirement, `deal-lifecycle`). Verify (application integration): the
+      rewritten tests pass in both storefronts.
+- [ ] 2A.4 Verification point: both storefronts' suites (application integration) pass,
+      among them `test_rate_delivery.py`, `test_watchdog_buy.py` and the
+      `test_lifecycle_*.py` modules; `scripts/change-workflow run pre-commit` passes.
+      End-to-end: section 2B.
+
+## 2B. The recurring purchases are delivered in both lanes
+
+Delivers the interim lane form of the recurring purchase, until section 10 moves it to
+lane time: delivered rather than refused, under the waits the scenarios make today.
+Implements D1 in the lanes; requirement "A recurring purchase is delivered end to end in
+each compute lane" (`test-compatibility`), whose lane-time clause section 10 meets.
+Touches `e2e-tests`.
+
+- [ ] 2B.1 Rewrite the refused-commit stages in
+      `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py` and their drivers in
+      `e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_recurring_purchase.py` and
+      `.../bare_metal/test_bare_metal_recurring_purchase.py`, changing only what the
+      refusal's removal changes: the deal is delivered (the site's activation, the
+      payments double's rate `start` after it, availability), the buyer's own `end` stops
+      it with the started period charged (the payer's balance down by one period, not
+      restored), and the seller's lifecycle read shows the buyer's end and no
+      `delivery_end` filing. Update the stage order
+      `e2e-tests/tests/unit/test_recurring_purchase_stages.py` holds. Verify (unit,
+      `e2e-tests/tests/unit/`): the stage modules pass.
+- [ ] 2B.2 Run both scenarios in their lanes. Verify (system):
+      `e2e_vm_recurring_purchase` and `e2e_bare_metal_recurring_purchase` pass, each
+      leaving no payment hold, mock rule or held loop.
+- [ ] 2B.3 Verification point: the `e2e-tests` unit suite and both lane runs pass.
+      End-to-end: `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase`.
 
 ## 3. Every payment stop is classified
 
