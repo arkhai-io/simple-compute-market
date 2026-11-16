@@ -45,6 +45,7 @@ version = "0.13.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
@@ -58,6 +59,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-core", specifier = "==0.6.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "httpx", specifier = ">=0.27" },
 ]

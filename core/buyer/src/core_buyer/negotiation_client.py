@@ -27,7 +27,6 @@ import base64
 import binascii
 import json
 import logging
-import time
 import urllib.error
 import urllib.request
 import uuid
@@ -36,6 +35,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Optional
 
+import injected_time
 from market_policy.negotiation_middleware import (
     NegotiationChainExhausted,
     NegotiationContext,
@@ -722,7 +722,7 @@ def _authenticated_json(
     if not isinstance(expected_response_principals, TrustedIdentitySet):
         raise ValueError("a pinned response principal set is required")
     request_id = request_id or uuid.uuid4().hex
-    timestamp = int(time.time()) if timestamp is None else timestamp
+    timestamp = injected_time.now() if timestamp is None else timestamp
     body_value: Any = EMPTY_BODY if body is None else body
     authenticated = sign_request(
         signer=signer,
@@ -817,10 +817,11 @@ def _authenticated_json(
             f"{method} {url} -> HTTP {response_status} "
             f"{_authentication_description(response_headers)}"
         ) from exc
+    reference = injected_time.now()
     verification = verify_response(
         signed_response,
         body=payload if text else EMPTY_BODY,
-        now=int(time.time()),
+        now=reference,
         max_skew=_MAX_RESPONSE_SKEW,
         expected_role=expected_response_role,
         expected_principals=expected_response_principals,
@@ -837,7 +838,7 @@ def _authenticated_json(
             f"{method} {url} response authentication failed: {verification.code.value}"
         )
     capture_envelope(capture, envelope=authenticated, raw_body=data or b"", headers=headers,
-                     verified_at=int(time.time()),
+                     verified_at=reference,
                      expected_principals=TrustedIdentitySet(identities=(principal,)))
     if not 200 <= response_status < 300:
         raise AuthenticatedHTTPError(

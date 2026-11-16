@@ -645,7 +645,8 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 # check-time-reads — one time source per process
 # (docs/guidance/engineering/implementation.md, "One time source per process"):
 # no direct wall-clock read in production source or the lane doubles. The forms
-# it refuses and its scope are scripts/check_time_reads.py's.
+# it refuses and its scope are scripts/check_time_reads.py's. check-packaging
+# runs it.
 check-time-reads: ## Fail on a direct wall-clock read (time.time, datetime.now, …) in production source or the lane doubles, naming each file and line
 	@python3 scripts/check_time_reads.py
 
@@ -702,7 +703,7 @@ check-uv-version: ## Fail if the installed uv is older than the minimum that wri
 	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-build-requirements check-project-layout check-architecture check-release-components
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-build-requirements check-project-layout check-architecture check-release-components check-time-reads
 
 # Every rule of scripts/check_release_components.py; check-workflow-credentials
 # and check-market-binary each run one of them alone.

@@ -13,9 +13,9 @@ from __future__ import annotations
 from .evidence import evidence_store
 
 import json
-import time
 from typing import Any
 
+import injected_time
 import typer
 from market_core.schemas import SettlementSelection
 from market_identity import TrustedIdentitySet
@@ -429,7 +429,7 @@ def register(app: typer.Typer) -> None:
             try:
                 selected_settlement = settlement_policy.select(
                     listing_dict,
-                    expiration_unix=int(time.time()) + 3600,
+                    expiration_unix=injected_time.now() + 3600,
                     clauses=settlement_clauses,
                 )
             except ValueError as exc:

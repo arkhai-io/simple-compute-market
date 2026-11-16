@@ -906,38 +906,190 @@ doubles' direct reads with their behaviour unchanged, and switches the check on
 the doubles' direct reads, the root `Makefile`, and
 `docs/guidance/repository/packaging-checks.md`.
 
-- [ ] 7.1 Each buyer package and client declares `arkhai-injected-time`, relocked;
+- [x] 7.1 Each buyer package and client declares `arkhai-injected-time`, relocked;
   every direct read converted as 3.2; the watchdog's probe staleness is lane time, its
   probe interval and timeouts elapsed work (D3, D20).
   - Verify: `make check-time-reads` reports none of these packages; `make test-core`,
     `make test-kits` and the buyers' suites pass.
-- [ ] 7.2 The signing clients take every request timestamp and every response
+  - Done: nine packages declare `arkhai-injected-time>=0.1.0`, with their
+    `published-packages.md` rows: `core/buyer`, `core/storefront-client`,
+    `core/registry-client`, `kit/deal-lifecycle-buyer` and
+    `kit/deal-lifecycle-client` (both with `allowed-dependencies`, so each lists it
+    and maps `injected_time` under `[tool.arkhai.architecture.import-roots]`, as
+    section 3 describes), the VM, bare-metal and API-credits buyers, and, outside the
+    plan, `domains/vms/negotiation` (5.3's handoff). Relocked with `make lock`
+    (full). 29 reads converted, all the time of the world, none elapsed work: the
+    buyer's request timestamps and response freshness references (core's
+    `_authenticated_json` and settlement submission, the three clients), the rotation
+    intents' expiry (the profile service's and the registry client's), every escrow
+    and selection `expiration_unix` the buyers propose, the heartbeat loop's expiry
+    check and its sleep toward the escrow's expiration, the run log's stamp (7.3),
+    the buyer lifecycle's and evidence pruning's clocks, the watchdog's probe and
+    stop stamps (`WaitClock.now`, `watch_deal`'s `clock`), and the RL strategy's
+    time-of-day feature (`time.localtime(injected_time.now())`, an instant given, so
+    the check admits it). The watchdog's probe interval, probe timeout and stop
+    retry were already elapsed work on `monotonic`/`asyncio.wait_for`; its staleness
+    judgement compares the lane-time `last_probe_at` with the lifecycle's clock, now
+    the source. A response's freshness reference and its capture's `verified_at`
+    are now one read, where two wall reads made them.
+  - Versions: `kit/deal-lifecycle-client` 0.1.1 (a patch: a new runtime dependency,
+    no API change; it carried the `marketplace-v0.3.0` version, and nothing pins it
+    exactly). `core/storefront-client` (0.29.0, released, pinned exactly by the
+    provisioning service) is left for section 9, whose `set_time` takes its minor
+    bump and moves that pin once, as section 3 left `kit/storefront`. The others were
+    already bumped on `dev` since that release; `tools/lane-double-controls` is
+    unpublished and new since it.
+  - Tests that patched a module's `time.time`, which the module no longer imports,
+    now install an injected source: `core/buyer`'s `test_identity_http.py` (an
+    autouse fixture at its signing instant) and `core/storefront-client`'s
+    admin, lifecycle, negotiate and close-listing tests (a `held_time` fixture in
+    `tests/conftest.py`). The close-listing retry test moves the source a second
+    between the two calls where it fed a sequence of patched reads, and its fake
+    storefront now signs at the request's timestamp rather than the wall clock.
+  - Evidence: unit and library integration, `kit/deal-lifecycle-buyer`'s
+    `test_watchdog.py::test_probes_are_stamped_from_the_process_source_and_scheduled_while_it_is_held`
+    (unit: with no clock given and the source held, three probes and the stop carry
+    the one injected instant, while the fake monotonic schedule runs all three), and
+    two library integration tests in `test_watchdog_journal.py` over the SQLite
+    evidence file: `test_the_loop_journals_its_probes_and_stop_at_the_process_source_s_instant`
+    (the loop given no clock, the stop's dispatch alone stood in for: the journal,
+    reopened, holds the last probe, the stop's decision and both probe observations
+    at the injected instant) and
+    `test_the_read_judges_a_probe_s_staleness_at_the_process_source_s_instant` (a
+    lifecycle given no clock reads a journaled probe as monitored at its freshness
+    bound by the source and unmonitored a second past it). `make check-time-reads`
+    lists none of these packages; `make -C kit/deal-lifecycle-buyer test` 52 passed,
+    `make -C core/buyer test` 172, `make -C domains/vms/buyer test` 334,
+    `make -C domains/bare_metal/buyer test` 84, `make -C domains/apicredits/buyer
+    test` 35; `make test-core` and `make test-kits` passed within 7.7's `make test`.
+    The RL strategy's converted line is exercised by no suite: it runs only once
+    `torch` is imported, which no package depends on, and its one test
+    (`domains/vms/storefront`'s `test_rl_middleware.py`) skips without it; the
+    conversion is read, not run.
+- [x] 7.2 The signing clients take every request timestamp and every response
   freshness reference from the process source (`marketplace-identity`'s "Signing and
   verification read the process source").
   - Verify: unit tests in `core/storefront-client`, `core/registry-client` and
     `kit/deal-lifecycle-client` with an injected source at 1794822300: a signed
     request carries 1794822300, and a response stamped 1794822300 verifies.
-- [ ] 7.3 Supply the buyer's read database or file times (its run log and buyer state)
+  - Done: unit, `test_process_time_source.py` in each of the three: with the source
+    held at 1794822300 (2026-11-16 09:45 UTC, which the wall clock had left hours
+    behind when they ran, and leaves further behind since), a request built with no
+    timestamp carries 1794822300 — in its envelope and header for the storefront and
+    registry clients, in its header for the lifecycle client — and a response
+    stamped 1794822300 verifies with no reference given, which a wall-clock
+    reference would refuse for skew; and the same response is refused
+    `timestamp_skew` once the source is set 301 s past it, so the reference follows
+    the source as it moves. The storefront and registry clients' tests call their
+    `auth` module's request builder and response verifier directly; the lifecycle
+    client's runs `end_delivery` over an `httpx.MockTransport`.
+    `make -C core/storefront-client test` 71 passed, `make -C core/registry-client
+    test` 28, `make -C kit/deal-lifecycle-client test` 4. Against the round's base the
+    storefront client's test fails at collection (`ModuleNotFoundError:
+    injected_time`, `run test-before`), which shows less than a behavioural failure;
+    the other two import the same module.
+- [x] 7.3 Supply the buyer's read database or file times (its run log and buyer state)
   from the process source (D13).
   - Verify: a buyer test under an injected source finds the injected instant in the
     run log's read fields.
-- [ ] 7.4 The doubles' direct reads go through the component's wall source:
+  - Done: the run log's `ts`, which `list_runs` reports as a run's `started_at` and
+    `last_event_ts`, is the source's instant as an aware UTC ISO string, now with no
+    fraction (`market logs` already cut one off). `list_runs` orders runs by their
+    files' modification time, the order they were last written in, which a source
+    moving only forward cannot contradict and which carries no instant out; it is
+    left as it is (its docstring says why). The buyer's state is otherwise the
+    watchdog and end journals and the evidence store, whose instants their callers
+    pass from the clocks 7.1 converted; no buyer store has an SQL time default. Read:
+    the watchdog journal's probe instants (the staleness judgement compares them),
+    asserted under injected time by 7.1's two integration tests. Not asserted under
+    injected time: the end journal's `observed_at` (written from the lifecycle's
+    clock and reported) and the evidence store's `recorded_at` (retention compares it
+    with the prune command's clock), each now the source by default.
+  - Evidence: library integration, `core/buyer/tests/integration/test_run_log_times.py`
+    (a run log over real files under a temporary state directory, the source at
+    1794821400 then set 60 s on: each event's `ts`, and the summary's `started_at`
+    and `last_event_ts`, hold those instants), in `make -C core/buyer test` (172).
+  - Outside the plan: `core/buyer`'s `make test` ran `tests/unit` alone, so its
+    existing `tests/integration` suite (one test, passing) never ran; the Makefile and
+    `pytest`'s `testpaths` now name both directories.
+- [x] 7.4 The doubles' direct reads go through the component's wall source:
   `lane_double_controls/clock.py`'s `wall_clock` and any direct read in the two
   doubles; their offset clocks stay until section 13.
   - Verify: `make test-lane-double-controls`, `make test-payments-lane-double` and
     `make test-mediation-lane-double` pass unchanged.
-- [ ] 7.5 Make sure nothing is left: run `make check-time-reads` on the tree.
+  - Done: `wall_clock` reads a module-level `injected_time.WallTime`, explicitly the
+    wall source rather than the installed one, so the doubles stay on wall time until
+    section 13 gives them injected time; `tools/lane-double-controls` declares
+    `arkhai-injected-time` (it has no `published-packages.md` row: it is not
+    published) and the two doubles are relocked with it. The doubles held no direct
+    read of their own: both take `wall_clock` as their clocks' default. Their tests
+    are unchanged: `make test-lane-double-controls` 120 passed (mypy strict clean),
+    `make test-payments-lane-double` 84, `make test-mediation-lane-double` 73, run
+    after `make dist` rebuilt the controls' wheel.
+- [x] 7.5 Make sure nothing is left: run `make check-time-reads` on the tree.
   - Verify: it reports no finding.
-- [ ] 7.6 Switch the check on: `make check-packaging` runs `check-time-reads`, and
+  - Done: `make check-time-reads` prints "OK: no direct wall-clock read in production
+    source or the lane doubles."
+- [x] 7.6 Switch the check on: `make check-packaging` runs `check-time-reads`, and
   `docs/guidance/repository/packaging-checks.md`'s "Checks" table gains its row (D20).
   - Verify: `make check-packaging` passes, and fails on a planted `time.time()` in a
     kit.
-- [ ] 7.7 Section verification.
+  - Done: `check-time-reads` is the last check `check-packaging` runs, and its
+    Makefile comment says so; the table's row names what it refuses, its scope and
+    what passes, and cites `implementation.md`'s section. No CI workflow runs
+    `check-packaging`, so the check runs where it already runs: the pre-commit hook's
+    functional checks and closeout's packaging part.
+  - Evidence: with `_PLANTED_WALL_READ = time.time()` added to
+    `kit/deal-lifecycle-buyer`'s `commands.py`, `make check-packaging` failed (exit 2)
+    at `check-time-reads`, naming `commands.py:28` and the project, after every other
+    check passed; the plant was then removed. The passing run is 7.7's pre-commit.
+- [x] 7.7 Section verification.
   - Unit and integration: `make test`.
   - `make check-packaging`; `scripts/change-workflow run pre-commit
     drive-the-storefront-clock-in-lanes`.
   - End-to-end: the three lanes, every module at wall time, as regression evidence
     for round one; no new scenario is owed.
+  - Evidence: `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes` on the final tree:
+    `after-functional-change` (`make lock`) and `pre-commit-functional` (`make
+    dist-clean`, `make check-packaging` — its `check-time-reads` printing "OK: no
+    direct wall-clock read" — and `make test`, every suite, `make test-core` and
+    `make test-kits` among them) passed; of `pre-commit`, only the citations check
+    failed, on closeout's `openspec/specs/injected-time/architecture.md` (18.9).
+  - Confirmed: no end-to-end marker is new or changed; every lane module runs the
+    buyer, the signing clients and the doubles at wall time, so validation's lane run
+    is the round's regression evidence. No owed CI evidence: no workflow runs
+    `check-packaging`, and the suites run in the workflows' existing jobs.
+  - Fresh-context check: it found test comments calling 1794822300 "hours from the
+    wall clock", true only of the day they ran (reworded: an instant the wall clock
+    has left behind by far more than the skew), an unwrapped watchdog docstring that
+    called `clock` the source where only its default is (fixed), no test of the real
+    watchdog journal storing a source-stamped probe (the loop test above was added),
+    and four evidence claims broader than their tests — the lifecycle client's
+    envelope, the RL strategy's line as run, the skew test as telling the source from
+    the wall clock, and 7.1 and 7.6 resting on this run before it was recorded (all
+    reworded or recorded here). Declined: moving
+    `kit/deal-lifecycle-client`'s new test into a `unit/` directory, since its
+    existing tests sit in a flat `tests/` and reorganizing them is outside this
+    change (`test-placement.md`'s split; a row for the change index if the owner
+    wants it); and editing `openspec/specs/buyer-orchestration/architecture.md`,
+    whose watchdog paragraphs (its probe stamps and staleness on "the wall clock",
+    near lines 220–237) closeout's promotion must restate in the process source's
+    terms — a permanent companion this change updates at closeout, not mid-round.
+  - Handoff for section 8 and later. Round one's conversion is complete and the
+    check is on: a new direct wall read anywhere in scope fails `make
+    check-packaging`, and with it the pre-commit hook. Every signing client now reads
+    the process source, so a test through a client may inject any instant, as long
+    as the service it calls reads the same process's source (4.2's 120 s-behind
+    fixtures may now move to fixed instants, but need not). A test that patched a
+    module's `time.time` to fix a timestamp now installs an `InjectedTime` and
+    restores the previous source; `core/storefront-client`'s `held_time` fixture
+    holds 1000. The doubles' `wall_clock` reads `WallTime()` explicitly, so
+    installing an injected source in a double's process does not move it until
+    section 13 replaces the offset clock. `core/storefront-client` owes its minor
+    bump to section 9. Closeout's 18.9 must also cover `buyer-orchestration`'s
+    architecture companion (above). This session grew large; section 8 is better
+    started fresh.
 
 ## 8. The time-setting operation's freshness exemption
 

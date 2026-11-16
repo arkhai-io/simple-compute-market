@@ -28,6 +28,7 @@ import os
 import time
 from typing import Any
 
+import injected_time
 import typer
 from arkhai_vms import VmConnectionDetails, make_vm_provision_terms
 from core_buyer import build_buyer_explanation, explain_registry_query
@@ -731,7 +732,7 @@ def register(app: typer.Typer) -> None:
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3) from exc
-        expiration_unix = int(time.time()) + int(expiration_seconds)
+        expiration_unix = injected_time.now() + int(expiration_seconds)
         if explain:
             assert discovery is not None
             trace = settlement_policy.explain_listings(

@@ -1,0 +1,104 @@
+"""The registry client signs and judges freshness by the process time source."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+
+import injected_time
+import pytest
+from injected_time import InjectedTime
+from market_identity import (
+    AuthenticatedRequest,
+    Ed25519Signer,
+    ResponseEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_response,
+)
+
+from registry_client.auth import (
+    IDENTITY_IDENTIFIER_HEADER,
+    IDENTITY_SCHEME_HEADER,
+    REQUEST_ID_HEADER,
+    ROLE_HEADER,
+    SIGNATURE_HEADER,
+    SIGNATURE_VERSION_HEADER,
+    TIMESTAMP_HEADER,
+    authenticate_request,
+    authentication_headers,
+    verify_authenticated_response,
+)
+
+#: An instant the wall clock has left behind by far more than the signing skew,
+#: so a read of the wall clock anywhere on the path fails the response's skew.
+INSTANT = 1_794_822_300
+
+_SELLER = Ed25519Signer(bytes.fromhex("44" * 32))
+_REGISTRY = Ed25519Signer(bytes.fromhex("55" * 32))
+_BODY = {"listing_id": "listing"}
+
+
+@pytest.fixture(autouse=True)
+def source() -> Iterator[InjectedTime]:
+    before = injected_time.installed()
+    held = InjectedTime(start=INSTANT)
+    injected_time.install(held)
+    yield held
+    injected_time.install(before)
+
+
+def _request() -> AuthenticatedRequest:
+    return authenticate_request(
+        signer=_SELLER, role="seller", method="POST", operation="listing.publish",
+        resource="listings", body={"listing_id": "listing"},
+    )
+
+
+def _response_headers(request: AuthenticatedRequest, *, timestamp: int) -> dict[str, str]:
+    signed = sign_response(
+        signer=_REGISTRY,
+        envelope=ResponseEnvelope(
+            role="registry", principal=_REGISTRY.identity, method=request.method,
+            operation=request.operation, resource=request.resource,
+            request_id=request.request_id, timestamp=timestamp, status=200,
+            body_hash=canonical_body_hash(_BODY),
+        ),
+    )
+    return {
+        SIGNATURE_VERSION_HEADER: signed.protocol,
+        IDENTITY_SCHEME_HEADER: signed.principal.scheme.value,
+        IDENTITY_IDENTIFIER_HEADER: signed.principal.identifier,
+        ROLE_HEADER: signed.role,
+        REQUEST_ID_HEADER: signed.request_id,
+        TIMESTAMP_HEADER: str(signed.timestamp),
+        SIGNATURE_HEADER: signed.proof.value,
+    }
+
+
+def test_a_signed_request_carries_the_source_s_instant() -> None:
+    request = _request()
+
+    assert request.timestamp == INSTANT
+    assert authentication_headers(request)[TIMESTAMP_HEADER] == str(INSTANT)
+
+
+def test_a_response_stamped_at_the_source_s_instant_verifies() -> None:
+    request = _request()
+
+    verify_authenticated_response(
+        headers=_response_headers(request, timestamp=INSTANT),
+        expected_registries=TrustedIdentitySet(identities=(_REGISTRY.identity,)),
+        request=request, status=200, body=_BODY,
+    )
+
+
+def test_a_response_past_the_skew_from_the_source_is_refused(source: InjectedTime) -> None:
+    request = _request()
+    source.set(INSTANT + 301)
+
+    with pytest.raises(ValueError, match="timestamp_skew"):
+        verify_authenticated_response(
+            headers=_response_headers(request, timestamp=INSTANT),
+            expected_registries=TrustedIdentitySet(identities=(_REGISTRY.identity,)),
+            request=request, status=200, body=_BODY,
+        )

@@ -109,6 +109,7 @@ dependencies = [
     { name = "arkhai-apicredits-domain" },
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-mediation" },
     { name = "arkhai-kit-arkhai-payments" },
@@ -169,6 +170,7 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
     { name = "arkhai-core-registry-client" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-mediation" },
     { name = "arkhai-kit-arkhai-payments" },
@@ -215,6 +217,7 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-identity" },
@@ -233,6 +236,7 @@ version = "0.13.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
@@ -384,6 +388,7 @@ name = "arkhai-kit-deal-lifecycle-buyer"
 version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
@@ -395,15 +400,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -551,6 +557,7 @@ dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-mediation" },
     { name = "arkhai-kit-arkhai-payments" },
@@ -597,6 +604,7 @@ version = "0.7.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },

@@ -394,6 +394,7 @@ version = "0.13.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
@@ -427,6 +428,7 @@ name = "arkhai-core-storefront-client"
 version = "0.29.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]

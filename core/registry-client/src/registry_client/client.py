@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import Any, Optional, cast
 
 import httpx
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedRequest,
@@ -312,7 +312,7 @@ class _RegistryClientBase:
             nonce=rotation_nonce,
             overlap_seconds=overlap_seconds,
             expires_at=(
-                expires_at if expires_at is not None else int(time.time()) + 300
+                expires_at if expires_at is not None else injected_time.now() + 300
             ),
         )
         rotation = sign_rotation(

@@ -212,6 +212,7 @@ version = "0.13.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]

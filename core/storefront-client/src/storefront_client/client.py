@@ -43,11 +43,11 @@ from __future__ import annotations
 from market_identity import EnvelopeCapture, capture_envelope
 
 import logging
-import time
 import urllib.parse
 from typing import Any
 
 import httpx
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     Identity,
@@ -225,7 +225,7 @@ def _negotiate_new_proposal(
         "escrow_address": escrow_address,
         "fields": fields,
         "literal_fields": literals,
-        "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
+        "expiration_unix": escrow_expiration_unix or (injected_time.now() + 3600),
     }
     if rates is not None:
         proposal["rates"] = rates

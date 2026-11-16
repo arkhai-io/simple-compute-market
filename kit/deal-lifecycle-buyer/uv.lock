@@ -55,6 +55,7 @@ source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-identity" },
@@ -73,6 +74,7 @@ version = "0.13.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
@@ -122,6 +124,7 @@ name = "arkhai-kit-deal-lifecycle-buyer"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
@@ -138,6 +141,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.1.0" },
     { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },

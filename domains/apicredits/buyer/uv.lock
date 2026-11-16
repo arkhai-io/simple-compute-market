@@ -145,6 +145,7 @@ dependencies = [
     { name = "arkhai-apicredits-domain" },
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-mediation" },
     { name = "arkhai-kit-arkhai-payments" },
@@ -174,6 +175,7 @@ requires-dist = [
     { name = "arkhai-apicredits-domain", specifier = ">=0.5.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.7.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.12.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.1.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.5.0" },
@@ -229,6 +231,7 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-identity" },
@@ -247,6 +250,7 @@ version = "0.13.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]

@@ -608,6 +608,7 @@ name = "lane-double-controls"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-arkhai-mediation" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -625,6 +626,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.2.0" },
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "jsonschema", specifier = ">=4.23,<5" },

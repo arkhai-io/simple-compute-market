@@ -676,6 +676,7 @@ name = "lane-double-controls"
 version = "0.1.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-arkhai-mediation" },
     { name = "httpx" },
     { name = "jsonschema" },

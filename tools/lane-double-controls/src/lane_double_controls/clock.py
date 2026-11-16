@@ -13,14 +13,18 @@ as it signed it.
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable
+
+from injected_time import WallTime
 
 WallClock = Callable[[], int]
 
+_WALL_TIME = WallTime()
+
 
 def wall_clock() -> int:
-    return int(time.time())
+    """The wall instant, read through the time component's wall source."""
+    return _WALL_TIME.now()
 
 
 class PerceivedClock:

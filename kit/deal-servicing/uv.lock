@@ -53,6 +53,7 @@ name = "arkhai-core-storefront-client"
 version = "0.29.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
@@ -119,15 +120,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -128,6 +128,7 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-identity" },
@@ -146,6 +147,7 @@ version = "0.13.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
@@ -297,6 +299,7 @@ name = "arkhai-kit-deal-lifecycle-buyer"
 version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
@@ -308,15 +311,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -437,6 +441,7 @@ dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-mediation" },
     { name = "arkhai-kit-arkhai-payments" },
@@ -476,6 +481,7 @@ requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-core", specifier = ">=0.6.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.7.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.12.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.8.0" },
@@ -528,6 +534,7 @@ version = "0.7.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },

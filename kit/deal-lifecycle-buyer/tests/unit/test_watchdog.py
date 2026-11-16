@@ -5,7 +5,9 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import injected_time
 import pytest
+from injected_time import InjectedTime
 from market_deal_lifecycle_buyer import (
     EndDeliveryProgress, EndTarget, WatchdogSettings, WatchdogState, WatchdogStop, bound_notice, run_monitor,
     tcp_reachable, watch_deal, watchdog_settings, watchdog_status,
@@ -94,6 +96,8 @@ async def never_ended():
 
 
 SETTINGS = WatchdogSettings(interval_seconds=30, threshold=3, probe_timeout_seconds=5)
+#: An injected instant, apart from the fake clock's.
+INSTANT = 1_794_822_300
 
 
 @pytest.mark.asyncio
@@ -251,6 +255,23 @@ async def test_a_restart_before_the_stop_landed_resumes_that_one_stop():
     outcome = await watch_deal(deal, "deal", journal=journal, probe=AsyncMock(), ended=never_ended)
     assert outcome.reason == "stopped"
     deal.end.assert_awaited_once_with("deal")
+
+
+@pytest.mark.asyncio
+async def test_probes_are_stamped_from_the_process_source_and_scheduled_while_it_is_held():
+    clock, journal, deal = Clock(), Journal(SETTINGS), lifecycle()
+    before = injected_time.installed()
+    injected_time.install(InjectedTime(start=INSTANT))
+    try:
+        await watch_deal(deal, "deal", journal=journal, probe=probes(False, False, False),
+                         monotonic=clock.monotonic, sleep=clock.sleep, ended=never_ended)
+    finally:
+        injected_time.install(before)
+    # The source is held, so every probe and the stop carry its one instant,
+    # while the schedule ran its three probes on the monotonic clock.
+    assert journal.probes == [INSTANT] * 3
+    assert journal.state("deal").stop.decided_at == INSTANT
+    assert clock.elapsed == 60
 
 
 @pytest.mark.asyncio
