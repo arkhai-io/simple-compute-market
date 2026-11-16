@@ -1,103 +1,83 @@
 ## Why
 
 Both compute domains can offer, accept and approve an on-demand or spot deal, but
-neither can deliver one. `negotiate-open-ended-compute-terms` and
-`spot-deals-through-arkhai-payments` (both archived) built the terms, the
-servicing declaration, exact rate mandates with authority-priced `partialPeriod`,
-one payments transaction adapter serving once and rate parts, the seller's
-`deals preempt`, the buyer's canonical `end` and its opt-in watchdog. Spot then
-made end service refuse to commit every deal that is not once-only
+neither delivers one. `negotiate-open-ended-compute-terms` and
+`spot-deals-through-arkhai-payments` (both archived) built the terms, the servicing
+declaration, exact rate mandates with authority-priced `partialPeriod`, one payments
+transaction adapter serving once and rate parts, the seller's `deals preempt`, the
+buyer's canonical `end` and its opt-in watchdog. Spot then made end service refuse to
+commit every deal that is not once-only
 (`kit/deal-servicing/src/market_deal_servicing/end.py`, `_unserviceable`), because
-nothing yet services a rate deal once it is delivered: a delivered deal would run
-with billing started and nobody acting on the buyer's stop, on exhaustion or on a
-seller's pending stop. Its design leaves lifting that refusal to whichever change
-composes rate servicing (spot D12, D13).
+nothing yet serviced a delivered rate deal, and left lifting the refusal to whichever
+change composes rate servicing (spot D12, D13).
 
-Most of what a running deal needs already exists. Billing starts on delivery,
-after site activation and before disclosure
-(`domains/compute/delivery/src/compute_delivery/path.py`); the payment watch
-records each part's verified final stop as the deal's selected end
-(`kit/deal-servicing/src/market_deal_servicing/watch.py`); end service truncates
-and tears down once an end is due (`end.py`). Funding exhaustion, the term end, a
-notice taking effect, the buyer's stop and the dispute authority's stop are all
-stops the payment authority records, so the storefront keeps no funding timer.
+Most of what a running deal needs already runs for any deal: the delivery path
+authorizes each phase and starts billing through the one payments adapter
+(`domains/compute/delivery/src/compute_delivery/path.py`), the payment watch records
+each rate part's verified final stop as the deal's end
+(`kit/deal-servicing/src/market_deal_servicing/watch.py`), and end service terminates
+or truncates on it. What breaks once the refusal goes is narrower: end service refuses
+a payment answer that changes while a deal's revision stands still, which a rate
+answer does; no payment stop is ever classified, so a buyer's stop cannot discharge a
+later seller-failure filing; the seller list calls a deal *ended* while a rate part may
+still bill; and the two storefronts' servicing cycles order their steps differently,
+bare metal's skipping its filings when its physical work fails.
 
-This change is Goal 8's MVP servicing change: it lifts the refusal, services
-running rate deals in both compute storefronts, and qualifies them in both lanes
-against the payments and mediation doubles. It runs beside
-`drive-the-storefront-clock-in-lanes`, whose clock its funds-exhausted rows need,
-and `switch-on-hosted-per-period-vm` follows it. It takes the servicing slice of
-`converge-ongoing-compute-leases`; convergence keeps the opt-in funding timer,
-self-penalty filings and revision netting, the recovery runner, one kit loop and
-the rest of its matrix.
+This change is Goal 8's MVP servicing change: it lifts the refusal, services running
+rate deals in both compute storefronts, unifies the two storefronts' servicing and
+delivery-recovery loops, and qualifies rate deals in both lanes against the payments
+and mediation doubles. It runs beside `drive-the-storefront-clock-in-lanes`, whose lane
+time its lane rows are written against, and `switch-on-hosted-per-period-vm` follows
+it. It takes the servicing slice of `converge-ongoing-compute-leases`.
 
 ## What Changes
 
-- **The refusal lifted.** End service stops refusing the commit of a deal whose
-  seller projection is not once-only, and authorizes it through the payment
-  adapter like any other deal. A deal refused before this change is committed on
-  a later drive under a key that does not collide with the refusal journaled as a
-  completed commit authorization.
-- **Rate servicing composed in both storefronts.** Each composition builds its
-  payments seller stage over the servicing declaration and binds the rate
-  adapter's `authorize` and `start_billing` into the shared delivery path. The VM
-  composition builds its stage itself, as bare metal's does, rather than relying
-  on its composition root to build it.
-- **Stop causes classified.** The payment watch maps each verified stop cause —
-  the buyer's stop, the seller's entitled notice, funding exhaustion, the term end
-  and the dispute authority's stop — to the lawful end it is. Exhaustion and the
-  term end share the authority's cause `terms`; the stop's effective time against
-  the Agreement's end tells them apart.
-- **Teardown on a stop in both domains.** A stop taking effect ends delivery at its
-  effective time: VM through its end service, bare metal through its
-  `drive_physical`.
-- **What *ended* means.** The seller's lifecycle list calls a deal *ended* only when
-  it is physically released, every payment part has a verified authority stop or
-  end, and no end-related case is open; otherwise it is *ending* with its reason,
-  such as "rate still running at the authority", which is what operators' manual
-  triage acts on.
-- **One owner of the servicing step order.** The per-deal step order and its error
-  isolation move into a `kit/deal-servicing` helper both storefronts' cycles call;
-  the loop registers through `kit/storefront`; the VM cycle's cursor becomes
-  durable. Bare metal adopting the helper fixes the remaining defect in its cycle,
-  where a failure in `drive_physical` skips that deal's local reconciliation, site
-  corrections and filing dispatch for the cycle.
-- **The loop's journal allowance.** `settlement-servicing` states that a neutral
-  lifecycle loop may journal observations and injected-adapter effects, never
-  balances.
-- **Startup coherence and withdrawal.** A storefront holding rate deals refuses to
-  start without rate servicing composed; withdrawing a treatment from the
-  declaration withdraws new offers and keeps servicing existing deals.
-- **Restart recovery in both domains.** A restarted storefront rebuilds every
-  running deal's servicing from its database and the authorities' records.
-- **What the buyer is shown.** The pre-approval display states that an on-demand
-  option's premature-stop penalty is collectible only from the seller's earnings
-  still held. After a funding stop, the buyer is told the deal cannot be revived
-  by a top-up and a new deal is needed.
-- **A stale buyer requirement corrected.** `buyer-orchestration`'s "The buyer
-  refuses seller ends that keep the started period" says the buyer configures the
-  treatments it accepts; the code offers one waiver per refused term instead
-  (`kit/settlement-runtime/src/market_settlement_runtime/buyer_terms.py`), as "Each
-  default refusal has its own waiver" states. The requirement is reworded to
-  match.
-- **Lane qualification in both lanes, against both doubles.** The on-demand
-  baseline (start, the buyer's stop, teardown); spot preemption with notice; the
-  maximum term ending with `returned`; funds running out, which moves the
-  storefront's clock with the doubles'; and the buyer watchdog's delivered-deal
-  cases spot could not run while every rate commit was refused. Compositions in
-  the lanes declare `[charged, returned]`, the treatments the shipped presets use.
-  Each run is labelled lane-double evidence, never live.
+- **The refusal lifted, and changed answers held back** (D1). End service no longer
+  refuses to commit a deal that is not once-only. When the payment adapter answers a
+  phase differently at a revision whose first answer is journaled, end service returns
+  `pending` and journals nothing, so a changed answer only holds a phase back.
+- **Payment stops classified** (D2, D3). One classifier in `arkhai_compute`, passed by
+  both storefronts' watches, classifies every payment stop, once-only deals' included,
+  from its cause and the deal's entitlements; a `terms` stop before the Agreement's end
+  is funds running out. Earlier pending payment stops are resolved when next read.
+- **One servicing step order, and the cycles unified** (D4, D6). A `kit/deal-servicing`
+  helper runs respondent discovery, then each deal's steps in a fixed order, each
+  isolated. Both domains record their own term end, discover respondents per authority
+  and payee account, page every registered deal, and keep the page position in a
+  kit-owned table.
+- **One loop layout and one delivery re-drive** (D5). Both storefronts run
+  `deal-servicing`, `delivery-recovery`, `payment-reconciliation` and
+  `settlement-servicing`, one job each; the re-drive is one routine in
+  `domains/compute/delivery` over domain ports.
+- **What *ended* means, and why a deal is ending** (D7). *Ended* requires physical
+  release, every payment part stopped or ended at the payments service, and no open
+  case; the seller list's `ending` codes say what is outstanding. The lifecycle
+  contracts take an incompatible version, and the models touched stop omitting newer
+  fields for 0.1.0 clients.
+- **A storefront that cannot service its deals reports them** (D8). It starts, shows
+  them repair required and reports them at startup; withdrawing a treatment keeps
+  servicing existing deals.
+- **The VM composition builds its own payments seller stage** (D11).
+- **The loop's journal allowance** (D12) in `settlement-servicing`.
+- **What the buyer is shown** (D13): the penalty's collectible bound before approval,
+  and after a funding stop that a top-up cannot revive the deal.
+- **A stale buyer requirement corrected, and restart recovery proven** (D14).
+- **Lane qualification in both lanes, against both doubles** (D9, D10): the on-demand
+  baseline with the buyer's stop, funds running out, spot preemption with notice, the
+  maximum term ending with `returned`, and the buyer watchdog's delivered-deal cases,
+  each reaching its instants by setting lane time. Lane compositions declare
+  `[charged, returned]`. Each run is labelled lane-double evidence, never live.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `deal-lifecycle`: end service's rate-commit refusal lifted and the refused deal's next commit keyed; stop-cause classification for rate parts; the kit-owned per-deal step order; what *ended* means in the seller's list.
-- `market-composition`: rate servicing composed in both compute compositions; startup coherence and withdrawal; loop registration through `kit/storefront`.
+- `deal-lifecycle`: the refusal removed and changed answers pending; payment-stop classification, the `terms` split and the resolution of earlier pending stops; the kit-owned servicing step order, the unified term end, respondent discovery and paging; what *ended* means and the `ending` codes.
+- `compute-delivery`: the shared delivery re-drive over domain ports.
+- `market-composition`: the four-loop layout in both storefronts; the startup report and withdrawal; the VM composition building its payments seller stage.
 - `settlement-servicing`: the neutral lifecycle loop's journal allowance.
-- `compute-delivery`: a rate deal delivered and its billing started through the shared path; teardown when a stop takes effect.
-- `buyer-orchestration`: the penalty's collectible bound and the funding-stop message in the display; "The buyer refuses seller ends that keep the started period" reworded to the per-term waivers.
-- `test-compatibility`: the rate lane rows in both lanes, the watchdog's delivered-deal cases, and their evidence labels.
+- `buyer-orchestration`: the penalty's collectible bound and the funding-stop message; "The buyer refuses seller ends that keep the started period" reworded to the per-term waivers.
+- `test-compatibility`: the recurring purchase delivered; the rate lane rows and watchdog cases in both lanes on lane time, and their evidence labels.
 
 ### New Capabilities
 
@@ -105,47 +85,57 @@ None.
 
 ## Non-Goals
 
-- The seller's opt-in funding timer, revision netting, and the financial completion fact's revision scoping, pending and unknown operations and manual acknowledgement (convergence tasks 2.1 and 2.3 beyond what this change takes).
+- The seller's opt-in funding timer, revision netting, and the refined financial completion fact (convergence tasks 2.1 and 2.3 beyond what this change takes).
 - One kit loop with whole-page passes (convergence task 2.2).
 - Self-penalty filings and mechanical rulings on rate parts (convergence task 3.2), and execution of a ruling's `stop` or `penalty` effects in the mediation double (convergence task 3.5a).
 - The stateless recovery runner and evidence export (convergence task 3.4).
 - Convergence's matrix rows 1–5, 8 and 10–13, and the extra windows and races of its task 4.2.
 - Setup parts in the lane rows; they need the self-penalty filing path that returns a setup charge on non-delivery.
 - Re-anchoring running deals across a payments receipt key change; spot made a key change a drained cutover (its D17).
+- Recovery for deals end service refused before this change; no release carried the refusal (`marketplace-v0.3.0`).
 - The site-enforced delivery deadline (`renewable-compute-lease-deadlines`), and the seller-chosen payout hold and the penalty's collectibility rule (`offer-a-seller-chosen-payout-hold`).
 - Hosted runs and any production declaration (`switch-on-hosted-per-period-vm`).
 
 ## Impact
 
-- Behaviour: a storefront whose declaration lists rate treatments now delivers its rate deals instead of holding them in repair. No deployed composition declares any, so production is unchanged until `switch-on-hosted-per-period-vm`.
-- Buyer behaviour: the default buyer's refusals are unchanged. A seller's option promises a delivery deadline only when its payments clause configures one, which the storefront enforces; `renewable-compute-lease-deadlines` replaces that with the site-enforced pool deadline.
-- Composition: the VM settlement composition builds its payments seller stage.
-- Database: the physical completion fact, if the existing journal does not already record it in a form the seller's list can read.
+- Behaviour: a storefront whose declaration lists rate treatments now delivers its rate deals. No deployed composition declares any, so production rate behaviour is unchanged until `switch-on-hosted-per-period-vm`. Every deal's payment stops are now classified, and VM records its own term end.
+- Wire: `kit/deal-lifecycle-contracts` takes an incompatible version for the seller list's `ending` codes and the removed omissions; the seller client and both storefront CLIs ship with it.
+- Persistence: one kit-owned servicing table for the page position, by a migration appended to each storefront chain, which drops bare metal's `bare_metal_lifecycle_cursor`.
+- Configuration: interval keys for `deal-servicing` and `delivery-recovery`, defaulting to today's intervals; released keys keep their meaning.
+- Operations: loop names change in both storefronts; lane stages and operator documentation follow.
+- Buyer behaviour: the default buyer's refusals are unchanged.
 
 ## Dependencies and Related Changes
 
-- Depends on no open change. Its funds-exhausted rows need `drive-the-storefront-clock-in-lanes`; its other rows do not, so the two run in parallel.
+- Its lane round depends on `drive-the-storefront-clock-in-lanes` landing: every lane row is written against its lane-time helper (D9). Its other work runs in parallel with it.
 - `switch-on-hosted-per-period-vm` follows it.
-- Builds on `spot-deals-through-arkhai-payments` (archived): the refusal it lifts (D12–D14), the payments transaction adapter (D11), rate `authorize` (D4), the seller's notice and `deals preempt` (D6) and the buyer's `end` and watchdog (D6a), all landed.
-- Parts taken from `converge-ongoing-compute-leases` (task numbers in its `tasks.md`): 1.3 (rate servicing in both compositions), 2.1 (the physical fact, and the simple financial fact *ended* reads), 2.2's per-deal step order as a helper (not the whole-page loop), 2.3 (stop-cause classification in both domains, without timers), 2.4 (one operator signal, reduced to *ended* and *ending* with its reason), 2.5 (stop to teardown, authority outage and restart in both domains, without timers or the runner), 3.1 (the rate delivery binding in both domains), 3.5 (startup coherence and withdrawal, without re-anchoring), 4.1 (matrix rows 0, 6, 7 and 9 in both lanes, without setup parts or timer variants), 4.3 (evidence labels); the loop-journal allowance in its `settlement-servicing` delta; and the two items its campaign-index row carries from spot: the refused deal's next commit key, and the watchdog's delivered-deal cases.
-- `drive-the-storefront-clock-in-lanes` takes convergence's task 4.1a, the bare-metal storefront clock, since this change's bare-metal funds-exhausted row needs it.
+- Builds on `spot-deals-through-arkhai-payments` (archived): the refusal it lifts (D12–D14), the payments transaction adapter (D11), rate `authorize` (D4), the seller's notice and `deals preempt` (D6) and the buyer's `end` and watchdog (D6a).
+- Work taken from `converge-ongoing-compute-leases` (task numbers in its `tasks.md`): 1.3 and 3.1 (rate servicing in both compositions, which the code already binds but for VM's stage), 2.1 (the physical fact and the simple financial fact *ended* reads), 2.2's per-deal step order as a helper (not the whole-page loop), 2.3 (stop-cause classification in both domains, without timers), 2.4 (reduced to *ended* and *ending* with its codes), 2.5 (stop to teardown, authority outage and restart in both domains, without timers or the runner), 3.5 (startup coherence and withdrawal, as a report), 4.1 (matrix rows 0, 6, 7 and 9 in both lanes, without setup parts or timer variants), 4.3 (evidence labels); the loop-journal allowance in its `settlement-servicing` delta; and the two items its campaign-index row carries from spot: the refused deal's next commit, and the watchdog's delivered-deal cases. Also taken, and named in convergence's row Notes: respondent discovery, which its D3 listed as a composition-supplied step, and the four-loop layout its single loop will run beside.
+- Closes the campaign index's unowned row "`VmSettlementComposition` builds no payments seller stage" (D11).
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification: `deal-lifecycle`, `market-composition`, `settlement-servicing`, `compute-delivery`, `buyer-orchestration`, `test-compatibility`
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification: `deal-lifecycle`, `compute-delivery`, `market-composition`, `settlement-servicing`, `buyer-orchestration`, `test-compatibility`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- D1: `deal-lifecycle`'s spec — the refusal's removal and the refused deal's next commit key.
-- D2: `deal-lifecycle`'s spec and architecture companion — authority-recorded stops as the only end source for a running rate.
-- D3: `deal-lifecycle`'s spec — stop-cause classification, including the `terms` split.
-- D4: `deal-lifecycle`'s spec and architecture companion — the kit-owned per-deal step order and its isolation.
-- D5: `deal-lifecycle`'s spec — what *ended* and *ending* mean in the seller's list.
-- D6: `settlement-servicing`'s spec — the loop's journal allowance.
-- D7: `market-composition`'s spec — both compositions build their payments seller stage; startup coherence and withdrawal.
-- D8: `buyer-orchestration`'s spec — the penalty's collectible bound and the funding-stop message.
-- `buyer-orchestration`'s spec — "The buyer refuses seller ends that keep the started period" names the per-term waivers rather than buyer-configured treatments (a correction, no decision).
-- D9: `test-compatibility`'s spec and `docs/development/TESTING.md` — the rate lane rows.
+- D1: `deal-lifecycle`'s spec ("Neutral delivery decisions delegate payment interpretation") and architecture companion — the refusal's removal and a changed answer returned pending.
+- D2: `deal-lifecycle`'s spec ("Cause classification is owned by end service") and architecture companion — the payment-stop classifier, its placement and the resolution of earlier pending stops.
+- D3: `deal-lifecycle`'s spec — the `terms` split by the Agreement's end.
+- D4: `deal-lifecycle`'s spec and architecture companion — the kit-owned servicing step order and the unified term end, respondent discovery and paging; `deal-lifecycle`'s and `vm-storefront-fulfillment`'s architecture "Current limits" lose the respondent and term-end differences; `docs/development/ROADMAP.md`'s Goal 8 current state likewise.
+- D5: `compute-delivery`'s spec and architecture companion — the shared re-drive; `market-composition`'s spec — the four-loop layout; `storefront-publication`'s configuration companion — the interval keys; `docs/development/ARCHITECTURE.md` — the loop layout both storefronts share.
+- D6: `deal-lifecycle`'s architecture companion — the kit-owned page position.
+- D7: `deal-lifecycle`'s spec ("The seller half lists deals") — what *ended* means and the `ending` codes.
+- D8: `market-composition`'s spec — the startup report and withdrawal.
+- D9: `test-compatibility`'s spec and `docs/development/TESTING.md` — the rate lane rows on lane time.
+- D10: `test-compatibility`'s spec and `docs/development/TESTING.md` — the watchdog's delivered-deal cases.
+- D11: `market-composition`'s spec — both compositions build their payments seller stage.
+- D12: `settlement-servicing`'s spec — the loop's journal allowance.
+- D13: `buyer-orchestration`'s spec — the penalty's collectible bound and the funding-stop message.
+- D14: `buyer-orchestration`'s spec — the requirement reworded to the per-term waivers; restart recovery's evidence in `test-compatibility`'s companion.
+- D15: no permanent destination — the implementation cadence orders this change's own work.
+- `docs/guidance/workflow/changes.md` — a change taking on work another change owns names the move in its own proposal and in that change's row Notes (the owner's principle, stated in this design).
+- `docs/guidance/repository/package-versions.md` — a released client or CLI is not owed compatibility with a later storefront, provided the client shipped with that storefront reads everything it serves; backwards client compatibility stays supported through the staged deprecation pattern of `docs/guidance/engineering/versioning.md`, but is not owed (the owner's principle, stated in this design).
