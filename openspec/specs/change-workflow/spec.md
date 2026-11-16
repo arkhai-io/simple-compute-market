@@ -570,7 +570,10 @@ implement them.
 
 Each round MUST be recorded as it starts, from the latest plan's mapping, as its
 first round with a section not yet complete; a change with no mapping for its next
-incomplete section MUST ask the owner, once per round.
+incomplete section MUST ask the owner, once per round. A round recorded while the
+latest round is open — no implementation triage has finished or returned since it
+— MUST continue that round, whatever sections it names, keeping its last record and
+starting commit.
 
 #### Scenario: A round is recorded after the fact
 
@@ -587,6 +590,14 @@ incomplete section MUST ask the owner, once per round.
 - **THEN** the new round line keeps the open round's last record and starting
   commit and names the line it continues, so the round's reading, validation, and
   review still cover sections 1 to 4
+
+#### Scenario: A replan renumbers an open round's sections
+
+- **WHEN** a round naming sections 3 and 4 is open, section 3 and part of 4 are
+  committed, and a return to design re-plans the rest of section 4 as sections 5
+  and 6
+- **THEN** the round recorded for sections 5 and 6 continues the open round, and its
+  round view, validation, and review read every commit since the open round's base
 
 ### Requirement: CW-tc82 Each section is checked, handed off, and committed alone
 

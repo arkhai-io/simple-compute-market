@@ -1001,15 +1001,18 @@ def test_a_round_after_the_open_rounds_triage_starts_a_new_round(tmp_path: Path)
     assert (later["after"], later["commit"]) == (6, "later") and "continues" not in later
 
 
-def test_a_round_naming_a_section_the_open_round_lacks_starts_a_new_round(
-        tmp_path: Path) -> None:
+def test_a_round_renumbered_by_a_replan_continues_the_open_round(tmp_path: Path) -> None:
+    # A return to design splits open section 4 into 4 to 6: the work committed
+    # since the open round's base is still untriaged, so the round keeps its base.
     log = log_file(tmp_path)
     log.parent.mkdir()
-    note_round(log, [[1, 2]], "plan", clock=clock, commit="base")
+    first = note_round(log, [[3, 4]], "plan", clock=clock, commit="base")
+    append_entry(log, {"step": "implement", "outcome": "returned"}, clock)
 
-    later = note_round(log, [[2, 3]], "owner", clock=clock, commit="later")
+    later = note_round(log, [[5], [6]], "plan", clock=clock, commit="replanned")
 
-    assert later["commit"] == "later" and "continues" not in later
+    assert (later["commit"], later["continues"], later["sections"]) == (
+        "base", first["seq"], [[5], [6]])
 
 
 # The owner's waiver of another design review is a plain direction to planning.
