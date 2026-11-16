@@ -2184,7 +2184,7 @@ Delivers D19's buyer half. Implements `buyer-orchestration`'s "The buyer reads i
 time from a lane-time file". Touches `core/buyer` (its profile configuration and CLI
 entry) and the domain buyers' entry where they install anything at startup.
 
-- [ ] 14.1 The buyer reads `[time] source` and `[time] file`; under `"injected"` it
+- [x] 14.1 The buyer reads `[time] source` and `[time] file`; under `"injected"` it
   installs a source reading the file through the component's reader on every read;
   `"injected"` without `file`, or a missing, unreadable or invalid file at startup,
   refuses to start naming the setting or the file; a later failed read fails the
@@ -2195,15 +2195,123 @@ entry) and the domain buyers' entry where they install anything at startup.
     warning is logged; a missing file
     refuses naming it; `{"now": "1794821400"}` written during a run fails the next read
     naming the file.
-- [ ] 14.2 A running `buy` with the watchdog sees a later instant at its next read.
+  - Done: `core_buyer.time_source` — `configured_time_source(config)` reads the
+    buyer configuration's `[time]` table: no `source` names none (the process
+    keeps wall time); `"wall"` a `WallTime`; any other value is refused by the
+    component's `source_for`, naming `[time] source` and the value;
+    `"injected"` needs `file`, else `TimeConfigurationError` naming `[time]
+    file`, and returns the component's `TimeFile(file)` after reading it once,
+    so a missing, unreadable or invalid file raises `TimeFileError` naming it.
+    `install_configured_time_source(config)` installs it. The `market` callback
+    runs it on `load_user_config()` — the buyer configuration `market --config`
+    or the XDG default names — before any command body, turns a refusal into
+    `[market] <reason>` on stderr and exit 2, and for a lane-time file prints
+    the `announcement` (the setting, the file and its instant) and a warning per
+    table stating `livemode = true` (`live_warnings`) on stderr, as the CLI's
+    other notices are printed, since the buyer configures no logging. `run(app,
+    args)`, which the console entry calls, turns a `TimeFileError` a command
+    raises later into the same exit, so a read that fails mid-command fails it
+    naming the file, with no fallback (the `TimeFile` itself never reads the
+    wall clock). Core is mechanism-neutral and names no domain's layout, so the
+    livemode check reads every table, wherever it sits, for `livemode = true`
+    (`live_sections`): `[Settlement.arkhai_payments]` for the compute buyers,
+    `[bare_metal.arkhai_payments]` for bare metal, rather than the payments
+    kit's `payments_livemode`, which reads only `[Settlement]`; only the
+    payments mechanism has `livemode` today. The domain buyers have no entry of
+    their own: every buyer command runs through the `market` callback, so
+    nothing in them changed. A command's own `--config` (the bare-metal
+    commands', the lifecycle and contact-exchange commands') names a domain's
+    configuration and does not choose the process's time; the lanes pass one
+    file as both `market --config` and the command's (`buyer_cli.py`,
+    `purchase_driver.py`), so section 16 states `[time]` in it. No version bump:
+    `core/buyer` 0.7.0 was already bumped on `dev` since `marketplace-v0.3.0`.
+  - Evidence. Unit, `core/buyer/tests/unit/test_time_source.py`: no source
+    stated (three forms) names none; `wall`; `injectd` refused with the
+    component's exact message; injected with no or an empty `file` refused
+    naming `[time] file`; a non-table `[time]` refused; every table stating
+    `livemode = true` is live, wherever it sits, and nothing else; wall time is
+    neither announced nor warned of. Application integration of the CLI,
+    `core/buyer/tests/integration/test_injected_time_cli.py`, the `market` app
+    `build_app` assembles from an explicit domain list (discovery itself not
+    run), through Typer's runner and through `run`, which the console entry
+    calls, with a buyer configuration and a lane-time file under a temporary
+    directory: the source installed is the configured `TimeFile`, and stderr
+    carries the announcement with its instant and the warning beside
+    `[bare_metal.arkhai_payments] livemode = true`; a wall-time buyer with a
+    live section prints nothing on stderr; a missing file exits 2 naming it,
+    before the command runs and with the installed source unchanged; injected
+    with no file exits 2 naming the setting; a stand-in domain's command reading
+    the time twice sees the harness's write between its reads; and, through
+    `run`, `{"now": "1794821400"}` written between the reads exits 2 with
+    `[market] time file <path>: holds no valid instant`, the first read printed
+    and the second printing nothing. `make -C core/buyer test` 188 passed.
+- [x] 14.2 A running `buy` with the watchdog sees a later instant at its next read.
   - Verify: an integration test in the buyer's suite drives the watchdog's staleness
     judgement across a file write, with no wall-time wait
     (`buyer-orchestration`'s "A running purchase sees an advance").
-- [ ] 14.3 Section verification.
+  - Done, library integration, in `kit/deal-lifecycle-buyer`'s suite — the
+    buyer's watchdog and its read live there, not in `core/buyer`, which does not
+    depend on them — `tests/integration/test_watchdog_journal.py`, the process
+    source a `TimeFile` the test rewrites, as the `market` callback installs it,
+    over the real SQLite evidence file:
+    `test_a_running_watch_stamps_each_probe_from_the_lane_time_file_as_it_is_rewritten`
+    (the loop, on fake monotonic time and a fake sleep that writes the file 30 s
+    on between rounds, stamps its two failed probes, its last probe and its stop
+    at the instants written after the first round, no wall wait; the first,
+    passing probe's stamp is overwritten in the journal and not asserted) and
+    `test_the_staleness_judgement_follows_a_lane_time_file_write` (a lifecycle
+    given no clock reads a journaled probe as monitored at its freshness bound
+    and unmonitored once the file is rewritten a second past it). `make -C
+    kit/deal-lifecycle-buyer test` 54 passed. Neither runs `market buy` itself:
+    the `buy` command's watchdog composes these same pieces, and 14.1's CLI test
+    shows a command installed on the file sees a write at its next read.
+- [x] 14.3 Section verification.
   - Unit and integration: `make test-core` (`core/buyer`), `make test-kits`
     (`kit/deal-lifecycle-buyer`), the domain buyers' suites in `make test-domains`.
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: section 16's lanes run every buyer stage on the lane-time file.
+  - Evidence: `make -C core/buyer test` 188 and `make -C kit/deal-lifecycle-buyer
+    test` 54, after the fresh-context fixes. `scripts/change-workflow run
+    pre-commit drive-the-storefront-clock-in-lanes` before them:
+    `after-functional-change` (`make lock`) and `pre-commit-functional` (`make
+    dist-clean`, `make check-packaging`, `make test`, every suite, `make
+    test-core`, `make test-kits` and `make test-domains` with the three domain
+    buyers among them) passed; of `pre-commit` only the citations check failed,
+    on closeout's `openspec/specs/injected-time/architecture.md` (18.9). On the
+    final tree, after the fixes: the same — `after-functional-change` and
+    `pre-commit-functional` (every suite) passed, and of `pre-commit` only the
+    citations check failed, on that document.
+  - Each new test imports what only this change adds (`injected_time`,
+    `core_buyer.time_source`), so against the round's base each fails at
+    collection, which shows less than a behavioural failure.
+  - End-to-end scenarios covering the section, none run by it: once section 16
+    states `[time]` in each lane's buyer configuration and the harness writes the
+    file, every buyer stage of the three lanes runs on it, the bare-metal
+    watchdog purchase among them. No owed CI evidence: the suites run in the
+    workflows' existing jobs.
+  - Outside the plan: 18.9's promotion list gains
+    `openspec/specs/buyer-orchestration/architecture.md`, whose watchdog
+    paragraphs 7.7's handoff said closeout must restate and to which this
+    section adds the buyer's lane-time file.
+  - Fresh-context check: it found the livemode check blind to the bare-metal
+    buyer's `[bare_metal.arkhai_payments]` (it now reads every table), the INFO
+    announcement invisible since the buyer configures no logging (both notices
+    now print on stderr, as the CLI's others do), the console-entry test
+    patching the imported `discover_domains` (a `run(app, args)` seam now, which
+    the test calls), the 18.9 gap (added), and five claims broader than their
+    tests (reworded: the announcement, the "superset", the console entry, the
+    first probe's stamp, and `--config`). Declined: reading `[time]` from a
+    command's own `--config` too — the process's time is the buyer
+    configuration's, a command's file is a domain's, and the lanes pass the same
+    file to both (Done above); and the existing loader's silence on a missing
+    `market --config` file, which loads as an empty configuration for every
+    setting, not only `[time]`, and predates this change.
+  - Handoff for section 15: the harness writes the buyer's lane-time file with
+    `injected_time.TimeFile(path).write(T)`; `[time] file` must name the path the
+    harness writes, as the buyer process sees it (the buyer runs as a subprocess
+    of the harness, so one host path). Every `market` command then prints
+    `[market] [time] source is injected: …` on stderr, which the harness keeps
+    apart from the JSON on stdout.
 
 ## 15. The lane-time fixture, the chain and the run modes
 
@@ -2362,6 +2470,10 @@ archive's writes; a part needing any other edit returns the change to implementa
   - `openspec/specs/test-compatibility/architecture.md`: "The doubles' controls and
     perceived clocks", renamed "Lane time and the doubles' controls" (D1, D4, D7, D15,
     D16, D18, D21);
+  - `openspec/specs/buyer-orchestration/architecture.md`: the watchdog's probe
+    stamps and staleness on the process time source, not the wall clock, and the
+    buyer's `[time]` table and lane-time file (D3, D19; 7.7's and 14.3's
+    handoffs);
   - `openspec/specs/market-composition/configuration.md`,
     `openspec/specs/physical-provisioning/configuration.md`,
     `openspec/specs/registry-discovery/configuration.md`: each party's `time.source`
