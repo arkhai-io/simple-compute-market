@@ -29,6 +29,7 @@ from market_alkahest.settlement_config import ALKAHEST_MECHANISM_ID
 NEGOTIATION = "neg-4c1e"
 ESCROW = "0x" + "ab" * 32
 ACTIVATION = ActivatedDeliveryRef(record_ref="reservation-1", activated_at=1_700_000_000)
+START = OperationKeys(NEGOTIATION, "neg-4c1e:start")
 
 
 def _evidence(**fields) -> DeliveryEvidence:
@@ -87,9 +88,7 @@ async def test_evidence_for_another_deal_or_commitment_is_refused_unvalidated(fi
 async def test_billing_start_with_activation_evidence_is_a_no_op():
     adapter, _ = _adapter(valid=True)
 
-    result = await adapter.start_billing(
-        "neg-4c1e:start", _evidence(activated_delivery=ACTIVATION),
-    )
+    result = await adapter.start_billing(START, _evidence(activated_delivery=ACTIVATION))
 
     assert result.outcome.status == "accepted"
     assert result.no_op is True
@@ -98,7 +97,7 @@ async def test_billing_start_with_activation_evidence_is_a_no_op():
 async def test_billing_start_without_activation_evidence_is_refused():
     adapter, validator = _adapter(valid=True)
 
-    result = await adapter.start_billing("neg-4c1e:start", _evidence())
+    result = await adapter.start_billing(START, _evidence())
 
     assert result.outcome.status == "rejected"
     assert result.no_op is False
@@ -108,9 +107,7 @@ async def test_billing_start_without_activation_evidence_is_refused():
 async def test_billing_start_on_invalid_commitment_evidence_is_refused():
     adapter, _ = _adapter(valid=False)
 
-    result = await adapter.start_billing(
-        "neg-4c1e:start", _evidence(activated_delivery=ACTIVATION),
-    )
+    result = await adapter.start_billing(START, _evidence(activated_delivery=ACTIVATION))
 
     assert result.outcome.status == "rejected"
 

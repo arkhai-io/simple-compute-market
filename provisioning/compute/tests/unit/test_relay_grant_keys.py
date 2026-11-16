@@ -1,9 +1,9 @@
 """A relay's grant key: its profile form, its id, and its public half.
 
-Level 1, per `docs/development/TESTING.md`: pure functions over bytes, with no
-collaborator. The three forms are the ones the relay's admission plugin reads,
-so each is pinned against a published value rather than against this module's
-own output.
+Unit level, per `docs/guidance/engineering/test-levels.md`: pure functions over
+bytes, with no collaborator. The three forms are the ones the relay's admission
+plugin reads, so each is pinned against a published value rather than against
+this module's own output.
 
 The fixed key is the secret key of RFC 8032's first Ed25519 test vector
 ("TEST 1"), a published value known to everyone: an example only, which must

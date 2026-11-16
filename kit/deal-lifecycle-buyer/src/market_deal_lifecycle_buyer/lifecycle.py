@@ -20,7 +20,8 @@ from market_deal_lifecycle_contracts.models import (
 )
 from market_identity import Identity, canonical_json
 
-from .ending import BuyerEndJournal, EndDeliveryProgress, end_delivery
+from .ending import BuyerEndJournal, EndDeliveryProgress, end_delivery, end_rate
+from .watchdog import WatchdogJournal, watchdog_view
 
 
 class BuyerPeer(Protocol):
@@ -41,6 +42,7 @@ class BuyerDeal:
     dispute: DisputeBinding | None = None
     buyer: Identity | None = None
     seller: Identity | None = None
+    rate: bool = False
 
     def __post_init__(self) -> None:
         if not self.negotiation_id or not self.commitment_ref:
@@ -63,6 +65,7 @@ class BuyerLifecycle:
         disputes: DisputeAdapterTable, operations: OperationStore, peer: BuyerPeer,
         observe_hint: HintObserver | None = None,
         end_journal: BuyerEndJournal | None = None, evidence: EvidenceStore | None = None,
+        watchdog: WatchdogJournal | None = None,
         clock: Callable[[], int] = lambda: int(time.time()),
     ) -> None:
         self._resolve = deal
@@ -73,6 +76,7 @@ class BuyerLifecycle:
         self.observe_hint = observe_hint
         self.end_journal = end_journal
         self.evidence = evidence
+        self.watchdog = watchdog
         self.clock = clock
 
     def _deal(self, negotiation_id: str) -> BuyerDeal:
@@ -80,6 +84,11 @@ class BuyerLifecycle:
         if deal.negotiation_id != negotiation_id:
             raise ValueError("buyer resolver returned another negotiation")
         return deal
+
+    async def end(self, negotiation_id: str, *, surrender: bool = False) -> EndDeliveryProgress:
+        if self._deal(negotiation_id).rate and not surrender:
+            return await end_rate(self, negotiation_id)
+        return await self.end_delivery(negotiation_id)
 
     async def end_delivery(self, negotiation_id: str) -> EndDeliveryProgress:
         return await end_delivery(self, negotiation_id)
@@ -117,7 +126,7 @@ class BuyerLifecycle:
             negotiation_id=negotiation_id, kind="append", operation_key=operation_key, payload=payload,
         ))
 
-    async def _hint(self, command: LifecycleCommand, outcome: LifecycleOutcome) -> None:
+    async def _hint(self, command: LifecycleCommand, outcome: LifecycleOutcome) -> LifecycleOutcome:
         # The peer key is stable across retries, separate from authority keys.
         operation_key = hashlib.sha256(canonical_json({
             "peer": "hint", "command": command.model_dump(mode="json"),
@@ -133,7 +142,12 @@ class BuyerLifecycle:
             # into an unknown filing. Its acknowledgement is observed separately.
             hint = Unknown(reason="storefront hint was not acknowledged")
         if self.observe_hint is not None:
-            await self.observe_hint(message, hint)
+            try:
+                await self.observe_hint(message, hint)
+            except Exception:
+                # A diagnostic observer cannot change an authority outcome.
+                pass
+        return hint
 
     async def read(self, negotiation_id: str) -> LifecycleRead:
         deal = self._deal(negotiation_id)
@@ -157,10 +171,21 @@ class BuyerLifecycle:
                             if not isinstance(view.outcome, Accepted)), financial.outcome)
             authority = AuthorityView(
                 outcome=outcome, state=financial.state, events=financial.events,
-                extensions=financial.extensions, deadline=financial.deadline,
+                parts=financial.parts, extensions=financial.extensions, deadline=financial.deadline,
                 disputes=cases.disputes, cases=cases.cases,
             )
         return LifecycleRead(
             negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
             authority=authority, delivery=delivery.delivery,
         )
+
+    async def buyer_read(self, negotiation_id: str) -> dict:
+        """The buyer's read of the deal: its lifecycle read and the watchdog's status.
+
+        The status is the buyer's knowledge of its own monitor, composed here and
+        never a field of ``LifecycleRead`` or any lifecycle wire model, so the
+        storefront neither sees nor reports it.
+        """
+        read = await self.read(negotiation_id)
+        state = self.watchdog.state(negotiation_id) if self.watchdog is not None else None
+        return {**read.model_dump(mode="json"), "watchdog": watchdog_view(state, self.clock())}

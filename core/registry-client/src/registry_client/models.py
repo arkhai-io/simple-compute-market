@@ -195,8 +195,11 @@ class ListingRequest:
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
     storefront_url: str = ""
 
+    # Domain-owned listing-level terms travel without registry-client vocabulary.
+    extra: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
-        return {
+        common = {
             "listing_id": self.listing_id,
             "listing_resource": self.listing_resource,
             "accepted_escrows": self.accepted_escrows,
@@ -205,6 +208,10 @@ class ListingRequest:
             "max_duration_seconds": self.max_duration_seconds,
             "storefront_url": self.storefront_url,
         }
+        collisions = set(common).intersection(self.extra)
+        if collisions:
+            raise ValueError(f"extra listing terms collide with common fields: {sorted(collisions)}")
+        return {**common, **self.extra}
 
 
 @dataclass
@@ -212,8 +219,10 @@ class ListingSummary:
     """Single listing record as returned by GET /listings or
     GET /listings/{id}. Captures common fields defensively.
 
-    ``storefront_url`` is the publisher's storefront URL — where a buyer
-    negotiates.
+    ``storefront_url`` is where a buyer negotiates: the URL the seller signed
+    into the listing's publication, or, for a listing served without seller
+    publication evidence (``publisher_publication`` null), the publisher
+    record's URL.
     """
 
     id: str | int | None = None
@@ -381,6 +390,7 @@ class ValidatePublishRequest:
     settlement_options: list[dict] = field(default_factory=list)
     max_duration_seconds: int | None = None
     storefront_url: str = ""
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -392,7 +402,10 @@ class ValidatePublishRequest:
         }
         if self.max_duration_seconds is not None:
             d["max_duration_seconds"] = self.max_duration_seconds
-        return d
+        collisions = set(d).intersection(self.extra)
+        if collisions:
+            raise ValueError(f"extra listing terms collide with common fields: {sorted(collisions)}")
+        return {**d, **self.extra}
 
 
 @dataclass

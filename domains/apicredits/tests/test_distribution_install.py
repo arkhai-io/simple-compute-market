@@ -24,6 +24,13 @@ from conftest_wheels import APICREDITS, REPO, _members, _metadata, wheels
 
 __all__ = ["wheels"]
 
+# uv caches a find-links wheel under its location and filename, and serves that
+# cached build again without re-reading the file. Repository wheels keep their
+# version across commits and pytest's temporary paths repeat once the temporary
+# directory is cleared, so without a refresh a wheel built from an earlier tree
+# can be installed in place of the one the fixture just built.
+_PIP_INSTALL = ("uv", "pip", "install", "--refresh")
+
 
 def test_domain_contract_imports_from_built_wheel(
     wheels: dict[str, Path],
@@ -45,9 +52,7 @@ def test_domain_contract_imports_from_built_wheel(
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run(
         [
-            "uv",
-            "pip",
-            "install",
+            *_PIP_INSTALL,
             "--python",
             str(python),
             "--find-links",
@@ -91,9 +96,7 @@ def test_service_schema_module_imports_from_built_wheel(
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run(
         [
-            "uv",
-            "pip",
-            "install",
+            *_PIP_INSTALL,
             "--python",
             str(python),
             "--find-links",
@@ -145,9 +148,7 @@ def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run(
         [
-            "uv",
-            "pip",
-            "install",
+            *_PIP_INSTALL,
             "--python",
             str(python),
             "--find-links",

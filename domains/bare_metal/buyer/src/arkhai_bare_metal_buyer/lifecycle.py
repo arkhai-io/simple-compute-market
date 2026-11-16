@@ -125,6 +125,7 @@ async def buyer_lifecycle(*, agreement_bytes, settlement_data, seller_url, signe
         agreement.negotiation_id, commitment,
         PaymentBinding(agreement.negotiation_id, PaymentSelector(mechanism)), dispute,
         Identity.model_validate(agreement.buyer), Identity.model_validate(agreement.seller),
+        rate=option.settlement.get("period") is not None,
     )
     try:
         async with LifecycleClient(seller_url, signer, publishers, capture=store.capture,
@@ -133,7 +134,7 @@ async def buyer_lifecycle(*, agreement_bytes, settlement_data, seller_url, signe
                 deal=lambda negotiation_id: deal, peer=peer, operations=store,
                 payments=PaymentAdapterTable([(deal.payment.selector, lambda _: payment)] if payment else []),
                 disputes=DisputeAdapterTable(disputes), evidence=store,
-                end_journal=store.end_journal,
+                end_journal=store.end_journal, watchdog=store.watchdog,
             )
     finally:
         if mediation is not None:

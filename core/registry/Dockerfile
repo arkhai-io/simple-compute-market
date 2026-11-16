@@ -25,7 +25,9 @@ COPY domains/apicredits/registry/filter-spec.yaml ./filter-spec-apicredits.yaml
 # same depth below /repo as below the repository root, so the lock's relative
 # wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
 # packages from the lock and reinstalls them, so a cached build of a
-# same-version wheel is never reused.
+# same-version wheel is never reused. The wheelhouse's digest
+# (scripts/wheelhouse_digest.py) keys the install's cache.
+ARG WHEELHOUSE_DIGEST
 COPY .dist/ /repo/.dist/
 COPY scripts/uv_project.py /repo/scripts/uv_project.py
 COPY core/registry/pyproject.toml core/registry/uv.lock /repo/core/registry/
@@ -43,6 +45,13 @@ WORKDIR /app
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && \
     mkdir -p /app/data && \
     chown appuser:appuser /app /app/data
+
+# The digest of the wheelhouse this image installed, which loading a release
+# candidate requires to be the digest of the wheelhouse it stores. Set before
+# the cross-stage copies, which Podman could otherwise reuse from a build of
+# another wheelhouse.
+ARG WHEELHOUSE_DIGEST
+LABEL org.arkhai.wheelhouse-digest="${WHEELHOUSE_DIGEST}"
 
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /app/filter-spec.yaml ./

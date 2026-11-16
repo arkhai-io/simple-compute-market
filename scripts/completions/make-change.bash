@@ -10,9 +10,14 @@ _arkhai_make_change()
 {
     local cur prev words cword
     _init_completion -n = || return
-    local value name path archived=false
+    local value name path active=true archived=false
+    # Archive cleanup runs only on an archived change; a merge runs on an active
+    # one before closeout and on an archived one after its archive.
     for name in "${words[@]}"; do
-        [[ $name == archive-cleanup ]] && archived=true
+        case $name in
+            archive-cleanup) active=false; archived=true ;;
+            merge) archived=true ;;
+        esac
     done
     case $cur in
         CHANGE=*)
@@ -26,7 +31,8 @@ _arkhai_make_change()
                     name=${name:11}
                     [[ $name == "$value"* ]] && COMPREPLY+=("$name")
                 done
-            else
+            fi
+            if $active; then
                 for path in openspec/changes/*/; do
                     [[ -d $path && $path != openspec/changes/archive/ ]] || continue
                     name=${path%/}
@@ -38,7 +44,7 @@ _arkhai_make_change()
         KIND=*)
             value=${cur#KIND=}
             COMPREPLY=()
-            for name in design implementation pre-closeout closeout; do
+            for name in design implementation pre-closeout closeout merge; do
                 [[ $name == "$value"* ]] && COMPREPLY+=("$name")
             done
             ;;

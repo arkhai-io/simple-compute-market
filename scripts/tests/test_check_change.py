@@ -18,7 +18,7 @@ CHANGE = "shape-bounds"
 # repository's command, so none is here.
 NAMES = ["comment hygiene", "documentation citations", "specification index",
          "decision destinations", "history wording", "version bumps", "local imports",
-         "capability index"]
+         "capability index", "guidance"]
 
 
 def _checkout(tmp_path: Path) -> Path:
@@ -69,6 +69,8 @@ def test_every_check_passing_prints_one_line(tmp_path: Path) -> None:
         ["make", "--no-print-directory", "check-version-bumps", "CHANGE_BASE=dev"],
         ["make", "--no-print-directory", "check-local-imports", "CHANGE_BASE=dev"],
         ["make", "--no-print-directory", "check-capability-index"],
+        # The guidance check reads the whole tree, not the change's diff.
+        ["make", "--no-print-directory", "check-guidance"],
     ]
 
 

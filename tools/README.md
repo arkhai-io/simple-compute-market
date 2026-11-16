@@ -179,7 +179,7 @@ collaborator, that both doubles and the end-to-end harness import, so a
 scenario drives a double through a typed client without installing the double.
 `make dist` builds its wheel for the doubles' images and the harness; the
 release wheelhouse, `make dist-release`, does not carry it
-([`RELEASING.md`](../docs/development/RELEASING.md)).
+([`published-packages.md`](../docs/guidance/repository/published-packages.md)).
 
 Each lane double's image has its own target in `tools/Makefile`, built with the
 repository root as its context so its Dockerfile can copy the wheelhouse. The

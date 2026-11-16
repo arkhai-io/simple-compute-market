@@ -219,7 +219,7 @@ async def _seed(
     )
     await db.commit_agreed_terms(
         negotiation_id=NEGOTIATION,
-        agreed_price=100,
+        negotiated_scalar=100,
         agreed_duration_seconds=3600,
         agreement_bytes=raw,
         accepted_at=now,
@@ -261,7 +261,7 @@ class Harness(SimpleNamespace):
 
 async def _harness(
     tmp_path, *, deposit=False, actions=("emit_event",), authority=None, disputes=None,
-    mediation_transport=None,
+    mediation_transport=None, payments=None,
 ):
     """``authority`` replaces the Agreement's dispute authority, ``disputes`` is
     the storefront's dispute configuration document, and ``mediation_transport``
@@ -274,7 +274,7 @@ async def _harness(
     registry = build_vm_storefront_registry(domain)
     migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), registry=registry)
-    payments = FakePaymentsClient()
+    payments = payments or FakePaymentsClient()
     stage = PaymentSellerStage(_config(), client_for_owner=payments)
     data = await _seed(db, stage, deposit=deposit, authority=authority)
     coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
@@ -352,6 +352,11 @@ async def _status_code(call) -> int:
 @pytest.mark.asyncio
 async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once(make):
     h = await make()
+    with sqlite3.connect(h.db.db_path) as conn:
+        conn.execute(
+            "UPDATE negotiation_threads SET negotiated_scalar = ? WHERE negotiation_id = ?",
+            ("10000", NEGOTIATION),
+        )
     pending = await h.settle()
     assert pending.pending and pending.retryable
     assert pending.settlement_ref == h.data.transaction_id

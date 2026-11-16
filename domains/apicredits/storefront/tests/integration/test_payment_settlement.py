@@ -140,7 +140,7 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
     )
     await db.commit_agreed_terms(
         negotiation_id=NEGOTIATION,
-        agreed_price=300,
+        negotiated_scalar=300,
         agreed_duration_seconds=0,
         agreement_bytes=raw,
         accepted_at=now,

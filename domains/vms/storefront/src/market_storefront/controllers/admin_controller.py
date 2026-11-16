@@ -8,7 +8,6 @@ routes to return 404.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import time
@@ -39,7 +38,7 @@ from core_storefront.models.system_models import (
 from core_storefront.stage_log import stage_event
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
-from market_identity import RotationRequest, canonical_json
+from market_identity import RotationRequest
 
 import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
@@ -290,8 +289,8 @@ class AdminController:
     ) -> InterruptDealResponse:
         """Interrupt a hosted negotiation or a splitter-backed escrow.
 
-        Hosted notice rights come from the accepted option. Without a right,
-        delivery ends locally while the authority handles the correction.
+        Hosted callers select preemption or failure explicitly. Preemption
+        requires the accepted right; failure ends delivery and files a case.
         Splitter-backed escrows retain their separate on-chain declaration.
         """
         thread = await self._db.load_negotiation_thread_row(negotiation_id=escrow_uid)
@@ -302,25 +301,20 @@ class AdminController:
                 if agreement["settlement"]["settlement"]["schema"] == "arkhai.payments.v1":
                     if body.interrupted_at_utc is not None or body.seller_amount is not None or body.refund_amount is not None:
                         raise HTTPException(status_code=400, detail="Hosted interruption accepts no at or payout amounts")
-                    actor = self._operator(request).principal
-                    key = body.operation_key or hashlib.sha256(canonical_json({
-                        "negotiation_id": escrow_uid, "administrator": actor.model_dump(mode="json"),
-                        "reason": body.reason,
-                    })).hexdigest()
                     try:
-                        kind, outcome, delivery = await lifecycle.interrupt(
-                            escrow_uid, actor=actor, operation_key=key,
-                            reason=body.reason, dry_run=body.dry_run,
+                        result = await lifecycle.interrupt(
+                            escrow_uid, actor=self._operator(request).principal, operation_key=body.operation_key,
+                            reason=body.reason, interruption_kind=body.interruption_kind, dry_run=body.dry_run,
                         )
                     except (KeyError, ValueError) as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
                     return InterruptDealResponse(
                         escrow_uid=escrow_uid, listing_id=agreement["listing_id"],
-                        status="dry_run" if body.dry_run else outcome.status,
+                        status="dry_run" if body.dry_run else result.outcome.status,
                         interrupted_at_utc=self._interrupt_time(None),
-                        settlement_action="notice_stop" if kind == "stop" else "delivery_end_filing",
-                        lifecycle_outcome=outcome.model_dump(mode="json"),
-                        delivery=delivery.model_dump(mode="json"),
+                        settlement_action=result.settlement_action,
+                        lifecycle_outcome=result.outcome.model_dump(mode="json"),
+                        delivery=result.delivery.model_dump(mode="json"),
                     )
         escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
         if escrow is None:

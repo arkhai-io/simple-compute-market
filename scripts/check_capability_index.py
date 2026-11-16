@@ -2,7 +2,7 @@
 """Fail if the capability index and the capabilities it lists disagree.
 
 `openspec/specs/README.md` is the canonical capability documentation index
-(`AGENTS.md`, "Documentation ownership"): a capability it does not list is one a
+(`openspec/README.md`, "Current capability documentation"): a capability it does not list is one a
 reader starting there never finds. Every `openspec/specs/<capability>/` holding a
 `spec.md` must have a row in the index's `## Capabilities` table linking that
 `spec.md`, and every row of that table must link a capability's `spec.md` and

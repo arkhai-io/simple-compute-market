@@ -39,9 +39,9 @@ cd simple-compute-market
 make build-seller
 ```
 
-`build-seller` builds the two images you need (`arkhai:storefront`,
-`arkhai:compute-provisioning`) and the wheels they consume — ~3 minutes on a
-warm machine. Build on Linux; macOS hits a known cross-platform
+`build-seller` builds the images you need (`arkhai:storefront`,
+`arkhai:bare-metal-storefront`, `arkhai:compute-provisioning`) and the release's
+wheels they are built from — ~3 minutes on a warm machine. Build on Linux; macOS hits a known cross-platform
 `uv sync` issue.
 
 ## 2. Configure
@@ -165,7 +165,7 @@ The receipt-signing identity and fee policy are trusted service configuration.
 Dispute authorities are root `[[Dispute]]` preferences followed by the registry's
 recommendations (enabled by default for a storefront), not a payments-service
 setting; an empty resolved list is reported at startup. See
-[dispute authority preferences](development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
+[dispute authority preferences](../openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences).
 The accepted option fixes its dispute authority for settlement and refunds.
 The API key is a secret setting: state it as `[Settlement.arkhai_payments]`
 `api_key` in the Secret overlay `storefront.secrets.toml`, never in the public
@@ -174,7 +174,7 @@ payments client, and nothing else in the process, trust a private CA for the
 service. Once the storefront runs, `market-storefront check-payments --account
 <YOUR_PAYEE_ACCOUNT>` reads that account's balance with exactly the client the
 storefront builds, and reports the first step that failed (see
-[settlement consumer configuration](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover)).
+[settlement consumer configuration](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)).
 A seller holding a `[[DisputeCredential]]` in the same overlay — with its own
 `ca_bundle_path` when the authority's certificate chains to a private CA — runs
 `market-storefront check-mediation --origin <the authority's origin>` the same
@@ -209,7 +209,8 @@ Region is a physical fact, so only the pool states it; no override does. A
 pool that states no region publishes nothing new and leaves the listings it
 already published unrefreshed; system status reports it among its site's
 `publication_derivation` holds as `pool_region_missing`.
-`DEPLOYMENT_AND_CONFIG.md`'s "Storefront listing shapes and pool overrides"
+`storefront-publication`'s
+["Storefront listing shapes and pool overrides"](../openspec/specs/storefront-publication/configuration.md#storefront-listing-shapes-and-pool-overrides)
 describes each term. Capacity admission, physical selection, prepared
 execution, and teardown are owned by the selected provisioning site.
 

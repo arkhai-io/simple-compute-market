@@ -17,6 +17,7 @@ from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
 
 from market_alkahest.token import ERC20TokenMetadata
 from market_identity import Identity
+from market_resource_pools_contracts import UtcAvailability, positive_duration_bound
 from market_resource_pools_contracts.backing import CapacityBackingLabel
 
 #: The resource types a VM listing resource payload may name explicitly.
@@ -40,6 +41,21 @@ def payload_resource_type(data: Mapping[str, Any]) -> str:
     if explicit in (COMPUTE_RESOURCE_TYPE, TOKEN_RESOURCE_TYPE):
         return explicit
     return TOKEN_RESOURCE_TYPE if "token" in data else COMPUTE_RESOURCE_TYPE
+
+
+def registry_rate_structure(listing: Mapping[str, Any]) -> Any:
+    """The family rates a registry listing serves, or ``None`` when it serves none.
+
+    A registry carries a listing's listing-level prices in one ``pricing``
+    object, so its family rates are ``pricing.rate_structure``; it refuses a
+    top-level ``rate_structure`` at publication. See
+    openspec/specs/registry-discovery/spec.md, "The compute schema carries a
+    listing's asking rate".
+    """
+    pricing = listing.get("pricing")
+    if not isinstance(pricing, Mapping):
+        return None
+    return pricing.get("rate_structure")
 
 # =============================================================================
 # Domain Model Class Hierarchy
@@ -400,7 +416,8 @@ class ComputeResource(ComputeDomainResource):
         default=None,
         description=(
             "The seller's asking price for this listing's shape; omitted, not "
-            "null, when nothing prices it."
+            "null, when nothing prices it. Published in the listing's pricing, "
+            "not in its capacity description."
         ),
     )
 
@@ -420,11 +437,11 @@ class ComputeResource(ComputeDomainResource):
 
     @model_serializer(mode="wrap")
     def _omit_absent_fields(self, handler: Any) -> Any:
-        # Omitted rather than null: a rateless listing publishes no field (the
-        # compute schema types it as an object) and a withdrawn rate refreshes
-        # in place to a listing without one; a slice without GPUs publishes no
-        # GPU key, since the compute schema types a present ``gpu_model`` as a
-        # string and a null would state a value the shape does not.
+        # Omitted rather than null: a rateless listing records no rate, so a
+        # withdrawn rate refreshes in place to a listing without one; a slice
+        # without GPUs publishes no GPU key, since the compute schema types a
+        # present ``gpu_model`` as a string and a null would state a value the
+        # shape does not.
         data = handler(self)
         if isinstance(data, dict):
             for name in ("asking_rate", "gpu_count", "gpu_model"):
@@ -470,6 +487,15 @@ class Listing(BaseModel):
             "the legacy accepted_escrows contract."
         ),
     )
+    rate_structure: dict[str, list[dict[str, str]]] | None = Field(
+        default=None,
+        description=(
+            "Resolved family rates a shape-priced listing's quotes derive from. "
+            "A registry serves them as ``pricing.rate_structure``: a listing "
+            "validated from that form reads them from there, and "
+            ":meth:`published_pricing` writes them back to it."
+        ),
+    )
     demands: list[EscrowDemand] | None = Field(
         default=None,
         description=(
@@ -486,6 +512,13 @@ class Listing(BaseModel):
             "as primary_rate * agreed_duration_seconds / 3600."
         ),
     )
+
+    available_until_utc: UtcAvailability | None = None
+
+    _relative_bound = field_validator("max_duration_seconds", mode="before")(
+        positive_duration_bound
+    )
+
     oracle_address: str | None = Field(
         default=None,
         description="The oracle wallet address used for arbitration and escrow workflows",
@@ -549,5 +582,43 @@ class Listing(BaseModel):
             data["listing_resource"] = ComputeDomainResource.parse_from_dict(
                 data["listing_resource"]
             )
+        # A stored listing keeps its rates in this field; a registry listing
+        # serves them only in its pricing object.
+        if data.get("rate_structure") is None:
+            published = registry_rate_structure(data)
+            if published is not None:
+                data["rate_structure"] = published
 
         return data
+
+    def published_listing_resource(self) -> dict[str, Any]:
+        """The capacity description a registry publication carries.
+
+        Optional capacity attributes are absent commitments, not JSON nulls,
+        since the compute publication schema types every present attribute.
+        The asking rate is a term of sale and travels in :meth:`published_pricing`
+        instead; the stored listing keeps it beside the shape it prices.
+        """
+        resource = self.listing_resource.model_dump(mode="json", exclude_none=True)
+        resource.pop("asking_rate", None)
+        return resource
+
+    def published_pricing(self) -> dict[str, Any] | None:
+        """The listing-level prices, as the one ``pricing`` object a registry
+        publication carries, or ``None`` when the listing states none. A
+        settlement option's price travels with its option instead.
+
+        ``asking_rate`` prices the listing's whole shape; ``rate_structure``
+        holds the resolved family rates a shape-priced listing's prices derive
+        from. Either may be absent without the other.
+        """
+        pricing: dict[str, Any] = {}
+        resource = self.listing_resource
+        if isinstance(resource, ComputeResource) and resource.asking_rate is not None:
+            pricing["asking_rate"] = resource.asking_rate.model_dump(mode="json")
+        if self.rate_structure is not None:
+            pricing["rate_structure"] = {
+                family: [dict(rate) for rate in rates]
+                for family, rates in self.rate_structure.items()
+            }
+        return pricing or None

@@ -491,6 +491,12 @@ Every surface capable of persisting a Resource Pool's `policy_tags` MUST apply t
 same check: the bulk pool-document import path and the individual pool admin API
 (`create`/`replace`/`update`). The value MUST be projected verbatim.
 
+The shared reader resolves an entry to the `amount`, `asset`, and `period` a listing
+publishes; the entry's `shape` selects the listing it prices and is never published.
+Where a listing carries that rate is the reading domain's publication, which places it
+in the listing's `pricing`; neither the pool authority, its contracts, nor the
+storefront override store names a listing's published layout.
+
 #### Scenario: Operator supplies a malformed asking rate
 
 - **WHEN** an operator submits an `asking_rates` entry whose amount is a JSON number,
@@ -504,6 +510,13 @@ same check: the bulk pool-document import path and the individual pool admin API
 - **WHEN** an operator submits a structurally well-formed entry quoted per `month`
 - **THEN** Resource Pool validation accepts it, and a storefront that accepts only
   `hour` holds the pool's listings and reports the declaration unreadable
+
+#### Scenario: A declared rate reaches a listing
+
+- **WHEN** a pool declares an asking rate for a shape and a storefront publishes a
+  listing of that shape
+- **THEN** the listing publishes the entry's `amount`, `asset`, and `period` in its
+  `pricing`, and not the entry's `shape`
 
 ### Requirement: Pricing rate-list hint validation
 
@@ -960,6 +973,24 @@ is required.
 
 - **WHEN** an operator creates or edits a VM pool with provider `vm.ansible`
 - **THEN** the VM adapter validates its configuration and handles fulfillment through that registration
+
+### Requirement: Capacity bounds are validated publication hints
+
+Pool contracts MUST support optional `max_duration_seconds` and
+`available_until_utc` hints per offering mode without making the site the authority
+for commercial entitlements. A stated absolute bound MUST be timezone-aware UTC;
+unset or nonpositive relative bounds MUST mean no relative limit. Malformed values
+MUST be refused rather than converted into guessed defaults.
+
+#### Scenario: Absolute capacity date
+
+- **WHEN** a valid pool document states a UTC availability date
+- **THEN** the pool wire model preserves it for storefront resolution without adding a site commercial-policy check
+
+#### Scenario: Invalid date
+
+- **WHEN** a pool hint supplies a malformed or timezone-naive availability date
+- **THEN** validation refuses it with an actionable diagnostic
 
 ## Evidence
 

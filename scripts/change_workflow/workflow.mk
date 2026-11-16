@@ -45,7 +45,7 @@ CHANGE_WORKFLOW_ARGUMENTS = $(if $(strip $(ARGUMENTS)), --arguments '$(subst ','
 .PHONY: design plan implement review triage validate merge closeout archive-cleanup orchestrate
 .PHONY: change-next change-clone change-clone-remove round-view round-done round-view-closed
 .PHONY: change-watch change-cost change-history check-change-index check-tasks
-.PHONY: check-agent-skills check-push-ready push-branch change-graph
+.PHONY: check-agent-skills check-review check-push-ready push-branch change-graph
 
 design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start design "$(CHANGE)"$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
@@ -56,7 +56,7 @@ plan: ## Open a Claude Code planning session for an OpenSpec change; unattended,
 implement: ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve or the owner's direction to the sections, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS)$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))'))$(CHANGE_WORKFLOW_RUN)
 
-review: ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=<branch>] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
+review: ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout|merge [REVIEW_BASE=<branch>] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
 	@$(CHANGE_WORKFLOW) review "$(CHANGE)" --kind "$(KIND)" $(if $(strip $(REVIEW_BASE)),--base "$(REVIEW_BASE)") $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
@@ -65,13 +65,13 @@ triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untria
 validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change; ARGUMENTS follows the change in the skill's invocation (CHANGE=<change> [ARGUMENTS=<text>] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start validate "$(CHANGE)"$(CHANGE_WORKFLOW_ARGUMENTS)$(CHANGE_WORKFLOW_RUN)
 
-merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, resolving the conflicts and repairing what that branch's changes broke (CHANGE=<change> [FROM=<branch>, default the branch the change lands on] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start merge "$(CHANGE)"$(if $(strip $(FROM)), --arguments 'from $(subst ','\'',$(strip $(FROM)))')$(CHANGE_WORKFLOW_RUN)
+merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, or again after its archive, resolving the conflicts and repairing what that branch's changes broke; ARGUMENTS follows the branch in the skill's invocation, as the owner's direction to the merge (CHANGE=<change> [FROM=<branch>, default the branch the change lands on] [ARGUMENTS=<text>] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+	@$(CHANGE_WORKFLOW) start merge "$(CHANGE)"$(if $(strip $(FROM)$(ARGUMENTS)), --arguments '$(subst ','\'',$(strip $(if $(strip $(FROM)),from $(strip $(FROM))) $(ARGUMENTS)))')$(CHANGE_WORKFLOW_RUN)
 
 closeout: ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start closeout "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
 
-archive-cleanup: ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+archive-cleanup: ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it, or again after a merge after its archive (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start archive-cleanup "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
 
 orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on the model and effort the workflow configuration's models.orchestrator names (CHANGE=<change>)
@@ -114,6 +114,9 @@ check-tasks: ## Fail if a task of a change's task list sits under another sectio
 
 check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills
 	@$(CHANGE_WORKFLOW) check skills
+
+check-review: ## Fail if the review on standard input would be refused publishing, printing each problem the format check finds (KIND=design|implementation|pre-closeout|closeout|merge CHANGE=<change>)
+	@$(CHANGE_WORKFLOW) check review "$(KIND)" "$(CHANGE)"
 
 check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
 	@$(CHANGE_WORKFLOW) check push

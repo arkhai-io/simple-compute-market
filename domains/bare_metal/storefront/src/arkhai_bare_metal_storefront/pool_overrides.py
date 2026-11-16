@@ -31,6 +31,9 @@ from market_pool_overrides import (
     read_pool_overrides,
 )
 from market_settlement_runtime import SettlementPublicationClause
+from market_resource_pools_contracts import (
+    UtcAvailability, capacity_bound_hint, positive_duration_bound,
+)
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
@@ -44,11 +47,12 @@ class BareMetalPoolOverrideTerms(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     min_duration_seconds: StrictInt | None = Field(default=None, gt=0)
-    max_duration_seconds: StrictInt | None = Field(default=None, gt=0)
+    max_duration_seconds: StrictInt | None = None
+    available_until_utc: UtcAvailability | None = None
 
     @model_validator(mode="after")
     def _ordered(self) -> "BareMetalPoolOverrideTerms":
-        low, high = self.min_duration_seconds, self.max_duration_seconds
+        low, high = self.min_duration_seconds, positive_duration_bound(self.max_duration_seconds)
         if low is not None and high is not None and low > high:
             raise ValueError("min_duration_seconds must not exceed max_duration_seconds")
         return self
@@ -60,7 +64,7 @@ def positive_lease_bound(seconds: int | None) -> int | None:
     ``[pricing].default_max_duration_seconds`` may be absent, zero, or negative;
     none of those bounds a lease, so a pool relying on it publishes nothing.
     """
-    return seconds if seconds is not None and seconds > 0 else None
+    return positive_duration_bound(seconds)
 
 
 def effective_duration_problems(
@@ -70,17 +74,17 @@ def effective_duration_problems(
 
     Each override bound replaces its configured counterpart; the pair that
     results must be ordered. Configuration states no minimum, so the only
-    combination across tiers is an override minimum with the configured
-    maximum.
+    combination across tiers is an override minimum with the lower-tier
+    maximum (the pool hint, else configuration).
     """
-    effective_max = (
+    effective_max = positive_duration_bound(
         terms.max_duration_seconds if terms.max_duration_seconds is not None else configured_max
     )
     low = terms.min_duration_seconds
     if low is not None and effective_max is not None and low > effective_max:
         return [
             f"terms.min_duration_seconds {low} exceeds the effective maximum "
-            f"{effective_max} (the configured maximum, which this override does not replace)"
+            f"{effective_max} (the lower-tier maximum, which this override does not replace)"
             if terms.max_duration_seconds is None
             else f"terms.min_duration_seconds {low} exceeds max_duration_seconds {effective_max}"
         ]
@@ -131,8 +135,8 @@ class BareMetalPoolOverrideContribution:
     """Pool overrides for the ``bare_metal`` offering mode.
 
     ``configured_max_duration_seconds`` reads the storefront's current lease
-    maximum when a record is judged, so the effective bounds are checked
-    against the configuration publication would combine them with.
+    maximum when a record is judged against its site's live hints, so the
+    effective bounds use the same precedence as publication.
     """
 
     offering_mode = BARE_METAL_OFFERING_MODE
@@ -151,10 +155,25 @@ class BareMetalPoolOverrideContribution:
             asking_rates=record.asking_rates,
             terms=record.terms,
         )
-        if problems:
-            return problems
+        return problems
+
+    def projection_problems(
+        self,
+        site_pools: Sequence[Mapping[str, Any]],
+        *,
+        record: PoolOverrideRecord,
+    ) -> Sequence[str]:
         terms = BareMetalPoolOverrideTerms.model_validate(record.terms or {})
-        return effective_duration_problems(terms, self._configured_max())
+        pool = next(pool for pool in site_pools if pool.get("pool_id") == record.pool_id)
+        tags = (pool.get("pool_metadata") or {}).get("policy_tags") or {}
+        try:
+            hint = capacity_bound_hint(tags, BARE_METAL_OFFERING_MODE)
+        except ValueError as exc:
+            return [str(exc)]
+        lower_max = hint.max_duration_seconds
+        if lower_max is None:
+            lower_max = self._configured_max()
+        return effective_duration_problems(terms, lower_max)
 
     def judge_shapes(
         self,
@@ -178,6 +197,7 @@ class BareMetalPoolOverride:
     clauses: tuple[SettlementPublicationClause, ...] | None = None
     min_duration_seconds: int | None = None
     max_duration_seconds: int | None = None
+    available_until_utc: str | None = None
     asking_rates: Any = None
     problems: tuple[str, ...] = ()
     term_conflicts: tuple[str, ...] = ()
@@ -222,6 +242,7 @@ def read_bare_metal_pool_overrides(
             ),
             min_duration_seconds=terms.min_duration_seconds,
             max_duration_seconds=terms.max_duration_seconds,
+            available_until_utc=terms.available_until_utc,
             asking_rates=item.asking_rates,
         )
     return overrides

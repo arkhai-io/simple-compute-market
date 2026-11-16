@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from market_settlement_runtime.rate_servicing import RateServicing
+
 import pytest
 
 import market_storefront.container as container
@@ -168,6 +170,8 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         site_projections: object,
         accepted_obligation_dispatch: object = None,
         arkhai_payments_stage: object = None,
+        rate_servicing: object = None,
+        rate_term_projections: object = None,
     ):
         registration = registry.resolve_registration(binding)
         assert registry is built["registry"]
@@ -207,6 +211,8 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
             domain=domain,
             accepted_obligation_dispatch=lambda: {},
             arkhai_payments_stage=None,
+            rate_servicing=RateServicing(),
+            rate_term_projections={},
             payments_coordinator=None,
             settlement_config=SimpleNamespace(priority=()),
             disputes=SimpleNamespace(refresh=AsyncMock()),

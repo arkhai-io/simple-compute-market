@@ -2,9 +2,9 @@
 
 The kit stores, checks, and reports overrides without knowing any market's
 vocabulary. For each offering mode a storefront sells, the market that serves it
-contributes the two judgements only it can make: whether a record's shapes and
-terms are ones it understands, and whether a site's declarations are feasible for
-each stated shape.
+contributes the judgements only it can make: whether a record's shapes and
+terms are ones it understands, whether those terms fit a site's live hints,
+and whether that site's declarations are feasible for each stated shape.
 """
 
 from __future__ import annotations
@@ -24,6 +24,15 @@ class PoolOverrideContribution(Protocol):
     def vocabulary_problems(self, record: PoolOverrideRecord) -> Sequence[str]:
         """Every reason ``record``'s shapes or terms are outside this market's
         vocabulary; empty when the record is readable."""
+        ...
+
+    def projection_problems(
+        self,
+        site_pools: Sequence[Mapping[str, Any]],
+        *,
+        record: PoolOverrideRecord,
+    ) -> Sequence[str]:
+        """Terms that conflict with the live projection; empty when compatible."""
         ...
 
     def judge_shapes(

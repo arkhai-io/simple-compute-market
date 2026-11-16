@@ -13,7 +13,7 @@ from market_identity import (
 
 from market_deal_servicing import (
     Classification, DeliveryIngress, DeliveryRecord, EndService, EndSession, PhysicalResult,
-    SellerDeal, SellerSession, VerifiedSiteEnd,
+    SellerDeal, SellerSession, VerifiedSiteEnd, create_payment_observations, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -36,6 +36,9 @@ async def main():
         path = Path(root) / "storefront.sqlite"
         end = EndService(path, physical, clock=lambda: now[0])
         with transaction(path) as conn:
+            # The storefront chain's migrations, which no session runs.
+            create_schema(conn)
+            create_payment_observations(conn)
             for negotiation in ("surrender", "site"):
                 EndSession(conn).register(DeliveryRecord(
                     negotiation_id=negotiation, commitment_ref="fixture-commitment", seller=seller.identity,

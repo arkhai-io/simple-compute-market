@@ -14,14 +14,20 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-nfdb](spec.md#requirement-cw-nfdb-a-phase-ends-only-when-its-reviews-triage-advances-it) — design, implementation, and closeout end only when their review's triage names a next-phase exit.
 - [CW-hdxi](spec.md#requirement-cw-hdxi-the-merge-brings-in-the-branch-the-change-lands-on) — after pre-closeout, a merge brings in the landing branch and reconciles the change's code with it.
 - [CW-a6ow](spec.md#requirement-cw-a6ow-closeout-waits-for-a-validation-of-the-merged-head) — closeout waits for a passed validation of the merged `HEAD`; another review or a waiver needs the owner.
+- [CW-m4qe](spec.md#requirement-cw-m4qe-an-archived-changes-branch-merges-its-landing-branch-again) — after archive cleanup, a merge after the archive brings in the landing branch again, entered while the row says `archived` by the owner's direction or cleanup's first exit, with no return; a merge run after cleanup is its run, but an older one by hand recording no `landing`.
+- [CW-x9tb](spec.md#requirement-cw-x9tb-the-merge-after-the-archive-judges-its-review) — the merge after the archive judges, on written criteria, whether a merge review is needed; its exit is followed without asking, and a waiver of its validation directs that exit.
+- [CW-g3zn](spec.md#requirement-cw-g3zn-a-merge-after-the-archive-keeps-the-change-archived) — a merge after the archive keeps the row `archived`, releases dependents the landing branch brought, and appends to the drafts.
 - [CW-9pbk](spec.md#requirement-cw-9pbk-the-owner-is-consulted-at-fixed-touchpoints) — the owner answers design questions, round notes, discussed findings' dispositions, and another round when recommended; advancing is taken without asking.
 
 ### Closeout and the archive
 
 - [CW-ksnu](spec.md#requirement-cw-ksnu-closeout-archives-the-change-before-its-review) — closeout archives the change first, so the closeout review reads it and the specifications as archived.
 - [CW-trdu](spec.md#requirement-cw-trdu-archive-cleanup-waits-on-the-closeout-reviews-triage) — cleanup waits on the closeout triage advancing, and a passed validation when a path outside the inert paths changed since, unless waived.
-- [CW-pkug](spec.md#requirement-cw-pkug-closeout-changes-documentation-only) — closeout edits documentation only; needing a code change returns the change to implementation.
-- [CW-1iaz](spec.md#requirement-cw-1iaz-steps-after-the-archive-find-a-change-by-name) — post-archive steps find an archived change by name; design, planning, and implementation refuse it.
+- [CW-pkug](spec.md#requirement-cw-pkug-closeout-changes-only-inert-paths) — closeout changes only inert paths, changes' records, and the archive's own writes; a part needing any other change returns the change to implementation.
+- [CW-r2hu](spec.md#requirement-cw-r2hu-a-merge-review-reads-what-a-merge-after-the-archive-did) — a `merge` review reads a merge after the archive's resolutions; its triage advances to archive cleanup or another merge review.
+- [CW-5vkd](spec.md#requirement-cw-5vkd-archive-cleanups-first-exit-waits-for-the-landing-branch) — each finished merge records the remote, landing branch, and commit it fetched, and a later merge defaults to that branch; cleanup fetches that source, stopping when the fetch fails, its finished line refused without the record or with one other than what it fetched, and its first exit to `done` names the merge after the archive when the logged commit is not contained.
+- [CW-p8fy](spec.md#requirement-cw-p8fy-archive-cleanup-run-again-cleans-up-and-copies-only) — cleanup run again on an `archived` row cleans up validation, commits, pushes, and copies the history only.
+- [CW-1iaz](spec.md#requirement-cw-1iaz-steps-after-the-archive-find-a-change-by-name) — post-archive steps, the merge after the archive and the merge review included, find an archived change by name; design, planning, and implementation refuse it.
 - [CW-z83w](spec.md#requirement-cw-z83w-a-design-decision-after-the-design-review-returns-to-design) — a design decision after the design review returns to design; the owner may waive another review.
 
 ### The change index
@@ -46,6 +52,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-uhdy](spec.md#requirement-cw-uhdy-a-direction-is-held-to-the-unwaivable-entry-guards-it-meets) — a direction is refused at an unmet unwaivable entry guard, never crossing the archive; waivable guards yield.
 - [CW-eups](spec.md#requirement-cw-eups-a-direction-to-validation-names-the-validations-target) — a direction to validation nests its target; a pass leads there, a failure goes to the owner.
 - [CW-q3dm](spec.md#requirement-cw-q3dm-waivers-are-recommended-and-the-owners-to-take) — a step recommends a waiver only on a written criterion, naming it and its evidence; only the owner waives.
+- [CW-w6vy](spec.md#requirement-cw-w6vy-waivers-are-recommended-and-recorded-where-they-are-given) — a waiver is recommended in the step's own message, and validation takes a standing waiver only from the log; a triage's waiver is its ledger line.
 
 ## 2. Implementation and validation
 
@@ -100,6 +107,8 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-ovuj](spec.md#requirement-cw-ovuj-review-records-are-untracked-and-their-durable-content-is-promoted) — `reviews/` is untracked and uncited by permanent documents; durable content is promoted at closeout.
 - [CW-5e24](spec.md#requirement-cw-5e24-a-reviews-transcript-is-kept-and-never-read-as-a-record) — a review's raw transcript may be kept, untracked, but no review or triage step reads it.
 - [CW-r9d2](spec.md#requirement-cw-r9d2-a-reviewers-output-is-published-only-as-a-review) — reviewer output is published only once format-checked; a run publishing nothing is recorded as stopped.
+- [CW-r8fb](spec.md#requirement-cw-r8fb-a-review-the-format-check-refuses-is-sent-back-to-its-reviewer) — a draft the format check refuses is sent back to its reviewer's session, `review.format-retries` times (once by default), the line and message saying so; a surviving refusal keeps its draft and session, which the next review of the kind continues.
+- [CW-c4rv](spec.md#requirement-cw-c4rv-a-reviewer-runs-the-publishing-check-before-it-answers) — `check review <kind> <change>` runs the publishing check on a review on standard input, which the reviewer runs before it answers.
 - [CW-a2lf](spec.md#requirement-cw-a2lf-each-finding-states-its-alternatives) — each finding states its alternatives with their trade-offs, or none and why; a finding without them is not published.
 
 ### Lens, basis, and severity
@@ -114,6 +123,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-d5ac](spec.md#requirement-cw-d5ac-a-review-finding-the-default-rule-admits-is-accepted-by-default) — an uncontested, non-blocking review finding with one agreed edit or fix and no alternative is accepted by default, its classification recorded.
 - [CW-t9bx](spec.md#requirement-cw-t9bx-default-acceptances-are-reported-in-one-table) — default acceptances are reported in one table, with the triage's last question or its final report.
 - [CW-r8vz](spec.md#requirement-cw-r8vz-the-owner-revisits-a-default-acceptance) — on the owner's direction, the latest finished triage resumes to amend a default acceptance or its advancing exit.
+- [CW-t2lw](spec.md#requirement-cw-t2lw-a-triages-records-take-their-written-shapes) — a triage writes `Classification:` lines, reports "Accepted by default", gives each ledger line its keys and revisions their prefix, and saves a pasted review verbatim.
 
 ### Guidance reviews
 
@@ -159,11 +169,12 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-k2rv](spec.md#requirement-cw-k2rv-the-owner-stops-a-running-step-through-the-command) — on the owner's word, the command stops the change's running step, naming it when two run; the interrupt resolves no run.
 - [CW-h7lq](spec.md#requirement-cw-h7lq-a-stop-signals-only-a-run-that-still-holds-its-record) — a stop checks the run still holds its record at selection and just before the signal, else refuses.
 - [CW-w4ne](spec.md#requirement-cw-w4ne-a-stopped-run-is-recovered-as-any-stop-and-a-late-stop-ends-nothing) — a stopped run is recovered as any stop and commits nothing; a stop after the agent exits ends nothing.
+- [CW-o9hd](spec.md#requirement-cw-o9hd-the-orchestrating-session-tells-the-owner-what-it-starts-and-leaves-the-owners-actions-to-them) — it says when it starts a long turn, gives the owner the command for a step they closed unrecorded, and rereads the files after a takeover.
 
 ### Step runs and outcomes
 
 - [CW-js86](spec.md#requirement-cw-js86-an-unattended-run-ends-with-a-structured-outcome) — an unattended run ends with a schema outcome: finished, question, proposed return, blocked, or stopped.
-- [CW-5ldi](spec.md#requirement-cw-5ldi-an-exit-or-a-return-is-named-as-a-target) — exits and returns are targets naming a graph node with any kind or sections; unknown kinds are refused.
+- [CW-5ldi](spec.md#requirement-cw-5ldi-an-exit-or-a-return-is-named-as-a-target) — exits and returns are targets naming a graph node with any kind or sections; unknown kinds are refused; the wrapper gives an unattended validation its target and logs it as the finished validation's exit.
 - [CW-4vma](spec.md#requirement-cw-4vma-a-triage-outcome-names-the-records-it-triaged) — a triage outcome names its distinct triaged records, at least one review; otherwise it is recorded stopped.
 - [CW-1a4d](spec.md#requirement-cw-1a4d-the-wrapper-logs-every-outcome-of-a-run) — the wrapper logs every outcome with session and commit, recording stopped for a run that gives none.
 - [CW-4c3e](spec.md#requirement-cw-4c3e-the-files-prevail-over-the-log-on-a-changes-state) — a change's files hold and prevail on its state; the log holds exits and the owner's decisions.
@@ -204,15 +215,17 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-8tdv](spec.md#requirement-cw-8tdv-an-unmet-exit-guard-names-the-step-that-satisfies-it) — an unmet exit guard names its satisfying step carrying the exit, or goes to the owner when none can.
 - [CW-nkys](spec.md#requirement-cw-nkys-validation-is-always-named-with-a-target) — validation is always named with a target, whose guards are checked again on validation's exit.
 - [CW-izj1](spec.md#requirement-cw-izj1-a-confirmed-return-starts-its-work-afresh) — a confirmed return releases the returned review, so its work is a fresh round; declined returns go to the owner.
-- [CW-tnp6](spec.md#requirement-cw-tnp6-a-round-and-the-merge-advance-only-on-a-passed-validation) — a round and the merge advance only on a passed validation of their commit; a failed merge validation repeats the merge.
+- [CW-tnp6](spec.md#requirement-cw-tnp6-a-round-and-the-merge-advance-only-on-a-passed-validation) — a round and either merge advance only on a passed validation of their commit; a failed merge validation repeats that merge.
+- [CW-j7wp](spec.md#requirement-cw-j7wp-the-computation-answers-done-from-the-route) — an archived change is `done` only while its route ends at cleanup's exit, computed in its clone first and answered before any branch or row check; an older merge by hand after cleanup routes nothing.
+- [CW-e3gt](spec.md#requirement-cw-e3gt-a-step-checks-its-entry-before-it-works) — planning, the merge, closeout, and archive cleanup go on only when the computation names them, and a step acting on a task list checks it first.
 
 ### The graph
 
 - [CW-ak1z](spec.md#requirement-cw-ak1z-the-workflow-graph-is-one-table-in-code) — the graph is one table in code of nodes, exits, joins, and guards, changed only by an OpenSpec change.
 - [CW-sd34](spec.md#requirement-cw-sd34-exit-guards-bind-steps-and-entry-guards-bind-every-entry) — exit guards bind step exits, not directions; entry guards bind every entry, waivable ones yielding to directions.
-- [CW-xo82](spec.md#requirement-cw-xo82-the-archive-guards-both-sides-of-closeout) — the archive's presence or absence guards the steps on each side of closeout; closeout is entered only from the merge.
+- [CW-xo82](spec.md#requirement-cw-xo82-the-archive-guards-both-sides-of-closeout) — the archive's presence or absence guards the steps on each side of closeout, the merge after the archive and its review included; closeout is entered only from the merge before it.
 - [CW-iaeh](spec.md#requirement-cw-iaeh-a-triage-needs-a-record-to-triage-and-a-validation-a-target) — a triage needs an untriaged record of its kind; validation needs a target, checked on its exit.
-- [CW-9tzd](spec.md#requirement-cw-9tzd-archive-cleanup-ends-at-the-terminal-node) — archive cleanup exits to the terminal node `done`, which has no exits or step and no direction reaches.
+- [CW-9tzd](spec.md#requirement-cw-9tzd-archive-cleanup-ends-at-the-terminal-node) — archive cleanup exits to the terminal node `done`, which has no exits or step and no direction reaches; the merge after the archive leaves it.
 - [CW-66kx](spec.md#requirement-cw-66kx-the-graph-diagram-is-held-to-the-table) — `check graph` holds the diagram's source and embedded copy to the table's structure, whatever its layout.
 
 ### Permissions
@@ -223,6 +236,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-4yhk](spec.md#requirement-cw-4yhk-a-denied-run-stops-or-goes-on-only-by-allowed-calls) — a run blocked by a denial stops naming it; going on uses only calls its rules allow.
 - [CW-2lvd](spec.md#requirement-cw-2lvd-a-deny-rules-refusal-stands-except-a-write-steering-rules) — a deny rule's refusal is not worked around, except write-steering rules, whose write may use Edit or Write.
 - [CW-2h9t](spec.md#requirement-cw-2h9t-a-call-no-rule-allows-may-be-done-by-an-allowed-tool) — a call denied for want of an allow rule may be done by an allowed tool, named in the message.
+- [CW-b5cf](spec.md#requirement-cw-b5cf-an-unattended-steps-calls-take-the-forms-its-rules-match) — an unattended step runs one command per call, names paths from its root, reads refused files through a tool, and waits through `wait`.
 - [CW-svng](spec.md#requirement-cw-svng-the-orchestrating-session-reads-and-classifies-each-denial) — the orchestrating session reads denials from the run's record and classifies each as a table gap or forbidden.
 - [CW-5rmh](spec.md#requirement-cw-5rmh-the-orchestrating-session-checks-a-deny-rules-denial-for-a-workaround) — after a deny rule's denial it checks later calls for a workaround; an Edit-made steered write is a gap.
 - [CW-vdqj](spec.md#requirement-cw-vdqj-the-orchestrating-session-proposes-a-rule-for-each-gap-and-records-its-reading) — for each gap it proposes the narrowest rule, as grant or tracked change, and logs its reading.
@@ -255,7 +269,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-yib2](spec.md#requirement-cw-yib2-a-change-may-be-worked-in-a-clone-of-its-own) — a change may be worked in its own clone or the workspace; clones never disturb each other.
 - [CW-4x66](spec.md#requirement-cw-4x66-the-computation-names-a-changes-clone-or-brings-workspace-records-to-the-owner) — the computation names a missing clone's creation, but brings a change with workspace records to the owner.
 - [CW-8jyb](spec.md#requirement-cw-8jyb-creating-a-clone-is-safe-to-repeat) — clone creation is repeatable, finishing an incomplete clone and refusing a foreign or dirty directory, deleting nothing; its remotes come from Git's record in the workspace.
-- [CW-s3ju](spec.md#requirement-cw-s3ju-the-branch-a-change-lands-on-is-recorded-where-its-orchestration-began) — the clone records the branch the change lands on, the workspace's or `--from`, printed as `find --json`'s `base`; an argument overrides it.
+- [CW-s3ju](spec.md#requirement-cw-s3ju-the-branch-a-change-lands-on-is-recorded-where-its-orchestration-began) — the clone records the branch the change lands on, the workspace's or `--from`, printed as `find --json`'s `base`; a merge given no branch brings in the last finished merge's recorded branch before it, and an argument overrides both.
 - [CW-8npg](spec.md#requirement-cw-8npg-a-clones-bootstrap-gates-implementation-and-validation) — implementation and validation wait on the clone's `post-clone` bootstrap succeeding, its state recording its command; a failure goes to the owner.
 - [CW-hak6](spec.md#requirement-cw-hak6-archive-cleanup-copies-a-changes-history-into-the-workspace) — archive cleanup last copies the change's records and evidence into the workspace, repeated after its outcome.
 - [CW-rf50](spec.md#requirement-cw-rf50-copying-a-changes-history-overwrites-nothing) — the history copy is repeatable, extends prefix files, and refuses to overwrite a differing file.
@@ -266,6 +280,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 ### Skills from one source
 
 - [CW-d8de](spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness) — each skill has one source every harness loads; no per-harness copies, and every harness entry resolves.
+- [CW-s7rq](spec.md#requirement-cw-s7rq-a-skill-restates-guidance-no-stricter-than-its-source) — a skill restates guidance briefly where its step applies it, citing it and never stricter; a stricter need amends the guidance.
 
 ## 5. The public surface
 
@@ -284,11 +299,20 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-f3qk](spec.md#requirement-cw-f3qk-one-configuration-file-states-what-the-workflow-assumes) — one file, `.agents/workflow.toml`, states the commands, documents, and values the workflow assumes; nothing Git or the invocation supplies.
 - [CW-w8ne](spec.md#requirement-cw-w8ne-the-configuration-is-checked-whenever-it-is-read) — every reader checks the whole file, refusing an unknown key, a wrong type, or an unavailable placeholder by name.
 - [CW-t5hz](spec.md#requirement-cw-t5hz-a-missing-required-field-refuses-only-the-steps-that-need-it) — a missing required field refuses only the steps needing it, before launch; an explicit empty value is declared.
-- [CW-n7ra](spec.md#requirement-cw-n7ra-the-repositorys-inert-paths) — the repository's inert paths name what validation would prove nothing about; the engine holds none of its own.
-- [CW-l7hn](spec.md#requirement-cw-l7hn-a-steps-documents-to-load-come-from-the-configuration) — a step loads `load.common` and `load.<step>` through `config load`; the post-compaction hook re-reads `load.common`.
+- [CW-n7ra](spec.md#requirement-cw-n7ra-the-repositorys-inert-paths) — the repository's inert paths name what validation would prove nothing about; with none declared, `openspec/` and every Markdown file, and an empty declaration makes none inert.
+- [CW-l7hn](spec.md#requirement-cw-l7hn-a-steps-documents-to-load-come-from-the-configuration) — a step loads `load.common` and `load.<step>` through `config load`, an entry ending in `/` expanding to its Markdown files and refused when it yields none; the post-compaction hook re-reads `load.common`.
 - [CW-i2we](spec.md#requirement-cw-i2we-the-openspec-cli-runs-through-the-configured-command) — the OpenSpec validation and archive run through `openspec.command`, or `openspec` on the path.
 - [CW-o6kc](spec.md#requirement-cw-o6kc-the-configurations-resolution-is-listed) — `config` lists how every field resolved, and `config parts` validation's plan, each with `--json`.
 - [CW-z5me](spec.md#requirement-cw-z5me-no-step-edits-the-configuration) — no unattended step edits the configuration; it changes only as a tracked edit by the owner, or by the orchestrating session on the owner's word.
+
+### The repository's guidance
+
+- [CW-g7lt](spec.md#requirement-cw-g7lt-every-guidance-file-carries-one-layer-tag) — every guidance file carries one layer tag, engineering, workflow, or repository, and other tags from its layer's vocabulary or a lower one's.
+- [CW-d2rw](spec.md#requirement-cw-d2rw-guidance-never-links-to-a-higher-layer) — a guidance file never links to one tagged with a higher layer.
+- [CW-p9sa](spec.md#requirement-cw-p9sa-guidance-sits-beside-the-system-it-pertains-to) — repository guidance for one system sits beside its specification, spanning several in the cross-system documents; closeout checks placement.
+- [CW-x4ex](spec.md#requirement-cw-x4ex-exceptions-to-shared-guidance-are-declared-beside-what-they-apply-to) — an exception to shared guidance is a `selects` or `overrides` row beside its component, or in the root guidance when it spans systems.
+- [CW-n6dm](spec.md#requirement-cw-n6dm-directories-carry-no-meaning-to-the-workflow) — a guidance file's layer and tags come from its frontmatter, never its directory.
+- [CW-r8cg](spec.md#requirement-cw-r8cg-a-step-reads-the-guidance-beside-a-capability) — every other Markdown file in a capability's directory is its guidance, read wherever its specification and companion are.
 
 ### What an adopting repository provides
 

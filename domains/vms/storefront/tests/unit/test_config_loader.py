@@ -305,6 +305,27 @@ def test_a_retention_sweep_interval_is_read_as_seconds():
     assert agent_config.introduction_retention_sweep_interval(3600) == 3600.0
 
 
+def test_the_default_penalty_multiple_is_24_periods_unless_stated():
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert packaged["pricing"]["default_premature_stop_penalty_periods"] == 24
+    assert agent_config.default_premature_stop_penalty_periods(Dynaconf(environments=False)) == 24
+
+    source = Dynaconf(environments=False)
+    source.set("pricing", {"default_premature_stop_penalty_periods": 6})
+    assert agent_config.default_premature_stop_penalty_periods(source) == 6
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, "24", True])
+def test_a_default_penalty_multiple_that_is_not_a_positive_integer_is_refused_by_its_key(value):
+    source = Dynaconf(environments=False)
+    source.set("pricing", {"default_premature_stop_penalty_periods": value})
+    with pytest.raises(
+        ValueError, match=r"^\[pricing\]\.default_premature_stop_penalty_periods must be a positive integer"
+    ) as refused:
+        agent_config.default_premature_stop_penalty_periods(source)
+    assert refused.value.__context__ is None
+
+
 # ---------------------------------------------------------------------------
 # Composites — AGENT_ID, AGENT_NAME, BASE_URL_OVERRIDE are computed once at
 # module load. get_agent_id() supports per-call override.

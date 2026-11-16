@@ -88,12 +88,15 @@ priority = []
 # never published. A [Delivery] section sends each revealed buyer contact to
 # the seller's own sinks, routed per site by [Delivery.origins] when the
 # storefront has more than one; sink credentials belong in
-# storefront.secrets.toml. See DEPLOYMENT_AND_CONFIG.md. Generated
+# storefront.secrets.toml. See "Settlement consumer configuration and
+# cutover", "Contact-exchange contacts", and "Introduction delivery" in the
+# configuration.md beside the settlement-configuration,
+# contact-exchange-settlement, and introduction-delivery specifications under
+# openspec/specs/. Generated
 # role configuration supplies every typed field and the exact capability pins.
-# Provider, webhook, database, migration, EAS, and RPC service configuration is
 
 # [Wallet] and [Chains.<name>] are optional EVM resources supplied by operator
-# Private wallet material belongs only in storefront.secrets.toml. Alkahest
+# overlays. Private wallet material belongs only in storefront.secrets.toml. Alkahest
 # requires Wallet.private_key plus a selected Chains entry with rpc_url and
 # chain_id; Wallet.address, when stated, must be the account the key signs as,
 # and when omitted is that account. A chain on a deployment's own Alkahest
@@ -201,6 +204,10 @@ policies           = ["has_matching_inventory_guard", "escrow_shape_guard", "bis
 seller_model_path  = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt"
 buyer_model_path   = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt"
 extra_policy_paths = []
+# One commercial floor for every shape priced by the advertised rate structure,
+# in basis points of the advertised rates: an integer from 0 to 10000, so the
+# advertised rates are always a price the storefront accepts.
+multiplier_floor_bps = 10000
 
 [pricing]
 # Structured settlement option defaults. Each entry is one complete clause;
@@ -210,7 +217,12 @@ settlements = []
 # advertises no rate -- in the payment asset's base units per hour, as decimal
 # text. It constructs no settlement option.
 default_min_price            = ""
-default_max_duration_seconds = 0   # 0 means unlimited
+default_max_duration_seconds = 0   # nonpositive/unset means unlimited
+# Absolute UTC lease-end ceiling, independently resolved from capacity_bounds.vm.
+# default_available_until_utc = "2035-01-01T00:00:00Z"
+# An on-demand option's premature-stop penalty, in its periods' price, when its
+# clause states none; a clause's own penalty, even "0", wins. A positive integer.
+default_premature_stop_penalty_periods = 24
 publish_priceless            = false
 # Whether a resource pool's own projected `sla` hint
 # is consulted at all when resolving a listing's advertised SLA (the

@@ -14,11 +14,14 @@ explicitly, and this check rejects:
   different `if:` condition than its checkout, so it reads the declaration
   where no checkout happened or skips it where one did; or a `python-version`
   setup pin of another minor version;
-- a Dockerfile `FROM` naming a Python version literally, a `FROM` using
-  `${PYTHON_VERSION}` with no `ARG PYTHON_VERSION` default before the first
-  `FROM`, or a default other than the declared version.
+- a Dockerfile (`Dockerfile*` or `*.Dockerfile`) `FROM` naming a Python
+  version literally, a `FROM` using `${PYTHON_VERSION}` with no
+  `ARG PYTHON_VERSION` default before the first `FROM`, or a default other
+  than the declared version.
 
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Rules: docs/guidance/engineering/packaging.md, with packaging-uv.md and
+packaging-docker.md beside it.
+Conventions: docs/guidance/repository/python-version.md.
 """
 
 from __future__ import annotations
@@ -155,7 +158,7 @@ def problems(root: Path = ROOT) -> list[str]:
     for workflow in _files(root, "*.yml"):
         if workflow.relative_to(root).parts[:2] == (".github", "workflows"):
             found += ci_problems(workflow, root, version)
-    for dockerfile in _files(root, "Dockerfile*"):
+    for dockerfile in sorted(set(_files(root, "Dockerfile*")) | set(_files(root, "*.Dockerfile"))):
         if dockerfile.name.endswith(".dockerignore"):
             continue
         text = _uncommented(dockerfile.read_text("utf-8"))
@@ -182,7 +185,7 @@ def main() -> int:
     for problem in found:
         print(problem)
     if found:
-        print(f"\n{len(found)} Python version problem(s). See docs/development/BUILD_AND_PACKAGING.md.")
+        print(f"\n{len(found)} Python version problem(s). See docs/guidance/repository/python-version.md.")
         return 1
     print("OK: every Python version selection reads the root declaration.")
     return 0

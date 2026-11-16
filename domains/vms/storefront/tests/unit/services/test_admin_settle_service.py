@@ -345,6 +345,55 @@ class TestEvaluateSettleDryRun:
         probe.assert_awaited_once()
         assert result["would_submit"] is False
 
+    @pytest.mark.parametrize("held", [False, True])
+    async def test_an_accepted_resized_deal_previews_its_agreed_shape(
+        self, svc, db, held
+    ):
+        """Settlement claims the accepted order, not the advertised listing, so
+        the preview claims it too, whether the deal is held or reserved fresh."""
+        listing = {
+            **_LISTING_ROW,
+            "listing_resource": {
+                "gpu_model": "H200", "gpu_count": 2, "vcpu_count": 32,
+                "ram_gb": 256, "region": "California, US",
+                "resource_id": "r-1", "offering_mode": "vm",
+            },
+        }
+        agreed = {
+            **listing,
+            "listing_resource": {
+                **listing["listing_resource"],
+                "gpu_count": 1, "vcpu_count": 8, "ram_gb": 64,
+            },
+        }
+        db.load_listing.return_value = listing
+        db.load_negotiation_thread_row.return_value = {
+            **_accepted_thread(),
+            "settlement_plan": {**_PLAN, "service_terms": {"vm.v1": {"order": agreed}}},
+        }
+        db.load_capacity_hold.return_value = (
+            {"capacity_reservation_id": "res-held", "payload": {}} if held else None
+        )
+        probe = AsyncMock(return_value=None)
+        with patch(
+            "market_storefront.services.admin_settle_service._build_provisioning_job_spec",
+            new=probe,
+        ):
+            result = await svc.evaluate_settle_dry_run(
+                escrow_uid=_ESCROW_UID,
+                listing_id=_LISTING_ID,
+                ssh_public_key="",
+                duration_seconds=3600,
+                negotiation_id=_NEGOTIATION_ID,
+            )
+        if held:
+            probe.assert_not_awaited()
+            assert result["required_attributes"]["dimensions"] == {
+                "gpu_count": 1, "vcpu_count": 8, "ram_gb": 64,
+            }
+        else:
+            assert probe.call_args.kwargs["order_dict"] == agreed
+
     async def test_passes_correct_args_to_build_spec(self, svc, db):
         """_build_provisioning_job_spec is called with listing and caller-supplied ssh_public_key."""
         db.load_listing.return_value = _LISTING_ROW

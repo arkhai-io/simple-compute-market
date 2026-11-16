@@ -85,11 +85,10 @@ pipeline. That is the gap this change fills.
   lose this repository's specifics.
 - A set of addenda for this repository, and their entries in the workflow's
   configuration file.
-- `openspec/README.md`'s "Plan closeout requirements", whose repository-specific
-  parts become this repository's closeout addendum.
+- `openspec/README.md`'s "This repository's closeout parts", which become this
+  repository's closeout addendum.
 - `scripts/check_agent_skills.py`, for the slot check.
-- The workflow's specification, architecture companion, and
-  `docs/agents/change-workflow.md`.
+- The workflow's specification and architecture companion.
 
 ## Dependencies and Related Changes
 
@@ -114,7 +113,7 @@ pipeline. That is the gap this change fills.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
-`openspec/README.md` and `docs/agents/change-workflow.md` change with it.
+`openspec/README.md` and `docs/guidance/workflow/closeout.md` change with it.
 
 The lesser goal's gap "A skill can vary per repository only by being edited" in
 `openspec/changes/README.md` is owned by this change and closes with it.

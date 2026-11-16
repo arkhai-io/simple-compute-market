@@ -28,11 +28,16 @@ are held to the workflow's model policy as they are read: no step names two mode
 of one vendor, and only the review names a Codex model. No model is forbidden: a
 repository that never wants one does not list it.
 
+A review's draft the format check refuses is sent back to the reviewer that wrote
+it, for correction, as many times as `review.format-retries` says: once when the
+field is absent, never when it is 0.
+
 `config` lists every field and how it resolved, `config load <step>` the documents
 a step's skill reads, and `config parts <change>` validation's plan for the change.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
-CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, and CW-w2ld.
+CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, and
+CW-r8fb.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ import shlex
 import sys
 import tomllib
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from .common import ORCHESTRATOR, StepError, repository_root
@@ -57,7 +62,7 @@ CONFIGURATION = Path(".agents/workflow.toml")
 # The hooks named by when they run. `pre-push` and `post-clone` belong to the
 # engine's own push and clone, so no step runs them through `run`.
 HOOKS = ("after-functional-change", "pre-commit", "pre-commit-functional", "pre-archive",
-         "pre-push", "post-clone")
+         "pre-push", "post-clone", "test-before")
 # The default checks of `pre-commit`, run before its declared commands unless
 # `defaults.disable` names them.
 DEFAULT_CHECKS = ("index", "tasks", "skills", "openspec")
@@ -65,6 +70,12 @@ DEFAULT_CHECKS = ("index", "tasks", "skills", "openspec")
 DEFAULT_OPENSPEC = "openspec"
 # The documents every session reads as it starts, which a step's own add to.
 COMMON_DOCUMENTS = "common"
+# The inert paths when the configuration declares none: OpenSpec's tree and every
+# Markdown file, whose changes alter nothing validation or a code check would prove
+# but a test of a document's currency, which the next full run of the suites reads.
+DEFAULT_INERT_PATHS = ("openspec/", "**/*.md")
+# The send-backs a review's refused draft is given when the configuration names none.
+DEFAULT_FORMAT_RETRIES = 1
 _PART_KEYS = ("run", "start", "collect", "owed", "after", "evidence", "cleanup")
 _TABLES: dict[str, tuple[str, ...]] = {
     "repository": ("protected-branches", "inert-paths"),
@@ -74,12 +85,15 @@ _TABLES: dict[str, tuple[str, ...]] = {
     "load": (COMMON_DOCUMENTS, *STEPS),
     "models": (ORCHESTRATOR, *STEPS),
     "validation": ("preflight", "parts"),
+    "review": ("format-retries",),
 }
 # The placeholders every command may use, but `pre-push`'s: the guarded push pushes a
 # branch, not a change, so it has the remote alone to give.
 _EVERYWHERE = frozenset({"change", "base"})
 _PRE_PUSH = frozenset({"remote"})
-PLACEHOLDERS = frozenset({"change", "base", "remote", "owed", "after"})
+# `test-before` runs one test file at a time, named by `{test}`.
+_TEST_BEFORE = _EVERYWHERE | {"test"}
+PLACEHOLDERS = frozenset({"change", "base", "remote", "owed", "after", "test"})
 # A name in braces, not the shell's `${…}`.
 PLACEHOLDER = re.compile(r"(?<!\$)\{([A-Za-z_][A-Za-z0-9_-]*)\}")
 
@@ -148,6 +162,7 @@ class Configuration:
     models: Mapping[str, Any] = field(default_factory=dict)
     preflight: tuple[str, ...] | None = None
     parts: tuple[Part, ...] | None = None
+    format_retries: int | None = None
 
     def hook(self, name: str) -> tuple[str, ...] | None:
         """The hook's commands, or None when it is not declared."""
@@ -161,14 +176,29 @@ class Configuration:
         raise ConfigError(f"{self.shown} declares no validation part {name!r}; its parts: "
                           f"{declared}")
 
+    def review_format_retries(self) -> int:
+        """How many times a review's draft the format check refuses is sent back to
+        its reviewer for correction."""
+        return DEFAULT_FORMAT_RETRIES if self.format_retries is None else self.format_retries
+
+    def repository_inert_paths(self) -> tuple[str, ...]:
+        """The repository's inert paths: its declaration, which replaces the default
+        even when empty, or the workflow's default where it declares none."""
+        return DEFAULT_INERT_PATHS if self.inert_paths is None else self.inert_paths
+
     def openspec_command(self) -> str:
         return self.openspec if self.openspec is not None else DEFAULT_OPENSPEC
 
-    def documents(self, step: str) -> list[str]:
-        """The documents a step's skill reads: `load.common`, then `load.<step>`,
-        each once."""
-        return list(dict.fromkeys((*self.load.get(COMMON_DOCUMENTS, ()),
-                                   *self.load.get(step, ()))))
+    def documents(self, step: str, root: Path) -> list[str]:
+        """The documents a step's skill reads, relative to the repository at `root`:
+        `load.common`, then `load.<step>`, each document once. An entry ending in
+        `/` names a directory and stands for the Markdown files beneath it
+        (`directory_documents`); any other entry names one file and is given as it
+        is, whether or not the file exists."""
+        found: list[str] = []
+        for entry in (*self.load.get(COMMON_DOCUMENTS, ()), *self.load.get(step, ())):
+            found.extend(directory_documents(root, entry) if entry.endswith("/") else (entry,))
+        return list(dict.fromkeys(found))
 
     def step_models(self, step: str) -> tuple[Model, ...]:
         """The models a step's unattended runs use, in order of preference; refused,
@@ -192,6 +222,30 @@ class Configuration:
     @property
     def shown(self) -> str:
         return CONFIGURATION.as_posix()
+
+
+def directory_documents(root: Path, entry: str) -> list[str]:
+    """The Markdown files beneath the directory `entry` names, recursively, relative to
+    `root`, in sorted path order.
+
+    Refused, naming the entry, when the directory is missing, is a file, cannot be
+    read, or holds no Markdown file: a session given a directory that names nothing
+    would read none of the guidance it was meant to and never know, where a literal
+    entry's missing file is at least named to it."""
+    directory = root / entry
+    if not directory.is_dir():
+        found = "is a file" if directory.exists() else "does not exist"
+        raise ConfigError(f"load names the directory {entry}, which {found}")
+
+    def unreadable(error: OSError) -> None:
+        raise ConfigError(f"load names the directory {entry}, which cannot be read: {error}")
+
+    files = sorted(PurePosixPath((parent / name).relative_to(root).as_posix())
+                   for parent, _, names in directory.walk(on_error=unreadable)
+                   for name in names if name.endswith(".md"))
+    if not files:
+        raise ConfigError(f"load names the directory {entry}, which holds no Markdown file")
+    return [file.as_posix() for file in files]
 
 
 def _commands(where: str, value: Any, available: frozenset[str]) -> tuple[str, ...]:
@@ -225,6 +279,13 @@ def _strings(where: str, value: Any) -> tuple[str, ...]:
 def _string(where: str, value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{where} must be a non-empty string; got {value!r}")
+    return value
+
+
+def _count(where: str, value: Any) -> int:
+    """A whole number, zero or more; TOML's `true` is no number here."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(f"{where} must be a whole number, zero or more; got {value!r}")
     return value
 
 
@@ -373,7 +434,8 @@ def check(text: str, path: Path) -> Configuration:
     repository = tables.get("repository", {})
     hooks_table = tables.get("hooks", {})
     hooks = {name: _commands(f"hooks.{name}", value,
-                             _PRE_PUSH if name == "pre-push" else _EVERYWHERE)
+                             _PRE_PUSH if name == "pre-push"
+                             else _TEST_BEFORE if name == "test-before" else _EVERYWHERE)
              for name, value in hooks_table.items()}
     validation = tables.get("validation", {})
     load = {key: _strings(f"load.{key}", value)
@@ -396,6 +458,8 @@ def check(text: str, path: Path) -> Configuration:
         preflight=(_commands("validation.preflight", validation["preflight"], _EVERYWHERE)
                    if "preflight" in validation else None),
         parts=_parts(validation["parts"]) if "parts" in validation else None,
+        format_retries=(_count("review.format-retries", tables["review"]["format-retries"])
+                        if "format-retries" in tables.get("review", {}) else None),
     )
 
 
@@ -493,10 +557,11 @@ def resolution(configuration: Configuration) -> list[dict[str, Any]]:
         fields.append({"field": name, "status": status,
                        **({"value": value} if value is not None else {}), **more})
 
-    for key, value in (("protected-branches", configuration.protected_branches),
-                       ("inert-paths", configuration.inert_paths)):
-        add(f"repository.{key}", ABSENT if value is None else DECLARED,
-            None if value is None else list(value))
+    branches = configuration.protected_branches
+    add("repository.protected-branches", ABSENT if branches is None else DECLARED,
+        None if branches is None else list(branches))
+    add("repository.inert-paths", DEFAULT if configuration.inert_paths is None else DECLARED,
+        list(configuration.repository_inert_paths()))
     for hook in HOOKS:
         commands = configuration.hook(hook)
         add(f"hooks.{hook}", ABSENT if commands is None else DECLARED,
@@ -518,6 +583,8 @@ def resolution(configuration: Configuration) -> list[dict[str, Any]]:
         add(f"models.{key}", ABSENT if models is None else DECLARED, models)
     add("validation.preflight", ABSENT if configuration.preflight is None else DECLARED,
         None if configuration.preflight is None else list(configuration.preflight))
+    add("review.format-retries", DEFAULT if configuration.format_retries is None else DECLARED,
+        configuration.review_format_retries())
     if not configuration.parts:
         add(PARTS, ABSENT)
     for part in configuration.parts or ():
@@ -593,10 +660,22 @@ def plan(configuration: Configuration, owed: Sequence[tuple[str, str]]) -> list[
     return runs
 
 
-def plan_lines(configuration: Configuration, runs: Sequence[PlannedRun]) -> list[str]:
+def _waiver(waived: Mapping[str, Mapping[str, Any]], part: str) -> str:
+    entry = waived.get(part)
+    return f"waived by the owner at seq {entry['seq']}: {entry['decision']}" if entry else ""
+
+
+def plan_lines(configuration: Configuration, runs: Sequence[PlannedRun],
+               waived: Mapping[str, Mapping[str, Any]] | None = None) -> list[str]:
+    """The plan as lines; a part the owner waived names the decision waiving it,
+    whose condition validation judges before running or skipping it."""
+    waived = waived or {}
     preflight = "; ".join(configuration.preflight) if configuration.preflight else "none"
     lines = [f"{'preflight':<20} {preflight}"]
     for run in runs:
+        if waiver := _waiver(waived, run.part.name):
+            lines.append(f"{run.name:<20} {waiver}")
+            continue
         if run.not_owed:
             lines.append(f"{run.name:<20} not owed")
             continue
@@ -609,10 +688,18 @@ def plan_lines(configuration: Configuration, runs: Sequence[PlannedRun]) -> list
     return lines
 
 
-def plan_json(configuration: Configuration, runs: Sequence[PlannedRun]) -> str:
+def plan_json(configuration: Configuration, runs: Sequence[PlannedRun],
+              waived: Mapping[str, Mapping[str, Any]] | None = None) -> str:
+    waived = waived or {}
+    entries = []
+    for run in runs:
+        entry = run.entry()
+        if (decision := waived.get(run.part.name)) is not None:
+            entry["waived"] = {"seq": decision["seq"], "decision": decision["decision"]}
+        entries.append(entry)
     return json.dumps({"preflight": list(configuration.preflight)
                        if configuration.preflight is not None else None,
-                       "runs": [run.entry() for run in runs]}, ensure_ascii=False)
+                       "runs": entries}, ensure_ascii=False)
 
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
@@ -631,7 +718,11 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
               f"{COMMON_DOCUMENTS}", file=sys.stderr)
         return 2
     try:
-        configuration = load(repository_root() if root is None else root)
+        root = repository_root() if root is None else root
+        configuration = load(root)
+        # A directory entry is resolved here, before anything is printed, so a
+        # refused one prints no partial list.
+        documents = configuration.documents(args.step, root) if args.action == "load" else []
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -640,7 +731,7 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
               + ("passes its check." if configuration.exists
                  else "does not exist; every field is absent."))
     elif args.action == "load":
-        for document in configuration.documents(args.step):
+        for document in documents:
             print(document)
     elif args.json:
         print(json.dumps({"file": configuration.shown, "exists": configuration.exists,

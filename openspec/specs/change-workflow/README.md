@@ -7,8 +7,8 @@ them, and the interfaces an adopting repository may rely on. Its
 [index](index.md) organizes the requirements by id into five parts, and this document
 follows the same parts: the process; implementation and validation; reviews and
 triage; the engine; the public surface. It explains why the workflow is shaped as it
-is. How to run each step is in
-[`docs/agents/change-workflow.md`](../../../docs/agents/change-workflow.md); how this
+is. How the owner operates it is the
+[change workflow handbook](../../../docs/change-workflow-handbook.md); how this
 repository fills the roles the workflow leaves to a repository is in
 [`market-change-workflow`](../market-change-workflow/README.md).
 
@@ -80,8 +80,9 @@ even a rework of the returned round's own sections, which under the returned rou
 would reach the next round unread and unreviewed. A declined return is the owner's
 to settle, since the triage it ended no longer says what follows. A triage with
 nothing to discuss that recommends advancing advances without asking the owner
-anything. An implementation round, and the
-merge before closeout, advance only on a `passed` validation of their final commit,
+anything. An implementation round, the merge
+before closeout, and the merge after the archive advance only on a `passed`
+validation of their final commit,
 and after a closeout review a correction
 outside the repository's inert paths is validated before archive cleanup, so a code
 correction reaches the merge validated unless the owner waives it. The owner's own look at the pull request before merging is outside
@@ -121,14 +122,28 @@ review weighed — naming the criterion and its evidence (CW-q3dm); the merge be
 closeout keeps its own judgement. Criteria with no recommendation would leave the
 owner to spot every waiver. Each recommendation is a ledger line, taken or declined,
 so a guidance review can count them by criterion, the evidence a later change would
-need to take a criterion's waivers by default. The criteria themselves are in the
-workflow's guide, under "Waivers".
+need to take a criterion's waivers by default.
+
+A step's judgement of the exit it takes is followed without the owner's
+confirmation unless the exit needs a waiver. A confirmation of a judgement the owner
+almost always shares is a stop with a foregone answer; a waiver skips evidence, and
+so stays the owner's. The merge after the archive judges whether its resolutions
+need a review on written criteria and takes that exit without asking; the merge
+before closeout still asks the owner to confirm another pre-closeout review, until
+the workflow's use shows whether it should change too.
 
 The archive is the boundary no direction crosses. An archived change's deltas are
 already merged into `openspec/specs/`, so design, planning, and implementation
-refuse it; the closeout review, its triage, and archive cleanup need the archive,
-and archive cleanup would otherwise mark `archived` a change whose deltas were never
-merged.
+refuse it; the closeout review, its triage, archive cleanup, the merge after the
+archive, the merge review, and its triage need the archive, and archive cleanup
+would otherwise mark `archived` a change whose deltas were never merged. No step
+after the archive returns the change to an earlier phase either: once the landing
+branch's changes are interleaved with the archived deltas, the archive's merge of
+them cannot be undone, and archive cleanup's release of dependents would be left
+wrong. Where a merge after the archive cannot resolve a conflict so that both sides
+hold, or the landing branch has invalidated the change's design, the merge asks the
+owner and leaves the merge in progress; the owner resolves it as they direct, lands
+the change and follows up in a new change, or takes it off the workflow.
 
 ### The merge before closeout
 
@@ -164,19 +179,102 @@ which finds the branch merged, or merges what it gained meanwhile.
 Which branch a change lands on is recorded with its clone: the branch the workspace
 had checked out when the orchestrating session made the clone, or the clone's
 `--from` (["A change is worked in its own clone"](#a-change-is-worked-in-its-own-clone)).
-`start merge` adds that branch to the merge's invocation, and the skill merges the
-branch its invocation names and assumes none. The owner names another for one run,
-`FROM=<branch>` through the make fragment; a change worked in place, which has no
-clone and so no recorded branch, is merged only from a branch given, and the merge
+Each finished merge records in its outcome the branch it brought in, as `landing`
+with the remote it fetched from and the commit (["The log, its format, and the
+conversion"](#the-log-its-format-and-the-conversion)). `start merge` adds to the
+merge's invocation the branch it is given, else the branch the change's last
+finished merge recorded, else the clone's, and the skill merges the branch its
+invocation names and assumes none. The owner names another, `FROM=<branch>` through
+the make fragment, and every later merge of the change — a repair, the merge
+repeated after its review, a merge after the archive — brings that branch in again
+without the orchestrating session having to remember it: with the clone's branch
+first, the merge repeated after its review would bring in a branch other than the
+one reviewed whenever the argument was forgotten. A change worked in place, with no
+clone and no merge recorded yet, is merged only from a branch given, and the merge
 refuses without one. No repository default stands in: a default would be right for
-most changes and silently wrong for one branched from elsewhere.
+most changes and silently wrong for one branched from elsewhere. The record takes
+the branch name alone into `start merge`, never the remote: a merge after the
+archive may run in the workspace once the clone is gone, whose remotes are named
+otherwise, and it chooses its remote afresh where it runs and records it.
 
-The merge sits in the implementation phase, since it may change code, and sets
-`ready for closeout` as it advances only when the merged `HEAD` is already
-validated; closeout accepts a row still `in implementation` once the computation
-names it, as it did when a triage advanced before its fix was validated. A merge of
-the branch at any other time stays the owner's intervention, and does not replace this
-one.
+The merge before closeout sits in the implementation phase, since it may change
+code, and sets `ready for closeout` as it advances only when the merged `HEAD` is
+already validated; closeout accepts a row still `in implementation` once the
+computation names it, as it did when a triage advanced before its fix was validated.
+A merge of the branch at any other time before the archive stays the owner's
+intervention, and does not replace this one.
+
+#### The merge after the archive
+
+The landing branch keeps moving after the merge before closeout: while closeout, its
+review, and archive cleanup run, and while the pull request waits. When the
+change's branch then conflicts with it or falls behind it, the change is merged
+again through the merge after the archive, `late-merge`: a node of its own whose run
+is the merge step, with the same skill, mechanics, permissions, and target, as
+`round` runs implementation. A new step would have copied the merge's permissions
+into a second row of the step table, with a target, hook rights, and a model entry of
+its own, and had the owner leave the orchestrating session to run it; a `merge`
+qualified by a kind would have needed a permanent rule that a kindless merge is the
+one before closeout; and one `merge` node with both sets of exits would declare exits
+wrong in every state it can be in. Un-archiving the change into a new round was
+rejected for the reasons the archive boundary gives
+([The owner is interrupted only for
+judgement](#the-owner-is-interrupted-only-for-judgement)), and because the common,
+mostly mechanical merge would go through a dozen steps whose resolution the merge has
+already made.
+
+It is entered only once archive cleanup has run and while the change's index row
+says `archived`: the merge keeps that row, and archive cleanup run again tells itself
+from a first run by it, so a change whose row was pruned has the row restored before
+the owner directs the merge. It resolves as the merge before closeout does, and also
+keeps the change archived. The change's own row stays `archived` and its archived
+directory as its branch has them. `openspec/specs/`, each `index.md`, and the
+permanent documents keep both sides — every requirement saying what each change
+meant, every id unique — since the change's deltas are already merged there and no
+later step reads them. A row the landing branch brought that depends on the change
+is released as archive cleanup releases a dependent, since archive cleanup run again
+releases nothing. The capacity figure kept is the one measured later. The pull
+request's drafts are appended to, never redrafted, since the history copy refuses a
+file that changed other than by growing.
+
+The merge judges whether its resolutions need a review of their own, a review of kind
+`merge`, on criteria its skill writes: a conflict resolved outside the mechanical
+files — the change index, other changes' documents, files the hooks rebuild,
+version-only bumps, and files a validation part's cleanup writes; a reconciliation
+of the change's own code or scenarios; a file outside the mechanical files that both
+sides changed since the merge base, since two changes' edits to one specification can
+merge cleanly into contradiction; and a contract the landing branch changed in
+meaning. Several changes on one goal run in parallel and promote into the same
+specifications, so such a review is often warranted, and a confirmation of it would
+be a foregone stop: the merge names the review or archive cleanup and the
+orchestrating session follows it. Always reviewing would spend a review and a triage
+on a merge whose only conflict was an index row.
+
+The merged `HEAD` is validated before the review or archive cleanup, as before
+closeout, and a failed validation names the merge after the archive again, which
+repairs what it found; the end-to-end pipeline is the only check that finds a stale
+call in a scenario. Only the owner waives that validation, and the waiver is the
+owner's direction to the exit the merge named, so a review the merge chose is not
+skipped with the validation; skipping both is a direction to archive cleanup whose
+reason says so. A direction checks no exit guard, so a waiver always directed to
+archive cleanup would have skipped a chosen review silently. The merge review's
+triage advances to archive cleanup, which runs again on the archived row and ends at
+`done`, or names another merge review; it does not return to the merge. The owner
+reviews the branch before merging the pull request and directs another merge after
+the archive when the landing branch has moved again: a loop ending only when the
+landing branch gained nothing would go round until the branch paused.
+
+Detection runs by itself only where nothing it moves is under the owner's review.
+Archive cleanup fetches the branch the last finished merge recorded, or else the
+clone's, and records what it fetched; its first exit to `done`, before the pull
+request opens, names the merge after the archive when that commit is not in the
+branch, and the orchestrating session runs it without asking. A long closeout is
+when the landing branch gains the other changes on the owner's goal, and the check
+costs one fetch. After the pull request opens, nothing detects that the landing
+branch moved: nothing runs after `done`, a poller or a trigger on pushes would need
+infrastructure the workflow lacks, and a merge started by itself would move the
+branch the owner is reviewing. The owner then starts the merge by telling the
+orchestrating session, which records the direction.
 
 ### Closeout and archival
 
@@ -187,13 +285,39 @@ land rather than inferring them from the delta. The steps after the archive find
 change by name under its dated directory; design, planning, and implementation have
 nothing to do with an archived change and refuse it.
 
-Closeout changes documentation only. The code was last reviewed at pre-closeout and
-the closeout review reads documentation, so a closeout code edit would go unreviewed
-as code; comment hygiene and import placement are therefore done before the
-pre-closeout review and only confirmed at closeout. A code defect a closeout review
-does find stops for the owner, who directs the correction and decides whether it
-needs another reader; reopening the change for a full round is not required for what
-is expected to be rare.
+Closeout changes only the repository's inert paths, changes' records, and the
+archive's own writes — the change's own documents and their move into the archive,
+its row of the change index, and its deltas merged into the specifications
+(CW-pkug). The code was last reviewed at pre-closeout and the closeout review reads
+documentation, so a closeout code edit would go unreviewed as code; comment hygiene
+and import placement are therefore done before the pre-closeout review and only
+confirmed at closeout, and a part that would change any other path, a citation inside
+a skill included, returns the change to implementation. The rule is stated in the
+inert paths, the set archive cleanup exempts from validation, rather than as
+"documentation", which the workflow never defined, so closeout's own commit is never
+one validation would have proved anything about. The archive's own writes are exempt
+whatever the declaration: under an empty one no path is inert, and an archive that
+returned to implementation could never archive. The merge transcribes delta text
+already validated and reviewed with the change's commits; promotion elsewhere follows
+the declaration. A code defect a closeout review does find stops for the owner, who
+directs the correction and decides whether it needs another reader; reopening the
+change for a full round is not required for what is expected to be rare.
+
+What closeout works through is the workflow's guidance
+([`closeout.md`](../../../docs/guidance/workflow/closeout.md)): the workflow's parts in
+order, archival last, with the repository's own parts — the checks and evidence that
+depend on how the repository builds, packages, deploys, or runs its system — at the
+position the list gives them, defined where the repository's root guidance names.
+Every part is the workflow's, since closeout exists only in the workflow; what a part
+confirms may be a rule of any layer, and the command it runs is the repository's, so
+the workflow's list names checks by role and names no repository path. A plan, a
+skill, or a review cites a part by its heading, never its number, so a part added,
+removed, or reordered breaks no citation. Its guidance placement part reads what the
+change added, moved, or rewrote in the guidance against the layer test, adjacency,
+and exception placement ([The repository's guidance is
+layered](#the-repositorys-guidance-is-layered)), after promotion and before the
+citations are checked: the mechanical check catches a link to a higher layer, but not
+a general rule written with one repository's example.
 
 Archive cleanup follows the closeout review's advancing triage as a step of its own,
 with its own entry checks, rather than as the end of triage: it releases the
@@ -457,6 +581,22 @@ format, so an error or a truncated answer never becomes history, while narration
 before the title is left to the transcript; a run that published nothing is a
 failed run however many earlier records exist.
 
+A reviewer that finishes with a draft the format check refuses is sent the problems
+in its own session, on the same model, and its answer is checked again — once,
+unless `review.format-retries` says otherwise. Refusing outright would lose a whole
+review, the costliest run of a round, to a defect of form such as an empty field,
+and the rerun would start from nothing; a send-back costs one turn of a session
+that still holds the review. Only a format refusal goes back: an unavailable reviewer, a
+network failure, or a non-zero exit says nothing a correction could fix. The run's
+line records each send-back's problems and its message says the review was sent
+back, which the owner is told without being asked anything. A refusal that survives
+keeps its draft under `transcripts/`, where no triage reads it, and its line records
+the reviewer's session and the problems, so the next review of the kind continues
+that session with them rather than starting again; a fresh review starts anew. The
+reviewer runs the same check before it answers, `check review <kind> <change>` on
+its draft piped on standard input, since it writes no file; the command and the
+publisher call the one check, so they cannot disagree.
+
 Every finding states its alternatives: each option a reasonable owner might choose,
 with its trade-off, or `none` and why the fix is evident (CW-a2lf). "None" is a
 statement, not an omission, and the publishing check refuses a finding without the
@@ -464,12 +604,62 @@ field, since an absent line cannot tell "none" from "not considered". The field 
 default acceptance's weakest condition — that no alternative exists — a reading
 independent of the triaging agent's, usually by another model, at no cost of a run.
 
+Each review is of a kind — design, implementation, pre-closeout, closeout, or merge
+— and each kind asks its own questions and has its own triage, with the exits that
+kind's place in the graph allows. The review of the merge before closeout is the
+pre-closeout review asking one question more, since its triage's exits — the merge
+again, planning, design — are the right ones there. After the archive they are all
+wrong, so the merge after the archive has a kind of its own, `merge`: it reads each
+resolution against both parents and every commit since the merge's first parent,
+each specification and index the merge touched for what both changes meant with no
+id duplicated or dropped, and the change's code and end-to-end scenarios against what
+the landing branch renamed, removed, moved, or changed in meaning. The closeout
+review with those questions added was rejected: built to read documentation, since
+closeout edits no code, it would gain a duty to read code, its own questions would
+mostly not apply, and its records would mean two things.
+
 `reviews/` is untracked: it is working history, and anything durable in it reaches
 permanent documentation through promotion. It moves with the change into the
 archive; for a change worked in its own clone, archive cleanup copies it into the
 owner's workspace ([History lives in the owner's
 workspace](#history-lives-in-the-owners-workspace)), where it stays until an export
 flow carries it elsewhere.
+
+The publishing check reads the draft as a review of the kind and the change asked
+for, its sections in order, and every finding carrying a lens, a basis, a severity,
+evidence, and its alternatives; the run's line lists each send-back's problems as
+`sent_back`, and a refusal that survives as `refused`. A review pasted from
+elsewhere is saved verbatim as the next record, `NN-<kind>-external.md`, and
+triaged with any other review of its kind, the triage assigning its findings' lens,
+basis, severity, and alternatives. The directory reads as the change's history:
+
+```text
+openspec/changes/<change>/reviews/
+  01-design.md                       a review: summary, assessment, questions, findings
+  01-design.triage.md                each finding's position and the owner's disposition
+  02-implementation.md               an implementation review, run beside 03
+  03-validation.md                   validation of the same commit
+  04-implementation-owner.md         the owner's notes on the round, verbatim
+  02-implementation.triage.md        one triage file beside each record triaged
+  03-validation.triage.md
+  04-implementation-owner.triage.md
+  05-design-external.md              a review pasted from elsewhere
+  06-orchestrator.md                 the orchestrating session's observations of the tooling
+  pull-request.md                    archive cleanup's merge drafts
+  workflow.jsonl                     one line per run, unattended or recorded, and per orchestrator decision
+  transcripts/
+    01-design.log                    the reviewer's whole session
+    07-implement.jsonl               an unattended step's event stream
+    07-implement.progress            one line per tool call, as `make change-watch` shows it
+```
+
+A run whose answer was still not a review after its send-back publishes nothing,
+its draft kept beside its transcript as `transcripts/NN-<kind>.rejected.md`.
+`workflow.jsonl` is written by the command alone, which `log <change>` prints: each
+run's outcome with its session, commit, model, cost, and denials, an interactive one
+marked `interactive`; each `round` line; each `orchestrator` line, a decision naming
+the run it resolves or whose denials it read, and, for the owner's direction, its
+target; and a conversion's `convert` line.
 
 ### A finding has a lens, a basis, and a severity
 
@@ -602,6 +792,22 @@ not the owner takes it, its agent's position naming the recommendation and its
 criterion, a declined one being a correction like any other (CW-n6wy). A step that
 commits nothing leaves the line to the step that next commits: a validation's to the
 triage that reads its record, or archive cleanup for a record no triage reads.
+
+Each line is one JSON object:
+
+```json
+{"review": "03-design", "finding": "F2", "section": null, "lens": "consistency", "basis": "evidence", "severity": "blocking", "agent_position": "agree: <reason>", "owner_disposition": "<what the owner decided>", "summary": "<one line>"}
+```
+
+`review` names the record the finding came from, or `design` for a redirection no
+review raised; `section` is the `tasks.md` section, or `null`. An entry revising an
+earlier one starts its disposition `revises <review> <finding>:`, a revision of a
+revisit included. A standing waiver of validation's parts given as a triage's
+disposition is that triage's line; one given outside a triage, with no step's
+recommendation, is the workflow log's decision alone, where a guidance review finds
+the waivers no step recommended. The owner's waiver of archive cleanup's validation
+of a correction is a line under the closeout review's record, its finding
+`validated`.
 
 ## The engine
 
@@ -747,6 +953,31 @@ make fragment's targets, and the repository's own, are conveniences around the
 command and carry no promise. Which subcommands and outputs another party may rely
 on is set out under [The public surface](#the-public-surface).
 
+```text
+scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--sections …] [--session …] [--arguments …] [--fresh]
+scripts/change-workflow next | record | note | review | find | clone | clone-remove [--base …] | clone where
+scripts/change-workflow resume | stop | log | watch | denials | round-view | round-done | cost | history | push [--remote …]
+scripts/change-workflow run <hook> <change> [--base …] | run validation <change> preflight | run validation <change> <part> run|start|collect [--owed …] | run cleanup <change>
+scripts/change-workflow config [--json] | config load <step>|common | config parts <change> [--json] | openspec <arguments>
+scripts/change-workflow check config | check change | check index | check tasks | check push | check skills | check review | check round-view | check graph
+scripts/change-workflow hook post-compaction | convert | wait
+```
+
+`start` checks the configuration whole and refuses, naming it, a field the step
+needs that is absent, before launching anything (CW-t5hz); it refuses an archived
+change for design, planning, and implementation — the merge takes one after the
+archive — and refuses implementation and the steps after it while a round view is
+open. `find --json` prints the change's `name`, `directory`, `archived`, `records`,
+the record set's `format`, and `base`, the landing branch its clone recorded or
+`null`; the merge, every review but the design's, and the closing checks read
+`base`, an argument overriding it for one run. `clone-remove --base` overrides the
+clone's record of the landing branch too, and is needed where it records none.
+`wait <file> <pattern> [--timeout <seconds>]` prints the file's first line matching
+the pattern as soon as it is there, one written before it began included, and exits
+1 after its bound, nine minutes by default, inside a call's ten-minute limit:
+following a command's output with `tail -f … | grep -m1` hangs when the matching
+line is the command's last, so the step table denies the follow forms.
+
 ### The orchestrator relays and routes
 
 The orchestrating session starts steps, shows each step's message to the owner as
@@ -797,6 +1028,12 @@ delete a published review, or log `stopped` over a step whose outcome, commits
 included, was reached. The harness's own stop of a background command was rejected,
 since a SIGKILL leaves no log line, and delivering words into a running session is
 not something a headless run accepts.
+
+The owner instructs the orchestrating session rather than leaving it to run a
+separate target: a transition the owner starts, such as a merge after the archive,
+is the owner's direction, which the session records on their word, and the session
+then runs whatever the computation names. A step of its own that the owner ran by
+hand would bypass the log, the validation, and the review the session carries.
 
 What only the orchestrating session sees is still reported. Misbehaviour of the
 workflow's tooling that shows across steps — an answer delivered to the wrong
@@ -939,6 +1176,32 @@ steps. How the format is versioned, and what a reader does with a newer one, is 
 of the public surface ([A change's records carry one format
 version](#a-changes-records-carry-one-format-version)).
 
+A merge's finished outcome, and archive cleanup's, records the landing branch the run
+fetched as `landing`: the remote as the run's checkout names it, or `.` for a branch
+the checkout holds itself, the branch, and the commit, recorded whether or not
+anything merged. The branch alone would not say which of two different commits a
+merge brought in, since a clone fetches a branch only the workspace holds from its
+`workspace` remote. The engine checks it in code rather than leaving it to the
+skills. The outcome check refuses a malformed record. The log's writer, which reads
+the log, refuses a finished merge without one or naming a remote the checkout lacks
+or a commit `HEAD` does not contain, and a finished archive cleanup without the
+record whenever a source resolves, or with one other than what it fetched from that
+source: its branch, its remote, and the commit the checkout's ref names as the line
+is written, since an older commit of the right branch is what `HEAD` would contain
+while the branch moved. A merge's question, stop, or return need not carry it: at a
+conflict left for the owner the fetched commit is in `MERGE_HEAD`, not `HEAD`. A
+repair after a failed validation fetches nothing and carries the record of the merge
+it repairs; only a repair, before archive cleanup, of a merge logged before the
+record existed omits it. On archive cleanup's line the writer also records whether the
+run's commit contains the fetched commit, decided in the checkout that fetched it,
+so the guard that reads it needs neither a ref nor the network. A refusal is logged
+as the run stopping, its message kept, since a run must leave a line; the rerun
+fetches again. The engine never fetches itself, which would put network Git in the
+engine: a cleanup that skips its fetch while the ref has not moved since the merge
+still passes, and the skill's text governs that. Reading the record is compatible,
+since a line without it keeps its meaning; writing it is not, since a skill that does
+not record it can no longer finish a merge.
+
 ### Routing is code, with the model as backstop
 
 Where a change stands, and what runs next, is computed by
@@ -988,6 +1251,51 @@ passed validation clears the guard and a failed one names the owner. The target'
 entry guards are checked on validation's exit rather than its entry: a round's
 validation starts beside the review its target triages, before that review is
 published.
+
+The wrapper gives an unattended validation its target: it computes it before the
+session starts, passes it in the prompt, records it on the run's line, and logs a
+finished validation with that target as its exit, whatever exit the session named. A
+session asking the computation itself would meet its own run: once a validation's
+question or stop is logged, the computation reads that run and names the owner,
+which is no exit, and a validation that passed would be logged stopped. So a resume
+takes the target from the line it resumes and never computes it again. An interactive
+validation, with no wrapper, reads the target from the computation as it starts,
+before any line of its own exists.
+
+The graph declares no exit that is wrong in a state its node can be in. Where one
+step runs in two places with different exits, as the merge does before closeout and
+after the archive, the table has a node for each, and the computation tells which a
+run was from the log alone: a `merge` run logged after an archive cleanup run is a
+run of the merge after the archive, which holds because nothing returns an archived
+change to an earlier phase. A finished merge after archive cleanup that records no
+`landing`, with no finished merge before it recording one, routes nothing: it can
+only be a merge run by hand before the merge after the archive was a node, and its
+change stays where archive cleanup left it. A result for the merge after the archive
+names the step to run, `{"step": "merge"}`, with the node in its reason, so the
+orchestrating session's target and the merge skill's own route check need nothing
+added.
+
+For an archived change the computation reads the route rather than answering `done`
+from the row, so a direction or a guard's remedy after archive cleanup is followed:
+`done` is answered while the route ends at archive cleanup's exit to `done`, or the
+change has no log. It answers in an order that keeps `done` cheap and correct. A
+newer log and an undeclared line are refused first. A change with a live clone is
+computed in that clone, where its log is current and the owner's direction is
+written, rather than answered `done` from the workspace's copy. Then `done` is
+answered before any check of the branch checked out, since an archived change
+without a clone has landed and its branch is rarely checked out; only a route with a
+step to run goes on to those checks and to the index row, so a directed merge names
+the owner until the change's branch is checked out, and one for a change with no row
+names the owner as for any change the index does not list.
+
+The guard on archive cleanup's first exit to `done` reads only what the log's writer
+recorded on the run's line, never a ref. A guard reading the fetched ref whenever the
+route is computed would make the same exit name a merge the owner never asked for
+after any later fetch, and would send every change archived before the record
+existed, its landing branch long moved on, to a merge. A later archive cleanup run's
+exit is not guarded, and a cleanup line with no `landing` reads as checked: the same
+check on every exit to `done` would merge again until the landing branch paused,
+and stopping it would need a waiver of a node no direction reaches.
 
 A durable change to the workflow is an OpenSpec change, so the table is code,
 reviewed as code; a data file of nodes and named guards would trade a code edit for
@@ -1046,6 +1354,13 @@ tracked edit the owner commits, or the orchestrating session commits on the owne
 word, or by a grant for one run. An interactive run is unaffected: the owner's own
 settings apply, with prompts.
 
+The rules match a call's whole command, so an unattended step runs one command per
+Bash call: a chained command runs only when every command in it is allowed. Two
+shapes the harness refuses whatever the step's rules allow, each costing a denial on
+the run's line: a `find` over `/` or `/etc`, and a path that climbs with `..` after
+a `cd`. A step names such a path from the repository's root, or reads it with the
+Read tool.
+
 No step may edit the repository's configuration either, `.agents/workflow.toml`:
 `[common]` denies the Edit and Write tools on that one file, beside `.claude/**`, so
 no step changes what its own hooks run. Only the file is denied, since a workflow
@@ -1062,6 +1377,7 @@ the graph, and no repository changes it:
 | `pre-archive` | closeout |
 | validation's preflight and parts | validate |
 | `cleanup`, every part's cleanup as one list | archive cleanup |
+| `test-before`, a test file run against an earlier commit in a throwaway worktree | implement, triage |
 
 `pre-push` and `post-clone` are run by no step, only by the engine's own `push` and
 `clone`. The unattended-run marker the wrapper sets names the run's step, and `run`
@@ -1303,6 +1619,17 @@ wrapper to copy after recording cleanup's outcome would make a generic wrapper l
 one step's special case, and later lines would still need the prefix rule. Reports
 of a cleaned-up change's log and cost read the history wherever it is.
 
+Archive cleanup runs again after a merge after the archive, on a row already
+`archived`. It releases no dependent, leaves the row, and drafts no second pull
+request; it runs the cleanup of every validation part, since the merge's validation
+recreated what the first run removed, commits what that cleanup wrote, pushes,
+copies the history, and appends what its cleanup reported to the pull request's
+drafts. `done` is still reached only by archive cleanup's exit: a merge that cleaned
+up and copied itself would duplicate cleanup's steps and need its hook. Records
+written after the first copy — the merge's notes, its review, the rerun's own —
+reach the workspace by the same synchronization, which is why the drafts are only
+appended to.
+
 A clone is removed only on the owner's command, after the merge: archive cleanup
 does not, since the pull request may need another round. Removal refuses, deleting
 nothing, unless the history is in the workspace with identical contents, the branch
@@ -1487,6 +1814,7 @@ comment as the step table does; its keys are kebab-case, as Git's hook names are
 | `[openspec]` | `command` | the default validation, closeout's archive, `openspec` |
 | `[load]` | `common`, and a key per step | `config load`, every skill, the post-compaction hook |
 | `[models]` | `orchestrator`, and a key per step, each an ordered list of a harness, a model, and an effort | `start orchestrate`, the wrapper, the review |
+| `[review]` | `format-retries`: how many times a draft the format check refuses is sent back to its reviewer, 1 when absent, 0 never | the review |
 | `[validation]` | `preflight`; `parts.<name>` with `run`, or `start` and `collect`, and `owed`, `after`, `evidence`, `cleanup`; at least one part required | `config parts`, `run validation`, `run cleanup`, history |
 
 A field is required or optional. A required field's absence refuses the steps that
@@ -1573,16 +1901,87 @@ where the closing checks cover what it can break. A document a test checks for
 currency, such as the run instructions `e2e-tests/README.md` must name, stays inert:
 a commit to it alone skips `make test`, and the next full run of the suites catches
 what it broke. With none
-declared, no path is inert, and only changes' records are exempt where a requirement
-exempts them.
+declared, the workflow's default applies: `openspec/` and every Markdown file,
+`**/*.md`, whose changes alter nothing validation or a code check would prove but a
+test of a document's currency. A declaration, an empty one included, replaces the
+default; with an empty one no path is inert, and only changes' records and the
+archive's own writes are exempt, where a requirement exempts them (CW-n7ra). A
+repository that declares nothing has its documents exempt, as almost every adopter
+would want; one that wants none exempt says so by declaring an empty list, a visible
+act rather than an omission.
 
 `load.common` lists the documents every step's skill reads as it starts, and
 `load.<step>` a step's additions; `config load <step>` prints the two together, so no
 skill merges them, and `config load common` prints the first alone for a session no
 step runs, the orchestrating session or a guidance review. The post-compaction hook,
-not knowing the session's step, re-reads `load.common`. The entries are paths; a
-single list for every step was rejected, since steps already read different
-documents.
+not knowing the session's step, re-reads `load.common`. A single list for every step
+was rejected, since steps already read different documents.
+
+An entry is a path. One ending in `/` names a directory and stands for every
+Markdown file beneath it, in sorted path order, each printed once, so a guidance file
+added or moved within it is read without editing the configuration. The trailing `/` tells a missing directory from a missing
+file, and a directory entry fails closed: `config load` refuses, naming the entry,
+one that is missing, unreadable, or holds no Markdown file, rather than reading it as
+nothing, and the post-compaction hook then tells the session its documents are
+unknown. A literal entry is not checked for its file, so an adopting repository's
+existing configuration means what it meant, and an absent or empty list still means no
+documents. The expansion selects nothing by tag: listing every file was rejected,
+since a forgotten entry is silently unread, and loading by tag is a loader of its own.
+
+### The repository's guidance is layered
+
+What a repository adopting the workflow tells its agents divides into three layers,
+by what each piece of guidance depends on: **engineering**, which holds in a
+repository using neither the workflow nor OpenSpec; **workflow**, which holds in any
+adopting repository, OpenSpec included, and names nothing of one; and **repository**,
+which names the adopting repository's own packages, services, tools, documents, or
+targets (CW-g7lt). A rule that would hold without the workflow is engineering even
+when written with one repository's example, and is stated with a neutral one, the
+repository's statement being its instance. OpenSpec's documentation model is
+workflow material, since the workflow requires OpenSpec and an adopter takes both. A
+lower layer never links to a higher one (CW-d2rw) — the package direction rule applied
+to documents — so lifting a layer out of a repository is a move rather than a rewrite,
+and where workflow guidance needs something a repository supplies it names it by role.
+The workflow's guidance states the layers for whoever works a change
+([`docs/guidance/workflow/README.md`, "The layers of guidance"](../../../docs/guidance/workflow/README.md#the-layers-of-guidance)).
+Within the workflow, a statement is placed by what it constrains: the
+specification what the engine and skills do, the guidance what a change's work must
+produce, and the handbook what the owner does.
+
+Each guidance file states its layer in YAML frontmatter, its `tags` holding exactly
+one layer tag and otherwise only tags from its layer's vocabulary table or a lower
+layer's, so a file can carry a topic, a tool, and its layer at once, which no
+directory structure allows. A file's tags name what it covers, and content on another
+subject goes in another file; no selection formula is assumed, since how a loader
+selects by tag is undecided ([Current limits](#current-limits)). The vocabularies are
+Markdown tables, each layer's in its own README, its layer tag the first row, and a
+tag no file carries is not kept. Directories carry no meaning (CW-n6dm): they organize
+guidance for people, start flat with each file named by its subject, and may nest once
+a layer grows too large to navigate; the frontmatter alone states the layer, so a
+lift-out selects files by tag and a reorganization changes nothing the workflow does.
+Tags were preferred to the path as the tag, which forces every section into one
+place, and to a marker beside each heading, which needs a section extractor in any
+loader.
+
+Repository guidance sits beside the system it pertains to (CW-p9sa): what pertains to
+one capability is a guidance file in its directory under `openspec/specs/`, read
+wherever its specification and companion are read (CW-r8cg), and what spans several
+systems sits in the repository's cross-system documents. A capability's guidance is
+found by its place — every Markdown file in its directory but its specification, its
+companion, and its index — so an untagged guide is still read and still checked.
+Naming capability files in the configuration's load lists was rejected, since it
+would reload every capability's guidance into every step.
+
+A repository's exception to shared guidance — selecting a case the guidance leaves
+open, or overriding one of its rules — is a row of a table headed "Exceptions to
+shared guidance", beside the component it applies to, or in the root guidance when it
+spans several systems (CW-x4ex). An inline note beside each affected rule cannot
+survive a lift-out and cannot be audited, and one root table for every exception would
+load every capability's exceptions into every step. Narrowing a shared rule is an
+ordinary repository rule, and work not yet meeting a shared rule is deferred work,
+not an exception. Engineering guidance describes what may enter a private repository
+as well as a public one, because the workflow runs in both; a repository's root
+guidance selects its case as an exception row.
 
 ### What an adopting repository provides
 
@@ -1676,7 +2075,13 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   archive, and a step reverting the archive commit is not built, since it raises
   questions of its own — which commit to revert once later commits touched the same
   specifications, what becomes of the closeout review's records. A closeout triage
-  that needs a code correction stops for the owner.
+  that needs a code correction stops for the owner. An archived change's branch
+  merges its landing branch again through the merge after the archive, whose
+  unresolvable conflicts are the owner's.
+- Nothing notices that the landing branch moved while the pull request is open: the
+  owner directs the merge after the archive then. A poller or a trigger on pushes to
+  the landing branch is infrastructure a hosted runner would supply
+  ([`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)).
 - A direction may name a node that makes no sense from where the change stands;
   only its unwaivable entry guards and the owner hold it.
 - `scripts/change-workflow convert` and the computation's detection of a
@@ -1712,9 +2117,14 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   that impossible needs credentials the step does not hold, which
   [`sandbox-unattended-workflow-steps`](../../changes/sandbox-unattended-workflow-steps/proposal.md)
   owns, as it owns checking after each step that the configuration is unchanged.
-- `[load]` lists paths; loading guidance by tag waits on
-  [`layer-engineering-guidance`](../../changes/layer-engineering-guidance/proposal.md)'s
-  vocabulary.
+- `[load]` lists paths and directories, and selects nothing by tag: every step reads
+  every guidance file under a directory entry, and a capability's guidance with its
+  specification. Which tags a session carries, how they select files, and whether the
+  loader is the workflow's or a repository's are undecided, and no change owns them
+  yet; until one does, the skills keep restating the guidance they apply, since only
+  such a loader can promise a harness without a post-compaction hook the rule again.
+  Moving the shared layers out of the repository, and how a permanent document cites
+  guidance held elsewhere, are likewise unowned.
 - Decision destinations and the specification index are this repository's checks,
   not the workflow's defaults; whether they move into the engine is
   [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md)

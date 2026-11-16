@@ -31,9 +31,10 @@ documents, or with `common` those every session reads, and `config parts`
 validation's plan for a change, `run` and `openspec`
 the repository's hooks and its OpenSpec command (`hooks`), `check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
-default checks (`check change`), and the graph diagram's comparison with the graph
-table, `hook post-compaction` the post-compaction hook, and `wait` the bounded wait
-on a background command's output. `check graph` is internal: it maintains the
+default checks (`check change`), a review's format check on standard input (`check
+review`), and the graph diagram's comparison with the graph table, `hook
+post-compaction` the post-compaction hook, and `wait` the bounded wait on a
+background command's output. `check graph` is internal: it maintains the
 engine's own diagram, and no repository or runner relies on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
@@ -64,14 +65,15 @@ from . import clone as clones
 from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
                next_step, push, round_view, skills, tasks, wait)
 from .clone import clone_of
-from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
+from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, Entry, StepError, repository_root
 from .convert import convert_change
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
-from .log import (branch_decisions, direction, history_log_path, last_entries, log_path,
-                  note_orchestrator, note_round, open_log, read_log, record_interactive)
+from .log import (Checkout, branch_decisions, direction, git_checkout, history_log_path,
+                  last_entries, log_path, note_orchestrator, note_round, open_log, read_log,
+                  record_interactive, recorded_landing, waived_parts)
 from .records import git_head
-from .review import review_and_log
+from .review import check_review, review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
 from .watch import denial_report, watch
 from .wrapper import Wrapper
@@ -116,7 +118,8 @@ ARCHIVED_ONLY = _taking(graph.ARCHIVED)
 def interactive_outcome(change: str, step: str, outcome_text: str, session: str | None,
                         environ: Mapping[str, str], root: Path,
                         head: Callable[[Path], str | None] = git_head,
-                        invocations: Callable[[Path], Path | None] = invocations_directory
+                        invocations: Callable[[Path], Path | None] = invocations_directory,
+                        checkout: Callable[[Path, str], Checkout] = git_checkout
                         ) -> dict:
     """Record the outcome of `step`, run interactively on `change`, and return its line.
 
@@ -141,7 +144,8 @@ def interactive_outcome(change: str, step: str, outcome_text: str, session: str 
     directory = invocations(root)
     invoked = kept_invocations(directory, session, change)
     line = record_interactive(log_path(root, change), step, outcome, session=session,
-                              commit=head(root), invoked=invoked)
+                              commit=head(root), invoked=invoked,
+                              checkout=checkout(root, change))
     drop_invocations(directory, session, invoked)
     return line
 
@@ -324,6 +328,10 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--resumes", type=int, default=None,
                           help="the owner's direction to revisit the finished triage run at "
                                "this seq, which `resume` then continues with their words")
+    decision.add_argument("--waives", default=None,
+                          help="the parts of validation the owner waives for later "
+                               "validations, ','-separated, on the condition --decision "
+                               "states")
     next_ = commands.add_parser("next", help="compute the change's next step")
     next_.add_argument("change")
     next_.add_argument("--plain", action="store_true",
@@ -380,7 +388,8 @@ def _parser() -> argparse.ArgumentParser:
     run_ = commands.add_parser(
         "run", help="run one of the repository's hooks for a change, as the engine's hook "
                     "table allows the step")
-    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP))
+    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP,
+                                       hooks.TEST_BEFORE))
     run_.add_argument("change")
     run_.add_argument("part", nargs="?", default=None,
                       help="validation only: `preflight`, or the part to run")
@@ -388,6 +397,15 @@ def _parser() -> argparse.ArgumentParser:
                       help="validation's part only: run, start, or collect")
     run_.add_argument("--owed", default=None,
                       help="an owed part only: the workflow its run is for")
+    run_.add_argument("--test", dest="tests", action="append", default=[],
+                      help="test-before only: a test file, as HEAD holds it, to run against "
+                           "the earlier commit; repeat for more")
+    run_.add_argument("--at", default=None,
+                      help="test-before only: the commit to run against; the current "
+                           "round's base by default")
+    run_.add_argument("--lapsed", default=None,
+                      help="a part the owner waived only: why the waiver's condition no "
+                           "longer holds, so the part runs")
     run_.add_argument("--base", default=None,
                       help="the branch the change lands on, for a command naming {base}; "
                            "the one its clone recorded by default")
@@ -406,6 +424,10 @@ def _parser() -> argparse.ArgumentParser:
     checks.add_parser("skills", help="every agent skill loaded from its one source")
     checks.add_parser("round-view", help="fail while a round view is open")
     checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
+    review_ = checks.add_parser(
+        "review", help="a review on standard input, checked as it is before it is published")
+    review_.add_argument("kind", choices=KINDS)
+    review_.add_argument("change")
     waiting = commands.add_parser(
         "wait", help="block until a file holds a line matching a pattern, within a bound")
     waiting.add_argument("file", type=Path)
@@ -451,15 +473,23 @@ _FROM = re.compile(r"from\s+\S")
 
 def merge_arguments(root: Path, change: str, arguments: str) -> str:
     """The merge's arguments, naming the branch it brings in: the one given, `from
-    <branch>`, or else the branch the change lands on, as its clone recorded it;
-    refused, naming the argument, with neither."""
+    <branch>`; else the branch the change's last finished merge recorded in its
+    `landing`, so a merge given another branch than the clone's is followed by merges
+    of that branch; else the branch the change lands on, as its clone recorded it;
+    refused, naming the argument, with none.
+
+    Only the recorded branch is taken, never its remote: a merge after the archive
+    may run in the workspace once the clone that recorded it is gone, where the
+    remote is named otherwise, and it chooses its remote afresh where it runs."""
     if _FROM.match(arguments):
         return arguments
-    base = find.landing_branch(root, change)
+    landing = recorded_landing(read_log(log_path(root, change)))
+    base = landing["branch"] if landing is not None else find.landing_branch(root, change)
     if base is None:
         raise StepError(f"the merge brings in the branch {change} lands on, and none is "
-                        "recorded, since the change has no clone that recorded one: give it "
-                        "with FROM=<branch>, or --arguments 'from <branch>'")
+                        "recorded, since no finished merge recorded one and the change has no "
+                        "clone that recorded one: give it with FROM=<branch>, or --arguments "
+                        "'from <branch>'")
     return " ".join(part for part in (f"from {base}", arguments) if part)
 
 
@@ -660,9 +690,33 @@ def _config_parts(args: argparse.Namespace, root: Path) -> int:
     except ChangeNotFound as exc:
         raise StepError(str(exc)) from exc
     runs = config.plan(configuration, tasks.owed_lines(directory / next_step.TASKS_FILE))
-    print(config.plan_json(configuration, runs) if args.json
-          else "\n".join(config.plan_lines(configuration, runs)))
+    waived = _waived(root, args.subject)
+    print(config.plan_json(configuration, runs, waived) if args.json
+          else "\n".join(config.plan_lines(configuration, runs, waived)))
     return 0
+
+
+def _round_base(root: Path, change: str) -> str | None:
+    """The commit the change's latest round started from, its round view's base."""
+    path = log_path(root, change)
+    rounds = [e for e in read_log(path) if e.get("outcome") == "round"] if path.exists() else []
+    return rounds[-1].get("commit") if rounds else None
+
+
+def _parts(root: Path, given: str) -> list[str]:
+    """The parts a waiver names, each one the configuration declares."""
+    names = [name.strip() for name in given.split(",") if name.strip()]
+    declared = {part.name for part in config.load(root).parts or ()}
+    if unknown := [name for name in names if name not in declared]:
+        raise StepError(f"the waiver names parts validation does not declare: "
+                        f"{', '.join(unknown)}; declared: {', '.join(sorted(declared))}")
+    return names
+
+
+def _waived(root: Path, change: str) -> dict[str, Entry]:
+    """The parts of validation the owner waived in the change's log."""
+    path = log_path(root, change)
+    return waived_parts(read_log(path)) if path.exists() else {}
 
 
 def _graph(root: Path) -> int:
@@ -683,14 +737,20 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         if args.hook == hooks.VALIDATION:
             if args.part is None or (args.part == hooks.PREFLIGHT) != (args.phase is None):
                 raise _Usage("run validation takes `preflight`, or a part and its phase")
-        elif (args.part, args.phase, args.owed) != (None, None, None):
+        elif (args.part, args.phase, args.owed, args.lapsed) != (None, None, None, None):
             raise _Usage(f"run {args.hook} takes the change alone")
+        if args.hook != hooks.TEST_BEFORE and (args.tests or args.at):
+            raise _Usage("--test and --at belong to run test-before")
         # The branch the change lands on, for a command naming `{base}`: the one
         # given, or the one its clone recorded.
         base = args.base or find.landing_branch(root, args.change)
         return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
                           environ=environ, base=base, part=args.part, phase=args.phase,
-                          owed=args.owed)
+                          owed=args.owed, lapsed=args.lapsed, tests=args.tests,
+                          commit=(args.at or _round_base(root, args.change)
+                                  if args.hook == hooks.TEST_BEFORE else None),
+                          waived=(_waived(root, args.change)
+                                  if args.hook == hooks.VALIDATION else None))
     if args.command == "check" and args.check == "change":
         configuration = config.load(root)
         try:
@@ -698,6 +758,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         except ChangeNotFound as exc:
             raise StepError(str(exc)) from exc
         return 0 if hooks.Hooks(root, configuration, environ).check_change(args.change) else 1
+    if args.command == "check" and args.check == "review":
+        return check_review(sys.stdin.read(), args.kind, args.change)
     if args.command == "wait":
         return _wait(args)
     if (reached := delegated(args)) is not None:
@@ -728,7 +790,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
     path = (history_log_path if args.command == "log" else log_path)(wrapper.root, args.change)
     if args.command == "record":
         line = interactive_outcome(args.change, args.step, args.outcome, args.session,
-                                   environ, wrapper.root, wrapper.head, wrapper.invocations)
+                                   environ, wrapper.root, wrapper.head, wrapper.invocations,
+                                   wrapper.checkout)
         print(json.dumps(line, ensure_ascii=False))
         return 0
     if args.command == "convert":
@@ -783,6 +846,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                                  target=args.target,
                                  branch=args.branch,
                                  resumes=args.resumes,
+                                 waives=(_parts(root, args.waives)
+                                         if args.waives is not None else None),
                                  # A branch decision is about the change whose log
                                  # holds it, which is where steps look.
                                  change=args.decided_change

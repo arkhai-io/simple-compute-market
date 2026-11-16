@@ -15,7 +15,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
+from arkhai_bare_metal import BARE_METAL_OFFERING_MODE, published_listing_resource
 from core_storefront.multi_registry_client import (
     MultiRegistryClient,
     RegistryAuthorityTrust,
@@ -76,19 +76,42 @@ class BareMetalPublicationHooks:
     async def binding_for_listing(self, listing_id: str) -> PublicationBinding | None:
         return await bare_metal_listing_binding(self._db, listing_id)
 
+    async def publication_candidate(
+        self, listing: dict[str, Any]
+    ) -> PublicationCandidate[dict[str, Any]]:
+        return await bare_metal_publication_candidate(self._db, str(listing["listing_id"]))
+
 
 async def bare_metal_publication_candidate(
     sqlite_client: SQLiteClient,
     listing_id: str,
 ) -> PublicationCandidate[dict[str, Any]]:
-    """The persisted listing, as the kit runtime publishes it, with its binding."""
+    """The persisted listing, as the kit runtime publishes it, with its binding.
+
+    Every path that publishes -- first publication, refresh, reopen, and
+    registry repair -- builds its payload here, so each sends the same document.
+    """
     binding = await bare_metal_listing_binding(sqlite_client, listing_id)
     listing = await sqlite_client.load_listing(listing_id=listing_id)
     if binding is None or listing is None:
         raise CapacityBindingError(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
-    return PublicationCandidate(listing_id, binding, listing)
+    resource, pricing = published_listing_resource({
+        name: value for name, value in _listing_resource(listing).items()
+        if name not in ("max_duration_seconds", "available_until_utc")
+    })
+    terms: dict[str, Any] = {"pricing": pricing} if pricing is not None else {}
+    if listing.get("available_until_utc") is not None:
+        terms["available_until_utc"] = listing["available_until_utc"]
+    payload = {
+        **listing,
+        "listing_resource": resource,
+        # Carried opaquely by core publication as top-level terms beside the
+        # common fields, so no registry or core code names a price or a bound.
+        "publication_terms": terms,
+    }
+    return PublicationCandidate(listing_id, binding, payload)
 
 
 def build_publication_runtime(

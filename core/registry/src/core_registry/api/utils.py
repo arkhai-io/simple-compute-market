@@ -234,19 +234,30 @@ def order_to_dict(listing: Listing) -> dict[str, Any]:
 
     publisher = listing.publisher
     owners = active_identities(publisher) if publisher is not None else None
+    document = _as_json_obj(listing.published_document, None)
+    if document is None:
+        document = {
+            "storefront_url": publisher.storefront_url if publisher else None,
+            "listing_resource": _as_json_obj(listing.listing_resource, {}),
+            "accepted_escrows": _as_json_obj(listing.accepted_escrows, []),
+            "settlement_options": _as_json_obj(listing.settlement_options, []),
+            "demands": _as_json_obj(listing.demands, []),
+            "max_duration_seconds": listing.max_duration_seconds,
+            "oracle_address": listing.oracle_address,
+        }
+    document = dict(document)
+    updates = _as_json_obj(listing.publisher_updates, {})
+    if "oracle_address" in updates:
+        document["oracle_address"] = listing.oracle_address
     return {
+        **document,
+        "publisher_publication": _as_json_obj(listing.publisher_publication, None),
+        "publisher_updates": updates,
         "listing_id": listing.listing_id,
         "publisher_id": listing.publisher_id,
         "publisher_principals": (
             owners.model_dump(mode="json") if owners is not None else None
         ),
-        "storefront_url": publisher.storefront_url if publisher else None,
-        "listing_resource": _as_json_obj(listing.listing_resource, {}),
-        "accepted_escrows": _as_json_obj(listing.accepted_escrows, []),
-        "settlement_options": _as_json_obj(listing.settlement_options, []),
-        "demands": _as_json_obj(listing.demands, []),
-        "max_duration_seconds": listing.max_duration_seconds,
-        "oracle_address": listing.oracle_address,
         "status": listing.status.value,
         "created_at": listing.created_at.isoformat(),
         "updated_at": listing.updated_at.isoformat(),

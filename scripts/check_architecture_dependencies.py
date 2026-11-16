@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail if a package imports an internal distribution it does not declare.
 
-Rules (docs/development/ARCHITECTURE.md, "Package and dependency layers"):
+Rules (docs/guidance/repository/package-layers.md, "Layers" and "Where the current tree diverges"):
 
 - ``undeclared_import``: an internal distribution the source imports and the
   ``pyproject.toml`` does not declare. Fails: the environment that resolves it

@@ -11,7 +11,13 @@ from market_contact_exchange import (
     resolve_seller_contact,
     validate_contact_origins,
 )
-from market_core.schemas import SettlementOption
+from market_core.schemas import (
+    AgreedPrice,
+    Agreement,
+    PriceBasis,
+    SettlementOption,
+    derive_settlement_option_id,
+)
 from market_settlement_runtime import (
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
@@ -91,6 +97,43 @@ async def test_option_builder_produces_one_canonical_rateless_option() -> None:
     assert option.settlement_params["channel"] == "telegram"
     assert option.settlement_params["claimant_principal"] == _CLAIMANT
     assert "@capacity_broker" not in str(built)
+
+
+def _introduction(**changes: Any) -> SettlementOption:
+    """A rateless introduction option, with ``changes`` applied under its own ID."""
+    fields: dict[str, Any] = {
+        "settlement": {
+            "schema": "contact-exchange.v1", "profile": "default", "channel": "telegram",
+            "terms": "Net-30.", "claimant_principal": _CLAIMANT,
+        },
+        **changes,
+    }
+    return SettlementOption(option_id=derive_settlement_option_id(**fields), **fields)
+
+
+def test_an_introduction_projects_as_a_total_with_no_periodic_obligation() -> None:
+    project = create_contact_exchange_registration().project_billing
+    assert project is not None
+    assert project(_introduction()) == PriceBasis(unit="total")
+    assert _registry().agreed_price(Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer={"scheme": "ed25519", "identifier": "buyer"}, seller=_CLAIMANT,
+        settlement=_introduction(), amount=0, duration_seconds=0,
+        start_utc="2026-01-01T00:00:00Z", accepted_at="2026-01-01T00:00:00Z",
+    )) == AgreedPrice(unit="total", amount=0)
+
+
+@pytest.mark.parametrize("changes", [
+    {"price": {"asset": "USD/2", "rates": [{"field": "amount", "per": "hour", "value": "1"}]}},
+    {"price": {"asset": "USD/2", "rates": []}},
+    {"settlement": {"schema": "contact-exchange.v1", "profile": "default", "period": "PT1M"}},
+    {"settlement": {"schema": "fixture.other.v1"}},
+], ids=["rate", "asset", "parameters", "schema"])
+def test_a_priced_or_foreign_option_has_no_introduction_projection(changes: dict[str, Any]) -> None:
+    project = create_contact_exchange_registration().project_billing
+    assert project is not None
+    with pytest.raises(ValueError, match="contact billing requires"):
+        project(_introduction(**changes))
 
 
 async def test_option_builder_rejects_scalar_rate_clauses() -> None:

@@ -58,7 +58,9 @@ the session, and every turn ends with an outcome matching
   the harness reports it as don't ask mode — may be done instead by a tool this
   step's rules allow for the same work, such as the Edit tool for a shell write or
   Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+  Never ask about a denial as a question. One refused call is not a reason to
+  stop when the step's next commands are allowed: carry on with them, and name
+  the denial in your message.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
@@ -73,7 +75,9 @@ the session, and every turn ends with an outcome matching
   answered, take only the action the answer names, and rerun the part. When the
   record is written, end with `finished`, `next` the target the computation gave
   this validation (step 1), whatever the record's result: the computation checks
-  that target's guards again from the record. In a round's join the target is the
+  that target's guards again from the record. When your prompt gave the target,
+  the wrapper sets the logged outcome's `next` to it whatever you name, but state
+  it all the same. In a round's join the target is the
   round's triage, which triages the record's failures with the round; as a guard's
   remedy, or after the owner's direction, a passed validation leads to its target
   and a failed or inconclusive one to the owner — but a failed validation of the
@@ -108,11 +112,12 @@ names it again, saying to resume the session or record its outcome.
 
 ## 1. Check that this commit may be validated
 
-`scripts/change-workflow start validate` refuses while a round view is open in this
-checkout (`make round-view` of a change worked in the owner's workspace): the
-branch then points at the round's base, not its commit. If you were started some
-other way, `scripts/change-workflow check round-view` says the same; stop and ask
-the owner to run `make round-done`.
+A round view open in this checkout (`make round-view` of a change worked in the
+owner's workspace) points the branch at the round's base, not its commit. An
+unattended run has already been started by the wrapper, which ran `start validate`
+and its round-view check before your session began: never run `start validate`
+yourself. A session started some other way runs `scripts/change-workflow check
+round-view`; when it fails, stop and ask the owner to run `make round-done`.
 A view the owner opens in their workspace for a change worked in its own clone
 moves nothing here, and validation runs beside it.
 
@@ -136,17 +141,21 @@ moves nothing here, and validation runs beside it.
 - **Commit.** Record `git rev-parse HEAD` and the branch. Every part below describes
   that commit; if `HEAD` moves while you work, stop: the evidence no longer belongs
   to one commit.
-- **Target.** Run `scripts/change-workflow next <change>` and record the
-  `target` its result carries: the round's triage, `{"step": "triage", "kind":
-  "implementation"}`, when it names `validate` or `validate-and-review` in a
-  round's join; the exit whose guard this validation remedies, such as `{"step":
-  "closeout"}`, when it names `validate`, or the owner after a failed or
-  inconclusive validation of it; or the target the owner's direction to validation
-  names. It is this run's exit, under orchestration and interactively alike, read
-  now, before the run waits on anything. When the result carries no `target` — a
-  validation started by hand outside the route — record that, and name the round's
-  triage: in a round's join that is the target the computation gives, and anywhere
-  else the computation brings it to the owner as a target it did not give.
+- **Target.** The target is this run's exit: the round's triage, `{"step":
+  "triage", "kind": "implementation"}`, when the computation names `validate` or
+  `validate-and-review` in a round's join; the exit whose guard this validation
+  remedies, such as `{"step": "closeout"}`, when it names `validate`, or the owner
+  after a failed or inconclusive validation of it; or the target the owner's
+  direction to validation names. Unattended, the wrapper computed it before your
+  session started and gives it in your prompt, labelled `Target`, as JSON, and
+  again on a resume: record it, and never run `scripts/change-workflow next` for
+  it, since once your own run is logged the computation reads that run and names
+  the owner. Interactively, with no wrapper, run `scripts/change-workflow next
+  <change>` now, before the run waits on anything, and record the `target` its
+  result carries. When neither gives a target — a validation started by hand
+  outside the route — record that, and name the round's triage: in a round's join
+  that is the target the computation gives, and anywhere else the computation
+  brings it to the owner as a target it did not give.
 - **Plan.** `scripts/change-workflow config parts <change>` prints validation's
   plan, which the repository's configuration declares and the engine reads: the
   preflight, then each run of a part in declaration order, with its shape — `run`,
@@ -162,11 +171,13 @@ moves nothing here, and validation runs beside it.
   and the served list together to find which the charts serve now — reaches a
   part's command through the environment; never pass one yourself.
 - **Waivers.** Any part may be waived, and only by the owner. A waiver for later
-  validations is the owner's decision in the change's workflow log — a line
-  `"by": "owner"` in `workflow.jsonl` beside the change's records, which Grep finds
-  — naming the parts and the condition they are waived on, such as "nothing the
-  change touches affects the services the end-to-end tests validate"; an
-  instruction in the invocation is not a waiver. For each part such a decision
+  validations is the owner's decision in the change's workflow log, naming the
+  parts it waives (`waives`) and the condition they are waived on, such as "nothing
+  the change touches affects the services the end-to-end tests validate"; an
+  instruction in the invocation is not a waiver. The plan marks each waived part
+  with the decision's `seq` and words, so read them there. An older decision
+  recorded before waivers named their parts is free text in `workflow.jsonl`:
+  read the log's owner decisions for one too. For each part such a decision
   waives, find the last validation record of the change whose `Parts:` line ran
   that part, and its `Commit:`. The waiver lapses, and the part runs, when the
   commits since then include a merge (`git log --merges <that commit>..HEAD`),
@@ -176,7 +187,8 @@ moves nothing here, and validation runs beside it.
   is `waived`: it is not run, and the record names the decision's `seq`, its
   condition, and what you checked. A lapsed waiver is written in the part's section
   too, naming the decision's `seq` and why it lapsed — the merge, or how the
-  condition broke. A waived part is an omission of evidence, neither passed,
+  condition broke — and the part is run with `--lapsed '<why>'`: the engine refuses
+  to run or start a part the log waives without it. A waived part is an omission of evidence, neither passed,
   failed, nor inconclusive, and the result is judged on the parts that ran. When
   every part is waived there is nothing to validate: write no record, and tell the
   owner that waiving validation entirely is their direction past the guard it
@@ -441,7 +453,7 @@ the change, and triage cannot fix it. Settle it now:
    its deletion (`volumes gone`) to delete, the daemon to restart. When it is a
    known environmental failure, already diagnosed in an earlier validation record
    of this change, recommend beside the remedy that the owner may waive the part
-   instead, naming that record, as `docs/agents/change-workflow.md`'s "Waivers" gives the criterion;
+   instead, naming that record, as `change-workflow`'s CW-q3dm gives the criterion;
    with no criterion holding, recommend none. Only the owner waives: a part they
    waive is `waived`, an omission of evidence counted in no result, while one they
    decline to remedy is `inconclusive`.

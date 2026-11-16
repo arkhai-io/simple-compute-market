@@ -10,7 +10,7 @@ protected-branches = ["main", "dev"]
 # these paths or a change's records needs no new validation. Engine, `run
 # pre-commit`: a commit changing only these runs only `pre-commit`. An entry with a
 # glob character is a pattern over the whole path; `**` spans directories.
-inert-paths = ["openspec/", "docs/", "**/README.md"]
+inert-paths = ["openspec/", "docs/", "**/README.md", "AGENTS.md"]
 
 [hooks]
 # Engine, `run pre-commit` and `run after-functional-change`, for change-implement,
@@ -32,6 +32,10 @@ pre-push = "make pre-push REMOTE={remote}"
 # Engine, `clone`: as a clone is made, in the background; implementation and
 # validation wait for it.
 post-clone = "make init"
+# Engine, `run test-before`, for change-implement and change-triage: one test file,
+# as HEAD holds it, run in a detached worktree of an earlier commit, to show a test
+# fails without the change. The scripts' suites run there with no built environment.
+test-before = "uv run --no-project --with pytest --with pyyaml pytest -q {test}"
 
 [defaults]
 # Engine, `run pre-commit` and `check change`: the workflow's default checks this
@@ -45,9 +49,13 @@ command = "scripts/openspec"
 
 [load]
 # Engine, `config load <step>`: the documents every step's skill reads as it
-# starts; the engine's post-compaction hook re-reads them.
-common = ["AGENTS.md", "docs/development/ARCHITECTURE.md", "docs/development/TESTING.md",
-          "docs/development/DEPLOYMENT_AND_CONFIG.md", "openspec/README.md"]
+# starts; the engine's post-compaction hook re-reads them. The root guidance, then
+# `docs/guidance/`, a directory entry standing for every Markdown file beneath it,
+# so a guidance file added or moved there is read without editing this list, then
+# the repository's cross-system documents and its OpenSpec guide, each a file.
+common = ["AGENTS.md", "docs/guidance/", "docs/development/ARCHITECTURE.md",
+          "docs/development/TESTING.md", "docs/development/DEPLOYMENT_AND_CONFIG.md",
+          "openspec/README.md"]
 # Engine, `config load design`: change-design's own addition.
 design = ["docs/development/ROADMAP.md"]
 
@@ -67,6 +75,11 @@ validate        = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "
 merge           = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
 closeout        = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
 archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+
+[review]
+# Engine, the review: how many times a reviewer's draft the format check refuses is
+# sent back to the reviewer's session for correction before the run stops; 0 never.
+format-retries = 1
 
 [validation]
 # Engine, `run validation <change> preflight`, for change-validate: before any part,

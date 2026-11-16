@@ -83,8 +83,9 @@ template:
 ## Deployment mounts both at /etc/arkhai/ with independent checksums,
 ## and no sensitive keys leak across the boundary. Stable across
 ## cosmetic chart edits (no byte-level snapshots).
-# Repackage every local subchart first: a stale charts/*.tgz would otherwise be
-# rendered in place of the chart directory beside it.
+# init first resolves every dependency Chart.yaml declares against its subchart.
+# The lock and archives it writes are in .helmignore, so the render, like every
+# package, reads the subcharts' directories and never a stale archive.
 test-render: init
 	@./scripts/test-render.sh
 
@@ -99,8 +100,8 @@ endif
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
 ## Deploy keeping the release's volumes when it is uninstalled. For a local
-## development cluster use deploy-local instead (docs/development/DEPLOYMENT_AND_CONFIG.md,
-## "Stateful service persistence").
+## development cluster use deploy-local instead (docs/guidance/repository/local-clusters.md,
+## "A local cluster is deployed with deploy-local").
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \

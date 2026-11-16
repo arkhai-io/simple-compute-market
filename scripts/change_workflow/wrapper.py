@@ -18,30 +18,44 @@ appended to the workflow log, with what the run invoked as `invoked`: what each 
 its attempts' sessions invoked for the change through `run`, and through the
 guarded push, that no line has taken yet. A run that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself, and so is
-a triage whose outcome does not name the records it triaged. A step
+a triage whose outcome does not name the records it triaged, and a finished merge
+or archive cleanup whose landing record the log's writer refuses. A step
 denied a tool ends `stopped` only when it cannot go on without it; one that went
 on is logged with the outcome it ended with, and the orchestrating session reads
 the recorded denials before the change moves on. A run whose session took further
 turns after an outcome is logged with its last, the earlier ones kept beside it as
 `earlier`.
 
+A validation's exit is the target the next-step computation gives it, which the
+computation does not give once the validation's own run is logged: it reads that
+run, and names the owner. So an
+unattended validation's target is computed before its session starts, given to the
+session in its prompt, and recorded as `target` on its line; a resume of that run
+reads the target from the line it resumes, never computing it again. A finished
+validation is logged with that target as its exit, whatever `next` its session
+gave, so a missing or mistaken one never stops a validation that finished. A
+validation started with no target to give — outside the route, or resuming a line
+that records none — is logged with the exit its session named.
+
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
-CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, and CW-q5fy.
+CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, CW-q5fy, and CW-5ldi.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from . import config
+from . import config, next_step
 from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_now
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
 from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
                       unreachable)
-from .log import last_run, log_path, read_log, record_outcome, revisit_direction, revisit_refusal
+from .log import (Checkout, git_checkout, landing_problems, last_run, log_path, read_log,
+                  record_outcome, revisit_direction, revisit_refusal)
 from .outcome import load_schema, outcome_problems, triage_outcome_problems
 from .records import git_head, next_transcript
 from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
@@ -51,12 +65,35 @@ from .stream import Stream
 from .subagents import subagent_denials
 
 
+VALIDATE = "validate"
+# The computation's steps that name validation with its target.
+_VALIDATING = ("validate", "validate-and-review")
+
+
 def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
     return f"/{rules.skill} {change}" + (f" {arguments}" if arguments else "")
 
 
+def target_note(target: Entry) -> str:
+    """How a validation's session is told its target: labelled, as JSON."""
+    return (f"Target (the wrapper computed it; this validation's exit): "
+            f"{json.dumps(target, ensure_ascii=False)}")
+
+
+def validation_target(root: Path, change: str,
+                      compute: Callable[[Path, str], Entry] = next_step.compute) -> Entry | None:
+    """The target the next-step computation gives validation of `change` now, or None
+    when it names no validation with one, such as a validation started by hand
+    outside the route."""
+    result = compute(root, change)
+    target = result.get("target")
+    if result.get("step") in _VALIDATING and isinstance(target, dict) and target:
+        return dict(target)
+    return None
+
+
 def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, Any],
-                denials: Sequence[dict[str, Any]] = ()) -> Entry:
+                denials: Sequence[dict[str, Any]] = (), target: Entry | None = None) -> Entry:
     """The outcome to log for a run that exited with `status` and ended with `result`,
     having been denied `denials`.
 
@@ -67,12 +104,16 @@ def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, An
     ended, its denials there for the orchestrating session to read. The outcome
     is checked with those denials in it, since the wrapper sets them whatever the
     step gave, and an outcome the schema rejects keeps the step's own message
-    ahead of the reason, so what it said to the owner is not lost.
+    ahead of the reason, so what it said to the owner is not lost. A finished
+    outcome of a run given its `target` takes that target as its exit before it is
+    checked, whatever exit the step named.
     """
     denials = list(denials)
     outcome = (result or {}).get("structured_output")
     if isinstance(outcome, dict):
         outcome = {**outcome, "denials": denials}
+        if target is not None and outcome.get("outcome") == "finished":
+            outcome["next"] = dict(target)
     if status != 0:
         detail = (result or {}).get("result")
         reason = f"exit {status}" + (f": {detail}" if isinstance(detail, str) and detail else "")
@@ -105,6 +146,20 @@ def triage_outcome(outcome: Entry, reviews: Path) -> Entry:
     if not (problems := triage_outcome_problems(outcome, reviews)):
         return outcome
     reason = "the triage's outcome does not name what it triaged: " + "; ".join(problems)
+    return {"outcome": "stopped", "message": f"{outcome['message']}\n\n{reason}",
+            "reason": reason, "denials": outcome.get("denials", [])}
+
+
+def landed_outcome(outcome: Entry, step: str, log: Path, commit: str | None,
+                   checkout: Checkout) -> Entry:
+    """A merge's or archive cleanup's outcome as it is logged: as the step gave it
+    when the log's writer accepts its landing record, or when it ends without an
+    exit; otherwise `stopped`, naming why, the step's own message kept ahead of the
+    reason. A refusal would otherwise leave the run without a line."""
+    if not (problems := landing_problems(read_log(log), step, outcome, commit, checkout,
+                                         log.parent)):
+        return outcome
+    reason = f"the {step} outcome's landing is refused: " + "; ".join(problems)
     return {"outcome": "stopped", "message": f"{outcome['message']}\n\n{reason}",
             "reason": reason, "denials": outcome.get("denials", [])}
 
@@ -162,6 +217,11 @@ class Wrapper:
     # Where a session's invocations through `run` and the guarded push wait for its
     # line.
     invocations: Callable[[Path], Path | None] = invocations_directory
+    # What the log's writer reads of the checkout a run ran in, for a change, to check
+    # a merge's or archive cleanup's landing record.
+    checkout: Callable[[Path, str], Checkout] = git_checkout
+    # The target the next-step computation gives a validation as it starts.
+    target: Callable[[Path, str], Entry | None] = validation_target
 
     def run(self, step: str, change: str, *, arguments: str = "",
             sections: Sequence[int | str] | None = None, fresh: bool = False,
@@ -209,8 +269,13 @@ class Wrapper:
             extra["sections"] = list(sections)
         if granted:
             extra["granted"] = list(granted)
+        target = self.target(self.root, change) if step == VALIDATE else None
+        if target is not None:
+            extra["target"] = target
+            arguments = " ".join(part for part in (arguments, target_note(target)) if part)
         return self._turn(step, rules, change, log, step_prompt(rules, change, arguments),
-                          models, session=session, granted=granted, extra=extra)
+                          models, session=session, granted=granted, extra=extra,
+                          target=target)
 
     def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
         """Resume the step session of the run at `seq` with the owner's answer.
@@ -272,14 +337,23 @@ class Wrapper:
             extra["resumes"] = seq
         if granted:
             extra["granted"] = list(granted)
+        # The resumed run's own line names it: the computation, reading that run,
+        # would name the owner instead.
+        target = previous.get("target") if step == VALIDATE else None
+        target = dict(target) if isinstance(target, dict) and target else None
         # Framed, so an answer starting with `-` is never read as a flag.
-        return self._turn(step, steps[step], change, log, f"The owner's answer: {answer}",
+        prompt = f"The owner's answer: {answer}"
+        if target is not None:
+            extra["target"] = target
+            prompt += f"\n\n{target_note(target)}"
+        return self._turn(step, steps[step], change, log, prompt,
                           _session_models(previous, config.load(self.root).step_models(step)),
-                          session=previous["session"], granted=granted, extra=extra)
+                          session=previous["session"], granted=granted, extra=extra,
+                          target=target)
 
     def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
               models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
-              extra: Entry | None = None) -> Entry:
+              extra: Entry | None = None, target: Entry | None = None) -> Entry:
         """Run one turn and log it, recorded as in progress in the checkout until its
         line is written, however it ends.
 
@@ -289,11 +363,13 @@ class Wrapper:
         with termination_deferred(), recorded_run(self.runs(self.root), step, change,
                                                   clock=self.clock):
             return self._logged_turn(step, rules, change, log, prompt, models,
-                                     session=session, granted=granted, extra=extra)
+                                     session=session, granted=granted, extra=extra,
+                                     target=target)
 
     def _logged_turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
                      models: Sequence[Model], *, session: str | None,
-                     granted: Sequence[str] = (), extra: Entry | None = None) -> Entry:
+                     granted: Sequence[str] = (), extra: Entry | None = None,
+                     target: Entry | None = None) -> Entry:
         """Run one turn on the first of `models` that is available, and log it.
 
         A model whose harness is missing, not signed in, or at its usage limit
@@ -316,7 +392,7 @@ class Wrapper:
         attempts: list[Stream] = []
         outcome, status, failure, model, stream, passed_over, logged = (
             self._attempt_models(step, rules, prompt, schema, models, session, granted,
-                                 transcript, progress, attempts))
+                                 transcript, progress, attempts, target))
         extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
             extra["unavailable"] = passed_over
@@ -341,9 +417,11 @@ class Wrapper:
             pass
         if step == "triage":
             outcome = triage_outcome(outcome, log.parent)
-        line = record_outcome(log, step, outcome, session=ran,
-                              commit=self.head(self.root), extra=extra, schema=schema,
-                              clock=self.clock)
+        commit = self.head(self.root)
+        checkout = self.checkout(self.root, change)
+        outcome = landed_outcome(outcome, step, log, commit, checkout)
+        line = record_outcome(log, step, outcome, session=ran, commit=commit, extra=extra,
+                              schema=schema, checkout=checkout, clock=self.clock)
         # Forgotten only once the line holds them; a resumed turn's line takes only
         # what the session invoked since.
         for s in sessions:
@@ -355,14 +433,14 @@ class Wrapper:
     def _attempt_models(self, step: str, rules: StepRules, prompt: str, schema: dict[str, Any],
                         models: Sequence[Model], session: str | None,
                         granted: Sequence[str], transcript: Path, progress: Path,
-                        attempts: list[Stream],
+                        attempts: list[Stream], target: Entry | None = None,
                         ) -> tuple[Entry, int | None, BaseException | None, Model, Stream,
                                    list[Entry], dict[str, Any] | None]:
         """Run the turn of `step` on the first available of `models`, marked as that
         step's unattended run: its outcome, exit status, any failure, the model last
         tried, its stream, the models passed over, and the result the outcome was
         logged from, when the step gave one. Every attempt's stream is appended to
-        `attempts`."""
+        `attempts`. A finished outcome takes `target`, when given, as its exit."""
         failure: BaseException | None = None
         passed_over: list[Entry] = []
         outcome: Entry = {}
@@ -408,7 +486,7 @@ class Wrapper:
                           f"{NETWORK_RETRIES + 1} attempts: {reached[1]}")
             else:
                 outcome = run_outcome(status, stream.result, schema,
-                                      self._denials(stream, session))
+                                      self._denials(stream, session), target)
                 # A run that exited non-zero is logged from its status, so even its
                 # last turn's outcome is kept as earlier.
                 logged = stream.result if status == 0 else None

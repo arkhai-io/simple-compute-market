@@ -21,9 +21,10 @@ from change_workflow.log import log_path, note_orchestrator, read_log, record_ou
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
 from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
 from change_workflow.steps import Model, load_steps
-from change_workflow.wrapper import Wrapper
-from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LIMIT, MODELS, NETWORK, OPUS,
-                                      SESSION, VALID, FakeClaude, clock, configured,
+from change_workflow.wrapper import Wrapper, validation_target
+from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT, MODELS,
+                                      NETWORK, OPUS, SESSION, VALID, FakeClaude, clock,
+                                      configured,
                                       event_lines, failed_run, make_wrapper, not_installed,
                                       option, option_rules, without_session_id)
 
@@ -1024,9 +1025,113 @@ def test_a_triage_that_asks_names_nothing_it_triaged(tmp_path: Path) -> None:
     assert _triage(tmp_path, VALID["question"])["outcome"] == "question"
 
 
+# A finished merge records the landing branch it fetched, which the log's writer checks.
+
+def test_a_merge_whose_landing_the_writer_refuses_is_logged_stopped(tmp_path: Path) -> None:
+    outcome = {"outcome": "finished", "message": "Merged.", "next": {"step": "closeout"}}
+
+    line = make_wrapper(tmp_path, FakeClaude((event_lines(outcome), 0))).run("merge", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert "records no landing" in line["reason"]
+    assert line["message"] == f"Merged.\n\n{line['reason']}"
+
+
+def test_a_merge_recording_its_landing_is_logged_as_it_ended(tmp_path: Path) -> None:
+    outcome = {"outcome": "finished", "message": "Merged.", "next": {"step": "closeout"},
+               "landing": LANDED}
+
+    line = make_wrapper(tmp_path, FakeClaude((event_lines(outcome), 0))).run("merge", CHANGE)
+
+    assert (line["outcome"], line["landing"]) == ("finished", LANDED)
+
+
 def test_a_checkout_without_git_has_no_runs_directory(tmp_path: Path) -> None:
     # The pytest temporary directory is not inside a Git checkout.
     assert runs_directory(tmp_path) is None
     with recorded_run(None, "design", CHANGE):
         assert live_runs(None) == []
     assert list(tmp_path.iterdir()) == []
+
+
+# A validation is given its target, and finishes at it.
+
+ROUND_TRIAGE = {"step": "triage", "kind": "implementation"}
+CLOSEOUT = {"step": "closeout"}
+
+
+def _validating(tmp_path: Path, claude: FakeClaude, target: dict | None) -> Wrapper:
+    return replace(make_wrapper(tmp_path, claude), target=lambda *_: target)
+
+
+def test_a_validation_is_given_its_target_and_finishes_at_it(tmp_path: Path) -> None:
+    # The session names the owner, as the computation answered once its own run
+    # was logged; the wrapper's target is the exit, so the schema never sees it.
+    said = {**VALID["finished"], "next": {"step": "owner"}}
+    claude = FakeClaude((event_lines(said), 0))
+
+    line = _validating(tmp_path, claude, CLOSEOUT).run("validate", CHANGE)
+
+    assert claude.commands[0][2] == (
+        f'/change-validate {CHANGE} Target (the wrapper computed it; this validation\'s exit): '
+        '{"step": "closeout"}')
+    assert (line["outcome"], line["next"], line["target"]) == ("finished", CLOSEOUT, CLOSEOUT)
+
+
+def test_a_finished_validation_naming_no_exit_finishes_at_its_target(tmp_path: Path) -> None:
+    said = {key: value for key, value in VALID["finished"].items() if key != "next"}
+    claude = FakeClaude((event_lines(said), 0))
+
+    line = _validating(tmp_path, claude, ROUND_TRIAGE).run("validate", CHANGE)
+
+    assert (line["outcome"], line["next"]) == ("finished", ROUND_TRIAGE)
+
+
+def test_a_validation_with_no_target_keeps_its_own_exit(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    line = _validating(tmp_path, claude, None).run("validate", CHANGE)
+
+    assert claude.commands[0][2] == f"/change-validate {CHANGE}"
+    assert line["next"] == VALID["finished"]["next"] and "target" not in line
+
+
+def test_a_validations_question_keeps_its_target_for_the_resume(tmp_path: Path) -> None:
+    said = {**VALID["finished"], "next": {"step": "owner"}}
+    claude = FakeClaude((event_lines(VALID["question"], session="v-1"), 0),
+                        (event_lines(said, session="v-1"), 0))
+    computed: list[dict | None] = [CLOSEOUT]
+    # The computation names the owner once the question is logged; the resume
+    # never asks it again.
+    wrapper = replace(make_wrapper(tmp_path, claude), target=lambda *_: computed.pop(0))
+    asked = wrapper.run("validate", CHANGE)
+    note_orchestrator(log_path(tmp_path, CHANGE), "asked the owner", "question")
+
+    line = wrapper.resume(CHANGE, asked["seq"], "Rerun the part.")
+
+    assert (asked["outcome"], asked["target"]) == ("question", CLOSEOUT)
+    assert claude.commands[1][2] == (
+        "The owner's answer: Rerun the part.\n\n"
+        "Target (the wrapper computed it; this validation's exit): {\"step\": \"closeout\"}")
+    assert (line["outcome"], line["next"], line["target"]) == ("finished", CLOSEOUT, CLOSEOUT)
+
+
+def test_another_steps_run_is_given_no_target(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    line = _validating(tmp_path, claude, CLOSEOUT).run("implement", CHANGE)
+
+    assert claude.commands[0][2] == f"/change-implement {CHANGE}"
+    assert line["next"] == VALID["finished"]["next"] and "target" not in line
+
+
+@pytest.mark.parametrize("result,target", [
+    ({"step": "validate", "target": CLOSEOUT}, CLOSEOUT),
+    ({"step": "validate-and-review", "kind": "implementation", "target": ROUND_TRIAGE},
+     ROUND_TRIAGE),
+    ({"step": "owner", "reason": "the validate step stopped"}, None),
+    ({"step": "review", "kind": "implementation"}, None),
+])
+def test_the_target_is_the_computations_when_it_names_validation(
+        tmp_path: Path, result: dict, target: dict | None) -> None:
+    assert validation_target(tmp_path, CHANGE, compute=lambda *_: result) == target

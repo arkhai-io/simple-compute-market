@@ -252,7 +252,7 @@ async def _accepted_deal(db: SQLiteClient, negotiation_id: str, listing_id: str)
     )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
-        agreed_price=_AMOUNT,
+        negotiated_scalar=_AMOUNT,
         agreed_duration_seconds=3600,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         settlement_data={

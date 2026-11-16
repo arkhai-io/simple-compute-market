@@ -29,6 +29,6 @@ dev = [
 
 # The package allowlist: every distribution this package may declare or import
 # beyond the standard library, because its lightness is part of its contract.
-# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+# make check-architecture holds it; see docs/guidance/repository/package-layers.md, "Kind".
 [tool.arkhai.architecture]
 allowed-dependencies = ["arkhai-kit-capability-shape"]

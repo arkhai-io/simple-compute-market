@@ -1,0 +1,44 @@
+# Public deterministic development profile; never use these authorities on a public network.
+# Approval/command fixtures only. This is not a storefront publication configuration.
+profile = "lane-only"
+double_selector = "in-process"
+setup_opt_out = true
+
+[payments]
+livemode = false
+service_url = "http://127.0.0.1:9"
+fee_bps = 250
+
+[authority]
+interface = "arkhai.mediation.v1"
+origin = "https://mediation.example"
+account = "33333333-3333-4333-8333-333333333333"
+record_key = "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+[authority.params]
+procedure = "optimistic"
+
+# The lane-only declaration the options are checked against. The shipped presets
+# return the incomplete period on the payee's stop and at the term end; the
+# payer's stop always charges its started period, so both are listed.
+[servicing]
+treatments = ["charged", "returned"]
+
+[recurring]
+period = "PT60S"
+reserve_ahead_seconds = 120
+
+# The shipped presets, each approved by a default buyer.
+[[products]]
+name = "spot"
+payee_notice_seconds = 30
+
+[[products]]
+name = "on-demand"
+
+# A separate observation: a spot option charging the started period on the
+# payee's stop and at the term end, which a default buyer refuses and a buyer
+# approves only by waiving each charged term.
+[charged]
+name = "spot-charged"
+payee_notice_seconds = 30
+waivers = ["charged_term_end", "charged_preemption"]

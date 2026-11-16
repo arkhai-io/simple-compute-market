@@ -12,6 +12,8 @@ from typing import Any
 import httpx
 from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValueType
 from market_core.schemas import (
+    AgreedPrice,
+    PriceBasis,
     RateValue,
     SettlementOption,
     SettlementPrice,
@@ -35,13 +37,20 @@ from market_settlement_runtime import (
 )
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
+
 from market_arkhai_payments.client import PaymentsClient
-from market_arkhai_payments.mandates import PaymentsOptionParams
+from market_arkhai_payments.mandates import (
+    SUPPORTED_PARTIAL_PERIODS, PaymentsOptionParams, duration_seconds,
+)
 from market_arkhai_payments.models import AccountId, Asset
 from market_arkhai_payments.receipts import ReceiptIdentity
 
 ARKHAI_PAYMENTS_MECHANISM = "arkhai.payments.v1"
 ARKHAI_PAYMENTS_CONFIG_KEY = "arkhai_payments"
+#: Seconds a verified snapshot's ``observedAt`` may lag the storefront's clock
+#: when it decides a rate delivery phase, unless the seller configures another.
+DEFAULT_SNAPSHOT_FRESHNESS_SECONDS = 5
 
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _CAPABILITIES = ("agreement.v1", "receipt.v1")
@@ -85,6 +94,11 @@ class ArkhaiPaymentsConfig(BaseModel):
     # The service mode whose receipts this role accepts. Live payments services
     # sign livemode=true; test and development services sign false.
     livemode: bool = False
+    # Seller role: how far, in seconds, a verified snapshot's observedAt may lag
+    # the storefront's clock and still decide a rate delivery phase. The two
+    # clocks are independent claims, so this is a liveness allowance for skew
+    # and latency, not an ordering; bounds are still checked at the storefront's now.
+    snapshot_freshness_seconds: int = Field(default=DEFAULT_SNAPSHOT_FRESHNESS_SECONDS, gt=0, le=300)
     # Buyer role only: deposit the exact Agreement with the approval. Off by
     # default because the Agreement discloses both parties and provision terms
     # to the payments service, and a deposit cannot be withdrawn.
@@ -397,6 +411,25 @@ def _option_params(option: Any) -> PaymentsOptionParams | None:
         return None
 
 
+def clause_rate_minor_units(rate: str, per: str, asset: str) -> int:
+    """A publication clause's advertised rate in the asset's minor units.
+
+    An hourly rate is stated in major units and scaled by the asset's precision,
+    refusing a rate finer than that precision rather than rounding it. Any other
+    unit's rate is already integer minor units, which the precision must not
+    scale a second time; domains own that unit vocabulary.
+    """
+    if per == "hour":
+        precision = int(asset.rsplit("/", 1)[1]) if "/" in asset else 0
+        scaled = Decimal(rate) * (Decimal(10) ** precision)
+        if scaled != scaled.to_integral_value():
+            raise ValueError(f"payment rate has more than {precision} decimal places for {asset}")
+        return int(scaled)
+    if not rate.isdecimal():
+        raise ValueError("payment unit rate must be integer base units")
+    return int(rate)
+
+
 def arkhai_payments_option_builder(
     section: BaseModel,
     readiness: MechanismReadiness,
@@ -416,6 +449,8 @@ def arkhai_payments_option_builder(
     if clause.mechanism != ARKHAI_PAYMENTS_MECHANISM:
         raise ValueError("publication clause does not select Arkhai payments")
     params = ArkhaiPaymentsPublicationInput.model_validate(clause.mechanism_input)
+    if params.period is not None or params.setup_amount is not None:
+        raise ValueError("recurring payment publication requires the injected preset helper")
     if params.asset != clause.asset:
         raise ValueError("payment option asset must match the publication clause")
 
@@ -427,46 +462,42 @@ def arkhai_payments_option_builder(
     if entry is None:
         raise ValueError("no offered dispute authority advertises arkhai.payments.v1")
     AccountId.model_validate(entry.account)
+    # A compute option's deadline is the pool's effective one when the
+    # composition supplies it, so the published term never disagrees with what
+    # the site enforces; otherwise the clause's own, which the seller's servicing
+    # journal files non-delivery at. A compute option with neither publishes
+    # without the term, and the caller reports that a default buyer refuses it.
+    pool_deadline = resources.get("delivery_deadline_seconds") if resources.get("compute") else None
+    deadline = pool_deadline if pool_deadline is not None else params.delivery_deadline_seconds
     lifecycle = LifecycleTerms.model_validate({
         "adjudication": Adjudication(
             version=1, dispute=entry.authority,
             dispute_window_seconds=params.dispute_window_seconds,
             case_hold_max_seconds=params.case_hold_max_seconds,
         ),
-        **({"delivery_deadline_seconds": params.delivery_deadline_seconds}
-           if params.delivery_deadline_seconds is not None else {}),
+        **({"delivery_deadline_seconds": deadline} if deadline is not None else {}),
     })
     validate_terms(encode_terms(lifecycle), TermContext(
         mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
         dispute_interfaces=frozenset(resources.get("dispute_interfaces", ())),
         authority=entry.requirements, compute=bool(resources.get("compute", False)),
     ))
-    if resources.get("compute") and lifecycle.delivery_deadline_seconds is None:
-        raise ValueError("compute option requires delivery_deadline_seconds")
 
     rates: list[RateValue] = []
     if clause.rate is not None:
-        if clause.per == "hour":
-            precision = (
-                int(params.asset.rsplit("/", 1)[1]) if "/" in params.asset else 0
-            )
-            scaled = Decimal(clause.rate) * (Decimal(10) ** precision)
-            if scaled != scaled.to_integral_value():
-                raise ValueError(
-                    f"payment rate has more than {precision} decimal places for {params.asset}"
-                )
-            value = int(scaled)
-        else:
-            # Unit prices are already integer base units; asset precision
-            # must not scale them a second time. Domains own the unit vocabulary.
-            if clause.per is None or not clause.rate.isdigit():
-                raise ValueError("payment unit rate must be integer base units")
-            value = int(clause.rate)
-        rates.append(RateValue(field="amount", per=clause.per, value=value))
+        if clause.per is None:
+            raise ValueError("payment unit rate must be integer base units")
+        rates.append(RateValue(
+            field="amount", per=clause.per,
+            value=clause_rate_minor_units(clause.rate, clause.per, params.asset),
+        ))
 
-    option_params = params.model_dump(mode="json", exclude={
+    # A once option names approval expiry `window`, which every released buyer
+    # reads, whichever name the seller's clause used.
+    option_params = {**params.model_dump(mode="json", exclude_none=True, exclude={
         "asset", "dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds",
-    })
+        "window", "approval_window",
+    }), "window": params.approval_term}
     price = SettlementPrice(asset=params.asset, rates=rates)
     settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM, **option_params}
     option = SettlementOption(
@@ -489,12 +520,14 @@ def validate_payment_lifecycle(
 ) -> LifecycleTerms:
     """Admit only an exact accepted authority with compatible advertised minima."""
     terms = LifecycleTerms.model_validate(settlement_option_lifecycle(option))
+    params = _option_params(option)
     entry = next((item for item in authorities if item.authority == terms.adjudication.dispute), None)
     validate_terms(encode_terms(terms), TermContext(
         mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
         dispute_interfaces=dispute_interfaces, authority=entry.requirements if entry else None,
         buyer=True, accepted_authorities=tuple(item.authority for item in authorities),
-        compute=compute,
+        compute=compute, has_stoppable_part=params is not None and params.period is not None,
+        supported_partial_periods=SUPPORTED_PARTIAL_PERIODS,
     ))
     AccountId.model_validate(terms.adjudication.dispute.account)
     return terms
@@ -522,9 +555,26 @@ def _payee_projection(option: Any) -> str | None:
     return params.payee_account if params is not None else None
 
 
-def _window_projection(option: Any) -> str | None:
+def _approval_window_projection(option: Any) -> str | None:
     params = _option_params(option)
-    return params.window if params is not None else None
+    return params.approval_term if params is not None else None
+
+
+def _window_projection(option: Any) -> str | None:
+    # The released field answers for once options, whose writers name the term
+    # `window`; a rate option is discovered by `approval_window`.
+    params = _option_params(option)
+    return params.approval_term if params is not None and params.period is None else None
+
+
+def _period_projection(option: Any) -> str | None:
+    params = _option_params(option)
+    return params.period if params is not None else None
+
+
+def _billing_projection(option: Any) -> str | None:
+    params = _option_params(option)
+    return ("per_period" if params.period is not None else "total") if params is not None else None
 
 
 def _deposit_projection(option: Any) -> bool | None:
@@ -543,9 +593,53 @@ def validate_arkhai_payments_publication_input(
     return ArkhaiPaymentsPublicationInput.model_validate(value)
 
 
+def payments_billing_basis(option: SettlementOption) -> PriceBasis:
+    """Interpret the accepted option's unit without consulting a current listing."""
+    if option.settlement_schema != ARKHAI_PAYMENTS_MECHANISM:
+        raise ValueError("billing projection requires an Arkhai payments option")
+    params = PaymentsOptionParams.model_validate(option.settlement_params)
+    return (PriceBasis(unit="per_period", period=params.period,
+                       period_seconds=duration_seconds(params.period))
+            if params.period is not None else PriceBasis(unit="total"))
+
+
+def payments_payment_presentation(
+    option: SettlementOption, duration_seconds: int | None, quote: AgreedPrice | None,
+) -> PaymentPresentation:
+    """Present setup and the initial whole-period reserve independently of usage."""
+    basis = payments_billing_basis(option)
+    params = PaymentsOptionParams.model_validate(option.settlement_params)
+    selected = quote or amount_rate_quote(option, duration_seconds, basis)
+    reserve = 0
+    if basis.unit == "per_period":
+        assert basis.period_seconds is not None and params.reserve_ahead_seconds is not None
+        reserve = selected.amount * ((params.reserve_ahead_seconds + basis.period_seconds - 1) // basis.period_seconds)
+    return PaymentPresentation(
+        quote=selected, setup_once=int(params.setup_amount or 0), initial_reserve=reserve,
+    )
+
+
 def create_arkhai_payments_registration() -> MechanismRegistration:
     """Register public option construction without escrow servicing hooks."""
     fields = (
+        SettlementClauseField(
+            descriptor=FieldDescriptor(
+                name="arkhai_payments.period", value_type=QueryValueType.STRING,
+                operators=_CLAUSE_OPERATORS, description="fixed billing period; absent for once-only options",
+            ), roles=frozenset({"buyer", "seller"}), projector=_period_projection,
+        ),
+        SettlementClauseField(
+            descriptor=FieldDescriptor(
+                name="arkhai_payments.billing_kind", value_type=QueryValueType.STRING,
+                operators=_CLAUSE_OPERATORS, description="total or per_period; setup beside rate remains per_period",
+            ), roles=frozenset({"buyer", "seller"}), projector=_billing_projection,
+        ),
+        SettlementClauseField(
+            descriptor=FieldDescriptor(
+                name="arkhai_payments.approval_window", value_type=QueryValueType.STRING,
+                operators=_CLAUSE_OPERATORS, description="approval expiry, independent of adjudication holds",
+            ), roles=frozenset({"buyer", "seller"}), projector=_approval_window_projection,
+        ),
         SettlementClauseField(
             descriptor=FieldDescriptor(
                 name="arkhai_payments.payee_account",
@@ -561,7 +655,7 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
                 name="arkhai_payments.window",
                 value_type=QueryValueType.STRING,
                 operators=_CLAUSE_OPERATORS,
-                description="the payment mandate's authorization window",
+                description="approval expiry of a once-only option; absent for rate options",
             ),
             roles=frozenset({"buyer", "seller"}),
             projector=_window_projection,
@@ -590,6 +684,8 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
         publication_input_model=ArkhaiPaymentsPublicationInput,
         publication_input_validator=validate_arkhai_payments_publication_input,
         negotiates_scalar_amount=True,
+        project_billing=payments_billing_basis,
+        present_payment=payments_payment_presentation,
     )
 
 

@@ -35,7 +35,7 @@ exists.
 
 Decided with the maintainer. Tests named integration build the application the
 storefront serves, run its lifespan, use a real database, and drive it with the
-canonical typed client, as `docs/development/TESTING.md` defines integration.
+canonical typed client, as `docs/guidance/repository/test-placement.md` defines integration.
 
 ## Open questions
 

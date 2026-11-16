@@ -7,7 +7,6 @@ import hashlib
 import json
 import logging
 import sqlite3
-import time
 
 from arkhai_compute.end_classification import (
     payment_actor,
@@ -48,7 +47,7 @@ class BareMetalLifecycle:
     def __init__(self, runtime):
         self.runtime = runtime
         self.path = runtime.db.db_path
-        self.clock = lambda: int(time.time())
+        self.clock = runtime.lifecycle_clock
         self.evidence = SQLiteEvidenceStore(self.path)
         self.locks: dict[str, asyncio.Lock] = {}
         self.clients = {}
@@ -412,6 +411,11 @@ class BareMetalLifecycle:
                 ),
             )
 
+    def committed(self, negotiation_id):
+        """Whether the deal's commitment is verified, so its payment authority can be read."""
+        with transaction(self.path) as conn:
+            return EndSession(conn).read(negotiation_id).committed_at is not None
+
     def reconcile_local(self, negotiation_id):
         now = self.clock()
         with transaction(self.path) as conn:
@@ -421,7 +425,12 @@ class BareMetalLifecycle:
                 return False
             # Admission establishes a missed delivery deadline before a later
             # terms expiry can incorrectly turn non-delivery into a lawful end.
-            session.admit(negotiation_id, record.phase, record.revision, now=now)
+            # While it holds that deadline for a payment observation, the terms
+            # expiry waits too: at a deadline capped at the term end, it would
+            # otherwise be selected in the deadline's place.
+            admission = session.admit(negotiation_id, record.phase, record.revision, now=now)
+            if admission.status == "awaiting_observation":
+                return True
             if now >= record.term_end and not any(
                 request.source_ref == "term-end" for request in session.requests(negotiation_id)
             ):
@@ -502,6 +511,16 @@ class BareMetalLifecycle:
             except Exception:
                 logger.exception("bare-metal respondent recovery failed")
         for deal in deals:
+            # The payment authority is read before delivery is driven or a missed
+            # deadline admitted, so a buyer stop it recorded while the storefront
+            # was down is the deal's end rather than seller non-delivery.
+            # Admission waits for that read itself, so a failed one delays the
+            # deadline to a later cycle.
+            try:
+                if await asyncio.to_thread(self.committed, deal.negotiation_id):
+                    await self.seller.read(deal.negotiation_id)
+            except Exception:
+                logger.exception("bare-metal authority read failed for %s", deal.negotiation_id)
             try:
                 await self.recover_delivery(deal)
             except Exception:
@@ -515,7 +534,6 @@ class BareMetalLifecycle:
             try:
                 await self.end.drive_physical(deal.negotiation_id)
                 if await asyncio.to_thread(self.reconcile_local, deal.negotiation_id):
-                    await self.seller.read(deal.negotiation_id)
                     await in_transaction(self.path, lambda conn: self.resolve_site_corrections(
                         EndSession(conn), deal.negotiation_id, now=self.clock(),
                     ))

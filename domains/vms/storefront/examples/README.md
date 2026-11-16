@@ -58,7 +58,7 @@ API key value in public TOML. Choose dispute authorities separately through root
 recommendations explicitly. The accepted option carries the selected authority
 in `lifecycle.adjudication.dispute`, and the retired payments `dispute_authority`
 key is rejected. See
-[dispute authority preferences](../../../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
+[dispute authority preferences](../../../../openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences).
 
 The VM buyer additionally supplies its Arkhai account, separate from its
 marketplace signing identity:

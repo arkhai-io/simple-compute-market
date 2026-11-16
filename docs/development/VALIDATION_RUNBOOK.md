@@ -211,6 +211,14 @@ make test-render
 cd ..
 ```
 
+Helm's official binaries are served from `get.helm.sh`. An environment that cannot
+reach it can use a redistribution such as the npm package `helm-binary-linux`, which
+ships one binary with no install scripts. Such a copy is unverified and may be an
+older release: inspect the package before running it, and keep it out of the
+repository. The supported release is the one CI pins
+([`chart-render-tests.md`, "The supported Helm"](../guidance/repository/chart-render-tests.md#the-supported-helm));
+the render log records whichever version actually ran.
+
 Policy training/RL dependencies are not part of the standard local validation.
 The old `domains/vms/tests` integration suite was removed in the latest pull;
 future training or RL validation should be documented separately when runnable
@@ -1062,9 +1070,9 @@ and the log records:
 
 A second run against the same stack passes too: it reconciles the host's
 registration and adopts, paused, the listing the first run left, rather than
-creating another. A listing on the scenario's resource that it cannot adopt —
-several, a closed one, or one of another shape, as after the target's capacity
-changes — fails the run naming them; rerun with the target they were made for,
+creating another. Listings on the scenario's resource that it cannot adopt —
+several open ones, only closed ones, one of unknown status, or an open one of
+another shape, as after the target's capacity changes — fail the run naming them; rerun with the target they were made for,
 or against a fresh stack.
 
 The lane keeps the first guest's SSH heartbeat process open while a second guest
@@ -1498,7 +1506,7 @@ claims are sender-controlled; do not treat them as authenticated identities.
 
 ## 29. Qualify an ordinary Arkhai purchase
 
-Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence.
+Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Do not import a payment-specific full-deal driver merely to obtain operator visibility. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence, and correlate there the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations; leave credentials, private service records, and raw deployment data out of any public summary. What the evidence must rest on is [`qualification-evidence.md`](../guidance/repository/qualification-evidence.md).
 
 Before rollout, check the rebuilt consumer against both the currently deployed payment authority responses and the selected publication. If one check is reused for both, establish that the contracts are identical; if they differ, record a compatible rollout order before making a change. Separately verify retained historical signed bytes. Do not deploy or downgrade the authority to match the consumer.
 
@@ -1534,7 +1542,7 @@ market --config <buyer.toml> bare-metal access --run-id <run-id> --config <buyer
 Check the delivered host key, tenant identity and privilege, wrong-key refusal, and the workload on the paid guest. After the ordinary lease expires, independently observe successful teardown, absence of the guest/access, and restored capacity. A bare-metal buyer can request the ordinary teardown/recovery path with:
 
 ```bash
-market --config <buyer.toml> bare-metal teardown --run-id <run-id> --config <buyer.toml>
+market --config <buyer.toml> bare-metal end --run-id <run-id> --config <buyer.toml>
 ```
 
 Do not equate an accepted receipt with successful delivery or a payment hold with a refund. Keep raw authority responses and deployment data restricted; publish sanitized findings and explicit unrun items. A supplemental network-policy result is admissible only from an actual operator-only CPU guest on the same paid deployment, with the pinned guest base, actual default bridge and virtio NIC, and loaded policy structure bound to that deployment. A namespace-only probe is not a substitute. That guest proves only finite policy selectors it exercises and none of the paid tenant's identity, payment, grant, GPU, delivery, or lifecycle facts. Reusing this method does not claim that an older named marker ran.

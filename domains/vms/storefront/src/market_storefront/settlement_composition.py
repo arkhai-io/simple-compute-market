@@ -16,6 +16,12 @@ from typing import Any
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
+from market_settlement_runtime.rate_servicing import RateServicing
+from market_arkhai_payments.presets import payments_rate_wiring
+from market_settlement_runtime.horizon import RateTermProjections
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS, ClausePublication, RatePresetHelper,
+)
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
@@ -35,7 +41,7 @@ from market_arkhai_payments import (
     PaymentSellerStage,
     servicing_stage,
 )
-from market_core import MarketDomainContract
+from market_core import MarketDomainContract, SettlementStageTable
 from market_core.schemas import (
     EscrowProposal,
 )
@@ -56,6 +62,7 @@ from market_settlement_runtime import (
 )
 
 from market_storefront.deal_lifecycle import VmDealLifecycle
+from market_storefront.services.vm_job_spec_service import settlement_vm_order
 from market_storefront.delivery_lifecycle import request_delivery_end, VmPhysicalEnd
 from market_deal_servicing.end import EndService
 from market_storefront.payment_settlement import VmPaymentsCoordinator
@@ -98,9 +105,29 @@ class VmSettlementComposition:
     lifecycle: VmDealLifecycle | None = None
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
+    # `build_vm_settlement_composition` builds `arkhai_payments_stage` with this
+    # same declaration, so materialization admits exactly what publication and
+    # acceptance admit; a caller supplying its own stage owns that agreement.
+    rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
+    # ``None`` installs the payments kit's helper and projection; an explicit
+    # mapping, empty included, replaces them.
+    rate_preset_helpers: Mapping[str, RatePresetHelper] | None = field(default=None, repr=False)
+    rate_term_projections: RateTermProjections | None = field(default=None, repr=False)
+    delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
+        default=lambda _site, _pool: None, repr=False,
+    )
+    default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
+
+    def __post_init__(self) -> None:
+        helpers, projections = payments_rate_wiring(self.disputes.for_publication)
+        if self.rate_preset_helpers is None:
+            object.__setattr__(self, "rate_preset_helpers", helpers)
+        if self.rate_term_projections is None:
+            object.__setattr__(self, "rate_term_projections", projections)
+
     @property
-    def seller_stages(self):
-        return self.domain.settlement.seller_stages
+    def seller_stages(self) -> SettlementStageTable[Any]:
+        return _seller_stages(self.domain)
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         statuses = await self.configuration_registry.ordered_readiness(
@@ -152,11 +179,8 @@ class VmSettlementComposition:
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
-        merged_resources = {
-            **self.mechanism_resources, **resources,
-            "dispute_authorities": self.disputes.for_publication(),
-            "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
-        }
+        diagnose = resources.get("publication_diagnostic", lambda _entry: None)
+        merged_resources = {**self.mechanism_resources, **resources}
         compiled = (
             [
                 compile_settlement_publication_clause(
@@ -197,18 +221,22 @@ class VmSettlementComposition:
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
         statuses = {status.mechanism: status for status in readiness}
-        work = (
-            [
-                (
-                    statuses.get(clause.mechanism),
-                    {**merged_resources, "publication_clause": clause},
-                )
-                for clause in compiled
-            ]
+        work: list[tuple[MechanismReadiness | None, SettlementPublicationClause | None]] = (
+            [(statuses.get(clause.mechanism), clause) for clause in compiled]
             if compiled is not None
-            else [(status, merged_resources) for status in readiness]
+            else [(status, None) for status in readiness]
         )
-        for status, option_resources in work:
+        step = ClausePublication(
+            registry=self.configuration_registry,
+            config=self.settlement_config,
+            servicing=self.rate_servicing,
+            helpers=self.rate_preset_helpers or {},
+            authorities=self.disputes.for_publication(),
+            dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+            compute=True,
+            default_penalty_periods=self.default_penalty_periods,
+        )
+        for status, clause in work:
             if status is None:
                 raise RuntimeError(
                     "publication clause mechanism has no readiness status"
@@ -226,22 +254,18 @@ class VmSettlementComposition:
                     ",".join(blocker.code for blocker in status.blockers),
                 )
                 continue
-            envelope = self.configuration_registry.build_option(
-                status,
-                self.settlement_config,
-                role="seller",
-                resources=option_resources,
+            artifacts = step.publish(
+                status, clause,
+                resources=merged_resources,
+                delivery_deadline=lambda: self.delivery_deadline_for_pool(
+                    str(resources.get("origin", "")), resources.get("pool_id"),
+                ),
+                max_duration_seconds=resources.get("max_duration_seconds"),
+                available_until_utc=resources.get("available_until_utc"),
+                diagnose=diagnose,
             )
-            if not isinstance(envelope, Mapping):
-                raise RuntimeError(
-                    f"settlement option builder {status.mechanism} returned no envelope"
-                )
-            accepted_escrows.extend(
-                dict(item) for item in envelope.get("accepted_escrows", ())
-            )
-            settlement_options.extend(
-                dict(item) for item in envelope.get("settlement_options", ())
-            )
+            accepted_escrows.extend(artifacts.accepted_escrows)
+            settlement_options.extend(artifacts.settlement_options)
         # Nothing published is returned as such, with the readiness that
         # explains it: whether that refuses a listing, and how, is the caller's.
         return accepted_escrows, settlement_options, readiness
@@ -279,8 +303,8 @@ async def prepare_vm_settlement(
             f"Negotiation {negotiation_id} is not terminal-success "
             f"(terminal_state={thread.get('terminal_state')!r})"
         )
-    if thread.get("agreed_price") is None:
-        raise ValueError(f"Negotiation {negotiation_id} has no agreed_price committed")
+    if thread.get("negotiated_scalar") is None:
+        raise ValueError(f"Negotiation {negotiation_id} has no negotiated_scalar committed")
 
     listing_id = thread.get("our_listing_id")
     order = (
@@ -298,6 +322,7 @@ async def prepare_vm_settlement(
     if not isinstance(raw, bytes):
         raise ValueError("accepted Agreement bytes are unavailable")
     agreement = json.loads(raw)
+    order = settlement_vm_order(thread, dict(order), agreement["provision_terms"])
     stage = resolve_proposal_stage(
         domain.settlement.seller_stages, proposal_raw, agreement=agreement,
     )
@@ -477,7 +502,10 @@ async def fulfill_vm_settlement(
         negotiation_id=evidence.negotiation_id
     )
     agreement = json.loads(thread["agreement_bytes"])
-    stage = domain.settlement.seller_stages[settlement_option_schema(agreement["settlement"])]
+    mechanism = settlement_option_schema(agreement["settlement"])
+    if mechanism is None:
+        raise ValueError("accepted VM Agreement has no settlement mechanism")
+    stage = _seller_stages(domain)[mechanism]
     lifecycle = await fulfill_domain(
         domain,
         StorefrontFulfillmentContext(
@@ -718,8 +746,14 @@ def require_coherent_release_model(
     )
 
 
+def _seller_stages(domain: MarketDomainContract) -> SettlementStageTable[Any]:
+    if domain.settlement is None or domain.settlement.seller_stages is None:
+        raise ValueError("VM settlement requires a domain seller-stage table")
+    return domain.settlement.seller_stages
+
+
 def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
-    stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
+    stage = _seller_stages(domain).get(ALKAHEST_MECHANISM_ID)
     return frozenset(getattr(stage, "release_models", ()) or ())
 
 
@@ -889,7 +923,7 @@ def build_vm_settlement_composition(
     payments_config = settlement_config.mechanism_config("arkhai_payments")
     # Accepted payment deals are serviced whether or not new payment options
     # are published, so the stage follows the servicing fields, not `enabled`.
-    payments_stage = servicing_stage(payments_config)
+    payments_stage = servicing_stage(payments_config, rate_servicing=settlement_config.rate_servicing)
     composition = VmSettlementComposition(
         domain=domain,
         repository=repository,
@@ -903,6 +937,8 @@ def build_vm_settlement_composition(
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
         disputes=disputes,
+        rate_servicing=settlement_config.rate_servicing,
+        default_penalty_periods=storefront_config.default_premature_stop_penalty_periods(),
         arkhai_payments_stage=payments_stage,
         payments_coordinator=VmPaymentsCoordinator(
             domain=domain, db=sqlite_client, stage=payments_stage

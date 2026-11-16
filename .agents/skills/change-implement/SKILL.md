@@ -219,7 +219,8 @@ Read in full, even if you believe you know it:
 - the triage of the latest implementation review in `reviews/`, if any: accepted
   findings may have become tasks in this section;
 - the permanent spec and architecture companion of every capability the section
-  touches;
+  touches, and every other Markdown file in its directory but its `index.md`: the
+  capability's own guidance;
 - the code the section changes, and the tests it extends.
 
 If the session compacts while working, read these again before continuing.
@@ -236,27 +237,33 @@ Work through the section's tasks in order. For each:
   change's stated scope, and recorded in the section's notes as outside the plan,
   so the round's review and the owner's reading see it; one that is large, or not
   understood well enough to fix without a design of its own, is recorded where
-  `AGENTS.md`'s "Deferred work" says
-  (`openspec/README.md#defects-found-during-a-change`).
+  deferred work goes (`docs/guidance/workflow/working-model.md#deferred-work`,
+  `docs/guidance/workflow/changes.md#defects-found-during-a-change`).
 - A task the plan gives the orchestrator — an edit under `.claude/`, which every
   step is denied — is never attempted: check that its edit is in the worktree and
   commit it with the section. When it is missing, stop and name the edit.
-- Prove it at the lowest test level that can (`TESTING.md`), through the seams and
-  injected dependencies the code already offers rather than brute-force patching.
-- Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count.
+- Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
+  `test-levels.md`), through the seams and injected dependencies the code already
+  offers rather than brute-force patching (`test-seams.md`).
+- Respect the dependency layers in `docs/guidance/repository/package-layers.md`;
+  `TYPE_CHECKING` imports count
+  (`docs/guidance/engineering/dependencies-python.md`).
   Internal dependencies come from wheels and locks through `scripts/uv_project.py`,
   never editable sibling paths.
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
-  what the code used to be (`AGENTS.md`, "Python comments and docstrings").
+  what the code used to be (`docs/guidance/engineering/comments.md`;
+  `docs/guidance/workflow/change-references.md`).
 - Imports the section adds go at module level, unless one has a reason to stay
   local that you verified by attempting the move — a circular import that fails, or
   a deliberate lazy load — and recorded beside it
-  (`openspec/README.md#plan-closeout-requirements`, part 2). Closeout only confirms
+  (`docs/guidance/engineering/dependencies-python.md`, "Imports go at module level";
+  `docs/guidance/workflow/closeout.md#import-placement`). Closeout only confirms
   comments and imports; it never edits code, so this is where they are done.
 - Mark the task `[x]` when its evidence passes, with a short note: each suite, its
-  level as `TESTING.md` defines them — unit, library integration (a real component
-  against real storage, no application), application integration (the running
+  level as `docs/guidance/engineering/test-levels.md` defines them — unit, library
+  integration (a real component against real storage, no application),
+  application integration (the running
   application through its typed client), or system — and its result, and anything
   that differed from the plan. Name a suite by what it actually exercises: a test
   that calls the reconciler directly is not application integration, and a test that
@@ -317,6 +324,13 @@ Run each of these, and fix what it reports:
 
 - the focused suites the section's verification point names, and every suite that
   covers code the section changed;
+- where a test you wrote should fail without the change, show it:
+  `scripts/change-workflow run test-before <change> --test <path> [--at <commit>]`
+  runs the test file as `HEAD` holds it against the round's base, or the commit
+  given, in a throwaway worktree, and its closing line says whether it failed
+  there. A test that imports what only the change adds fails as it is collected,
+  which shows less; say which it was. Never stash, check out, or reset to see the
+  old code: the change's worktree is not touched to answer it;
 - `scripts/change-workflow run pre-commit <change>`, the repository's checks
   before a commit. The paths the worktree changes decide what it runs: when any
   lies outside the repository's inert paths, it runs `after-functional-change`,
@@ -342,7 +356,8 @@ command to see the diff (`git diff` against the section's starting commit, plus 
 untracked files), and this instruction — read the documents
 `scripts/change-workflow config load implement` prints and every document they
 require, plus the specs and architecture companions of the capabilities the diff
-touches; then report every place the diff breaks that guidance — layering,
+touches and every other Markdown file in their directories but their `index.md`;
+then report every place the diff breaks that guidance — layering,
 comments, test level, documentation placement, packaging — with file and line, and
 every evidence claim in the section's task notes that overstates what its tests
 exercise, and say plainly when it finds none. Fix what it finds that is right, and say what you

@@ -61,6 +61,11 @@ class ApiCreditPublicationHooks:
     ) -> PublicationBinding | None:
         return await api_credit_listing_binding(self._db, listing_id)
 
+    async def publication_candidate(
+        self, listing: dict[str, Any]
+    ) -> PublicationCandidate[dict[str, Any]]:
+        return await _candidate(self._db, listing)
+
     def registry_publisher(self) -> Identity:
         signer = container.resolved_marketplace_signer
         if signer is None:

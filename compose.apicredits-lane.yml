@@ -48,8 +48,9 @@ services:
       - APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0
 
   compute-registry:
-    # The registry image's default filter specification is the compute one.
-    image: arkhai:registry
+    # The registry image's default filter specification is the compute one. It is
+    # a release image, so a lane run with RELEASE_IMAGES=1 runs the candidate's.
+    image: arkhai:registry${IMAGE_SUFFIX:-}
     # The migration before the application, which refuses a database it has
     # not migrated.
     command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]

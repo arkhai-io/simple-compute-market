@@ -29,6 +29,11 @@ allow = [
   "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
   "Bash(git merge-base*)", "Bash(git check-ignore*)",
+  # Any step may refresh its view of the remote's branches and tags, so one
+  # reading the release record (the marketplace-v* tags) or the landing branch
+  # reads the current one. A fetch moves remote-tracking refs and tags only,
+  # never the worktree or a local branch.
+  "Bash(git fetch origin*)", "Bash(git fetch workspace*)",
   "Bash(scripts/change-workflow next*)", "Bash(scripts/change-workflow cost*)",
   "Bash(scripts/change-workflow log*)", "Bash(scripts/change-workflow config *)",
   "Bash(scripts/change-workflow record*)",
@@ -91,7 +96,10 @@ deny = [
 skill = "change-review"
 allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
          "Bash(make check-tasks*)", "Bash(make check-architecture)",
-         "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)"]
+         "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)",
+         # The reviewer checks its draft with the format check the review is
+         # published under, piping it on standard input, since it writes no file.
+         "Bash(scripts/change-workflow check review *)", "Bash(make check-review*)"]
 deny = ["Edit"]
 
 [steps.design]
@@ -141,8 +149,9 @@ allow = [
   "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(make -C * reinit*)", "Bash(uv run --directory * pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
-  "Bash(git add *)", "Bash(git commit *)", "Bash(git rm *)", "Bash(scripts/change-workflow push)",
-  "Bash(git pull --ff-only workspace *)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
+  "Bash(scripts/change-workflow push)",
+  "Bash(git pull --ff-only workspace *)", "Bash(git config --get-regexp remote)",
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
   "Bash(helm version*)", "Bash(make helm-values-schema)",
 ]
@@ -200,7 +209,6 @@ deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
 skill = "change-merge"
 allow = [
   "Edit", "Write", "Task",
-  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
   "Bash(git merge --no-edit origin/*)", "Bash(git merge --no-edit workspace/*)",
   "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",

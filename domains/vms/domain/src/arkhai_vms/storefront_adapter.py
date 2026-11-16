@@ -81,8 +81,9 @@ def vm_listing_resource_for_listing(
     }
     if candidate.get("resource_id"):
         listing_resource["resource_id"] = candidate["resource_id"]
-    # The seller's asking price for this shape: a listing attribute from which
-    # nothing is constructed, published only when something prices the shape.
+    # The seller's asking price for this shape, recorded beside it: a term of
+    # sale from which nothing is constructed, present only when something
+    # prices the shape. Publication carries it in the listing's pricing.
     if candidate.get("asking_rate") is not None:
         listing_resource["asking_rate"] = dict(candidate["asking_rate"])
     return listing_resource

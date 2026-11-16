@@ -172,9 +172,12 @@ async def _probe_write(raw_client, headers=None):
     body = {
         "listing_id": f"gate-probe-{uuid.uuid4().hex}",
         "storefront_url": "http://gate-probe/",
-        "listing_resource": {},
+        "listing_resource": {"region": "example"},
         "accepted_escrows": [],
-        "settlement_options": [],
+        "settlement_options": [{
+            "option_id": "a" * 64,
+            "settlement": {"schema": "example.payment.v1"},
+        }],
         "demands": [],
         "max_duration_seconds": None,
     }

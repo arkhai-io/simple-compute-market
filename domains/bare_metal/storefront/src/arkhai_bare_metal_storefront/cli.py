@@ -15,10 +15,12 @@ from market_arkhai_payments import check_configured_payments_access
 from .admin_cli import reporting_failures
 from .config import load_storefront_settings
 from .config_migration import config_app
+from .deals_cli import deals_app
 from .pool_override_cli import pool_override_app
 from .publication_cli import close_all_open_listings, run_publication_cycle
 
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(deals_app, name="deals", help="Submit seller notice under the accepted Agreement.")
 app.add_typer(config_app, name="config", help="Migrate public seller configuration.")
 app.add_typer(
     pool_override_app,

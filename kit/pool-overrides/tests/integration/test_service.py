@@ -49,6 +49,9 @@ class _Contribution:
         self.feasible = feasible
         self.judged = []
 
+    def projection_problems(self, site_pools, *, record):
+        return []
+
     def vocabulary_problems(self, record):
         return self.problems
 

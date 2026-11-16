@@ -53,6 +53,10 @@ def _listing(listing_id: str) -> ListingRequest:
         storefront_url="http://seller.example/",
         listing_resource={"gpu_model": "A100", "region": "us"},
         accepted_escrows=[],
+        settlement_options=[{
+            "option_id": "a" * 64,
+            "settlement": {"schema": "example.payment.v1"},
+        }],
     )
 
 

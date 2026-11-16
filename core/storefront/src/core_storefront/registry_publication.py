@@ -76,7 +76,9 @@ async def publish_listing_to_registries(
                 "listing storefront_url differs from configured storefront URL"
             )
         async with registry_client_factory() as registry_client:
+            extra_terms = ensure_json_obj(listing_dict.get("publication_terms"), {})
             request = listing_request_factory(
+                **({"extra": extra_terms} if extra_terms else {}),
                 listing_id=listing_id,
                 listing_resource=listing_resource,
                 accepted_escrows=accepted_escrows,

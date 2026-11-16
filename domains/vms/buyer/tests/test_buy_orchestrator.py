@@ -534,6 +534,39 @@ def test_happy_path_drives_to_ready():
     assert any(s == "settlement_poll" for s in stages)
 
 
+def test_the_accepted_agreement_is_shown_before_the_settlement_stage_pays(capsys):
+    """The accepted Agreement's disclosure, which the negotiate hook's acceptance
+    check prints, is on stderr before the settle hook's stage pays. The stage
+    here is Alkahest's, paying by escrow creation; a payments option's approval
+    is not called, and the order it rests on is ``run_buy`` entering the settle
+    hook, whatever the stage, only after the negotiate hook returned an
+    accepted, disclosed outcome. The lane scenarios assert the rows' content."""
+    responses = [
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL, "max_duration_seconds": 7200}]},
+        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}},
+         **_accepted_echo(50)},
+        {"escrow_uid": "0xescrow", "status": "provisioning"},
+        {"status": "ready", "fulfillment_uid": "0xattest"},
+    ]
+    shown_at_payment: list[str] = []
+
+    def _create_escrow(escrows):
+        shown_at_payment.append(capsys.readouterr().err)
+        return ["0xescrow"]
+
+    with _patched_transport(_urlopen_sequence(responses)):
+        result = _run_buy_with_legacy_hooks(
+            config=_config(), constraints=_constraints(), provision=_provision(),
+            build_escrow_proposal=_build_escrow_proposal(), build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=_create_escrow, sleep=lambda _s: None,
+        )
+
+    assert result.status == "ready"
+    (shown,) = shown_at_payment
+    assert "Accepted Agreement: price, horizon and lifecycle terms before approval" in shown
+    assert "  Accepted price:" in shown and "  Initial reserve:" in shown
+
+
 # ---------------------------------------------------------------------------
 # Negotiation fallthrough
 # ---------------------------------------------------------------------------
@@ -553,7 +586,8 @@ def test_first_match_exits_second_agrees():
                 {
                     "listing_id": "seller-2",
                     "seller": "http://seller2:8001",
-                    "max_duration_seconds": 3600,
+                    # Fits the 7200-second deal: a shorter bound is refused.
+                    "max_duration_seconds": 7200,
                 },
             ]
         },
@@ -586,6 +620,39 @@ def test_first_match_exits_second_agrees():
     # Two attempts recorded — first was exit, second was agreed.
     assert len(result.attempts) == 2
     assert result.attempts[0]["outcome"]["status"] == "exited"
+
+
+@pytest.mark.parametrize(("bounds", "refusal"), [
+    # The seller signs a 7200-second Agreement, starting 2025-01-01T00:00:00Z.
+    ({"max_duration_seconds": 3600}, "exceeds the listing's bound of 3600"),
+    ({"max_duration_seconds": 0, "available_until_utc": "2025-01-01T01:30:00Z"},
+     "exceeds the listing's bound of 5400"),
+])
+def test_a_signed_horizon_outside_the_listing_bounds_is_refused_before_approval(bounds, refusal):
+    responses = [
+        {"items": [{"listing_id": "seller-1", "seller": "http://seller1:8001", **bounds}]},
+        {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": {"fields": {"amount": 50}},
+            **_accepted_echo(50),
+        },
+    ]
+    settled = []
+    with _patched_transport(_urlopen_sequence(responses)):
+        result = _run_buy_with_legacy_hooks(
+            config=_config(aggregation_policy="cheapest_first"),
+            constraints=_constraints(),
+            provision=_provision(),
+            build_escrow_proposal=_build_escrow_proposal(),
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: settled.append(escrows) or ["0xescrow"],
+            sleep=lambda _: None,
+        )
+    assert result.status == "exited"
+    assert settled == []
+    assert "accepted horizon refused" in result.attempts[0]["error"]
+    assert refusal in result.attempts[0]["error"]
 
 
 # ---------------------------------------------------------------------------

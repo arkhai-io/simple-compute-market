@@ -8,11 +8,14 @@ provider integrations live in separate packages that depend on this package.
 from __future__ import annotations
 
 import hashlib
+import json
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 
 from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
 from market_capability_shape import FieldKind, shape_digest, unflatten_shape
+from market_resource_pools_contracts import UtcAvailability, positive_duration_bound
 from market_resource_pools_contracts.backing import CapacityBackingLabel
 from market_resource_pools_contracts.backing import capacity_backing as backing_of
 from pydantic import (
@@ -22,6 +25,7 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     model_serializer,
     model_validator,
+    field_validator,
 )
 
 from .provision_terms import BareMetalProvisionTerms
@@ -139,6 +143,12 @@ class BareMetalListing(BaseModel):
         ge=1,
         description="Longest lease duration the seller advertises.",
     )
+    available_until_utc: UtcAvailability | None = None
+
+    _relative_bound = field_validator("max_duration_seconds", mode="before")(
+        positive_duration_bound
+    )
+
     region: str = Field(
         min_length=1,
         description="The region the machine's pool declares.",
@@ -169,6 +179,25 @@ class BareMetalListing(BaseModel):
             if data.get(name) is None:
                 data.pop(name, None)
         return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _listing_envelope(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping) or "listing_resource" not in value:
+            return value
+        resource = value["listing_resource"]
+        if isinstance(resource, str):
+            resource = json.loads(resource)
+        if not isinstance(resource, Mapping):
+            raise ValueError("listing_resource must be a mapping")
+        return {
+            **resource,
+            **{
+                name: value[name]
+                for name in ("max_duration_seconds", "available_until_utc")
+                if name in value
+            },
+        }
 
     @model_validator(mode="after")
     def _validate_listing(self) -> "BareMetalListing":
@@ -232,10 +261,11 @@ class BareMetalMessage(BaseModel):
     """Bare-metal negotiation message payload."""
 
     kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
-    duration_seconds: int = Field(
-        ge=1,
-        description="Requested bare-metal lease duration.",
+    duration_seconds: int | None = Field(
+        default=None, ge=1,
+        description="Requested horizon; omission is valid only for recurring options.",
     )
+    start_utc: str | None = None
     access_method: str = Field(
         default=SSH_ACCESS_METHOD,
         description="Requested access method.",

@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 #: The commands that recover a recorded bare-metal purchase by its run.
-RECOVERY_COMMANDS = ("result", "access", "teardown", "delivery")
+RECOVERY_COMMANDS = ("result", "access", "end", "delivery")
 
 #: The delivery progress the storefront records once the site has released the lease.
 RELEASED = "released"

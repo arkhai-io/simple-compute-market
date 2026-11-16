@@ -20,6 +20,7 @@ from core_buyer.orchestration import (
     wait_for_settlement,
 )
 from market_alkahest.plans import require_escrow_terms_fund_plan
+from market_alkahest.settlement_config import alkahest_billing_basis
 from market_alkahest import alkahest_address_book
 from market_alkahest.proposals import (
     ReleaseConditionError,
@@ -306,16 +307,21 @@ class PaymentsBuyerStage:
         deal, log = context.deal, context.log
         if deal.agreement_bytes is None or deal.settlement_data is None:
             raise ValueError("run has no accepted Agreement and payment mandate")
-        final = settle_payment(
-            buyer=payment_buyer(context.resolve_policy()),
-            agreement_bytes=deal.agreement_bytes, settlement_data=deal.settlement_data,
-            seller_url=deal.seller_url, principal=deal.buyer_principal,
-            signer=context.signer,
-            resolve_seller_principals=context.resolve_seller_principals,
-            negotiation_id=deal.negotiation_id, timeout=context.timeout,
-            interval=context.poll_interval,
-            on_event=lambda stage, body: log.event(stage, **body),
-        )
+        try:
+            final = settle_payment(
+                buyer=payment_buyer(context.resolve_policy()),
+                agreement_bytes=deal.agreement_bytes, settlement_data=deal.settlement_data,
+                seller_url=deal.seller_url, principal=deal.buyer_principal,
+                signer=context.signer,
+                resolve_seller_principals=context.resolve_seller_principals,
+                negotiation_id=deal.negotiation_id, timeout=context.timeout,
+                interval=context.poll_interval,
+                on_event=lambda stage, body: log.event(stage, **body),
+            )
+        except TimeoutError as exc:
+            # A wait that runs out ends the resumed run ``timeout``, as a fresh
+            # buy's does; the run stays resumable from its log.
+            final = {"status": "timeout", "reason": str(exc)}
         log.end(final.get("status") or "unknown", escrow_uid=deal.negotiation_id)
         context.console.print(Panel(str(final), title="Settlement complete"))
         if final.get("status") != "ready":
@@ -446,7 +452,7 @@ def derive_resumed_escrow_terms(
         return derive_accepted_escrow_terms(
             accepted_proposal=deal.accepted_escrow_proposal,
             listing_record=deal.listing_record,
-            agreed_amount=exact_agreed_amount(deal),
+            agreed_amount=exact_agreed_amount(deal, project_billing=alkahest_billing_basis),
             duration_seconds=int(duration_seconds),
             settlement_plan=deal.settlement_plan,
             addr_config_path=addr_config_path,
@@ -523,7 +529,9 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Negotiation", deal.negotiation_id)
-    header.add_row("Agreed price (per hour)", str(deal.agreed_amount))
+    header.add_row("Agreed price (total)", str(
+        exact_agreed_amount(deal, project_billing=alkahest_billing_basis)
+    ))
     header.add_row("Duration (seconds)", str(effective_duration))
     if chain.token_contract:
         header.add_row(

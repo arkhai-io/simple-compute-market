@@ -77,8 +77,10 @@ def main() -> int:
         accepted_at=accepted_at,
         start_utc=accepted_at,
         duration_seconds=0,
-        amount="100",
-        asset="USD/2",
+        # A fixture amount and asset; production derivation reads the accepted
+        # Agreement's.
+        amount="1000000",
+        asset="USD/6",
         fee_bps=fee_bps,
         lifecycle=LifecycleTerms.model_validate(dispute_lifecycle(dispute_authority)),
     )

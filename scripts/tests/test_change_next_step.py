@@ -16,9 +16,9 @@ from change_workflow import next_step as nxt
 from change_workflow import round_view as rounds
 from change_workflow.common import FORMAT, StepError
 from change_workflow.find import change_directory
-from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
-                                 read_log, record_outcome, unused_direction)
-from change_workflow_fixtures import configured
+from change_workflow.log import (Checkout, append_entry, log_path, note_orchestrator,
+                                 note_round, read_log, record_outcome, unused_direction)
+from change_workflow_fixtures import ACCEPTING, LANDED, configured
 
 CHANGE = "shape-bounds"
 # The review kind the design records below are named for.
@@ -109,8 +109,12 @@ def _validation(commit: str = HEAD, result: str = "passed") -> str:
 
 
 def _log(root: Path, step_name: str, outcome: dict, **extra) -> dict:
+    """A run's line; a finished merge or archive cleanup records the landing branch
+    it fetched, contained in HEAD, unless the outcome gives its own."""
+    if step_name in ("merge", "archive-cleanup") and outcome.get("outcome") == "finished":
+        outcome = {"landing": LANDED, **outcome}
     return record_outcome(log_path(root, CHANGE), step_name, outcome, session="s",
-                          commit=HEAD, extra=extra or None)
+                          commit=HEAD, extra=extra or None, checkout=ACCEPTING)
 
 
 def _review(root: Path, name: str, *, reviewed: str | None = None,
@@ -475,6 +479,51 @@ def test_reviews_and_validation_await_triage(tmp_path: Path) -> None:
     assert result == {"step": "triage", "kind": "implementation",
                       "reason": "01-validation.md, 02-implementation.md, "
                                 "03-implementation-owner.md have no triage"}
+
+
+def test_a_round_carries_owner_notes_no_triage_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    # Notes on a finished triage's fixes, saved while no review awaited a triage.
+    _record(root, "01-implementation-owner.md")
+    _round(root, [[2]])
+    _check(root, SECOND_DONE)
+    _record(root, "02-validation.md", text=_validation())
+    _review(root, "03-implementation.md")
+
+    unread = _next(root)
+    _record(root, "04-implementation-owner.md")
+    result = _next(root)
+
+    rounds = [e for e in read_log(log_path(root, CHANGE)) if e.get("outcome") == "round"]
+    assert rounds[-1]["carries"] == [1]
+    # The carried notes are not the round's reading.
+    assert unread["step"] == "round-view"
+    assert result == {"step": "triage", "kind": "implementation",
+                      "reason": "01-implementation-owner.md, 02-validation.md, "
+                                "03-implementation.md, 04-implementation-owner.md "
+                                "have no triage"}
+
+
+def test_a_round_carries_no_owner_notes_a_triage_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _record(root, "01-implementation-owner.md", triage="Read with round 1.")
+    _round(root, [[2]])
+
+    assert "carries" not in read_log(log_path(root, CHANGE))[-1]
+
+
+def test_a_review_awaiting_triage_comes_before_the_rounds_open_sections(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    # The round's section holds an unchecked task: it is open again.
+    _check(root, TASKS)
+    _record(root, "01-validation.md", text=_validation())
+    _review(root, "02-implementation.md")
+    _record(root, "03-implementation-owner.md")
+
+    result = _next(root)
+
+    assert (result["step"], result["kind"]) == ("triage", "implementation")
 
 
 def test_a_rounds_triage_whose_outcome_is_not_recorded_is_in_progress(tmp_path: Path) -> None:
@@ -937,7 +986,7 @@ def test_a_validation_naming_another_exit_than_its_target_goes_to_the_owner(
 # After a pre-closeout review, closeout's own checks read the documentation, so a
 # triage's commit of documents alone needs no validation; before it, only records.
 DOCUMENTS = ["openspec/changes/README.md", f"openspec/changes/{CHANGE}/specs/x/spec.md",
-             "docs/agents/change-workflow.md"]
+             "docs/change-workflow-handbook.md"]
 
 
 def test_a_merge_bringing_only_documents_goes_to_closeout_unvalidated(
@@ -993,13 +1042,14 @@ def test_a_documentation_correction_at_closeout_needs_no_validation(tmp_path: Pa
     root = _repository(tmp_path, "in closeout", archived=True)
     _closeout_triaged(root)
 
-    result = _next(root, changed=["docs/agents/change-workflow.md",
+    result = _next(root, changed=["docs/change-workflow-handbook.md",
                                   "openspec/specs/change-workflow/spec.md"])
 
     assert result["step"] == "archive-cleanup"
 
 
-# The inert paths are the repository's (CW-n7ra): the engine reads none of its own.
+# The inert paths are the repository's declaration, or the workflow's default where
+# it declares none (CW-n7ra).
 
 def test_a_repository_marks_images_inert(tmp_path: Path) -> None:
     """CW-n7ra's scenario, the inert paths read from the repository's own
@@ -1019,22 +1069,34 @@ def test_a_repository_marks_images_inert(tmp_path: Path) -> None:
     (lambda root: _pre_closeout(root, to=_to("review", "pre-closeout"), reviewed="e" * 40),
      DOCUMENTS),
 ])
-def test_with_no_inert_path_declared_documents_are_read_as_code(tmp_path: Path, arrange,
-                                                                changed) -> None:
+def test_with_an_empty_declaration_documents_are_read_as_code(tmp_path: Path, arrange,
+                                                              changed) -> None:
     root = _repository(tmp_path, "in implementation")
     arrange(root)
 
-    assert _next(root, changed=changed, inert_paths=lambda _: None)["step"] == "validate"
+    assert _next(root, changed=changed, inert_paths=lambda _: ())["step"] == "validate"
     # Changes' records stay exempt whatever the repository declares.
-    assert _next(root, changed=RECORDS_ONLY, inert_paths=lambda _: None)["step"] != "validate"
+    assert _next(root, changed=RECORDS_ONLY, inert_paths=lambda _: ())["step"] != "validate"
 
 
-def test_with_no_inert_path_declared_a_documentation_correction_is_validated(
+def test_with_no_inert_path_declared_the_default_makes_documents_inert(tmp_path: Path) -> None:
+    """CW-n7ra's scenario "A repository declares no inert paths", the default read
+    through the repository's own configuration file."""
+    root = _repository(tmp_path, "in implementation")
+    configured(root, "[repository]\nprotected-branches = []\n")
+    _merged(root, reviewed="e" * 40)
+
+    assert _next(root, changed=DOCUMENTS, inert_paths=nxt._inert_paths)["step"] == "closeout"
+    assert _next(root, changed=DOCUMENTS + FIX, inert_paths=nxt._inert_paths)["step"] \
+        == "validate"
+
+
+def test_with_an_empty_declaration_a_documentation_correction_is_validated(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in closeout", archived=True)
     _closeout_triaged(root)
 
-    result = _next(root, changed=["docs/agents/change-workflow.md"], inert_paths=lambda _: None)
+    result = _next(root, changed=["docs/change-workflow-handbook.md"], inert_paths=lambda _: ())
 
     assert (result["step"], result["target"]) == ("validate", {"step": "archive-cleanup"})
 
@@ -1075,6 +1137,60 @@ def test_archive_cleanup_that_names_done_finishes_the_change(tmp_path: Path) -> 
     _log(root, "archive-cleanup", _done(_to("done")))
 
     assert _next(root) == {"step": "done", "reason": "archived"}
+
+
+def _cleaned_up(root: Path, *, contained: bool, landing: bool = True) -> dict:
+    """An archive cleanup run naming done, its line recording a landing the log's
+    writer found its commit does, or does not, contain; or no landing."""
+    checkout = Checkout(remotes=lambda: {"origin"}, contains=lambda *_: contained,
+                        base=lambda: None, resolve=lambda _: HEAD)
+    outcome = _done(_to("done"), **({"landing": LANDED} if landing else {}))
+    return record_outcome(log_path(root, CHANGE), "archive-cleanup", outcome, session="s",
+                          commit=HEAD, checkout=checkout)
+
+
+@pytest.mark.parametrize("first,later,moved", [
+    ({"contained": False}, None, True),
+    ({"contained": True}, None, False),
+    ({"contained": False, "landing": False}, None, False),
+    ({"contained": True}, {"contained": False}, False),
+], ids=["moved", "contained", "no landing", "a later run"])
+def test_the_landing_moved_only_on_the_first_cleanups_recorded_result(
+        tmp_path: Path, first: dict, later: dict | None, moved: bool) -> None:
+    """The reading archive cleanup's first exit is guarded by: only the first finished
+    run's line, and only its recorded containment."""
+    root = _repository(tmp_path, "in closeout", archived=True)
+    run = _cleaned_up(root, **first)
+    if later is not None:
+        run = _cleaned_up(root, **later)
+    computation = nxt.Computation(root, CHANGE, head=lambda _: HEAD, **HERE)
+    computation.read()
+
+    assert computation.landing_moved(run) is moved
+
+
+def test_a_cleanup_finishing_after_a_stopped_fetch_is_the_first_to_take_its_exit(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _log(root, "archive-cleanup", {"outcome": "stopped", "message": "The fetch failed.",
+                                   "reason": "git fetch origin main failed", "denials": []})
+    run = _cleaned_up(root, contained=False)
+    computation = nxt.Computation(root, CHANGE, head=lambda _: HEAD, **HERE)
+    computation.read()
+
+    assert computation.landing_moved(run)
+
+
+def test_a_cleanup_line_without_its_recorded_containment_reads_as_checked(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    run = append_entry(log_path(root, CHANGE), {
+        "step": "archive-cleanup", "session": "s", "commit": HEAD,
+        **_done(_to("done"), landing=LANDED)})
+    computation = nxt.Computation(root, CHANGE, head=lambda _: HEAD, **HERE)
+    computation.read()
+
+    assert not computation.landing_moved(run)
 
 
 def test_a_steps_exit_whose_target_cannot_be_entered_goes_to_the_owner(
@@ -2076,6 +2192,31 @@ def test_a_stopped_run_waits_until_a_decision_resolves_it(tmp_path: Path) -> Non
     assert (decided["step"], decided["kind"]) == ("review", "implementation")
 
 
+def test_a_review_the_format_check_refused_is_named_again_never_its_triage(
+        tmp_path: Path) -> None:
+    """A refused draft is kept under transcripts/, where nothing reads it as a
+    record: once its stop is decided, the review is named again, not a triage."""
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "01-implementation-owner.md", "02-validation.md")
+    transcripts = _reviews(root) / "transcripts"
+    transcripts.mkdir()
+    (transcripts / "03-implementation.rejected.md").write_text(
+        "# Implementation review — x\n", "utf-8")
+    refusal = {"outcome": "stopped", "message": "refused", "reason": "refused",
+               "denials": []}
+    refused = {"kind": "implementation", "refused": ["F1 has no Evidence"],
+               "rejected": "transcripts/03-implementation.rejected.md"}
+    run = record_outcome(log_path(root, CHANGE), "review", refusal, session="codex:s-1",
+                         commit=HEAD, extra=refused)
+
+    stopped = _next(root)
+    _decide(root, "rerun the review", resolves=run["seq"])
+    decided = _next(root)
+
+    assert stopped["step"] == "owner"
+    assert (decided["step"], decided["kind"]) == ("review", "implementation")
+
+
 def test_a_decision_about_one_run_leaves_another_steps_question_waiting(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
@@ -2920,3 +3061,322 @@ def test_a_clone_and_the_workspaces_view_are_read_from_git(
         "validate-and-review", True, str(work.resolve()))
     assert unread["step"] == "round-view"
     assert (reading["step"], reading["round_view"]) == ("owner", CHANGE)
+
+
+# An archived change: `done` from the route, and the merge after the archive.
+
+def _archived(tmp_path: Path, *, contained: bool = True, landing: bool = True) -> Path:
+    """An archived change whose closeout triage advanced and whose archive cleanup
+    ran, its row `archived`, its first exit to `done` recording a landing commit its
+    commit does, or does not, contain."""
+    root = _repository(tmp_path, "archived", archived=True)
+    _closeout_triaged(root, reviewed=HEAD)
+    _cleaned_up(root, contained=contained, landing=landing)
+    return root
+
+
+def _merged_after(root: Path, to: dict) -> dict:
+    """The owner's direction to the merge after the archive, and its run naming `to`."""
+    _direct(root, "late-merge", "merge the landing branch again")
+    return _log(root, "merge", _done(to))
+
+
+def test_a_merge_run_before_archive_cleanup_and_one_after_are_different_nodes(
+        tmp_path: Path) -> None:
+    """CW-m4qe: a merge run logged after an archive cleanup run is a run of the merge
+    after the archive, routed on its exits; before it, of the merge before closeout."""
+    root = _repository(tmp_path, "in implementation")
+    _merged(root, to=_to("closeout"))
+    before = nxt.route_of(read_log(log_path(root, CHANGE)))
+    _cleaned_up(root, contained=True)
+    late = _log(root, "merge", _done(_to("archive-cleanup")))
+    after = nxt.route_of(read_log(log_path(root, CHANGE)))
+
+    assert before.source == graph.MERGE and after.source == graph.LATE_MERGE
+    assert after.line == late
+
+
+def test_a_direction_to_the_merge_after_the_archive_is_spent_by_the_merge_after_it(
+        tmp_path: Path) -> None:
+    root = _archived(tmp_path)
+    _direct(root, "late-merge", "merge again")
+    directed = unused_direction(read_log(log_path(root, CHANGE)))
+    _log(root, "merge", QUESTION)
+    asked = unused_direction(read_log(log_path(root, CHANGE)))
+    _log(root, "merge", _done(_to("archive-cleanup")))
+
+    assert directed is not None and asked == directed
+    assert unused_direction(read_log(log_path(root, CHANGE))) is None
+
+
+def test_archive_cleanup_finishes(tmp_path: Path) -> None:
+    """CW-9tzd, "Archive cleanup finishes"."""
+    assert _next(_archived(tmp_path)) == {"step": "done", "reason": "archived"}
+
+
+def test_the_owners_direction_follows_done(tmp_path: Path) -> None:
+    """CW-j7wp, "The owner's direction follows done"."""
+    root = _archived(tmp_path)
+    _direct(root, "late-merge", "the pull request conflicts with main")
+
+    result = _next(root)
+
+    assert result["step"] == "merge" and result["reason"].startswith("late-merge: ")
+    assert "the owner directed late-merge" in result["reason"]
+
+
+def test_an_archived_change_in_its_clone_is_computed_in_the_workspace(tmp_path: Path) -> None:
+    """CW-j7wp, "An archived change in its clone is computed in the workspace": named
+    to its clone, and computed there."""
+    root = _archived(tmp_path)
+    clone = tmp_path / "work.changes" / CHANGE
+
+    from_workspace = _from_workspace(root, clone=clone)
+    in_clone = _in_clone(root)
+
+    assert (from_workspace["step"], from_workspace["clone"]) == ("in-clone", str(clone))
+    assert in_clone == {"step": "done", "reason": "archived"}
+
+
+def test_an_archived_change_without_a_clone_another_branch_checked_out(
+        tmp_path: Path) -> None:
+    """CW-j7wp, "An archived change without a clone, another branch checked out"."""
+    root = _archived(tmp_path)
+
+    assert _from_workspace(root, branch="main") == {"step": "done", "reason": "archived"}
+
+
+def test_a_merge_after_the_archive_directed_without_the_branch(tmp_path: Path) -> None:
+    """CW-j7wp, "A merge after the archive directed without the branch"."""
+    root = _archived(tmp_path)
+    _direct(root, "late-merge", "merge again")
+
+    without = _from_workspace(root, branch="main")
+    with_branch = _from_workspace(root, branch=f"feat/{CHANGE}")
+
+    assert without["step"] == "owner" and "branch is not checked out here" in without["reason"]
+    assert with_branch["step"] == "merge"
+
+
+def test_an_archived_change_whose_row_was_pruned(tmp_path: Path) -> None:
+    """CW-j7wp, "An archived change whose row was pruned"; and a route with a step
+    to run, with no row, names the owner."""
+    root = _archived(tmp_path)
+    _direct(root, "late-merge", "merge again")
+    (root / "openspec/changes/README.md").write_text(
+        "| Change | Status | Depends on | Notes | Acceptance boundary |\n|---|---|---|---|---|\n",
+        "utf-8")
+    directed = _next(root)
+    pruned = _archived(tmp_path / "pruned")
+    (pruned / "openspec/changes/README.md").write_text(
+        "| Change | Status | Depends on | Notes | Acceptance boundary |\n|---|---|---|---|---|\n",
+        "utf-8")
+
+    assert _next(pruned) == {"step": "done", "reason": "archived, and its index row pruned"}
+    assert directed["step"] == "owner" and "has no row" in directed["reason"]
+
+
+def test_a_merge_after_the_archive_directed_in_the_clone_is_computed_there(
+        tmp_path: Path) -> None:
+    root = _archived(tmp_path)
+    _direct(root, "late-merge", "merge again")
+
+    assert _in_clone(root)["step"] == "merge"
+
+
+def test_an_archived_changes_undeclared_line_is_refused_before_done(tmp_path: Path) -> None:
+    root = _archived(tmp_path)
+    append_entry(log_path(root, CHANGE), {"step": "deploy", "outcome": "finished",
+                                          "message": "x"})
+
+    result = _from_workspace(root, branch="main")
+
+    assert result["step"] == "owner" and "does not declare" in result["reason"]
+
+
+def test_an_archived_change_with_no_log_is_done(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "archived", archived=True)
+
+    assert _from_workspace(root, branch="main") == {"step": "done", "reason": "archived"}
+
+
+def test_the_landing_branch_moved_during_closeout(tmp_path: Path) -> None:
+    """CW-5vkd, "The landing branch moved during closeout": the merge, carrying
+    `done`."""
+    result = _next(_archived(tmp_path, contained=False))
+
+    assert result["step"] == "merge" and result["target"] == {"step": "done"}
+    assert result["reason"].startswith("late-merge: ") and "moved" in result["reason"]
+
+
+def test_the_landing_branch_moves_after_the_pull_request_opened(tmp_path: Path) -> None:
+    """CW-5vkd, "The landing branch moves after the pull request opened": the
+    computation takes no ref as an input, only the line, so no fetch after it was
+    written can change the exit; with the containment recorded true, it is `done`."""
+    root = _archived(tmp_path, contained=True)
+
+    assert _next(root) == {"step": "done", "reason": "archived"}
+
+
+def test_a_change_archived_before_the_record_existed(tmp_path: Path) -> None:
+    """CW-5vkd, "A change archived before the record existed"."""
+    assert _next(_archived(tmp_path, landing=False)) == {"step": "done", "reason": "archived"}
+
+
+def _merged_by_hand(root: Path) -> dict:
+    """A merge run by hand after archive cleanup and recorded naming `done`, as the
+    older tooling wrote it: no `landing`, and no writer check of its exit."""
+    return append_entry(log_path(root, CHANGE), {
+        "step": "merge", "session": "s", "commit": HEAD, "interactive": True,
+        "outcome": "finished", "message": "Merged.", "next": _to("done")})
+
+
+def test_a_merge_run_by_hand_after_archive_cleanup_before_the_record_existed(
+        tmp_path: Path) -> None:
+    """CW-j7wp, "A merge was run by hand after archive cleanup before the merge after
+    the archive was a node": it routes nothing, and the change is done."""
+    root = _archived(tmp_path, landing=False)
+    _merged_by_hand(root)
+
+    assert nxt.route_of(read_log(log_path(root, CHANGE))).source == graph.ARCHIVE_CLEANUP
+    assert _next(root) == {"step": "done", "reason": "archived"}
+
+
+def test_a_merge_recording_no_landing_after_one_that_did_is_the_merge_after_the_archive(
+        tmp_path: Path) -> None:
+    """Only a merge with no finished merge before it recording `landing` is read as
+    older: one after the merge after the archive recorded it routes as that node."""
+    root = _archived(tmp_path)
+    _merged_after(root, _to("archive-cleanup"))
+    late = _merged_by_hand(root)
+    route = nxt.route_of(read_log(log_path(root, CHANGE)))
+
+    assert (route.source, route.line) == (graph.LATE_MERGE, late)
+    assert _next(root)["step"] == "owner"
+
+
+def test_the_landing_branch_moved_after_a_merge_after_the_archive(tmp_path: Path) -> None:
+    """CW-5vkd, "The landing branch moved after a merge after the archive": only the
+    first archive cleanup's exit is guarded."""
+    root = _archived(tmp_path)
+    _merged_after(root, _to("archive-cleanup"))
+    _record(root, "06-validation.md", text=_validation(HEAD))
+    named = _next(root)
+    _cleaned_up(root, contained=False)
+
+    assert named["step"] == "archive-cleanup"
+    assert _next(root) == {"step": "done", "reason": "archived"}
+
+
+def test_the_landing_branch_has_gained_nothing(tmp_path: Path) -> None:
+    """CW-m4qe, "The landing branch has gained nothing": HEAD and its validation
+    stand, and archive cleanup is next."""
+    root = _archived(tmp_path)
+    _record(root, "06-validation.md", text=_validation(HEAD))
+    _merged_after(root, _to("archive-cleanup"))
+
+    assert _next(root)["step"] == "archive-cleanup"
+
+
+def test_both_changes_edited_one_specification(tmp_path: Path) -> None:
+    """CW-x9tb, "Both changes edited one specification": the merge review, once the
+    merged HEAD is validated."""
+    root = _archived(tmp_path)
+    _merged_after(root, _to("review", "merge"))
+    unvalidated = _next(root)
+    _record(root, "06-validation.md", text=_validation(HEAD))
+    validated = _next(root)
+
+    assert (unvalidated["step"], unvalidated["target"]) == ("validate",
+                                                            {"step": "review", "kind": "merge"})
+    assert (validated["step"], validated["kind"]) == ("review", "merge")
+
+
+def test_only_the_change_index_conflicted(tmp_path: Path) -> None:
+    """CW-x9tb, "Only the change index conflicted": archive cleanup, once validated,
+    with nothing for the owner."""
+    root = _archived(tmp_path)
+    _merged_after(root, _to("archive-cleanup"))
+    unvalidated = _next(root)
+    _record(root, "06-validation.md", text=_validation(HEAD))
+
+    assert (unvalidated["step"], unvalidated["target"]) == ("validate",
+                                                            {"step": "archive-cleanup"})
+    assert _next(root)["step"] == "archive-cleanup"
+
+
+def test_the_owner_waives_only_the_validation_of_a_merge_that_named_its_review(
+        tmp_path: Path) -> None:
+    """CW-x9tb, "The owner waives only the validation of a merge that named its
+    review"."""
+    root = _archived(tmp_path)
+    run = _merged_after(root, _to("review", "merge"))
+    _direct(root, "review", "waive the merged HEAD's validation", kind="merge",
+            resolves=run["seq"])
+
+    result = _next(root)
+
+    assert (result["step"], result["kind"]) == ("review", "merge")
+
+
+def test_a_merge_reviews_triage_commits_a_code_fix(tmp_path: Path) -> None:
+    """CW-r2hu, "A merge review's triage commits a code fix": validated, then archive
+    cleanup."""
+    root = _archived(tmp_path)
+    _merged_after(root, _to("review", "merge"))
+    _record(root, "06-validation.md", text=_validation("e" * 40))
+    _review(root, "07-merge.md", reviewed="e" * 40)
+    _triage(root, "07-merge.md", to=_to("archive-cleanup"))
+    unvalidated = _next(root, changed=FIX)
+    _record(root, "08-validation.md", text=_validation(HEAD))
+
+    assert (unvalidated["step"], unvalidated["target"]) == ("validate",
+                                                            {"step": "archive-cleanup"})
+    assert _next(root, changed=FIX)["step"] == "archive-cleanup"
+
+
+def test_a_merge_reviews_triage_names_another_merge_review(tmp_path: Path) -> None:
+    root = _archived(tmp_path)
+    _merged_after(root, _to("review", "merge"))
+    _record(root, "06-validation.md", text=_validation(HEAD))
+    _review(root, "07-merge.md", reviewed=HEAD)
+    _triage(root, "07-merge.md", to=_to("review", "merge"))
+
+    result = _next(root)
+
+    assert (result["step"], result["kind"]) == ("review", "merge")
+
+
+@pytest.mark.parametrize("named", [_to("archive-cleanup"), _to("review", "merge")],
+                         ids=["archive cleanup", "merge review"])
+def test_a_validation_of_head_merged_after_the_archive_fails(tmp_path: Path,
+                                                             named: dict) -> None:
+    """CW-tnp6, "A validation of HEAD merged after the archive fails": the merge after
+    the archive, carrying the exit it named; an inconclusive one names the owner."""
+    root = _archived(tmp_path)
+    _merged_after(root, named)
+    _record(root, "06-validation.md", text=_validation(HEAD, "failed"))
+    failed = _next(root)
+    _record(root, "07-validation.md", text=_validation(HEAD, "inconclusive"))
+    inconclusive = _next(root)
+
+    assert failed["step"] == "merge" and failed["target"] == named
+    assert failed["reason"].startswith("late-merge: ")
+    assert inconclusive["step"] == "owner"
+
+
+def test_the_owner_directs_implementation_of_an_archived_change_while_the_merge_asks(
+        tmp_path: Path) -> None:
+    """CW-xo82, "The owner directs implementation of an archived change": the
+    direction is refused, and the merge's question stays with the owner."""
+    root = _archived(tmp_path)
+    _direct(root, "late-merge", "merge again")
+    asked = _log(root, "merge", {"outcome": "question", "message": "Which side holds?",
+                                 "awaiting": "a decision"})
+
+    with pytest.raises(StepError, match="entry guard"):
+        _direct(root, "round", "implement the resolution")
+    result = _next(root)
+
+    assert result["step"] == "owner" and result["seq"] == asked["seq"]
+    assert "Which side holds?" in result["reason"]

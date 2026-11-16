@@ -29,21 +29,14 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
           # Anvil only accepts JSON-RPC POST requests — a bare HTTP GET returns 400
-          # so httpGet probes will always fail. Use exec+curl to POST a valid call.
+          # so httpGet probes will always fail. The image's own `cast` makes a
+          # valid call; the image installs no other client.
           livenessProbe:
             exec:
               command:
-                - curl
-                - --silent
-                - --fail
-                - --max-time
-                - "2"
-                - -X
-                - POST
-                - -H
-                - "Content-Type: application/json"
-                - --data
-                - '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+                - cast
+                - block-number
+                - --rpc-url
                 - http://localhost:8545
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -51,17 +44,9 @@ spec:
           readinessProbe:
             exec:
               command:
-                - curl
-                - --silent
-                - --fail
-                - --max-time
-                - "2"
-                - -X
-                - POST
-                - -H
-                - "Content-Type: application/json"
-                - --data
-                - '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+                - cast
+                - block-number
+                - --rpc-url
                 - http://localhost:8545
             initialDelaySeconds: 3
             periodSeconds: 5
