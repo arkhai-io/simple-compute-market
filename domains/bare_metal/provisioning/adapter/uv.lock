@@ -68,8 +68,10 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-kit-resource-pools-contracts" },
+    { name = "cryptography" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "sqlalchemy" },
 ]
 
 [package.metadata]
@@ -88,8 +90,10 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.3.0" },
+    { name = "cryptography", specifier = ">=42.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
 ]
 
 [[package]]

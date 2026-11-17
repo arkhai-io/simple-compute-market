@@ -999,31 +999,50 @@ admission tokens are resolved at execution". Touches
 `execution.py`, and comments in `db.py`, `pool_relays.py`, `route_service.py`) and
 the VM and bare-metal adapters' codec tests.
 
-- [ ] 10a.1 In `RelayPortAllocator.allocate_in_session`, which standalone
+- [x] 10a.1 In `RelayPortAllocator.allocate_in_session`, which standalone
       `allocate` also runs, keep returning an owner's existing active lease
       first, then read the relay row locked (`with_for_update`, as
       `RelayExecutionResolver.resolve_into` reads it) and refuse a new owner
       on a disabled relay before any port is claimed, naming the relay. Raise
       it as an allocator error, which `_lease_remote_port` in both domains'
       plans already turns into `ProviderConfigInvalidError`. (D1 item 2; 06 F2)
-- [ ] 10a.2 In `RelayExecutionResolver.resolve_into`, drop the refusal of a
+      *Done:* the error is a new `RelayDisabledError`, exported from the relay
+      package, naming the relay and its rendezvous. The locked read also takes
+      `populate_existing=True`, which the plan did not name: preparation reads
+      the relay into the acceptance's own session first
+      (`relay_execution_fields` through `read_config_for_execution`), and a
+      locked read answered from that identity map would see `enabled` as it
+      was before a disable that committed in between. The second 10a.5 test
+      holds it.
+- [x] 10a.2 In `RelayExecutionResolver.resolve_into`, drop the refusal of a
       disabled relay. An absent relay, a relay with no token, and a create's
       relay with no active grant key or no lease for its reservation are still
       refused as `RelayUnusableAtExecutionError`. (D1 item 3; MODIFIED "Relay
       admission tokens are resolved at execution")
-- [ ] 10a.3 Rewrite every comment and docstring in the relay package that
+- [x] 10a.3 Rewrite every comment and docstring in the relay package that
       describes disabling as a stop refusing jobs — `execution.py`'s class and
       method docstrings, `route_service.py`'s module docstring ("Disable is the
       operator's answer…"), and any other the package's search for "disabled"
       finds — to the invariant: disabling a relay drains it; no new lease, and
       leased work runs. (D1; `docs/guidance/engineering/comments.md`)
-- [ ] 10a.4 Library integration, in
+      *Done:* `execution.py` (module, error class, and `resolve_into`
+      docstrings), `route_service.py`'s module docstring, `allocator.py`'s
+      module and `allocate_in_session` docstrings, `pool_relays.py`'s
+      `check_relay_usable` docstring and refusal message, `RelayDisabledError`'s
+      docstring, and a comment on `Relay.enabled` in `db.py`. They say no port
+      is leased to a new delivery and leased work runs. None names the relay
+      read's `drained`, which 10b adds, or the deliverable-hosts filter, which
+      10d adds.
+- [x] 10a.4 Library integration, in
       `provisioning/compute/tests/integration/test_relay_port_allocator.py`:
       a new owner is refused on a disabled relay through `allocate` and through
       `allocate_in_session`, with no lease recorded; an owner already holding a
       lease receives it again; enabling the relay lets the new owner allocate.
       (Scenario "A new owner asks the allocator for a port on a disabled relay")
-- [ ] 10a.5 Library integration, a database-concurrency test following
+      *Done:* `TestADisabledRelayLeasesNoNewPort`, four tests. The relay is
+      disabled through `RelayService.set_enabled`, the real administration
+      write. Library integration, passing.
+- [x] 10a.5 Library integration, a database-concurrency test following
       `docs/guidance/engineering/concurrency-tests.md` with independent sessions
       and bounded explicit synchronization, in both orders: an acceptance that
       has allocated but not committed, then a disable, ends with the relay
@@ -1033,7 +1052,22 @@ the VM and bare-metal adapters' codec tests.
       holds, through an ORM execute listener, that the relay is read with a
       `FOR UPDATE` lock before the claim. (Scenario "A relay is disabled while
       an acceptance is in flight")
-- [ ] 10a.6 Library integration, in
+      *Done:* `TestADisableRacingAnAcceptance`, three tests, library
+      integration, passing. First order: an acceptance thread holds SQLite's
+      writer slot, allocated and uncommitted. The disable thread starts, and an
+      engine `before_cursor_execute` listener signals just before it issues
+      its `UPDATE relays`. The test asserts the disable has not finished, then
+      lets the acceptance commit. Every wait is bounded at 10 s. The end state
+      is the relay disabled and holding the lease. This order shows SQLite's
+      single writer at work, not the allocator: it would pass without this
+      section's allocator change. Second order: independent sessions in
+      sequence. The acceptance session reads the relay enabled, unlocked, as
+      preparation does, then a disable commits, then that session's
+      allocation is refused and records no lease. Third: a `do_orm_execute`
+      listener renders each ORM read for PostgreSQL and shows the relay read
+      as `FOR UPDATE` before any `relay_port_leases` write. It also shows no
+      unlocked relay read.
+- [x] 10a.6 Library integration, in
       `provisioning/compute/tests/integration/test_relay_administration.py`:
       replace the parametrized case expecting a disabled relay to be refused
       at execution (around line 767) with cases where it is not — a removal
@@ -1041,18 +1075,66 @@ the VM and bare-metal adapters' codec tests.
       reservation holds the lease resolves and signs its grant — and keep the
       absent, no-token, no-grant-key, and wrong-reservation refusals.
       (Scenario "A relay is disabled between acceptance and execution")
-- [ ] 10a.7 Unit, in each domain's codec suite
+      *Done:* the parametrized case became `test_a_relay_with_no_token_fails_the_job`,
+      `test_a_removal_on_a_disabled_relay_is_resolved`, and
+      `test_a_create_holding_its_lease_on_a_disabled_relay_is_signed_its_grant`.
+      The absent, no-grant-key, no-held-lease, and wrong-reservation refusals
+      stand as they were. Library integration, passing.
+- [x] 10a.7 Unit, in each domain's codec suite
       (`domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py` and
       `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_codec.py`): a VM `vm_remove` and a bare-metal
       reclaim whose lease names a disabled relay prepare their job, as both
       codecs call the resolver.
-- [ ] 10a.8 **Verification:** `make test` in `provisioning/compute`,
+      *Done at a different level from the plan: library integration, not
+      unit.* Each codec prepares its removal through the family's real
+      `RelayExecutionResolver` over file-backed SQLite. The relay is created
+      and then disabled through `RelayService`. The test asserts the relay's
+      address and token reach the playbook variables and no grant is asked
+      for. The tests are:
+      - VM: `test_a_teardown_on_a_disabled_relay_is_prepared` in
+        `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`.
+      - Bare metal: `test_a_reclaim_on_a_disabled_relay_is_prepared` in a new
+        `domains/bare_metal/provisioning/adapter/tests/integration/test_relay_reclaim.py`.
+
+      Both pass. A first version was a unit test over a hand-written session
+      double. The fresh-context check refused it: the resolver is the last
+      layer before the database, which `test-levels.md` proves against the
+      real boundary. Neither codec reads `enabled`, so what these tests show
+      is the codec handing a removal to the resolver. The disabled-relay
+      behaviour itself is 10a.6's. The bare-metal adapter's `dev` group now
+      declares `cryptography>=42.0`, as the VM adapter's does, and
+      `sqlalchemy>=2.0`. Its lock was relocked with `make lock PROJECTS=…`,
+      and the lock diff is those two dev entries.
+- [x] 10a.8 **Verification:** `make test` in `provisioning/compute`,
       `domains/vms/provisioning/adapter`, and
       `domains/bare_metal/provisioning/adapter` (unit and library integration);
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none. None is owed: whether a relay is disabled is provisioning-service
       state that no relay or host sees, and the real relay lanes'
       teardowns run on enabled relays as before.
+      *Results:* `make test` passed in `provisioning/compute` (539), in
+      `domains/vms/provisioning/adapter` (293), and in
+      `domains/bare_metal/provisioning/adapter` (138), against a
+      `compute_provisioning` wheel rebuilt with `make dist-compute-provisioning`.
+      `make -C provisioning/compute/service test` also covers the allocator
+      and resolver, and passed: 622 unit and 540 application integration.
+      `scripts/change-workflow run pre-commit` passed: after-functional-change,
+      pre-commit-functional (every suite), and pre-commit.
+      End-to-end scenarios: none covers this section, as planned, and none is
+      owed. No `Owed by validation:` line.
+      *Outside the plan:* `scripts/change-workflow run pre-commit` failed
+      comment hygiene on a line no change of this round wrote:
+      `scripts/tests/test_change_workflow_log.py`, whose comment named "section
+      4". The comment was reworded to say the same without the number.
+
+**Handoff (10a).** An adapter's or the service's suite sees a change to
+`provisioning/compute` only through the wheel: run `make
+dist-compute-provisioning` (and `make dist-compute-provisioning-contracts` for a
+contracts change) before `make -C <package> test`, which reinstalls from `.dist`.
+Package versions are not bumped here; 10b.3 bumps every package the round
+changes. On SQLite the relay row lock is not rendered. The writer slot, which
+acceptance takes with `begin_sqlite_write_transaction`, is what serializes a
+disable against an allocation there.
 
 ## 10b. The relay read reports the drain
 

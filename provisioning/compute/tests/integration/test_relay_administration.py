@@ -761,23 +761,52 @@ class TestExecutionTimeTokenResolution:
 
         assert resolved.relay_token == "rotated"
 
-    @pytest.mark.parametrize(
-        "break_it, expected",
-        [
-            (lambda r: r.set_enabled("site-a", False), "disabled"),
-            (lambda r: None, "no admission token"),
-        ],
-    )
-    def test_an_unusable_relay_fails_the_job(
-        self, relays, session_factory, settings, break_it, expected
-    ):
-        _make_relay(relays, token="admission-token" if expected == "disabled" else None)
-        break_it(relays)
-        with pytest.raises(RelayUnusableAtExecutionError) as excinfo:
+    def test_a_relay_with_no_token_fails_the_job(self, relays, session_factory, settings):
+        _make_relay(relays, token=None)
+        with pytest.raises(RelayUnusableAtExecutionError, match="no admission token"):
             self._resolver(session_factory, settings).resolve_into(
                 self._params(relay_id="site-a")
             )
-        assert expected in str(excinfo.value)
+
+    def test_a_removal_on_a_disabled_relay_is_resolved(self, relays, session_factory, settings):
+        """Disabling a relay drains it, so the teardown that ends a delivery
+        on it runs: refused, the guest would stay up and its buyer keep
+        access past the lease end."""
+        _make_relay(relays, token="admission-token")
+        relays.set_enabled("site-a", False)
+
+        resolved = self._resolver(session_factory, settings).resolve_into(
+            self._params(relay_id="site-a")
+        )
+
+        assert resolved.relay_addr == "10.0.0.9"
+        assert resolved.relay_port == 7000
+        assert resolved.relay_token == "admission-token"
+        assert resolved.relay_grant is None
+
+    def test_a_create_holding_its_lease_on_a_disabled_relay_is_signed_its_grant(
+        self, relays, session_factory, settings
+    ):
+        """A create accepted before the disable holds its lease, and runs."""
+        _make_relay(relays, token="admission-token")
+        lease = RelayPortAllocator(session_factory).allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-1",
+            lease_ends_at=datetime(2031, 6, 1, tzinfo=timezone.utc),
+            host_id="kvm1",
+        )
+        relays.set_enabled("site-a", False)
+
+        resolved = self._resolver(session_factory, settings).resolve_into(
+            self._params(relay_id="site-a"), remote_port=lease.remote_port, owner_id="cr-1"
+        )
+
+        assert resolved.relay_token == "admission-token"
+        header, claims = _segments(resolved.relay_grant)
+        assert header["kid"] == relays.get_relay("site-a").grant_keys.active.kid
+        assert claims["port"] == lease.remote_port
+        assert claims["jti"] == "cr-1"
 
     def test_a_vanished_relay_fails_the_job(self, session_factory, settings):
         with pytest.raises(RelayUnusableAtExecutionError):
