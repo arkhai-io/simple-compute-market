@@ -1,6 +1,6 @@
 [project]
 name = "lane-double-controls"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "The control contract of the end-to-end lanes' payments and mediation doubles and the API-credit sample app: models, routes, typed client, time control and transport-fault middleware"
 readme = "README.md"

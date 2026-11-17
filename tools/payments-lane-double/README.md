@@ -88,27 +88,50 @@ client calls them. They are lane-private: no lane publishes the port to its host
 - **Signer rotation.** `POST /test/signer/rotate` signs every later receipt and
   snapshot with the fixture's `rotation_seed`; a receipt signed before keeps its
   signature, and a snapshot embedding it verifies under both keys.
+- **Reservation.** `POST /test/transactions/{id}/reserve {"through": <Unix
+  seconds>}` reserves each of the transaction's running rate parts — started and
+  not stopped — through that instant, on the arithmetic the engine applies at
+  `start`, as far as the part's `end` and the payer's balance allow, and answers
+  each such part's index, the instant it is then reserved through (the signed
+  snapshot's `fundedThrough` when it is the only running part) and the periods
+  added, which may be zero. As at `start`, the reservation covers 60 seconds past
+  `through`, so a `through` on a period boundary short of the part's end reserves
+  the period after it too. The double reserves nothing unasked: a rate part is
+  reserved at approval, at `start` and at this control, never at a read, so once
+  injected time passes the periods reserved, the next read shows the part's
+  `terms` stop at their end whatever the payer's balance. The payments service's
+  scheduler reserves ahead on its own; at the double a scenario programs that
+  decision, calling the control before setting time past the first reservation. A
+  transaction with no running rate part — before `start`, once-only, or every rate
+  part stopped — is refused 409 `no_running_rate_part`, an unknown transaction
+  404 `transaction_not_found`, and neither changes anything.
 - **Status.** `GET /test/status` reports the time, `{"source": "injected", "now":
   …}` or `{"source": "wall"}`, and the SHA-256 of each installed contract
   resource, read from the payments kit wheel.
 
 A control refusal is `{"code", "message"}`: 401 `authentication_required` without
 the control token, 422 `invalid_request` for a malformed or unsupported rule,
-409 `rule_exists`, 404 `rule_not_found`, and the time control's 409
-`time_moves_forward` and 422 `invalid_time`.
+409 `rule_exists`, 404 `rule_not_found`, the time control's 409
+`time_moves_forward` and 422 `invalid_time`, and the reservation control's 409
+`no_running_rate_part` and 404 `transaction_not_found`.
 
 ## What it claims
 
 Its suite drives the payments kit's real client against the app through an
 in-process transport, and over loopback HTTP for the transport faults, with
-injected time set through the control, and claims what the engine serves: approval, Agreement
-attachment, signed receipts, transaction snapshots, reverses and the balance read;
-and the rate and hold surface — rate parts and payee-only `start`, `stop` with
-notice and the earliest pending stop taking effect when time reaches it,
-per-part `end`, funding exhaustion at funded-through, once and `afterStop` holds
-releasing once time passes them, partial `reverse` before and after a stop, and
-`extend` and `lift` with `hold_not_extendable`, `extension_not_found` and
-`extension_closed`. Each answer is the engine's. A scenario passing against the
+injected time set through the control, and claims what the engine serves:
+approval, Agreement attachment, signed receipts, transaction snapshots, reverses
+and the balance read; and the rate and hold surface — rate parts and payee-only
+`start`, `stop` with notice and the earliest pending stop taking effect when time
+reaches it, per-part `end`, funding exhaustion at funded-through, once and
+`afterStop` holds releasing once time passes them, partial `reverse` before and
+after a stop, and `extend` and `lift` with `hold_not_extendable`,
+`extension_not_found` and `extension_closed`. Through the typed control client it
+claims the reservation control: a running part reserved one period further, the
+signed snapshot's funded boundary at the answer and the part's `terms` stop there
+once time reaches it; refused for an unstarted, a once-only and a stopped part
+with the snapshot unchanged; and no part reserved unasked. Each answer is the
+engine's. A scenario passing against the
 double establishes this repository's use of the payments boundary, never the
 payments service's ledger, funding or availability.
 

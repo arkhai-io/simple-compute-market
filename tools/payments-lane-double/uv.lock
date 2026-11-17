@@ -62,7 +62,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.8.1"
+version = "0.9.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -76,7 +76,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.8.1-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -673,7 +673,7 @@ wheels = [
 
 [[package]]
 name = "lane-double-controls"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -683,7 +683,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "lane_double_controls-0.1.0-py3-none-any.whl" },
+    { path = "lane_double_controls-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -718,7 +718,7 @@ wheels = [
 
 [[package]]
 name = "payments-lane-double"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -742,11 +742,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.6.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.9.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
     { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = "~=0.115.8" },
-    { name = "lane-double-controls", specifier = ">=0.1.0" },
+    { name = "lane-double-controls", specifier = ">=0.2.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "starlette", specifier = ">=0.40,<0.47" },
     { name = "uvicorn", specifier = "~=0.34.0" },

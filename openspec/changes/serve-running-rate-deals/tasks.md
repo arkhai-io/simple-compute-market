@@ -1894,7 +1894,7 @@ periods are reserved", "A reservation is refused when no rate part runs" and "A 
 part is not reserved unasked" (`test-compatibility`). Touches `kit/arkhai-payments`,
 `tools/lane-double-controls`, `tools/payments-lane-double`.
 
-- [ ] 9B.1 In `kit/arkhai-payments/src/market_arkhai_payments/fixtures/authority.py`, give
+- [x] 9B.1 In `kit/arkhai-payments/src/market_arkhai_payments/fixtures/authority.py`, give
       `PaymentsAuthority` a public reservation method: for a transaction, bring it to the
       clock as a read does, then reserve each running rate part (started, not stopped)
       through a named instant, as far as the part's end and the payer's balance allow, on
@@ -1909,7 +1909,38 @@ part is not reserved unasked" (`test-compatibility`). Touches `kit/arkhai-paymen
       end stops at the end; an unstarted, a once-only and a stopped part are refused with
       nothing changed; without the method, time past the first reservation still stops
       the part there.
-- [ ] 9B.2 In `tools/lane-double-controls`, add the reservation route,
+      Done: `PaymentsAuthority.reserve(transaction, through)` runs `advance(...,
+      refill=False)`, refuses `PaymentsAPIError(409, "no_running_rate_part")` before
+      any change when no rate part is started and unstopped, and otherwise reserves
+      each such part through `_reserve_to`, the per-part body `_refill` now calls
+      with its own lead, so the reservation at `start` is unchanged; each answer is
+      `{"part", "reserved_through", "periods_added"}`, `reserved_through` from
+      `_reserved_through`, which the snapshot's `reservedThrough` now shares. Like
+      `_refill`, a lead reserves to cover 60 seconds past it, so a `through` on a
+      period boundary short of the part's end reserves the period after it too; the
+      rows reserve through an end or a stop's instant, where the end caps it. The
+      kit README's engine paragraph names the method and the slack (12.9's D17 entry
+      notes it). Differing from the plan, the kit takes 0.9.0, not its unreleased
+      0.8.1: `docs/guidance/engineering/versioning.md` gives new public API a minor
+      bump, and "One bump per unit of work" bumps an already-bumped package again
+      when a later edit needs a larger bump; the two exact pins on it (the
+      bare-metal storefront and buyer, each already bumped by this change) move to
+      `==0.9.0`. Unit (`kit/arkhai-payments/tests/test_rate_reservation.py`, new,
+      flat beside the kit's other modules — the recorded layout gap — the engine on
+      an injected clock, which is unit rather than the library integration the plan
+      names, since it owns no storage): an hourly part ending six periods after its start, its payer funded one
+      period beyond the start's three, is reserved one period further
+      (`periods_added` 1), the snapshot's `fundedThrough` and `reservedThrough` move
+      to it, the payer's available balance is zero, and a read at that instant shows
+      the `terms` stop there; reserving through the end, and past it, is capped
+      there (`reserved_through` and `fundedThrough` the end, three periods added,
+      then none on a second call); an unstarted, a once-only and a stopped
+      part are refused `409 no_running_rate_part` with the snapshot and the payer's
+      balance unchanged; an unknown transaction is `404 transaction_not_found`; and
+      with no reservation, time past the first reservation stops the part `terms`
+      there despite a large balance. `make -C kit/arkhai-payments test`: 362 passed,
+      the vector, generated-model and mypy checks passing.
+- [x] 9B.2 In `tools/lane-double-controls`, add the reservation route,
       `POST /test/transactions/{transaction}/reserve`, to the payments party in
       `routes.py`, its request (`through`) and answer (`transaction`, `parts` with
       `part`, `reserved_through`, `periods_added`) to `models.py`, the refusal code
@@ -1917,7 +1948,23 @@ part is not reserved unasked" (`test-compatibility`). Touches `kit/arkhai-paymen
       `reserve(transaction, through)`; bump 0.1.0 → 0.1.1. Verify (unit,
       `tests/unit/test_models.py`, `test_routes.py`): the models refuse a malformed body
       and the route is the payments party's alone.
-- [ ] 9B.3 In `tools/payments-lane-double/src/payments_lane_double/app.py`, serve the
+      Done: `RESERVE` in `routes.py` (payments alone); `Reservation` (`through`, a
+      strict instant held to the time component's range), `ReservedPart` and
+      `Reserved` (`transaction` a transaction id, `parts` at least one, so an answer
+      reaching nothing cannot parse) in `models.py`; `no_running_rate_part` and,
+      beyond the plan, `transaction_not_found` among the control codes, the second
+      for 9B.3's `404`; `ControlClient.reserve(transaction, through)`. Version 0.2.0,
+      not the plan's 0.1.1, since the route, models and client method are new public
+      API (`versioning.md`, as 9B.1). Unit (`test_models.py`): a reservation names one instant; a missing,
+      string, float, boolean, negative or extra-field body is refused; an answer
+      with no parts, a malformed transaction, negative periods or a string part is
+      refused. Unit (`test_routes.py`): the route is the payments party's alone,
+      `POST /test/transactions/{transaction}/reserve`. The client's call-by-call
+      check (`tests/integration/test_client.py`, against an httpx stand-in) gains
+      `reserve`'s request and answer, and every declared route still has a client
+      method. `make -C tools/lane-double-controls test`: the TLS and strict mypy
+      checks pass, 149 passed.
+- [x] 9B.3 In `tools/payments-lane-double/src/payments_lane_double/app.py`, serve the
       route over the engine's method, authenticated by the control token: `200` with the
       answer, `409 no_running_rate_part` for a transaction with no running rate part,
       `404` for an unknown transaction, both changing nothing. Bump 0.2.0 → 0.2.1, which
@@ -1929,13 +1976,82 @@ part is not reserved unasked" (`test-compatibility`). Touches `kit/arkhai-paymen
       answer and the `terms` stop there once injected time reaches it; refused for an
       unstarted, a once-only and a stopped part with the snapshot unchanged; not
       reserved unasked.
-- [ ] 9B.4 Write the double's `README.md` "Controls" (the reservation control: what it
+      Done: `PaymentsDouble.reserve` under the double's lock — a transaction it never
+      approved is `ControlError(404, "transaction_not_found")`, the engine's refusal
+      `ControlError(409, "no_running_rate_part")`, both before any change — and the
+      control handler registered from `controls.RESERVE`, refusing a malformed
+      transaction id or body `422 invalid_request`; the double's check that it serves
+      exactly the routes the contract gives it holds. Version 0.3.0, not the plan's
+      0.2.1, for the new control route (`versioning.md`, as 9B.1); it also covers
+      section 10's second payer in `fixtures/accounts.toml`. Its bounds are raised
+      to the payments kit `>=0.9.0` and the controls `>=0.2.0`; `make lock` moved
+      every lock naming the three packages. Application integration
+      (`tests/integration/test_controls.py`, the app in process behind the typed
+      control client, read through the payments kit's client; the rate terms and
+      helpers are `test_double.py`'s): the suite's second payer, funded through the
+      funding control for the approval, the start's refill and one period more, has
+      its started part reserved one period further — the answer naming the part,
+      `reserved_through` one period past the first reservation and one period added
+      — the signed snapshot read through the payments kit's client verifying under
+      the receipt identity, its own `fundedThrough` that instant, and, once the time
+      control sets it, the part's `terms` stop there; an unstarted, a once-only and
+      a stopped part are refused `409 no_running_rate_part` with the snapshot
+      unchanged; an unknown transaction is `404 transaction_not_found`; a malformed
+      transaction id and a malformed body, sent by hand since the typed client
+      cannot build them, are `422 invalid_request` with the snapshot unchanged; and
+      the shared buyer's started part, with no reservation, stops `terms` at its
+      first reservation once time is set past it. `make -C tools/payments-lane-double
+      test`: 101 passed.
+- [x] 9B.4 Write the double's `README.md` "Controls" (the reservation control: what it
       reserves, its bounds, its refusal; nothing reserved unasked) and "What it claims",
       and `tools/lane-double-controls/README.md`'s "The controls" (the route).
-- [ ] 9B.5 Verification point: `kit/arkhai-payments`', `tools/lane-double-controls`' and
+      Done: the double's "Controls" gains the reservation control (what it reserves,
+      its arithmetic, its 60-second slack and bounds, nothing reserved unasked, its
+      two refusals) and its refusal list the two codes; "What it claims" names the
+      three scenarios its suite drives through the typed control client. The
+      controls' README gains the route's row, a paragraph on the control, its slack
+      and its answer, and three refusal rows.
+- [x] 9B.5 Verification point: `kit/arkhai-payments`', `tools/lane-double-controls`' and
       `tools/payments-lane-double`'s suites pass, and `scripts/change-workflow run
       pre-commit serve-running-rate-deals` passes. End-to-end: section 10's rate rows
       and section 11's watchdog cases, each of whose reservation stages calls it.
+      Done: `scripts/change-workflow run pre-commit serve-running-rate-deals` passed
+      with every functional hook after the fresh-context fixes and the version
+      change — among its suites the payments kit (362 passed), the controls (149),
+      the payments double (101), the mediation double (78), both storefronts and
+      the bare-metal buyer, whose exact pins moved, and the e2e unit suite (991
+      passed, 1 skipped). End-to-end confirmed: no scenario calls the control until
+      section 10 adds the reservation stage, so no pipeline result is evidence for
+      this section yet. Owed by validation: none. `run test-before` was not run: the
+      new test files are uncommitted until this commit, and at the base the engine
+      has no `reserve`, the controls no `RESERVE`, so each new case fails there at
+      its first call, by the code, not a run.
+      Fresh-context check: fixed — comments and both READMEs saying the engine
+      reserves "only at `start`" (approval and a refilling `advance` reserve too);
+      the three packages' patch steps against `versioning.md`'s minor bump for new
+      public API (now 0.9.0, 0.2.0, 0.3.0); the kit test's level (unit, not library
+      integration); the controls README not stating the 60-second slack; the
+      double's untested `422 invalid_request` path (now tested); 9B.3's note joining
+      two reads (the verified snapshot's own `fundedThrough` is now asserted); and
+      9B.1's "stops at the end" (the reservation is capped there). Declined: the
+      kit and double both running the three refusals, which the delta requires of
+      the double's suite.
+
+Section 9B handoff:
+
+- Section 10.2's reservation stage calls `ControlClient.reserve(transaction,
+  through)`; `e2e-tests` declares `lane-double-controls>=0.1.0` and must raise it to
+  `>=0.2.0` when the stage lands. A refusal raises `ControlError` with
+  `no_running_rate_part`, so a stage that fails on any refusal needs no check of its
+  own beyond letting it raise.
+- The reservation covers 60 seconds past `through`, as at `start`: reserving through
+  a stop's effective instant on a period boundary reserves the next period too,
+  which the stop then refunds. Reserving through the Agreement's end is capped at
+  the end.
+- The plan's versions are superseded: payments kit 0.9.0 (the bare-metal pins moved),
+  controls 0.2.0, payments double 0.3.0. The owner reads the deviation at the round;
+  `design.md` D17's sentence that the kit "costs no further version" and the tools
+  "each take one patch step" is stale until a triage or closeout amends it.
 
 ## 10. Rate deals qualified in both lanes on lane time
 
@@ -2224,8 +2340,8 @@ campaign index currency.
         and "Lane time and the doubles' controls" (the reservation control);
         `docs/development/TESTING.md`, "Private Service Dependencies" (the doubles'
         controls paragraph); `kit/arkhai-payments/README.md`, "Installed contract and
-        authority fixture" (the reservation method beside `advance`); the double's and
-        the controls' READMEs, written in 9B.4.
+        authority fixture" (the reservation method beside `advance`), already written
+        with the code in 9B.1; the double's and the controls' READMEs, written in 9B.4.
       - D18, D19: `docs/development/TESTING.md`, "The canonical compute deal" (the
         watchdog cases with the storefront paused; the rate rows and watchdog cases as
         Compose-lane, lane-double evidence), beside the `test-compatibility` spec by the

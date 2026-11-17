@@ -713,7 +713,7 @@ wheels = [
 
 [[package]]
 name = "lane-double-controls"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -723,7 +723,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "lane_double_controls-0.1.0-py3-none-any.whl" },
+    { path = "lane_double_controls-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -11,6 +11,8 @@ from lane_double_controls.models import (
     ControlError,
     FilingAnswer,
     Funding,
+    Reservation,
+    Reserved,
     Rule,
     Ruling,
     TimeView,
@@ -176,6 +178,38 @@ def test_a_time_view_states_its_now_exactly_when_injected(view: dict[str, Any]) 
 def test_funding_is_a_positive_count_of_minor_units(amount: str) -> None:
     with pytest.raises(ValidationError):
         Funding(account="00000000-0000-4000-8000-0000000000b1", amount=amount)
+
+
+def test_a_reservation_names_one_instant() -> None:
+    assert Reservation.model_validate({"through": 1_800_007_200}).through == 1_800_007_200
+
+
+@pytest.mark.parametrize("body", [
+    {}, {"through": "1800007200"}, {"through": 1_800_007_200.5}, {"through": True},
+    {"through": -1}, {"through": 1_800_007_200, "periods": 2},
+], ids=["missing", "string", "float", "boolean", "negative", "extra"])
+def test_a_malformed_reservation_is_refused(body: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        Reservation.model_validate(body)
+
+
+_PART = {"part": 0, "reserved_through": 1_800_000_360, "periods_added": 1}
+
+
+def test_a_reservation_answer_lists_each_running_part() -> None:
+    answer = Reserved.model_validate({"transaction": "9c" * 32, "parts": [_PART]})
+    assert answer.parts[0].reserved_through == 1_800_000_360
+
+
+@pytest.mark.parametrize("answer", [
+    {"transaction": "9c" * 32, "parts": []},
+    {"transaction": "not-a-transaction", "parts": [_PART]},
+    {"transaction": "9c" * 32, "parts": [{**_PART, "periods_added": -1}]},
+    {"transaction": "9c" * 32, "parts": [{**_PART, "part": "0"}]},
+], ids=["no-parts", "transaction", "negative-periods", "string-part"])
+def test_a_reservation_answer_reaching_nothing_or_malformed_is_refused(answer: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        Reserved.model_validate(answer)
 
 
 def test_a_control_error_carries_one_body() -> None:

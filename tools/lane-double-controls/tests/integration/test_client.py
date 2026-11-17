@@ -92,6 +92,10 @@ _CALLS: list[tuple[str, Callable[[ControlClient], Any], str, str, dict[str, str]
      {"account": "acct", "amount": "2500"}, (200, {"account": "acct", "amount": "2500"})),
     ("rotate_signer", lambda c: c.rotate_signer(), "POST", "/test/signer/rotate", {}, None,
      (200, {"scheme": "ed25519", "identifier": "abc"})),
+    ("reserve", lambda c: c.reserve(_TRANSACTION, 1_800_007_200), "POST",
+     f"/test/transactions/{_TRANSACTION}/reserve", {}, {"through": 1_800_007_200},
+     (200, {"transaction": _TRANSACTION, "parts": [
+         {"part": 0, "reserved_through": 1_800_000_360, "periods_added": 1}]})),
     ("cases", lambda c: c.cases(_TRANSACTION), "GET", "/test/cases",
      {"transaction": _TRANSACTION}, None, (200, {"cases": [_CASE]})),
     ("decide", lambda c: c.decide("case-1", _RULING), "POST", "/test/cases/case-1/decide", {},
@@ -120,7 +124,8 @@ def test_each_client_method_sends_its_routes_request_with_the_control_token(
 
 
 def test_every_declared_route_has_a_client_method() -> None:
-    called = {(method, re.sub(r"case-1|r\.1", "{}", path)) for _, _, method, path, *_ in _CALLS}
+    called = {(method, re.sub(rf"case-1|r\.1|{_TRANSACTION}", "{}", path))
+              for _, _, method, path, *_ in _CALLS}
     declared = {(route.method, re.sub(r"\{[a-z_]+\}", "{}", route.path))
                 for route in routes.ROUTES}
 
