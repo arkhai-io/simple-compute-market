@@ -19,10 +19,11 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from functools import partial
 from typing import Any
 
+import injected_time
 from compute_delivery import ComputeDeliveryPath, DeliveryOutcome, recover_deliveries
 from market_core.schemas import settlement_option_schema
 
@@ -72,7 +73,7 @@ class VmDeliveryRecovery:
         claimed = await self._db.claim_vm_delivery(
             negotiation_id=negotiation_id,
             owner=self._owner,
-            lease_until=(datetime.now(timezone.utc) + timedelta(seconds=self._lease_seconds)).isoformat(),
+            lease_until=(injected_time.now_datetime() + timedelta(seconds=self._lease_seconds)).isoformat(),
         )
         try:
             yield claimed

@@ -126,6 +126,18 @@ class Settings:
             )
 
     @property
+    def configured_time_source(self) -> object | None:
+        """The value ``time.source`` states, or ``None`` when no layer states it.
+
+        Returned as stated, for the composition root to install or refuse; a
+        ``time`` that is not a table states no source.
+        """
+        section = self._source.get("time")
+        if not hasattr(section, "items"):
+            return None
+        return {str(key).lower(): item for key, item in section.items()}.get("source")
+
+    @property
     def resolved_vm_playbook_path(self) -> Path:
         return Path(str(self._source.vm_playbook_path)).resolve()
 

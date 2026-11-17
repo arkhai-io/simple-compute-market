@@ -13,7 +13,7 @@ import logging
 import httpx
 import pytest
 
-from lane_double_controls import ControlClient, Status, routes
+from lane_double_controls import ControlClient, Status, TimeView, routes
 
 from tests.e2e.roles.helpers import lane_doubles
 from tests.e2e.roles.helpers.mediation import MediationTarget
@@ -39,8 +39,9 @@ def _double(contracts: dict[str, str]) -> ControlClient:
     def answer(request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == f"Bearer {_TOKEN}"
         assert (request.method, request.url.path) == (routes.STATUS.method, routes.STATUS.path)
-        status = Status(perceived_now=1_800_000_000, offset_seconds=0, contracts=contracts)
-        return httpx.Response(200, json=status.model_dump(mode="json"))
+        status = Status(time=TimeView(source="injected", now=1_800_000_000),
+                        contracts=contracts)
+        return httpx.Response(200, json=status.model_dump(mode="json", exclude_none=True))
 
     return ControlClient("https://double.test", token=_TOKEN, transport=httpx.MockTransport(answer))
 

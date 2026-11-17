@@ -6,8 +6,8 @@ tags: [engineering, implementation]
 
 How production code is written: what it guards against, what it builds rather than
 reuses, how shared behaviour is composed and classes are related, how a service's
-layers divide the work, which party decides, and how a long-running worker is driven
-by hand.
+layers divide the work, which party decides, where a process reads the time, and how
+a long-running worker is driven by hand.
 
 ## No speculative guard code
 
@@ -128,6 +128,28 @@ messages were originated or sent unless the later is derived from the earlier, f
 example by carrying a digest of it. A design that needs an origin order between two
 parties' messages makes the later message carry that derivation; one that needs only a
 single authority's order relies on that authority's own recorded sequence.
+
+## One time source per process
+
+A process reads the time of the world — any instant it stores, signs, sends to
+another party, or compares with an instant another party knows — from one time
+source, installed by its composition root, and from nothing else. A read straight
+from the wall clock bypasses that source: where a test sets the time every party
+reads, the one read of the wall clock disagrees with every other party.
+
+A duration of the process's own activity — a timeout, a poll budget, a backoff, a
+rate-limiter window, a loop interval — is not the time of the world. It is measured
+on the monotonic clock, which neither stops when the source's time is held nor
+jumps when it is set: a timeout measured on a held clock never expires, and one
+measured on a clock that was just moved forward expires at once. A value only
+subtracted from another reading in the same process is such a duration.
+
+A billing service, for example, stamps each invoice with the time source's instant
+and compares a payment's due date with it, while the retry loop that sends the
+invoice bounds its wait on the monotonic clock. A function that takes a clock to
+stay testable defaults it to the process's source when the clock reads the time of
+the world, and to the monotonic clock when it measures a duration, never to the
+wall clock.
 
 ## Operator lifecycle controls
 

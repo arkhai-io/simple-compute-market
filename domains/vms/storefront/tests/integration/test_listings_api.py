@@ -13,8 +13,10 @@ FastAPI app with dependency overrides.
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
+
 from market_policy.listing_source import ListingSourceVerdict
 from market_core.schemas import PriceBasis, RateValue, derive_settlement_option_id
 from unittest.mock import AsyncMock, patch
@@ -960,6 +962,34 @@ class TestCreateListing:
                 paused=True,
             )
         assert "400" in str(exc_info.value)
+
+    async def test_a_created_listing_holds_the_injected_instant(
+        self, injected_source, seller_auth_full_client
+    ):
+        """Every time the listing's ordering and reconciliation read is the
+        storefront's process source, never a read of the wall clock."""
+        c, db = seller_auth_full_client
+        result = await c.create_listing(
+            listing_resource=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            paused=True,
+        )
+
+        instant = datetime.fromtimestamp(injected_source.now(), timezone.utc)
+        with sqlite3.connect(db.db_path) as conn:
+            created_at, updated_at = conn.execute(
+                "SELECT created_at, updated_at FROM listings WHERE listing_id = ?",
+                (result.listing_id,),
+            ).fetchone()
+            (reconciled_at,) = conn.execute(
+                "SELECT last_reconciled_at FROM storefront_listing_bindings"
+                " WHERE listing_id = ?",
+                (result.listing_id,),
+            ).fetchone()
+        stored = instant.replace(tzinfo=None).isoformat()
+        assert (created_at, updated_at) == (stored, stored)
+        assert reconciled_at == instant.isoformat()
 
     async def test_resource_id_only_offer_succeeds(self, seller_auth_full_client):
         """A resource_id-only listing_resource (no pool_id) is a legitimate

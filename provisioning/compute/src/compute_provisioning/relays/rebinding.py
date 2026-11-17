@@ -16,10 +16,17 @@ So there is one rebinding rule, applied at three write paths:
     relay is the same on both sides, in which case no delivered connection
     string moves and the change is free.
 
-There is deliberately no new draining primitive. Disabling a pool already
-excludes it from new scheduling without invalidating active workloads, so
-rebinding is disable, wait, rebind, re-enable. A second draining concept beside
-the existing one would be a second thing to understand and keep consistent.
+Rebinding is drain-then-change, and a drain is one lifecycle — stop new work,
+let existing work finish — at two scopes, with no other drain. Disabling a pool
+drains that pool: it excludes the pool from new scheduling without invalidating
+its running deliveries, which is what a pool's relay reference or a host's pool
+waits on. Disabling a relay drains every pool referencing it: no new lease is
+allocated on it and its leased deliveries run to their end, until it reads
+drained, which is what a relay's address or port waits on, since each affects
+every pool on the relay. A relay's token rotation waits on the same drain, for
+the reason ``check_relay_token_rotation`` gives. A refusal names the drain at
+the scope that clears it, so an operator is not sent to disable each pool on a
+relay in turn.
 """
 
 from __future__ import annotations
@@ -44,11 +51,17 @@ class RelayRebindingRefused(ValueError):
     """A relay binding cannot change while deliveries are still reachable through it."""
 
 
-# How an operator gets past this. Carried in the message rather than left to
-# documentation, because the operator who hits the rule is the one who needs it.
-_DRAIN_HINT = (
+# How an operator gets past this, at the scope that clears it. Carried in the
+# message rather than left to documentation, because the operator who hits the
+# rule is the one who needs it.
+_POOL_DRAIN_HINT = (
     "Disable the pool to stop new scheduling without disturbing running deliveries, "
-    "wait for these leases to be released, then make the change and re-enable."
+    "wait for these leases to be released, then make the change and re-enable the pool."
+)
+_RELAY_DRAIN_HINT = (
+    "Disable the relay to stop new deliveries on every pool referencing it without "
+    "disturbing running ones, wait until the relay reads drained, then make the "
+    "change and enable the relay again."
 )
 
 
@@ -63,12 +76,14 @@ def _describe(leases: Sequence[RelayPortLease], limit: int = 5) -> str:
     return ", ".join(shown)
 
 
-def _refuse(what: str, leases: Sequence[RelayPortLease]) -> RelayRebindingRefused:
+def _refuse(
+    what: str, leases: Sequence[RelayPortLease], hint: str
+) -> RelayRebindingRefused:
     return RelayRebindingRefused(
         f"{what} while {len(leases)} tunnel(s) are still bound through it "
         f"({_describe(leases)}). Each one corresponds to a connection string a "
         f"buyer already holds, and a remote port does not carry across relays. "
-        f"{_DRAIN_HINT}"
+        f"{hint}"
     )
 
 
@@ -104,6 +119,7 @@ def check_relay_endpoint_change(
             f"Relay '{relay.id}' cannot move from "
             f"{relay.relay_addr}:{relay.relay_port} to {new_addr}:{new_port}",
             held,
+            _RELAY_DRAIN_HINT,
         )
 
 
@@ -126,6 +142,7 @@ def check_relay_token_rotation(db: Session, *, relay: Relay) -> None:
         raise _refuse(
             f"Relay '{relay.id}' cannot have its admission token rotated",
             held,
+            _RELAY_DRAIN_HINT,
         )
 
 
@@ -149,6 +166,7 @@ def check_pool_relay_change(
             f"Pool '{pool_id}' cannot change its relay from "
             f"{current_relay_id or '<none>'} to {new_relay_id or '<none>'}",
             held,
+            _POOL_DRAIN_HINT,
         )
 
 
@@ -177,6 +195,7 @@ def check_host_pool_change(
             f"{current_pool_id or '<none>'} to {new_pool_id or '<none>'}, which "
             f"dials a different relay",
             held,
+            _POOL_DRAIN_HINT,
         )
 
 

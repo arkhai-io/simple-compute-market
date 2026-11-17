@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 from compute_delivery import RecordedProgress
 from market_core import SettlementEvidence
 from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH
@@ -35,7 +36,7 @@ def _json(value: Any) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return injected_time.now_datetime().isoformat()
 
 
 #: Every ``fulfillment_phase`` a VM delivery record holds. A phase outside
@@ -386,7 +387,7 @@ class VmSettlementRepository:
                 ).fetchone()[0]
                 record_delivery_end(
                     conn, negotiation_id, source_ref="refund:" + reference,
-                    cause="settlement_refunded", now=int(datetime.now(timezone.utc).timestamp()),
+                    cause="settlement_refunded", now=injected_time.now(),
                 )
 
         await asyncio.to_thread(complete)
@@ -428,7 +429,7 @@ class VmSettlementRepository:
                         "SELECT MIN(ended_at) FROM servicing_final_requests WHERE negotiation_id=?",
                         (negotiation_id,),
                     ).fetchone()[0]
-                    if selected is not None and selected <= datetime.now(timezone.utc).timestamp():
+                    if selected is not None and selected <= injected_time.now():
                         result.update(status="ended", connection_details=None, tenant_credentials=None)
                 return result
 
@@ -529,7 +530,7 @@ class VmSettlementRepository:
                 return [
                     dict(row)
                     for row in conn.execute(
-                        "SELECT * FROM vm_delivery_records WHERE status NOT IN ('ready', 'failed', 'refunded', 'ended') ORDER BY updated_at LIMIT ?",
+                        "SELECT * FROM vm_delivery_records WHERE status NOT IN ('ready', 'failed', 'refunded', 'ended') ORDER BY updated_at, rowid LIMIT ?",
                         (limit,),
                     ).fetchall()
                 ]

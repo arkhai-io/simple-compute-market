@@ -2,9 +2,9 @@
 
 The payments peer is the payments kit's ``FakePaymentsClient``, acting as the
 authority's account over its shared ``PaymentsAuthority`` engine, and one injected
-wall clock under the double's perceived clock is both the double's time and the
-engine's. The kit's real ``MediationClient`` sends through an ASGI transport to the
-app; ``ControlClient`` through Starlette's test client, which an httpx mock
+source, starting at ``T0``, is both the double's time and the engine's, as both
+read one lane time in a lane. The kit's real ``MediationClient`` sends through
+an ASGI transport to the app; ``ControlClient`` through Starlette's test client, which an httpx mock
 transport forwards to, so both send exactly the requests they send over the
 network.
 """
@@ -17,6 +17,7 @@ from typing import Any, TypeVar
 
 import httpx
 from fastapi.testclient import TestClient
+from injected_time import InjectedTime
 from pydantic import SecretStr
 
 from lane_double_controls import ControlClient
@@ -30,7 +31,7 @@ from market_identity import Ed25519Signer
 from mediation_lane_double.app import create_app
 from mediation_lane_double.authority import AuthorityFixture, parse_authority
 
-from conftest import Clock, committed_authority
+from conftest import committed_authority
 
 T0 = 1_800_000_000
 DAY = 86_400
@@ -68,14 +69,14 @@ class Lane:
     """
 
     def __init__(self, wrap: Callable[[FakePaymentsClient], Any] | None = None) -> None:
-        self.wall = Clock(T0)
+        self.time = InjectedTime(start=T0)
         self.authority = suite_authority()
         self.payments = FakePaymentsClient(signer=PAYMENTS_SIGNER)
         # Every event the double submits is the authority account's.
         self.payments(self.authority.account)
         peer = wrap(self.payments) if wrap is not None else self.payments
-        self.app = create_app(self.authority, peer, clock=self.wall)
-        self.payments.engine.clock = self.app.state.clock
+        self.app = create_app(self.authority, peer, source=self.time)
+        self.payments.engine.clock = self.time.now
         self.http = TestClient(self.app, base_url=ORIGIN)
         self.dispute = DisputeAuthority.model_validate({
             "interface": self.authority.interface, "origin": ORIGIN,

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import time
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
+import injected_time
 from market_identity import Identity
 
 from .models import (
@@ -60,7 +60,7 @@ class SettlementRuntime:
         repository: SettlementRuntimeRepository,
         clients: Mapping[str, ConditionalEscrowClient],
         *,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = injected_time.now,
         lease_seconds: float = 30.0,
         fulfillment_lease_seconds: float | None = None,
     ) -> None:

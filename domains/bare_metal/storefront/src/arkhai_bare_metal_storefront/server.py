@@ -14,16 +14,21 @@ from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import set_stage_event_db_path
 from market_core import MarketDomainContract
 from market_deal_servicing import create_lifecycle_router
+import injected_time
 from market_storefront_kit import get_storefront_container
 from market_storefront_kit import (
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
+    StorefrontTimeRouteService,
+    announce_time_source,
     build_composed_storefront_app,
+    install_time_source,
 )
 
 from .api import router as http_router
-from .config import load_storefront_settings
+from .api import time_router
+from .config import configured_time_source, load_storefront_settings
 from .domain_runtime import get_market_domain_contract
 from .lifecycle_steps import register_bare_metal_loops
 from .response_auth import authenticate_response
@@ -59,6 +64,11 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
         await runtime.settlement_composition.disputes.refresh(
             runtime.registry_configuration.client_factory(runtime.marketplace_signer)
         )
+    announce_time_source(
+        injected_time.installed(),
+        payments_livemode=runtime.payments_livemode,
+        logger=logger,
+    )
     seed_service_peer_trust(runtime)
     set_stage_event_db_path(runtime.db.db_path)
     # The storefront starts regardless, so one mechanism's missing
@@ -99,9 +109,14 @@ def build_bare_metal_storefront_app(
     routers: Iterable[Any] = (),
     root_path: str = "",
 ) -> Any:
-    """Build the shared storefront shell around one bare-metal registration."""
+    """Build the shared storefront shell around one bare-metal registration.
+
+    The time-setting route is mounted only when the process's installed source
+    is injected time.
+    """
 
     registration = registry.resolve_mode("bare_metal")
+    time_routers = (time_router,) if StorefrontTimeRouteService().mounted else ()
     selected_domain = registration.contract
 
     def build_services(domain: MarketDomainContract) -> BareMetalStorefrontRuntime:
@@ -139,7 +154,7 @@ def build_bare_metal_storefront_app(
             ),
             services=service_hooks,
             routes=StorefrontRouteHooks(
-                routers=(http_router, create_lifecycle_router(lambda request: get_storefront_container(request).lifecycle.routes()), *tuple(routers)),
+                routers=(http_router, *time_routers, create_lifecycle_router(lambda request: get_storefront_container(request).lifecycle.routes()), *tuple(routers)),
                 middleware=(authenticate_response,),
             ),
         )
@@ -149,6 +164,11 @@ def build_bare_metal_storefront_app(
 BARE_METAL_STOREFRONT_REGISTRY = build_bare_metal_storefront_registry(
     domain=get_market_domain_contract(),
 )
+# The process's time source is installed here, before the application is built
+# and before anything reads the time: `[Time] source` decides whether the
+# time-setting route is mounted, and a value other than "wall" or "injected"
+# refuses startup naming it.
+install_time_source(configured_time_source())
 app = build_bare_metal_storefront_app(
     registry=BARE_METAL_STOREFRONT_REGISTRY,
 )

@@ -42,10 +42,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+import injected_time
 from arkhai_bare_metal.provisioning_routes import (
     BARE_METAL_MOCK_OPERATION_PREFIX,
     BARE_METAL_MOCK_ROUTE_PREFIX,
@@ -189,7 +189,7 @@ class ProvisioningTestClient:
                 operation=contract.operation,
                 resource=resource,
                 request_id=request_id,
-                timestamp=int(datetime.now(timezone.utc).timestamp()),
+                timestamp=injected_time.now(),
                 body_hash=canonical_body_hash(canonical),
             ),
         )
@@ -281,7 +281,7 @@ class ProvisioningTestClient:
         result = verify_response(
             authenticated,
             body=body,
-            now=int(datetime.now(timezone.utc).timestamp()),
+            now=injected_time.now(),
             max_skew=self._max_timestamp_skew,
             expected_role="service",
             expected_principals=self._expected_authorities,

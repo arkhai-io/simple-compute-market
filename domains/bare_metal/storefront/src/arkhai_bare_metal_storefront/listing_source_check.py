@@ -22,8 +22,9 @@ the site stays authoritative. See openspec/specs/storefront-publication/spec.md,
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 
+import injected_time
 from arkhai_bare_metal import (
     SOURCE_MATCHES,
     SOURCE_UNAVAILABLE,
@@ -47,16 +48,12 @@ from .sqlite_client import SQLiteClient
 ListingSourceCheck = Callable[[str], Awaitable[ListingSourceVerdict]]
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 def build_listing_source_check(
     db: SQLiteClient,
     site_projections: SiteProjectionState | None,
     *,
     confirmation_window_seconds: float,
-    clock: Callable[[], datetime] = _utc_now,
+    clock: Callable[[], datetime] = injected_time.now_datetime,
 ) -> ListingSourceCheck:
     """A check reading each listing's own site from ``site_projections``.
 

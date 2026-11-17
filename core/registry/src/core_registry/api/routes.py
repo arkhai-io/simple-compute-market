@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from core_registry.api.admin_routes import router as admin_router
+from core_registry.api.admin_routes import status_router as admin_status_router
 from core_registry.api.descriptor_routes import router as descriptor_router
 from core_registry.api.filter_spec import router as filter_spec_router
 from core_registry.api.listing_routes import router as listing_router
@@ -16,9 +17,11 @@ router = APIRouter()
 # Public surface: health + admin endpoints stay outside the
 # bearer-token gate. Health is by definition unauthenticated; admin
 # endpoints carry their own require_admin_api_key dependency
-# attached at the admin router (a separate shared secret).
+# attached at the admin router (a separate shared secret). The time-setting
+# admin route is mounted by main.py, only under injected time.
 router.include_router(make_health_router())
 router.include_router(admin_router)
+router.include_router(admin_status_router)
 router.include_router(descriptor_router)
 
 router.include_router(make_system_router())

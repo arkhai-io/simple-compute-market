@@ -16,13 +16,12 @@ import json
 import logging
 import os
 import sqlite3
-import time
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import injected_time
 from market_core import DomainIdentity
 from market_identity import Identity, ReplayIdentity, ReplayReservation
 
@@ -39,6 +38,20 @@ from core_storefront.domain_registry import (
 from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 
 logger = logging.getLogger(__name__)
+
+
+def store_timestamp() -> str:
+    """The process time source's instant as the market-state tables' text timestamps hold it.
+
+    ISO 8601 in UTC with no offset: the stale-negotiation sweep, among the
+    columns' readers, reads a timestamp with no offset as UTC. A domain store
+    writing this form uses it too; some write the same instant with its
+    `+00:00` offset, which sorts beside it, since both start with the same
+    nineteen characters. The instant is whole seconds, and the source may hold
+    one instant across many writes, so a query ordering by such a column breaks
+    ties by insertion order.
+    """
+    return injected_time.now_datetime().replace(tzinfo=None).isoformat()
 
 
 def _principal_columns(principal: Identity) -> tuple[str, str]:
@@ -281,7 +294,7 @@ def write_listing_update(
     if status is not None:
         updates.append("closed_by=?")
         values.append(closed_by)
-    add("updated_at", updated_at or datetime.now().isoformat())
+    add("updated_at", updated_at or store_timestamp())
     add("listing_resource", listing_resource, serialize=True)
     add("fulfillment_resource", fulfillment_resource, serialize=True)
     for name, value in (
@@ -1621,7 +1634,7 @@ class SQLiteClient:
                     SET terminal_state = ?, status = 'terminated', updated_at = ?
                     WHERE negotiation_id = ?
                     """,
-                    (terminal_state, datetime.now().isoformat(), negotiation_id),
+                    (terminal_state, store_timestamp(), negotiation_id),
                 )
                 conn.commit()
             finally:
@@ -1667,7 +1680,7 @@ class SQLiteClient:
             settlement_data_json = None
 
         def _save() -> None:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             agreed_at_value = accepted_at or now
             conn = sqlite3.connect(self.db_path)
             try:
@@ -1760,7 +1773,7 @@ class SQLiteClient:
                     "UPDATE negotiation_threads "
                     "SET settlement_plan = ?, updated_at = ? "
                     "WHERE negotiation_id = ?",
-                    (encoded, datetime.now().isoformat(), negotiation_id),
+                    (encoded, store_timestamp(), negotiation_id),
                 )
                 conn.commit()
             except Exception:
@@ -1908,7 +1921,7 @@ class SQLiteClient:
             if not updates:
                 return
             updates.append("updated_at = ?")
-            values.append(datetime.now().isoformat())
+            values.append(store_timestamp())
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute(
@@ -2118,7 +2131,7 @@ class SQLiteClient:
                             reservation.request_hash,
                             attempt_token,
                             now + lease_seconds,
-                            datetime.now().isoformat(),
+                            store_timestamp(),
                         ),
                     )
                     conn.commit()
@@ -2274,7 +2287,7 @@ class SQLiteClient:
         PRIMARY KEY conflict (idempotent by escrow_uid)."""
 
         def _insert() -> bool:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             conn = sqlite3.connect(self.db_path)
             try:
                 try:
@@ -2324,7 +2337,7 @@ class SQLiteClient:
                         "UPDATE escrows SET fulfillment_phase = "
                         "COALESCE(fulfillment_phase, 'delivery_started'), updated_at = ? "
                         "WHERE escrow_uid = ? AND status = 'provisioning'",
-                        (datetime.now().isoformat(), escrow_uid),
+                        (store_timestamp(), escrow_uid),
                     )
                 return cursor.rowcount == 1
             finally:
@@ -2342,7 +2355,7 @@ class SQLiteClient:
         """
 
         def _record() -> dict[str, Any]:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             conn = sqlite3.connect(self.db_path, isolation_level=None)
             try:
                 conn.execute("BEGIN IMMEDIATE")
@@ -2400,7 +2413,7 @@ class SQLiteClient:
                         conn.execute(
                             "UPDATE escrows SET status = ?, updated_at = ? "
                             "WHERE escrow_uid = ? AND status = 'refunding'",
-                            (prior_status, datetime.now().isoformat(), escrow_uid),
+                            (prior_status, store_timestamp(), escrow_uid),
                         )
             finally:
                 conn.close()
@@ -2459,7 +2472,7 @@ class SQLiteClient:
             if not updates:
                 return
             updates.append("updated_at = ?")
-            values.append(datetime.now().isoformat())
+            values.append(store_timestamp())
 
             conn = sqlite3.connect(self.db_path)
             try:
@@ -2499,7 +2512,7 @@ class SQLiteClient:
                     LEFT JOIN settlement_obligations o
                       ON o.mechanism_ref = e.escrow_uid
                     WHERE o.obligation_ref IS NULL
-                    ORDER BY e.created_at ASC
+                    ORDER BY e.created_at ASC, e.rowid ASC
                     LIMIT ?
                     """,
                     (limit,),
@@ -2525,7 +2538,7 @@ class SQLiteClient:
                     SELECT {", ".join(self._ESCROW_COLS)}
                     FROM escrows
                     WHERE is_primary = 1 AND status NOT IN ('ready', 'failed', 'refunded')
-                    ORDER BY updated_at ASC
+                    ORDER BY updated_at ASC, rowid ASC
                     LIMIT ?
                     """,
                     (limit,),
@@ -2542,7 +2555,7 @@ class SQLiteClient:
         """Atomically claim unfinished escrow convergence until ``lease_until``."""
 
         def _claim() -> bool:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.execute(
@@ -2573,7 +2586,7 @@ class SQLiteClient:
                     """UPDATE escrows SET processing_owner = NULL,
                        processing_lease_until = NULL, updated_at = ?
                        WHERE escrow_uid = ? AND processing_owner = ?""",
-                    (datetime.now().isoformat(), escrow_uid, owner),
+                    (store_timestamp(), escrow_uid, owner),
                 )
                 conn.commit()
             finally:
@@ -2619,7 +2632,7 @@ class SQLiteClient:
                     SELECT {", ".join(self._ESCROW_COLS)}
                     FROM escrows
                     WHERE negotiation_id = ? AND is_primary = 1
-                    ORDER BY created_at ASC LIMIT 1
+                    ORDER BY created_at ASC, rowid ASC LIMIT 1
                     """,
                     (negotiation_id,),
                 ).fetchone()
@@ -2652,7 +2665,7 @@ class SQLiteClient:
                     JOIN negotiation_threads nt
                       ON nt.negotiation_id = e.negotiation_id
                     WHERE nt.our_listing_id = ? AND e.is_primary = 1
-                    ORDER BY e.created_at ASC LIMIT 1
+                    ORDER BY e.created_at ASC, e.rowid ASC LIMIT 1
                     """,
                     (listing_id,),
                 ).fetchone()
@@ -2697,7 +2710,7 @@ class SQLiteClient:
                 published_str = published_payload
             else:
                 published_str = json.dumps(published_payload)
-            now = published_at if published_at is not None else int(time.time())
+            now = published_at if published_at is not None else injected_time.now()
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute(
@@ -3046,7 +3059,7 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                now = datetime.now().isoformat()
+                now = store_timestamp()
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO negotiation_threads(
@@ -3312,7 +3325,7 @@ class SQLiteClient:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 cur = conn.cursor()
-                timestamp = datetime.now().isoformat()
+                timestamp = store_timestamp()
                 proposal_blob = (
                     json.dumps(buyer_escrow_proposal)
                     if buyer_escrow_proposal is not None
@@ -3605,7 +3618,7 @@ class SQLiteClient:
                             updated_at = ?
                         WHERE negotiation_id = ?
                         """,
-                        (datetime.now().isoformat(), neg_id),
+                        (store_timestamp(), neg_id),
                     )
                     canceled.append(
                         {
@@ -3658,7 +3671,7 @@ class SQLiteClient:
                         ssh_commands,
                         ssh_key_path_host,
                         key_type,
-                        datetime.now().isoformat(),
+                        store_timestamp(),
                     ),
                 )
                 conn.commit()
@@ -3685,7 +3698,7 @@ class SQLiteClient:
                            ssh_commands, ssh_key_path_host, key_type, created_at
                     FROM credentials
                     WHERE listing_id = ? AND granted_to = ?
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, rowid ASC
                     """,
                     (listing_id, granted_to),
                 )
@@ -3798,7 +3811,7 @@ class SQLiteClient:
                            rate_structure,
                            available_until_utc
                     FROM listings {where}
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),
@@ -3865,7 +3878,7 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     "UPDATE listings SET paused = ?, updated_at = ? WHERE listing_id = ?",
-                    (1 if paused else 0, datetime.now().isoformat(), listing_id),
+                    (1 if paused else 0, store_timestamp(), listing_id),
                 )
                 conn.commit()
             finally:
@@ -3931,7 +3944,7 @@ class SQLiteClient:
                            agreed_at, created_at, updated_at
                     FROM negotiation_threads
                     {where}
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),
@@ -4097,7 +4110,7 @@ class SQLiteClient:
                     SELECT ts, stage, event, data
                     FROM stage_events
                     WHERE negotiation_id = ?
-                    ORDER BY ts ASC
+                    ORDER BY ts ASC, id ASC
                     """,
                     (neg_id,),
                 )
@@ -4125,7 +4138,7 @@ class SQLiteClient:
                            escrow_address, is_primary, status
                     FROM escrows
                     WHERE negotiation_id = ?
-                    ORDER BY is_primary DESC, created_at ASC
+                    ORDER BY is_primary DESC, created_at ASC, rowid ASC
                     """,
                     (neg_id,),
                 )

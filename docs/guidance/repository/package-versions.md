@@ -99,11 +99,16 @@ because Helm rewrites every `Chart.yaml` when packaging:
 A package storing a path more than once is refused, and so is one storing a file Git
 ignores under `helm/`: `helm package` reads whatever the directory holds, and
 `helm dependency update` leaves a time-stamped `Chart.lock` and subchart archives there.
-`helm/.helmignore` names those files. An untracked file Git does not ignore is packaged,
-as an edit of the tree is. The chart package includes `helm/`'s tracked tests and
-fixtures, so a test-only edit inside `helm/` takes a chart version bump. A Helm bump
-edits `.helm-version` and `tests.yml`'s `azure/setup-helm` version together; a test holds
-them equal.
+`helm/.helmignore` names those files. It also names every tracked file under `helm/`
+that is not the chart, so none reaches the package: the Makefiles and scripts that
+deploy and test it, the release values a deployment layers on it
+(`local-values.yaml`, `bare-metal-release-values.yaml`), the validation's capacity
+record, and the render tests and their fixtures. An edit to one of those takes no chart
+version bump; an edit to anything the package stores — a template, a Helm test pod's
+template under `templates/tests/`, a values or schema file, a subchart's files — does. A
+file added under `helm/` is packaged unless `.helmignore` names it, and so is an untracked
+file Git does not ignore, as an edit of the tree is. A Helm bump edits `.helm-version`
+and `tests.yml`'s `azure/setup-helm` version together; a test holds them equal.
 
 The check guards the versions recorded releases name. It is not a complete guard
 against PyPI, whose history includes versions no record names. The complete guard is

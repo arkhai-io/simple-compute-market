@@ -10,9 +10,9 @@ the provision terms, exactly like the VM lease duration.
 from __future__ import annotations
 
 import json
-import time
 from typing import Any, Optional
 
+import injected_time
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -344,7 +344,7 @@ def register(credits_app: typer.Typer) -> None:
                 )
                 selected_settlement = settlement_policy.select(
                     listing_dict,
-                    expiration_unix=int(time.time()) + 3600,
+                    expiration_unix=injected_time.now() + 3600,
                 )
                 if selected_settlement is None:
                     raise ValueError(

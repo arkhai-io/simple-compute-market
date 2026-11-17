@@ -4,7 +4,7 @@ version = "0.2.0"
 license = "MIT"
 description = "Signed buyer client for the storefront lifecycle API."
 requires-python = ">=3.12"
-dependencies = ["arkhai-kit-deal-lifecycle-contracts>=0.3.0", "arkhai-kit-identity>=0.4.0", "httpx>=0.27"]
+dependencies = ["arkhai-injected-time>=0.1.0", "arkhai-kit-deal-lifecycle-contracts>=0.3.0", "arkhai-kit-identity>=0.4.0", "httpx>=0.27"]
 
 [build-system]
 requires = ["hatchling"]
@@ -17,4 +17,8 @@ packages = ["src/market_deal_lifecycle_client"]
 dev = ["pytest>=8.3.4,<9"]
 
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity", "httpx"]
+allowed-dependencies = ["arkhai-injected-time", "arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity", "httpx"]
+
+# The time component's import name differs from its distribution's.
+[tool.arkhai.architecture.import-roots]
+injected_time = "arkhai-injected-time"

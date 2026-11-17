@@ -1213,7 +1213,9 @@ async def test_a_source_check_finds_the_backing_changed_as_a_declared_mismatch(d
 
 
 def _bindings(db: SQLiteClient, resource: str) -> list[tuple[str, str, str, str]]:
-    """``(listing_id, status, derivation_key, source_envelope_json)`` per binding."""
+    """``(listing_id, status, derivation_key, source_envelope_json)`` per binding,
+    in the order the listings were written: listings stamped in one second tie on
+    ``created_at``, so insertion breaks the tie."""
     with sqlite3.connect(db.db_path) as conn:
         return [
             tuple(row)
@@ -1223,7 +1225,7 @@ def _bindings(db: SQLiteClient, resource: str) -> list[tuple[str, str, str, str]
                 FROM storefront_listing_bindings b
                 JOIN listings l ON l.listing_id = b.listing_id
                 WHERE b.physical_resource_id = ?
-                ORDER BY l.created_at, b.listing_id
+                ORDER BY l.created_at, l.rowid
                 """,
                 (resource,),
             ).fetchall()

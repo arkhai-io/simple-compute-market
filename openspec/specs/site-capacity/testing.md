@@ -11,8 +11,8 @@ admission and offered read, each at the lowest level that can
 ## Host Requirement Enforcement
 
 The usable-host rule — where the pool is backed and its provider needs a host, a
-declaration is offered only when it names a registered, enabled host — is
-rechecked at each layer, and each layer proves its own check. Below the
+declaration is offered only when it names a host the composition reports taking
+new delivery — is rechecked at each layer, and each layer proves its own check. Below the
 provisioning service a "disabled" or "unregistered" host is an id a fake
 `DeliverableHosts` report leaves out, one case to the layer; that the host
 authority leaves both out is proved where it lives.

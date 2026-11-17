@@ -147,8 +147,7 @@ def _envelope(request, body):
     )
 
 
-def test_capacity_release_sync_async_contract_is_byte_equivalent(monkeypatch):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+def test_capacity_release_sync_async_contract_is_byte_equivalent(held_time):
     async_transport = _AsyncTransport()
     sync_transport = _SyncTransport()
     kwargs = {
@@ -209,9 +208,8 @@ def test_capacity_release_sync_async_contract_is_byte_equivalent(monkeypatch):
 
 
 def test_create_listing_settlement_config_sync_async_contract_is_byte_equivalent(
-    monkeypatch,
+    held_time,
 ):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
     async_transport = _AsyncCreateTransport()
     sync_transport = _SyncCreateTransport()
     settlement_config = {"mechanism_payload": {"opaque": ["shape"]}}

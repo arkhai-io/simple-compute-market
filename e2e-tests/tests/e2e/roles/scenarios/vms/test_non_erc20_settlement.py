@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass
 from typing import Any
 
+import injected_time
 import pytest
 from compute_provisioning_contracts import MockRuleCreate
 from market_alkahest.dev_chain import anvil_address_book_path
@@ -380,7 +380,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     # Pin the escrow deadline once: the negotiated terms and the escrow
     # created on chain must state the same one, and settlement refuses an
     # escrow whose deadline differs.
-    expiration_unix = int(time.time()) + 3600
+    expiration_unix = injected_time.now() + 3600
     # The VM seller infers nothing from an escrow's shape, so the opening names
     # the listing's Alkahest option explicitly, as the published copy lists it.
     (alkahest_option,) = [

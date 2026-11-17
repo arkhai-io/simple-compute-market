@@ -31,7 +31,7 @@ _CASE = {"case_ref": "case-1", "transaction": _TRANSACTION, "agreement": "b" * 6
 _RULE = Rule(rule_id="r.1", match={}, unavailable=True)
 _RULE_VIEW = {"rule": _RULE.model_dump(mode="json", exclude_none=True),
               "matched": 0, "waiting": 0}
-_CLOCK = {"perceived_now": 1_800_000_060, "offset_seconds": 60}
+_TIME = {"source": "injected", "now": 1_800_000_060}
 _RULING = Ruling(basis="operator", delivery_end=False,
                  effects=[{"kind": "reverse", "part": 0, "amount": "100"}], close=True)
 
@@ -84,12 +84,10 @@ _CALLS: list[tuple[str, Callable[[ControlClient], Any], str, str, dict[str, str]
      (204, None)),
     ("resume_rule", lambda c: c.resume_rule("r.1"), "POST", "/test/rules/r.1/resume", {},
      None, (200, _RULE_VIEW)),
-    ("advance_clock", lambda c: c.advance_clock(60), "POST", "/test/clock/advance", {},
-     {"seconds": 60}, (200, _CLOCK)),
-    ("reset_clock", lambda c: c.reset_clock(), "POST", "/test/clock/reset", {}, None,
-     (200, {"perceived_now": 1_800_000_000, "offset_seconds": 0})),
+    ("set_time", lambda c: c.set_time(1_800_000_060), "POST", "/test/time", {},
+     {"now": 1_800_000_060}, (200, _TIME)),
     ("status", lambda c: c.status(), "GET", "/test/status", {}, None,
-     (200, {**_CLOCK, "contracts": {"mediation.schema.json": "c" * 64}})),
+     (200, {"time": _TIME, "contracts": {"mediation.schema.json": "c" * 64}})),
     ("fund", lambda c: c.fund("acct", 2500), "POST", "/test/funding", {},
      {"account": "acct", "amount": "2500"}, (200, {"account": "acct", "amount": "2500"})),
     ("rotate_signer", lambda c: c.rotate_signer(), "POST", "/test/signer/rotate", {}, None,
@@ -166,7 +164,7 @@ def test_the_client_trusts_the_configured_ca_bundle_alone(
         (tmp_path / name).write_bytes(content)
 
     async def status_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
-        body = json.dumps({**_CLOCK, "contracts": {}}).encode()
+        body = json.dumps({"time": _TIME, "contracts": {}}).encode()
         await send({"type": "http.response.start", "status": 200,
                     "headers": [(b"content-type", b"application/json")]})
         await send({"type": "http.response.body", "body": body})
@@ -175,7 +173,7 @@ def test_the_client_trusts_the_configured_ca_bundle_alone(
                  key=tmp_path / "mediation-double.key.pem") as origin:
         with ControlClient(origin, token=_TOKEN,
                            ca_bundle_path=str(tmp_path / "lane-ca.pem")) as trusted:
-            assert trusted.status().offset_seconds == 60
+            assert trusted.status().time.now == 1_800_000_060
         with ControlClient(origin, token=_TOKEN) as default_trust:
             with pytest.raises(httpx.ConnectError):
                 default_trust.status()

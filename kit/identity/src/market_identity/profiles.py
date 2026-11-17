@@ -16,6 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import injected_time
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from market_identity.canonical import canonical_rotation_bytes
@@ -589,7 +590,7 @@ def rotate_profile(
         raise ProfileStoreError("rotation authority does not match local profile contract")
     if request.intent.current != profile.primary_principal:
         raise ProfileStoreError("rotation current principal is not the profile primary")
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or injected_time.now_datetime()
     result = verify_rotation(request, now=int(timestamp.timestamp()))
     if not result.current_valid or not result.replacement_valid or result.expired:
         raise ProfileStoreError("rotation requires valid current and replacement proofs")
@@ -838,7 +839,7 @@ def _profile_id(value: uuid.UUID | str) -> uuid.UUID:
 
 
 def _iso(value: datetime | None) -> str:
-    instant = value or datetime.now(timezone.utc)
+    instant = value or injected_time.now_datetime()
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
     return instant.astimezone(timezone.utc).isoformat()

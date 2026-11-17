@@ -16,14 +16,15 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
+import injected_time
 from market_schema_migrations import Migration
 
 from .introduction_routes import IntroductionPayloadsDeletedError, IntroductionRecord
 
 #: The text form of every timestamp in ``contact_introductions``: UTC, second
-#: precision, as SQLite's ``strftime('%Y-%m-%dT%H:%M:%SZ','now')`` writes
-#: ``created_at``. One fixed-width form is what lets eligibility compare
-#: timestamps as strings, which an index serves.
+#: precision, the form of the ``created_at`` column's DDL default,
+#: ``strftime('%Y-%m-%dT%H:%M:%SZ','now')``. One fixed-width form is what lets
+#: eligibility compare timestamps as strings, which an index serves.
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 #: What a redacted row's contact columns hold. Not NULL: the columns are
@@ -145,16 +146,19 @@ def insert_introduction(
                 "introduction already revealed with different contact payloads"
             )
         return existing
+    # The reveal time is the process time source's, never the database's: the
+    # retention sweep compares it with a cutoff read from that source.
     conn.execute(
         "INSERT INTO contact_introductions "
         "(obligation_ref, agreement_ref, buyer_contact, seller_contact, "
-        "introduction_package) VALUES (?, ?, ?, ?, ?)",
+        "introduction_package, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         (
             record.obligation_ref,
             record.agreement_ref,
             json.dumps(record.buyer_contact, sort_keys=True),
             json.dumps(record.seller_contact, sort_keys=True),
             json.dumps(record.introduction_package, sort_keys=True),
+            format_introduction_timestamp(injected_time.now_datetime()),
         ),
     )
     return record

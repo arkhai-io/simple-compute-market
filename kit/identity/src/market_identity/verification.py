@@ -106,8 +106,18 @@ def verify_request(
     capture: EnvelopeCapture | None = None,
     raw_body: bytes | None = None,
     headers: Mapping[str, str] | None = None,
+    time_setting_operation: str | None = None,
 ) -> VerificationResult:
-    """Verify request context and proof, then classify an optional replay lookup."""
+    """Verify request context and proof, then classify an optional replay lookup.
+
+    ``time_setting_operation`` names the operation that sets the authority's
+    time, which the authority passes only while it mounts that operation, under
+    injected time. A request for that operation is verified as every request is
+    — principal, context, body hash, proof and replay — but its timestamp is not
+    held to ``max_skew``: an advance of more than the skew leaves the caller,
+    which moves its own time first, signing at an instant the authority has not
+    reached yet. Every other operation keeps its freshness check.
+    """
 
     if max_skew < 0:
         raise ValueError("max_skew must not be negative")
@@ -134,7 +144,11 @@ def verify_request(
         return VerificationResult(code=VerificationCode.CONTEXT_MISMATCH)
     if not hmac.compare_digest(parsed.body_hash, canonical_body_hash(body)):
         return VerificationResult(code=VerificationCode.BODY_HASH_MISMATCH)
-    if abs(now - parsed.timestamp) > max_skew:
+    freshness_exempt = (
+        time_setting_operation is not None
+        and expected_operation == time_setting_operation
+    )
+    if not freshness_exempt and abs(now - parsed.timestamp) > max_skew:
         return VerificationResult(code=VerificationCode.TIMESTAMP_SKEW)
 
     verifier = get_identity_verifier(parsed.principal.scheme)

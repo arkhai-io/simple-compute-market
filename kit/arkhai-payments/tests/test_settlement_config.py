@@ -18,6 +18,7 @@ from market_arkhai_payments.settlement_config import (
     arkhai_payments_preflight,
     create_arkhai_payments_registration,
     payments_client_for_owner,
+    payments_livemode,
     resolve_payments_api_key,
 )
 from market_identity import Ed25519Signer, Eip191Signer
@@ -479,3 +480,11 @@ def test_client_factory_serves_a_disabled_mechanism() -> None:
     )
     with payments_client_for_owner(config, "11111111-1111-4111-8111-111111111111") as client:
         assert client is not None
+
+
+def test_live_payments_are_read_only_from_a_section_stating_true() -> None:
+    assert payments_livemode({}) is False
+    assert payments_livemode({"arkhai_payments": {"livemode": False}}) is False
+    assert payments_livemode({"arkhai_payments": {"livemode": "true"}}) is False
+    assert payments_livemode({"arkhai_payments": "on"}) is False
+    assert payments_livemode({"Arkhai_Payments": {"LIVEMODE": True}}) is True

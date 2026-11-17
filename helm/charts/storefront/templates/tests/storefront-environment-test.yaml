@@ -87,9 +87,9 @@ spec:
           readOnly: true
         {{- end }}
   volumes:
-    - name: test-config
+    - name: helm-profile
       configMap:
-        name: {{ .Release.Name }}-test-config
+        name: {{ .Release.Name }}-helm-profile
     {{- if $globalSecretEnabled }}
     {{- include "storefront.smokeTestSecretVolume" . | nindent 4 }}
     {{- else if $hasSelectedSecret }}

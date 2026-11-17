@@ -8,12 +8,12 @@ import pytest
 from pydantic import ValidationError
 
 from lane_double_controls.models import (
-    ClockAdvance,
     ControlError,
     FilingAnswer,
     Funding,
     Rule,
     Ruling,
+    TimeView,
 )
 
 _REVERSE = {"kind": "reverse", "part": 0, "amount": "500"}
@@ -150,10 +150,26 @@ def test_a_payments_rule_cannot_rule() -> None:
     assert refused.value.code == "invalid_request"
 
 
-@pytest.mark.parametrize("seconds", [0, -1])
-def test_the_clock_advances_only_forward(seconds: int) -> None:
+@pytest.mark.parametrize("view", [
+    {"source": "injected", "now": 1_794_821_400},
+    {"source": "wall"},
+])
+def test_a_time_view_is_an_injected_instant_or_wall_time(view: dict[str, Any]) -> None:
+    assert TimeView.model_validate(view).model_dump(exclude_none=True) == view
+
+
+@pytest.mark.parametrize("view", [
+    {"source": "injected"},
+    {"source": "wall", "now": 1_794_821_400},
+    {"source": "injected", "now": True},
+    {"source": "injected", "now": "1794821400"},
+    {"source": "injected", "now": -1},
+    {"source": "injected", "now": 253_402_300_800},
+    {"source": "frozen", "now": 1_794_821_400},
+])
+def test_a_time_view_states_its_now_exactly_when_injected(view: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
-        ClockAdvance(seconds=seconds)
+        TimeView.model_validate(view)
 
 
 @pytest.mark.parametrize("amount", ["0", "-5", "1.5", "", "01"])

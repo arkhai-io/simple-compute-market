@@ -239,9 +239,12 @@ def test_a_lane_storefront_configuration_is_its_stack_profile_plus_payments(
     lane, settlement, profile
 ):
     """The VM and API-credit lanes run their own copy of a profile the full local
-    stack also runs, so the stack runs no payments; the copy differs only in
-    what payments adds."""
-    assert _without_lane_payments(_toml(lane), settlement) == _without_lane_payments(
+    stack also runs, so the stack runs no payments and wall time; the copy
+    differs only in what payments adds and in the lane's injected time."""
+    copy = _toml(lane)
+    assert copy.pop("Time") == {"source": "injected"}
+    assert "Time" not in _toml(profile)
+    assert _without_lane_payments(copy, settlement) == _without_lane_payments(
         _toml(profile), settlement
     )
     assert not (_toml(profile)[settlement].get("arkhai_payments") or {}).get("enabled")

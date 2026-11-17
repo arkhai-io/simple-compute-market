@@ -15,12 +15,12 @@ import asyncio
 import json
 import logging
 import sqlite3
-from datetime import datetime
 from typing import Any
 
 from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
+    store_timestamp,
 )
 
 from market_storefront.payment_repository import VmSettlementRepository
@@ -125,7 +125,7 @@ class SQLiteClient(VmSettlementRepository, CoreSQLiteClient):
                     (
                         obligation_ref,
                         obligation_index,
-                        datetime.now().isoformat(),
+                        store_timestamp(),
                         escrow_uid,
                     ),
                 )

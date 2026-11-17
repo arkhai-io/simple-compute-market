@@ -44,6 +44,8 @@ from market_settlement_runtime.rate_publication import (
     DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
     PenaltyPeriods,
 )
+from market_storefront_kit import TimeSourceSetting
+from market_storefront_kit import configured_time_source as kit_configured_time_source
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from ..settings_source import DEFAULTS_FILE, settings_source
@@ -536,6 +538,24 @@ class WalletConfigDeclaration(BaseModel):
     address: str = ""
     ssh_public_key: str = ""
     private_key: str = Field(default="", json_schema_extra={"secret": True})
+
+
+class TimeConfigDeclaration(BaseModel):
+    """``[Time]``: the process's time source, ``"wall"`` unless set ``"injected"``.
+
+    Declares the section for a chart's generated values schema, which refuses
+    any other source; startup reads it through :func:`configured_time_source`
+    and refuses any other value naming it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: TimeSourceSetting = "wall"
+
+
+def configured_time_source(source: Dynaconf | None = None) -> Any:
+    """The value ``[Time] source`` states, or ``None`` when unset."""
+    return kit_configured_time_source(source or settings)
 
 
 class RegistryConfigDeclaration(BaseModel):

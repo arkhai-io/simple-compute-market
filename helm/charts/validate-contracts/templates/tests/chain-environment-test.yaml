@@ -38,7 +38,7 @@ spec:
         {{- include "validate-contracts.smokeTestConfigVolumeMounts" . | nindent 8 }}
         {{- include "validate-contracts.smokeTestSecretVolumeMounts" . | nindent 8 }}
   volumes:
-    - name: test-config
+    - name: helm-profile
       configMap:
-        name: {{ .Release.Name }}-test-config
+        name: {{ .Release.Name }}-helm-profile
     {{- include "validate-contracts.smokeTestSecretVolume" . | nindent 4 }}

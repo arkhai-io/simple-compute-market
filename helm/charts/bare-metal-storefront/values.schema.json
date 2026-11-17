@@ -1909,6 +1909,29 @@
             "object",
             "null"
           ]
+        },
+        "^[tT][iI][mM][eE]$": {
+          "additionalProperties": false,
+          "type": [
+            "object",
+            "null"
+          ],
+          "patternProperties": {
+            "^[sS][oO][uU][rR][cC][eE]$": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "wall",
+                    "injected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
         }
       }
     }

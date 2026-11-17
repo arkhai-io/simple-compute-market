@@ -24,10 +24,11 @@ start.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
+
+import injected_time
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
@@ -45,8 +46,8 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     ESCROW_TTL_SECONDS,
     WINDOW_TOLERANCE,
     alkahest_opening,
+    reach_agreement_instant,
     utc_instant,
-    wait_until,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.escrow import create_buyer_escrow
@@ -88,7 +89,7 @@ def _agree_and_escrow(
     fund its escrow on chain. ``start`` asks for an Agreement start; without
     one the deal starts at acceptance. ``before_escrow`` runs once the deal is
     accepted, with its negotiation id, before the escrow exists."""
-    expiration = int(time.time()) + ESCROW_TTL_SECONDS
+    expiration = injected_time.now() + ESCROW_TTL_SECONDS
     option, escrow = alkahest_opening(registry_client.get_listing(listing_id))
     terms = deal_driver.provision_terms()
     if start is not None:
@@ -158,7 +159,7 @@ class Stage13a_ForwardDealCommittedAndWaiting:
         # The deal's create runs as a buyer's would, with no gate held.
         delete_mock_rules_if_present(provisioning_test_client.vm_rules, PROV_RULE_ID, REMOVE_RULE_ID)
 
-        asked = (datetime.now(timezone.utc) + FORWARD_LEAD).replace(microsecond=0)
+        asked = injected_time.now_datetime() + FORWARD_LEAD
         deal = _agree_and_escrow(
             storefront_client, storefront_admin_client, registry_client, deal_driver,
             buyer_config, seller_wallet, listing_id, start=asked,
@@ -175,7 +176,7 @@ class Stage13a_ForwardDealCommittedAndWaiting:
             storefront_admin_client, "provision", "reserved",
             negotiation_id=deal.negotiation_id, since_id=mark, timeout=30.0,
         )
-        assert datetime.now(timezone.utc) < deal.start, (
+        assert injected_time.now_datetime() < deal.start, (
             f"the deal was committed after its Agreement start {deal.start.isoformat()}; "
             "raise FORWARD_LEAD"
         )
@@ -190,7 +191,7 @@ class Stage13a_ForwardDealCommittedAndWaiting:
 
         advance_storefront(storefront_admin_client, RESUME)
 
-        assert datetime.now(timezone.utc) < deal.start, "the re-drive ran after the start"
+        assert injected_time.now_datetime() < deal.start, "the re-drive ran after the start"
         assert storefront_client.get_settle_status(deal.escrow_uid).fulfillment_id is None
         assert _dispatches(storefront_admin_client, deal.negotiation_id, mark) == []
         again = site_capacity.reservations_for_negotiation(deal.negotiation_id)
@@ -206,11 +207,11 @@ class Stage13a_ForwardDealCommittedAndWaiting:
 class Stage13b_ForwardDealDeliveredAtItsStart:
     def test_13b_the_deal_is_delivered_once_its_start_is_reached(
         self, storefront_client, storefront_admin_client, provisioning_client,
-        provisioning_test_client, site_capacity, deal_state,
+        provisioning_test_client, site_capacity, deal_state, lane_time,
     ):
         """Once its start is reached, a re-drive dispatches and delivers the deal.
 
-        The re-drive is stepped once the clock reaches the Agreement start:
+        The re-drive is stepped once the lane reaches the Agreement start:
         it dispatches the fulfillment on the reservation committed at
         settlement, and once the fulfillment is ready a further step activates
         the lease, inside the Agreement's window, and the deal becomes ready.
@@ -219,7 +220,7 @@ class Stage13b_ForwardDealDeliveredAtItsStart:
         deal: AgreedDeal = deal_state.forward_deal
         reservation_id = deal_state.forward_reservation_id
 
-        wait_until(deal.start + WINDOW_TOLERANCE)
+        reach_agreement_instant(lane_time, deal.start + WINDOW_TOLERANCE)
         advance_storefront(storefront_admin_client, RESUME)
         wait_for_stage_event(
             storefront_admin_client, "provision", "job_submitted",

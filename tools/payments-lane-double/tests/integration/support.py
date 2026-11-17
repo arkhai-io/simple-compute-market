@@ -2,8 +2,8 @@
 
 The double runs behind Starlette's test client, which an httpx mock transport
 forwards to, so ``PaymentsClient`` and ``ControlClient`` send exactly the requests
-they send over the network. The wall clock is injected; the double's perceived
-clock adds the offset the clock controls move.
+they send over the network. The double reads an injected source the lane holds,
+starting at ``T0``; time moves only when the test or the time control sets it.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from injected_time import InjectedTime, WallTime
 
 from lane_double_controls import ControlClient
 from market_arkhai_payments import PaymentsAPIError, PaymentsClient
@@ -21,7 +22,7 @@ from market_arkhai_payments.canonical import agreement_hash
 from payments_lane_double.accounts import AccountDirectory, parse_accounts
 from payments_lane_double.app import create_app
 
-from conftest import Clock, committed_accounts
+from conftest import committed_accounts
 
 T0 = 1_800_000_000
 HOUR = 3_600
@@ -54,10 +55,10 @@ def suite_directory() -> AccountDirectory:
 class Lane:
     """One app over a fresh engine, and the kit's client for each account."""
 
-    def __init__(self) -> None:
-        self.clock = Clock(T0)
+    def __init__(self, source: InjectedTime | WallTime | None = None) -> None:
+        self.time = source or InjectedTime(start=T0)
         self.directory = suite_directory()
-        self.app = create_app(self.directory, clock=self.clock)
+        self.app = create_app(self.directory, source=self.time)
         self.http = TestClient(self.app, base_url=ORIGIN)
 
     def transport(self) -> httpx.MockTransport:

@@ -58,6 +58,9 @@ class BareMetalHealthResponse(BaseModel):
     paused: bool | None = None
     principal: Identity
     sites: list[dict[str, object]] = Field(default_factory=list)
+    # The process's time source: ``{"source": "injected", "now": <Unix seconds>}``
+    # or ``{"source": "wall"}``; system status only.
+    time: dict[str, object] | None = None
     # Reported per site and outside ``checks``: one site's projection being
     # unavailable is not a storefront-wide degradation.
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None

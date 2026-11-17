@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import dataclass
 from typing import Any
 
+import injected_time
 from fastapi import Request
 from starlette.responses import JSONResponse, Response
 
@@ -132,7 +132,7 @@ async def _authenticate(
     db = _container.resolved_sqlite_client
     if db is None:
         raise AuthError("Storefront identity state is unavailable", status_code=503)
-    now = int(time.time())
+    now = injected_time.now()
     allowed = _allowed_principals(_service_peer_trust(), callback.site_ids, now=now)
     return await authenticate_request(
         headers=request.headers,

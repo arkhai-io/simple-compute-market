@@ -10,8 +10,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from injected_time import WallTime
 
-from lane_double_controls import ControlError, Rule
+from lane_double_controls import ControlError, Rule, TimeView
 from market_arkhai_payments.contracts import get_contract
 from market_arkhai_payments.receipts import (
     ReceiptIdentity,
@@ -102,34 +103,51 @@ def test_signer_rotation_signs_later_receipts_and_snapshots_with_the_second_key(
                               agreement_json=AGREEMENT, livemode=False)
 
 
-def test_status_reports_the_perceived_now_and_the_installed_contract_hashes(lane: Lane) -> None:
+def test_status_reports_the_injected_now_and_the_installed_contract_hashes(lane: Lane) -> None:
     metadata = get_contract().metadata
 
     with lane.controls() as controls:
         status = controls.status()
 
-    assert (status.perceived_now, status.offset_seconds) == (T0, 0)
+    assert status.time == TimeView(source="injected", now=T0)
     assert status.contracts == {
         "schema/payments.schema.json": metadata["schema_sha256"],
         "test-vectors/payments.json": metadata["vectors_sha256"],
     }
 
 
-def test_the_clock_advances_and_resets_to_wall_time(lane: Lane) -> None:
+def test_the_time_is_set_forward_and_held_there(lane: Lane) -> None:
     with lane.controls() as controls:
-        assert controls.advance_clock(3_600).perceived_now == T0 + 3_600
-        lane.clock.now = T0 + 10
-        assert controls.status().perceived_now == T0 + 3_610
+        assert controls.set_time(T0 + 3_600) == TimeView(source="injected", now=T0 + 3_600)
+        assert controls.status().time.now == T0 + 3_600
+        # Setting the instant already held succeeds and changes nothing.
+        assert controls.set_time(T0 + 3_600).now == T0 + 3_600
 
-        reset = controls.reset_clock()
-
-    assert (reset.perceived_now, reset.offset_seconds) == (T0 + 10, 0)
+    assert lane.time.now() == T0 + 3_600
 
 
-def test_admission_reads_the_perceived_clock(lane: Lane) -> None:
+@pytest.mark.parametrize(("now", "expected"), [
+    (T0 - 1, (409, "time_moves_forward")),
+    (True, (422, "invalid_time")),
+])
+def test_a_refused_setting_changes_nothing(lane: Lane, now: int,
+                                           expected: tuple[int, str]) -> None:
+    with lane.controls() as controls:
+        assert refused(controls.set_time, now) == expected
+        assert controls.status().time.now == T0
+
+
+def test_a_wall_time_double_serves_no_time_route() -> None:
+    lane = Lane(source=WallTime(wall=lambda: T0))
+    with lane.http, lane.controls() as controls:
+        assert controls.status().time == TimeView(source="wall")
+        assert refused(controls.set_time, T0 + 60) == (404, "invalid_request")
+
+
+def test_admission_reads_the_injected_time(lane: Lane) -> None:
     terms = mandate(lane)
     with lane.controls() as controls:
-        controls.advance_clock(terms["expires"] - T0)
+        controls.set_time(terms["expires"])
 
     assert refusal(lane.client("buyer").approve, terms) == (409, "mandate_expired")
 

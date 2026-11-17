@@ -1,19 +1,30 @@
 {{/*
 Helm test pod: full buyer-seller deal lifecycle (e2e_deal marker).
 
-Config is assembled from two dynaconf profiles:
-  1. "helm"       — config-helm.yml from the shared test-config ConfigMap
-                    (non-secret topology: URLs, chain ID, registry addresses,
-                     seller API URL, buyer wallet address, buyer chain_rpc_url)
-  2. "e2e-secret" — config-e2e-secret.yml from this subchart's Secret
-                    (seller + buyer private keys, admin API key)
+Config is assembled from three dynaconf profiles, each its own volume, layered
+in this order, a later one overriding an earlier:
+  1. "helm"       — config-helm.yml from the umbrella's <release>-helm-profile
+                    ConfigMap (helm/templates/tests/helm-profile.yaml): the
+                    topology the umbrella derives from the release, true for
+                    every test pod that mounts it: the smoke tests, contract
+                    validation and these end-to-end pods (URLs, chain
+                    ID, registry and provisioning pins, seller API URL and
+                    publisher, buyer wallet address and chain_rpc_url). It is
+                    present whichever subcharts are enabled.
+  2. "e2e-tests"  — config-e2e-tests.yml from this subchart's ConfigMap: its
+                    `config` value, passed through whole, the public settings
+                    only the end-to-end scenarios act on (lane_time). It is a
+                    profile of its own, mounted by this pod and the scenarios
+                    pod alone, because the smoke tests and contract
+                    validation read "helm" too: a setting
+                    there, such as lane_time, would start the end-to-end
+                    fixtures in the smoke pods and contract validation too.
+  3. "e2e-secret" — config-e2e-secret.yml from this subchart's Secret: the
+                    credentials (seller and buyer private keys, administrator
+                    credentials and the registry's administrator key).
 
-ACTIVE_PROFILES: "helm,e2e-secret"
+ACTIVE_PROFILES: "helm,e2e-tests,e2e-secret"
 CONFIG_DIRECTORY: /app/config
-
-The test-config ConfigMap is created by the umbrella chart's
-helm/templates/tests/test-config.yaml and is always present when the
-umbrella chart is deployed, regardless of which subcharts are enabled.
 */}}
 apiVersion: v1
 kind: Pod
@@ -38,7 +49,7 @@ spec:
         - --tb=short
       env:
         - name: ACTIVE_PROFILES
-          value: "helm,e2e-secret"
+          value: "helm,e2e-tests,e2e-secret"
         - name: CONFIG_DIRECTORY
           value: /app/config
         - name: XDG_DATA_HOME
@@ -46,11 +57,20 @@ spec:
         - name: XDG_STATE_HOME
           value: /var/lib/arkhai-buyer-state
       volumeMounts:
-        - name: test-config
+        # The three profiles the deal test's header describes, in layering
+        # order: "helm", the topology the smoke tests and contract validation
+        # read too; "e2e-tests", the settings only the end-to-end scenarios act
+        # on, kept out of "helm" so no other test pod acts on them;
+        # "e2e-secret", the credentials.
+        - name: helm-profile
           mountPath: /app/config/config-helm.yml
           subPath: config-helm.yml
           readOnly: true
-        - name: e2e-secret
+        - name: e2e-tests-profile
+          mountPath: /app/config/config-e2e-tests.yml
+          subPath: config-e2e-tests.yml
+          readOnly: true
+        - name: e2e-secret-profile
           mountPath: /app/config/config-e2e-secret.yml
           subPath: config-e2e-secret.yml
           readOnly: true
@@ -63,10 +83,13 @@ spec:
           subPath: credential
           readOnly: true
   volumes:
-    - name: test-config
+    - name: helm-profile
       configMap:
-        name: {{ .Release.Name }}-test-config
-    - name: e2e-secret
+        name: {{ .Release.Name }}-helm-profile
+    - name: e2e-tests-profile
+      configMap:
+        name: {{ include "e2e-tests.configMapName" . }}
+    - name: e2e-secret-profile
       secret:
         secretName: {{ include "e2e-tests.secretName" . }}
     - name: buyer-profile-store

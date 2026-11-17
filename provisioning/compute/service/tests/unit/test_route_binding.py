@@ -8,7 +8,9 @@ Unauthenticated routes (liveness and the API documentation) are outside the
 table by design.
 
 The mounted routes are read from the app's OpenAPI document, the framework's
-public account of every route it serves; no route here is hidden from it.
+public account of every route it serves; no route here is hidden from it. The
+time-setting router, which the service mounts only under injected time and so
+not in this wall-time process, counts as mounted.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import re
 
 import pytest
+from compute_provisioning_service.controllers.system_controller import make_time_router
 from compute_provisioning_service.main import app, provisioning_route_table
 from compute_provisioning_service.middleware.auth import EXCLUDED_PATHS
 
@@ -35,6 +38,10 @@ def _mounted() -> list[tuple[str, str]]:
         for method in operations:
             if method in {"get", "put", "post", "delete", "patch"}:
                 routes.append((method.upper(), path))
+    for route in make_time_router().routes:
+        for method in route.methods:
+            if (method, route.path) not in routes:
+                routes.append((method, route.path))
     return sorted(routes)
 
 

@@ -11,9 +11,10 @@ assignment in one transaction. See
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Callable, Sequence
 
+import injected_time
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -448,7 +449,7 @@ class SettlementRepository:
         """
 
         begin_sqlite_write_transaction(db)
-        now = now or datetime.now(timezone.utc)
+        now = now or injected_time.now_datetime()
         candidates = (
             db.query(SettlementRecord)
             .filter(SettlementRecord.state.in_(list(states)))
@@ -553,7 +554,7 @@ class SettlementRepository:
             record.claimed_by = None
             record.claim_expires_at = None
         else:
-            now = now or datetime.now(timezone.utc)
+            now = now or injected_time.now_datetime()
             record.claim_expires_at = now + timedelta(seconds=lease_seconds)
         db.flush()
         return True
@@ -598,7 +599,7 @@ class SettlementRepository:
         active leases from expired claims eligible for reclamation.
         """
 
-        now = now or datetime.now(timezone.utc)
+        now = now or injected_time.now_datetime()
         state_values = [state.value for state in self._RECOVERY_STATES]
 
         active_claim = case(

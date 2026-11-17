@@ -17,6 +17,7 @@ from unittest.mock import patch
 from typing import AsyncIterator
 
 import httpx
+import injected_time
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
@@ -41,6 +42,7 @@ from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 from market_storefront.services.system_service import SystemService
+from storefront_client.auth import build_authenticated_request
 from storefront_client.client import StorefrontClient, StorefrontClientError
 from tests.publication_app import recorded_registries
 from tests.fake_site import (
@@ -1254,3 +1256,81 @@ async def test_an_event_read_the_signature_does_not_bind_is_refused(admin_app, q
     ) as raw:
         response = await raw.get(f"/api/v1/system/events?{query}")
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# The time-setting operation's freshness
+# ---------------------------------------------------------------------------
+
+
+async def _skewed_admin_requests(
+    admin_app, *, at: int
+) -> tuple[httpx.Response, httpx.Response, list[int]]:
+    """A time setting and a pause, each signed by the administrator at ``at``.
+
+    Raw requests, as a rejection-path test's are: the canonical client signs at
+    the process's instant, the storefront's own, and cannot send a request
+    signed at another, so these are built with its request builder and only
+    their statuses are asserted. The time route is a stand-in counting its
+    calls, since what is under test is the administrator middleware in front of
+    it.
+    """
+    calls: list[int] = []
+
+    async def set_time() -> dict[str, int]:
+        calls.append(1)
+        return {"set": len(calls)}
+
+    admin_app.add_api_route("/api/v1/admin/time", set_time, methods=["POST"])
+    setting = build_authenticated_request(
+        signer=_ADMIN_SIGNER,
+        role="admin",
+        method="POST",
+        operation="admin_time",
+        resource="time",
+        body={"now": at},
+        timestamp=at,
+    )
+    pause = build_authenticated_request(
+        signer=_ADMIN_SIGNER,
+        role="admin",
+        method="POST",
+        operation="admin_pause",
+        resource="",
+        body={},
+        timestamp=at,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app), base_url="http://test"
+    ) as raw:
+        set_response = await raw.post(
+            "/api/v1/admin/time", content=setting.content, headers=setting.headers
+        )
+        pause_response = await raw.post(
+            "/api/v1/admin/pause", content=pause.content, headers=pause.headers
+        )
+    return set_response, pause_response, calls
+
+
+@pytest.mark.parametrize("skew", (900, -900))
+async def test_under_injected_time_the_time_setting_operation_alone_is_admitted_skewed(
+    admin_app, injected_source, skew
+):
+    setting, pause, calls = await _skewed_admin_requests(
+        admin_app, at=injected_source.now() + skew
+    )
+
+    assert setting.status_code == 200, setting.text
+    assert setting.headers["X-Market-Signature"]
+    assert calls == [1]
+    assert pause.status_code == 403
+    assert not _lifecycle.trading_pause().paused
+
+
+async def test_under_wall_time_the_time_setting_operation_keeps_its_freshness(admin_app):
+    setting, _, calls = await _skewed_admin_requests(
+        admin_app, at=injected_time.now() + 900
+    )
+
+    assert setting.status_code == 403
+    assert calls == []

@@ -87,6 +87,7 @@ from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsPublicationInput,
     create_arkhai_payments_registration,
     payments_client_for_owner,
+    payments_livemode,
     resolve_payments_api_key,
 )
 
@@ -155,6 +156,7 @@ __all__ = [
     "format_duration",
     "mandate_policy_for_agreement",
     "payments_client_for_owner",
+    "payments_livemode",
     "pinned_snapshot_verifier",
     "receipt_message",
     "snapshot_message",

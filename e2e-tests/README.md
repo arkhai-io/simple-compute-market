@@ -94,9 +94,12 @@ states its settings in committed runner profiles. A lane target runs the runner 
 `RUNNER_PROFILES=docker,payments-lane,<lane>-lane`: `config/config-payments-lane.yml`
 holds what every lane shares — the target and its identity, the fee, LANE_OWNED,
 CA_BUNDLE_PATH, API_KEY_ENV and BUYER_API_KEY, both accounts and the buyer's
-marketplace seed — and `config/config-<lane>-lane.yml` only what differs, the
-seller's marketplace credential and, for bare metal, its whole-host fixture's
-COMPUTE_HOURLY_GROSS and DISPUTE_WINDOW. Dynaconf merges the section key by key.
+marketplace seed — and `config/config-<lane>-lane.yml` the payments settings
+that differ, the seller's marketplace credential and, for bare metal, its
+whole-host fixture's COMPUTE_HOURLY_GROSS and DISPUTE_WINDOW, beside the lane's
+`lane_time` section, which names the run's time mode and every party the lane
+runs for the lane-time fixture (`tests/e2e/roles/helpers/lane_time.py`). Dynaconf
+merges the `payments` section key by key.
 `test-buyer-machine` mounts the lane CA where CA_BUNDLE_PATH names it, and passes
 the runner nothing else; rerunning markers against a lane's stack passes the
 lane's RUNNER_PROFILES. The lane's settings mark the target LANE_OWNED, so an
@@ -317,7 +320,7 @@ scenario shares another's deal.
 | `e2e_vm_dispute_lost_filing` | `test_lost_filing_answer.py` | the answer to the storefront's operator-end filing is dropped after commit; the storefront's servicing retries the filing and its adapter adopts the one case |
 | `e2e_vm_dispute_mediation_unavailable` | `test_mediation_unavailable.py` | with the mediation double unavailable, servicing reads the authority's outcome `unknown` while delivery stays active, and reads the case again once the outage is removed |
 | `e2e_vm_dispute_payments_hold` | `test_payments_hold_a_ruling.py` | payments loses its answer to the first of two reverses and is then unavailable while the decision is repeated; the storefront shows the ruling unapplied, and the decision repeated once payments answers completes it with exactly one reverse per effect |
-| `e2e_vm_dispute_hold_passed` | `test_hold_passed.py` | after the deal ends, both doubles' clocks advance past the part's terms end and then its release instant; the snapshot shows the payout, and the buyer's filing reports the part `not_held`, `paid_out`, and is dismissed with nothing held |
+| `e2e_vm_dispute_hold_passed` | `test_hold_passed.py` | after the deal ends, lane time is set past the part's terms end and then its release instant; the snapshot shows the payout, and the buyer's filing reports the part `not_held`, `paid_out`, and is dismissed with nothing held |
 
 Every stage advances one side effect through the services' typed clients, the
 doubles' `ControlClient`, or the mediation kit's dispute adapter, never a raw
@@ -338,12 +341,12 @@ applied state, so no stage steps the storefront's servicing while a ruling waits
 at its gate. The payments-hold scenario's two reverses on one part are
 indistinguishable to a payments rule and an outage cannot be scoped, so it stops
 the ruling with a dropped answer on the first reverse, then an outage while the
-decision is repeated. In the hold-passed scenario no storefront step follows the
-clock advance, since the storefront reads wall time.
+decision is repeated. The hold-passed scenario sets lane time only after its
+deal has ended.
 
-The modules run in any order: each removes its rules through `lane_double_rules`,
-and the hold-passed module, the only one that advances the clocks, resets both
-doubles' clocks through `lane_double_clock`, whatever its outcome. A deal still delivering when its scenario's stages end is ended by the
+The modules run in any order: each removes its rules through `lane_double_rules`.
+Lane time only moves forward and no module returns it, so a module after the
+hold-passed one starts days later. A deal still delivering when its scenario's stages end is ended by the
 shared lease-expiry stages, for which the storefront files no case;
 `DisputeStageZ_NoFurtherCase` then steps servicing once and holds the deal to the
 scenario's own cases.

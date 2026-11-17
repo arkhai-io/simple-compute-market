@@ -8,11 +8,11 @@ import logging
 import os
 
 from market_deal_lifecycle.configuration import authorities_by_registry
-import time
 import webbrowser
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import injected_time
 import typer
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
@@ -846,7 +846,7 @@ def request_introduction(
     selection = SettlementSelection(
         option_id=selected.option_id,
         settlement={"schema": selected.settlement_schema},
-        expiration_unix=int(time.time()) + expiration_seconds,
+        expiration_unix=injected_time.now() + expiration_seconds,
     )
     run_log = RunLog.start(
         profile_id=identity.profile_id,

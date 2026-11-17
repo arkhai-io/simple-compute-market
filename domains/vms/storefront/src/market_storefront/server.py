@@ -47,14 +47,19 @@ from market_alkahest import (
     ProbedChain,
     json_rpc_call,
 )
+import injected_time
+from market_arkhai_payments import payments_livemode
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
+    StorefrontTimeRouteService,
     alkahest_client_constructor,
+    announce_time_source,
     build_composed_storefront_app,
+    install_time_source,
 )
 
 import market_storefront.container as _container
@@ -78,6 +83,7 @@ from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
     chain_address_books,
+    configured_time_source,
     default_premature_stop_penalty_periods,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
@@ -521,6 +527,11 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_introduction_delivery = services.introduction_delivery
         await services.settlement_composition.disputes.refresh(_make_registry_client)
         await _report_unserviceable_deals(services.settlement_composition)
+        announce_time_source(
+            injected_time.installed(),
+            payments_livemode=payments_livemode(settlement_config_mapping()),
+            logger=logger,
+        )
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(
             registry=services.registry,
@@ -579,6 +590,9 @@ from market_storefront.controllers.admin_controller import (  # noqa: E402
 from market_storefront.controllers.admin_controller import (  # noqa: E402
     router as admin_router,
 )
+from market_storefront.controllers.admin_controller import (  # noqa: E402
+    time_router,
+)
 from market_storefront.controllers.deals_controller import (  # noqa: E402
     router as deals_router,
 )
@@ -621,6 +635,8 @@ def build_vm_storefront_app(
     """Build the VM HTTP application from one explicit frozen registry.
 
     ``seams`` defaults to production's service-peer trust and startup refusal.
+    The time-setting route is mounted only when the process's installed source
+    is injected time.
     """
 
     registration = registry.resolve_mode("vm")
@@ -667,6 +683,7 @@ def build_vm_storefront_app(
                     admin_settle_router,
                     introductions_router,
                     lease_reports_router,
+                    *((time_router,) if StorefrontTimeRouteService().mounted else ()),
                     create_lifecycle_router(lambda _: _container.resolved_settlement_composition.lifecycle.routes(
                         TrustedIdentitySet(identities=tuple(_active_administrators(
                             _container.resolved_sqlite_client.db_path,
@@ -684,4 +701,9 @@ def build_vm_storefront_app(
     )
 
 
+# The process's time source is installed here, before the application is built
+# and before anything reads the time: `[Time] source` decides whether the
+# time-setting route is mounted, and a value other than "wall" or "injected"
+# refuses startup naming it.
+install_time_source(configured_time_source())
 app = build_vm_storefront_app(registry=storefront_domain_registry())

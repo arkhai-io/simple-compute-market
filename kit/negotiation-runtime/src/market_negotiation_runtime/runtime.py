@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Protocol
 
+import injected_time
 from market_identity import Identity
 from market_policy.listing_source import ListingSourceVerdict, classify_listing_source
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
@@ -327,7 +328,7 @@ class NegotiationRuntime:
         self._resolve_opening = resolve_opening
         self._resolve_continuation = resolve_continuation
         self._id_factory = id_factory or (lambda: "neg_" + uuid.uuid4().hex)
-        self._now = now or (lambda: datetime.now(UTC))
+        self._now = now or injected_time.now_datetime
 
     async def start(
         self,

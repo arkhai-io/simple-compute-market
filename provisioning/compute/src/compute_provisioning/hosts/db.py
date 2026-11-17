@@ -9,6 +9,7 @@ machine's hardware, which its capacity declaration alone states.
 
 from __future__ import annotations
 
+import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -42,9 +43,20 @@ class Host(Base):
     connection_protected = Column(JSON, nullable=False, default=dict)
     enabled = Column(Boolean, nullable=False, default=True)
     pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Both are returned on a host's view, so they are the process source's
+    # instants rather than the database's clock.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        onupdate=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
     )
 
     def connection(self) -> ConnectionEnvelope:

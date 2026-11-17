@@ -1153,6 +1153,17 @@ def test_a_payments_key_named_by_variable_is_refused() -> None:
         assert _names_path(rendered.stderr, dotted), rendered.stderr
 
 
+def test_the_time_source_is_admitted_as_wall_or_injected_and_refused_otherwise() -> None:
+    """An agent's `[Time] source` is one of the storefront's two sources; the
+    generated definition refuses any other, naming the key."""
+    for source in ("wall", "injected"):
+        rendered = _render(agent=_with_config(Time={"source": source}))
+        assert rendered.returncode == 0, rendered.stderr
+    refused = _render(agent=_with_config(Time={"source": "injectd"}))
+    assert refused.returncode != 0
+    assert _names_path(refused.stderr, "agents.bob.config.Time.source"), refused.stderr
+
+
 def test_a_dispute_credential_is_refused_in_public_configuration() -> None:
     """The deployment-state scenario "The public configuration states a dispute
     credential": the whole entry belongs in the Secret overlay, so `config`

@@ -1,17 +1,18 @@
-"""The typed client of a lane double's control routes.
+"""The typed client of a lane double's control routes, and of the sample app's.
 
-A caller drives a double's controls through this client. It authenticates with
-the double's control token, trusts the CA bundle it is given alone when it is
-given one, and raises every refusal as ``ControlError`` with the double's control
+A caller drives a party's controls through this client. It authenticates with
+the party's control token, trusts the CA bundle it is given alone when it is
+given one, and raises every refusal as ``ControlError`` with the party's control
 code, so a caller branches on the code and never on a status or a body. A transport failure is httpx's own error: a control call that cannot reach
-its double is a broken lane, not an answer.
+its party is a broken lane, not an answer.
 """
 
 from __future__ import annotations
 
 import ssl
+from collections.abc import Mapping
 from types import TracebackType
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -20,8 +21,6 @@ from lane_double_controls import routes
 from lane_double_controls.models import (
     CaseList,
     CaseView,
-    ClockAdvance,
-    ClockView,
     ControlError,
     ControlErrorBody,
     Funded,
@@ -32,15 +31,16 @@ from lane_double_controls.models import (
     Ruling,
     SignerIdentity,
     Status,
+    TimeView,
 )
 
 _Answer = TypeVar("_Answer", bound=BaseModel)
 
 
 class ControlClient:
-    """Calls one double's control routes.
+    """Calls one party's control routes.
 
-    ``base_url`` is the double's API origin, such as
+    ``base_url`` is the party's API origin, such as
     ``https://payments-double:8443``. ``transport`` replaces the network, for a
     test driving an in-process app.
     """
@@ -79,11 +79,13 @@ class ControlClient:
     def resume_rule(self, rule_id: str) -> RuleView:
         return self._call(routes.RULE_RESUME, RuleView, rule_id=rule_id)
 
-    def advance_clock(self, seconds: int) -> ClockView:
-        return self._call(routes.CLOCK_ADVANCE, ClockView, body=ClockAdvance(seconds=seconds))
+    def set_time(self, now: int) -> TimeView:
+        """Set the party's injected time to ``now``, Unix seconds, and return its answer.
 
-    def reset_clock(self) -> ClockView:
-        return self._call(routes.CLOCK_RESET, ClockView)
+        The value is sent as given: the party reads it by the time component's
+        one rule and refuses ``invalid_time`` or ``time_moves_forward``.
+        """
+        return self._call(routes.TIME, TimeView, body={"now": now})
 
     def status(self) -> Status:
         return self._call(routes.STATUS, Status)
@@ -105,15 +107,17 @@ class ControlClient:
         return self._call(routes.CASE_CLOSE, CaseView, case_ref=case_ref)
 
     def _call(self, route: routes.ControlRoute, answer: type[_Answer], *,
-              body: BaseModel | None = None, params: dict[str, str] | None = None,
-              **path: str) -> _Answer:
+              body: BaseModel | Mapping[str, Any] | None = None,
+              params: dict[str, str] | None = None, **path: str) -> _Answer:
         return answer.model_validate(self._send(route, body=body, params=params, **path).json())
 
-    def _send(self, route: routes.ControlRoute, *, body: BaseModel | None = None,
+    def _send(self, route: routes.ControlRoute, *,
+              body: BaseModel | Mapping[str, Any] | None = None,
               params: dict[str, str] | None = None, **path: str) -> httpx.Response:
-        response = self._http.request(
-            route.method, route.url(**path), params=params,
-            json=None if body is None else body.model_dump(mode="json", exclude_none=True))
+        json = (body.model_dump(mode="json", exclude_none=True)
+                if isinstance(body, BaseModel) else body)
+        response = self._http.request(route.method, route.url(**path), params=params,
+                                      json=json)
         if response.is_error:
             raise _refusal(response)
         return response
@@ -126,7 +130,7 @@ def _refusal(response: httpx.Response) -> ControlError:
         # Not a control refusal at all, such as a proxy's page: keep the status,
         # and say the body was not the controls' own.
         return ControlError(response.status_code, "unexpected_response",
-                            f"the double answered {response.status_code} without a control error")
+                            f"the party answered {response.status_code} without a control error")
     return ControlError(response.status_code, body.code, body.message)
 
 

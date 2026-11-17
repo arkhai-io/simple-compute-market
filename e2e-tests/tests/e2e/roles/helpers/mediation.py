@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
@@ -33,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import injected_time
 import pytest
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
@@ -195,7 +195,8 @@ def file_as_buyer(
         token=SecretStr(target.buyer_api_key),
     )
     intent = DeliveryEndIntent(
-        ended_at=int(time.time()) if ended_at is None else ended_at, delivered=True, cause="payer",
+        ended_at=injected_time.now() if ended_at is None else ended_at, delivered=True,
+        cause="payer",
     )
 
     async def file() -> LifecycleOutcome:

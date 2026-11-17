@@ -10,10 +10,10 @@ import tempfile
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import injected_time
 from market_identity import (
     REQUEST_PROTOCOL,
     Identity,
@@ -116,7 +116,9 @@ def _new_run_id() -> str:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    # The process time source's instant: whole seconds, so the stamp carries no
+    # fraction.
+    return injected_time.now_datetime().isoformat()
 
 
 def _public_principal(principal: Identity) -> dict[str, str]:
@@ -695,7 +697,12 @@ def read_run(
 
 
 def list_runs(*, directory: Path | None = None) -> list[RunSummary]:
-    """Return validated run summaries, newest first by file modification time."""
+    """Return validated run summaries, newest first by file modification time.
+
+    The order is the order the runs were last written in, which the process
+    time source, moving only forward, cannot contradict; no instant is read
+    from the file system.
+    """
 
     root = directory or runs_dir()
     if not root.exists():

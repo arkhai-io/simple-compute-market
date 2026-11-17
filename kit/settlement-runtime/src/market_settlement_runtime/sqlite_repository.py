@@ -11,9 +11,9 @@ import asyncio
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
 from typing import Any, Literal
 
+import injected_time
 from market_identity import Identity
 
 from .models import canonical_json
@@ -86,7 +86,7 @@ class SettlementSQLiteRepository:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return injected_time.now_datetime().isoformat()
 
     def _obligation(self, row: tuple[Any, ...]) -> dict[str, Any]:
         value = dict(zip(self._OBLIGATION_COLUMNS, row))

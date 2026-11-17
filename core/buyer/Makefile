@@ -21,4 +21,4 @@ reinit:
 	python3 ../../scripts/uv_project.py reinit
 
 test: reinit
-	uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	uv run --find-links $(DIST_DIR) pytest tests/unit tests/integration -q

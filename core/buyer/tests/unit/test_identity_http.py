@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from io import BytesIO
 from urllib.error import HTTPError
 
+import injected_time
 import pytest
+from injected_time import InjectedTime
 
 from core_buyer.negotiation_client import AuthenticatedHTTPError, _authenticated_json
 from core_buyer.orchestration import submit_settlement_request
@@ -18,6 +20,16 @@ from market_identity import (
 )
 
 _NOW = 2_000_000_000
+
+
+@pytest.fixture(autouse=True)
+def _source_at_now() -> Iterator[InjectedTime]:
+    """The process time source held at the instant every response is signed at."""
+    before = injected_time.installed()
+    source = InjectedTime(start=_NOW)
+    injected_time.install(source)
+    yield source
+    injected_time.install(before)
 
 
 def _trust(*signers: Ed25519Signer) -> TrustedIdentitySet:
@@ -107,7 +119,6 @@ def test_ed25519_request_and_signed_response_need_no_wallet(monkeypatch) -> None
         captured["request"] = request
         return _opener(seller=seller, signed_payload=response)(request, **kwargs)
 
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         open_request,
@@ -153,7 +164,6 @@ def test_response_trust_accepts_overlap_and_rejects_retired_principal(
     old = Ed25519Signer(b"\x17" * 32)
     replacement = Ed25519Signer(b"\x18" * 32)
     payload = {"status": "ready"}
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         _opener(seller=old, signed_payload=payload),
@@ -187,7 +197,6 @@ def test_response_trust_accepts_overlap_and_rejects_retired_principal(
 def test_signed_response_body_mutation_is_rejected(monkeypatch) -> None:
     buyer = Ed25519Signer(b"\x03" * 32)
     seller = Ed25519Signer(b"\x04" * 32)
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         _opener(
@@ -219,7 +228,6 @@ def test_signed_response_body_mutation_is_rejected(monkeypatch) -> None:
 def test_response_replay_under_another_request_id_is_rejected(monkeypatch) -> None:
     buyer = Ed25519Signer(b"\x05" * 32)
     seller = Ed25519Signer(b"\x06" * 32)
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         _opener(
@@ -247,7 +255,6 @@ def test_response_replay_under_another_request_id_is_rejected(monkeypatch) -> No
 def test_legacy_response_authentication_is_rejected(monkeypatch) -> None:
     buyer = Ed25519Signer(b"\x07" * 32)
     seller = Ed25519Signer(b"\x08" * 32)
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         lambda *_args, **_kwargs: _Response(
@@ -331,7 +338,6 @@ def test_valid_signed_http_error_is_verified_before_status_propagation(
         resource="listing-1",
         status=409,
     )
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -387,7 +393,6 @@ def test_untrusted_http_errors_are_rejected(
             resource="listing-1",
             status=409,
         )
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -447,7 +452,6 @@ def test_a_refused_response_names_its_status_without_quoting_it(monkeypatch) -> 
     buyer = Ed25519Signer(b"\x1a" * 32)
     seller = Ed25519Signer(b"\x1b" * 32)
     secret = "sk_live_should_never_be_repeated"
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -495,7 +499,6 @@ def test_a_partly_authenticated_response_reads_differently(monkeypatch) -> None:
         resource="listing-1",
     )
     del headers["X-Market-Timestamp"]
-    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
     monkeypatch.setattr(
         "core_buyer.negotiation_client.urllib.request.urlopen",
         lambda *_args, **_kwargs: _Response(payload, headers),

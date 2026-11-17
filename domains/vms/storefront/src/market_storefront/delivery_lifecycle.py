@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 
+import injected_time
 from market_deal_servicing import EndSession
 from market_deal_servicing.end import PhysicalResult
 from market_deal_servicing.evidence import transaction
@@ -91,7 +91,7 @@ class VmPhysicalEnd:
         return PhysicalResult(progress="tearing_down", done=False)
 
 
-async def request_delivery_end(db, negotiation_id, *, source_ref, cause, clock=lambda: int(time.time())):
+async def request_delivery_end(db, negotiation_id, *, source_ref, cause, clock=injected_time.now):
     now = clock()
     with transaction(db.db_path) as conn, atomic(conn):
         return record_delivery_end(conn, negotiation_id, source_ref=source_ref, cause=cause, now=now)

@@ -10,6 +10,7 @@ import json
 import time
 from typing import Any, Literal, TypeVar
 
+import injected_time
 import typer
 
 from market_deal_lifecycle.terms import LifecycleTerms
@@ -381,7 +382,7 @@ def create_evidence_command_group(
     reader: DealReader,
     *,
     terms_from_agreement: Callable[[bytes], LifecycleTerms | dict | None],
-    clock: Callable[[], int] = lambda: int(time.time()),
+    clock: Callable[[], int] = injected_time.now,
 ) -> typer.Typer:
     app = typer.Typer(help="Keep and export the buyer's signed deal evidence.")
 

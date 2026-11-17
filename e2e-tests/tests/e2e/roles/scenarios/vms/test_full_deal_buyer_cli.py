@@ -92,9 +92,10 @@ Phase 12 — Buyer CLI surrender on a second deal
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from importlib import resources
 
+import injected_time
 import pytest
 from compute_provisioning_contracts import MockRuleCreate
 from market_alkahest.dev_chain import anvil_address_book_path
@@ -1391,7 +1392,7 @@ E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
 def _expired_lease_end() -> str:
     """A lease end the watchdog reads as expired but still inside its grace."""
     return (
-        datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+        injected_time.now_datetime() - E2E_LEASE_EXPIRY_BACKDATE
     ).isoformat().replace("+00:00", "Z")
 
 

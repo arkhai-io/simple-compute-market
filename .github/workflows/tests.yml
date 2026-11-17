@@ -53,6 +53,7 @@ jobs:
           - test-e2e-unit
           - test-deployment-packaging
           - test-frp-grant-admission
+          - test-injected-time
           - test-lane-double-controls
           - test-payments-lane-double
           - test-mediation-lane-double

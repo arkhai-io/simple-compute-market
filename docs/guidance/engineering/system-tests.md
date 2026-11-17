@@ -27,17 +27,56 @@ establish ordering even when it passes. So a scenario:
   advances exactly one side effect, and measures that effect through the services'
   typed clients;
 - waits only on a request it made, or on an effect its own request caused, bounded —
-  an event its request emits, or a message it sends off the request path — or for an
-  instant the scenario's
-  own data fixes, then advances what acts on that instant explicitly; where one
-  service reads another's state live, it reads the effect once after its step rather
-  than polling for it;
-- drives a decision a service derives from a record and a timestamp by moving that
-  service's perceived clock through a control, never by waiting, or reaches a
-  deadline by moving the record's time into the past and stepping the loop that
-  acts on it, which runs exactly the code a wall-clock expiry runs;
+  an event its request emits, or a message it sends off the request path — or, in
+  a run on the wall clock (see "Time a test does not control"), for an instant the
+  scenario's own data fixes, then advances what acts on that instant explicitly;
+  where one service reads another's state live, it reads the effect once after its
+  step rather than polling for it;
+- reaches an instant by setting the time every participant perceives, together,
+  never by waiting and never by moving one participant alone: once the clocks of
+  two participants that exchange signed or timestamped messages disagree by more
+  than the exchange's tolerance, every exchange between them fails, and a decision
+  one participant dates in another's future is never acted on. Moving a record's
+  time into the past and stepping the loop that acts on it, which runs exactly the
+  code an expiry runs, is admitted below setting time: weaker, since only that
+  record moves, and discouraged once the participants' time can be set;
 - leaves a behaviour defined by a window or interval elapsing to a level that can
   drive the clock, rather than waiting for it.
+
+## Time a test does not control
+
+A scenario run against a component whose time it cannot set — a hosted provider, a
+security component with a clock of its own — handles that component's time by the
+first of these that applies:
+
+- if the scenario does not exercise the component's time-dependent behaviour, keep
+  its times out of the way: expiries and windows set far enough ahead that no run
+  reaches them;
+- if it does, control the component's time through a control of its own, such as a
+  provider's test clock, or else through a double standing in for the component
+  whose time is set with every other participant's;
+- below those, move the record's time into the past and step the loop that acts on
+  it;
+- otherwise the run uses the wall clock throughout: it waits only for an instant
+  the scenario's own data fixes, and a stage needing any other instant skips,
+  naming the instant it needed and the component whose time it could not set.
+
+A proxy rewriting the times in a component's responses is none of these: it
+changes only what the component reports, never when it acts, and cannot rewrite a
+signed value, so it serves only times the scenario does not exercise.
+
+A run either sets every participant's time or leaves every participant on the
+wall clock, never a mix: once time is set, a participant whose time was set and one
+on the wall clock disagree, and the exchanges between them fail. A shared stage
+reaches an instant through one helper in either kind of run, so the stages stay
+shared between them.
+
+For example, a billing scenario run against the team's own services and a fake card
+processor sets every service's time and the fake's to the end of a trial and steps
+the renewal; run against the processor's hosted sandbox, it sets the sandbox's test
+clock with the rest; run against a production-like sandbox with no test clock, its
+renewal stage skips, naming the trial's end and the sandbox, while its sign-up
+stages, which wait for nothing, run.
 
 ## A system test reaches services only through their interfaces
 

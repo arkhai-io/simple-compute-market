@@ -12,6 +12,14 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-injected-time"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_injected_time-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-capability-admissibility"
 version = "0.1.1"
 source = { registry = "../../.dist" }
@@ -32,9 +40,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.10.0"
+version = "0.10.1"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "pydantic" },
@@ -49,6 +58,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.4.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.7" },

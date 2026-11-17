@@ -106,8 +106,9 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # provisions on a real KVM host an operator provides, which the pipeline never
 # has, and runs from the operator's machine through `test-module`. The six
 # `e2e_vm_dispute_*` scenarios each run on a deal of their own, and each removes
-# its rules from the lane's doubles and resets their clocks when it ends, so
-# they need no order among themselves. `e2e_vm_recurring_purchase` ends its
+# its rules from the lane's doubles when it ends, so they need no order among
+# themselves; lane time only moves forward, and a module after the hold-passed
+# one starts where that one left it. `e2e_vm_recurring_purchase` ends its
 # deal by the buyer's own stop before the deal's delivery deadline.
 E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_vm_recurring_purchase \
               or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \

@@ -59,6 +59,7 @@ from compute_provisioning_contracts import (
     RelayTokenRotate,
     RelayUpdate,
     SystemStatusResponse,
+    TimeSettingResponse,
     VersionResponse,
     WorkerPauseResponse,
 )
@@ -371,6 +372,15 @@ def _convergence_cycle(step: str) -> _Call:
 
 def _worker_pause(path: str) -> _Call:
     return _Call("POST", path, {}, parse=_model(WorkerPauseResponse))
+
+
+def _set_time(now: int) -> _Call:
+    # ``now`` is sent as given: the service alone judges the value, refusing
+    # anything but an integer instant (422 ``invalid_time``) and an instant
+    # earlier than its own (409 ``time_moves_forward``).
+    return _Call(
+        "POST", "/api/v1/system/time", {"now": now}, parse=_model(TimeSettingResponse)
+    )
 
 
 def _version() -> _Call:
@@ -802,6 +812,15 @@ class ComputeProvisioningClient(SigningBase):
     async def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
         return await self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
 
+    async def set_time(self, now: int, *, request_id: str | None = None) -> TimeSettingResponse:
+        """Set an injected service's time to ``now``, in Unix seconds.
+
+        Signed at this process's instant, which an injected service admits
+        outside the signing skew for this operation alone; a wall-time service
+        mounts no such route.
+        """
+        return await self._run(_set_time(now), request_id)
+
     async def rotate_trusted_principal(
         self, role: str, rotation: RotationRequest, *, request_id: str | None = None
     ) -> PrincipalRotationResponse:
@@ -1136,6 +1155,10 @@ class SyncComputeProvisioningClient(SigningBase):
 
     def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
         return self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
+
+    def set_time(self, now: int, *, request_id: str | None = None) -> TimeSettingResponse:
+        """See ``ComputeProvisioningClient.set_time``."""
+        return self._run(_set_time(now), request_id)
 
     def rotate_trusted_principal(
         self, role: str, rotation: RotationRequest, *, request_id: str | None = None

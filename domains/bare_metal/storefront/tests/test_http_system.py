@@ -8,17 +8,22 @@ import sqlite3
 from datetime import datetime, timezone
 
 import httpx
+import injected_time
 import pytest
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from fastapi import Request
 from market_alkahest import AlkahestChainProbe, ProbedChain
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, Identity, TrustedIdentitySet
 
+from market_storefront_kit import StorefrontTimeRouteService
 from storefront_client import StorefrontClient
+from storefront_client.auth import build_authenticated_request
 from storefront_client.client import StorefrontClientError
 from storefront_client.models import HealthResponse
 
+from arkhai_bare_metal_storefront import api as storefront_api
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.lifecycle_steps import (
     PUBLICATION,
@@ -181,6 +186,93 @@ async def test_pause_is_admin_authenticated_and_process_local(tmp_path) -> None:
         async with _admin_client(second_app) as admin:
             status = await admin.get_system_status()
     assert status.paused is False
+
+
+async def _skewed_admin_requests(
+    tmp_path, *, at: int
+) -> tuple[httpx.Response, httpx.Response, list[int], BareMetalStorefrontRuntime]:
+    """A time setting and a pause, each signed by the administrator at ``at``.
+
+    Raw requests, as a rejection-path test's are: the canonical client signs at
+    the process's instant, the storefront's own, and cannot send a request
+    signed at another, so these are built with its request builder and only
+    their statuses are asserted. Under injected time the storefront's own time
+    route answers; under wall time it mounts none, so a stand-in behind the
+    storefront's administrator authentication, which only this module's route
+    helpers reach, takes its path, counting its calls.
+    """
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+    calls: list[int] = []
+
+    async def set_time(request: Request) -> dict[str, int]:
+        await storefront_api._admin(
+            request=request,
+            runtime=storefront_api._runtime(request),
+            operation="admin_time",
+            resource="time",
+            body=await storefront_api._request_body(request),
+        )
+        calls.append(1)
+        return {"set": len(calls)}
+
+    if not StorefrontTimeRouteService().mounted:
+        app.add_api_route("/api/v1/admin/time", set_time, methods=["POST"])
+    setting = build_authenticated_request(
+        signer=ADMIN_SIGNER,
+        role="admin",
+        method="POST",
+        operation="admin_time",
+        resource="time",
+        body={"now": at},
+        timestamp=at,
+    )
+    pause = build_authenticated_request(
+        signer=ADMIN_SIGNER,
+        role="admin",
+        method="POST",
+        operation="admin_pause",
+        resource="",
+        timestamp=at,
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://seller"
+        ) as raw:
+            # The pause first: once the setting moves the time, an instant
+            # skewed from the old one may be fresh.
+            pause_response = await raw.post("/api/v1/admin/pause", headers=pause.headers)
+            set_response = await raw.post(
+                "/api/v1/admin/time", content=setting.content, headers=setting.headers
+            )
+    return set_response, pause_response, calls, runtime
+
+
+@pytest.mark.parametrize(("skew", "status"), ((900, 200), (-900, 409)))
+async def test_under_injected_time_the_time_setting_operation_alone_is_admitted_skewed(
+    tmp_path, injected_source, skew, status
+) -> None:
+    """Admitted either way: 900 s ahead sets the time, and 900 s behind is
+    refused only as an earlier instant, never for skew."""
+    start = injected_source.now()
+    setting, pause, _, runtime = await _skewed_admin_requests(tmp_path, at=start + skew)
+
+    assert setting.status_code == status, setting.text
+    assert setting.headers["X-Market-Signature"]
+    assert injected_source.now() == max(start, start + skew)
+    assert pause.status_code == 403
+    assert runtime.trading_pause.paused is False
+
+
+async def test_under_wall_time_the_time_setting_operation_keeps_its_freshness(
+    tmp_path,
+) -> None:
+    setting, _, calls, _ = await _skewed_admin_requests(
+        tmp_path, at=injected_time.now() + 900
+    )
+
+    assert setting.status_code == 403
+    assert calls == []
 
 
 async def _health(runtime: BareMetalStorefrontRuntime) -> HealthResponse:
