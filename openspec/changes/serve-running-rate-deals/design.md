@@ -275,6 +275,7 @@ ending:
 | `release_pending` | the resource is not yet proven released |
 | `payment_running` | a payment part has no verified stop or end |
 | `case_open` | a case is open at the dispute authority |
+| `case_unobserved` | the deal names a dispute authority of which no verified read is saved, so no case is verified closed |
 
 ```json
 {"negotiation_id": "n-123", "commitment_ref": "tx-abc", "domain": "vms",
@@ -313,6 +314,17 @@ guards no window the payments adapter leaves (an unstarted part is already liste
 without a stop) and whose instant a backdated end defeats; and a new
 `payment_unknown` code, since `payment_running`'s text already says no stop is
 verified.
+
+*Settled at round 1's repeat pass (44 F1):* the dispute half follows the same rule. A
+deal that names a dispute authority, of which no verified read has been saved — a
+view is saved only from an accepted read — has its cases unknown, not empty, so it
+is `ending` with a fourth code, `case_unobserved`, until one such read is saved. A
+deal whose storefront composed no adapter for its authority's interface therefore
+stays `ending` until one is composed; a missing credential still shows repair
+required first. The code arrives in `kit/deal-lifecycle-contracts`' unreleased 0.3.0,
+so it costs no further version. Rejected: widening `case_open` to cover an unobserved
+authority, which would list `case_open` beside an empty `open_cases` and make its text
+untrue; unlike `payment_running`, its text does not already cover the unverified case.
 
 ### D8 — A storefront that cannot service its deals starts and reports them
 

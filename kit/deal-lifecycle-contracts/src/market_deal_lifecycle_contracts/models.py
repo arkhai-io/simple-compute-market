@@ -21,7 +21,7 @@ PaymentEventKind = Literal["start", "stop", "stop_request", "collect", "reverse"
 DisputeEventKind = Literal["filed", "appended", "ruled", "closed"]
 LifecycleState = Literal["unstarted", "running", "ending", "ended", "repair_required"]
 # Why a deal with a recorded end is still ending rather than ended.
-EndingCode = Literal["release_pending", "payment_running", "case_open"]
+EndingCode = Literal["release_pending", "payment_running", "case_open", "case_unobserved"]
 
 #: Each ending code's text. Every reader renders these words, so a code added
 #: to ``EndingCode`` arrives with its text and no client interprets codes itself.
@@ -29,6 +29,7 @@ ENDING_TEXT: Mapping[EndingCode, str] = MappingProxyType({
     "release_pending": "The resource is not yet proven released.",
     "payment_running": "A payment part has no verified stop or end at the payment authority.",
     "case_open": "A case is open at the dispute authority.",
+    "case_unobserved": "The dispute authority has not yet been observed, so no case is verified closed.",
 })
 
 

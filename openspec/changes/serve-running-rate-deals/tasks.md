@@ -270,6 +270,41 @@ rate deal never observed, then observed with no parts, lists `ending
 deal ended before its part ever started stays `payment_running` until that part's
 terms end, as the requirement's words ask.
 
+Round 1 repeat-pass triage fix, 44 F1 (`reviews/44-implementation.triage.md`): the
+dispute half of the list's rule. A deal naming a dispute authority of which no verified
+read is saved has its cases unknown, so `_outstanding` names a fourth code,
+`case_unobserved`, and neither the list nor `unserviceable()` calls it ended until one
+read is saved (D7's second settled note). `_observed` reads the authority view and
+whether the dispute view is missing in one transaction, so a view saved meanwhile
+cannot leave them disagreeing. `kit/deal-lifecycle-contracts` 0.3.0 gains the code and
+its text; the delta's closed list and a scenario, and the kit README, name it. The
+32 F1 note's released once-only deal now lists `ending ["case_unobserved"]` until its
+dispute authority is read. Library integration, `test_watch_and_seller.py`: a released
+once-only deal lists `ending ["case_unobserved"]`, `repair_required` without its
+credential, still `case_unobserved` after a failed read, and `ended` after one verified
+empty read; a deal naming no dispute authority is `ended` with no read; the
+missing-adapter report keeps a released deal until its dispute authority is read;
+the never-observed rate deal names `payment_running` and `case_unobserved`. Unit,
+contracts: the served-page shapes include an ending deal with `case_unobserved`.
+Evidence:
+- library integration, `make test-kits`: `kit/deal-servicing` 134 passed,
+  `kit/deal-lifecycle-contracts` 55 passed, `kit/deal-lifecycle-client` 3 passed, every
+  other kit suite passed;
+- `scripts/change-workflow run pre-commit`: `after-functional-change … passed, exit 0`,
+  `pre-commit-functional … passed, exit 0` (among them the VM storefront 1197 passed,
+  1 skipped and 623 passed, bare metal 663 passed, the e2e unit suite 911 passed,
+  1 skipped, the release tooling 3123 passed), `pre-commit … passed, exit 0`;
+- `run test-before` not run: it runs a test file as `HEAD` holds it, and the changed
+  file is uncommitted until this commit; at the commit before, the rewritten once-only
+  case's first assertion reads `ended`, the defect the review showed;
+- fresh-context check: no correctness defect beyond a race between the authority read
+  and a separate dispute-view read, fixed by reading both in one transaction
+  (`_observed`); fixed the `unserviceable()` docstring (a dispute read, not the payment
+  adapter, clears an unobserved deal), the delta scenario's wording ("verified read …
+  saved"), the README's reflow, and a missing `repair_required` assertion; noted for
+  section 10.1 that a lane deal's `ended` needs one saved dispute read; declined
+  rewording D7's opening paragraph, which its settled notes amend, as 32 F1's did.
+
 ## 2A. Both storefronts deliver a rate deal in their recurring test worlds
 
 Delivers each storefront's application-level evidence that a rate deal is committed,
@@ -1712,6 +1747,11 @@ lane" and "Rate deals are qualified in both compute lanes on lane time"
       end classified, not exhaustion). Each labelled lane-double evidence. Verify: both
       markers pass in their lanes; `e2e-tests/tests/unit/` passes.
 - [ ] 10.3 Verification point: both lanes' runs pass. End-to-end: the four markers above.
+
+Note from 44 F1's fix (`reviews/44-implementation.triage.md`): a lane deal names a
+dispute authority, so 10.1's `ended` also needs the lane storefront's servicing cycle to
+have saved one verified read of that authority; until then the seller list shows the
+deal `ending` with `case_unobserved`.
 
 ## 11. The buyer's watchdog against a delivered deal
 

@@ -158,8 +158,14 @@ async def test_a_deal_whose_mechanism_has_no_adapter_composed_is_repair_required
     )
     assert unnamed.unserviceable() == []
 
-    # A deal ended and released is not open.
+    # A deal ended and released whose dispute authority was never observed
+    # still has no case verified closed, so it stays open.
     record_buyer_end(rig, "deal", progress="released")
+    assert api.unserviceable() == [("deal", reason)]
+
+    # Once one read of its dispute authority, showing no case, is saved, it is
+    # not open.
+    await rig["watch"]().poll()
     assert api.unserviceable() == []
 
 
@@ -224,10 +230,11 @@ async def test_a_released_rate_deal_is_ended_only_once_every_part_has_stopped(ri
 async def test_a_released_rate_deal_never_observed_at_the_payment_authority_is_ending(rig):
     rate = register_rate(rig)
     # The buyer ended at the storefront and the resource is released before
-    # any watch has read the payment authority, so no part's stop is verified.
+    # any watch has read the payment authority, so no part's stop is verified,
+    # nor, with no read of the dispute authority, is any case verified closed.
     record_buyer_end(rig, "rate", progress="released")
 
-    assert await listed(rig, "rate") == ("ending", ["payment_running"])
+    assert await listed(rig, "rate") == ("ending", ["payment_running", "case_unobserved"])
 
     # A view that lists no part verifies no stop either.
     rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[])
@@ -236,11 +243,45 @@ async def test_a_released_rate_deal_never_observed_at_the_payment_authority_is_e
     assert await listed(rig, "rate") == ("ending", ["payment_running"])
 
 
-async def test_a_released_once_only_deal_never_observed_is_ended(rig):
-    # A once-only deal has no rate part to stop.
+async def test_a_released_once_only_deal_is_ended_only_once_its_dispute_authority_is_observed(rig):
+    # A once-only deal has no rate part to stop, but it names a dispute
+    # authority, and before any read of it is saved no case is verified closed.
     record_buyer_end(rig, "deal", progress="released")
 
+    assert await listed(rig, "deal") == ("ending", ["case_unobserved"])
+
+    # Without the authority's credential it shows repair required first.
+    rig["credentials"][0] = False
+    assert await listed(rig, "deal") == ("repair_required", [])
+    rig["credentials"][0] = True
+
+    # A failed read saves no view, so the authority is still unobserved.
+    rig["dispute"].read.return_value = AuthorityView(outcome=Unknown(reason="authority unreachable"))
+    await rig["watch"]().poll()
+
+    assert await listed(rig, "deal") == ("ending", ["case_unobserved"])
+
+    # One verified read showing no case ends it.
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted())
+    await rig["watch"]().poll()
+
     assert await listed(rig, "deal") == ("ended", [])
+
+
+async def test_a_released_deal_naming_no_dispute_authority_needs_no_dispute_read(rig):
+    plain = SellerDeal(
+        negotiation_id="plain", commitment_ref="plain-commitment", domain="fixture",
+        buyer=rig["buyer"].identity, payment=PaymentSelector("fixture.payment.v1"), once_only=True,
+    )
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="plain", commitment_ref="plain-commitment", seller=rig["seller"].identity,
+            start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
+        ))
+        SellerSession(conn).register(plain)
+    record_buyer_end(rig, "plain", progress="released")
+
+    assert await listed(rig, "plain") == ("ended", [])
 
 
 async def test_a_released_rate_deal_still_billing_stays_unserviceable_until_its_part_stops(rig):

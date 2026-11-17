@@ -63,6 +63,8 @@ PAGES = {
     "ending": m.DealPage(deals=[summary(state="ending", parts=[RUNNING_PART],
                                         ending=["payment_running", "case_open"])],
                          continuation="n"),
+    "ending, dispute unobserved": m.DealPage(deals=[summary(state="ending", parts=[STOPPED_PART],
+                                                            ending=["case_unobserved"])]),
     "ended": m.DealPage(deals=[summary(state="ended", parts=[STOPPED_PART])]),
 }
 

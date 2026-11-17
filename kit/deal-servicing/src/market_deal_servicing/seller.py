@@ -184,6 +184,18 @@ class SellerServicing:
     def _authority(
         self, deal: SellerDeal, watch: DealWatch, current: list[AuthorityView] | None = None,
     ) -> AuthorityView:
+        return self._observed(deal, watch, current)[0]
+
+    def _observed(
+        self, deal: SellerDeal, watch: DealWatch, current: list[AuthorityView] | None = None,
+    ) -> tuple[AuthorityView, bool]:
+        """The deal's authority view, and whether it names a dispute authority
+        of which no verified view is saved.
+
+        A view is saved only from an accepted read, so with none the dispute
+        authority's cases are unknown, not empty. Both are read in one
+        transaction, so a view saved meanwhile cannot leave them disagreeing.
+        """
         with transaction(self.path) as conn:
             session = WatchSession(conn)
             payment = session.view(deal.negotiation_id, watch.payment_record)
@@ -235,7 +247,7 @@ class SellerServicing:
             disputes=dispute.disputes if dispute else [],
             cases=dispute.cases if dispute else [], extensions=payment.extensions if payment else [],
             deadline=payment.deadline if payment else None,
-        )
+        ), watch.dispute_record is not None and dispute is None
 
     def _unserviceable_reason(self, deal: SellerDeal) -> str:
         mechanism = deal.payment.mechanism
@@ -252,7 +264,9 @@ class SellerServicing:
         recorded end, its resource proven released, nothing outstanding at
         either authority as last observed (``_outstanding``). With no adapter
         nothing observes its payment again, so a released deal whose part last
-        showed no stop stays reported until the adapter is restored. Every
+        showed no stop stays reported until the adapter is restored; one whose
+        dispute authority was never observed stays reported until a read of
+        that authority is saved. Every
         registered deal is read, committed or not, since an uncommitted one
         still holds capacity a storefront must end.
         """
@@ -286,12 +300,12 @@ class SellerServicing:
         if selected is None:
             return False
         try:
-            authority = self._authority(deal, self._watch(deal))
+            authority, unobserved = self._observed(deal, self._watch(deal))
         except Exception:
             logger.exception("unserviceable deal %s: its authority views cannot be read", deal.negotiation_id)
             return False
         open_cases = [case.case_ref for case in authority.cases if case.state != "closed"]
-        return not self._outstanding(deal, authority, progress, open_cases)
+        return not self._outstanding(deal, authority, progress, open_cases, dispute_unobserved=unobserved)
 
     async def watch(self, negotiation_id: str):
         deal = await asyncio.to_thread(self._deal, negotiation_id)
@@ -332,7 +346,7 @@ class SellerServicing:
             deals, continuation = SellerSession(conn).page(request)
         summaries = []
         for deal in deals:
-            authority = self._authority(deal, self._watch(deal))
+            authority, unobserved = self._observed(deal, self._watch(deal))
             with transaction(self.path) as conn:
                 end = EndSession(conn)
                 delivery = end.read(deal.negotiation_id)
@@ -343,7 +357,9 @@ class SellerServicing:
             if deal.once_only:
                 state = "running"
             if selected:
-                ending = self._outstanding(deal, authority, delivery.progress, open_cases)
+                ending = self._outstanding(
+                    deal, authority, delivery.progress, open_cases, dispute_unobserved=unobserved,
+                )
                 state = "ending" if ending else "ended"
             if authority.state == "repair_required" or delivery.progress == "repair_required":
                 state, ending = "repair_required", []
@@ -359,7 +375,7 @@ class SellerServicing:
 
     def _outstanding(
         self, deal: SellerDeal, authority: AuthorityView, progress: PhysicalProgress,
-        open_cases: builtins.list[str],
+        open_cases: builtins.list[str], *, dispute_unobserved: bool,
     ) -> builtins.list[EndingCode]:
         """What still keeps a deal with a recorded end from being ended.
 
@@ -373,6 +389,10 @@ class SellerServicing:
         authority's view of it lists every one, started or not; a view listing
         none, or no view yet saved, verifies no stop, so its payment is still
         running. A once-only deal has no rate part to stop.
+
+        A deal naming a dispute authority of which no verified view is saved
+        (``dispute_unobserved``) has no case verified closed, so it is not ended
+        until one read of that authority is saved.
         """
         now = self.clock()
         ending: builtins.list[EndingCode] = []
@@ -385,6 +405,8 @@ class SellerServicing:
             ending.append("payment_running")
         if open_cases:
             ending.append("case_open")
+        if dispute_unobserved:
+            ending.append("case_unobserved")
         return ending
 
     async def submit(

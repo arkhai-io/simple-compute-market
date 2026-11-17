@@ -117,9 +117,11 @@ it opens no competing writer.
 `list` returns bounded keyset pages from durable watched views. A deal with a
 recorded end is `ended` only once its resource is proven released, every payment
 part in its watched view has a final stop or an end at or before now, and no case
-is open; until then it is `ending`, and `ending` names each outstanding condition
-(`release_pending`, `payment_running`, `case_open`). `read` refreshes
-both records and returns physical progress even without a payment adapter. A
+is open in a saved view of its dispute authority; until then it is `ending`, and
+`ending` names each outstanding condition (`release_pending`, `payment_running`,
+`case_open`, `case_unobserved` while no view of the dispute authority it names is
+saved). `read` refreshes both records and returns physical progress even without
+a payment adapter. A
 missing dispute credential or unresolved local respondent case marks repair
 required, and so does a deal of a mechanism named in `missing_adapters`, the
 mechanisms a storefront installs whose configuration composed no adapter: its
