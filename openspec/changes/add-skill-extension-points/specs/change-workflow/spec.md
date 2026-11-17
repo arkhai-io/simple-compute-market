@@ -126,16 +126,24 @@ workflow MUST NOT fetch evidence from beyond the checkout.
 Each evidence kind MUST be declared required `always` or when `owed`. An owed kind is
 required once for each argument a complete section's `Owed by validation (<kind>
 <argument>):` line names, and its evidence MUST be present for each argument on its
-own: an owed kind's pattern MUST hold `{owed}`, and an owed argument MUST be a single
-path segment holding no glob character, a line naming another refused, naming its
-section. A line naming no kind MUST be read as the one owed kind, and refused when
-there is more than one. A waiver MUST name kinds.
+own: an owed kind's pattern MUST hold `{owed}`. Every owed line MUST name an
+argument, a non-empty path segment that is neither `.` nor `..` and holds no `/`,
+whitespace, or glob character (`*`, `?`, `[`, `]`); the owed-line reader MUST refuse
+a line naming none or another, naming its section. A line naming no kind MUST be read
+as the one owed kind, its argument the first word in backticks, and refused when
+there is more than one owed kind. A waiver MUST name kinds.
 
 #### Scenario: A section owes the pipeline
 
 - **WHEN** a repository declares `pipeline` as owed and a complete section has
-  `Owed by validation (pipeline): scenario test_spot_deal_settles passes`
-- **THEN** `evidence` lists the pipeline kind as required for that section
+  `Owed by validation (pipeline e2e.yml): scenario test_spot_deal_settles passes`
+- **THEN** `evidence` lists `pipeline e2e.yml` as required for that section
+
+#### Scenario: An owed argument climbs out of its directory
+
+- **WHEN** a complete section has `Owed by validation (ci ..): job lint — passes`
+- **THEN** the owed-line reader refuses the line, naming its section, and `evidence`
+  reports the refusal rather than a kind present or missing
 
 #### Scenario: Two workflows are owed and one has evidence
 
@@ -190,10 +198,30 @@ kinds in order, keeping each `after`, then collect each started kind. A gatherin
 failure MUST NOT prevent the session. A waived kind MUST be skipped unless a merge
 since it last ran lapses the waiver.
 
+`gather <change>` MUST gather only the required kinds and owed arguments that are
+missing and not waived, and MUST NOT gather a kind whose evidence is present. `gather
+<change> --kind <kind>` MUST gather a new attempt of that kind whatever is present: of
+the one owed argument `--owed <argument>` names, or of each argument the kind is owed
+without it. It MUST refuse a waived kind unless `--lapsed` is given. The skill MUST
+write the reason for a new attempt in the record beside the attempt's path.
+
 #### Scenario: The local suite fails during gathering
 
 - **WHEN** the gathering's `local` kind fails
 - **THEN** the session starts with that failure in its inputs and diagnoses it
+
+#### Scenario: Gathering leaves present evidence alone
+
+- **WHEN** `gather` runs for a commit whose `local` evidence is present and failing
+- **THEN** it does not run `local`, and validation diagnoses the present failure
+
+#### Scenario: One owed workflow is rerun after an environmental failure
+
+- **WHEN** `ci docker.yml` failed for an environmental reason, `ci tests.yml`
+  passed, and the owner allows a rerun
+- **THEN** `gather --kind ci --owed docker.yml` starts and collects a new attempt of
+  `docker.yml` alone, which `evidence` marks current, and the record names the
+  reason beside its path
 
 ### Requirement: CW-h3ks Each step has a hook before and after it
 

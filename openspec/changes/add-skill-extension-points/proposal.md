@@ -31,9 +31,10 @@ same checks on the very tree it commits: the workflow knows parts, not evidence.
   dispatched run, describes the commit — whoever wrote it; it counts by being present
   at its kind's pattern, an owed kind's for each argument owed.
 - **Validation completes and assesses evidence.** `scripts/change-workflow evidence`
-  reports which required kinds are present for `HEAD`'s tree; the engine gathers the
-  missing ones before validation's session starts; the skill assesses every kind from
-  its guide and writes the record, naming each kind's source.
+  reports which required kinds are present for `HEAD`'s tree or commit, as each
+  kind's pattern keys it; the engine gathers the missing ones before validation's
+  session starts, and `gather --kind` a new attempt the skill directs; the skill
+  assesses every kind from its guide and writes the record, naming each kind's source.
 - **Kinds are declared in the configuration, explained in guides.** Each kind's
   engine fields — requirement (`always` or `owed`), evidence pattern with `{tree}` or
   `{commit}`, commands, `after`, `cleanup` — sit in `[validation.evidence.<kind>]`;
@@ -74,13 +75,13 @@ The workflow has no release, so none of these is migrated (CW-c2tw):
 | `[validation.parts.<name>]` | becomes `[validation.evidence.<kind>]`; `evidence` a pattern with `{tree}` or `{commit}`, and `{owed}` in an owed kind's; adds `required` and a required `guide` | no |
 | Hooks `before-<step>`, `after-<step>` | added, optional, no defaults; a review's run by its runner | yes |
 | Placeholders `{tree}`, `{commit}`, `{inputs}`, `{kind}` | added | yes |
-| `evidence <change> [--json]`, `gather <change> [--kind] [--lapsed]`, `run before\|after <step> <change>` | added | yes |
+| `evidence <change> [--json]`, `gather <change> [--kind <kind> [--owed <argument>]] [--lapsed]`, `run before\|after <step> <change>` | added | yes |
 | `run validation … preflight\|run\|start\|collect`, `config parts` | fold into `gather` and `evidence` | no |
 | `run cleanup` | kept for reruns; also the built-in action before archive cleanup | yes |
 | The validation record | adds `Tree:` and each kind's source; `Parts:` becomes `Evidence:`, which the engine does not parse | yes |
 | The record set's layout | adds `reviews/runs/<run>/before\|after/` | yes |
 | A run's log line | names its inputs directory | yes |
-| The owed line | adds an optional `(<kind> <argument>)` | yes |
+| The owed line | adds an optional `(<kind> <argument>)`; every line names an argument, one safe path segment | yes |
 | Roles (CW-m4ps) | validation's roles restated as evidence kinds; step hooks an optional role; the skills name no target | no, for the restated roles |
 
 ## Non-Goals
@@ -105,7 +106,9 @@ The workflow has no release, so none of these is migrated (CW-c2tw):
   `graph.py` (the actions table), `history.py`, `records.py`; their tests.
 - `.agents/workflow.toml`, the new `.agents/evidence/` guides, and this repository's
   validation scripts (`scripts/validate_slice.py`, `scripts/ci_evidence.py`,
-  `scripts/fetch-e2e-logs.py`), writing under `.snapshot/evidence/{tree}/`.
+  `scripts/fetch-e2e-logs.py`), writing under `.snapshot/evidence/{tree}/` for the
+  local and Helm kinds and `.snapshot/evidence/{commit}/` for the pipeline and CI
+  kinds.
 - Every `change-*` skill, for neutrality, the inputs directory, and the contradiction
   notice; `change-validate`, `change-archive-cleanup`, `change-merge`, `change-plan`,
   `change-implement`, `change-orchestrate`, `change-closeout`, `change-review`,

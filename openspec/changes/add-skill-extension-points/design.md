@@ -1,7 +1,7 @@
 # Design: add skill extension points
 
-Status: design amended by the triage of its first design review (18 F1 to F5),
-awaiting another design review.
+Status: design settled, amended by the triages of its design reviews (18 F1 to F5,
+26 F1 to F3); ready for planning.
 
 ## Context
 
@@ -142,7 +142,17 @@ every kind's evidence from its guide: passed, failed (the commit or unknown), or
 environmental. Present failing evidence is diagnosed, never gathered again for a pass
 — only an environmental diagnosis and the owner's word rerun a kind, as today.
 Unreadable evidence is gathered again, the record saying why. Evidence is never
-gathered again only because another step wrote it or it is old. The record adds
+gathered again only because another step wrote it or it is old.
+
+`scripts/change-workflow gather <change>` gathers only the required kinds and owed
+arguments missing and not waived, and never touches present evidence. `gather
+<change> --kind <kind> [--owed <argument>]` gathers a new attempt of that kind
+whatever is present — of one owed argument with `--owed`, of each argument the kind
+is owed without it — which becomes current by path order; a waived kind is gathered
+only with `--lapsed` besides. The reason for a new attempt — environmental and
+rerun on the owner's word, unreadable, or a waiver lapsed — is the skill's to write
+in the record beside the attempt's path; the engine does not police it (D3, D10),
+the skill's text keeping a rerun from being made for a pass, as today (26 F2). The record adds
 `Tree:` and each kind's source, `present` or `gathered`; the guards keep reading
 `Commit:` and `Result:`.
 
@@ -150,18 +160,26 @@ Rejected: the agent matching patterns itself, so each step re-derives presence;
 a machine verdict read from a field each guide names, with validation skipped when
 everything passes, which couples the engine to each repository's evidence format,
 cannot tell environmental from commit-caused, and removes the assessment the guards
-and triage read; running every part, as today.
+and triage read; running every part, as today; a separate `rerun` command beside a
+missing-only `gather`, another command and step-table entry over the path `--kind`
+reaches; a `--reason` the engine writes or requires, which the record already
+carries (26 F2).
 
 ### D5 — A kind is required always or when owed
 
 Each kind's configuration says `required = "always"` or `"owed"`. An owed kind is
 required once for each argument a complete section's owed line names, which now
-names its kind: `Owed by validation (ci tests.yml): job … — …`. A line naming no
-kind reads as the one owed kind, so plans already written read as before, and is
-refused where more than one kind is owed. Evidence is present for each argument on
-its own: an owed kind's pattern holds `{owed}`, so a `tests.yml` result never makes
-`docker.yml` present, and an owed argument is a single path segment holding no glob
-character, the owed line refused otherwise, naming its section (18 F1). Waivers are
+names its kind: `Owed by validation (ci tests.yml): job … — …`. Every owed line
+names an argument. A line naming no kind reads as the one owed kind, its argument
+the first word in backticks as today, so plans already written read as before; it is
+refused where more than one kind is owed, or where it has no backticked argument,
+which today's reader passes over as owing nothing. Evidence is present for each
+argument on its own: an owed kind's pattern holds `{owed}`, so a `tests.yml` result
+never makes `docker.yml` present (18 F1). An owed argument is a non-empty path
+segment, neither `.` nor `..`, holding no `/`, whitespace, or glob character (`*`,
+`?`, `[`, `]`), so no argument reaches another's directory; the owed line is refused
+otherwise, naming its section (26 F1). A repository whose optional pipeline is owed
+as a whole names it by the workflow that dispatches it, `(pipeline e2e.yml)`. Waivers are
 unchanged, naming kinds where they named parts. Present evidence of a kind not required is listed `not required`
 and not assessed. Here `local`, `helm`, and `pipeline` are `always` and `ci` is
 `owed`.
@@ -170,7 +188,11 @@ Rejected: owing limited to the one CI-shaped kind, leaving another repository's
 optional pipeline to a waiver per change; conditions on the paths a change touches,
 deferred with D2's declared inputs (Open Questions); conditions in a guide's prose,
 which the engine cannot report; a manifest binding each matched file to its owed
-argument, a format and a parser for layouts no adopter has asked for.
+argument, a format and a parser for layouts no adopter has asked for; a line naming
+its kind alone, `(pipeline)`, with a sentinel filling `{owed}`, a second matching
+rule and a reserved word that may collide with a real argument; owing as a whole
+declared by an owed pattern without `{owed}`, which reverses 18 F1's check for a
+case no adopter has raised (26 F1).
 
 ### D6 — The configuration is the engine's injection, the guide the skill's
 
@@ -224,7 +246,8 @@ built in:
   closing lines as today. A waived kind is skipped unless a merge since it last ran
   lapses the waiver, which is mechanical; whether a waiver's condition still holds
   is the skill's judgement, which gathers a lapsed kind with `gather --kind <kind>
-  --lapsed`. The wait leaves the agent's session.
+  --lapsed`, and a new attempt of a present kind or one owed argument with `gather
+  --kind <kind> [--owed <argument>]` (D4). The wait leaves the agent's session.
 - **Before `archive-cleanup`:** run every kind's cleanup (CW-ikmm); the skill commits
   a tracked file a cleanup wrote.
 
@@ -347,7 +370,9 @@ without a `guide`, or whose guide does not exist or is empty, failing closed as 
 `load` directory entry does (18 F4); a hook key other than `before-` or `after-` a
 step in `graph.STEPS`; `{kind}` outside review and triage hooks, `{inputs}` outside
 step hooks, `{tree}` and `{commit}` outside a kind's commands and pattern and the
-functional hooks. A guide restating the configuration is held by review. `check skills` is unchanged; the
+functional hooks. The owed-line reader, not the configuration's check, refuses an
+owed argument outside D5's segment and a line with none (26 F1). A guide restating
+the configuration is held by review. `check skills` is unchanged; the
 inverted test of D9 is the workflow's own.
 
 Rejected: a separate `check guides`, since the configuration is the one place a guide
@@ -391,7 +416,8 @@ no release.
 `ci` under `.snapshot/evidence/{commit}/<kind>/` (D2), `ci`'s holding `{owed}` (D5),
 each attempt in a UTC timestamp directory, and each kind with its guide under
 `.agents/evidence/`, which hold what leaves the skills. The preflight stays. This
-repository's validation scripts take the tree and write there, and
+repository's validation scripts take the tree or the commit their kind keys by and
+write there, and
 `pre-commit-functional` leaves `local` evidence for the tree it tested. No step hook
 is declared at first. Closeout's own parts stay in `openspec/README.md`.
 `market-change-workflow`'s MCW-r4tx and MCW-5tgp are restated for kinds, and its

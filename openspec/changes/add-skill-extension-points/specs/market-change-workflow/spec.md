@@ -18,7 +18,8 @@ owed workflow; each attempt is a directory named by its UTC start time.
 #### Scenario: Validation runs this repository's parts
 
 - **WHEN** validation of a commit runs in this repository with no kind waived, a
-  complete section owing `(ci tests.yml)`, and no evidence present for its tree
+  complete section owing `(ci tests.yml)`, and no evidence present for its tree or
+  commit
 - **THEN** the gathering starts the pipeline and the owed CI run, then runs the
   local kind, then the Helm kind
 
