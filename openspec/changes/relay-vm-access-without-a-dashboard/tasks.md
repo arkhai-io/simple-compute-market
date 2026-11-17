@@ -1570,6 +1570,27 @@ this change's deltas and merged by the archive (11.11). The two descriptions are
       disabled;
     - neither MODIFIED block drops any of main's text.
 
+**Pre-closeout triage fix (26-pre-closeout).**
+- *26 F1, outside the plan:* `RelayService.held_ports` is removed. Its docstring
+  gave deciding what deletion does to a relay with live leases as its reason,
+  which D3 settled, and it had no caller: the holdings read is `list_leases`,
+  the count is the relay read's `active_lease_count`, and every test reads held
+  ports through `RelayPortAllocator.held_ports`, which it duplicated.
+  `arkhai-compute-provisioning`'s existing 0.27.0 → 0.28.0 bump covers the
+  removal.
+- *Evidence:*
+  - `make -C provisioning/compute test` (unit and library integration): 556
+    passed.
+  - `scripts/change-workflow run pre-commit` passed: after-functional-change,
+    pre-commit-functional (`make test`, the service 622 unit and 546
+    application integration among it), and pre-commit, each closing "passed,
+    exit 0".
+  - `test-before`: not run; the fix adds no test.
+  - *Fresh-context check:* no problem found. No reference to the method
+    remains in code, tests, documents, or specifications; no import is left
+    unused; no requirement promises it; and no release has shipped 0.28.0, so
+    the minor bump covers it.
+
 **Handoff (10d).** The service's application-integration harness builds its own
 wiring in `tests/integration/conftest.py` and does not run `container.py`'s.
 A change to the container's composition is mirrored there, and the unit suite

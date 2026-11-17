@@ -589,24 +589,6 @@ class RelayService:
             .one_or_none()
         )
 
-    def held_ports(self, relay_id: str) -> list[int]:
-        """Remote ports currently leased on a relay.
-
-        Exposed because deciding what deletion should do to a relay with live
-        leases needs the answer, and because an operator asking "what is this
-        relay carrying" should not have to read the database.
-        """
-        with self._session_factory() as db:
-            rows = (
-                db.query(RelayPortLease)
-                .filter(
-                    RelayPortLease.relay_id == relay_id,
-                    RelayPortLease.released_at.is_(None),
-                )
-                .all()
-            )
-            return sorted(row.remote_port for row in rows)
-
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
