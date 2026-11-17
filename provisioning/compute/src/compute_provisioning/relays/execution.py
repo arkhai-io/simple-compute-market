@@ -23,6 +23,13 @@ its resolved provider variables. The rule exists so an operator editing pool
 configuration cannot change what a running job does; a credential is the one
 input where the newest value is the correct one.
 
+A disabled relay is not refused here. Disabling a relay drains it: the
+allocator leases no port on it to a new delivery, and every job already holding
+a lease on it runs to its end — a create accepted before the disable, and every
+teardown and reclaim. Refusing them would leave guests running and buyers
+reaching them past their lease end, and hold every failed delivery's lease, so
+the relay would never drain.
+
 The resolver works on a domain's dataclass or frozen Pydantic job parameters with
 ``relay_id``, ``relay_addr``, ``relay_port``, ``relay_token``, and
 ``relay_grant`` fields. The domain passes the leased port of a job that adds a
@@ -44,7 +51,10 @@ from .keys import GrantKey
 
 
 class RelayUnusableAtExecutionError(RuntimeError):
-    """The referenced relay cannot carry a tunnel now.
+    """The referenced relay is absent, or lacks what the job needs of it.
+
+    A job needs the relay's admission token, and a job adding a proxy needs an
+    active grant key and a lease for its own reservation on its port.
 
     Raised as a configuration error rather than a transient one. A retry runs
     against the same configuration and fails identically, so burning the retry
@@ -73,7 +83,9 @@ class RelayExecutionResolver:
         proxy needs no grant and passes no port.
 
         A job with no relay reference reaches its buyer without a relay and
-        passes through untouched.
+        passes through untouched. A job on a disabled relay is resolved like
+        any other: it holds a lease, or removes a proxy, and a drain lets both
+        run.
         """
         if isinstance(params, type) or (not is_dataclass(params) and not (
             isinstance(params, BaseModel) and params.model_config.get("frozen")
@@ -95,11 +107,6 @@ class RelayExecutionResolver:
                 raise RelayUnusableAtExecutionError(
                     f"job references relay '{relay_id}', which no longer exists; "
                     "the delivery would have no external route"
-                )
-            if not relay.enabled:
-                raise RelayUnusableAtExecutionError(
-                    f"relay '{relay_id}' ({relay.relay_addr}:{relay.relay_port}) "
-                    "is disabled, so it will not admit this host's tunnel client"
                 )
             if not relay.relay_token_encrypted:
                 raise RelayUnusableAtExecutionError(

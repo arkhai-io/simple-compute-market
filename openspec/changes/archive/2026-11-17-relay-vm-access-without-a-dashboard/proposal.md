@@ -113,6 +113,13 @@ wildcard DNS record and certificate it implies are not needed.
   an entry names which profile key holds its token, read once when the relay is
   created and never re-read, so a rotation through the controller survives a
   later reconciliation.
+- **Make disabling a relay its drain.** A disabled relay's pools' hosts take no
+  new delivery and no port is leased on it, while every delivery already holding
+  a lease on it — creates, teardowns, and reclaims, for VMs and bare metal —
+  runs to its end. Disabling is reversible. The relay read reports
+  `active_lease_count` and `drained`, which tells the relay's operator when the
+  server may be removed; removing it is that operator's, outside this
+  repository. Nothing deletes a relay.
 - **Remove the fallback literal from the client template** so a missing token
   fails initialization instead of configuring a value published in a tracked
   file.
@@ -140,6 +147,15 @@ None.
   applying to fields a read never returned.
 - `vm-storefront-fulfillment`: the storefront's provisioning settings keys are
   removed with the field.
+- `fulfillment`: the hosts taking new delivery that the compute composition
+  reports leave out every host in a pool referencing a disabled relay.
+
+The first three were promoted into `openspec/specs/` by hand at the first closeout
+(task 11.6), and later changes have since rewritten some of what was promoted.
+The change's deltas therefore carry only what remains to promote: the relay
+drain, under `physical-provisioning` (06 F1), and its consequence for the
+hosts-taking-new-delivery report, under `fulfillment` and `physical-provisioning`'s
+"Disabling a host keeps new deliveries off it" (15 F1).
 
 ## Non-Goals
 
@@ -174,14 +190,16 @@ relay endpoint becomes deployment configuration in the definition document, and
 the token becomes durable state in the database, because a credential has no
 business in a storefront's configuration.
 
-**Host state.** None to migrate. The dev cluster has never run a live-fire
-provisioning test and is deployed in mock mode, so no host has been initialized
-against the relay and none carries accumulated VM proxy stanzas in a single
-`/etc/frp/frpc.toml`.
+**Host state.** None to migrate. When this change was designed no host had been
+initialized against the relay, and none carried accumulated VM proxy stanzas in
+a single `/etc/frp/frpc.toml`.
 
 **Schema.** One migration carries the relay table, the port lease table, and the
-host connection port. It has not been applied in any environment, so it is a
-single operator step against an unmigrated database rather than a sequence.
+host connection port. The relay mechanism has since reached a release:
+`marketplace-v0.3.0`, the newest release tag, carries the relay package and its
+schema. The drain changes no schema and no stored form — the relay read's new
+fields are computed — so no migration is owed against that release. The relay
+read's fields are additive, and a `marketplace-v0.3.0` client ignores them.
 
 **Delivery.** The token seed is one more key in the `provisioning-secrets`
 dynaconf profile — already rendered, already projected, already mounted — so it
@@ -238,6 +256,7 @@ is rewritten as part of this change rather than left to contradict the code.
 - [x] Existing subsystem specification: `openspec/specs/vm-storefront-fulfillment/spec.md` — removal of storefront-configured connectivity keys
 - [x] Existing capability architecture: `openspec/specs/physical-provisioning/architecture.md` — why relay coordination is host-local rather than relay-side, and why a relay is a resource rather than pool configuration
 - [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the definition documents' paths and contents; that reconciliation follows a change to a document rather than a restart is in `docs/guidance/engineering/definition-documents.md`
+- [x] `docs/seller-frp-setup.md` and `docs/development/VALIDATION_RUNBOOK.md` §28 — the relay drain at both scopes, token rotation by draining the relay, and the procedure for retiring a relay
 - [ ] `docs/development/ARCHITECTURE.md` — no repository-wide shape change anticipated
 - [ ] `docs/development/ROADMAP.md` — no roadmap goal currently covers reaching hosts without an inbound route; whether one is warranted is a closeout decision, not an omission
 
@@ -272,3 +291,32 @@ is rewritten as part of this change rather than left to contradict the code.
 - Relays are administered through their own controller, including rotation,
   without redeployment →
   `openspec/specs/physical-provisioning/spec.md`
+- D1: disabling a relay drains it — new delivery and allocation stop, leased
+  work runs, and it is reversible → `openspec/specs/physical-provisioning/spec.md`
+  ("Disabling a relay drains it", and the amended "Relay admission tokens are
+  resolved at execution"); that removing the relay server is its operator's,
+  outside this repository → `openspec/specs/physical-provisioning/architecture.md`,
+  a new "Disabling a relay drains it" subsection under "Buyer access to
+  provisioned hosts"
+- D2: the relay read's `active_lease_count` and `drained`, and why `drained`
+  does not wait for grant expiry → `openspec/specs/physical-provisioning/spec.md`
+  ("A relay reports whether it has drained")
+- D3: nothing deletes a relay; a drained row is kept disabled →
+  `openspec/specs/physical-provisioning/spec.md` ("Disabling a relay drains it")
+- D4: a relay the document stops listing is left as it is →
+  `openspec/specs/physical-provisioning/spec.md` ("Disabling a relay drains it",
+  its scenario "The definition document stops listing a drained relay"); that a
+  listed relay is drained through its `enabled` entry → `docs/seller-frp-setup.md`,
+  "Changing a relay later"
+- D5: the relay drain is the pool drain at relay scope, with refusals naming
+  the scope → `openspec/specs/physical-provisioning/spec.md` ("A relay binding is
+  fixed for a lease's life") and `openspec/specs/physical-provisioning/architecture.md`
+  ("Rebinding requires draining"); the procedure → `docs/seller-frp-setup.md`
+  ("Registering the relay", "Changing a relay later") and
+  `docs/development/VALIDATION_RUNBOOK.md` §28 (a new "Retire a relay")
+- D6: a provisioning container is never shared between users, by design, which
+  the transient secret files' confidentiality rests on →
+  `openspec/specs/physical-provisioning/architecture.md`, "Relay credentials stay
+  on the host and in the service"
+- D7: no permanent destination — the implementation cadence orders this
+  change's own work and describes nothing about the system

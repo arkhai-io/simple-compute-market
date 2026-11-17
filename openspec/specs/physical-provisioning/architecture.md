@@ -526,6 +526,14 @@ grant, relay token or admin password use Ansible `no_log`, and each domain's
 codec marks these values as secret fields for job redaction. Provider extras
 cannot override the client baseline, proxy targets or task controls.
 
+In the service, the relay token is decrypted only into a run's variables file,
+created owner-only and exclusively under a random name in the process's
+temporary directory and removed on every ending of the run, as decrypted host
+keys are. That protection rests on the provisioning container never being
+shared between users, which holds by design: a user who opens one to others, by
+adding their own SSH keys or running their own tunnel into it, has stepped
+outside what this repository and its deployment provide.
+
 The `grant_key_secret_key` profile value is one-line standard base64 encoding
 of an Ed25519 PKCS#8 DER private key; surrounding whitespace is stripped, and
 invalid or missing values fail relay creation without echoing the secret. It is
@@ -565,8 +573,9 @@ nonoverlapping issuer ranges and keys, but still shares its token and sessions;
 one operator's frps restart affects every user. A separate relay per operator
 is recommended. For a compromised signing key, remove it immediately and deny
 its next reconnects, or retain it until its leases end with the signing risk
-limited to its issuer. A leaked client token requires stopping admission,
-draining every lease sharing it, then rotating the token and host baselines.
+limited to its issuer. A leaked client token requires draining the relay in
+every provisioning service that registers its server, then rotating the token
+and host baselines.
 
 If teardown cannot reach the host, a relay operator must block the leased port
 and end established sockets in the relay namespace; where firewall control is
@@ -579,8 +588,66 @@ activity termination and verified cleanup.
 
 A host's relay binding cannot change while any affected lease remains active.
 The host authority composes the compute-family relay mechanism's pool-change
-check; it refuses a relay-changing move while relay leases exist. Disablement
-stops new scheduling but leaves existing leases to drain before rebinding.
+check; it refuses a relay-changing move while relay leases exist.
+
+A drain is one lifecycle — stop new work, let existing work finish — at two
+scopes, and there is no other. Disabling a pool drains that pool, which is what
+a pool's relay reference and a host's move to a pool on another relay wait on.
+Disabling a relay drains every pool referencing it, which is what a relay's
+address, port, or token waits on, since each change affects every pool on the
+relay. A refusal under the rebinding rule names the drain at the scope that
+clears it, so an operator facing a relay-side refusal is not sent to disable
+each pool on the relay in turn.
+
+### Disabling a relay drains it
+
+A relay's `enabled` is its drain, for VM and bare-metal delivery alike.
+Disabling it stops new work on the relay in two places and lets every delivery
+already holding a lease on it run to its end:
+
+- **No new delivery is placed on it.** The compute composition reports to the
+  site authority the hosts taking new delivery as the host authority's report
+  less every host placed in, or with a declaration in, a pool referencing a
+  disabled relay — the seam a disabled host already uses, so the site learns
+  nothing of relays. Both are counted because a host's placement and its
+  declaration's pool are recorded apart: a bare-metal host may be unplaced
+  while its one declaration sits in a pool, and a delivery takes its relay from
+  the declaration's pool.
+- **No port on it is leased to a new owner.** The allocator, the one place a
+  lease is created, refuses a new owner on a disabled relay, reading the relay
+  row under a lock a concurrent disable cannot pass, so a disable committed
+  while an acceptance is in flight either waits for it or is seen by it. An
+  owner already holding a lease receives it again. A disabled relay's active
+  leases therefore only shrink, and "drained" is stable once reached.
+
+Execution does not refuse a disabled relay: a create whose lease was allocated
+before the disable, and every teardown and reclaim, run, since refusing them
+would leave guests reachable past their lease end and hold every failed
+delivery's lease, and the relay would never drain.
+
+The relay read reports `active_lease_count` and `drained`, true exactly when
+the relay is disabled and holds no active lease, computed from the leases and
+required in the typed response, so a client reading a service that does not
+report them fails to parse rather than reading an unknown as an answer. The
+condition is stated by the service, where the lifecycle rule lives, rather than
+rebuilt by each reader, because the relay's operator relies on it to remove the
+server. It does not wait for a released lease's grant to expire: a lease is
+released only once its proxy is gone, and a grant is verified only by its own
+relay's keys, which go with the server.
+
+Disabling is reversible before or after the relay drains: it removes no proxy,
+releases no lease, and changes neither the token nor a grant key. Removing the
+relay server, or on a shared relay this relay's keys and range in the admission
+plugin, is the relay operator's, outside this repository; the service never
+verifies that a server exists, so a relay is enabled again only when one runs.
+Nothing deletes a relay: a drained relay's row stays, disabled, as the record
+its leases, retired keys, and pool references point at, and keeps holding its
+rendezvous, so a server reinstated there is the same relay. A relay the
+definition document stops listing is left as it is, since relays are also
+created through the API and omission cannot mean drain; a listed relay is
+drained through its entry's `enabled`. The procedure is the [seller relay
+guide](../../../docs/seller-frp-setup.md#retiring-a-relay) and the [relay
+runbook](../../../docs/development/VALIDATION_RUNBOOK.md#retire-a-relay).
 
 ## Bounded bare-metal working data
 

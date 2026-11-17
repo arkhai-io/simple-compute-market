@@ -56,7 +56,11 @@ from market_identity import (
 
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from compute_provisioning.relays import RelayExecutionResolver, RelayService
+from compute_provisioning.relays import (
+    RelayDeliverableHosts,
+    RelayExecutionResolver,
+    RelayService,
+)
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
@@ -683,16 +687,18 @@ async def client_and_queue(
             connection_codecs
         ),
     )
+    # The hosts taking new delivery as the production container reports them:
+    # the host authority's, less the hosts of every pool on a disabled relay.
+    deliverable_hosts = RelayDeliverableHosts(host_authority)
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         site_id=identity_context.storefront_site_id,
         lease_end_effect=lease_end_reports.record,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
-        # The hosts taking new delivery, reported by the host authority as the
-        # production container wires it, so a declaration naming a disabled or
-        # unregistered host is refused and not offered here as it is there.
-        deliverable_hosts=host_authority,
+        # So a declaration naming a disabled or unregistered host, or a host
+        # on a disabled relay, is refused and not offered here as it is there.
+        deliverable_hosts=deliverable_hosts,
         # The release guard exactly as the production container composes it,
         # so capacity is freed here only on the proof it needs there.
         release_guard=FulfillmentReleaseGuard(SettlementRepository()),
@@ -753,7 +759,7 @@ async def client_and_queue(
             session_factory,
             resource_pool_service,
             capacity_ledger_service,
-            deliverable_hosts=host_authority,
+            deliverable_hosts=deliverable_hosts,
         ),
     )
 

@@ -104,6 +104,15 @@ def relays(session_factory, settings):
     )
 
 
+def _names_the_relays_drain(message: str) -> None:
+    """A refusal of a change on the relay's side names the relay's drain: it
+    affects every pool on the relay, so disabling one pool would not clear it."""
+    assert "Disable the relay" in message
+    assert "wait until the relay reads drained" in message
+    assert "enable the relay again" in message
+    assert "Disable the pool" not in message
+
+
 def _make_relay(relays, **overrides):
     fields = {
         "relay_id": "site-a",
@@ -179,6 +188,75 @@ class TestRelayAdministration:
     def test_a_window_running_past_the_port_space_is_refused(self, relays):
         with pytest.raises(RelayValidationError):
             _make_relay(relays, vm_port_range_start=65500, vm_port_range_count=100)
+
+
+class TestTheDrainReport:
+    """Every relay read reports how many leases the relay holds and whether it
+    has drained: disabled, and holding none. The relay's operator relies on
+    ``drained`` to know the relay server may be removed."""
+
+    #: A lease end well ahead, so a released lease's grant has not expired.
+    _AHEAD = datetime.now(timezone.utc) + timedelta(days=30)
+
+    @staticmethod
+    def _both(relays, relay_id="site-a"):
+        """The relay as the read and the list report it."""
+        read = relays.get_relay(relay_id)
+        (listed,) = [view for view in relays.list_relays() if view.id == relay_id]
+        assert (listed.active_lease_count, listed.drained) == (
+            read.active_lease_count,
+            read.drained,
+        )
+        return read
+
+    def test_an_enabled_relay_holding_no_lease_is_not_drained(self, relays):
+        created = _make_relay(relays)
+
+        assert (created.active_lease_count, created.drained) == (0, False)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (0, False)
+
+    def test_a_relay_is_drained_once_disabled_and_its_last_lease_released(
+        self, relays, session_factory
+    ):
+        _make_relay(relays)
+        allocator = RelayPortAllocator(session_factory)
+        allocator.allocate(
+            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1",
+            lease_ends_at=self._AHEAD,
+        )
+
+        disabled = relays.set_enabled("site-a", False)
+        assert (disabled.active_lease_count, disabled.drained) == (1, False)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (1, False)
+
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+        (lease,) = relays.list_leases("site-a")
+        assert lease.released_at is not None
+        assert lease.grant_expires_at > datetime.now(timezone.utc).replace(tzinfo=None)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (0, True)
+
+        enabled = relays.set_enabled("site-a", True)
+        assert (enabled.active_lease_count, enabled.drained) == (0, False)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (0, False)
+
+    def test_each_relay_counts_its_own_leases(self, relays, session_factory):
+        _make_relay(relays, relay_id="site-a")
+        _make_relay(relays, relay_id="site-b", relay_addr="10.0.0.10")
+        allocator = RelayPortAllocator(session_factory)
+        for owner in ("cr-1", "cr-2"):
+            allocator.allocate(
+                relay_id="site-a", owner_kind="fulfillment", owner_id=owner,
+                lease_ends_at=self._AHEAD,
+            )
+        relays.set_enabled("site-b", False)
+
+        counted = {view.id: (view.active_lease_count, view.drained) for view in relays.list_relays()}
+
+        assert counted == {"site-a": (2, False), "site-b": (0, True)}
 
 
 class TestHoldings:
@@ -366,6 +444,64 @@ class TestRelayDefinitionDocuments:
         )
         assert diff.updated == ("site-a",)
         assert relays.get_relay("site-a").vm_port_range_start == 7100
+
+    def test_a_drained_relay_the_document_stops_listing_is_left_as_it_is(
+        self, relays, settings
+    ):
+        """Omission is not a drain and not a deletion: relays are also created
+        through the API, outside any document, so the document's silence about
+        one says nothing about it."""
+        listed = self._document()
+        listed["relays"].append(dict(
+            listed["relays"][0], id="site-b", relay_addr="10.0.0.10",
+            grant_key_secret_key="site_b_grant_key",
+        ))
+        settings.site_b_grant_key = GrantKey.generate().profile_form()
+        import_relay_definitions(yaml.safe_dump(listed), relay_service=relays, settings=settings)
+        relays.set_enabled("site-b", False)
+        before = relays.get_relay("site-b")
+        assert before.drained is True
+
+        diff = import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+
+        assert "site-b" not in diff.created + diff.updated + diff.unchanged
+        assert relays.get_relay("site-b") == before
+
+    def test_a_listed_relay_is_drained_through_its_entry_and_enabled_by_omission(
+        self, relays, settings, session_factory
+    ):
+        """A listed relay is drained through its entry's ``enabled``, since an
+        API disable is reverted when the document next changes. The drain is
+        written while the relay holds a lease, which is when an operator needs
+        it, and an entry omitting ``enabled`` enables the relay again."""
+        import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+        allocator = RelayPortAllocator(session_factory)
+        leased = allocator.allocate(
+            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1",
+            lease_ends_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        diff = import_relay_definitions(
+            self._yaml(enabled=False), relay_service=relays, settings=settings
+        )
+
+        assert diff.updated == ("site-a",)
+        disabled = relays.get_relay("site-a")
+        assert (disabled.enabled, disabled.active_lease_count, disabled.drained) == (
+            False, 1, False,
+        )
+        (lease,) = relays.list_leases("site-a")
+        assert (lease.remote_port, lease.released_at) == (leased.remote_port, None)
+
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+        drained = relays.get_relay("site-a")
+        assert (drained.active_lease_count, drained.drained) == (0, True)
+
+        diff = import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+
+        assert diff.updated == ("site-a",)
+        enabled = relays.get_relay("site-a")
+        assert (enabled.enabled, enabled.drained) == (True, False)
 
     def test_an_unknown_field_is_refused(self):
         document = self._document()
@@ -655,7 +791,7 @@ class TestRebinding:
             relays.update_relay("site-a", relay_addr="10.0.0.20")
         message = str(excinfo.value)
         assert "kvm1:6100" in message
-        assert "Disable the pool" in message
+        _names_the_relays_drain(message)
 
     def test_a_relay_can_move_once_drained(self, session_factory, relays):
         self._relay_with_lease(session_factory, relays)
@@ -691,6 +827,7 @@ class TestRebinding:
             relays.rotate_token("site-a", "rotated")
 
         assert "kvm1:6100" in str(excinfo.value)
+        _names_the_relays_drain(str(excinfo.value))
 
     def test_a_token_can_be_set_before_any_host_dials(self, relays):
         """The ordinary case is unaffected: a relay with no leases has nothing
@@ -761,23 +898,52 @@ class TestExecutionTimeTokenResolution:
 
         assert resolved.relay_token == "rotated"
 
-    @pytest.mark.parametrize(
-        "break_it, expected",
-        [
-            (lambda r: r.set_enabled("site-a", False), "disabled"),
-            (lambda r: None, "no admission token"),
-        ],
-    )
-    def test_an_unusable_relay_fails_the_job(
-        self, relays, session_factory, settings, break_it, expected
-    ):
-        _make_relay(relays, token="admission-token" if expected == "disabled" else None)
-        break_it(relays)
-        with pytest.raises(RelayUnusableAtExecutionError) as excinfo:
+    def test_a_relay_with_no_token_fails_the_job(self, relays, session_factory, settings):
+        _make_relay(relays, token=None)
+        with pytest.raises(RelayUnusableAtExecutionError, match="no admission token"):
             self._resolver(session_factory, settings).resolve_into(
                 self._params(relay_id="site-a")
             )
-        assert expected in str(excinfo.value)
+
+    def test_a_removal_on_a_disabled_relay_is_resolved(self, relays, session_factory, settings):
+        """Disabling a relay drains it, so the teardown that ends a delivery
+        on it runs: refused, the guest would stay up and its buyer keep
+        access past the lease end."""
+        _make_relay(relays, token="admission-token")
+        relays.set_enabled("site-a", False)
+
+        resolved = self._resolver(session_factory, settings).resolve_into(
+            self._params(relay_id="site-a")
+        )
+
+        assert resolved.relay_addr == "10.0.0.9"
+        assert resolved.relay_port == 7000
+        assert resolved.relay_token == "admission-token"
+        assert resolved.relay_grant is None
+
+    def test_a_create_holding_its_lease_on_a_disabled_relay_is_signed_its_grant(
+        self, relays, session_factory, settings
+    ):
+        """A create accepted before the disable holds its lease, and runs."""
+        _make_relay(relays, token="admission-token")
+        lease = RelayPortAllocator(session_factory).allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-1",
+            lease_ends_at=datetime(2031, 6, 1, tzinfo=timezone.utc),
+            host_id="kvm1",
+        )
+        relays.set_enabled("site-a", False)
+
+        resolved = self._resolver(session_factory, settings).resolve_into(
+            self._params(relay_id="site-a"), remote_port=lease.remote_port, owner_id="cr-1"
+        )
+
+        assert resolved.relay_token == "admission-token"
+        header, claims = _segments(resolved.relay_grant)
+        assert header["kid"] == relays.get_relay("site-a").grant_keys.active.kid
+        assert claims["port"] == lease.remote_port
+        assert claims["jti"] == "cr-1"
 
     def test_a_vanished_relay_fails_the_job(self, session_factory, settings):
         with pytest.raises(RelayUnusableAtExecutionError):
