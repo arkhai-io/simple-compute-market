@@ -26,6 +26,15 @@ services:
     environment:
       - ACTIVE_PROFILES=api-credits-registry,payments-lane
 
+  credits-service:
+    environment:
+      # The full stack's principals and the lane's operator, `admin`: the
+      # lane-time fixture reads the service's time and, under injected time,
+      # sets it, signed as that role. Anvil 9, a well-known development key never
+      # for a public network; e2e-tests/config/config-apicredits-lane.yml holds
+      # its credential.
+      - APICREDITS_TRUSTED_PRINCIPALS=@json {"seller":[{"scheme":"eip191","identifier":"0x90f79bf6eb2c4f870365e785982e1f101e93b906"}],"service":[{"scheme":"ed25519","identifier":"w75DsOFODAFDR0gVcITNTSeEvG_SRQU9GyTulF2w7IM"}],"admin":[{"scheme":"eip191","identifier":"0xa0ee7a142d267c1f36714e4a8f75612f20a79720"}]}
+
   credits-storefront:
     depends_on:
       payments-double:

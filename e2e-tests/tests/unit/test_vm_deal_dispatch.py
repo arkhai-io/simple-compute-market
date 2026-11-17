@@ -142,6 +142,7 @@ def test_08b_waits_for_the_deals_own_dispatch_from_a_mark_taken_before_settling(
     state = _state()
     Stage08b_SettlementSubmittedAndJobQueued().test_08b_settlement_submitted_and_provisioning_job_queued(
         driver.storefront_client, log, FakeProvisioning(), {"wallet_address": "0xbuyer"}, driver, state,
+        None,
     )
     assert state.fulfillment_id == "f-this"
     order = [name for name, _ in log.calls]

@@ -10,7 +10,8 @@ description = "End-to-end integration tests for Arkhai deployed blockchain envir
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "arkhai-compute-provisioning-contracts>=0.12.0",
-    "arkhai-compute-provisioning-client>=0.9.0",
+    # 0.11.0 first sets the provisioning service's time.
+    "arkhai-compute-provisioning-client>=0.11.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "pytest>=8.0",
@@ -33,7 +34,9 @@ dependencies = [
     "jsonschema>=4.21",
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
-    "arkhai-core-storefront-client>=0.27.0",
+    # 0.30.0 first sets a storefront's time and reads its status time section,
+    # which lane time does.
+    "arkhai-core-storefront-client>=0.30.0",
     # Stages 06, 07, and 09 of the listing-shapes scenario write storefront pool
     # overrides through the kit's typed client.
     "arkhai-kit-pool-overrides>=0.2.0",
@@ -80,8 +83,15 @@ dependencies = [
     # dispute scenarios file as the buyer.
     "arkhai-kit-arkhai-mediation>=0.3.0",
     # The lane doubles' typed control client, through which the payment
-    # scenarios read the doubles' status and program their rules and clocks.
+    # scenarios read the doubles' status and program their rules, and lane time
+    # sets the doubles' and the sample app's time.
     "lane-double-controls>=0.1.0",
+    # The harness's own time source, injected in an injected run so its signing
+    # clients and stages read lane time, and the buyer's lane-time file writer.
+    "arkhai-injected-time>=0.1.0",
+    # The credits service's typed client, through which lane time sets that
+    # service's time.
+    "arkhai-apicredits-domain>=0.10.0",
 ]
 
 [tool.uv]

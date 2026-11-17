@@ -2323,17 +2323,77 @@ lane time" and "A run uses one time source throughout". Touches
 conftests, the runner profiles `e2e-tests/config/config-*.yml`, and
 `e2e-tests/tests/unit/`.
 
-- [ ] 15.1 The harness installs an injected source in its own process for an injected
+- [x] 15.1 The harness installs an injected source in its own process for an injected
   run; its signing clients read it (D19).
   - Verify: e2e unit tests: a client built in the harness signs at the harness's
     instant.
-- [ ] 15.2 The runner profile names the run's mode, `injected` or `wall`, and every
+  - Done: `e2e-tests/tests/e2e/roles/helpers/lane_time.py`. `lane_time_of(section)`
+    installs an `InjectedTime` at the session's wall instant in the harness's
+    process for an injected run before any party's client is built; the
+    session fixture `lane_time` (autouse, re-exported by `roles/conftest.py`)
+    restores the previous source when the session ends. The harness's own reads
+    of the time of the world now read the process source too
+    (`injected_time.now()` / `now_datetime()`), wall time in a wall run: every
+    escrow expiry, back-dated lease end (`_expired_lease_end`, the real
+    drivers' recovery truncations), filing instant, forward-deal start and its
+    before-start checks, the reapply snapshot's instant, and the signed
+    requests `provisioning_test_client.py` and the VM conftest build by hand —
+    29 reads in 19 files, which a lane on frozen time would otherwise compare
+    with wall instants. `e2e-tests` declares `arkhai-injected-time` and
+    `arkhai-apicredits-domain` (the credits client), raises its floors on the
+    storefront client (0.30.0) and the provisioning client (0.11.0), whose
+    `set_time` and status time section lane time uses, and is relocked.
+  - Evidence, unit, `e2e-tests/tests/unit/test_lane_time.py::test_a_client_built_in_an_injected_run_signs_at_the_harness_s_instant`
+    (a `SyncStorefrontClient` built after `lane_time_of` starts an injected run
+    sends `X-Market-Timestamp` equal to the harness's instant, read off an
+    `httpx.MockTransport`) and `test_a_wall_run_installs_no_injected_source`.
+- [x] 15.2 The runner profile names the run's mode, `injected` or `wall`, and every
   party: each storefront, provisioning service, registry, the credits service and the
   sample app where the lane runs them, both doubles, the chain, and the buyer's file
   path (D7, D16).
   - Verify: e2e unit tests: a profile naming a party it cannot reach fails setup
     naming it, never skips.
-- [ ] 15.3 `lane_time.set(T)`: moves the harness's own source, then each service
+  - Done: each lane's own runner profile (`config-vms-lane.yml`,
+    `config-bare-metal-lane.yml`, `config-apicredits-lane.yml`) gains a
+    `lane_time` section: `mode`, a `target` naming the run for a blocked skip,
+    and `parties`, each a `name`, a `kind` (`storefront`, `provisioning`,
+    `registry`, `credits`, `control`, `chain`, `buyer`) and what its client
+    needs — URL, administrator credential, the authority pin, the registry's
+    administrator key, a control token and CA bundle, the chain's RPC URL, the
+    buyer file's path — restated from the lane's committed configuration as
+    the profiles already restate fixtures. `parties_from` builds each over its
+    typed client (`SyncStorefrontClient`, `SyncComputeProvisioningClient`,
+    `SyncRegistryClient` with the administrator key, `CreditsServiceClient` as
+    `admin`, `ControlClient`, JSON-RPC, `TimeFile`), refusing an unknown kind or
+    a missing field by name. The profiles state `mode: wall` here, every party
+    then running wall time: section 16 turns each lane injected with its Compose
+    configuration, and adds the sample app, which serves its status only under
+    injected time. The fixture's reads need what the lanes lacked: an
+    administrator key on the four lane registries without one
+    (`dev-env/registry/config-{registry-a,bare-metal-registry,api-credits-registry,compute-registry}.env`,
+    the development value registry-b already used) and an `admin` principal on
+    the credits service (Anvil 9, in `compose.apicredits-lane.yml`'s override of
+    its trusted principals). The generated buyer configuration
+    (`buyer_cli.py`) gains `[time] source = "injected"` and `file` in an injected
+    run (`buyer_time_file`), nothing in a wall run.
+  - Evidence, unit, `test_lane_time.py`: an unreachable party's read fails
+    naming it (`… cannot be read: connection refused`) — `LaneTimeError`, an
+    `AssertionError`, which the session fixture turns into `pytest.fail`, not
+    a skip (the fixture itself is not run by a unit test); an unknown kind and
+    a missing field are refused by name; the generated buyer configuration's
+    `[time]` table appears only for an injected run's file
+    (`buyer_cli._time_section`, `buyer_time_file`); a run naming no lane
+    parties has no lane time. `test_lane_time_profiles.py` (static
+    configuration over the committed files): each lane's section builds every
+    party over its typed client, as the fixture does, with no network call, by
+    the lane's names and kinds; and every restated value is held to its source
+    — each registry's key, authority id and identifier to its
+    `dev-env/registry/` profile, each double's control token to its fixture,
+    the storefronts' and provisioning services' credentials and pins to
+    `config-docker.yml`, the credits operator to the principal
+    `compose.apicredits-lane.yml` trusts as `admin` and the authority pin to the
+    one the sample app's middleware trusts.
+- [x] 15.3 `lane_time.set(T)`: moves the harness's own source, then each service
   through its typed client's `set_time`, then both doubles and the sample app through
   `lane-double-controls`' client, then the chain (`evm_setNextBlockTimestamp` and a
   mined block, and its block time frozen with `anvil_setBlockTimestampInterval` if
@@ -2344,22 +2404,116 @@ conftests, the runner profiles `e2e-tests/config/config-*.yml`, and
   - Verify: e2e unit tests over fake parties: the order of calls; a party left behind
     fails naming it and its instant; an older image's status without a time section
     fails naming it; a backward set fails.
-- [ ] 15.4 Session start: in an injected run, set every party to the wall instant at
+  - Done: `LaneTime.set(T)` refuses a T before the harness's instant (`lane time
+    moves only forward: the harness is at …, and … is earlier`), sets the
+    harness, then each party in `SET_ORDER` — storefronts, provisioning,
+    registries, the credits service, the controls (doubles, sample app), the
+    chain, the buyer's file — failing on a party's refusal naming it, then
+    `confirm(T)`: every party's status read, failing on one with no time
+    section, on another source, or at another instant, naming each. The chain
+    is `evm_setNextBlockTimestamp(T)` then `evm_mine`, read back from the
+    latest block. Freezing it between sets (`anvil_setBlockTimestampInterval`)
+    is not adopted here: whether Anvil admits it is checked against the lane's
+    Anvil in section 16, which records the answer.
+  - Evidence, unit, `test_lane_time.py` over recording fakes: the order of calls
+    (storefront, provisioning, registry, credits, control, chain, buyer,
+    whatever the profile's order), each party set with the harness already at
+    T; a party left behind fails naming it and its instant; a status without a
+    time section fails naming it; a status instant that is a float fails the
+    read (the component's rule, `check_instant`, in `_reading`); a backward set
+    fails naming the harness and both instants and calls no party; a party
+    refusing fails naming it; the chain party's RPC calls and its read; the
+    buyer file written and read through the component.
+- [x] 15.4 Session start: in an injected run, set every party to the wall instant at
   the session's start; in any run, read every status and fail naming a mix of sources
   (D11, D16).
   - Verify: e2e unit tests: a mix fails naming the wall-time party.
-- [ ] 15.5 The helper shared stages use to reach an instant: in an injected run it
+  - Done: `LaneTime.start(wall)` sets every party to the session's wall instant
+    in an injected run, then, in either mode, `check_one_source()` fails naming
+    each party whose status names another source or none; the chain and the
+    buyer's file, which name no source, are read only for their instant.
+  - Evidence, unit: the session start sets every party to the wall instant; a
+    wall run with an injected party fails naming it; `check_one_source` on an
+    injected run with a wall-time party fails naming it.
+  - Gap, for the round's triage: a run whose profile names no `lane_time`
+    parties — the local Helm release's validation, a hosted target — gets no
+    lane time and no check of every party's source; a stage there reaches an
+    Agreement instant through `reach_agreement_instant`, which waits, but a
+    blocked skip for any other instant needs a wall-mode `lane_time` section in
+    that run's profile, which none has (a stage calling `lane_time.reach`
+    directly would meet `None`; none does). 12.2's note owes a wall-mode check
+    of each party's status on the local Helm release, which needs a runner
+    profile naming the release's parties and their administrator credentials
+    there; it is not delivered by this section.
+- [x] 15.5 The helper shared stages use to reach an instant: in an injected run it
   sets lane time; in a wall run it waits for an instant the Agreement fixes, and any
   other instant is a blocked skip naming the wall-time target. `wait_until` callers move
   to it; `lane_double_clock` and `clocks_reset_after` are removed (D8, D16).
   - Verify: e2e unit tests for both modes and the blocked skip
     (`test-compatibility`'s "A time-driven module against a hosted target").
-- [ ] 15.6 Section verification.
+  - Done: `LaneTime.reach(instant, fixed_by_agreement=…)` sets lane time to the
+    instant, or leaves it when already past, in an injected run; in a wall run
+    it waits for an Agreement-fixed instant through `wait_until` (moved here
+    from `compute_deal_stages.py`, its behaviour unchanged, its docstring and
+    annotations rewritten) and is a blocked skip naming the
+    profile's `target` for any other. `compute_deal_stages.reach_agreement_instant`
+    serves the two callers that waited — stage 08b's late settlement and the
+    forward deal's start (`delivery_timing_deal.py`, 13b) — each now taking the
+    `lane_time` fixture, and a run with no lane time waits as before.
+    `lane_double_clock` and `clocks_reset_after` went in section 13 (13.4).
+  - Evidence, unit: an injected run reaches an instant by setting it and never
+    moves back; a wall run waits for an Agreement instant through its wait
+    function; any other instant on wall time is a blocked skip naming the
+    target; a wall run sets no time; `reach_agreement_instant` on an injected
+    lane sets the instant; the existing `wait_until` tests, now importing it
+    from `lane_time`; and `test_vm_deal_dispatch.py`'s stage-08b test, passing
+    no lane time, which waits as before (the other stage-08b unit test skips at
+    its preflight before reaching it).
+- [x] 15.6 Section verification.
   - Unit: `make test-e2e-unit`.
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: section 16's lanes.
   - Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the
     fixture's tests.
+  - Evidence: `make test-e2e-unit` 943 passed (1 skipped), after the
+    fresh-context fixes. `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes` before them: `after-functional-change`
+    (`make lock`) and `pre-commit-functional` (`make dist-clean`, `make
+    check-packaging`, `make test`, every suite, `make test-e2e-unit` among them)
+    passed; of `pre-commit` only the citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9). On the final tree,
+    after the fixes: the same — `after-functional-change` and
+    `pre-commit-functional` (every suite) passed, and of `pre-commit` only the
+    citations check failed, on that document.
+  - The new tests import what only this change adds (`lane_time`,
+    `injected_time`), so against the round's base they fail at collection.
+  - End-to-end scenarios covering the section, none run by it: every module of
+    the three lanes starts the session fixture, in wall mode until section 16;
+    stage 08b and the forward deal's 13b reach their Agreement instants through
+    it. The owed job is right: `test · test-e2e-unit` runs `make test-e2e-unit`
+    in `tests.yml`, a workflow `scripts/ci_evidence.py` lists.
+  - Fresh-context check: it found the profiles' restated values held by no test
+    and the typed-client builders never built (`test_lane_time_profiles.py`
+    added), `TESTING.md` and the e2e README calling a lane profile "only what
+    differs" (both now describe its `lane_time` section), the Anvil freeze and
+    the profiles' flip to injected owned by no task (the handoff below), the
+    client floors below the API used (raised), the credits status's instant
+    taken unparsed (`check_instant` now), two docstring claims (the backward
+    refusal names the harness; a run with no lane time waits), the import
+    grouping in eight files (fixed), and seven claims broader than their tests
+    and a miscount (reworded above: the unreachable party, the profile's kinds,
+    the buyer's table, the harness moving first, the injected source check, the
+    stage-08b tests, the blocked skip off the lanes, 29 reads in 19 files).
+  - Handoff for section 16, which owns these: flip each lane profile's
+    `lane_time.mode` to `injected` with the Compose configuration that injects
+    every party; add the sample app to the API-credit lane's parties (`kind:
+    control`, its URL on the lane network and its control token), since it
+    serves its status only under injected time; check against the lane's Anvil
+    whether `anvil_setBlockTimestampInterval` freezes block time between sets,
+    adopt it in `ChainParty` if so, and record the answer in 16's notes. Under
+    injected time every `market` command prints the announcement on stderr; the
+    buyer's file is `/tmp/arkhai-lane-time/now.json` inside the runner, written
+    at the session's start before any buyer command.
 
 ## 16. Every Compose lane on injected time
 

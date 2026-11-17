@@ -643,10 +643,12 @@ their payments configuration's `ca_bundle_path`, never `SSL_CERT_FILE`. Each lan
 target runs the runner under `ACTIVE_PROFILES=docker,payments-lane,<lane>-lane`
 (`RUNNER_PROFILES` in `e2e-tests/Makefile`): `config-payments-lane.yml` holds the
 double's target, receipt identity, fee policy, CA bundle path, accounts and the
-buyer's credentials, and `config-<lane>-lane.yml` only what differs by lane — the
-seller's marketplace credential, and in the bare-metal lane its price and
-dispute window — Dynaconf merging the
-`payments` section key by key. Unset, the runner runs under `docker` alone and
+buyer's credentials, and `config-<lane>-lane.yml` the payments settings that
+differ by lane — the seller's marketplace credential, and in the bare-metal lane
+its price and dispute window — Dynaconf merging the `payments` section key by
+key, and the lane's `lane_time` section: the run's time mode and every party the
+lane runs, with what the lane-time fixture reaches each by
+(`e2e-tests/tests/e2e/roles/helpers/lane_time.py`). Unset, the runner runs under `docker` alone and
 has no payments target. The runner's environment carries no payments value; the
 lane CA reaches it as one mount. Tests hold every value a lane profile restates
 to the fixture or identity file it comes from. Once the stack is up, each lane

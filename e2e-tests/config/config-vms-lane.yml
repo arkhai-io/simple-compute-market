@@ -12,3 +12,76 @@
 
 payments:
   seller_marketplace_credential: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+
+# The lane's time: its mode and every party it runs, each reached by its typed
+# client or control as tests/e2e/roles/helpers/lane_time.py builds it. A party
+# named here and not reachable fails the session's setup. Every credential is a
+# public development value restated from the lane's committed configuration
+# (config-docker.yml, config-payments-lane.yml, dev-env/registry/), never for a
+# public network.
+lane_time:
+  mode: wall
+  target: "the VM Compose lane"
+  parties:
+    - name: bob-storefront
+      kind: storefront
+      url: "http://bob-storefront:8001"
+      admin_scheme: eip191
+      admin_credential: "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e"
+      publisher_scheme: eip191
+      publisher_identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    - name: alice-storefront
+      kind: storefront
+      url: "http://alice-storefront:8002"
+      admin_scheme: eip191
+      admin_credential: "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356"
+      publisher_scheme: eip191
+      publisher_identifier: "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
+    - name: bob-provisioning
+      kind: provisioning
+      url: "http://provisioning:8081"
+      admin_scheme: eip191
+      admin_credential: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+      authority_scheme: eip191
+      authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+    - name: alice-provisioning
+      kind: provisioning
+      url: "http://alice-provisioning:8081"
+      admin_scheme: eip191
+      admin_credential: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+      authority_scheme: ed25519
+      authority_identifier: "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw"
+    - name: registry-a
+      kind: registry
+      url: "http://registry:8080"
+      authority_id: registry-a
+      authority_scheme: eip191
+      authority_identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+      caller_scheme: eip191
+      caller_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      admin_key: development-registry-admin-key
+    - name: registry-b
+      kind: registry
+      url: "http://registry-b:8080"
+      authority_id: registry-b
+      authority_scheme: eip191
+      authority_identifier: "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
+      caller_scheme: eip191
+      caller_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      admin_key: development-registry-admin-key
+    - name: payments-double
+      kind: control
+      url: "https://payments-double:8443"
+      token: payments-lane-double-control-public-development-token
+      ca_bundle_path: /run/lane-doubles/lane-ca.pem
+    - name: mediation-double
+      kind: control
+      url: "https://mediation-double:8443"
+      token: mediation-lane-double-control-public-development-token
+      ca_bundle_path: /run/lane-doubles/lane-ca.pem
+    - name: anvil
+      kind: chain
+      url: "http://anvil:8545"
+    - name: buyer-file
+      kind: buyer
+      file: /tmp/arkhai-lane-time/now.json

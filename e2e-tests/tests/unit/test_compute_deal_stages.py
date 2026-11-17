@@ -26,12 +26,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.e2e.roles.helpers.compute_deal_stages import (
-    MAX_CLOCK_WAIT,
     ComputeDealState,
     Stage08b_SettlementSubmittedAndJobQueued,
     Stage09c_LeaseRecorded,
-    wait_until,
 )
+from tests.e2e.roles.helpers.lane_time import MAX_CLOCK_WAIT, wait_until
 from tests.unit.stage_sources import (
     StateUse,
     base_names,
@@ -406,6 +405,7 @@ def test_settlement_skips_until_the_preflight_before_it_passes():
     with pytest.raises(pytest.skip.Exception, match="_settle_preflight_passed"):
         Stage08b_SettlementSubmittedAndJobQueued().test_08b_settlement_submitted_and_provisioning_job_queued(
             storefront, storefront_admin, provisioning, {"wallet_address": "0xbuyer"}, driver, state,
+            None,
         )
     storefront.settle_evm.assert_not_called()
     driver.settle_dispatched.assert_not_called()

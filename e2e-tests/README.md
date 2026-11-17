@@ -94,9 +94,12 @@ states its settings in committed runner profiles. A lane target runs the runner 
 `RUNNER_PROFILES=docker,payments-lane,<lane>-lane`: `config/config-payments-lane.yml`
 holds what every lane shares — the target and its identity, the fee, LANE_OWNED,
 CA_BUNDLE_PATH, API_KEY_ENV and BUYER_API_KEY, both accounts and the buyer's
-marketplace seed — and `config/config-<lane>-lane.yml` only what differs, the
-seller's marketplace credential and, for bare metal, its whole-host fixture's
-COMPUTE_HOURLY_GROSS and DISPUTE_WINDOW. Dynaconf merges the section key by key.
+marketplace seed — and `config/config-<lane>-lane.yml` the payments settings
+that differ, the seller's marketplace credential and, for bare metal, its
+whole-host fixture's COMPUTE_HOURLY_GROSS and DISPUTE_WINDOW, beside the lane's
+`lane_time` section, which names the run's time mode and every party the lane
+runs for the lane-time fixture (`tests/e2e/roles/helpers/lane_time.py`). Dynaconf
+merges the `payments` section key by key.
 `test-buyer-machine` mounts the lane CA where CA_BUNDLE_PATH names it, and passes
 the runner nothing else; rerunning markers against a lane's stack passes the
 lane's RUNNER_PROFILES. The lane's settings mark the target LANE_OWNED, so an

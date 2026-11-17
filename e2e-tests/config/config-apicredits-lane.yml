@@ -12,3 +12,63 @@
 
 payments:
   seller_marketplace_credential: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+
+# The lane's time: its mode and every party it runs, each reached by its typed
+# client or control as tests/e2e/roles/helpers/lane_time.py builds it. A party
+# named here and not reachable fails the session's setup. Every credential is a
+# public development value restated from the lane's committed configuration
+# (config-docker.yml's api_credits, config-payments-lane.yml, dev-env/registry/,
+# compose.apicredits-lane.yml's credits operator, Anvil 9), never for a public
+# network.
+lane_time:
+  mode: wall
+  target: "the API-credit Compose lane"
+  parties:
+    - name: credits-storefront
+      kind: storefront
+      url: "http://credits-storefront:8000"
+      admin_scheme: eip191
+      admin_credential: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+      publisher_scheme: eip191
+      publisher_identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+    - name: credits-service
+      kind: credits
+      url: "http://credits-service:8082"
+      admin_scheme: eip191
+      admin_credential: "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6"
+      authority_scheme: ed25519
+      authority_identifier: "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c"
+    - name: api-credits-registry
+      kind: registry
+      url: "http://api-credits-registry:8080"
+      authority_id: api-credits-registry
+      authority_scheme: ed25519
+      authority_identifier: "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
+      caller_scheme: eip191
+      caller_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      admin_key: development-registry-admin-key
+    - name: compute-registry
+      kind: registry
+      url: "http://compute-registry:8080"
+      authority_id: compute-registry
+      authority_scheme: eip191
+      authority_identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+      caller_scheme: eip191
+      caller_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      admin_key: development-registry-admin-key
+    - name: payments-double
+      kind: control
+      url: "https://payments-double:8443"
+      token: payments-lane-double-control-public-development-token
+      ca_bundle_path: /run/lane-doubles/lane-ca.pem
+    - name: mediation-double
+      kind: control
+      url: "https://mediation-double:8443"
+      token: mediation-lane-double-control-public-development-token
+      ca_bundle_path: /run/lane-doubles/lane-ca.pem
+    - name: anvil
+      kind: chain
+      url: "http://anvil:8545"
+    - name: buyer-file
+      kind: buyer
+      file: /tmp/arkhai-lane-time/now.json
