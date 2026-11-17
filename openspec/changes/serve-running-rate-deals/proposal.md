@@ -62,22 +62,31 @@ it. It takes the servicing slice of `converge-ongoing-compute-leases`.
 - **What the buyer is shown** (D13): the penalty's collectible bound before approval,
   and after a funding stop that a top-up cannot revive the deal.
 - **A stale buyer requirement corrected, and restart recovery proven** (D14).
-- **Lane qualification in both lanes, against both doubles** (D9, D10): the on-demand
-  baseline with the buyer's stop, funds running out, spot preemption with notice, the
-  maximum term ending with `returned`, and the buyer watchdog's delivered-deal cases,
-  each reaching its instants by setting lane time. Lane compositions declare
-  `[charged, returned]`. Each run is labelled lane-double evidence, never live.
+- **An Agreement nobody filed on is observed** (D16): the mediation adapter reads the
+  authority's answer that it holds no record of the Agreement as no case, so such a deal
+  can be listed *ended*, both halves' reads carry an accepted dispute outcome, and
+  evidence retention runs; the kit's fake answers as the authority does.
+- **The scenario programs the payments double's further reservation** (D17): a control
+  reserving a rate part through a named instant, as far as its end and the payer's
+  balance allow, in place of the service's scheduler.
+- **Lane qualification in both lanes, against both doubles** (D9, D10, D18, D19): the
+  on-demand baseline with the buyer's stop, funds running out, spot preemption with
+  notice, the maximum term ending with `returned`, and the buyer watchdog's
+  delivered-deal cases with the storefront paused, each reaching its instants by
+  setting lane time. Lane compositions declare `[charged, returned]`. Each run is
+  labelled lane-double evidence, never live; the Compose lanes are this change's
+  evidence.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `deal-lifecycle`: the refusal removed and changed answers pending; payment-stop classification, the `terms` split and the resolution of earlier pending stops; the kit-owned servicing step order, the unified term end, respondent discovery and paging; what *ended* means and the `ending` codes.
+- `deal-lifecycle`: the refusal removed and changed answers pending; payment-stop classification, the `terms` split and the resolution of earlier pending stops; the kit-owned servicing step order, the unified term end, respondent discovery and paging; what *ended* means and the `ending` codes; an authority holding no record of the Agreement read as no case.
 - `compute-delivery`: the shared delivery re-drive over domain ports.
 - `market-composition`: the four-loop layout in both storefronts; the startup report and withdrawal; the VM composition building its payments seller stage.
 - `settlement-servicing`: the neutral lifecycle loop's journal allowance.
 - `buyer-orchestration`: the penalty's collectible bound and the funding-stop message; "The buyer refuses seller ends that keep the started period" reworded to the per-term waivers.
-- `test-compatibility`: the recurring purchase delivered; the rate lane rows and watchdog cases in both lanes on lane time, and their evidence labels.
+- `test-compatibility`: the recurring purchase delivered; the rate lane rows and watchdog cases in both lanes on lane time, and their evidence labels; the payments double's reservation control.
 
 ### New Capabilities
 
@@ -103,7 +112,8 @@ None.
 - Persistence: one kit-owned servicing table for the page position, by a migration appended to each storefront chain, which drops bare metal's `bare_metal_lifecycle_cursor`.
 - Configuration: interval keys for `deal-servicing` and `delivery-recovery`, defaulting to today's intervals; released keys keep their meaning.
 - Operations: loop names change in both storefronts; lane stages and operator documentation follow.
-- Buyer behaviour: the default buyer's refusals are unchanged.
+- Buyer behaviour: the default buyer's refusals are unchanged; a deal nobody filed on reads with an accepted dispute outcome.
+- Packages beyond the compute family: `kit/arkhai-mediation`'s read of an Agreement with no record and its fake (D16); `kit/arkhai-payments`' engine reservation method, `tools/payments-lane-double`'s reservation control and second payer, and `tools/lane-double-controls`' route and client (D17). Neither kit's version moves past its unreleased one.
 
 ## Dependencies and Related Changes
 
@@ -137,5 +147,11 @@ None.
 - D13: `buyer-orchestration`'s spec and architecture companion ("Compute terms before approval", "The buyer's watchdog") — the penalty's collectible bound and the funding-stop message.
 - D14: `buyer-orchestration`'s spec — the requirement reworded to the per-term waivers; restart recovery's evidence in `test-compatibility`'s companion.
 - D15: no permanent destination — the implementation cadence orders this change's own work.
+- D16: `deal-lifecycle`'s spec ("The seller half lists deals") — an authority holding no record of the Agreement read as no case; `openspec/specs/settlement-servicing/architecture.md` (its "Initial missing mediation history permits the first filing only" sentence) and `kit/arkhai-mediation/README.md` (its initial-404 paragraph).
+- D17: `test-compatibility`'s spec ("Lane double controls are typed deterministic steps", "Rate deals are qualified in both compute lanes on lane time"); `tools/payments-lane-double/README.md` (its controls and claims), `tools/lane-double-controls/README.md` (the route), `kit/arkhai-payments/README.md` (the engine's reservation method beside `advance`); `docs/development/TESTING.md`, "Private Service Dependencies" (the reservation control).
+- D18: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" (the watchdog cases with the storefront paused).
+- D19: `docs/development/TESTING.md`, "The canonical compute deal" — the rate rows and watchdog cases are Compose-lane, lane-double evidence.
+- `docs/guidance/engineering/test-doubles.md`, "A double mirrors its producer" — a producer's scheduled actions, such as reserving ahead, are answers a scenario programs like its rulings and job outcomes; a double stays externally programmable, gaining no internal behaviour a scenario could program (the owner's principle, stated in this design).
+- `docs/guidance/repository/deterministic-tests.md`, "Pause the loop, then advance it explicitly" — a local end-to-end test holds a party's time-based signals by pausing it, never by stopping it; external-topology tests handle time differently (the owner's principle, stated in this design).
 - `docs/guidance/workflow/changes.md`, "Defects found during a change" — a change taking on work another change owns names the move in its own proposal and in that change's row Notes (the owner's principle, stated in this design).
 - `docs/guidance/repository/package-versions.md`, "Compatibility is owed to what a release has shipped" — a released client or CLI is not owed compatibility with a later storefront, provided the client shipped with that storefront reads everything it serves; backwards client compatibility stays supported through the staged deprecation pattern of `docs/guidance/engineering/versioning.md`, but is not owed (the owner's principle, stated in this design).

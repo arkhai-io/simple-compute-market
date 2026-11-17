@@ -179,7 +179,7 @@ Each compute domain's payment watch MUST classify every verified payment final s
 
 The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token and each deal's negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state, current deadline, open-extension flag and open cases. Once-only deals MUST run from verified commitment until delivery ends. Rejected required filings MUST remain terminal, set repair required, expose every filing outcome in read/list and MUST NOT auto-resubmit.
 
-A deal with a recorded end MUST be listed `ended` only when its resource is proven released, every payment part has a verified stop or end at the payment authority, and, when it names a dispute authority, a verified read of that authority has been saved and shows no case open; otherwise it MUST be listed `ending`, with `ending` naming each outstanding condition from a closed list — `release_pending`, `payment_running`, `case_open`, `case_unobserved` — whose text the lifecycle contracts carry. A case opened after a deal was listed `ended` MUST return it to `ending`. The client shipped with the storefront MUST read every deal shape the list serves; a client released earlier is not owed reading it.
+A deal with a recorded end MUST be listed `ended` only when its resource is proven released, every payment part has a verified stop or end at the payment authority, and, when it names a dispute authority, a verified read of that authority has been saved and shows no case open; otherwise it MUST be listed `ending`, with `ending` naming each outstanding condition from a closed list — `release_pending`, `payment_running`, `case_open`, `case_unobserved` — whose text the lifecycle contracts carry. A dispute authority's answer that it holds no record of the Agreement, which it gives until the Agreement's first filing, MUST be read as a verified read showing no case, by the seller's and the buyer's reads alike. A case opened after a deal was listed `ended` MUST return it to `ending`. The client shipped with the storefront MUST read every deal shape the list serves; a client released earlier is not owed reading it.
 
 #### Scenario: A rejected filing is visible after restart
 
@@ -208,6 +208,13 @@ A deal with a recorded end MUST be listed `ended` only when its resource is prov
 - **WHEN** the seller lists its deals
 - **THEN** the deal is `ending` with `ending` naming `case_unobserved`, never `ended`
 - **AND** once a verified read showing no open case is saved, it is `ended` with no `ending`
+
+#### Scenario: A deal nobody filed on is observed with no case
+
+- **GIVEN** a deal naming a dispute authority that holds no record of its Agreement, because no party has filed, whose resource is proven released and whose payment needs no further stop
+- **WHEN** servicing reads the authority and the authority answers its first record page that it holds no record of the Agreement
+- **THEN** a view showing no case is saved, the seller's and the buyer's reads of the deal carry an accepted dispute outcome, and the seller lists the deal `ended` with no `ending`
+- **AND** once a party files, the next read shows the case and the deal is `ending` with `case_open`
 
 #### Scenario: Several conditions are outstanding
 

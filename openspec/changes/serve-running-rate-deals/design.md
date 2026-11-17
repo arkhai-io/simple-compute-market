@@ -55,6 +55,31 @@ What stops a rate deal, and what goes wrong once nothing does:
   the rest for that deal (`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/lifecycle.py`,
   `cycle`).
 
+What the lanes cannot yet show, once rate deals deliver:
+
+- **An unfiled Agreement's cases.** A dispute authority learns an Agreement from its
+  first filing, and until then answers a read `404 invalid_request`, as it answers a
+  reader who is no party, so a read discloses neither
+  (`tools/mediation-lane-double/src/mediation_lane_double/service.py`, `record`;
+  `kit/arkhai-mediation/README.md`). The mediation adapter's ordinary read returns
+  that answer as `Rejected` (`kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`,
+  `_read`), so for a deal nobody filed on no dispute view is ever saved: the seller's
+  and the buyer's reads carry a rejected outcome
+  (`kit/deal-servicing/src/market_deal_servicing/seller.py`, `_observed`;
+  `kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/lifecycle.py`, `read`),
+  and evidence retention, which needs every view accepted, never runs. The kit's
+  in-process fake answers such a read with an empty page instead
+  (`kit/arkhai-mediation/src/market_arkhai_mediation/fixtures/authority.py`).
+- **A rate part's further reservations.** The payments service keeps a started rate
+  part reserved ahead by its own scheduler; the payments kit's engine, which the lane
+  double serves, reserves only at `start`, and its reads and commands never top up
+  (`kit/arkhai-payments/src/market_arkhai_payments/fixtures/authority.py`, `_refill`,
+  `advance`). On the double every rate deal stops `terms` at its first reservation's
+  end, whatever the payer's balance.
+- **A stopped storefront.** The lane harness runs in a `docker run` container on the
+  lane's network, with the buyer, and has no Docker access (`e2e-tests/Makefile`,
+  `test-buyer-machine`).
+
 `converge-ongoing-compute-leases` designs the full servicing of running rate deals.
 This change takes the slice an MVP deal needs, because the payment authority, not
 the storefront, records every stop an MVP deal can end on, and it takes from
@@ -322,7 +347,10 @@ is `ending` with a fourth code, `case_unobserved`, until one such read is saved.
 deal whose storefront composed no adapter for its authority's interface therefore
 stays `ending` until one is composed; a missing credential still shows repair
 required first. The code arrives in `kit/deal-lifecycle-contracts`' unreleased 0.3.0,
-so it costs no further version. Rejected: widening `case_open` to cover an unobserved
+so it costs no further version. An authority's answer that it holds no record of the
+Agreement is such a read, showing no case (D16), so a deal nobody filed on is observed;
+`case_unobserved` remains for an authority that has not answered or has no adapter
+composed. Rejected: widening `case_open` to cover an unobserved
 authority, which would list `case_open` beside an empty `open_cases` and make its text
 untrue; unlike `payment_running`, its text does not already cover the unverified case.
 
@@ -352,9 +380,12 @@ deals would be reported forever.
 
 Every lane row of this change reaches its instants by setting lane time through
 `drive-the-storefront-clock-in-lanes`' shared lane-time helper, then steps the loop
-that acts and asserts: row 6 sets the instant the balance cannot reserve the next
-period, row 7 the preempt request's time plus the Agreement's seller notice, row 9 the
-Agreement's end, and row 0 the Agreement's start and its stop. Lane time is one
+that acts and asserts: row 6 reserves the part through the Agreement's end (D17), with
+the payer funded one period beyond its first reservation, and sets the funded boundary
+the double then reports; row 7 sets the preempt request's time plus the Agreement's
+seller notice; row 9 reserves through the Agreement's end and sets it; and row 0 sets
+the Agreement's start and its stop. A row setting lane time past its deal's first
+reservation reserves first. Lane time is one
 frozen instant every party shares, the site included, so a termination is stamped at
 the commanded instant and a stop is never in a party's future. Lane presets keep
 realistic notice and terms.
@@ -368,20 +399,17 @@ time; and mixing waits with set time.
 ### D10 — The watchdog's delivered-deal cases are lane rows
 
 The four cases spot could not run — the real `buy` with the opt-in from `available`;
-access lost with the storefront stopped yielding a single buyer stop; a killed
-command reading `unmonitored` once its last probe goes stale; the resumed run reading
+access lost with the storefront paused yielding a single buyer stop; a killed command
+reading `unmonitored` once its last probe goes stale; the resumed run reading
 `monitored` — run in both lanes on the lane-time helper: the buyer reads lane time from
 its lane-time file, so staleness is reached by setting time. The mock provisioning
-discloses no endpoint a probe can reach, so the harness opens a TCP listener on the
-compose host, where it and the buyer run, and the deal's mock fulfillment result
-discloses that listener; closing it is the access lost. The harness runs beside the
-lane's Compose project (`e2e-tests/Makefile` runs `docker compose` and `pytest` on the
-same host), so a lane fixture stops the storefront's Compose service and starts it again,
-waiting for it to report healthy, with the lane's Compose arguments passed to the
-harness in its environment.
+discloses no endpoint a probe can reach, so the harness opens a TCP listener in its own
+container, where the buyer runs too, and a mock-provisioning rule the scenario installs
+has the deal's fulfillment result disclose it; closing it is the access lost. The
+storefront is paused for that case (D18).
 
-Rejected: application-integration tests alone, which cannot see the stopped
-storefront.
+Rejected: application-integration tests alone, which cannot show the watchdog's stop
+landing at the payments authority from a delivered deal.
 
 ### D11 — The VM composition builds its own payments seller stage
 
@@ -446,10 +474,114 @@ Two rounds, then closeout.
      both cycles on the helper;
   4. the re-drive routine and the loop layout with its interval keys and the renamed
      lane stages (D5); the restart tests (D14).
-- **Round 2, the lanes,** one session, once `drive-the-storefront-clock-in-lanes` has
-  landed: rows 0, 6, 7 and 9 and the watchdog cases in both lanes against both doubles
-  (D9, D10), labelled lane-double evidence.
+- **Round 2, the lanes,** two sessions, once `drive-the-storefront-clock-in-lanes` has
+  landed:
+  1. the mediation adapter's read of an Agreement with no record, and the kit's fake
+     answering as the authority does (D16); the payments engine's reservation method,
+     the double's reservation control and its typed client (D17); each with its tests;
+  2. on that tooling, rows 0, 6, 7 and 9 and the watchdog cases in both lanes against
+     both doubles (D9, D10), labelled lane-double evidence (D19).
+
+### D16 — An authority holding no record of the Agreement is read as no case
+
+The mediation adapter's ordinary read takes the authority's first-page
+`404 invalid_request` as an accepted read of an empty record — no disputes, no cases —
+as its delivery-end filing already does, so the filing's separate flag goes. The watch
+saves that view; the seller's list, read and unserviceable report and the buyer's read
+carry an accepted dispute outcome; evidence retention runs, still waiting for payouts to
+complete. Once a party files, the next read returns the record and the deal is `ending`
+again with `case_open` (D7). The kit's in-process fake answers a read of an Agreement it
+holds no record of with that `404`, as the authority and the lane double do, so kit and
+storefront tests meet it. `kit/arkhai-mediation` is at an unreleased 0.3.0
+(`marketplace-v0.3.0` carries 0.2.0), so this costs no further version; no wire form or
+stored record changes, and a deployed storefront's saved rejected observation is
+replaced by its next read.
+
+An empty record page is unsigned too, so this read carries the same assurance as any
+accepted read: transport to the Agreement's pinned authority. The one thing the `404`
+cannot tell apart is a reader who is no party: a seller whose mediation credential
+authenticates another account sees its deals with no case, though that credential also
+has its filings refused (`filer_not_party`) and its respondent listing empty.
+
+Rejected: the same read marking the absence in a new `AuthorityView` field, which no
+caller would act on; the seller list telling a `404` from other failures, which makes
+the neutral kit interpret one interface's error and leaves both reads rejected and
+retention stalled; inferring no case from the seller's own filings and a complete
+respondent discovery pass, which needs a per-authority record and a migration for no
+more assurance, and leaves the reads rejected; reverting D7's 44 F1 rule, which would
+list `ended` a deal whose authority is unreachable or has no adapter composed; and
+waiting for the published contract to give a verifiable answer, which it does not.
+
+### D17 — The scenario programs the payments double's further reservation
+
+The double runs nothing of its own: the payments service's scheduler decides when a rate
+part is reserved further, and, as `docs/guidance/engineering/test-doubles.md` has a
+double take its producer's decisions as answers a scenario programs, the scenario
+programs it. The double gains one control:
+
+```http
+POST /test/transactions/9c41…e07/reserve
+{"through": 1800007200}
+
+200 {"transaction": "9c41…e07", "part": 0, "reserved_through": 1800000360, "periods_added": 1}
+```
+
+It reserves each started rate part's further periods through the named instant, as far
+as the part's end and the payer's balance allow — the arithmetic the engine already
+applies at `start` — and answers the instant the part is then reserved through, which
+the signed snapshot reports as its funded boundary. The engine gains the public method
+behind it; `tools/lane-double-controls` gains the route and its typed client method; the
+engine's reads, `advance` and its reservation at `start` are unchanged, and funding
+running out still shows at the next read once lane time passes the boundary.
+`kit/arkhai-payments` is at an unreleased 0.8.1 (`marketplace-v0.3.0` carries 0.6.1), so
+this costs no further version. A reservation is a stage of its own, declared only where
+the double runs (`test-doubles.md`, "Shared stages never depend on a double"); against
+the payments service its scheduler reserves instead.
+
+Rejected: the double topping up by itself, a scheduler step in the engine run before
+every call, which adds internal behaviour the scenario can program; a control reserving
+an exact number of periods, refused when the balance falls short, which makes funds
+running out the scenario's choice rather than a boundary the ledger computes; rows kept
+within the first reservation, against realistic terms and with the double still unlike
+its producer; and stepping lane time with a read at each step, since reads never
+reserve.
+
+### D18 — The watchdog's storefront is paused, not stopped
+
+For the access-lost case (D10) the scenario pauses the storefront's loops, which holds
+every time-based signal it would emit — a term end, a teardown, a filing — so the
+watchdog's one payer stop lands at the payments double with nothing from the storefront
+between; stepping `deal-servicing` then shows the storefront recording the buyer's
+entitled stop and tearing down. A local end-to-end test holds a party's time-based
+signals this way; an external-topology test handles time differently. That an
+unreachable storefront does not hold the stop back is proven at library integration,
+where each compute buyer runs its watchdog against a storefront refusing connections
+(`domains/vms/buyer/tests/test_watchdog_rate_stop.py`,
+`domains/bare_metal/buyer/tests/test_watchdog_rate_stop.py`).
+
+Rejected: stopping the storefront's container, which the harness, running in a container
+of its own with no Docker access, cannot do; giving the harness that access, through the
+Docker socket or a socket proxy in each lane, which hands test code control of the lane
+host for what a pause shows; splitting the case across two pytest runs with a Compose
+stop between, which makes the Makefile a scenario stage; and pointing the buyer's resumed
+run at a closed seller address, which proves a misconfigured buyer rather than a quiet
+storefront.
+
+### D19 — The Compose lanes are this change's evidence
+
+Every lane row and watchdog case runs in both Compose lanes against both doubles,
+labelled lane-double evidence, and closeout runs the end-to-end pipeline over them.
+Nothing in this change waits on another topology; a run elsewhere is recorded with its
+own label, as further evidence, and gates nothing. The rows use only the lane-time
+helper, the doubles' controls and the loop controls, so they carry over to any topology
+offering those.
+
+Rejected: gating a section on a topology no change owns, which gives this change a
+prerequisite outside its domain and a second acceptance boundary, and whose wall-time
+Helm release cannot reach the doubles' controls or set lane time; and requiring both.
 
 ## Open Questions
 
-None.
+- The published mediation contract gives no verifiable answer for an Agreement the
+  authority holds no record of, so D16 reads an unsigned `404` as no case. Revisit D16's
+  mapping if the contract comes to offer such an answer.

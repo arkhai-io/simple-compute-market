@@ -21,6 +21,63 @@ Rate mechanics qualification MUST follow "External payment qualification names i
 - **THEN** it uses the shipped presets under a lane declaration listing returned, with a default buyer
 - **AND** a charged variant is a separate observation whose buyer waives each charged term through its per-term waiver
 
+### Requirement: Lane double controls are typed deterministic steps
+
+Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding, receipt-signer rotation and rate-part reservation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it. The payments double MUST reserve a started rate part's further periods only when its reservation control is called, never on its own: the control reserves the part through the instant the scenario names, as far as the part's end and the payer's balance allow, and answers the instant the part is then reserved through. Transport faults MUST apply only to the contract's API routes, never to the control routes. Every rule MUST state its `match`, and an unavailable rule MUST state `match: {}` and covers every contract API route. A control MUST refuse an unknown or malformed target with a typed code and install nothing. Each control the VM controls scenarios do not exercise — funding, signer rotation, refusal with a published code, the filing-answer override, close without ruling and the rule listing — MUST be proven by its double's suite through the typed client over HTTP, and so MUST the reservation control.
+
+#### Scenario: A response is lost after commit
+
+- **WHEN** a drop-after-commit rule matches a request
+- **THEN** the double commits the request and abandons its response, the caller sees a transport error, and a retry under the same key returns the original result without a second effect
+
+#### Scenario: A double is unavailable
+
+- **WHEN** an unavailable rule with `match: {}` is installed on a double
+- **THEN** every API request's response is abandoned and its callers see a transport error, never an HTTP error status
+- **AND** the control routes still answer, and removing the rule restores the API
+
+#### Scenario: An unavailable rule is scoped
+
+- **WHEN** a scenario installs an unavailable rule whose `match` is not empty
+- **THEN** the double refuses it as an invalid request and installs nothing
+
+#### Scenario: A rule states no scope
+
+- **WHEN** a scenario installs a rule without `match`
+- **THEN** the double refuses it as an invalid request and installs nothing
+
+#### Scenario: A finaliser removes rules
+
+- **WHEN** a scenario deletes a rule that has matched or completed, and then deletes a rule that does not exist
+- **THEN** the first is removed from the listing, and the second is reported not found
+
+#### Scenario: A call is refused with a published code
+
+- **WHEN** the payments double's suite installs a refusal rule and calls the matching route through the payments kit's client
+- **THEN** the client receives the rule's published status and code, and the rule listing counts the match
+
+#### Scenario: An account is funded
+
+- **WHEN** the payments double's suite funds an account through the typed client
+- **THEN** the account's balance read through the payments kit's client shows the funding
+
+#### Scenario: A rate part's further periods are reserved
+
+- **GIVEN** a started rate part whose payer's balance funds one period beyond its first reservation
+- **WHEN** the payments double's suite calls the reservation control through the typed client, naming the Agreement's end
+- **THEN** the control answers the part reserved through one period past its first reservation, and the transaction's signed snapshot through the payments kit's client shows that instant as its funded boundary
+- **AND** with injected time set to that boundary, the next read shows the part's `terms` stop there
+
+#### Scenario: A rate part is not reserved unasked
+
+- **WHEN** the payments double's injected time is set past a started rate part's first reservation and no reservation control was called
+- **THEN** the next read shows the part's `terms` stop at its first reservation's end, whatever the payer's balance
+
+#### Scenario: A scenario leaves a rule behind
+
+- **WHEN** a module ends with a rule still installed
+- **THEN** the rule listing shows it with its matched and waiting counts
+
 ## REMOVED Requirements
 
 ### Requirement: A recurring purchase runs end to end in each compute lane
@@ -48,12 +105,12 @@ Each compute lane MUST run one recurring-purchase scenario from a lane-only serv
 - **THEN** the payer's stop is accepted at the payments double, the started period is charged, the storefront records the buyer's entitled stop and tears the deal down, and the seller's list shows the deal `ended` once the release is proven
 
 ### Requirement: Rate deals are qualified in both compute lanes on lane time
-Each compute lane MUST run, each on its own deal, under the shipped presets with a default buyer and a lane declaration listing charged and returned: funds running out, where the rate part's `terms` stop ends delivery at its effective time and is classified exhaustion; a spot seller's preemption, where the payments double holds the pending stop and the deal ends when it takes effect with the unstarted period returned; and the maximum term, where the rate part ends at the Agreement's end with `returned` and is classified the term end. Each row MUST reach its instants by setting lane time, never by waiting, and MUST be labelled lane-double evidence.
+Each compute lane MUST run, each on its own deal, under the shipped presets with a default buyer and a lane declaration listing charged and returned: funds running out, where the rate part's `terms` stop ends delivery at its effective time and is classified exhaustion; a spot seller's preemption, where the payments double holds the pending stop and the deal ends when it takes effect with the unstarted period returned; and the maximum term, where the rate part ends at the Agreement's end with `returned` and is classified the term end. Each row MUST reach its instants by setting lane time, never by waiting, and MUST be labelled lane-double evidence. A row that sets lane time past its deal's first reservation MUST first program the payments double's further reservation through its control, as the payments service's own scheduler would have reserved, in a stage of its own declared only where the double runs.
 
 #### Scenario: Funds run out
-- **GIVEN** a delivered on-demand deal whose payer balance funds two periods
-- **WHEN** the scenario sets lane time past the second period's end and steps `deal-servicing`
-- **THEN** the payments double records a `terms` stop at the funded boundary, the storefront classifies it exhaustion and tears the deal down at that instant, and the buyer's read says a top-up cannot revive it
+- **GIVEN** a delivered on-demand deal whose payer balance funds one period beyond the part's first reservation
+- **WHEN** the scenario reserves the part through the Agreement's end, sets lane time to the funded boundary the payments double then reports, and steps `deal-servicing`
+- **THEN** the payments double records a `terms` stop at that boundary, after the first reservation's end and before the Agreement's end, the storefront classifies it exhaustion and tears the deal down at that instant, and the buyer's read says a top-up cannot revive it
 
 #### Scenario: A spot seller preempts with notice
 - **GIVEN** a delivered spot deal
@@ -61,17 +118,18 @@ Each compute lane MUST run, each on its own deal, under the shipped presets with
 - **THEN** the payments double held the pending stop until then, the storefront records the seller's entitled stop at its effective time and tears the deal down, and the unstarted period is returned
 
 #### Scenario: The maximum term ends
-- **GIVEN** a delivered on-demand deal
-- **WHEN** the scenario sets lane time to the Agreement's end and steps `deal-servicing`
+- **GIVEN** a delivered on-demand deal whose payer balance funds the whole term
+- **WHEN** the scenario reserves the part through the Agreement's end, sets lane time to the Agreement's end and steps `deal-servicing`
 - **THEN** the rate part ends with `returned`, the storefront classifies the end as the term end, not exhaustion, and tears the deal down
 
 ### Requirement: The buyer's watchdog is qualified against a delivered deal
-Each compute lane MUST run the buyer's watchdog against a delivered rate deal on lane time: the shipped `buy` with the opt-in monitoring from `available`; the disclosed endpoint ceasing to accept connections while the storefront is stopped, which yields one buyer stop; a killed command whose read shows `unmonitored` once lane time passes its last probe's staleness bound; and the resumed run whose read shows `monitored`. Each case MUST be labelled lane-double evidence.
+Each compute lane MUST run the buyer's watchdog against a delivered rate deal on lane time: the shipped `buy` with the opt-in monitoring from `available`; the disclosed endpoint ceasing to accept connections while the storefront's loops are paused, which yields one buyer stop; a killed command whose read shows `unmonitored` once lane time passes its last probe's staleness bound; and the resumed run whose read shows `monitored`. The disclosed endpoint MUST be a listener the harness opens and closes, which the deal's mock fulfillment result discloses through a rule the scenario installs. Each case MUST be labelled lane-double evidence.
 
-#### Scenario: Access is lost while the storefront is stopped
+#### Scenario: Access is lost while the storefront is paused
 - **GIVEN** a delivered rate deal whose `buy` runs with the watchdog opted in
-- **WHEN** the storefront is stopped and the disclosed endpoint stops accepting connections for the threshold of probes
-- **THEN** the watchdog sends one payer stop, which the payments double accepts, and exits
+- **WHEN** the storefront's loops are paused and the disclosed endpoint stops accepting connections for the threshold of probes
+- **THEN** the watchdog sends one payer stop, which the payments double accepts, and exits, with nothing from the storefront between
+- **AND** once the scenario steps `deal-servicing`, the storefront records the buyer's entitled stop and tears the deal down
 
 #### Scenario: A killed command goes stale and resumes
 - **GIVEN** a delivered rate deal whose opted-in `buy` command was killed after a passing probe
