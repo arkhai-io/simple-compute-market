@@ -736,16 +736,17 @@ def test_the_repositorys_own_configuration_passes_its_check(
 def test_the_repository_declares_every_hook() -> None:
     """MCW-r4tx: this repository relocks after a functional change, runs its own
     closing checks before every commit, clears the wheelhouse, checks packaging and
-    runs every suite before a functional commit, checks packaging and the change's
-    architecture rows before the archive, and runs its pre-push checks as one
-    target."""
+    runs every suite before a functional commit — the local kind's own run, so it
+    leaves `local` evidence for the tree it tested — checks packaging and the
+    change's architecture rows before the archive, and runs its pre-push checks as
+    one target."""
     loaded = config.load(REPOSITORY)
 
     assert loaded.hook("after-functional-change") == ("make lock",)
     assert loaded.hook("pre-commit") == (
         "make check-repository CHANGE={change} CHANGE_BASE={base}",)
-    assert loaded.hook("pre-commit-functional") == ("make dist-clean", "make check-packaging",
-                                                    "make test")
+    assert loaded.hook("pre-commit-functional") == ("make validate-local TREE={tree}",)
+    assert loaded.hook("pre-commit-functional") == loaded.kind("local").run
     assert loaded.hook("pre-archive") == ("make check-packaging",
                                           "make check-architecture-change CHANGE={change}")
     assert loaded.hook("pre-push") == ("make pre-push REMOTE={remote}",)

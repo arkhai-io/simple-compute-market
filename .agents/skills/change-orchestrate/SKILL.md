@@ -367,11 +367,12 @@ the waiver to the ledger.
 
 When the owner waives parts of validation for later validations — "skip Helm and
 the pipeline for the rest of this change" — record their decision with no `--next`,
-naming the parts and the condition they are waived on, so validation finds it in the
-log (`change-workflow`'s CW-e7lm):
+naming the evidence kinds it waives, as `scripts/change-workflow evidence <change>`
+lists them, and the condition they are waived on, so the gathering skips them and
+validation finds the decision in the log (`change-workflow`'s CW-e7lm):
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --waives helm,pipeline --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+scripts/change-workflow note <change> orchestrator --by owner --waives helm,pipeline --decision "waive the helm and pipeline kinds of validation for the rest of this change, while <the condition>" --reason <the owner's words>
 ```
 
 Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only

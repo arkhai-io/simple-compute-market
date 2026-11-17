@@ -841,7 +841,7 @@ check-capability-index: ## Fail if a capability with a spec.md has no row in ope
 check-guidance: ## Fail if a guidance file lacks one layer tag, carries a tag no vocabulary of its layer or a lower one defines, a vocabulary row is carried by no file, a vocabulary or exception table is malformed, an exception row cites no guidance file or names a kind other than selects or overrides, guidance links to a higher layer, or a citation of a guidance file names an anchor no heading of it has
 	@python3 scripts/check_guidance.py
 
-record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
+record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, from the current Helm attempt of the tree its validated commit holds, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
 	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"
 
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
@@ -849,17 +849,23 @@ design-review: ## Design review of an OpenSpec change in Codex, continuing the l
 
 HELM_CONTEXT ?= docker-desktop
 
-validate-local: round-view-closed ## Validate HEAD without changing the checkout: check-packaging, then make test
-	@python3 scripts/validate_slice.py local
+# The tree or commit a validation target's evidence describes, as the change
+# workflow's engine fills `{tree}` and `{commit}`; each target refuses one the
+# checkout does not hold, and without one describes what it holds.
+TREE ?=
+COMMIT ?=
+
+validate-local: round-view-closed ## Clear the wheelhouse, check packaging, and run every suite on the worktree as it stands, without changing it, keeping the evidence under .snapshot/evidence/<tree>/local/ ([TREE=<tree>])
+	@python3 scripts/validate_slice.py local $(if $(strip $(TREE)),--tree "$(TREE)")
 
 WORKFLOW ?=
 CI_AFTER_RUN ?=
 
-validate-ci: round-view-closed ## Validate HEAD on a CI run dispatched by run-ci: wait for the run newer than CI_AFTER_RUN, keep its job logs, and class each failure against the same job in the latest completed dev run of code the branch contains (WORKFLOW=<file> CI_AFTER_RUN=<id>)
-	@python3 scripts/validate_slice.py ci --workflow "$(WORKFLOW)" $(if $(strip $(CI_AFTER_RUN)),--after-run "$(CI_AFTER_RUN)")
+validate-ci: round-view-closed ## Validate HEAD on a CI run dispatched by run-ci: wait for the run newer than CI_AFTER_RUN, keep its job logs, and class each failure against the same job in the latest completed dev run of code the branch contains, keeping the evidence under .snapshot/evidence/<commit>/ci-<workflow>/ (WORKFLOW=<file> CI_AFTER_RUN=<id> [COMMIT=<commit>])
+	@python3 scripts/validate_slice.py ci --workflow "$(WORKFLOW)" $(if $(strip $(CI_AFTER_RUN)),--after-run "$(CI_AFTER_RUN)") $(if $(strip $(COMMIT)),--commit "$(COMMIT)")
 
-validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there (CHANGE=<change> HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
-	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(CHANGE),--change "$(CHANGE)") $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+validate-helm: round-view-closed ## Validate the worktree's tree on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there, keeping the evidence under .snapshot/evidence/<tree>/helm/ (CHANGE=<change> HELM_CONTEXT=docker-desktop [TREE=<tree>] [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(CHANGE),--change "$(CHANGE)") $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios) $(if $(strip $(TREE)),--tree "$(TREE)")
 
 # It deploys, so it is named as a validation and its script outside `check_*`:
 # six steps' rules allow any `make check-*`, and closeout's `python3 scripts/check_*`.
@@ -880,9 +886,12 @@ E2E_RUN_ID ?=
 E2E_COMMIT ?=
 E2E_AFTER_RUN ?=
 
-fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
+# With COMMIT, the fetch is validation's pipeline evidence for that commit: the run
+# dispatched for it, its logs and summary.json under
+# .snapshot/evidence/<commit>/pipeline/<attempt>/, and no archive.
+fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory; with COMMIT, keep them as the pipeline evidence of that commit instead ([COMMIT=<commit>] [E2E_AFTER_RUN=<id>])
 	@$(CURDIR)/scripts/fetch-e2e-logs.py \
-		--output-dir "$(E2E_LOG_DIR)" \
+		$(if $(strip $(COMMIT)),--evidence "$(COMMIT)",--output-dir "$(E2E_LOG_DIR)") \
 		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)") \
 		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)") \
 		$(if $(strip $(E2E_AFTER_RUN)),--after-run "$(E2E_AFTER_RUN)")

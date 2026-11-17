@@ -395,6 +395,11 @@ Each successful fetch also creates `<run-id>.zip` beside the run directory,
 containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
 fetch means diagnostics were retrieved; it does not mean the tests passed.
+With `COMMIT=<commit>`, as validation's pipeline evidence kind collects it, the
+fetch keeps the commit's run as that commit's evidence instead: the same logs and a
+`summary.json` naming the run and its conclusion under
+`.snapshot/evidence/<commit>/pipeline/<attempt>/`, the attempt named by the UTC
+time it started, with no ZIP; it then fails unless the run concluded `success`.
 
 #### Release-image mode
 

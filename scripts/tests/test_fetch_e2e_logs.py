@@ -42,7 +42,9 @@ class FakeRunner:
         fail_actions_log: bool = False,
         fail_artifact: bool = False,
         missing_artifacts: tuple[str, ...] = (),
+        conclusion: str = "failure",
     ) -> None:
+        self.conclusion = conclusion
         self.runs = (
             runs
             if runs is not None
@@ -83,7 +85,7 @@ class FakeRunner:
             return subprocess.CompletedProcess(args, 0, "", "")
         if args[:3] == ["gh", "run", "view"] and "--json" in args:
             return subprocess.CompletedProcess(
-                args, 0, json.dumps({"conclusion": "failure"}), ""
+                args, 0, json.dumps({"conclusion": self.conclusion}), ""
             )
         if args[:3] == ["gh", "run", "view"] and "--log" in args:
             if self.fail_actions_log:
@@ -311,7 +313,85 @@ def test_make_target_delegates_to_python_helper() -> None:
     assert "$(CURDIR)/scripts/fetch-e2e-logs.py" in target
     assert '--commit "$(E2E_COMMIT)"' in target
     assert '--after-run "$(E2E_AFTER_RUN)"' in target
+    assert '$(if $(strip $(COMMIT)),--evidence "$(COMMIT)",--output-dir "$(E2E_LOG_DIR)")' \
+        in target
     assert "gh run" not in target
+
+
+# --- the pipeline evidence of a commit ---------------------------------------------
+
+ATTEMPT = "20261022T070000.000000Z"
+
+
+def _now() -> "fetcher.datetime":
+    return fetcher.datetime(2026, 10, 22, 7, 0, tzinfo=fetcher.timezone.utc)
+
+
+def test_the_commits_run_is_kept_as_its_pipeline_evidence(tmp_path: Path) -> None:
+    runner = FakeRunner(
+        runs=[{"databaseId": 50, "headBranch": "feature/test", "headSha": HEAD},
+              {"databaseId": 42, "headBranch": "feature/test", "headSha": HEAD}],
+        conclusion="success")
+
+    directory, summary = fetcher.fetch_evidence(HEAD, root=tmp_path, after_run=42, now=_now,
+                                                runner=runner)
+
+    kept = Path(".snapshot/evidence") / HEAD / "pipeline" / ATTEMPT
+    assert directory == tmp_path / kept
+    assert summary == {
+        "kind": "pipeline", "commit": HEAD, "attempt": ATTEMPT, "workflow": "e2e.yml",
+        "run": 50, "conclusion": "success", "passed": True,
+        "actions_log": str(kept / "actions.log"),
+        "compose_logs": {artifact: str(kept / artifact / "compose-logs.txt")
+                         for artifact in LANE_LOGS},
+        "error": None}
+    assert json.loads((directory / "summary.json").read_text("utf-8")) == summary
+    assert (directory / "actions.log").read_text("utf-8") == "actions log\n"
+    assert not list(tmp_path.rglob("*.zip"))
+
+
+def test_a_short_commit_is_kept_under_its_full_name(tmp_path: Path) -> None:
+    runner = FakeRunner(
+        runs=[{"databaseId": 42, "headBranch": "feature/test", "headSha": EARLIER}])
+
+    directory, summary = fetcher.fetch_evidence(EARLIER[:7], root=tmp_path, now=_now,
+                                                runner=runner)
+
+    assert directory == tmp_path / ".snapshot/evidence" / EARLIER / "pipeline" / ATTEMPT
+    assert (summary["run"], summary["conclusion"], summary["passed"]) == (42, "failure", False)
+
+
+def test_a_run_never_listed_leaves_an_attempt_saying_why(tmp_path: Path) -> None:
+    runner = FakeRunner(runs=[])
+
+    directory, summary = fetcher.fetch_evidence(HEAD, root=tmp_path, wait_seconds=0,
+                                                now=_now, runner=runner,
+                                                sleep=lambda seconds: None)
+
+    written = json.loads((directory / "summary.json").read_text("utf-8"))
+    assert written["passed"] is False and written["run"] is None
+    assert "no e2e.yml workflow run of commit 111111111111" in written["error"]
+
+
+@pytest.mark.parametrize("conclusion, status", [("success", 0), ("failure", 1)])
+def test_the_evidence_fetch_exits_by_the_runs_conclusion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    conclusion: str, status: int
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert fetcher.main(["--evidence", HEAD], runner=FakeRunner(conclusion=conclusion)) \
+        == status
+
+    out = capsys.readouterr().out
+    assert f"pipeline evidence for the commit {HEAD[:12]}: run 42 concluded {conclusion}" in out
+    assert len(list((tmp_path / ".snapshot/evidence" / HEAD / "pipeline").iterdir())) == 1
+
+
+@pytest.mark.parametrize("arguments", [["--run-id", "77"], ["--commit", HEAD]])
+def test_the_evidence_names_its_commit_alone(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        fetcher.main(["--evidence", HEAD, *arguments], runner=FakeRunner())
 
 
 @pytest.mark.parametrize("missing", LANE_LOGS)

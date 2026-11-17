@@ -80,9 +80,12 @@ def worktree_tree(root: Path) -> str:
     index = root / _git(root, "rev-parse", "--git-path", "index")
     with tempfile.TemporaryDirectory(prefix="change-workflow-tree-") as scratch:
         temporary = Path(scratch) / "index"
-        # A copy keeps the index's file states, so Git rereads only what changed.
+        # A copy keeps the index's file states, so Git rereads only what changed. It
+        # keeps the index's own modification time too: Git rereads a file changed in
+        # the same second as the index was written only by comparing the two, so a
+        # copy dated now would pass such a change over as unchanged.
         if index.is_file():
-            shutil.copyfile(index, temporary)
+            shutil.copy2(index, temporary)
         environ = {**os.environ, "GIT_INDEX_FILE": str(temporary)}
         _git(root, "add", "--all", environ=environ)
         return _git(root, "write-tree", environ=environ)

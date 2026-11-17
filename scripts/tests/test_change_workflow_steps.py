@@ -177,8 +177,8 @@ def test_only_validation_dispatches_a_ci_workflow() -> None:
 
 
 HOOK_COMMANDS = {
-    "validate": [f"validation {CHANGE} preflight", f"validation {CHANGE} local run",
-                 f"validation {CHANGE} pipeline start", f"validation {CHANGE} pipeline collect"],
+    # Validation runs no hook through `run`: it gathers evidence through `gather`.
+    "validate": [],
     "archive-cleanup": [f"cleanup {CHANGE}", f"pre-commit {CHANGE}"],
     "closeout": [f"pre-archive {CHANGE}", f"pre-commit {CHANGE}"],
     "implement": [f"pre-commit {CHANGE}", f"after-functional-change {CHANGE}"],
@@ -204,6 +204,33 @@ def test_every_step_runs_the_repositorys_hooks_through_the_command() -> None:
         for command in ("make test", "make lock", "make check-packaging",
                         "uv run pytest -q scripts/tests"):
             assert _allows(steps[name], command), (name, command)
+
+
+READS_EVIDENCE = {"validate", "review", "triage", "merge", "closeout", "archive-cleanup"}
+
+
+def test_validation_gathers_and_the_steps_reading_a_validation_read_the_evidence() -> None:
+    """Validation gathers what is missing, a new attempt of a kind, or a lapsed waiver's
+    kind; every step that reads a validation record may list the evidence it names,
+    and none but validation gathers (CW-e2vd, CW-g6th)."""
+    for name, rules in load_steps().items():
+        for command in (f"evidence {CHANGE}", f"evidence {CHANGE} --json"):
+            assert _allows(rules, f"scripts/change-workflow {command}") \
+                == (name in READS_EVIDENCE), (name, command)
+        for command in (f"gather {CHANGE}", f"gather {CHANGE} --kind helm",
+                        f"gather {CHANGE} --kind ci --owed tests.yml",
+                        f"gather {CHANGE} --kind pipeline --lapsed"):
+            assert _allows(rules, f"scripts/change-workflow {command}") \
+                == (name == "validate"), (name, command)
+
+
+def test_no_rule_names_validation_through_run_or_config() -> None:
+    """Validation's evidence is reached through `gather` and `evidence`: `run` takes no
+    `validation` form and `config` no `parts`, so no rule names either, while `run *`
+    serves the hooks the engine's table admits."""
+    for name, rules in load_steps().items():
+        for rule in (*rules.allow, *rules.deny):
+            assert "run validation" not in rule and "config parts" not in rule, (name, rule)
 
 
 def test_openspec_runs_through_the_configured_command() -> None:

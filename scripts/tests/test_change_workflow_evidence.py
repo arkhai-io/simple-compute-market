@@ -95,6 +95,30 @@ def test_a_dirty_worktrees_tree_is_the_tree_its_commit_then_holds(repository: Pa
     assert tree == _git(repository, "rev-parse", "HEAD^{tree}")
 
 
+def test_a_change_in_the_second_the_index_was_written_changes_the_tree(
+        repository: Path) -> None:
+    """A file rewritten at the same size in the second the index was written, its
+    modification time the one the index records for it, passes Git's comparison of
+    file states; only the index's own time tells Git to read it again, so the
+    temporary index must keep it. The file's state is recorded well before the index
+    is written, so Git leaves the entry as recorded, and Git's comparison of change
+    times is turned off, so the case does not depend on when the test runs."""
+    _git(repository, "config", "core.trustctime", "false")
+    module, index = repository / "src/module.py", repository / ".git/index"
+    recorded = module.stat().st_mtime_ns - 10 * 10**9
+    os.utime(module, ns=(recorded, recorded))
+    _git(repository, "update-index", "--refresh")
+    module.write_text("x = 2\n", "utf-8")
+    os.utime(module, ns=(recorded, recorded))
+    os.utime(index, ns=(recorded, recorded))
+
+    tree = evidence.worktree_tree(repository)
+    _git(repository, "add", "--all")
+    _git(repository, "commit", "-q", "-m", "the change tested")
+
+    assert tree == _git(repository, "rev-parse", "HEAD^{tree}")
+
+
 def test_an_ignored_file_changes_no_tree(repository: Path) -> None:
     """CW-g1gn: evidence written under an ignored directory never changes the tree it
     describes."""

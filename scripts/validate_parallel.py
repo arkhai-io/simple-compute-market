@@ -64,8 +64,9 @@ DEFAULT_HELM_CONTEXT = "docker-desktop"
 READ_TIMEOUT_SECONDS = 120.0
 # The image name every image the build targets write carries.
 BUILT_HERE = change_namespace.BUILT_HERE
-# What `validate_slice.py` prints last: where the attempt's logs and summary are.
-_ATTEMPT = re.compile(r"^Attempt \d+ logs and summary\.json: (?P<path>\S+)\s*$", re.M)
+# What `validate_slice.py` prints last: where the attempt's logs and summary are,
+# the attempt named by the UTC time it started, under the clone's tree.
+_ATTEMPT = re.compile(r"^Attempt \S+ logs and summary\.json: (?P<path>\S+)\s*$", re.M)
 _TIMESTAMP = re.compile(r"^(?P<time>\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(?P<fraction>\d+))?"
                         r"(?P<zone>Z|[+-]\d\d:\d\d)$")
 # Variables `make` hands down to every `make` it runs: neither the clones' targets

@@ -463,7 +463,13 @@ def _committed_configuration(workspace: Path, text: str) -> None:
 
 def _waited(clone: Path) -> clones.Bootstrap:
     """The bootstrap's state once its process, this test's child, has ended."""
-    os.waitpid(json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"], 0)
+    try:
+        os.waitpid(json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"], 0)
+    except ChildProcessError:
+        # The spawn drops its Popen object, and Python's subprocess reaps a dropped
+        # child that has ended as the next Popen starts: the child is gone only once
+        # it has ended.
+        pass
     return clones.bootstrap_state(clone)
 
 

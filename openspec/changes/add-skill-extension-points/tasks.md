@@ -520,20 +520,79 @@ orchestrating skills moved to the new commands (D16; MCW-r4tx, MCW-5tgp). Files:
 `.agents/skills/change-validate/SKILL.md`, `.agents/skills/change-orchestrate/SKILL.md`,
 their tests.
 
-- [ ] 4.1 `validate_slice.py` writes each attempt of `local` and `helm` under
+- [x] 4.1 `validate_slice.py` writes each attempt of `local` and `helm` under
   `.snapshot/evidence/<tree>/<kind>/<UTC timestamp>/`, its `summary.json` and logs
   there, given the tree (`TREE=`), and reads the latest Helm attempt for the capacity
   figure from there (D2, D4's path order; MCW-r4tx). Verify: `test_validate_slice.py`
   asserts the new paths, timestamp ordering, and `record-capacity` reading the
   current attempt.
-- [ ] 4.2 `ci_evidence.py` and `fetch-e2e-logs.py` write the `ci` and `pipeline`
+  - Done:
+    - A part's identity is its kind's (`IDENTITY`): the tree for `local` and `helm`,
+      the commit for `ci`. `--tree` or `--commit` gives it, and the part refuses
+      to start when the checkout holds another; without it, the part describes
+      what the checkout holds.
+    - The tree is computed as the engine computes `{tree}`: the checkout's index
+      copied, `git add --all` and `git write-tree` on the copy (`worktree_tree`).
+      A repository script reaches the engine only through its command
+      (`scripts/workflow_command.py`), and no command prints the worktree's tree,
+      so the script holds its own copy. Its test may not import the engine either
+      (`test_no_script_but_the_engines_own_imports_the_engine`), so each
+      computation is held to Git's own answer, the tree the commit then holds, in
+      its own suite.
+    - The clean-worktree checks became identity checks, steps `tree before`/`tree
+      after` (`commit before`/`after` for `ci`), and after every step. A tree kind
+      runs on a worktree with changes, as the functional checks before a commit do;
+      a change to its tree mid-part fails the step with "the worktree changed",
+      listing what the worktree holds against `HEAD`.
+    - An attempt is `%Y%m%dT%H%M%S.%fZ` of its UTC start, so path order is time
+      order. An attempt already started at the same instant is refused.
+    - `summary.json` names `kind` (was `part`), `tree`, `commit` (`HEAD` as it
+      started), and `attempt`. The printed last line keeps its form, `Attempt
+      <attempt> logs and summary.json: <path>`.
+    - `record-capacity` reads the latest record's validated commit, its tree through
+      `git rev-parse <commit>^{tree}`, and the last Helm attempt of that tree in path
+      order. A commit the checkout cannot read records nothing, saying why.
+    - The previous validation's `resources.txt` is the latest attempt by name,
+      across trees, in place of the file's modification time.
+  - Tests in `test_validate_slice.py`, all passing:
+    - unit tests through the doubled runner, reader, and tree: the new paths and
+      fields; a worktree with changes tested and kept under its tree; a tree given
+      that the worktree does not hold, refused before anything runs; a step changing
+      the tree; two attempts in time order, the later current; the same instant
+      refused; a branch switch mid-Helm; each part taking only its own identity; a
+      workflow name reaching another directory, refused;
+    - library integration on a real temporary repository: the worktree's tree, with
+      staged, unstaged, untracked, and ignored files, is the tree its commit then
+      holds, the checkout's index unchanged; an attempt with no tree given; and
+      `record-capacity` reading the current attempt of a real commit's tree;
+    - the Makefile targets' command lines with and without `TREE` and `COMMIT`
+      (`make -n`).
+- [x] 4.2 `ci_evidence.py` and `fetch-e2e-logs.py` write the `ci` and `pipeline`
   evidence under `.snapshot/evidence/<commit>/ci-<workflow>/<UTC timestamp>/` and
   `.snapshot/evidence/<commit>/pipeline/<UTC timestamp>/`, each with a
   `summary.json`, given the commit (`COMMIT=`); markers unchanged (MCW-zk52,
   MCW-7hr1, MCW-2lzw). Verify: `test_ci_evidence.py` and `test_fetch_e2e_logs.py`.
-- [ ] 4.3 `validate_parallel.py` follows the new layout. Verify:
+  - Done, differing from the plan's file list: the `ci` evidence is written by
+    `validate_slice.py ci` (`make validate-ci`, the kind's `collect`), under
+    `<commit>/ci-<workflow>/<attempt>/`. `ci_evidence.py` only dispatches and
+    classes, so only its docstring changed. Dispatch markers are unchanged.
+  - `fetch-e2e-logs.py --evidence <commit>` (`make fetch-e2e-logs COMMIT=<commit>`)
+    keeps the commit's run under `<commit>/pipeline/<attempt>/`, with a
+    `summary.json` naming the run, its conclusion, the logs kept, `passed`, and an
+    `error`. The summary is written whatever happened, so a fetch that found no run
+    leaves an attempt saying why. No archive is made, and the fetch exits 1 unless
+    the run concluded `success`. Without `COMMIT`, the manual fetch is as before;
+    `docs/development/TESTING.md` says so.
+  - Tests, all passing: `test_fetch_e2e_logs.py`, unit tests through its doubled
+    runner (the evidence's path and summary, a short commit kept under its full
+    name, a run never listed, the exit status by conclusion, `--evidence` alone, the
+    target's command); `test_ci_evidence.py` unchanged; the `ci` part's tests in
+    `test_validate_slice.py` assert its new directory.
+- [x] 4.3 `validate_parallel.py` follows the new layout. Verify:
   `test_validate_parallel.py`.
-- [ ] 4.4 The configuration's kind commands pass `TREE={tree}` or `COMMIT={commit}`,
+  - Done: it reads an attempt named by time. `test_validate_parallel.py`, unit tests
+    with the launches and reads doubled, passes: 47 passed.
+- [x] 4.4 The configuration's kind commands pass `TREE={tree}` or `COMMIT={commit}`,
   and `pre-commit-functional` leaves `local` evidence for `{tree}` — through a
   target that clears the wheelhouse, checks packaging, and runs every suite on the
   worktree as it stands, writing at `local`'s pattern (MCW-r4tx's second scenario).
@@ -541,7 +600,21 @@ their tests.
   session starts; the session commits it. Verify: after a functional commit,
   `scripts/change-workflow evidence add-skill-extension-points` lists `local`
   present for `HEAD`'s tree.
-- [ ] 4.5 The step table grants `scripts/change-workflow gather *` to validate and
+  - Done by this session, the owner having lifted the configuration's deny rule for
+    it (log seq 42):
+    - `pre-commit-functional = ["make validate-local TREE={tree}"]`, the `local`
+      kind's own run. `make validate-local` clears the wheelhouse, checks packaging,
+      and runs every suite.
+    - `local` and `helm` pass `TREE={tree}`; the `pipeline` and `ci` collects pass
+      `COMMIT={commit}`.
+  - `scripts/change-workflow config --json` reads the file with the whole check, and
+    it passes (`check config` is outside implementation's rules, as in 1.8).
+    `test_the_repository_declares_every_hook` asserts the hook is the kind's run.
+  - The live check follows the commit: recording its result here would change the
+    tree it checks. The session's report gives it. Before the commit, `run
+    pre-commit`'s `validate-local` ran the whole `make test` on the worktree, and
+    its `tree before` and `tree after` steps held.
+- [x] 4.5 The step table grants `scripts/change-workflow gather *` to validate and
   `scripts/change-workflow evidence *` to validate, review, triage, merge, closeout,
   and archive cleanup, and drops grants to removed subcommands. Every step is
   denied edits under `.claude/`: this task is the orchestrator's, on the owner's
@@ -564,14 +637,99 @@ their tests.
     No grant names a removed subcommand: `run *` stays for the hooks. The session
     making section 4 updates `test_change_workflow_steps.py` to assert the new
     grants.
-- [ ] 4.6 Move `change-validate` and `change-orchestrate` to the new commands only —
+  - Done: the orchestrator committed the edit as `323db78be`, on the owner's word
+    (log seq 42), before this session. It restored the `.claude/**` deny lines;
+    those on `.agents/workflow.toml` stay lifted for this session.
+  - `test_change_workflow_steps.py`, unit tests over the step table, passes but for
+    `test_no_step_may_edit_the_configuration`. That test fails until the
+    orchestrator restores the configuration's deny lines after this session. New
+    tests:
+    - `test_validation_gathers_and_the_steps_reading_a_validation_read_the_evidence`;
+    - `test_no_rule_names_validation_through_run_or_config`.
+    Validation's row in `HOOK_COMMANDS` names no `run` form.
+  - The assumptions test passes.
+- [x] 4.6 Move `change-validate` and `change-orchestrate` to the new commands only —
   `evidence` in place of `config parts`, `gather` and `gather --kind` in place of
   `run validation`, evidence paths in place of `.snapshot/validation/` — leaving
   their repository material for section 7. Verify: `make check-agent-skills` and
   the assumptions test pass, and a search of `.agents/skills/` finds no `run
   validation` or `config parts`.
-- [ ] 4.7 Verification point: the suites above; `run pre-commit` passes; the live
+  - Done. `change-validate` changes:
+    - step 1's plan is `evidence`;
+    - steps 2 and 3's starts, runs, and collects are one `gather <change>`, run in
+      the background and waited for on the harness's `[exited with code` line, since
+      the gathering prints a closing line per kind and none last;
+    - a rerun is `gather --kind`, and a lapsed waiver's kind `gather --kind …
+      --lapsed`;
+    - the paths are `.snapshot/evidence/`, and step 3 describes the pipeline's
+      collect.
+  - The record's `Parts:` line, the four kinds' material, and the guides stay for
+    section 7 (7.2). `change-orchestrate`'s waiver note says the decision names
+    evidence kinds and that the gathering skips them; its example's wording is
+    section 8's (8.3).
+  - `make check-agent-skills` and the assumptions test pass. A search of
+    `.agents/skills/` finds no `run validation` or `config parts`.
+- [x] 4.7 Verification point: the suites above; `run pre-commit` passes; the live
   check of 4.4. End-to-end: none.
+  - Correction: checked though `run pre-commit` does not pass whole.
+    - `after-functional-change` passed.
+    - `pre-commit-functional` is now `make validate-local`. It fails only on
+      `test_no_step_may_edit_the_configuration`, from the configuration's deny lines
+      lifted for this session; every other suite passed. So the `local` evidence it
+      leaves for this commit's tree says `FAILED`, naming that test, until a later
+      functional commit runs it with the deny restored.
+    - `pre-commit` passed once a history-wording hit in a docstring this section
+      added was fixed.
+  - End-to-end: none — confirmed; no scenario under `e2e-tests/` exercises the
+    workflow's tooling.
+  - Outside the plan: `scripts/tests/test_change_clone.py`'s `_waited` raised
+    `ChildProcessError` once, inside the full suite run by `validate-local`.
+    - The bootstrap's spawn drops its `Popen` object, and Python's `subprocess`
+      reaps a dropped child that has ended as the next `Popen` starts. So
+      `os.waitpid` can find the child already gone, a timing-dependent failure.
+    - `_waited` now takes that as the child having ended. The file passes, 80
+      tests.
+  - Outside the plan: `evidence.worktree_tree` (2.1) gave a stale tree.
+    - It copied the checkout's index with `shutil.copyfile`, dating the copy now.
+      Git rereads a file rewritten at the same size in the second the index was
+      written only by comparing the file's time with the index's own. So a copy
+      dated later passed such a change over, and the tree was `HEAD`'s.
+    - Seen once: `test_a_worktree_that_is_not_heads_is_refused` did not raise inside
+      `validate-local`'s full suite.
+    - Both copies, the engine's and `validate_slice.py`'s, now use `shutil.copy2`,
+      which keeps the index's time.
+    - Fixed with a test in each suite,
+      `test_a_change_in_the_second_the_index_was_written_changes_the_tree`. It is
+      library integration on a real repository, and fails with `copyfile` and
+      passes with `copy2`.
+  - The fresh-context check's findings fixed:
+    - comments still saying a part describes the commit;
+    - design-decision numbers in a test docstring;
+    - a test named for removed subcommands;
+    - a skill sentence contradicting the pipeline collect's exit status;
+    - "part" beside "kind" in edited sentences;
+    - `main`'s reader run in the root it was given.
+  - Its finding of two tree computations: a test holding them to one answer imported
+    the engine, which the command boundary's test refuses, so it was removed. Each
+    is held to Git's answer instead (4.1).
+  - Declined from the fresh-context check:
+    - Renaming `TREE` and `COMMIT` to prefixed names: the plan and D6 name them, and
+      no Makefile or script reads either otherwise. Command-line make variables do
+      reach the nested makes and tests, and a `COMMIT` in the owner's environment
+      would put `make fetch-e2e-logs` in evidence mode. Section 7's guides may say
+      so.
+    - `--event workflow_dispatch` for the pipeline's collect: the target never
+      passed it, `e2e.yml` runs only on schedule and dispatch, and the task keeps
+      the collect as it was.
+  - Handoff to section 5:
+    - `gather` is what the wrapper's built-in action before `validate` runs.
+    - `change-validate` still runs it itself (step 2) until then; section 7 rewrites
+      that step to read what the gathering before the session left.
+    - A pipeline attempt whose fetch found no run is present evidence, failed, so
+      the gathering never retries it. Only `gather --kind pipeline` makes a new
+      attempt, which dispatches a new run. Section 7's pipeline guide should say so.
+    - `make validate-local`'s summary names `HEAD` as `commit` even when it ran
+      before the commit it describes. The tree is the identity.
 
 ## 5. Actions and hooks around steps
 
