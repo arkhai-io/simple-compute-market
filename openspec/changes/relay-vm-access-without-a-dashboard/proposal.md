@@ -148,6 +148,11 @@ None.
 - `vm-storefront-fulfillment`: the storefront's provisioning settings keys are
   removed with the field.
 
+All three were promoted into `openspec/specs/` by hand at the first closeout
+(task 11.6), and later changes have since rewritten some of what was promoted.
+The change's deltas therefore carry only what remains to promote: the relay
+drain, under `physical-provisioning` (06 F1).
+
 ## Non-Goals
 
 - Do not make connectivity terms buyer-specified or negotiated. The request

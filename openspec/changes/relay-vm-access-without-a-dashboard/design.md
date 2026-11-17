@@ -440,12 +440,13 @@ run. A dispatch that never starts, a VM creation that fails permanently, a
 cancelled request, and an expired lease each end the VM's life without a
 teardown, and a release attached only to teardown leaks on all four.
 
-So release is attached to the lifecycle's terminal states rather than to one
-path through it. Even that is not sufficient on its own — a set of code paths
-is never provably exhaustive, and the one that is missed is the one nobody
-thought of. A periodic reconciliation releases leases whose owning job or
-fulfillment has been terminal beyond a grace period, which converts an
-unenumerated leak into a bounded one.
+So release is attached to one event every ending passes through rather than to
+one path through it — today the release of the reservation's capacity (see
+"Lease release goes with the reservation's capacity" below). Even that is not
+sufficient on its own — a set of code paths is never provably exhaustive, and
+the one that is missed is the one nobody thought of. A periodic reconciliation
+releases leases whose reservation has been released beyond a grace period,
+which converts an unenumerated leak into a bounded one.
 
 The window is 100 ports wide, so an unreleased lease is a slow degradation
 rather than an outage, and the same API that reports holdings is where a manual
@@ -555,21 +556,29 @@ rejected in `contain-embedded-host-key-material`'s design (D3), to be revisited
 when a run gains a third secret file or the provisioning container is shared
 with another user.
 
-**Lease release attaches to the settlement record's terminal transition.**
+**Lease release goes with the reservation's capacity.**
 
-`FulfillmentConvergenceWatchdog` is the single place a settlement record reaches
-succeeded or failed, for creates and teardowns alike. Release belongs there,
-inside the same transaction that records the terminal state.
+A port lease, VM or bare-metal, is released with its reservation's capacity, in
+the transaction that releases it, whatever path releases it, and never on a
+fulfillment state alone: permanent `physical-provisioning`, "Relay port leases
+are unique per relay", as `bare-metal-mock-provisioned-deal`,
+`repair-compute-purchase-recovery`, and `prove-relay-provisioning` (its release
+effect `release_reservation_ports`) left it. A failed create may leave a guest
+running with its tunnel bound, so its port is held with its capacity until a
+compensating teardown reaches `torn_down` or an operator verifies the host and
+forces the release, and a released port is not reissued until its last grant's
+expiry plus the reuse margin has passed.
 
-Not in the same transaction is the tempting simplification and it is wrong: a
-crash between the two leaves exactly the leak reconciliation exists to bound,
-recreated on a schedule rather than by an unforeseen path. Reconciliation should
-be cleaning up after paths nobody enumerated, not after the enumerated one.
-
-Attaching release to individual code paths — teardown, cancellation, expiry —
-was the earlier shape and is what produced an allocator whose comments claimed
-every terminal outcome released while nothing called it at all. One observer of
-terminal state is both correct and checkable.
+This replaced the shape this change first built, release inside the
+transaction in which `FulfillmentConvergenceWatchdog` recorded a settlement
+record's terminal state. That shape released a failed create's port while its
+proxy might still be bound, which is what the capacity rule prevents. What it
+kept, and the current rule keeps: release attaches to one event every ending
+passes through, in the same transaction, rather than to individual code paths —
+teardown, cancellation, expiry — which is what once produced an allocator whose
+comments claimed every terminal outcome released while nothing called it; and
+reconciliation cleans up after paths nobody enumerated, not after the
+enumerated one.
 
 The decisions below settle how a relay is drained and retired, and the handling
 of the rendered variables file. Removing a relay server is its operator's,
@@ -587,15 +596,25 @@ a lease on it run to its end, for a VM guest and a bare-metal grant alike:
    claim is then admitted against, placed on, or projected enabled for those
    hosts' declarations. `kit/site` does not change; the compute family composes
    its own host and relay facts.
-2. **No port is leased on it.** Fulfillment preparation refuses a disabled
-   relay before leasing, as `check_relay_usable` already does.
+2. **No port is leased on it.** The allocator, the one place a lease is
+   created, refuses a new owner on a disabled relay: `allocate_in_session`,
+   which standalone `allocate` also runs, reads the relay row locked
+   (`with_for_update`, as execution's resolver already reads it) after
+   returning an existing owner's active lease, so a repeated allocation for a
+   fulfillment that already holds one stays idempotent. The lock serializes a
+   disable against an acceptance in flight on PostgreSQL, where preparation's
+   unlocked read could otherwise see the relay enabled, the disable commit, and
+   the acceptance then commit a lease on a relay already disabled — reported
+   `drained` in between. Fulfillment preparation still refuses a disabled relay
+   first, through `check_relay_usable`, naming what the relay lacks
+   (06 F2).
 3. **Every leased job runs.** Execution no longer refuses a disabled relay: a
    create whose lease was allocated before the disable, and every teardown and
    reclaim, run. A relay that is absent, or holds no token or active grant key,
    is still refused.
 
-Because a lease is allocated only at fulfillment acceptance, and acceptance
-refuses a disabled relay, the set of a disabled relay's active leases only
+Because the allocator refuses a new owner on a disabled relay under the relay
+row's lock, whoever calls it, the set of a disabled relay's active leases only
 shrinks. "Drained" is therefore a stable condition the relay's operator can rely
 on (D2).
 
@@ -657,6 +676,18 @@ read still names what holds it open. Both are computed from
 `relay_port_leases`, so nothing is persisted. The fields are additive:
 `RelayResponse` does not forbid unknown fields, so a client from
 `marketplace-v0.3.0` reading a newer service ignores them.
+
+In the other direction, both fields are required in `RelayResponse`, with no
+default, so a client from this change reading a service that predates them
+fails to parse the response and receives no `drained` answer at all. A default
+would turn "unknown" into a value, and `drained` gates the removal of a server.
+An optional field with an "unsupported" state was weighed and rejected: it
+pushes a third case into every reader for a window the repository does not
+have, since the provisioning service and its client are released and deployed
+together before 1.0.0 (`docs/guidance/repository/package-versions.md`), and the
+relay's operator tooling always runs against a single version, as the owner
+confirmed (06 F3). A unit test holds that a response shaped as
+`marketplace-v0.3.0` serves it is refused by `RelayResponse`.
 
 `drained` does not wait for released leases' grants to expire. A lease is
 released only with its capacity — after a teardown that removed the proxy, an
