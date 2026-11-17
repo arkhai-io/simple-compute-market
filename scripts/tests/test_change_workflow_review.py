@@ -23,8 +23,8 @@ from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING,
                                       RECORDS, VALIDATED, FakeClaude, claude_review, clock,
                                       codex_missing, codex_saying, configured, ignore_evidence,
                                       not_installed,
-                                      option, option_rules, repository, review_text, reviews_of,
-                                      validation_text, writing)
+                                      option, option_rules, prompted, repository, review_text,
+                                      reviews_of, validation_text, writing)
 
 # The branch the change lands on, given for each review run here: the change is
 # worked in place, with no clone to have recorded one.
@@ -200,10 +200,10 @@ def test_the_owners_direction_rides_on_the_prompt_and_marks_the_line(tmp_path: P
                           runner=writing(review_text(), session="codex-1", calls=calls),
                           head=lambda _: HEAD)
 
-    assert calls[0][-1] == (
+    assert calls[0][-1] == prompted(
         f"Use the change-review skill. Review kind: design. Change: {CHANGE}. The owner's "
         f"direction to this review, in their words: {direction!r}. Look harder where it "
-        "points, and still review the whole change in the skill's format.")
+        "points, and still review the whole change in the skill's format.", "review")
     assert (line["outcome"], line["direction"]) == ("finished", direction)
     assert "override" not in line
 
@@ -727,6 +727,7 @@ def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
 
     assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2, "step": "review",
                     "session": "codex:codex-1", "commit": HEAD, "kind": "design",
+                    "inputs": "runs/20261021T091540Z-review",
                     "record": f"01-{kind}.md", "harness": "codex", "model": "gpt-6-sol",
                     "effort": "high", "outcome": "finished",
                     "next": {"step": "triage", "kind": "design"},
@@ -749,8 +750,9 @@ def test_a_review_falls_back_to_claude_when_codex_is_unavailable(
                           runner=codex, claude=claude, head=lambda _: HEAD, echo=None)
 
     command = claude.commands[0]
-    assert command[:3] == ["claude", "-p", ("Use the change-review skill. Review kind: "
-                                            f"implementation. Change: {CHANGE}. Base: dev.")]
+    assert command[:3] == ["claude", "-p", prompted("Use the change-review skill. Review kind: "
+                                                    f"implementation. Change: {CHANGE}. Base: dev.",
+                                                    "review")]
     assert "--json-schema" not in command
     assert (option(command, "--model"), option(command, "--effort")) == ("claude-opus-5-5",
                                                                          "high")
@@ -1289,3 +1291,104 @@ def test_the_review_check_reports_each_problem_on_its_own_line(
 
     out, err = capsys.readouterr()
     assert (out, err.splitlines()) == ("", problems)
+
+
+# A review's hooks, run by its runner: library integration, the reviewer doubled and
+# each hook a real `sh` command.
+
+RUN = "runs/20261021T091540Z-review"
+# The record the design review a test runs publishes, the change's first.
+DESIGN = "design"
+PUBLISHED = f"01-{DESIGN}.md"
+
+
+def _hooked(root: Path, *hooks: str) -> Path:
+    return configured(root, CONFIGURED.replace(
+        "[hooks]\n", "[hooks]\n" + "".join(f"{hook}\n" for hook in hooks)))
+
+
+def test_a_reviews_hooks_run_around_its_reviewer(tmp_path: Path) -> None:
+    """CW-h3ks: `before-review` is given the kind and the run's directory, which the
+    reviewer's prompt names; `after-review` sees the published record."""
+    record = f"openspec/changes/{CHANGE}/reviews/{PUBLISHED}"
+    root = _hooked(repository(tmp_path), "before-review = 'echo {kind} > {inputs}/kind.md'",
+                   f"after-review = 'cp {record} {{inputs}}/seen.md'")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    run = reviews_of(root) / RUN
+    assert calls[0][-1] == prompted(
+        f"Use the change-review skill. Review kind: design. Change: {CHANGE}.", "review")
+    assert (run / "before/kind.md").read_text("utf-8") == "design\n"
+    assert (run / "after/seen.md").read_text("utf-8") == (root / record).read_text("utf-8")
+    assert (line["outcome"], line["inputs"], line["record"]) == ("finished", RUN, PUBLISHED)
+
+
+def test_no_hook_is_declared_before_a_review(tmp_path: Path) -> None:
+    """CW-h3ks's scenario, the engine's half: the review runs, and its inputs say no
+    `before-review` was declared, for the orchestrating session to say so."""
+    root = repository(tmp_path)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1"), head=lambda _: HEAD)
+
+    assert line["outcome"] == "finished" and "invoked" not in line
+    assert "## before-review\n\nNot declared; nothing ran." in (
+        reviews_of(root) / RUN / "before/status.md").read_text("utf-8")
+
+
+def test_a_reviews_hooks_run_in_the_environment_given(tmp_path: Path) -> None:
+    root = _hooked(repository(tmp_path), "before-review = 'echo $GREETING > {inputs}/greeting'")
+
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing(review_text(), session="codex-1"), head=lambda _: HEAD,
+                   environ={**os.environ, "GREETING": "hello"})
+
+    assert (reviews_of(root) / RUN / "before/greeting").read_text("utf-8") == "hello\n"
+
+
+def test_a_failing_hook_before_a_review_prevents_nothing(tmp_path: Path) -> None:
+    root = _hooked(repository(tmp_path), "before-review = 'exit 2'")
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1"), head=lambda _: HEAD)
+
+    assert line["outcome"] == "finished"
+    assert "failed, exit 2: exit 2 (exit 2)" in (
+        reviews_of(root) / RUN / "before/status.md").read_text("utf-8")
+
+
+def test_a_hook_after_a_review_fails(tmp_path: Path) -> None:
+    """CW-a4fl: the run ends as a question naming the hook; the reviewer is not
+    resumed, and no second record is published or claimed."""
+    root = _hooked(repository(tmp_path), "after-review = 'echo unreachable; exit 1'")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    assert len(calls) == 1
+    assert (line["outcome"], line["record"]) == ("question", PUBLISHED)
+    assert line["message"] == (
+        f"{PUBLISHED} is published and stands, and after-review failed after it: "
+        "after-review: failed, exit 1. No reviewer is resumed for it. See "
+        f"reviews/{RUN}/after/status.md and the logs it names.")
+    assert line["awaiting"] == "the owner's decision on the failing after-review"
+    assert (reviews_of(root) / PUBLISHED).is_file()
+    assert not list(reviews_of(root).rglob("02-*"))
+    assert read_log(reviews_of(root) / "workflow.jsonl") == [line]
+    assert "unreachable" in (reviews_of(root) / RUN / "after/after-review.log").read_text("utf-8")
+
+
+def test_a_review_its_guard_refuses_runs_no_hook(tmp_path: Path) -> None:
+    root = _hooked(repository(tmp_path), "before-review = 'touch ran'")
+
+    line = review_and_log(CHANGE, "implementation", root=root, clock=clock,
+                          runner=writing(review_text("implementation")), head=lambda _: HEAD)
+
+    assert line["outcome"] == "stopped" and line["inputs"] == RUN
+    assert not (root / "ran").exists()

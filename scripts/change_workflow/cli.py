@@ -839,7 +839,7 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         line = review_and_log(args.change, args.kind, root=wrapper.root, base=args.base,
                               model=args.model or None, effort=args.effort or None,
                               fresh=args.fresh, unvalidated=args.unvalidated,
-                              direction=args.arguments.strip() or None)
+                              direction=args.arguments.strip() or None, environ=environ)
         if line["outcome"] != "stopped":
             print(f"Review written to {line['record']}", file=sys.stderr)
         return _logged(line)

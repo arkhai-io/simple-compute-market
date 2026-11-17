@@ -613,8 +613,11 @@ def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
                       + (f"; its {waits} waits after that" if waits else ""),
                       denials=denials, outcome=outcome)
     if outcome == "question":
+        # A reviewer is never resumed, its final message being taken for another
+        # review, so a review's question is the owner's to settle by their direction.
         return _owner(f"the {step} step asks: {entry.get('message', '')}",
-                      awaiting=entry.get("awaiting"), resume=step)
+                      awaiting=entry.get("awaiting"),
+                      **({"resume": step} if step != "review" else {}))
     if outcome == "returned":
         target = _exit_of(entry)
         return _owner(f"the {step} step proposes returning to "

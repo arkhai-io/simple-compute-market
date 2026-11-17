@@ -66,7 +66,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import config, next_step
 from .around import (Around, Ran, after_failure_note, after_question, claim_inputs, failures,
-                     inputs_note, named, write_status)
+                     guarded, inputs_note, named)
 from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_now
 from .find import landing_branch
 from .graph import AFTER, BEFORE
@@ -496,24 +496,7 @@ class Wrapper:
     def _actions(self, moment: Callable[[Path], list[Ran]], directory: Path) -> list[Entry]:
         """Run the actions and hooks before a session into `directory`, and return
         what they invoked."""
-        return [entry for one in self._moment(moment, directory, BEFORE) for entry in one.invoked]
-
-    def _moment(self, moment: Callable[[Path], list[Ran]], directory: Path, when: str
-                ) -> list[Ran]:
-        """What the actions and hooks of one moment came to. One the engine cannot
-        run at all counts as a failure, written to `status.md` in their place, so it
-        informs the session or resumes it as any failing hook does."""
-        try:
-            return moment(directory)
-        except (OSError, StepError) as exc:
-            failed = [Ran(f"the engine's run of what comes {when} the session", 1,
-                          lines=[f"ERROR: {exc}"])]
-            try:
-                directory.mkdir(parents=True, exist_ok=True)
-                write_status(directory, when, "the session", failed)
-            except OSError:
-                pass
-            return failed
+        return [entry for one in guarded(moment, directory, BEFORE) for entry in one.invoked]
 
     def _after_finished(self, step: str, rules: StepRules, change: str, log: Path, inputs: str,
                         around: Around, behind: list[Entry], outcome: Entry,
@@ -536,7 +519,7 @@ class Wrapper:
             except StepError:
                 reviews = log.parent
             directory = reviews / inputs / AFTER
-            ran = self._moment(around.after, directory, AFTER)
+            ran = guarded(around.after, directory, AFTER)
             behind += [entry for one in ran for entry in one.invoked]
             if not failures(ran):
                 break

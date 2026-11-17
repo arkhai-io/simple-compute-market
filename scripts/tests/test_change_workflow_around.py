@@ -94,6 +94,24 @@ def test_a_runs_inputs_are_named_on_its_line_and_hold_what_each_hook_printed(
     assert (invoked["hook"], invoked["exit_status"]) == ("before-implement", 0)
 
 
+def test_a_hooks_commands_run_as_the_steps_run_never_under_the_callers_session(
+        tmp_path: Path) -> None:
+    """What a hook's commands run through the engine is held to the step's hook
+    table and kept for the run's line, not for an orchestrating session that
+    started the wrapper."""
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    hook = ("before-implement = 'echo $CHANGE_WORKFLOW_UNATTENDED $CLAUDE_CODE_SESSION_ID "
+            "> {inputs}/marked'")
+    wrapper = replace(_wrapper(tmp_path, _hooks(hook), claude),
+                      environ={"PATH": "/usr/bin:/bin", SESSION_ID: "the-orchestrators"})
+
+    wrapper.run("implement", CHANGE)
+
+    marker, session = (_inputs(tmp_path, "implement") / "marked").read_text("utf-8").split()
+    assert marker == "implement"
+    assert session.startswith("implement-before-implement-")
+
+
 def test_a_hook_passes_a_large_artifact_beside_its_message(tmp_path: Path) -> None:
     """CW-i9np's large artifact, as its layout: the message and the data are files of
     the directory, and neither the prompt nor `status.md` carries the data."""
@@ -399,16 +417,20 @@ def test_a_steps_hooks_are_refused_to_another_steps_run(
     assert not (tmp_path / "ran").exists()
 
 
+@pytest.mark.parametrize("when", ["before", "after"])
 def test_an_interactive_review_runs_no_hooks_and_says_so(
-        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    configured(tmp_path, _hooks("before-review = 'touch ran'"))
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], when: str) -> None:
+    """CW-h3ks: a review run interactively is no run."""
+    configured(tmp_path, _hooks(f"{when}-review = 'touch ran'"))
     (tmp_path / "openspec/changes" / CHANGE).mkdir(parents=True, exist_ok=True)
 
-    assert main(["run", "before", "review", CHANGE], root=tmp_path,
+    assert main(["run", when, "review", CHANGE], root=tmp_path,
                 environ={SESSION_ID: SESSION}) == 0
 
-    assert "a review run interactively is no run" in capsys.readouterr().out
+    assert (f"[change-workflow] {when}-review: skipped, a review run interactively is no "
+            "run, so it runs no hooks") in capsys.readouterr().out
     assert not (tmp_path / "ran").exists()
+    assert not (_reviews(tmp_path) / "runs").exists()
 
 
 @pytest.mark.parametrize("session", ["../elsewhere", "a/b", ".", ".."])

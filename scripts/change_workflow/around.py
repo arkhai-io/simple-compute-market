@@ -106,6 +106,22 @@ def output_to(path: Path) -> Iterator[None]:
             os.close(saved[1])
 
 
+@contextmanager
+def environment(environ: Mapping[str, str]) -> Iterator[None]:
+    """The process's environment replaced by `environ` while the block runs. A
+    hook's commands run in the process's environment (`hooks.command_environment`),
+    so this is how they, and every engine command among them, run marked as the
+    step's run and keep what they ran under the action's own session."""
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
 @dataclass
 class Ran:
     """One action or hook run around a session: its name, its exit status, or why
@@ -158,6 +174,23 @@ def write_status(directory: Path, when: str, step: str, ran: Sequence[Ran]) -> P
     with path.open("a", encoding="utf-8") as status:
         status.write("\n".join([*opening, *body]))
     return path
+
+
+def guarded(moment: Callable[[Path], list[Ran]], directory: Path, when: str) -> list[Ran]:
+    """What the actions and hooks of one moment came to. One the engine cannot run at
+    all counts as a failure, written to `status.md` in their place, so it informs or
+    resumes the session as any failing hook does, and never stops the run's line."""
+    try:
+        return moment(directory)
+    except (OSError, StepError) as exc:
+        failed = [Ran(f"the engine's run of what comes {when} the session", 1,
+                      lines=[f"ERROR: {exc}"])]
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            write_status(directory, when, "the session", failed)
+        except OSError:
+            pass
+        return failed
 
 
 def _engine_lines(log: Path) -> list[str]:
@@ -219,9 +252,10 @@ class Around:
         """Run `call` with its output in its log, and take what it kept."""
         session = f"{self.step}-{name}-{uuid.uuid4().hex}"
         log = _log_name(directory, name)
-        with output_to(log):
+        environ = self.environment(session)
+        with output_to(log), environment(environ):
             try:
-                status = call(self.environment(session))
+                status = call(environ)
             except StepError as exc:
                 print(f"ERROR: {exc}", file=sys.stderr)
                 status = 1
@@ -323,15 +357,24 @@ def after_failure_note(step: str, directory: Path, reviews: Path, ran: Sequence[
             "owner as a question.")
 
 
+def hook_question(directory: Path, reviews: Path, ran: Sequence[Ran],
+                  opening: Callable[[str, str], str], said: str | None = None) -> Entry:
+    """A question to the owner naming what failed among `ran`: `opening(names,
+    closings)`, then where its status and logs are, then the session's own report
+    when there is one."""
+    failed = failures(ran)
+    names = ", ".join(one.name for one in failed)
+    message = (opening(names, "; ".join(one.closing() for one in failed))
+               + f" See reviews/{named(directory, reviews)}/{STATUS} and the logs it names."
+               + (f"\n\nThe session's last report: {said}" if said else ""))
+    return {"outcome": "question", "message": message,
+            "awaiting": f"the owner's decision on the failing {names}"}
+
+
 def after_question(step: str, directory: Path, reviews: Path, ran: Sequence[Ran],
                    said: str | None) -> Entry:
     """The run's outcome when a hook after it failed a second time: a question to the
     owner naming the hook, the session's own report kept beside it."""
-    failed = failures(ran)
-    names = ", ".join(one.name for one in failed)
-    message = (f"{names} failed again after the {step} session was resumed with its "
-               f"failure: " + "; ".join(one.closing() for one in failed)
-               + f". See reviews/{named(directory, reviews)}/{STATUS} and the logs it names."
-               + (f"\n\nThe session's last report: {said}" if said else ""))
-    return {"outcome": "question", "message": message,
-            "awaiting": f"the owner's decision on the failing {names}"}
+    return hook_question(directory, reviews, ran, lambda names, closings: (
+        f"{names} failed again after the {step} session was resumed with its failure: "
+        f"{closings}."), said)

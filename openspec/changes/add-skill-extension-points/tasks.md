@@ -927,18 +927,102 @@ Delivers the review runner's `before-review` and `after-review`, and no hooks fo
 interactive review (D7; CW-h3ks, CW-a4fl). Files: `scripts/change_workflow/review.py`,
 `scripts/tests/test_change_workflow_review.py`.
 
-- [ ] 6.1 `review.py` runs `before-review` with `{kind}` before starting the
+- [x] 6.1 `review.py` runs `before-review` with `{kind}` before starting the
   reviewer, giving it the run's inputs directory to read, and `after-review` once
   it has published the record and before it logs the outcome as final (CW-h3ks).
   Verify: library-integration tests with the reviewer doubled: the reviewer's prompt
   names the directory, and `after-review` sees the published record.
-- [ ] 6.2 A failing `after-review` resumes no reviewer and ends the run as a question
+  - Done:
+    - `_review_and_log` claims the run's directory, named on every line however the
+      run ends, and builds one `ReviewHooks`, an `Around` for the review with the
+      review's base or the landing branch, and `{kind}`.
+    - `run_review` runs its before moment once every guard has passed, just before
+      the reviewer starts. It names the directory at the end of the reviewer's first
+      prompt; a format correction's prompt does not name it.
+    - `_review_and_log` runs the after moment once the record is published, before
+      the line.
+    - The line's `invoked` is what ran before, the reviewer's own, then what ran
+      after.
+    - The CLI now passes its environment to the review, so the review's hooks run in
+      it as every other step's do.
+    - A review the configuration cannot be read for has no hooks, and `run_review`
+      refuses it as before.
+  - Library-integration tests in `test_change_workflow_review.py`, the reviewer
+    doubled by the Codex writer, each hook a real `sh` command, all passing:
+    - `test_a_reviews_hooks_run_around_its_reviewer`: the prompt names the directory,
+      the hook gets `{kind}`, and `after-review` copies the published record;
+    - CW-h3ks's scenario, the engine's half (`test_no_hook_is_declared_before_a_review`);
+      the orchestrating session's sentence is section 8's;
+    - a failing `before-review` prevents nothing;
+    - a review its guard refuses runs no hook;
+    - the hooks run in the environment given.
+  - The prompt and line assertions of four existing review tests now include the
+    inputs.
+- [x] 6.2 A failing `after-review` resumes no reviewer and ends the run as a question
   naming the hook, the record standing and never published again; an interactive
   review runs no hooks and says so (CW-a4fl; CW-h3ks). Verify: CW-a4fl's review
   scenario as a library-integration test, and a test that no second record is
   claimed.
-- [ ] 6.3 Verification point: `test_change_workflow_review.py`; `run pre-commit`
+  - Done: `after_review_question`, its wording beside `around.after_question`
+    through `around.hook_question`.
+    - An interactive review's `run before|after review` (5.5) says it runs no hooks
+      and makes no directory.
+  - Outside the plan: the next-step computation named `resume` for any step's
+    question, and `resume` refuses a review line. So a review's question named a
+    step no command takes. `next_step._waiting` now names no `resume` for a
+    review's question, and the owner settles it by their direction. Section 8.3's
+    orchestrating skill should relay it so.
+    - Test: `test_a_reviews_question_names_no_resume` in `test_change_next_step.py`.
+  - Library-integration tests, all passing:
+    - CW-a4fl's review scenario (`test_a_hook_after_a_review_fails`): one reviewer
+      call, the line a question naming the hook and the record, the record kept,
+      no `02-` file anywhere under `reviews/`, and one line logged;
+    - the interactive review, for `before` and `after`, in
+      `test_change_workflow_around.py`.
+- [x] 6.3 Verification point: `test_change_workflow_review.py`; `run pre-commit`
   passes. End-to-end: none.
+  - `run test-before` on `test_change_workflow_review.py` at section 5's commit
+    fails on its assertions: the four updated tests and the four new ones then
+    present. The section's later tests came after it ran.
+  - Outside the plan, a defect in section 5's actions, fixed:
+    - A hook's commands run in the process's environment
+      (`hooks.command_environment`), not the one the hook runner is given. So the
+      marker and the engine's own session id `around` made never reached them, and
+      an engine command a hook ran would have been kept under the session of
+      whoever started the wrapper.
+    - `around.environment` now makes the action's environment the process's own
+      while it runs.
+    - Test: `test_a_hooks_commands_run_as_the_steps_run_never_under_the_callers_session`.
+  - The fresh-context check's findings, fixed:
+    - two docstrings still naming only `finished` and `stopped`;
+    - the review's `Around` composed twice, now one `ReviewHooks`;
+    - the `environ` the CLI never passed;
+    - a guard on a list no caller left out;
+    - the absent-hook scenario untested;
+    - the two questions' shared wording.
+  - The check's plausible finding, a review's question naming a resume no command
+    takes, is fixed as 6.2 says.
+  - `run pre-commit` passed whole: `after-functional-change`, `pre-commit-functional`
+    (`make validate-local`, every suite, the scripts' 3300 passing, its `local`
+    evidence `PASSED`), and `pre-commit`. `test_change_workflow_review.py`: 108
+    passed.
+    - An earlier run failed only on the comment check, which reads a literal review
+      record's name as a reference. The tests now build it from the kind.
+    - This note changes the tree that run checked, as 5.7's did.
+  - End-to-end: none — confirmed; no scenario under `e2e-tests/` exercises the
+    workflow's tooling.
+  - Handoff to section 7 and on:
+    - Every run's prompt now ends with its inputs note, and every line names
+      `inputs`. Section 7's `change-validate` reads the gathering's
+      `before/status.md` there instead of running `gather` itself, which the wrapper
+      has done since section 5. Until then the skill's own `gather` finds
+      everything present and gathers nothing.
+    - Section 8.3: a review's question after a failing `after-review` names no
+      resume. The orchestrating session relays it for the owner's direction.
+    - Section 8.4: `run before|after <step> <change>` prints the inputs directory as
+      its last line, `[change-workflow] inputs: reviews/runs/…`.
+  - The session has grown large over two sections. The next sections should start
+    in a fresh session.
 
 ## 7. The guides and the validation skills
 
