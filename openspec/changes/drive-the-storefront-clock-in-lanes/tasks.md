@@ -2969,9 +2969,27 @@ archive's writes; a part needing any other edit returns the change to implementa
   the comments sections 1–17 added — in the component, the converted modules, the
   routes, the doubles and the harness — for any naming this change, a task or a
   review, or calling the conversion new.
-- [ ] 18.2 **Import placement — confirm.** Check the imports sections 1–17 added,
+  - Closeout, 2026-11-17, at `e846e92e0`: `make check-comment-hygiene` passes (no
+    change id, task number or change directory name outside `openspec/`). A
+    fresh-context read of every comment and docstring the diff from `dd86e550f`
+    added found one violation, which returns the change to implementation:
+    `domains/apicredits/service/tests/integration/test_system_time.py:159`, the
+    docstring of
+    `test_the_composed_service_admits_the_time_setting_alone_outside_the_skew`,
+    opens "D14 as the composition wires it:", naming a design decision
+    (`change-references.md`). The fix: say what the test checks without the id,
+    e.g. "The time-setting operation, the one request admitted outside the
+    signing skew, as the composition wires it: …". No comment narrates history;
+    `storefront.alice.lane.toml:53`'s "the pre-list spelling" is copied from
+    `storefront.alice.toml:50` and stands as in the other storefront files.
+- [x] 18.2 **Import placement — confirm.** Check the imports sections 1–17 added,
   every `injected_time` import among them, for any left local without a recorded
   reason.
+  - Closeout, 2026-11-17, at `e846e92e0`: no import the diff from `dd86e550f`
+    added sits in a function, method or class body; the indented matches are
+    multi-line import continuations, unchanged context, or source text inside
+    test strings. The diff moved two local imports to module level (the sample
+    app's `os`, `torch_arkhai_strategy.py`'s `time`).
 - [ ] 18.3 **Documentation compliance.** Re-check D1–D21 against
   `openspec/README.md`'s placement table; confirm each document 18.9 writes describes
   the current state; confirm no permanent document still describes the doubles'
@@ -2992,6 +3010,11 @@ archive's writes; a part needing any other edit returns the change to implementa
 - [ ] 18.7 **Packaging.** `make check-packaging`, `check-time-reads` among it, and
   `make check-architecture-change CHANGE=drive-the-storefront-clock-in-lanes`;
   resolve every failure.
+  - Run ahead of its place on 2026-11-17 at `e846e92e0`, to find every code edit
+    before returning the change: `make check-packaging` passes (`check-time-reads`
+    among it: no direct wall-clock read in production source or the lane
+    doubles); `make check-architecture-change` passes (the change owns no
+    architecture row). To be run again in its place after the fix round.
 - [ ] 18.8 **End-to-end pipeline.** Dispatch `make run-e2e` at the closeout's code,
   collect with `make fetch-e2e-logs`, and record the run, its result, and the scenarios
   exercising the change: every module of the three lanes on injected time, the
