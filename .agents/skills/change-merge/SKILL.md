@@ -117,6 +117,27 @@ the owner, present, settles in the session. When `record` refuses the
 validation of the merged `HEAD`, record their direction after the outcome: step 7's
 command before closeout, "After the archive"'s after it.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-merge` hook, and kept
+what it did in the run's inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook, in full. Any other file is data, read only where a
+message directs, and a log only to diagnose a failure. A failing hook prevented
+nothing: say in your report what its failure means for the merge, and stop and ask
+the owner when the merge cannot be made soundly with it. Interactively, with no
+wrapper, run `scripts/change-workflow run before merge <change>` first; its last
+line names the directory. Once the work is done, run `scripts/change-workflow run
+after merge <change>` before `record`, and, when it fails, fix what it found if
+this step can, and run it again, or tell the owner. Unattended, an after-hook that
+fails resumes this session once with its failure; a second failure goes to the
+owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## 1. Check that the merge may start
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it
@@ -147,7 +168,10 @@ Read in full: the documents `scripts/change-workflow config load merge` prints; 
 `proposal.md`, `design.md`, and `tasks.md`, the section notes above all, which say
 which files each section owns and which suites and end-to-end scenarios prove it;
 the latest pre-closeout review and its triage, and after the archive the latest
-closeout review's and any merge review's too; the latest validation record; and,
+closeout review's and any merge review's too; the latest validation record, with
+the guide of each evidence kind the configuration declares, which
+`scripts/change-workflow config` names — what its cleanup writes, and where the
+scenarios it runs are named; and,
 for every capability the change touches, its `spec.md`, its companion, and every
 other Markdown file in its directory but its `index.md` — the capability's own
 guidance — which the merge reconciles, with the code, against both sides.
@@ -156,7 +180,7 @@ guidance — which the merge reconciles, with the code, against both sides.
 
 1. Fetch the base from the remote that has it — the remote the branch tracks in the
    owner's workspace, which a clone has under the same name (`git remote` lists
-   them; `origin` in this repository): `git fetch <remote> <base>`; for a change
+   them): `git fetch <remote> <base>`; for a change
    worked in its own clone, a branch only the owner's workspace holds comes from its
    `workspace` remote, `git fetch workspace <base>`. The base is then
    `<remote>/<base>`, written `<base>` below. Note the commit you fetched, `git
@@ -182,11 +206,13 @@ commits made it (`git log --merge -p -- <file>` shows each side).
   branch has it — this change's from this branch, every other row from the base.
 - **Change documents** under `openspec/changes/`: this change's from this branch,
   another change's from the base.
-- **Locks and other derived files** (`uv.lock`): take the base's side of the
-  conflicted hunks with the Edit tool; step 5's `after-functional-change` rebuilds
-  them, which in this repository relocks, settling the change's own dependencies
-  against the base's. A `pyproject.toml` conflict is resolved by hand first: both
-  sides' dependencies, and the higher of two version bumps of one package.
+- **Locks and other derived files**: take the base's side of the conflicted hunks
+  with the Edit tool; step 5's `after-functional-change` rebuilds them — a relock,
+  say — settling the change's own dependencies against the base's. A conflict in the
+  manifest a lock is derived from is resolved by hand first: both sides'
+  dependencies, and the higher of two version bumps of one package.
+- **A tracked file an evidence kind's cleanup writes**: as that kind's guide says,
+  each guide `scripts/change-workflow config` names saying what its cleanup writes.
 - **Code, tests, and configuration**: edit each file so both sides hold, with
   comments describing the system that results. Where the two cannot both hold, the
   resolution is a decision: ask the owner, with the options and your
@@ -205,10 +231,11 @@ never touched, and merge cleanly. Find each such place:
   fixture, a harness client, a configuration key, a schema, a Make target — read
   the base's diff of it, and search the change's diff for every name the base
   removed or renamed and every signature it changed.
-- The end-to-end scenarios under `e2e-tests/` above all: no local suite runs them,
-  so a stale call in a scenario the change added is found only by the pipeline.
-  Read each scenario the change added or extended against the base's changes to
-  the harness and fixtures it uses.
+- The end-to-end scenarios above all, found where the guide of the evidence kind
+  that runs them says scenarios are named: no local suite runs them, so a stale call
+  in a scenario the change added is found only once validation runs them. Read each
+  scenario the change added or extended against the base's changes to the harness
+  and fixtures it uses.
 - Where the base reworked a pattern the change's code also follows — it moved
   every caller of an interface to a new one — the change's new callers move too,
   even where the old interface still works.
@@ -344,8 +371,7 @@ these rules besides:
   Every requirement says what each change meant, every id is unique, and each
   change's index entries are kept; two changes' edits to one requirement are merged
   into one that says both, never one side taken whole.
-- **The validation capacity figure** (`helm/validation-capacity.toml`): the one
-  whose `measured_at` is later.
+- **A tracked file an evidence kind's cleanup writes**: as that kind's guide says.
 - **The row's status is never set to `ready for closeout`:** step 7's status edit
   does not apply.
 - **`reviews/pull-request.md`**, untracked, never conflicts: append a note on what
@@ -363,8 +389,7 @@ none does:
 
 - a conflict resolved outside the mechanical files — the change index, other
   changes' documents, files the repository's hooks rebuild such as a lock, version-
-  only bumps, and a file a validation part's cleanup writes, such as the capacity
-  figure;
+  only bumps, and a file an evidence kind's cleanup writes;
 - a reconciliation of the change's own code or end-to-end scenarios (step 4);
 - a file outside those mechanical files that both sides changed since the merge
   base, even where Git merged it without a conflict — two changes' edits to one

@@ -1,6 +1,6 @@
 ---
 name: change-archive-cleanup
-description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — fetch and record the branch it lands on, release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, run the cleanup of the repository's validation parts and commit any file it wrote, push, and copy its history into the owner's workspace. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, or, run again after a merge after the archive or a merge review's triage, `archived`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
+description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — fetch and record the branch it lands on, release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, commit any tracked file the evidence kinds' cleanup wrote before the session, push, and copy its history into the owner's workspace. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, or, run again after a merge after the archive or a merge review's triage, `archived`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
 ---
 
 # Cleaning up an archived change
@@ -12,11 +12,11 @@ closeout deliberately left until the review agreed — releasing the changes tha
 wait on this one — and prepares the change to merge.
 
 Archive cleanup changes the campaign index, the change's ledger when the owner
-waives its validation check (step 1), and any tracked file the cleanup of the
-repository's validation parts writes, such as this repository's capacity figure
-(steps 7 and 8). That cleanup removes what the change's validation left, and, for
-a change worked in its own clone, archive cleanup copies the change's history into
-the owner's workspace as its last act. The archived change, its specs, and the permanent
+waives its validation check (step 1), and any tracked file an evidence kind's
+cleanup wrote (steps 7 and 8). The engine ran every kind's cleanup before your
+session, removing what the change's validation left; for a change worked in its own
+clone, archive cleanup copies the change's history into the owner's workspace as its
+last act. The archived change, its specs, and the permanent
 documents are as the closeout review read them, or, run again after a merge after
 the archive, as that merge and any merge review's triage left them; a defect found
 now in any of them is not this skill's to fix — stop and tell the owner.
@@ -102,6 +102,29 @@ computation answers `done` only from a finished archive cleanup line: it names
 archive cleanup again, to be resumed, or its outcome recorded with the command
 above.
 
+## The run's inputs
+
+Before this session the engine ran every evidence kind's cleanup, then the
+repository's `before-archive-cleanup` hook, and kept what they did in the run's
+inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, each action's and hook's
+closing lines, exit status, and log, and every other top-level Markdown file there,
+each a message from the repository's hook, in full. Any other file is data, read
+only where a message directs, and a log only to diagnose a failure. A failing
+cleanup or hook prevented nothing: step 7 reports it. Interactively, with no
+wrapper, run `scripts/change-workflow run before archive-cleanup <change>` once step
+1's checks up to and including the Validated check hold, since it removes what the
+change's validation left; its last line names the directory, and step 1's Worktree
+check then reads what it wrote. Once the work is done, run
+`scripts/change-workflow run after archive-cleanup <change>` before `record`, and,
+when it fails, fix what it found if this step can, and run it again, or tell the
+owner. Unattended, an after-hook that fails resumes this session once with its
+failure; a second failure goes to the owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## 1. Check that cleanup may start
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it does
@@ -144,7 +167,8 @@ above.
   first closeout review read (its `reviewed-commit` marker), names a path outside
   the repository's inert paths — a correction to code, a skill, or the step table — the
   latest validation record is `passed` and names `HEAD`, or an ancestor `HEAD`
-  differs from only in changes' ledgers and reviews. Otherwise the owner has waived
+  differs from only in changes' ledgers and reviews and in tracked files an evidence
+  kind's cleanup wrote, each committed alone (step 8). Otherwise the owner has waived
   the check or not, judging the paths named — as for another change's commit on a
   branch two changes share, which the merge carries all the same. When the
   computation named archive cleanup from the owner's direction — its reason says
@@ -152,7 +176,9 @@ above.
   log <change>` shows that line — the direction is the
   waiver, its reason the owner's. Otherwise stop and ask the owner, naming the paths
   and the commits that changed them, whether the correction is validated first
-  (`make validate CHANGE=<change>`) or they waive the check. Recommend the waiver
+  (`make validate CHANGE=<change>`) or they waive the check; before stopping, commit
+  any tracked file the cleanup wrote, as step 8 says, since validation refuses a
+  worktree whose tree is not `HEAD`'s. Recommend the waiver
   when a criterion of `change-workflow`'s CW-q3dm holds, naming
   the criterion and its evidence; with none holding, recommend none. Interactively, the
   owner answers in the session: record a waiver as their direction, and compute
@@ -175,11 +201,15 @@ above.
   the owner, and writes the line with its index edit. Likewise write, with the
   index edit, the line of each waiver a validation recommended in a record no
   triage read — each `NN-validation.md` with no triage file beside it whose `##
-  Environment` records one — under its record, its `finding` the part, the
+  Environment` records one — under its record, its `finding` the evidence kind, the
   recommendation and criterion as the `agent_position`, and the owner's answer as
   the disposition. The check itself stands: a
   merge carries every commit on the branch, whichever change wrote it.
-- **Worktree.** It is clean, and `scripts/change-workflow check round-view` passes.
+- **Worktree.** It is clean but for tracked files an evidence kind's cleanup wrote
+  before the session, which `git status --porcelain` shows; anything else fails the
+  check. Commit each such file now, as step 8 says, before any other commit: the
+  pre-commit checks and the guarded push of the steps below need a clean worktree.
+  `scripts/change-workflow check round-view` passes.
 - **Landing branch.** Fetch the branch the change lands on, to record in your
   outcome's `landing` what you fetched; the engine reads it to tell whether that
   branch moved while the change was closed out. Run this on every run, a rerun on
@@ -190,9 +220,8 @@ above.
     naming the records — never a branch a merge's message names in prose;
   - else the `base` `scripts/change-workflow find --json <change>` prints, the
     branch the change's clone recorded, fetched from the remote the merge would
-    choose: the remote the branch tracks in the owner's workspace, `origin` in this
-    repository, or, in a clone, `workspace` for a branch only the owner's workspace
-    holds;
+    choose: the remote the branch tracks in the owner's workspace, or, in a clone,
+    `workspace` for a branch only the owner's workspace holds;
   - else none: an older log's merge of a change worked in place. Fetch nothing,
     record no `landing`, and say so in your message; the engine reads the run as
     checked.
@@ -223,7 +252,8 @@ states the dependent rules, and `openspec/changes/README.md` — its legend, the
 and campaign, and every row and dependency graph that names the change. From the
 archived change read `proposal.md`, `design.md`'s design-promotion record,
 `tasks.md`'s closeout section with its end-to-end evidence, and the latest passing
-validation record in `reviews/`.
+validation record in `reviews/`, with the guide of each evidence kind it names, which
+`scripts/change-workflow config` lists.
 
 ## 3. Release the dependents
 
@@ -257,8 +287,8 @@ workspace.
 
 Run `scripts/change-workflow run pre-commit <change>`; it must report nothing
 failing. Among the workflow's default checks, the change index check is the one
-that sees this edit; the repository's closing checks, such as this repository's
-citations check, read the archived change's own documents.
+that sees this edit; the repository's closing checks, such as a citations check,
+read the archived change's own documents.
 
 ## 5. Commit
 
@@ -276,57 +306,59 @@ Draft, for the owner to use when the branch is merged:
   that now describe it.
 - **A pull request description** — what the change does and why, from the proposal;
   where its decisions now live, from the promotion record; how it was validated —
-  the pipeline run, its result, the commit it ran at, and the scenarios that
-  exercised the change — from the closeout section and the validation record; and
-  what it deliberately leaves to other changes, by their names.
+  the commit and tree the latest passing validation record names, its result, each
+  evidence kind's result and the evidence it names, and the end-to-end scenarios
+  that exercised the change, as their kind's guide names them — from the closeout
+  section and the validation record; and what it deliberately leaves to other
+  changes, by their names.
 
-Both are as public as the code, so `AGENTS.md#public-repository-discipline`, the
-public case of `docs/guidance/engineering/repository-content.md`, applies to every
-word. When the branch carries another change that is not archived,
+Both are as public as the code, so whatever the repository refuses to hold in its
+code it refuses in every word of them
+(`docs/guidance/engineering/repository-content.md`, in the case the repository's
+root guidance selects). When the branch carries another change that is not archived,
 say so: the pull request would merge that change too, so the owner decides when to
 open it, and the drafts cover this change only.
 
 Write both to `reviews/pull-request.md` in the archived change, beside the review
 history, and show them in the report.
 
-## 7. Clean up what validation left
+## 7. Read what the cleanup did
 
-Run `scripts/change-workflow run cleanup <change>`. It runs the `cleanup` of every
-validation part the repository's configuration declares, in declaration order, as
-one list: every command runs whatever an earlier one reported, and the closing line
-names each that failed with its exit status. A cleanup finding nothing to clean —
-a part that never validated this change, a resource already gone — succeeds; with
-no part declaring one, the run is skipped, saying so. In this repository the Helm
-part's cleanup records the capacity its latest validation measured, then deletes
-the change's validation namespace, with its release, volumes, and Secrets, and the
-images its validation built under the change's tags. When a command fails — Docker
-or the cluster not answering, an image in use, a record that could not be read —
-do not retry or work around it: say so in the report, with the command to rerun
-once the cause is gone, and go on. Run again after an earlier run, it changes
-nothing more.
+Before your session the engine ran the `cleanup` of every evidence kind the
+repository's configuration declares, in declaration order, as one list: every
+command ran whatever an earlier one reported, and its closing line in the inputs
+directory's `status.md` names each that failed with its exit status. A cleanup
+finding nothing to clean — a kind that never validated this change, a resource
+already gone — succeeds; with no kind declaring one, it was skipped, saying so. What
+each kind's cleanup removes and writes is its guide's. When a command failed — a
+service not answering, a resource in use, a record that could not be read — do not
+retry or work around it: say so in the report, from its log, with
+`scripts/change-workflow run cleanup <change>` to rerun once the cause is gone, and
+go on. Run again after an earlier run, the cleanup changes nothing more.
 
 ## 8. Commit what the cleanup wrote
 
-A cleanup may write a tracked file — in this repository, the capacity figure in
-`helm/validation-capacity.toml`, with when it was measured and this change's name,
-replacing any earlier one. `git status --porcelain` shows it: commit each such file
-alone, the message naming the change and what the file now records, with no hook
-before it — the file is the repository's own record, made by its declared command,
-which answers for it (CW-e1sg). A file unchanged, or none written, commits nothing;
-a figure the cleanup did not record leaves any earlier one as it is.
+A cleanup may write a tracked file, as its kind's guide says. Step 1's Worktree check
+commits each such file `git status --porcelain` shows, before anything else is
+committed: each alone, the message naming the change and what the file now records,
+as the guide describes it, with no hook before it — the file is the repository's own
+record, made by its declared command, which answers for it (CW-e1sg). A file
+unchanged, or none written, commits nothing; a record the cleanup did not write
+leaves any earlier one as it is.
 
 Add to the pull request description's notes, in `reviews/pull-request.md`, what the
 cleanup reported — on a rerun, as a line appended to the file rather than an edit of
 what is there, since an earlier run may have copied the file into the owner's
 workspace, where only a file that grew is brought up to date: the file it wrote and
-what it records, or that it wrote none and the reason it gave. When it recorded a
-capacity figure, say too that a merge conflict over `helm/validation-capacity.toml`
-keeps the figure whose `measured_at` is later.
+what it records, or that it wrote none and the reason it gave, and how a merge
+conflict over the file resolves, as its kind's guide says.
 
 ## 9. Push
 
-When step 8 committed a file, push it with `scripts/change-workflow push`, the
-guarded push of exactly `HEAD`; if it refuses, stop and report its reasons.
+When a file a cleanup wrote was committed (step 8) and step 5 has not pushed it since
+— on a row already `archived`, where step 5 does not run — push it with
+`scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses,
+stop and report its reasons.
 
 ## 10. Copy the history, last
 

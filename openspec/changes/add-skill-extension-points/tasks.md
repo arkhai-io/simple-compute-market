@@ -1032,7 +1032,7 @@ D6, D10, D14; CW-a8ss, CW-k7gd, CW-g2rs, CW-c5nt, CW-i9np, CW-n8tr). Files:
 `.agents/evidence/*.md`, `.agents/skills/change-validate/SKILL.md`,
 `change-archive-cleanup/SKILL.md`, `change-merge/SKILL.md`.
 
-- [ ] 7.1 Write the guides from what leaves the skills, restating nothing the
+- [x] 7.1 Write the guides from what leaves the skills, restating nothing the
   configuration holds (CW-g2rs): `helm.md` — its evidence files, preflights and
   warnings, the memory classification (MCW-epkd), the namespace and served scenarios,
   its record section, what its cleanup writes and that a merge conflict keeps the
@@ -1044,7 +1044,28 @@ D6, D10, D14; CW-a8ss, CW-k7gd, CW-g2rs, CW-c5nt, CW-i9np, CW-n8tr). Files:
   messages; each naming its UTC timestamp attempts. Verify: `scripts/change-workflow
   check config` passes, and a reading of each guide against its configuration entry
   finds no restated command or pattern.
-- [ ] 7.2 Rewrite `change-validate`: the gathering already ran before the session
+  - Done: each guide has the headings CW-k7gd asks of one — what the kind shows,
+    reading its evidence, telling its failures apart, its section of the record, its
+    cleanup, and what a plan names for it.
+    - `helm.md` carries what left `change-validate` (the preflights, the namespace
+      evidence, the memory and capacity classification, the warnings, the
+      every-scenario judgement), `change-archive-cleanup`, and `change-merge` (the
+      capacity figure, committed alone, a conflict keeping the later `measured_at`).
+    - `pipeline.md` carries the collect, the no-run attempt that only a new attempt
+      replaces (4.7's handoff), the lanes, and the scenarios as pytest markers under
+      `e2e-tests/`, with the Helm kind's served list.
+    - `ci.md` carries the dispatchable list, the baseline's classes, the owed job's
+      judgement, the kind's result rule, and the owed-line example, now in the
+      `(ci tests.yml)` form.
+    - `local.md` carries its steps as the script names them, the attempt naming, the
+      worktree messages, and why an attempt's `commit` may not be the validated one.
+  - `scripts/change-workflow config` reads the file with the whole check, the
+    guides' among it, and passes (`check config` is outside implementation's rules,
+    as in 1.8). A reading against each entry: no guide names its kind's command,
+    pattern, requirement, `after`, or cleanup commands. Each says what its cleanup
+    does and writes, which CW-k7gd asks of it, and the attempt directory's name,
+    which is the scripts' convention, not the configuration's.
+- [x] 7.2 Rewrite `change-validate`: the gathering already ran before the session
   (read `status.md` and the inputs directory's messages first); `evidence` for what
   is present, missing, waived, or not required; each kind assessed from its guide —
   present failing evidence diagnosed, unreadable gathered again with the reason, a
@@ -1055,13 +1076,101 @@ D6, D10, D14; CW-a8ss, CW-k7gd, CW-g2rs, CW-c5nt, CW-i9np, CW-n8tr). Files:
   CW-a8ss, CW-c5nt, CW-e7lm). No repository target, path, or tool remains. Verify:
   the inverted test of section 9 reports nothing for this skill, and
   `make check-agent-skills` passes.
-- [ ] 7.3 Rewrite `change-archive-cleanup` — the cleanups ran before the session; a
+  - Done: a new "The run's inputs" section, before step 1, reads `status.md` and the
+    hook's messages, runs `run before|after validate` interactively, and carries the
+    contradiction notice (8.4's opening, written here for this skill).
+    - Step 2 reads what the gathering found; `gather --kind` is now only a new
+      attempt, for unreadable evidence, a lapsed waiver, or an environmental failure
+      the owner allowed.
+    - Step 3 assesses each kind as present and passed, present and failed,
+      unreadable, or missing, with its source.
+    - The record adds `Tree:` (which `history` reads) and `Evidence:` in place of
+      `Parts:`, a section per kind as its guide lays it out with its current and
+      earlier attempts' paths, and `Kind:` in place of `Part:` in a failure.
+    - A waiver's last assessment is read from `Evidence:`, or an older record's
+      `Parts:`.
+    - An after-hook's failure is explained in the resumed turn, validation acting on
+      nothing (D7).
+  - `make check-agent-skills` passes. The inverted test is section 9's; until then,
+    a scratch run of its collection over this skill finds only the outcome schema,
+    the make fragment's targets, and `scripts/change-workflow`.
+- [x] 7.3 Rewrite `change-archive-cleanup` — the cleanups ran before the session; a
   tracked file one wrote is committed alone as its guide says; the pull request draft
   names the evidence the record names — and `change-merge` — a file a cleanup writes
   resolved as its guide says; the scenarios as the pipeline guide names them; no
   example remote (D7, D9; CW-ikmm, CW-k7gd). Verify: as 7.2.
-- [ ] 7.4 Verification point: the skills check and the inverted test for these three
+  - Done:
+    - `change-archive-cleanup`: step 7 reads the cleanup's closing line from
+      `status.md`, naming `run cleanup` only to rerun a failure; step 8 commits a file
+      as its kind's guide describes it; step 6's draft names the record's commit,
+      tree, and each kind's evidence; no example remote; the public-content rule by
+      its engineering guidance, in the case the root guidance selects.
+    - `change-merge`: a tracked file a cleanup writes resolved as its kind's guide
+      says, before closeout and after the archive; the scenarios found as the guide
+      of the kind running them says; no example remote and no lock file's name; step
+      2 reads the evidence guides.
+    - Both gain "The run's inputs", as 7.2.
+  - As 7.2: the skills check passes. The scratch collection finds, besides the
+    workflow's own paths and the fragment's targets, only
+    `docs/guidance/engineering/repository-content.md` in `change-archive-cleanup`,
+    the engineering guidance section 9's test admits (9.1).
+  - Outside the plan, a defect the engine's cleanup before the session made in
+    `change-archive-cleanup`, fixed: a tracked file the cleanup wrote was committed
+    only at step 8, so step 1's Worktree check, step 4's pre-commit checks, step 5's
+    guarded push, and a validation the Validated check sent for all met a dirty
+    worktree. The Worktree check now commits each such file alone before anything
+    else, a stop for validation commits it first, and the Validated check passes
+    over such commits as it does ledgers and reviews (D2: the file changes a tree no
+    evidence needs to describe).
+- [x] 7.4 Verification point: the skills check and the inverted test for these three
   skills; `run pre-commit` passes. End-to-end: none.
+  - `run pre-commit` passed whole: `after-functional-change`, `pre-commit-functional`
+    (`make validate-local`: `dist-clean`, `check-packaging`, and `test`, every suite,
+    passing), and `pre-commit` with the repository's checks. `make
+    check-agent-skills` passes.
+    - This note changes the tree that run checked, as 5.7's did.
+  - The inverted test does not exist until section 9, so it is not run here; the
+    scratch run of its collection stands in (7.2, 7.3), and section 9's verification
+    runs it over these skills.
+  - End-to-end: none — confirmed; no scenario under `e2e-tests/` exercises the
+    workflow's tooling.
+  - The fresh-context check's findings, fixed:
+    - `change-archive-cleanup`'s worktree ordering (7.3);
+    - task 7.4 itself, dropped by an edit, restored;
+    - the guides describing the printed summary line as `summary.json`'s, which
+      `change-validate` step 3 would have read as every summary unreadable;
+    - interactive `run before` placed before validation's and archive cleanup's own
+      checks, though it pushes, gathers, and tears down;
+    - `change-validate` step 8 pointing at report items no guide named, now named in
+      the Helm, pipeline, and CI guides;
+    - `volumes gone` classed environmental whatever its detail;
+    - the Helm kind's storefront check pods and their warnings, missing, as in the
+      old skill;
+    - a failed preflight's closing line said to name what it reported, which only
+      its log holds;
+    - the Helm kind's wheelhouse clearing and the storefront environments' remedy,
+      and the CI kind's "HEAD is now" stop, which had left the skills unplaced;
+    - `ci.md` restating its requirement, `pipeline.md` restating its start order,
+      and "part" in `local.md`.
+  - Declined from the fresh-context check:
+    - The uv preflight's detail: the preflight is no kind's, so no guide holds it;
+      its log names both versions, and `docs/guidance/repository/locks.md` holds the
+      minimum and its reason.
+    - The refusal of a kept volume in `default`: only a Helm run without a change
+      reaches it, which validation never makes.
+    - `helm.md` describing what its cleanup removes as well as what it writes: archive
+      cleanup reports a failed removal, and needs to know what it was.
+    - `openspec/specs/change-workflow/README.md` still saying the validation skill
+      keeps the Helm material: closeout's promotion (10.9) rewrites that section.
+  - Handoff to section 8:
+    - Each step skill's opening gains "The run's inputs", as `change-validate`,
+      `change-archive-cleanup`, and `change-merge` now have it: the actions and hook
+      before the session, `status.md` and the messages read first, what a failure
+      means for the step, `run before|after` interactively, and the contradiction
+      notice.
+    - The guides now hold what `change-plan`, `change-implement`, and
+      `change-orchestrate` still say of scenarios, the dispatchable list, and the
+      owed-line example; section 8 points those skills at the guides.
 
 ## 8. Neutral skills
 
