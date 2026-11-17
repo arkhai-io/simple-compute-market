@@ -88,6 +88,13 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-e7lm](spec.md#requirement-cw-e7lm-validations-result-is-passed-failed-or-inconclusive) — results are `passed`, `failed` (commit-caused or unknown), or `inconclusive` (environmental missing evidence); a part the owner waived is `waived`, counted in no result, a standing waiver read from the log and lapsing at a merge.
 - [CW-a1nz](spec.md#requirement-cw-a1nz-an-environmental-failure-goes-to-the-owner-with-its-remedy) — an environmental failure goes to the owner with its remedy, rerun on their word, every attempt kept.
 - [CW-av28](spec.md#requirement-cw-av28-a-validation-record-names-the-scenarios-that-exercise-the-change) — the validation record names the end-to-end scenarios exercising the change, with each one's basis.
+- [CW-t3ev](spec.md#requirement-cw-t3ev-evidence-describes-a-tree-or-a-commit-where-its-result-depends-on-history) — a kind's pattern holds `{tree}` or `{commit}`: tree evidence, the worktree's `git write-tree`, is reused for any commit with that tree; commit evidence describes `HEAD` alone.
+- [CW-g1gn](spec.md#requirement-cw-g1gn-what-the-workflow-writes-after-implementation-is-ignored-by-git) — whatever validation, its gathering, or a step hook writes after implementation is ignored by Git; the check refuses an evidence pattern under a directory Git does not ignore.
+- [CW-p4rs](spec.md#requirement-cw-p4rs-evidence-counts-by-its-presence) — evidence counts by being present at its kind's pattern, whoever wrote it; the workflow fetches nothing from beyond the checkout.
+- [CW-r5qk](spec.md#requirement-cw-r5qk-an-evidence-kind-is-required-always-or-when-owed) — a kind is required `always` or `owed`, once per argument a complete section's owed line names, each argument one safe path segment; a waiver names kinds.
+- [CW-e2vd](spec.md#requirement-cw-e2vd-the-engine-reports-which-required-evidence-is-present) — `evidence <change>` lists each required kind and owed argument for `HEAD`'s tree or commit as present, missing, waived, or not required, the last match in path order current.
+- [CW-a8ss](spec.md#requirement-cw-a8ss-validation-gathers-what-is-missing-and-assesses-all-of-it) — validation gathers each missing kind and assesses every kind from its guide; present failing evidence is diagnosed, never gathered again for a pass.
+- [CW-g6th](spec.md#requirement-cw-g6th-the-engine-gathers-missing-evidence-before-validations-session) — before validation's session the engine gathers what is missing and not waived; `gather --kind` makes a new attempt of a kind or one owed argument, `--lapsed` for a waived one.
 
 ### The triage of a round
 
@@ -154,6 +161,10 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-e1sg](spec.md#requirement-cw-e1sg-a-commits-hooks-follow-from-the-paths-it-changes) — a commit touching a path outside the inert paths runs the functional hooks before `pre-commit`; a cleanup's tracked file is committed alone.
 - [CW-c8lw](spec.md#requirement-cw-c8lw-a-hooks-default-checks-run-unless-disabled-by-name) — `pre-commit`'s default checks run before its declared commands unless `defaults.disable` names one with a reason.
 - [CW-v2dq](spec.md#requirement-cw-v2dq-a-command-receives-its-values-through-placeholders) — a command takes the workflow's values as shell-quoted placeholders, each available only where it is defined; the machine's through the environment.
+- [CW-h3ks](spec.md#requirement-cw-h3ks-each-step-has-a-hook-before-and-after-it) — a repository may declare `before-<step>` and `after-<step>`, with no defaults; a review's runner runs a review's, and an interactive review runs none.
+- [CW-b7fl](spec.md#requirement-cw-b7fl-a-failing-hook-before-a-step-informs-its-session) — a failing `before-` hook never prevents its step's session, which reads the failure from its inputs; a hook the check refuses refuses the step.
+- [CW-a4fl](spec.md#requirement-cw-a4fl-a-failing-hook-after-a-step-resumes-its-session-once) — an `after-` hook runs after a finished outcome; on failure the session resumes once, then the run ends as a question; a failing `after-review` goes to the owner at once.
+- [CW-i9np](spec.md#requirement-cw-i9np-a-runs-inputs-reach-its-session-through-a-directory) — each run has an inputs directory, `{inputs}` to its hooks and named on its log line, holding `status.md`, hook logs, and messages the session reads in full.
 
 ### The orchestrating session
 
@@ -282,6 +293,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 - [CW-d8de](spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness) — each skill has one source every harness loads; no per-harness copies, and every harness entry resolves.
 - [CW-s7rq](spec.md#requirement-cw-s7rq-a-skill-restates-guidance-no-stricter-than-its-source) — a skill restates guidance briefly where its step applies it, citing it and never stricter; a stricter need amends the guidance.
+- [CW-n8tr](spec.md#requirement-cw-n8tr-the-workflows-skills-name-no-repositorys-targets-or-paths) — a target or path a workflow skill names is the workflow's own or an owned exemption, or a test fails naming the skill.
 
 ## 5. The public surface
 
@@ -305,6 +317,10 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-i2we](spec.md#requirement-cw-i2we-the-openspec-cli-runs-through-the-configured-command) — the OpenSpec validation and archive run through `openspec.command`, or `openspec` on the path.
 - [CW-o6kc](spec.md#requirement-cw-o6kc-the-configurations-resolution-is-listed) — `config` lists how every field resolved, and `config parts` validation's plan, each with `--json`.
 - [CW-z5me](spec.md#requirement-cw-z5me-no-step-edits-the-configuration) — no unattended step edits the configuration; it changes only as a tracked edit by the owner, or by the orchestrating session on the owner's word.
+- [CW-d1nj](spec.md#requirement-cw-d1nj-a-repository-injects-into-the-workflow-through-its-configuration-and-its-guides) — the configuration holds every value the engine reads and the guides what an agent is told; a skill learns a shared value from the engine's output.
+- [CW-g2rs](spec.md#requirement-cw-g2rs-a-guide-restates-nothing-the-configuration-holds) — an evidence kind's guide restates none of its configuration entry, held by review.
+- [CW-k7gd](spec.md#requirement-cw-k7gd-an-evidence-kind-has-a-guide-the-steps-read) — each kind names a non-empty guide the steps handling it read; a kind without one is refused by every reader.
+- [CW-c5nt](spec.md#requirement-cw-c5nt-a-skill-names-a-contradiction-it-notices-and-follows-its-own-text) — a guide or message may add to or narrow a skill; a skill names a contradiction it notices and follows its own text.
 
 ### The repository's guidance
 

@@ -59,10 +59,14 @@ def workspace(tmp_path: Path) -> Path:
     # records and evidence.
     (work / ".gitignore").write_text(
         ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
-    # The evidence directory history copies from, as a validation part declares it.
-    (work / ".agents").mkdir()
+    # The evidence directory history copies from, as an evidence kind's pattern fixes
+    # it, and the guide the kind names.
+    (work / ".agents/evidence").mkdir(parents=True)
+    (work / ".agents/evidence/local.md").write_text("# The local kind\n", "utf-8")
     (work / ".agents/workflow.toml").write_text(
-        "[validation.parts.local]\nrun = 'true'\nevidence = '.snapshot/validation/'\n", "utf-8")
+        "[validation.evidence.local]\nrequired = 'always'\nrun = 'true'\n"
+        "evidence = '.snapshot/validation/{tree}/local/*/summary.json'\n"
+        "guide = '.agents/evidence/local.md'\n", "utf-8")
     _commit(work, "README.md", "1\n")
     _git(work, "remote", "add", "origin", str(origin))
     # The workspace's dev tracks origin's, so a change landing on it pushes there.

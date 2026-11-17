@@ -22,12 +22,16 @@ CW-o6kc, CW-r5qk's pattern rule, CW-t3ev's pattern rule). Files:
 `test_change_workflow_hooks.py`, `test_change_history.py`, and the comment in
 `scripts/tests/test_change_workflow_log.py` 1.1 names.
 
-- [ ] 1.1 Rewrite the comment at `scripts/tests/test_change_workflow_log.py:1005` that
+- [x] 1.1 Rewrite the comment at `scripts/tests/test_change_workflow_log.py:1005` that
   names section numbers ("splits open section 4 into 4 to 6") to describe the
   behaviour it sets up, so the repository's comment check passes and every later
   commit's `pre-commit` can (a found defect, `docs/guidance/workflow/changes.md#defects-found-during-a-change`;
   record it in this task's note). Verify: `make check-comment-hygiene` passes.
-- [ ] 1.2 Add `openspec/specs/change-workflow/index.md`'s entries for the sixteen ids
+  - Done: a defect outside the change's scope, from an earlier commit — the comment
+    named section numbers, which the comment check refuses. It now says a replan
+    after a return renumbers the open round's sections. `make check-comment-hygiene`
+    passes.
+- [x] 1.2 Add `openspec/specs/change-workflow/index.md`'s entries for the sixteen ids
   the change's deltas add — under "## 2. Implementation and validation", "###
   Validation": CW-t3ev, CW-g1gn, CW-p4rs, CW-r5qk, CW-e2vd, CW-a8ss, CW-g6th; under
   "## 4. The engine", "### Hooks": CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np; "### Skills
@@ -38,14 +42,25 @@ CW-o6kc, CW-r5qk's pattern rule, CW-t3ev's pattern rule). Files:
   obligation, `openspec/README.md#the-index-check`); closeout's promotion revises
   them (10.9). Verify: `make check-spec-index CHANGE=add-skill-extension-points`
   passes.
-- [ ] 1.3 In `config.py`, replace `Part` and `_parts` with an evidence kind read from
+  - Done: the sixteen entries are under the four groups named, each linked to its
+    requirement's heading slug. `make check-spec-index CHANGE=add-skill-extension-points`
+    passes.
+- [x] 1.3 In `config.py`, replace `Part` and `_parts` with an evidence kind read from
   `[validation.evidence.<kind>]`: `required` (`always` or `owed`), `evidence` (a
   pattern), `run` or `start` and `collect`, `guide`, optional `after` and `cleanup`;
   drop `owed` as a key, owing following from `required = "owed"` (D5, D6; CW-g4oz).
   Keep `[validation] preflight`. Verify: unit tests in
   `test_change_workflow_config.py` read a four-kind configuration and refuse a
   `[validation.parts]` table as an unknown key.
-- [ ] 1.4 Add the check's refusals, each naming the field (D11; CW-w8ne): an undefined
+  - Done: `config.Kind` replaces `Part`. `owed` is a property, `required == "owed"`.
+    `identity` (tree or commit) is read from the pattern, and `directory` is the
+    pattern's fixed directory (`fixed_directory`). `Configuration.kinds` and `kind()`
+    replace `parts` and `part()`, and the required field `PARTS` became `EVIDENCE`,
+    `validation.evidence`. Unit tests: `test_a_four_kind_configuration_is_read`, the
+    `[validation.parts.local]` row of
+    `test_a_malformed_configuration_is_refused_naming_the_field`, and
+    `test_a_patterns_fixed_directory_ends_at_its_first_unfixed_segment`. All pass.
+- [x] 1.4 Add the check's refusals, each naming the field (D11; CW-w8ne): an undefined
   key or wrong type; `required` outside `always`/`owed`; neither or both of `run` and
   `start` with `collect`; an `after` naming no kind declared before it, or a started
   kind's `after` naming a `run` kind (CW-g4oz's two scenarios); a pattern holding
@@ -54,7 +69,33 @@ CW-o6kc, CW-r5qk's pattern rule, CW-t3ev's pattern rule). Files:
   kind's pattern without `{owed}`, and `{owed}` outside an owed kind (CW-r5qk's
   scenario); a kind with no `guide`, or one missing or empty (CW-k7gd's scenario).
   Verify: one unit test per refusal, each asserting the field named.
-- [ ] 1.5 Extend placeholder availability (CW-v2dq): `{tree}` and `{commit}` in a
+  - Done: unit tests, with Git's ignoring doubled at `config.check`'s `unignored`
+    seam:
+    - `test_a_malformed_kind_is_refused_naming_the_field`, one row per refusal, each
+      asserting the field named;
+    - `test_a_kind_naming_an_empty_guide_is_refused`;
+    - `test_an_evidence_directory_git_does_not_ignore_is_refused`, for the
+      unignored-directory refusal.
+    All pass. Beyond the plan's list, the check also refuses the following, each a
+    row of the first test:
+    - a missing `evidence`;
+    - a pattern naming any placeholder but the identity and `{owed}`;
+    - an absolute pattern or guide, or one holding `..`;
+    - a pattern with no fixed directory;
+    - a guide that is no file.
+  - Git is asked about the evidence directories once per load: one `git check-ignore`
+    covers every kind's fixed directory (`config.git_unignored`).
+    - Outside a Git checkout nothing is refused, since nothing is tracked there.
+    - Any other status from Git is told apart by `git rev-parse
+      --is-inside-work-tree`'s exit status, never by Git's (translated) message.
+  - Two tests drive the real Git, and both pass:
+    - `test_an_evidence_pattern_under_a_tracked_directory`, CW-g1gn's scenario, a
+      library-integration test through `config`, `config --json`, and `check config`
+      on a real repository;
+    - `test_outside_a_git_checkout_no_evidence_directory_is_refused`.
+  - Other tests that load a configuration from a temporary directory outside Git
+    reach the real Git on its not-a-checkout path. The Hooks unit tests double it.
+- [x] 1.5 Extend placeholder availability (CW-v2dq): `{tree}` and `{commit}` in a
   kind's commands and pattern and in `after-functional-change` and
   `pre-commit-functional`; `{kind}` in review and triage hooks; `{inputs}` in step
   hooks; and accept hook keys `before-<step>` and `after-<step>` for each step in
@@ -62,16 +103,54 @@ CW-o6kc, CW-r5qk's pattern rule, CW-t3ev's pattern rule). Files:
   only declared here; section 5 runs them. Verify: unit tests for each placeholder
   refused where unavailable, and for `before-validate` accepted and
   `before-round` refused.
-- [ ] 1.6 `config` and `config --json` list each kind's fields, its guide among them,
+  - Done: `config.STEP_HOOKS` holds `before-`/`after-` for each step in `graph.STEPS`.
+    A misspelt step hook is refused as naming no step.
+    - Unit tests: the placeholder and step-hook rows of
+      `test_a_malformed_configuration_is_refused_naming_the_field` (`{tree}` in
+      `pre-commit`, `{commit}` in `pre-archive`, `{inputs}` in `pre-commit`, `{kind}`
+      in `before-implement`, `{tree}` in `after-validate`, `before-round`,
+      `after-implementation`), the kind command rows of
+      `test_a_malformed_kind_is_refused_naming_the_field`, and
+      `test_placeholders_are_accepted_where_they_are_available`, which covers
+      `before-validate`, `before-review` with `{kind}` and `{inputs}`, and
+      `after-triage`.
+    - A kind's `cleanup` takes the tree and the commit, as every command of a kind
+      does (CW-v2dq); `run cleanup` fills them in section 3.
+    - The check admits `{tree}` and `{commit}` from here, but `run validation` and
+      the functional hooks fill neither until section 3 (3.3, 3.4): a command naming
+      them is refused at run time until then, and none does before section 4.
+    - All pass.
+- [x] 1.6 `config` and `config --json` list each kind's fields, its guide among them,
   and each step hook as declared or absent (CW-o6kc). Verify: a library-integration
   test of `config --json` naming every kind's `guide`.
-- [ ] 1.7 Move every current reader to kinds without changing behaviour yet:
+  - Done: `test_config_as_json_names_every_kinds_guide_and_each_step_hook`, a
+    library-integration test through `cli.main` on a real temporary Git checkout
+    holding the four kinds' guides and ignoring `.snapshot/`. It passes.
+- [x] 1.7 Move every current reader to kinds without changing behaviour yet:
   `config parts` and `run validation … run|start|collect` resolve kinds by name
   (section 3 replaces them), and `history` takes its evidence directories from each
   pattern's fixed directory (`config.evidence()`). Verify: the existing
   `test_change_workflow_hooks.py` and `test_change_history.py` cases pass against a
   kinds configuration.
-- [ ] 1.8 Rewrite `.agents/workflow.toml`'s validation as four kinds (D16; MCW-r4tx):
+  - Done: `hooks.py`, `cli.py` (`config parts`, a waiver's kinds), and `history.py`
+    read kinds. `config parts --json` keeps its keys, `part` among them, and its
+    `evidence` is now the kind's pattern.
+    - `test_change_workflow_hooks.py` and `test_change_history.py` pass against kinds
+      configurations, the history ones with patterns fixing the two directories they
+      copy from.
+    - The test fixture `configured` writes each test kind's guide and, in a Git
+      checkout, ignores `.snapshot/` through `.git/info/exclude`.
+      `ignore_evidence` does the same for a checkout cloned after it, as two tests in
+      `test_change_workflow_cli.py` and `test_change_workflow_review.py` needed.
+    - `test_change_clone.py` and the assumptions test read kinds.
+  - Behaviour shifts with 1.8's configuration until sections 3 and 4, though the
+    engine's code paths are unchanged:
+    - `config parts` and each kind's closing line name a pattern under
+      `.snapshot/evidence/`, where nothing writes yet; `change-validate` still reads
+      them as evidence directories (section 4 moves the skill and the scripts).
+    - `history` copies only under `.snapshot/evidence/` and still looks up a
+      validated commit's first twelve characters (section 3.6 reworks it).
+- [x] 1.8 Rewrite `.agents/workflow.toml`'s validation as four kinds (D16; MCW-r4tx):
   `local` (`always`, `run`, pattern `.snapshot/evidence/{tree}/local/*/summary.json`),
   `helm` (`always`, `run`, `after = "local"`, the capacity and teardown cleanup,
   `.snapshot/evidence/{tree}/helm/*/summary.json`), `pipeline` (`always`, `start` and
@@ -82,14 +161,59 @@ CW-o6kc, CW-r5qk's pattern rule, CW-t3ev's pattern rule). Files:
   orchestrator's, made on the owner's word before the section's session starts, and
   the session commits it with the section. Verify: `scripts/change-workflow check
   config` passes.
-- [ ] 1.9 Seed `.agents/evidence/local.md`, `helm.md`, `pipeline.md`, and `ci.md`, each
+  - Done by this session: the owner lifted the deny rule on the configuration for
+    it (log seq 37).
+    - The kinds keep today's order, `pipeline`, `ci`, `local`, `helm`, so `config
+      parts` lists them as before, and `local` and `helm` are the gathering's run
+      kinds in that order.
+    - `scripts/change-workflow check config` is outside implementation's rules, so
+      the check was read through `scripts/change-workflow config --json`, which
+      checks the whole file the same way. It passes, as does
+      `test_the_repositorys_own_configuration_passes_its_check`, which runs `check
+      config` in process.
+- [x] 1.9 Seed `.agents/evidence/local.md`, `helm.md`, `pipeline.md`, and `ci.md`, each
   non-empty prose naming what the kind shows, so the check passes; section 7 writes
   their full content (CW-k7gd). Verify: `scripts/change-workflow check config`
   passes and `make check-agent-skills` is unaffected.
-- [ ] 1.10 Verification point: the unit and library-integration suites above;
+  - Done: each guide is one paragraph naming what its kind shows and restating none
+    of its configuration entry. The configuration check passes (read as in 1.8), and
+    `make check-agent-skills` passes.
+- [x] 1.10 Verification point: the unit and library-integration suites above;
   `scripts/change-workflow run pre-commit add-skill-extension-points` and the
   functional checks it runs before this commit pass.
   End-to-end: none — no scenario exercises the workflow's tooling.
+  - Correction: checked although `run pre-commit` does not pass whole. Its only
+    failures are below, none this section's and none it can fix:
+    - `after-functional-change` passed.
+    - `pre-commit-functional` failed only on the two step-table tests below; every
+      other suite of `make test` passed, the scripts' 3179 passed.
+    - `pre-commit`: its default checks passed, and `make check-repository` failed
+      only on documentation citations. Those name
+      `scripts/change_workflow/evidence.py` and
+      `scripts/tests/test_change_workflow_evidence.py`, which section 2 creates.
+    - A history-wording hit in a comment this section added was fixed, and the
+      repository's checks were rerun.
+  - Evidence:
+    - The scripts' suites (`make test-release-tooling`): 3179 passed, 2 failed.
+    - The two failures are `test_change_workflow_steps.py`'s
+      `test_no_step_may_edit_the_configuration` and
+      `test_no_step_may_edit_its_own_permissions`. They fail at `HEAD` before this
+      section (`run test-before … --at HEAD`). The cause is the orchestrator's commit
+      `57b7baaad`, which lifted those deny rules in `.claude/change-steps.toml` for
+      this session.
+    - This session cannot restore them: the harness refuses every edit under
+      `.claude/`, whatever the table says. Restoring them is the orchestrator's, when
+      the session ends.
+  - The new config tests fail at the round's base as they are collected, since they
+    import fixtures only this section adds (`run test-before`).
+  - End-to-end: none — confirmed; no scenario under `e2e-tests/` exercises the
+    workflow's tooling.
+  - Handoff to section 2:
+    - `Kind.identity` and `Kind.directory` are ready for `evidence`.
+    - Filling a pattern needs a fill that does not shell-quote; `config.fill` quotes,
+      so add a separate one.
+    - `config.PlannedRun.entry()` still says `part`, for `config parts`' consumers,
+      until section 3 removes the subcommand.
 
 ## 2. Evidence identity, owed lines, and presence
 

@@ -1,5 +1,6 @@
 """The repository's workflow configuration, `change_workflow.config`: its check, its
-fields' kinds, how they resolved, a step's documents, and validation's plan."""
+fields' kinds, its evidence kinds, how they resolved, a step's documents, and
+validation's plan."""
 
 from __future__ import annotations
 
@@ -16,13 +17,38 @@ from change_workflow.config import ConfigError
 from change_workflow.next_step import TASKS_FILE
 from change_workflow.tasks import owed_lines
 from change_workflow_fixtures import (CHANGE, CONFIGURED, MODELS, VALID, FakeClaude, configured,
-                                      event_lines, make_wrapper)
+                                      event_lines, evidence_kind, make_wrapper)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def _checked(text: str) -> config.Configuration:
     return config.check(text, Path("workflow.toml"))
+
+
+def _every_directory_ignored(root: Path, directories: list[str]) -> list[str]:
+    return []
+
+
+def _kinds_checked(root: Path, text: str,
+                   unignored: config.Unignored = _every_directory_ignored
+                   ) -> config.Configuration:
+    """`text` checked as the configuration of a repository at `root` holding every
+    test kind's guide, Git's ignoring doubled by `unignored`."""
+    configured(root, text)
+    return config.check(text, root / config.CONFIGURATION, unignored=unignored)
+
+
+# This repository's four kinds, in the shape its configuration declares them.
+FOUR_KINDS = ("[validation]\npreflight = \"make check-uv-version\"\n\n"
+              + evidence_kind("pipeline", identity="commit", start="make run-e2e",
+                              collect="make fetch-e2e-logs AFTER={after} COMMIT={commit}")
+              + evidence_kind("ci", required="owed", identity="commit",
+                              start="make run-ci WORKFLOW={owed}",
+                              collect="make validate-ci WORKFLOW={owed} AFTER={after}")
+              + evidence_kind("local", run="make validate-local TREE={tree}")
+              + evidence_kind("helm", run="make validate-helm CHANGE={change} TREE={tree}",
+                              after="local", cleanup="make teardown CHANGE={change}"))
 
 
 # Every refusal names the field it found.
@@ -43,30 +69,9 @@ def _checked(text: str) -> config.Configuration:
      "models.implement[0].harness must be one of"),
     ("[models]\norchestrator = { model = 'm', harness = 'claude' }\n",
      "models.orchestrator.harness is no field"),
-    ("[validation.parts.local]\n", "validation.parts.local declares `run`, or `start` and "
-                                   "`collect`, and not both shapes; it declares neither"),
-    ("[validation.parts.local]\nrun = 'a'\nstart = 'b'\ncollect = 'c'\n",
-     "it declares run, start, collect"),
-    ("[validation.parts.pipeline]\nstart = 'b'\n", "it declares start"),
-    ("[validation.parts.local]\nrun = []\n", "validation.parts.local.run must name a command"),
-    ("[validation.parts.preflight]\nrun = 'a'\n", "no part takes the name"),
-    ("[validation.parts.local]\nrun = 'a'\nretries = 2\n",
-     "validation.parts.local.retries is no field"),
-    ("[validation.parts.local]\nrun = 'a'\nowed = 'yes'\n",
-     "validation.parts.local.owed must be true or false"),
-    ("[validation.parts.helm]\nrun = 'a'\nafter = 'local'\n",
-     "validation.parts.helm.after names 'local', which is no other declared part"),
-    ("[validation.parts.helm]\nrun = 'a'\nafter = 'helm'\n", "which is no other declared part"),
-    # Validation keeps declaration order, so a part follows only one declared before it,
-    # which also refuses every cycle.
-    ("[validation.parts.helm]\nrun = 'a'\nafter = 'local'\n[validation.parts.local]\nrun = 'b'\n",
-     "validation.parts.helm.after names 'local', which is declared after it"),
-    ("[validation.parts.a]\nrun = 'x'\nafter = 'b'\n[validation.parts.b]\nrun = 'y'\n"
-     "after = 'a'\n", "validation.parts.a.after names 'b', which is declared after it"),
-    # Every dispatch starts before any long part runs.
-    ("[validation.parts.local]\nrun = 'a'\n[validation.parts.pipeline]\nstart = 'b'\n"
-     "collect = 'c'\nafter = 'local'\n",
-     "validation.parts.pipeline.after names 'local', a `run` part"),
+    # Validation's kinds are under `evidence`; `parts` is no field the workflow defines.
+    ("[validation.parts.local]\nrun = 'a'\n", "validation.parts is no field the workflow "
+                                              "defines; validation takes preflight, evidence"),
     ("[defaults]\ndisable = [{ check = 'lint', reason = 'r' }]\n",
      "defaults.disable[0] names 'lint', which is no default check"),
     ("[defaults]\ndisable = [{ check = 'skills', reason = ' ' }]\n",
@@ -81,14 +86,22 @@ def _checked(text: str) -> config.Configuration:
      "hooks.pre-push names {change}, which is not available there"),
     ("[hooks]\npre-push = ['make pre-push BASE={base}']\n",
      "hooks.pre-push names {base}, which is not available there"),
-    ("[validation.parts.local]\nrun = 'make WORKFLOW={owed}'\n",
-     "validation.parts.local.run names {owed}, which is not available there"),
-    ("[validation.parts.ci]\nowed = true\nstart = 'make run-ci W={owed} AFTER={after}'\n"
-     "collect = 'make collect AFTER={after}'\n",
-     "validation.parts.ci.start names {after}, which is not available there"),
-    ("[validation.parts.ci]\nowed = true\nstart = 'a'\ncollect = 'b'\n"
-     "cleanup = 'make clean W={owed}'\n",
-     "validation.parts.ci.cleanup names {owed}, which is not available there"),
+    # The tree and the commit are the functional hooks' and a kind's alone.
+    ("[hooks]\npre-commit = 'make check TREE={tree}'\n",
+     "hooks.pre-commit names {tree}, which is not available there"),
+    ("[hooks]\npre-archive = 'make check COMMIT={commit}'\n",
+     "hooks.pre-archive names {commit}, which is not available there"),
+    # A step hook takes its run's inputs; a review's and a triage's also its kind.
+    ("[hooks]\npre-commit = 'make check INPUTS={inputs}'\n",
+     "hooks.pre-commit names {inputs}, which is not available there"),
+    ("[hooks]\nbefore-implement = 'make refresh KIND={kind}'\n",
+     "hooks.before-implement names {kind}, which is not available there"),
+    ("[hooks]\nafter-validate = 'make report TREE={tree}'\n",
+     "hooks.after-validate names {tree}, which is not available there"),
+    # A step hook names a step a run is logged as; a round is no step.
+    ("[hooks]\nbefore-round = 'make x'\n",
+     "hooks.before-round names no step; a step hook is before- or after- one of: "),
+    ("[hooks]\nafter-implementation = 'make x'\n", "hooks.after-implementation names no step"),
     ("[openspec]\ncommand = 'bunx openspec@{change}'\n",
      "openspec.command names {change}, which is not available there"),
     ("[hooks\n", "is not TOML"),
@@ -103,46 +116,224 @@ def test_a_malformed_configuration_is_refused_naming_the_field(text: str, named:
     assert named in str(refused.value)
 
 
-def test_a_part_may_follow_an_earlier_part_validation_can_keep_it_after() -> None:
-    """CW-g4oz: a dispatch after an earlier dispatch, and a long part after an earlier
-    part of either shape, keep declaration order and the dispatches-first rule."""
-    checked = _checked("""
-[validation.parts.pipeline]
-start = "a"
-collect = "b"
+# An evidence kind: what the engine reads of it, refused naming the field.
 
-[validation.parts.ci]
-start = "c"
-collect = "d"
-after = "pipeline"
+def test_a_four_kind_configuration_is_read(tmp_path: Path) -> None:
+    """CW-g4oz: each kind's requirement, pattern, shape, `after`, cleanup, and guide,
+    in declaration order, the identity its pattern keys read from the pattern."""
+    checked = _kinds_checked(tmp_path, FOUR_KINDS)
 
-[validation.parts.local]
-run = "e"
-after = "ci"
-
-[validation.parts.helm]
-run = "f"
-after = "local"
-""")
-    assert [(part.name, part.after) for part in checked.parts or ()] == [
-        ("pipeline", None), ("ci", "pipeline"), ("local", "ci"), ("helm", "local")]
+    assert [(kind.name, kind.required, kind.identity, kind.shape, kind.after)
+            for kind in checked.kinds or ()] == [
+        ("pipeline", "always", "commit", "start, collect", None),
+        ("ci", "owed", "commit", "start, collect", None),
+        ("local", "always", "tree", "run", None),
+        ("helm", "always", "tree", "run", "local")]
+    helm = checked.kind("helm")
+    assert helm.evidence == ".snapshot/evidence/{tree}/helm/*/summary.json"
+    assert (helm.guide, helm.cleanup) == (".agents/evidence/helm.md",
+                                          ("make teardown CHANGE={change}",))
+    assert checked.kind("ci").owed and not helm.owed
+    assert checked.evidence() == [".snapshot/evidence/"]
+    assert checked.preflight == ("make check-uv-version",)
 
 
-def test_placeholders_fill_where_they_are_available_and_the_shells_own_pass() -> None:
-    checked = _checked("""
+@pytest.mark.parametrize("pattern,directory", [
+    (".snapshot/evidence/{tree}/local/*/summary.json", ".snapshot/evidence/"),
+    (".snapshot/evidence/{commit}/ci-{owed}/*/summary.json", ".snapshot/evidence/"),
+    ("out/{tree}.json", "out/"),
+    ("out/run-*/{tree}/x.json", "out/"),
+    ("{tree}/x.json", ""),
+])
+def test_a_patterns_fixed_directory_ends_at_its_first_unfixed_segment(pattern: str,
+                                                                      directory: str) -> None:
+    assert config.fixed_directory(pattern) == directory
+
+
+def _without(text: str, line: str) -> str:
+    return "\n".join(kept for kept in text.splitlines() if not kept.startswith(line)) + "\n"
+
+
+@pytest.mark.parametrize("text,named", [
+    # An undefined key, and a wrong type.
+    (evidence_kind("local", run="a", retries="2"),
+     "validation.evidence.local.retries is no field the workflow defines"),
+    (evidence_kind("local", run=3), "validation.evidence.local.run must be a command"),
+    ("[validation]\nevidence = 'local'\n", "validation.evidence must be a table of evidence "
+                                           "kinds"),
+    # The requirement, always or owed.
+    (evidence_kind("local", required="sometimes", run="a"),
+     "validation.evidence.local.required must be one of always, owed; got 'sometimes'"),
+    (_without(evidence_kind("local", run="a"), "required"),
+     "validation.evidence.local.required must be one of always, owed; got None"),
+    # `run`, or `start` and `collect`.
+    (evidence_kind("local"), "validation.evidence.local declares `run`, or `start` and "
+                             "`collect`, and not both shapes; it declares neither"),
+    (evidence_kind("local", run="a", start="b", collect="c"), "it declares run, start, collect"),
+    (evidence_kind("pipeline", start="b"), "validation.evidence.pipeline declares `run`, or "
+                                           "`start` and `collect`, and not both shapes; it "
+                                           "declares start"),
+    (evidence_kind("local", run=[]), "validation.evidence.local.run must name a command"),
+    # An `after` validation could keep: an earlier kind, a dispatch never after a long
+    # kind; declaration order also refuses every cycle.
+    (evidence_kind("helm", run="a", after="local"),
+     "validation.evidence.helm.after names 'local', which is no other declared kind"),
+    (evidence_kind("helm", run="a", after="helm"), "which is no other declared kind"),
+    (evidence_kind("helm", run="a", after="local") + evidence_kind("local", run="b"),
+     "validation.evidence.helm.after names 'local', which is declared after it"),
+    (evidence_kind("local", run="a") + evidence_kind("pipeline", start="b", collect="c",
+                                                     after="local"),
+     "validation.evidence.pipeline.after names 'local', a `run` kind, but every `start` is "
+     "dispatched before any `run` kind runs"),
+    # The pattern: exactly one identity, `{owed}` exactly when owed, nothing else.
+    (evidence_kind("local", run="a").replace("{tree}", "latest"),
+     "validation.evidence.local.evidence must hold exactly one of {tree} and {commit}, the "
+     "identity its evidence describes; it holds neither"),
+    (evidence_kind("local", run="a").replace("{tree}", "{tree}/{commit}"),
+     "it holds {tree} and {commit}"),
+    (evidence_kind("ci", required="owed", start="a", collect="b").replace("-{owed}", ""),
+     "validation.evidence.ci.evidence must hold {owed}"),
+    (evidence_kind("local", run="a").replace("/local/", "/local-{owed}/"),
+     "validation.evidence.local.evidence names {owed}, which is not available there"),
+    (evidence_kind("local", run="a").replace("{tree}", "{tree}-{change}"),
+     "validation.evidence.local.evidence names {change}, which is not available there"),
+    (evidence_kind("local", run="a").replace(".snapshot/evidence/", "{tree}/"),
+     "validation.evidence.local.evidence must begin with a fixed directory"),
+    (evidence_kind("local", run="a").replace(".snapshot/", "../"),
+     "validation.evidence.local.evidence must be a path from the repository's root"),
+    (evidence_kind("local", run="a").replace('".snapshot/', '"/snapshot/'),
+     "validation.evidence.local.evidence must be a path from the repository's root"),
+    (_without(evidence_kind("local", run="a"), "evidence"),
+     "validation.evidence.local.evidence is required"),
+    # A guide, a file with something in it.
+    (_without(evidence_kind("local", run="a"), "guide"),
+     "validation.evidence.local.guide is required"),
+    (evidence_kind("local", run="a").replace("evidence/local.md", "evidence/missing.md"),
+     "validation.evidence.local.guide names .agents/evidence/missing.md, which does not exist"),
+    (evidence_kind("local", run="a").replace("evidence/local.md", "evidence"),
+     "validation.evidence.local.guide names .agents/evidence, which is no file"),
+    (evidence_kind("local", run="a").replace('".agents/evidence/local.md"', '"/etc/guide.md"'),
+     "validation.evidence.local.guide must be a path from the repository's root"),
+    (evidence_kind("local", run="a").replace('".agents/evidence/local.md"',
+                                             '".agents/../outside.md"'),
+     "validation.evidence.local.guide must be a path from the repository's root"),
+    # A kind's commands take the tree and the commit; only an owed kind's take
+    # `{owed}`, and only a `collect` takes `{after}`.
+    (evidence_kind("local", run="make WORKFLOW={owed}"),
+     "validation.evidence.local.run names {owed}, which is not available there"),
+    (evidence_kind("ci", required="owed", start="make run-ci W={owed} AFTER={after}",
+                   collect="make collect"),
+     "validation.evidence.ci.start names {after}, which is not available there"),
+    (evidence_kind("ci", required="owed", start="a", collect="b",
+                   cleanup="make clean W={owed}"),
+     "validation.evidence.ci.cleanup names {owed}, which is not available there"),
+    (evidence_kind("helm", run="a", cleanup="make clean AFTER={after}"),
+     "validation.evidence.helm.cleanup names {after}, which is not available there"),
+    (evidence_kind("local", run="make KIND={kind}"),
+     "validation.evidence.local.run names {kind}, which is not available there"),
+])
+def test_a_malformed_kind_is_refused_naming_the_field(tmp_path: Path, text: str,
+                                                      named: str) -> None:
+    """CW-w8ne, CW-g4oz, CW-t3ev, CW-r5qk, CW-k7gd: every refusal of an evidence kind
+    names its field."""
+    with pytest.raises(ConfigError) as refused:
+        _kinds_checked(tmp_path, text)
+
+    assert named in str(refused.value)
+
+
+def test_a_kind_naming_an_empty_guide_is_refused(tmp_path: Path) -> None:
+    """CW-k7gd's scenario "A kind names no guide": an empty guide, whitespace alone,
+    leaves validation nothing to assess the kind's evidence by."""
+    text = evidence_kind("local", run="a")
+    configured(tmp_path, text)
+    (tmp_path / ".agents/evidence/local.md").write_text(" \n\n", "utf-8")
+
+    with pytest.raises(ConfigError) as refused:
+        config.check(text, tmp_path / config.CONFIGURATION, unignored=_every_directory_ignored)
+
+    assert ("validation.evidence.local.guide names .agents/evidence/local.md, which is empty"
+            in str(refused.value))
+
+
+def test_an_evidence_directory_git_does_not_ignore_is_refused(tmp_path: Path) -> None:
+    """CW-g1gn: the check names the kind whose directory Git does not ignore; the
+    directories are given to Git once, each once."""
+    asked: list[list[str]] = []
+
+    def unignored(root: Path, directories: list[str]) -> list[str]:
+        asked.append(list(directories))
+        return [d for d in directories if d == "reports/"]
+
+    with pytest.raises(ConfigError) as refused:
+        _kinds_checked(tmp_path, evidence_kind("local", run="a")
+                       + evidence_kind("helm", run="b").replace(".snapshot/evidence/",
+                                                                "reports/"),
+                       unignored)
+
+    assert asked == [[".snapshot/evidence/", "reports/"]]
+    assert ("validation.evidence.helm.evidence lies under reports/, which Git does not ignore"
+            in str(refused.value))
+
+
+def test_an_evidence_pattern_under_a_tracked_directory(tmp_path: Path,
+                                                       capsys: pytest.CaptureFixture[str]
+                                                       ) -> None:
+    """CW-g1gn's scenario: `reports/{tree}/*.json` with `reports/` not ignored is
+    refused by every reader, through Git itself; `.snapshot/` ignored passes."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    configured(tmp_path, evidence_kind("local", run="a"))
+    assert main(["config"], root=tmp_path) == 0
+    capsys.readouterr()
+    text = (evidence_kind("local", run="a")
+            .replace(".snapshot/evidence/{tree}/local/*/summary.json", "reports/{tree}/*.json"))
+    configured(tmp_path, text)
+
+    for command in (["config"], ["config", "--json"], ["check", "config"]):
+        assert main(command, root=tmp_path) == 1
+        err = capsys.readouterr().err
+        assert "validation.evidence.local.evidence lies under reports/" in err
+
+
+def test_outside_a_git_checkout_no_evidence_directory_is_refused(tmp_path: Path) -> None:
+    """Outside a checkout nothing is tracked, so no pattern can change a tree."""
+    assert config.git_unignored(tmp_path, ["reports/"]) == []
+
+
+@pytest.mark.parametrize("text", [
+    # The functional hooks and a kind's commands take the tree and the commit.
+    "[hooks]\npre-commit-functional = 'make check TREE={tree} COMMIT={commit}'\n"
+    "after-functional-change = 'make lock TREE={tree}'\n",
+    evidence_kind("local", run="make validate TREE={tree} COMMIT={commit} CHANGE={change}"),
+    evidence_kind("pipeline", identity="commit", start="make run COMMIT={commit}",
+                  collect="make fetch AFTER={after} TREE={tree}",
+                  cleanup="make clean TREE={tree} COMMIT={commit}"),
+    # Every step's hooks take their inputs, a review's and a triage's their kind.
+    "[hooks]\nbefore-validate = 'make warm INPUTS={inputs} CHANGE={change}'\n"
+    "after-archive-cleanup = 'true'\n",
+    "[hooks]\nbefore-review = 'make brief KIND={kind} INPUTS={inputs}'\n"
+    "after-triage = 'make tell KIND={kind}'\nbefore-implement = []\n",
+])
+def test_placeholders_are_accepted_where_they_are_available(tmp_path: Path, text: str) -> None:
+    """CW-v2dq and CW-h3ks: `{tree}` and `{commit}` in the functional hooks and a
+    kind's commands, `{inputs}` in a step hook, `{kind}` in a review's and a
+    triage's, and a step hook for each step a run is logged as."""
+    _kinds_checked(tmp_path, text)
+
+
+def test_placeholders_fill_where_they_are_available_and_the_shells_own_pass(
+        tmp_path: Path) -> None:
+    checked = _kinds_checked(tmp_path, """
 [hooks]
 pre-push = "make pre-push REMOTE={remote}"
 pre-commit = ["echo ${HOME}", "awk '{print $1}' x", "make check CHANGE={change} BASE={base}"]
-
-[validation.parts.ci]
-owed = true
-start = "make run-ci WORKFLOW={owed}"
-collect = "make validate-ci WORKFLOW={owed} AFTER={after}"
-""")
+""" + evidence_kind("ci", required="owed", identity="commit",
+                    start="make run-ci WORKFLOW={owed}",
+                    collect="make validate-ci WORKFLOW={owed} AFTER={after}"))
 
     assert checked.hook("pre-commit") == ("echo ${HOME}", "awk '{print $1}' x",
                                           "make check CHANGE={change} BASE={base}")
-    assert checked.part("ci").owed
+    assert checked.kind("ci").owed
 
 
 @pytest.mark.parametrize("command", [["config"], ["config", "--json"], ["check", "config"],
@@ -193,9 +384,9 @@ def test_no_file_reads_as_every_field_absent(tmp_path: Path,
 
     loaded = config.load(tmp_path)
     assert not loaded.exists
-    assert config.missing(loaded, config.PRE_COMMIT_FUNCTIONAL, config.PARTS,
+    assert config.missing(loaded, config.PRE_COMMIT_FUNCTIONAL, config.EVIDENCE,
                           config.PROTECTED_BRANCHES, "models.implement") == [
-        "hooks.pre-commit-functional", "validation.parts", "repository.protected-branches",
+        "hooks.pre-commit-functional", "validation.evidence", "repository.protected-branches",
         "models.implement"]
 
 
@@ -259,10 +450,10 @@ def test_with_no_file_every_step_is_refused_its_protected_branches_and_models(
     assert claude.commands == []
 
 
-def test_validation_needs_one_part_however_empty_its_table(tmp_path: Path) -> None:
-    checked = _checked("[validation]\nparts = {}\n")
+def test_validation_needs_one_kind_however_empty_its_table(tmp_path: Path) -> None:
+    checked = _checked("[validation]\nevidence = {}\n")
 
-    with pytest.raises(ConfigError, match="validate needs .*validation.parts"):
+    with pytest.raises(ConfigError, match="validate needs .*validation.evidence"):
         config.require_for_step(checked, "validate")
 
 
@@ -315,10 +506,7 @@ pre-commit-functional = "make test"
 [defaults]
 disable = [{ check = "skills", reason = "this repository keeps no agent skills" }]
 
-[validation.parts.helm]
-run = "make validate-helm CHANGE={change}"
-cleanup = ["make teardown"]
-""")
+""" + evidence_kind("helm", run="make validate-helm CHANGE={change}", cleanup=["make teardown"]))
 
     assert main(["config", "--json"], root=tmp_path) == 0
 
@@ -338,11 +526,39 @@ cleanup = ["make teardown"]
     assert fields["defaults.tasks"]["value"] == "scripts/change-workflow check tasks <change>"
     assert fields["openspec.command"] == {"field": "openspec.command", "status": "default",
                                           "value": "openspec"}
-    assert fields["validation.parts.helm.cleanup"]["value"] == ["make teardown"]
-    assert fields["validation.parts.helm.after"]["status"] == "absent"
+    assert fields["validation.evidence.helm.cleanup"]["value"] == ["make teardown"]
+    assert fields["validation.evidence.helm.after"]["status"] == "absent"
+    assert fields["validation.evidence.helm.required"]["value"] == "always"
     assert fields["models.implement"]["status"] == "absent"
     assert fields["review.format-retries"] == {"field": "review.format-retries",
                                                "status": "default", "value": 1}
+
+
+def test_config_as_json_names_every_kinds_guide_and_each_step_hook(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-o6kc: `config --json` lists each kind's fields, its guide among them, and
+    each step's hooks as declared or absent. Library integration: a real Git
+    checkout ignoring `.snapshot/`, the guides read from it."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    configured(tmp_path, FOUR_KINDS + "\n[hooks]\nbefore-validate = 'make warm'\n")
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    fields = {entry["field"]: entry for entry in json.loads(capsys.readouterr().out)["fields"]}
+    assert {name: fields[f"validation.evidence.{name}.guide"]["value"]
+            for name in ("pipeline", "ci", "local", "helm")} == {
+        name: f".agents/evidence/{name}.md" for name in ("pipeline", "ci", "local", "helm")}
+    assert fields["validation.evidence.ci.evidence"] == {
+        "field": "validation.evidence.ci.evidence", "status": "declared",
+        "value": ".snapshot/evidence/{commit}/ci-{owed}/*/summary.json"}
+    assert fields["validation.evidence.local.start"]["status"] == "absent"
+    assert fields["hooks.before-validate"] == {"field": "hooks.before-validate",
+                                               "status": "declared", "value": ["make warm"]}
+    assert [name for name, entry in fields.items()
+            if name.startswith(("hooks.before-", "hooks.after-"))
+            and name != "hooks.after-functional-change" and entry["status"] == "absent"] == [
+        hook for step in config.STEPS for hook in (f"hooks.before-{step}", f"hooks.after-{step}")
+        if hook != "hooks.before-validate"]
 
 
 @pytest.mark.parametrize("text,inert_paths", [
@@ -498,30 +714,7 @@ def test_an_absent_or_empty_list_loads_nothing(tmp_path: Path) -> None:
 
 # `config parts <change>`: validation's plan.
 
-PARTS = """
-[validation]
-preflight = "make check-uv-version"
-
-[validation.parts.pipeline]
-start = "make run-e2e"
-collect = "make fetch-e2e-logs E2E_AFTER_RUN={after}"
-evidence = ".snapshot/e2e-logs/"
-
-[validation.parts.ci]
-owed = true
-start = "make run-ci WORKFLOW={owed}"
-collect = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}"
-evidence = ".snapshot/validation/"
-
-[validation.parts.local]
-run = "make validate-local"
-evidence = ".snapshot/validation/"
-
-[validation.parts.helm]
-after = "local"
-run = "make validate-helm CHANGE={change}"
-evidence = ".snapshot/validation/"
-"""
+PARTS = FOUR_KINDS
 
 TASKS = """# Tasks
 
@@ -574,7 +767,7 @@ def test_two_sections_owe_ci_workflows(tmp_path: Path,
         ("helm", "run", "local", []),
     ]
     assert shown["runs"][1]["owed"] == "ci.yml"
-    assert shown["runs"][0]["evidence"] == ".snapshot/e2e-logs/"
+    assert shown["runs"][0]["evidence"] == ".snapshot/evidence/{commit}/pipeline/*/summary.json"
 
 
 def test_the_plan_reads_as_lines(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -583,15 +776,16 @@ def test_the_plan_reads_as_lines(tmp_path: Path, capsys: pytest.CaptureFixture[s
 
     assert main(["config", "parts", CHANGE], root=tmp_path) == 0
 
+    ci = ".snapshot/evidence/{commit}/ci-{owed}/*/summary.json"
     assert [line.split() for line in capsys.readouterr().out.splitlines()] == [
         ["preflight", "make", "check-uv-version"],
-        ["pipeline", "start,", "collect", "evidence", ".snapshot/e2e-logs/"],
-        ["ci", "ci.yml", "start,", "collect", "owed", "by", "section", "1", "evidence",
-         ".snapshot/validation/"],
-        ["ci", "docker.yml", "start,", "collect", "owed", "by", "section", "2", "evidence",
-         ".snapshot/validation/"],
-        ["local", "run", "evidence", ".snapshot/validation/"],
-        ["helm", "run", "after", "local", "evidence", ".snapshot/validation/"],
+        ["pipeline", "start,", "collect", "evidence",
+         ".snapshot/evidence/{commit}/pipeline/*/summary.json"],
+        ["ci", "ci.yml", "start,", "collect", "owed", "by", "section", "1", "evidence", ci],
+        ["ci", "docker.yml", "start,", "collect", "owed", "by", "section", "2", "evidence", ci],
+        ["local", "run", "evidence", ".snapshot/evidence/{tree}/local/*/summary.json"],
+        ["helm", "run", "after", "local", "evidence",
+         ".snapshot/evidence/{tree}/helm/*/summary.json"],
     ]
 
 
@@ -643,19 +837,19 @@ def test_two_lines_owing_one_workflow_are_one_run(tmp_path: Path) -> None:
     tasks.write_text("## 1. A\n\n- [x] 1.1 x.\n  Owed by validation: `ci.yml`, job a\n\n"
                      "## 2. B\n\n- [x] 2.1 y.\n  Owed by validation: `ci.yml`, job b\n", "utf-8")
 
-    runs = config.plan(_checked(PARTS), owed_lines(tasks))
+    runs = config.plan(_kinds_checked(tmp_path, PARTS), owed_lines(tasks))
 
-    assert [(run.name, run.sections) for run in runs if run.part.owed] == [
+    assert [(run.name, run.sections) for run in runs if run.kind.owed] == [
         ("ci ci.yml", ("1", "2"))]
 
 
-def test_a_plan_without_parts_is_refused(tmp_path: Path,
+def test_a_plan_without_kinds_is_refused(tmp_path: Path,
                                          capsys: pytest.CaptureFixture[str]) -> None:
     _change(tmp_path, TASKS)
 
     assert main(["config", "parts", CHANGE], root=tmp_path) == 1
 
-    assert "validation needs validation.parts" in capsys.readouterr().err
+    assert "validation needs validation.evidence" in capsys.readouterr().err
 
 
 def test_the_repositorys_own_configuration_passes_its_check(
@@ -663,7 +857,7 @@ def test_the_repositorys_own_configuration_passes_its_check(
     loaded = config.load(REPOSITORY)
 
     assert loaded.exists
-    assert config.missing(loaded, config.PRE_COMMIT_FUNCTIONAL, config.PARTS,
+    assert config.missing(loaded, config.PRE_COMMIT_FUNCTIONAL, config.EVIDENCE,
                           config.PROTECTED_BRANCHES, f"models.{config.ORCHESTRATOR}",
                           *(f"models.{step}" for step in config.STEPS)) == []
     assert main(["check", "config"], root=REPOSITORY) == 0
@@ -691,12 +885,12 @@ def test_the_repository_declares_every_hook() -> None:
 
 def test_every_table_of_the_repositorys_file_says_who_uses_it() -> None:
     """Each table of this repository's file has a comment beside it naming the engine
-    operation or the skill that uses its fields; each validation part has one
-    saying what it is, under the comment naming who runs the parts."""
+    operation or the skill that uses its fields; each evidence kind has one saying
+    what it is, under the comment naming who runs the kinds."""
     text = (REPOSITORY / config.CONFIGURATION).read_text("utf-8")
     lines = text.splitlines()
     users = ("Engine", "engine", "change-")
-    assert "for change-validate: validation's parts" in text
+    assert "for change-validate: validation's evidence kinds" in text
     for index, line in enumerate(lines):
         if not line.startswith("["):
             continue
@@ -710,7 +904,7 @@ def test_every_table_of_the_repositorys_file_says_who_uses_it() -> None:
             if not later.startswith("#"):
                 break
             below.append(later)
-        if line.startswith("[validation.parts."):
+        if line.startswith("[validation.evidence."):
             assert below, line
         else:
             assert any(user in comment for comment in above + below for user in users), line

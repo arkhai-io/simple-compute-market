@@ -5,7 +5,7 @@ asks of an adopting repository has a provision here.
 The roles are stated twice: in `change-workflow`'s `README.md`, what any adopting
 repository provides, and in `market-change-workflow`'s, how this one provides each.
 This repository provides them in two places: its workflow configuration,
-`.agents/workflow.toml`, whose hooks' and validation parts' commands are provisions as
+`.agents/workflow.toml`, whose hooks' and evidence kinds' commands are provisions as
 they stand, and its statement of what the configuration does not hold. This test reads
 the configuration's commands and the two documents' tables, never the engine's
 modules: whether the table of the engine's own assumptions is complete is review's to
@@ -215,8 +215,8 @@ def provided(markdown: str, heading: str, root: Root) -> set[str]:
 
 def configured(text: str, root: Root) -> set[str]:
     """Every make target and path the configuration's commands name: each hook's, the
-    validation preflight's, and each part's `run`, `start`, `collect`, and `cleanup`,
-    each a command or a list of them."""
+    validation preflight's, and each evidence kind's `run`, `start`, `collect`, and
+    `cleanup`, each a command or a list of them."""
     def each(value: object) -> list[str]:
         if isinstance(value, str):
             return [value]
@@ -228,9 +228,9 @@ def configured(text: str, root: Root) -> set[str]:
     commands = [command for value in configuration.get("hooks", {}).values()
                 for command in each(value)]
     commands += each(validation.get("preflight"))
-    for part in validation.get("parts", {}).values():
+    for kind in validation.get("evidence", {}).values():
         for key in ("run", "start", "collect", "cleanup"):
-            commands += each(part.get(key))
+            commands += each(kind.get(key))
     listed: set[str] = set()
     for command in commands:
         listed.update(make_targets(command))
@@ -404,8 +404,9 @@ def test_the_step_table_and_the_fragment_name_their_targets_and_paths(tmp_path: 
 
 
 def test_the_configurations_commands_are_provisions() -> None:
-    """A hook's commands, the preflight's, and each part's are what the configuration
-    provides; a document it loads or a value it holds is not a command."""
+    """A hook's commands, the preflight's, and each evidence kind's are what the
+    configuration provides; a document it loads, a guide, or a pattern is not a
+    command."""
     text = """
 [repository]
 inert-paths = ["docs/"]
@@ -416,9 +417,11 @@ pre-commit-functional = ["make test", "make check-packaging"]
 common = ["AGENTS.md"]
 [validation]
 preflight = ["make check-uv-version"]
-[validation.parts.helm]
+[validation.evidence.helm]
+required = "always"
 run = "make validate-helm CHANGE={change}"
-evidence = ".snapshot/validation/"
+evidence = ".snapshot/evidence/{tree}/helm/*/summary.json"
+guide = ".agents/evidence/helm.md"
 cleanup = ["make -C helm teardown CHANGE={change}"]
 """
 

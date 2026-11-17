@@ -27,23 +27,20 @@ COMMIT = "0123456789abcdef0123456789abcdef01234567"
 VALIDATION = Path(".snapshot/validation") / COMMIT[:12]
 CITED = Path(".snapshot/validation/fedcba987654")
 RUN = Path(".snapshot/e2e-logs/39744936158")
-# The evidence directories the workspace's validation parts declare, as the clone's
-# checkout carries them; two parts share one.
+# The evidence directories the workspace's evidence kinds' patterns fix, as the
+# clone's checkout carries them; two kinds share one.
 EVIDENCE = [".snapshot/e2e-logs/", ".snapshot/validation/"]
-CONFIGURATION = """
-[validation.parts.pipeline]
-start = "true"
-collect = "true"
-evidence = ".snapshot/e2e-logs/"
 
-[validation.parts.local]
-run = "true"
-evidence = ".snapshot/validation/"
 
-[validation.parts.helm]
-run = "true"
-evidence = ".snapshot/validation/"
-"""
+def _kind(name: str, pattern: str, shape: str = 'run = "true"') -> str:
+    return (f'[validation.evidence.{name}]\nrequired = "always"\n{shape}\n'
+            f'evidence = "{pattern}"\nguide = ".agents/evidence/{name}.md"\n')
+
+
+CONFIGURATION = (_kind("pipeline", ".snapshot/e2e-logs/{commit}/*/summary.json",
+                       'start = "true"\ncollect = "true"')
+                 + _kind("local", ".snapshot/validation/{tree}/local/*/summary.json")
+                 + _kind("helm", ".snapshot/validation/{tree}/helm/*/summary.json"))
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -76,8 +73,10 @@ def workspace(tmp_path: Path) -> Path:
     (work / ".gitignore").write_text(
         ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
     (work / "README.md").write_text("1\n", "utf-8")
-    (work / ".agents").mkdir()
+    (work / ".agents/evidence").mkdir(parents=True)
     (work / ".agents/workflow.toml").write_text(CONFIGURATION, "utf-8")
+    for name in ("pipeline", "local", "helm"):
+        (work / ".agents/evidence" / f"{name}.md").write_text(f"# The {name} kind\n", "utf-8")
     _git(work, "add", "--all")
     _git(work, "commit", "-q", "-m", "start")
     _git(work, "remote", "add", "origin", str(origin))
@@ -149,7 +148,7 @@ def test_a_records_directory_naming_nothing_names_no_evidence(tmp_path: Path) ->
     assert history.named_evidence(reviews, EVIDENCE) == ([], [])
 
 
-def test_a_directory_no_part_declares_is_never_named(tmp_path: Path) -> None:
+def test_a_directory_no_kind_declares_is_never_named(tmp_path: Path) -> None:
     reviews = tmp_path / "reviews"
     _write(reviews, "05-implementation.triage.md", f"Read `{CITED}/helm/1/`.\n")
 
@@ -203,11 +202,11 @@ def test_evidence_the_records_name_that_the_clone_lacks_is_reported(
     assert synced.refused == []
 
 
-def test_evidence_under_a_directory_no_part_declares_is_not_copied(
+def test_evidence_under_a_directory_no_kind_declares_is_not_copied(
         workspace: Path, clone: Path) -> None:
     _history(clone)
     (clone / ".agents/workflow.toml").write_text(
-        "[validation.parts.local]\nrun = 'true'\nevidence = '.snapshot/validation/'\n", "utf-8")
+        _kind("local", ".snapshot/validation/{tree}/local/*/summary.json"), "utf-8")
 
     synced = history.sync(clone, workspace, CHANGE)
 

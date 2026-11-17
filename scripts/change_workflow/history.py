@@ -2,8 +2,8 @@
 
 A change worked in its own clone keeps its history there: its records under
 `reviews/` — reviews, triage, the owner's notes, the workflow log, transcripts —
-and the validation evidence they name, under the evidence directories the
-workflow configuration's validation parts declare. None of it is tracked,
+and the validation evidence they name, under the fixed directory of each evidence
+kind's pattern the workflow configuration declares. None of it is tracked,
 so no merge carries it, and removing the clone would lose it. Archive cleanup
 copies it, as its last act, to the same paths in the owner's workspace, where
 sessions working other changes find it (`find --records`); removing the
@@ -20,8 +20,8 @@ owner's call. Only regular files are copied. Nothing rebuildable is: only
 `reviews/` and the evidence directories its records name, never a wheelhouse, an
 environment, or a zip of logs.
 
-An evidence directory holds one directory per commit or run it is evidence of. The
-evidence a change's records name is, under each declared evidence directory, each
+An evidence directory holds one directory per tree, commit, or run it is evidence
+of. The evidence a change's records name is, under each evidence directory, each
 `<directory>/<name>` they cite, and the evidence of each validation record's commit
 (`**Commit:**`, kept under its first twelve characters) and of each record's
 pipeline run (`**Pipeline:** run <id>`), under whichever directories hold it.

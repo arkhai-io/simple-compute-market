@@ -714,11 +714,11 @@ def _round_base(root: Path, change: str) -> str | None:
 
 
 def _parts(root: Path, given: str) -> list[str]:
-    """The parts a waiver names, each one the configuration declares."""
+    """The evidence kinds a waiver names, each one the configuration declares."""
     names = [name.strip() for name in given.split(",") if name.strip()]
-    declared = {part.name for part in config.load(root).parts or ()}
+    declared = {kind.name for kind in config.load(root).kinds or ()}
     if unknown := [name for name in names if name not in declared]:
-        raise StepError(f"the waiver names parts validation does not declare: "
+        raise StepError(f"the waiver names evidence kinds validation does not declare: "
                         f"{', '.join(unknown)}; declared: {', '.join(sorted(declared))}")
     return names
 

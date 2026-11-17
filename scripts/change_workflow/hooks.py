@@ -417,26 +417,26 @@ class Hooks:
             self.needs(commands, values, "validation.preflight")
             return self.finish(name, self.run_commands(VALIDATION, commands, values,
                                                        phase=PREFLIGHT))
-        part = self.configuration.part(part_name)
+        part = self.configuration.kind(part_name)
+        where = f"validation.evidence.{part.name}"
         decision = (waived or {}).get(part.name)
         if decision is not None and phase in ("run", "start") and not lapsed:
-            raise HookError(f"validation.parts.{part.name} is waived by the owner's decision "
+            raise HookError(f"{where} is waived by the owner's decision "
                             f"at seq {decision['seq']}: {decision['decision']}. Record it "
                             "`waived`; if its condition no longer holds, run it with "
                             "--lapsed '<why>'")
         if lapsed and decision is None:
-            raise HookError(f"--lapsed names a waiver, and no owner's decision waives "
-                            f"validation.parts.{part.name}")
+            raise HookError(f"--lapsed names a waiver, and no owner's decision waives {where}")
         if phase not in PHASES:
-            raise HookError(f"a part is run with one of {', '.join(PHASES)}; got {phase!r}")
+            raise HookError(f"a kind is run with one of {', '.join(PHASES)}; got {phase!r}")
         if (phase == "run") != (part.run is not None):
-            raise HookError(f"validation.parts.{part.name} declares {part.shape}, so it is "
+            raise HookError(f"{where} declares {part.shape}, so it is "
                             f"run with {' or '.join(part.shape.split(', '))}, not {phase}")
         if part.owed and owed is None:
-            raise HookError(f"validation.parts.{part.name} is owed: give the workflow its run "
+            raise HookError(f"{where} is owed: give the workflow its run "
                             "is for with --owed <workflow>")
         if owed is not None and not part.owed:
-            raise HookError(f"validation.parts.{part.name} is not owed, so it takes no --owed")
+            raise HookError(f"{where} is not owed, so it takes no --owed")
         values = self.values(change, base, **({"owed": owed} if owed is not None else {}))
         key = _marker_key(commit, part.name, owed)
         if phase == "collect":
@@ -448,7 +448,7 @@ class Hooks:
                                 f"{f' --owed {owed}' if owed else ''}` first")
             values["after"] = after
         commands = getattr(part, phase)
-        self.needs(commands, values, f"validation.parts.{part.name}.{phase}")
+        self.needs(commands, values, f"{where}.{phase}")
         labels = {"part": part.name, "owed": owed, "phase": phase,
                   **({"lapsed": lapsed} if lapsed else {})}
         if phase == "start":
@@ -560,15 +560,15 @@ class Hooks:
             kept.write(json.dumps(markers, ensure_ascii=False, indent=1, sort_keys=True))
 
     def cleanup(self, change: str, base: str | None) -> bool:
-        """`run cleanup <change>`: every part's cleanup, in declaration order, as one
+        """`run cleanup <change>`: every kind's cleanup, in declaration order, as one
         list, each command run whatever an earlier one reported."""
         self.allow(CLEANUP)
-        parts = [part for part in self.configuration.parts or () if part.cleanup]
+        parts = [kind for kind in self.configuration.kinds or () if kind.cleanup]
         values = self.values(change, base)
         for part in parts:
-            self.needs(part.cleanup or (), values, f"validation.parts.{part.name}.cleanup")
+            self.needs(part.cleanup or (), values, f"validation.evidence.{part.name}.cleanup")
         if not parts:
-            return self.finish(CLEANUP, self.skip(CLEANUP, "no part declares a cleanup"))
+            return self.finish(CLEANUP, self.skip(CLEANUP, "no kind declares a cleanup"))
         ran = [invoked for part in parts
                for invoked in self.run_commands(CLEANUP, part.cleanup or (), values,
                                                 part=part.name, phase=CLEANUP)]

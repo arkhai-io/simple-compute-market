@@ -276,8 +276,26 @@ closeout = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 """
 
+# The guides a test configuration's evidence kinds name, which `configured` writes.
+GUIDES = ("local", "helm", "pipeline", "ci")
+
+
+def evidence_kind(name: str, *, required: str = "always", identity: str = "tree",
+                  **fields: str) -> str:
+    """An evidence kind's table: its requirement, its pattern under the ignored
+    `.snapshot/evidence/`, its guide, and the commands and fields given, each a TOML
+    string."""
+    owed = "-{owed}" if required == "owed" else ""
+    lines = [f"[validation.evidence.{name}]", f'required = "{required}"',
+             f'evidence = ".snapshot/evidence/{{{identity}}}/{name}{owed}/*/summary.json"',
+             f'guide = ".agents/evidence/{name}.md"']
+    lines += [f"{key} = {json.dumps(value)}" for key, value in fields.items()]
+    return "\n".join(lines) + "\n"
+
+
 # A repository's workflow configuration: the least every step needs, its protected
-# branches, its functional checks declared empty, one part, and every step's models.
+# branches, its functional checks declared empty, one evidence kind, and every step's
+# models.
 CONFIGURED = """
 [repository]
 protected-branches = ["main", "dev"]
@@ -285,15 +303,29 @@ protected-branches = ["main", "dev"]
 [hooks]
 pre-commit-functional = []
 
-[validation.parts.local]
-run = "true"
-""" + MODELS
+""" + evidence_kind("local", run="true") + MODELS
+
+
+def ignore_evidence(root: Path) -> Path:
+    """`root`, a Git checkout, ignoring `.snapshot/` as a repository with evidence
+    kinds must, through its own exclude file rather than a tracked `.gitignore`."""
+    exclude = root / ".git/info/exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8") as lines:
+        lines.write(".snapshot/\n")
+    return root
 
 
 def configured(root: Path, text: str = CONFIGURED) -> Path:
-    """`root` given `.agents/workflow.toml` holding `text`."""
-    (root / ".agents").mkdir(parents=True, exist_ok=True)
+    """`root` given `.agents/workflow.toml` holding `text`, and a guide for each kind
+    a test configuration names; in a Git checkout, `.snapshot/` ignored."""
+    (root / ".agents/evidence").mkdir(parents=True, exist_ok=True)
     (root / ".agents/workflow.toml").write_text(text, "utf-8")
+    for name in GUIDES:
+        (root / ".agents/evidence" / f"{name}.md").write_text(
+            f"# The {name} evidence kind\n\nHow to read its evidence.\n", "utf-8")
+    if (root / ".git").is_dir():
+        ignore_evidence(root)
     return root
 
 

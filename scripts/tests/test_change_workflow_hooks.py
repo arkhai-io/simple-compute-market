@@ -26,7 +26,7 @@ from change_workflow.running import (drop_invocations, invocations_directory, ke
                                      kept_invocations)
 from change_workflow_fixtures import (CHANGE, MODELS, NETWORK, SESSION, VALID, FakeClaude,
                                       claude_review, codex_missing, configured, event_lines,
-                                      make_wrapper, review_text)
+                                      evidence_kind, make_wrapper, review_text)
 from change_workflow_fixtures import repository as repository_with_records
 
 AT = datetime(2026, 11, 6, 9, 0, 0, tzinfo=timezone.utc)
@@ -67,7 +67,9 @@ def _hooks(root: Path, text: str, environ: dict[str, str] | None = None,
            shell: Shell | None = None, in_process: InProcess | None = None,
            echoed: list[str] | None = None) -> Hooks:
     _change(root)
-    return Hooks(root, config.check(text, root / ".agents/workflow.toml"), environ or {},
+    configured(root, text)
+    checked = config.check(text, root / ".agents/workflow.toml", unignored=lambda *_: [])
+    return Hooks(root, checked, environ or {},
                  shell=shell or Shell(), in_process=in_process or InProcess(),
                  clock=lambda: AT, timer=lambda: 0.0, head=lambda _: "c0ffee",
                  echo=(echoed.append if echoed is not None else lambda _: None))
@@ -528,31 +530,19 @@ def test_run_refuses_an_unknown_change(tmp_path: Path,
 
 # Validation's preflight and parts, the kept marker, and the closing line.
 
-PARTS = """
-[validation]
-preflight = "make check-uv-version"
-
-[validation.parts.pipeline]
-start = "make run-e2e"
-collect = "make fetch-e2e-logs E2E_AFTER_RUN={after}"
-evidence = ".snapshot/e2e-logs/"
-
-[validation.parts.ci]
-owed = true
-start = "make run-ci WORKFLOW={owed}"
-collect = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}"
-evidence = ".snapshot/validation/"
-
-[validation.parts.local]
-run = "make validate-local"
-evidence = ".snapshot/validation/"
-
-[validation.parts.helm]
-after = "local"
-run = "make validate-helm CHANGE={change}"
-evidence = ".snapshot/validation/"
-cleanup = ["make record-capacity CHANGE={change}", "make -C helm teardown CHANGE={change}"]
-"""
+PARTS = ("[validation]\npreflight = \"make check-uv-version\"\n\n"
+         + evidence_kind("pipeline", identity="commit", start="make run-e2e",
+                         collect="make fetch-e2e-logs E2E_AFTER_RUN={after}")
+         + evidence_kind("ci", required="owed", identity="commit",
+                         start="make run-ci WORKFLOW={owed}",
+                         collect="make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}")
+         + evidence_kind("local", run="make validate-local")
+         + evidence_kind("helm", after="local", run="make validate-helm CHANGE={change}",
+                         cleanup=["make record-capacity CHANGE={change}",
+                                  "make -C helm teardown CHANGE={change}"]))
+LOCAL = evidence_kind("local", run="true")
+HELM_EVIDENCE = ".snapshot/evidence/{tree}/helm/*/summary.json"
+CI_EVIDENCE = ".snapshot/evidence/{commit}/ci-{owed}/*/summary.json"
 
 
 class Capture:
@@ -590,7 +580,7 @@ def test_the_preflight_runs_and_closes(tmp_path: Path) -> None:
 
 def test_an_absent_preflight_is_skipped_saying_so(tmp_path: Path) -> None:
     echoed: list[str] = []
-    runner = _validating(tmp_path, "[validation.parts.local]\nrun = 'true'\n", echoed=echoed)
+    runner = _validating(tmp_path, LOCAL, echoed=echoed)
 
     assert runner.validation(CHANGE, None, "preflight")
 
@@ -605,7 +595,7 @@ def test_a_part_ends_with_the_engines_closing_line(tmp_path: Path) -> None:
 
     assert echoed[-1] == (
         f"[change-workflow] validation helm run at c0ffee: failed, exit 2: make validate-helm "
-        f"CHANGE={CHANGE} (exit 2); evidence .snapshot/validation/")
+        f"CHANGE={CHANGE} (exit 2); evidence {HELM_EVIDENCE}")
     assert [i.entry() for i in runner.invoked] == [
         {"hook": "validation", "part": "helm", "phase": "run",
          "command": f"make validate-helm CHANGE={CHANGE}", "exit_status": 2,
@@ -619,15 +609,15 @@ def test_an_owed_parts_closing_line_names_its_workflow(tmp_path: Path) -> None:
     assert runner.validation(CHANGE, None, "ci", "start", owed="ci.yml")
 
     assert echoed[-1] == ("[change-workflow] validation ci ci.yml start at c0ffee: passed, "
-                          "exit 0; evidence .snapshot/validation/")
+                          f"exit 0; evidence {CI_EVIDENCE}")
 
 
 @pytest.mark.parametrize("part,phase,owed,refused", [
-    ("ci", "start", None, "validation.parts.ci is owed: give the workflow"),
-    ("local", "run", "ci.yml", "validation.parts.local is not owed, so it takes no --owed"),
+    ("ci", "start", None, "validation.evidence.ci is owed: give the workflow"),
+    ("local", "run", "ci.yml", "validation.evidence.local is not owed, so it takes no --owed"),
     ("local", "start", None, "declares run, so it is run with run, not start"),
     ("pipeline", "run", None, "declares start, collect, so it is run with start or collect"),
-    ("smoke", "run", None, "declares no validation part 'smoke'"),
+    ("smoke", "run", None, "declares no evidence kind 'smoke'"),
 ])
 def test_a_part_run_another_way_than_it_declares_is_refused(
         tmp_path: Path, part: str, phase: str, owed: str | None, refused: str) -> None:
@@ -802,9 +792,8 @@ def test_a_changes_validation_left_resources(tmp_path: Path) -> None:
 def test_a_parts_cleanup_finds_nothing(tmp_path: Path) -> None:
     """CW-ikmm: a cleanup that removes nothing succeeds; one failing still lets the
     rest run, and fails the cleanup."""
-    text = PARTS.replace('[validation.parts.local]\nrun = "make validate-local"',
-                         '[validation.parts.local]\nrun = "make validate-local"\n'
-                         'cleanup = "make dist-clean"')
+    text = PARTS.replace('run = "make validate-local"',
+                         'run = "make validate-local"\ncleanup = "make dist-clean"')
     shell = Shell({"make dist-clean": 0, f"make record-capacity CHANGE={CHANGE}": 1})
     runner = _validating(tmp_path, text, shell=shell, step="archive-cleanup")
 
@@ -816,12 +805,11 @@ def test_a_parts_cleanup_finds_nothing(tmp_path: Path) -> None:
 
 def test_no_part_declaring_a_cleanup_is_skipped_saying_so(tmp_path: Path) -> None:
     echoed: list[str] = []
-    runner = _validating(tmp_path, "[validation.parts.local]\nrun = 'true'\n", echoed=echoed,
-                         step="archive-cleanup")
+    runner = _validating(tmp_path, LOCAL, echoed=echoed, step="archive-cleanup")
 
     assert runner.cleanup(CHANGE, None)
 
-    assert echoed == ["[change-workflow] cleanup at c0ffee: skipped, no part declares a cleanup"]
+    assert echoed == ["[change-workflow] cleanup at c0ffee: skipped, no kind declares a cleanup"]
 
 
 def test_only_archive_cleanup_runs_the_cleanups(tmp_path: Path) -> None:
@@ -840,9 +828,7 @@ def _ignoring_records(root: Path) -> Path:
 def test_validations_helm_part_fails(repository: Path) -> None:
     """CW-q5fy: library integration, a real `sh` and Git directory; the run's line
     lists the part with its resolved command and exit status 2."""
-    configured(_ignoring_records(repository),
-               "[validation.parts.helm]\nrun = 'exit 2'\nevidence = '.snapshot/validation/'\n"
-               + MODELS)
+    configured(_ignoring_records(repository), evidence_kind("helm", run="exit 2") + MODELS)
     ran: list[int] = []
 
     class Validating(FakeClaude):
@@ -1033,12 +1019,9 @@ def test_an_owed_start_and_collect_through_the_command(repository: Path,
                                                        capfd: pytest.CaptureFixture[str]
                                                        ) -> None:
     """Library integration: a real `sh` and Git directory, through `cli.main`."""
-    configured(repository, """
-[validation.parts.ci]
-owed = true
-start = "echo dispatched {owed}; echo 77"
-collect = "echo waited past {after} for {owed}"
-""")
+    configured(repository, evidence_kind("ci", required="owed", identity="commit",
+                                         start="echo dispatched {owed}; echo 77",
+                                         collect="echo waited past {after} for {owed}"))
     environ = {UNATTENDED: "validate"}
 
     assert main(["run", "validation", CHANGE, "ci", "start", "--owed", "ci.yml"],
@@ -1052,8 +1035,8 @@ collect = "echo waited past {after} for {owed}"
 
 
 def test_run_cleanup_through_the_command(repository: Path) -> None:
-    configured(repository, "[validation.parts.helm]\nrun = 'true'\n"
-                           "cleanup = ['touch first', 'touch second']\n")
+    configured(repository, evidence_kind("helm", run="true",
+                                         cleanup=["touch first", "touch second"]))
 
     assert main(["run", "cleanup", CHANGE], root=repository,
                 environ={UNATTENDED: "archive-cleanup"}) == 0

@@ -21,7 +21,8 @@ from change_workflow.running import Terminated, live_runs
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
                                       RECORDS, VALIDATED, FakeClaude, claude_review, clock,
-                                      codex_missing, codex_saying, configured, not_installed,
+                                      codex_missing, codex_saying, configured, ignore_evidence,
+                                      not_installed,
                                       option, option_rules, repository, review_text, reviews_of,
                                       validation_text, writing)
 
@@ -88,6 +89,7 @@ def test_a_review_reads_the_branch_the_clone_recorded(tmp_path: Path) -> None:
     Git directory."""
     root = repository(tmp_path)
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    ignore_evidence(root)
     (root / ".git" / find.CLONE_MARKER).write_text(
         json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
         "utf-8")
