@@ -209,7 +209,7 @@ the relay definitions document and the port reconciliation are VM's contribution
 The relay routes admit only the administrator. Completed tasks below keep the paths they
 were done at; the open ones name none of the moved files.
 
-- [ ] 1A.7 **Decide and record** the deletion semantics in `design.md` once
+- [x] 1A.7 **Decide and record** the deletion semantics in `design.md` once
       section 2's reconciliation behaviour is settled, then implement the
       decision or record why it stays deferred. This is a decision task, not an
       instruction to implement one of the three.
@@ -223,6 +223,12 @@ were done at; the open ones name none of the moved files.
       `design.md` D1–D5: nothing deletes a relay, and disabling one drains it.
       Sections 10a–10d implement the drain and 10e its procedure; 10e.3 ticks
       this task once 10a–10d are complete.
+      *Met (10e.3):* nothing deletes a relay, and disabling one drains it. The
+      allocator refuses a new owner (10a), execution lets leased jobs run
+      (10a), the read reports `drained` (10b), refusals name the drain's scope
+      (10c), and the relay's pools' hosts take no new delivery (10d). The
+      procedure, retirement included, is in the seller guide and runbook §28
+      (10e).
 - [x] 1A.8 Reject an update that would duplicate another relay's rendezvous,
       with both relay identifiers named. The unique constraint would catch it,
       but a constraint violation surfacing as a 500 is not an administration
@@ -407,7 +413,7 @@ rest nor withheld from a read.
 - [x] 2A.6 Assert that no job status or job list response carries a token, at
       Level 2 through the canonical typed client. This is the surface that
       published it, so this is the surface the test has to use.
-- [ ] 2A.7 The rendered vars file holds the decrypted token, so it needs the
+- [x] 2A.7 The rendered vars file holds the decrypted token, so it needs the
       same lifetime and access restrictions as other decrypted secret material
       on the execution path, as `physical-provisioning`'s "Relay admission
       tokens are resolved at execution" requires. The existing handling meets
@@ -431,6 +437,8 @@ rest nor withheld from a read.
       *Replanned against the reviewed design (2026-11-17).* `design.md` D6: the
       existing handling meets the requirement, and no revisit trigger is
       recorded against this change. 10e.3 ticks this task.
+      *Met (10e.3), as D6 records:* the existing `write_extra_vars` and
+      executor handling meets the requirement. No code changed for it.
 
 **Validation:** `make test` in `provisioning/compute/service`.
 
@@ -1523,7 +1531,7 @@ Delivers D5's procedure and D4's consequence for a document-listed relay, and
 records D6. Touches `docs/seller-frp-setup.md`,
 `docs/development/VALIDATION_RUNBOOK.md` §28, and this task list.
 
-- [ ] 10e.1 In `docs/seller-frp-setup.md`: in "Registering the relay", token
+- [x] 10e.1 In `docs/seller-frp-setup.md`: in "Registering the relay", token
       rotation becomes disable the relay, wait for `drained: true`, rotate,
       enable again; "Changing a relay later" names both drain scopes — the pool
       for a pool's relay or a host's pool, the relay for its address, port, or
@@ -1531,7 +1539,21 @@ records D6. Touches `docs/seller-frp-setup.md`,
       relay the definition document lists is disabled and enabled through its
       `enabled` entry, since an API disable is reverted when the document next
       changes. Present tense, describing the current system. (D4, D5)
-- [ ] 10e.2 In `docs/development/VALIDATION_RUNBOOK.md` §28: add "Retire a
+      *Done.*
+      - "Changing a relay later" now speaks of a delivery, a VM or a
+        bare-metal grant, rather than a VM.
+      - It lists the four refused changes with each scope's steps, and the
+        relay's steps name the disable, read, holdings, and enable routes and
+        `active_lease_count`.
+      - It states that a disable is reversible, and how a listed relay is
+        disabled.
+      - A new "Retiring a relay" subsection gives D5's five steps, links the
+        runbook's for step 3, and says what a reinstated server at the same
+        rendezvous takes (D3): a rotated token, and a key staged, configured
+        in its plugin with admission proven, then activated.
+      - Token rotation says that on a shared relay every registering operator
+        drains first, since an frps restart ends every session.
+- [x] 10e.2 In `docs/development/VALIDATION_RUNBOOK.md` §28: add "Retire a
       relay" for the relay's operator — wait for `drained: true` on the relay
       read, then remove the server, or on a shared relay this relay's active
       and retired keys and its range from the admission plugin; enable the
@@ -1539,12 +1561,53 @@ records D6. Touches `docs/seller-frp-setup.md`,
       section's "stop admission and drain" steps ("Native systemd relay",
       "Container relay", "Rotate keys and change admission policy") as
       disabling the relay and waiting for `drained`. (D2, D5)
-- [ ] 10e.3 Tick 1A.7 once sections 10a–10d are complete, and 2A.7, which D6
+      *Done.*
+      - "Retire a relay" follows "Rotate keys and change admission policy" and
+        gives the five steps for the relay's operator. It says why `drained`
+        does not wait for grant expiry (D2), and how to retire on a shared
+        relay.
+      - The restatements are the plugin's first introduction and listener
+        relocation (native), the frps restart and relocation (container), and
+        narrowing a range and a leaked token (rotation).
+      - Each restatement that restarts frps drains the server: the relay
+        disabled in every provisioning service that registers it.
+      - The leaked-token sequence also names each service's signed token
+        rotation.
+      - The compromised-key option keeps its condition, the leases that key
+        signed ending, as `grants_valid_until` reports.
+      - "Retire a relay" says which step is the relay operator's and which are
+        the site administrator's.
+      *Left as they were:* runbook "Prove admission" step 4 ("keep buyer
+      admission closed") and the seller guide's "before enabling buyer
+      admission" at registration, which describe a relay not yet carrying
+      buyers. The companion's own drain wording is closeout's (11.16).
+- [x] 10e.3 Tick 1A.7 once sections 10a–10d are complete, and 2A.7, which D6
       records as met by the existing handling with no revisit trigger.
-- [ ] 10e.4 **Verification:** `make check-doc-citations
+      *Done:* both ticked, with a note on each.
+- [x] 10e.4 **Verification:** `make check-doc-citations
       CHANGE=relay-vm-access-without-a-dashboard`;
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none.
+      *Results:* `make check-doc-citations CHANGE=relay-vm-access-without-a-dashboard`
+      passed (4 documents, every cited path resolves).
+      `scripts/change-workflow run pre-commit` passed on the final text (the
+      documents are inert paths, so the closing checks alone ran: the index,
+      the task list, the skills, strict OpenSpec validation, and
+      `check-repository`).
+      End-to-end: none, and none is owed. No `Owed by validation:` line.
+      *Outside the plan:* the change's row in `openspec/changes/README.md`
+      still read `ready for implementation`, which 10a should have set to `in
+      implementation`. It is set now, with the campaign's graph line and
+      paragraph brought to the same state.
+
+**Handoff (round).** Sections 10a–10e and the replanned 1A.7 and 2A.7 are
+complete. Closeout's remaining parts (11.4, 11.7–11.17) follow the round's
+triage. Two points carry into it:
+- 10d.1's reading of "the hosts of every pool": hosts placed in, or declared
+  in, such a pool.
+- 10d's list of permanent texts that still define the deliverable-hosts report
+  as "registered, enabled hosts", which closeout's promotion table does not
+  yet name.
 
 ## 11. Closeout
 

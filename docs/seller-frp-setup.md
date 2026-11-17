@@ -142,17 +142,19 @@ use an operator-retained `grant_key_secret_key` as the runbook describes.
 The token is encrypted at rest and is never returned by any read. Relay and pool
 responses report *whether* a token is configured, not what it is.
 
-To rotate the token, first stop new admissions and drain every lease on the
-relay; a disable or listing pause alone does not drain existing work. Update
-`frps.toml`, restart frps, update every host client baseline and send the signed
-rotation request with body `{"token": "<replacement>"}`:
+To rotate the token, drain the relay first: disable it, and wait until its read
+reports `"drained": true`, as "Changing a relay later" below describes. A
+restart of frps ends every session the server carries, so on a shared relay
+every operator registering it disables and drains their relay first. Then
+update `frps.toml`, restart frps, update every host client baseline and send the
+signed rotation request with body `{"token": "<replacement>"}`:
 
 ```console
 POST /api/v1/relays/site-a/token
 ```
 
-Verify the new client baselines and ungranted-proxy refusal before reopening
-admission. Token rotation is refused while the relay has unreleased leases.
+Verify the new client baselines and ungranted-proxy refusal, then enable the
+relay again. Token rotation is refused while the relay has unreleased leases.
 
 ## Storefront configuration
 
@@ -166,25 +168,78 @@ requests for the same host disagree about how it is reached.
 
 ## Changing a relay later
 
-A VM's relay is fixed for that VM's life. The buyer holds an address and a port,
-and a port on one relay means nothing on another, so an existing VM cannot be
-moved to a different rendezvous.
+A delivery's relay, for a VM or a bare-metal grant, is fixed for that delivery's
+life. The buyer holds an address and a port, and a port on one relay means
+nothing on another, so an existing delivery cannot be moved to a different
+rendezvous.
 
-Three changes are therefore refused while any affected host still runs a VM:
-repointing a relay's address or port, changing which relay a pool uses, and
-moving a host into a pool that dials a different relay. Each is allowed once the
-affected hosts hold no leases.
+Four changes are refused while an affected delivery still holds a lease.
+Changing which relay a pool uses, moving a host into a pool that dials a
+different relay, and repointing a relay's address or port would each move what
+a buyer holds. Rotating a relay's token makes every host's client restart to
+adopt it, since a reload does not apply a new token, and a restart drops the
+proxies the client carries.
+Each is allowed once the affected leases are released. Draining is the same
+lifecycle at two scopes, stop new work and let existing work finish, and the
+refusal names the scope that clears it.
 
-To make one:
+For a pool's relay, or a host's pool, drain the pool:
 
-1. Disable the pool. New VMs stop being scheduled onto it; running VMs are
-   untouched.
-2. Wait for its VMs to be torn down or to expire.
+1. Disable the pool. New deliveries stop being scheduled onto it; running ones
+   are untouched.
+2. Wait for its leases to be released, as its deliveries are torn down or
+   expire.
 3. Make the change.
 4. Re-enable the pool.
 
+For a relay's address, port, or token, drain the relay, since the change
+affects every pool that references it:
+
+1. Disable the relay (`POST /api/v1/relays/site-a/disable`). No new delivery
+   is placed on any of its pools' hosts or leased a port on it; running
+   deliveries are untouched, and their teardowns run.
+2. Wait until the relay read (`GET /api/v1/relays/site-a`) reports
+   `"drained": true`. Its `active_lease_count` shows how many leases remain,
+   and the holdings read (`GET /api/v1/relays/site-a/leases`) names what holds
+   it open.
+3. Make the change.
+4. Enable the relay again (`POST /api/v1/relays/site-a/enable`).
+
+Disabling a relay is reversible at any time, before or after it drains, and
+removes no proxy and releases no lease.
+
 Moving a host between pools that dial the *same* relay needs none of this.
 Nothing a buyer holds changes.
+
+A relay the definition document lists is disabled and enabled through its
+entry's `enabled`, not through the API: an API disable is reverted when the
+document next changes. A relay the document stops listing is left as it is.
+
+### Retiring a relay
+
+Nothing in the provisioning service deletes a relay. To take one out of
+service:
+
+1. Disable the relay, through its entry's `enabled: false` when the
+   definition document lists it.
+2. Wait until the relay read reports `"drained": true`. The holdings read
+   names what holds it open.
+3. Remove the relay server, or, on a shared relay, remove this relay's active
+   and retired keys and its port range from the admission plugin. This is the
+   relay operator's step, outside the provisioning service; the
+   [relay operations runbook](development/VALIDATION_RUNBOOK.md#retire-a-relay)
+   gives it for both cases.
+4. Point any pool still referencing the relay at another relay.
+5. Enable a relay again only when a server runs at its rendezvous. The service
+   never checks that a relay server exists, so an enabled relay with no server
+   sells capacity nothing can deliver.
+
+The drained relay's record stays, disabled, as the record its leases, keys,
+and pool references point at. A server later reinstated at the same address
+and port is the same relay: rotate its token, stage a key, configure its public
+half in the reinstated server's admission plugin and prove admission as the
+runbook's "Prove admission before enabling a pool" describes, activate the key,
+and enable the relay again.
 
 ## Verifying
 
