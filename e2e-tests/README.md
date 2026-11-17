@@ -59,8 +59,9 @@ ACTIVE_PROFILES=staging,staging-secrets
 ### Shared payment-scenario configuration
 
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
-`e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase` and
-`e2e_bare_metal_recurring_purchase`, and the qualification modules
+`e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase`,
+`e2e_bare_metal_recurring_purchase`, `e2e_vm_rate_servicing` and
+`e2e_bare_metal_rate_servicing`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -378,23 +379,64 @@ buy`, which approves the mandate and commits, and the storefront delivers it.
 
 The scenarios run the shared buyer-purchase stages, the canonical deal's
 delivery and teardown stages with their mock gates, and the recurring stages
-(`tests/e2e/roles/helpers/recurring_purchase_stages.py`): the mandate is one
-rate part charging one period's price and the payer's balance fell by the
-receipt's reserve; the fulfillment converges and the settlement reads ready;
-once the storefront's servicing has been stepped, the payments double records
-the rate part started, and one start event, no earlier than the whole second of
-the site's activation of the lease (the double records whole seconds), and the
-storefront's lifecycle read shows the deal active; the buy's stderr showed the
-per-period price, setup charge, initial reserve and maximum end (that they
-precede the settlement stage that approves is proved by each buyer's own tests,
-not here); the buyer's own `end` stops the payment inside the started period,
-which it charges, and the storefront records the payer's end with no filing;
-once a servicing step has carried out that end at the site (bare metal's hint
-already has, VM's servicing cycle does), the lease is released through the
-shared teardown stages; and the payer's balance is down by exactly one period's
-price. The seller's refund refuses a rate deal, so a failed run's
-cleanup ends an approved deal by the buyer's own `end` too. Neither waits for
-the delivery deadline.
+(`tests/e2e/roles/helpers/recurring_purchase_stages.py`), reaching every
+instant by setting lane time, never by waiting: the mandate is one rate part
+charging one period's price and the payer's balance fell by the receipt's
+reserve; the fulfillment converges, lane time is brought to the Agreement's
+start (both buyers ask for a deal starting at acceptance, so it already holds
+it) and `delivery-recovery` steps once, and the settlement reads ready; once
+the storefront's servicing has been stepped, the payments double records the
+rate part started, and one start event, no earlier than the whole second of the
+site's activation of the lease, and the storefront's lifecycle read shows the
+deal active; the buy's stderr showed the per-period price, setup charge,
+initial reserve and maximum end (that they precede the settlement stage that
+approves is proved by each buyer's own tests, not here); with lane time a
+minute into the first period, the buyer's own `end` stops the payment inside
+the started period, which it charges, and the storefront records the payer's
+end with no filing; once a servicing step has carried out that end at the site
+(bare metal's hint already has, VM's servicing cycle does), the lease is
+released through the shared teardown stages; the payer's balance is down by
+exactly one period's price; and after one more servicing step the seller's
+list, read through the typed seller lifecycle client, shows the deal `ended`
+with no outstanding code. The seller's refund refuses a rate deal, so a failed
+run's cleanup ends an approved deal by the buyer's own `end` too. Neither waits
+for the delivery deadline.
+
+### Rate servicing rows
+
+`e2e_vm_rate_servicing` runs in the VM lane and `e2e_bare_metal_rate_servicing`
+in the bare-metal lane, three modules each under
+`tests/e2e/roles/scenarios/<domain>/rate_servicing/`, each its own deal and
+lane-double evidence. Each shares the recurring purchase's stages through its
+accepted money, under a shipped preset with a default buyer and the lane's
+`[charged, returned]` declaration, then ends its deal one way
+(`tests/e2e/roles/helpers/rate_servicing_stages.py`):
+
+- funds running out: the deal is paid from the payments double's second payer
+  (`PAYMENTS.RATE_PAYER_ACCOUNT`), funded with exactly two periods' price
+  through the double's funding control; lane time is set past the second
+  period's end, the double records a `terms` stop at the funded boundary, the
+  storefront records that end there with no filing and tears the deal down, and
+  the buyer's `delivery` read says a top-up cannot revive it;
+- a spot seller's preemption: the storefront's administrator submits the
+  seller's notice through the typed seller lifecycle client, the call `deals
+  preempt` makes; the double holds it as a pending stop until lane time reaches
+  the request's time plus the 120-second notice, when the storefront records the
+  seller's stop at that instant with no filing and tears the deal down, and the
+  payer is returned what the deal had not earned;
+- the maximum term: lane time is brought to the Agreement's end a period at a
+  time, reading the transaction at each instant, since the double reserves a
+  funded deal's next period only at a read and a single set past what it has
+  reserved reads as funds running out; the part ends there `returned`, the
+  storefront records the term end with no filing and tears the deal down, and
+  the buyer's read names no funding stop.
+
+No storefront route reads how it classified an end, so the rows observe what
+follows from the classification — the end's cause and instant, no filing, the
+teardown — and the buyer's read, which classifies with the same compute-family
+classifier; the storefront's classification itself is each storefront's
+application evidence. On a wall-time run the funds-running-out and preemption
+rows are blocked, since only lane time reaches their instants.
 
 ### Real bare-metal provisioning
 

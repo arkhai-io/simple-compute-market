@@ -79,6 +79,10 @@ E2E_DISPUTE_LOST_FILING_HOST = "kvm-dispute-lost-filing"
 E2E_DISPUTE_MEDIATION_UNAVAILABLE_HOST = "kvm-dispute-mediation-unavailable"
 E2E_DISPUTE_PAYMENTS_HOLD_HOST = "kvm-dispute-payments-hold"
 E2E_DISPUTE_HOLD_PASSED_HOST = "kvm-dispute-hold-passed"
+#: The VM rate servicing rows, each on its own deal and so its own executor.
+E2E_RATE_FUNDS_EXHAUSTED_HOST = "kvm-rate-funds-exhausted"
+E2E_RATE_PREEMPTION_HOST = "kvm-rate-preemption"
+E2E_RATE_MAXIMUM_TERM_HOST = "kvm-rate-maximum-term"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
@@ -100,6 +104,9 @@ E2E_DISPUTE_LOST_FILING_POOL_ID = "compute-e2e-dispute-lost-filing-pool"
 E2E_DISPUTE_MEDIATION_UNAVAILABLE_POOL_ID = "compute-e2e-dispute-mediation-unavailable-pool"
 E2E_DISPUTE_PAYMENTS_HOLD_POOL_ID = "compute-e2e-dispute-payments-hold-pool"
 E2E_DISPUTE_HOLD_PASSED_POOL_ID = "compute-e2e-dispute-hold-passed-pool"
+E2E_RATE_FUNDS_EXHAUSTED_POOL_ID = "compute-e2e-rate-funds-exhausted-pool"
+E2E_RATE_PREEMPTION_POOL_ID = "compute-e2e-rate-preemption-pool"
+E2E_RATE_MAXIMUM_TERM_POOL_ID = "compute-e2e-rate-maximum-term-pool"
 
 #: The resource each VM dispute scenario lists. A listing's binding to its
 #: resource outlives the listing, so no two scenarios on one stack list the same.
@@ -109,6 +116,14 @@ E2E_DISPUTE_LOST_FILING_RESOURCE_ID = "compute-e2e-dispute-lost-filing-001"
 E2E_DISPUTE_MEDIATION_UNAVAILABLE_RESOURCE_ID = "compute-e2e-dispute-mediation-unavailable-001"
 E2E_DISPUTE_PAYMENTS_HOLD_RESOURCE_ID = "compute-e2e-dispute-payments-hold-001"
 E2E_DISPUTE_HOLD_PASSED_RESOURCE_ID = "compute-e2e-dispute-hold-passed-001"
+#: The resource each VM rate servicing row lists, and the GPU model only it
+#: declares, which the row's ``market buy`` discovers it by.
+E2E_RATE_FUNDS_EXHAUSTED_RESOURCE_ID = "compute-e2e-rate-funds-exhausted-001"
+E2E_RATE_PREEMPTION_RESOURCE_ID = "compute-e2e-rate-preemption-001"
+E2E_RATE_MAXIMUM_TERM_RESOURCE_ID = "compute-e2e-rate-maximum-term-001"
+E2E_RATE_FUNDS_EXHAUSTED_GPU_MODEL = "RTX 4060"
+E2E_RATE_PREEMPTION_GPU_MODEL = "RTX 4060 Ti"
+E2E_RATE_MAXIMUM_TERM_GPU_MODEL = "RTX 4070 Ti"
 
 
 def resource_gpus(resource: dict[str, Any]) -> tuple[int, str] | None:

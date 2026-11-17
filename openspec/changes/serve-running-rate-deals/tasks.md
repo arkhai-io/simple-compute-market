@@ -1753,6 +1753,73 @@ dispute authority, so 10.1's `ended` also needs the lane storefront's servicing 
 have saved one verified read of that authority; until then the seller list shows the
 deal `ending` with `case_unobserved`.
 
+Section 10 work in progress (uncommitted, round 2's session; no task checked yet):
+
+- Written, unit-checked, not yet run in a lane: `recurring_purchase_stages.py` on lane
+  time (`Recurring05_DeliveryRecoveredAtTheStart` after `Stage09a2`; the old 05–08
+  renumbered 06–09; `Recurring08` sets lane time `STOP_INTO_PERIOD_SECONDS` into the
+  first period, since the double charges nothing for a stop at the start itself;
+  `Recurring10_SellerListsTheDealEnded` steps `deal-servicing` and pages the typed seller
+  list); `rate_servicing_stages.py` (rows); `scenarios/{vms,bare_metal}/rate_servicing/`
+  (a conftest, a stages module and three row modules each); VM host registry entries;
+  markers `e2e_vm_rate_servicing`, `e2e_bare_metal_rate_servicing` in `pyproject.toml`
+  and the Makefile's lane lists; `e2e-tests/README.md`; the unit order check generalized
+  to every module (`ORDERS`). `make -C e2e-tests test-unit` 991 passed, 1 skipped.
+- Outside the plan's `e2e-tests`: the payments double's fixture gains a second payer,
+  `rate_payer` (`...00b3`, funded with nothing), restated in `config-payments-lane.yml`
+  and held equal by `test_lane_env.py`; funds running out funds it to exactly two
+  periods through `/test/funding`, since the shared buyer's balance never runs out.
+  `payments.py` hands each payer its own key (`payer_api_key`).
+- Found reading the double's engine: a single lane-time set past the periods a
+  transaction has reserved reads as exhaustion at their end, since the double reserves
+  only at a read; the maximum-term row steps lane time a period at a time with a
+  snapshot read at each (`move_lane_time_through`). No route reads a storefront's
+  classification, so rows assert its consequences (cause, instant, no filing, teardown)
+  and the buyer's `delivery` read's `funding_stop`.
+- The stale API-credits stack that blocked the lanes was taken down on the owner's word
+  (`make -C e2e-tests e2e-apicredits-down`, the same Compose project).
+- VM lane run (system, `make -C e2e-tests test-e2e-vm "E2E_MODULE=e2e_vm_recurring_purchase
+  or e2e_vm_rate_servicing"`): 73 passed, 4 failed, 42 skipped; stack taken down after.
+  The bare-metal lane was not run.
+  - The recurring purchase passed every stage through `Recurring09` on frozen lane time:
+    delivery after the re-drive step, the rate start, the buyer's stop a minute in
+    charging one period, teardown, the payer one period down.
+  - `Recurring10` failed: the list shows the deal `ending ["case_unobserved"]` after
+    release. **Design finding:** the mediation adapter's `read`
+    (`kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`, `_read`) is accepted
+    only when the authority holds a record of the Agreement, and the authority learns an
+    Agreement from its first filing; for a deal no one filed on, the read is a 404 and
+    never `Accepted`, so the watch saves no dispute view (`watch.py`, `_observe`) and D7's
+    44 F1 rule keeps every unfiled deal naming that authority `ending` for good, and
+    `unserviceable()` keeps reporting it. The requirement's "`ended` once the release is
+    proven" cannot be met in either lane, or in production, under D7 as settled. A design
+    decision: how an unfiled Agreement's absence of cases is observed.
+  - `MaximumTerm07` failed: the double stopped the deal `terms` at two periods, as
+    exhaustion. **Design finding:** the payments kit's engine
+    (`kit/arkhai-payments/src/market_arkhai_payments/fixtures/authority.py`), which the
+    double serves, reserves further periods only at the rate part's `start` (`_refill`
+    from `_apply`); snapshot and balance reads advance with `refill=False`. On the double
+    every rate deal runs out at its first reservation (reserve ahead plus a period: two
+    periods here), whatever the payer's balance, so no lane deal can run to a longer
+    maximum term, and funds running out is indistinguishable from that horizon.
+    `move_lane_time_through`'s stepping does not help. Either the double refills as the
+    service does (a kit fixture change, and `kit/arkhai-payments`' version chain), or the
+    rows use an Agreement within the first reservation (two periods), with the double's
+    limit recorded.
+  - Two rows' `Stage03` failed: the storefront created the funds-running-out and
+    preemption listings open, but the registry answered 404 for them, while the
+    maximum-term row's and the recurring purchase's published. Not diagnosed: the
+    storefront's logs were not readable in this session.
+- Section 11: its premise does not hold. The harness runs in a `docker run` container on
+  the lane network with no Docker access, not beside Compose (D10). The owner answered
+  that they will work with a coordinator agent to deploy an infrastructure topology and
+  gather the live lane evidence the change requires; not started here.
+- Returned to design with this work in progress committed, no task checked. Bring to
+  design: the unfiled-Agreement dispute read against D7's 44 F1 rule; the double's
+  refill against the funds-running-out and maximum-term rows; D10's harness premise and
+  the owner's topology; the plan's lane evidence against the owner's live-evidence
+  route.
+
 ## 11. The buyer's watchdog against a delivered deal
 
 Delivers D10; requirement "The buyer's watchdog is qualified against a delivered deal"

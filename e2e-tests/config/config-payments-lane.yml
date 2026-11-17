@@ -36,6 +36,11 @@ payments:
   api_key_env: "PAYMENTS_BUYER_API_KEY"
   buyer_api_key: "payments-lane-double-buyer-public-development-token"
   buyer_account: "00000000-0000-4000-8000-0000000000b1"
+  # The double's second payer, funded with nothing at start, and its bearer
+  # token: a scenario funds it with exactly what it needs, as funds running out
+  # does.
+  rate_payer_account: "00000000-0000-4000-8000-0000000000b3"
+  rate_payer_api_key: "payments-lane-double-rate-payer-public-development-token"
   seller_account: "00000000-0000-4000-8000-0000000000b2"
   # The payment scenarios' wallet-free Ed25519 buyer marketplace seed: 32 bytes
   # of 0xb1, as the unpadded base64url an Ed25519 credential is written in. Its

@@ -11,7 +11,7 @@ records as it ends. ``VmPurchaseDriver`` is the lane's, over
 ``arkhai.payments.v1`` settlement. The lease view is the canonical deal's,
 which finds a VM hold by its negotiation whatever the settlement mechanism.
 ``VmRecurringPurchaseDriver`` is the lane's recurring purchase, whose listing's
-one settlement is a recurring on-demand option.
+one settlement is a recurring option, on-demand or spot.
 """
 
 from __future__ import annotations
@@ -63,12 +63,15 @@ SETTLEMENT_TIMEOUT_SECONDS = 300
 SETTLEMENT_POLL_SECONDS = 1.0
 
 
-def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
+def vm_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
+                    payer: str | None = None) -> BuyerCli:
     """The run's VM buyer (``BUYER``), profiled under ``base`` with no wallet,
-    buying through Arkhai payments alone, with its dispute credential for the
-    run's mediation target when the run names one. Each profile keeps its own
-    run logs, so a purchase's compensation finds that purchase alone."""
+    buying through Arkhai payments alone from ``payer``, the run's buyer account
+    unless named, with its dispute credential for the run's mediation target
+    when the run names one. Each profile keeps its own run logs, so a
+    purchase's compensation finds that purchase alone."""
     mediation = mediation_if_configured()
+    payer = payer or str(payment_setting("BUYER_ACCOUNT"))
     registry_url = str(settings.REGISTRY.API_URL or "").rstrip("/")
     assert registry_url, "REGISTRY.API_URL is required for the purchase's discovery"
     scheme = str(settings.BUYER.get("marketplace_scheme", "eip191") or "eip191")
@@ -76,7 +79,7 @@ def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
     assert credential, "BUYER.MARKETPLACE_CREDENTIAL is required for the purchase's buyer"
     sections = (
         "[vms]",
-        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
+        f"payer_account = {_toml_quote(payer)}",
         "",
         # Only the configured, enabled mechanism is selectable, so the buyer
         # can settle this purchase no other way.
@@ -103,7 +106,7 @@ def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
             }],
         }},
         credential_environment={
-            **buyer_payments_environment(payments_config),
+            **buyer_payments_environment(payments_config, payer),
             **buyer_mediation_environment(mediation),
         },
         toml_sections=sections,
@@ -261,20 +264,27 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
     #: The storefront loop whose servicing cycle reads its committed deals'
     #: payments and carries out their recorded ends at the site.
     servicing_loop = "deal-servicing"
+    #: The seller's notice a spot option states; none for on-demand.
+    payee_notice_seconds: int | None = None
 
     def listing_settlement(self) -> dict[str, Any]:
-        """The listing's one settlement: a recurring on-demand option, paid
-        through Arkhai payments to the lane's seller account."""
+        """The listing's one settlement: a recurring option, on-demand or spot,
+        paid through Arkhai payments to the lane's seller account."""
         return recurring_settlement(
             seller_account=self.seller_account,
             delivery_deadline_seconds=delivery_deadline_seconds(),
+            payee_notice_seconds=self.payee_notice_seconds,
         )
 
     def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
         assert listing.listing_resource["gpu_model"] == self.gpu_model, listing
         # The listing states the recurring payments settlement alone.
         assert len(listing.settlement_options) == 1, listing.settlement_options
-        check_recurring_option(option, delivery_deadline_seconds=delivery_deadline_seconds())
+        check_recurring_option(option, delivery_deadline_seconds=delivery_deadline_seconds(),
+                               payee_notice_seconds=self.payee_notice_seconds)
+
+    def read_arguments(self, run_id: str) -> list[str]:
+        return ["delivery", "--from", run_id]
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         async def read() -> LifecycleRead:

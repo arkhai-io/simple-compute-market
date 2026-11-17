@@ -11,7 +11,7 @@ negotiation. ``BareMetalPurchaseDriver`` is the lane's, over
 ``BareMetalComputeDealDriver``: a storefront pool override offering the lane's
 whole host in ``arkhai.payments.v1`` alone. ``BareMetalRecurringPurchaseDriver``
 is the lane's recurring purchase, whose pool override's one settlement is a
-recurring on-demand option.
+recurring option, on-demand or spot.
 """
 
 from __future__ import annotations
@@ -63,13 +63,16 @@ DELIVERY_DEADLINE_SECONDS = 300
 PAYMENT_TIMEOUT_SECONDS = 300
 
 
-def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
+def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
+                            payer: str | None = None) -> BuyerCli:
     """A profiled Ed25519 buyer with no wallet (``PAYMENTS``'s buyer), under
-    ``base``, buying through Arkhai payments, with its dispute credential for
-    the run's mediation target when the run names one, which its teardown files
-    with. Each profile keeps its own run logs, so a purchase's compensation
-    finds that purchase alone."""
+    ``base``, buying through Arkhai payments from ``payer``, the run's buyer
+    account unless named, with its dispute credential for the run's mediation
+    target when the run names one, which its teardown files with. Each profile
+    keeps its own run logs, so a purchase's compensation finds that purchase
+    alone."""
     mediation = mediation_if_configured()
+    payer = payer or str(payment_setting("BUYER_ACCOUNT"))
     url = lane_setting("registry_url")
     scheme = lane_setting("registry_scheme")
     identifier = lane_setting("registry_identifier")
@@ -80,7 +83,7 @@ def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> Bu
         f"registry_authority = {_toml_quote(authority)}",
         "registry_principals = [{ scheme = " + _toml_quote(scheme)
         + ", identifier = " + _toml_quote(identifier) + " }]",
-        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
+        f"payer_account = {_toml_quote(payer)}",
         "",
         *payment_config_toml(payments_config, table="bare_metal.arkhai_payments"),
         "",
@@ -96,7 +99,7 @@ def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> Bu
         registry_authorities={url: {"authority": authority,
                                    "identities": [{"scheme": scheme, "identifier": identifier}]}},
         credential_environment={
-            **buyer_payments_environment(payments_config),
+            **buyer_payments_environment(payments_config, payer),
             **buyer_mediation_environment(mediation),
         },
         toml_sections=sections,
@@ -317,20 +320,27 @@ class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
     #: The storefront loop whose servicing cycle reads its committed deals'
     #: payments and carries out their recorded ends at the site.
     servicing_loop = "deal-servicing"
+    #: The seller's notice a spot option states; none for on-demand.
+    payee_notice_seconds: int | None = None
 
     def pool_settlement(self) -> dict[str, Any]:
-        """The pool override's one settlement: a recurring on-demand option on
-        the whole host."""
+        """The pool override's one settlement: a recurring option, on-demand or
+        spot, on the whole host."""
         return recurring_settlement(
             seller_account=self.seller_account,
             delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+            payee_notice_seconds=self.payee_notice_seconds,
         )
 
     def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
         # The pool override offers the recurring payments option alone.
         assert len(listing.settlement_options) == 1, listing.settlement_options
         self.check_payments_listing(listing, option)
-        check_recurring_option(option, delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS)
+        check_recurring_option(option, delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+                               payee_notice_seconds=self.payee_notice_seconds)
+
+    def read_arguments(self, run_id: str) -> list[str]:
+        return ["bare-metal", "delivery", "--run-id", run_id, "--config", self.config_path]
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         return LifecycleRead.model_validate(self.fulfillment.delivery(negotiation_id))

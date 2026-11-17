@@ -17,8 +17,10 @@ supplying VM's part, and inserts its own:
 ``market buy`` polls its settlement until delivery, so it runs in the
 background from ``Purchase03`` until ``Purchase09`` while the stages step
 delivery. The buyer ends the deal by its own ``market end``, which the
-storefront's servicing step carries out at the site, and the scenario does not
-wait for the delivery deadline. Its resource, host, pool and GPU model are its
+storefront's servicing step carries out at the site, and the seller's list
+shows it ended once released. Every instant is reached by setting lane time,
+never by waiting, and the scenario does not wait for the delivery deadline.
+Its resource, host, pool and GPU model are its
 own (``host_registry.py``), since a listing's binding to its resource outlives
 the listing and ``market buy`` selects its listing by discovery. The
 storefront's loops, fulfillment convergence and the lease watchdog are held for
@@ -68,10 +70,12 @@ from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     Recurring04_MandateApproved,
-    Recurring05_RateStartedAfterActivation,
-    Recurring06_AcceptedMoneyShown,
-    Recurring07_BuyerEnds,
-    Recurring08_PayerChargedOnePeriod,
+    Recurring05_DeliveryRecoveredAtTheStart,
+    Recurring06_RateStartedAfterActivation,
+    Recurring07_AcceptedMoneyShown,
+    Recurring08_BuyerEnds,
+    Recurring09_PayerChargedOnePeriod,
+    Recurring10_SellerListsTheDealEnded,
     RecurringPurchaseState,
     recurring_purchase_cleanup,
 )
@@ -314,6 +318,10 @@ class TestStage09a2_CapacityEventCycle:
                  deal_state.seller_listing_id, pending, applied)
 
 
+class TestRecurring05_DeliveryRecoveredAtTheStart(Recurring05_DeliveryRecoveredAtTheStart):
+    pass
+
+
 class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCredentials):
     pass
 
@@ -322,7 +330,7 @@ class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
     pass
 
 
-class TestRecurring05_RateStartedAfterActivation(Recurring05_RateStartedAfterActivation):
+class TestRecurring06_RateStartedAfterActivation(Recurring06_RateStartedAfterActivation):
     pass
 
 
@@ -330,7 +338,7 @@ class TestPurchase09_PurchaseRunEnded(Purchase09_PurchaseRunEnded):
     pass
 
 
-class TestRecurring06_AcceptedMoneyShown(Recurring06_AcceptedMoneyShown):
+class TestRecurring07_AcceptedMoneyShown(Recurring07_AcceptedMoneyShown):
     pass
 
 
@@ -342,7 +350,7 @@ class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
     pass
 
 
-class TestRecurring07_BuyerEnds(Recurring07_BuyerEnds):
+class TestRecurring08_BuyerEnds(Recurring08_BuyerEnds):
     pass
 
 
@@ -354,5 +362,9 @@ class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
     pass
 
 
-class TestRecurring08_PayerChargedOnePeriod(Recurring08_PayerChargedOnePeriod):
+class TestRecurring09_PayerChargedOnePeriod(Recurring09_PayerChargedOnePeriod):
+    pass
+
+
+class TestRecurring10_SellerListsTheDealEnded(Recurring10_SellerListsTheDealEnded):
     pass

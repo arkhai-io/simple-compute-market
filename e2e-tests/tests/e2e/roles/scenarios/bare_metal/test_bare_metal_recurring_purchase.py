@@ -16,8 +16,10 @@ bare-metal lanes) and its own:
   03  Publication:  one pass publishes the purchase's machine, offered by a
                     pool override stating the recurring option alone
 
-The buyer ends the deal by its own ``market bare-metal end``, and the scenario
-does not wait for the delivery deadline. The storefront's loops, fulfillment
+The buyer ends the deal by its own ``market bare-metal end``, and the seller's
+list shows it ended once released. Every instant is reached by setting lane
+time, never by waiting, and the scenario does not wait for the delivery
+deadline. The storefront's loops, fulfillment
 convergence and the lease watchdog are held for the module. This is lane-double
 evidence: it proves the money a buyer is shown and approves for a per-period
 Agreement, rate delivery and the buyer's end. Mock access is never evidence of
@@ -69,10 +71,12 @@ from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     Recurring04_MandateApproved,
-    Recurring05_RateStartedAfterActivation,
-    Recurring06_AcceptedMoneyShown,
-    Recurring07_BuyerEnds,
-    Recurring08_PayerChargedOnePeriod,
+    Recurring05_DeliveryRecoveredAtTheStart,
+    Recurring06_RateStartedAfterActivation,
+    Recurring07_AcceptedMoneyShown,
+    Recurring08_BuyerEnds,
+    Recurring09_PayerChargedOnePeriod,
+    Recurring10_SellerListsTheDealEnded,
     RecurringPurchaseState,
     recurring_purchase_cleanup,
 )
@@ -311,6 +315,10 @@ class TestStage09a2_PublicationClosesTheListing(BareMetalPublicationClosesListin
     pass
 
 
+class TestRecurring05_DeliveryRecoveredAtTheStart(Recurring05_DeliveryRecoveredAtTheStart):
+    pass
+
+
 class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCredentials):
     pass
 
@@ -319,7 +327,7 @@ class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
     pass
 
 
-class TestRecurring05_RateStartedAfterActivation(Recurring05_RateStartedAfterActivation):
+class TestRecurring06_RateStartedAfterActivation(Recurring06_RateStartedAfterActivation):
     pass
 
 
@@ -327,7 +335,7 @@ class TestPurchase09_PurchaseRunEnded(Purchase09_PurchaseRunEnded):
     pass
 
 
-class TestRecurring06_AcceptedMoneyShown(Recurring06_AcceptedMoneyShown):
+class TestRecurring07_AcceptedMoneyShown(Recurring07_AcceptedMoneyShown):
     pass
 
 
@@ -339,7 +347,7 @@ class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
     pass
 
 
-class TestRecurring07_BuyerEnds(Recurring07_BuyerEnds):
+class TestRecurring08_BuyerEnds(Recurring08_BuyerEnds):
     pass
 
 
@@ -351,5 +359,9 @@ class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
     pass
 
 
-class TestRecurring08_PayerChargedOnePeriod(Recurring08_PayerChargedOnePeriod):
+class TestRecurring09_PayerChargedOnePeriod(Recurring09_PayerChargedOnePeriod):
+    pass
+
+
+class TestRecurring10_SellerListsTheDealEnded(Recurring10_SellerListsTheDealEnded):
     pass
