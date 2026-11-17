@@ -347,10 +347,11 @@ is `ending` with a fourth code, `case_unobserved`, until one such read is saved.
 deal whose storefront composed no adapter for its authority's interface therefore
 stays `ending` until one is composed; a missing credential still shows repair
 required first. The code arrives in `kit/deal-lifecycle-contracts`' unreleased 0.3.0,
-so it costs no further version. An authority's answer that it holds no record of the
-Agreement is such a read, showing no case (D16), so a deal nobody filed on is observed;
-`case_unobserved` remains for an authority that has not answered or has no adapter
-composed. Rejected: widening `case_open` to cover an unobserved
+so it costs no further version. The authority's first-page `404 invalid_request` is
+taken as such a read, showing no case (D16), so a deal nobody filed on is observed —
+on the premise, which the published contract cannot check, that the credential
+authenticates the Agreement's party; `case_unobserved` remains for an authority that
+has not answered or has no adapter composed. Rejected: widening `case_open` to cover an unobserved
 authority, which would list `case_open` beside an empty `open_cases` and make its text
 untrue; unlike `payment_running`, its text does not already cover the unverified case.
 
@@ -497,11 +498,25 @@ storefront tests meet it. `kit/arkhai-mediation` is at an unreleased 0.3.0
 stored record changes, and a deployed storefront's saved rejected observation is
 replaced by its next read.
 
-An empty record page is unsigned too, so this read carries the same assurance as any
-accepted read: transport to the Agreement's pinned authority. The one thing the `404`
-cannot tell apart is a reader who is no party: a seller whose mediation credential
-authenticates another account sees its deals with no case, though that credential also
-has its filings refused (`filer_not_party`) and its respondent listing empty.
+This read is not verified. The authority answers the same `404` to a reader who is no
+party to the Agreement, and none of the published routes tells a client which account
+its token authenticates, so the adapter takes the `404` as no case on a premise the
+contract gives no way to check: that the credential authenticates the Agreement's party.
+An empty record page is unsigned too, so where that premise holds the read carries the
+assurance of any accepted read: transport to the Agreement's pinned authority. Where it
+does not, the limit is real: a seller whose mediation credential authenticates another
+account sees every unfiled deal, and any case filed against it before its first accepted
+read, as no case, so a released, paid deal with a case open can list `ended`. That
+misconfiguration also has its filings refused (`filer_not_party`) and its respondent
+listing empty, which is where an operator meets it; neither makes the list true.
+
+*Settled at the design review's triage (60 F1):* the mapping stands, its premise and
+limit stated rather than called verified. Rejected: requiring the payments view to show
+no open extension before `ended`, which corroborates no held case only while a finite
+extension lasts and widens D7's rule; keeping the `404` as `case_unobserved`, which
+leaves every correctly served unfiled deal `ending`, both reads rejected and retention
+stalled, to guard one misconfiguration; and waiting for the contract to give a
+verifiable answer, which no answer is expected to provide before this change lands.
 
 Rejected: the same read marking the absence in a new `AuthorityView` field, which no
 caller would act on; the seller list telling a `404` from other failures, which makes
@@ -523,13 +538,20 @@ programs it. The double gains one control:
 POST /test/transactions/9c41…e07/reserve
 {"through": 1800007200}
 
-200 {"transaction": "9c41…e07", "part": 0, "reserved_through": 1800000360, "periods_added": 1}
+200 {"transaction": "9c41…e07", "parts": [{"part": 0, "reserved_through": 1800000360, "periods_added": 1}]}
 ```
 
-It reserves each started rate part's further periods through the named instant, as far
-as the part's end and the payer's balance allow — the arithmetic the engine already
-applies at `start` — and answers the instant the part is then reserved through, which
-the signed snapshot reports as its funded boundary. The engine gains the public method
+It reserves each running rate part's — started and not stopped — further periods
+through the named instant, as far as the part's end and the payer's balance allow — the
+arithmetic the engine already applies at `start` — and answers, for each such part, the
+instant it is then reserved through, which the signed snapshot reports as its funded
+boundary. A transaction with no running rate part — before `start`, once-only, or every
+rate part stopped — is refused and nothing changes, so a stage run too early or against
+the wrong deal fails where it runs instead of passing with nothing reserved (60 F2):
+
+```http
+409 {"code": "no_running_rate_part", "message": "the transaction has no started, unstopped rate part"}
+``` The engine gains the public method
 behind it; `tools/lane-double-controls` gains the route and its typed client method; the
 engine's reads, `advance` and its reservation at `start` are unchanged, and funding
 running out still shows at the next read once lane time passes the boundary.
@@ -544,7 +566,9 @@ an exact number of periods, refused when the balance falls short, which makes fu
 running out the scenario's choice rather than a boundary the ledger computes; rows kept
 within the first reservation, against realistic terms and with the double still unlike
 its producer; and stepping lane time with a read at each step, since reads never
-reserve.
+reserve. *Settled at the design review's triage (60 F2):* the refusal and the per-part
+answer. Rejected: an empty answer, `parts: []`, which a lane stage could pass without
+reserving anything.
 
 ### D18 — The watchdog's storefront is paused, not stopped
 
@@ -583,5 +607,6 @@ Helm release cannot reach the doubles' controls or set lane time; and requiring 
 ## Open Questions
 
 - The published mediation contract gives no verifiable answer for an Agreement the
-  authority holds no record of, so D16 reads an unsigned `404` as no case. Revisit D16's
-  mapping if the contract comes to offer such an answer.
+  authority holds no record of, nor a way to check which account a credential
+  authenticates, so D16 reads an unsigned `404` as no case on an unchecked premise.
+  Revisit D16's mapping if the contract comes to offer either.

@@ -63,12 +63,16 @@ it. It takes the servicing slice of `converge-ongoing-compute-leases`.
   and after a funding stop that a top-up cannot revive the deal.
 - **A stale buyer requirement corrected, and restart recovery proven** (D14).
 - **An Agreement nobody filed on is observed** (D16): the mediation adapter reads the
-  authority's answer that it holds no record of the Agreement as no case, so such a deal
-  can be listed *ended*, both halves' reads carry an accepted dispute outcome, and
-  evidence retention runs; the kit's fake answers as the authority does.
+  authority's first-page `404 invalid_request` as no case, so such a deal can be listed
+  *ended*, both halves' reads carry an accepted dispute outcome, and evidence retention
+  runs; the kit's fake answers as the authority does. The read is not verified: the
+  authority gives a reader who is no party the same answer, so it rests on the
+  credential authenticating the Agreement's party, and the limit under one that does
+  not is stated.
 - **The scenario programs the payments double's further reservation** (D17): a control
-  reserving a rate part through a named instant, as far as its end and the payer's
-  balance allow, in place of the service's scheduler.
+  reserving each running rate part through a named instant, as far as its end and the
+  payer's balance allow, in place of the service's scheduler, and refusing a
+  transaction with no running rate part.
 - **Lane qualification in both lanes, against both doubles** (D9, D10, D18, D19): the
   on-demand baseline with the buyer's stop, funds running out, spot preemption with
   notice, the maximum term ending with `returned`, and the buyer watchdog's
@@ -147,7 +151,7 @@ None.
 - D13: `buyer-orchestration`'s spec and architecture companion ("Compute terms before approval", "The buyer's watchdog") — the penalty's collectible bound and the funding-stop message.
 - D14: `buyer-orchestration`'s spec — the requirement reworded to the per-term waivers; restart recovery's evidence in `test-compatibility`'s companion.
 - D15: no permanent destination — the implementation cadence orders this change's own work.
-- D16: `deal-lifecycle`'s spec ("The seller half lists deals") — an authority holding no record of the Agreement read as no case; `openspec/specs/settlement-servicing/architecture.md` (its "Initial missing mediation history permits the first filing only" sentence) and `kit/arkhai-mediation/README.md` (its initial-404 paragraph).
+- D16: `deal-lifecycle`'s spec ("The seller half lists deals") — the authority's first-page `404` read as no case, its unchecked credential premise and its limit; `openspec/specs/settlement-servicing/architecture.md` (its "Initial missing mediation history permits the first filing only" sentence) and `kit/arkhai-mediation/README.md` (its initial-404 paragraph).
 - D17: `test-compatibility`'s spec ("Lane double controls are typed deterministic steps", "Rate deals are qualified in both compute lanes on lane time"); `tools/payments-lane-double/README.md` (its controls and claims), `tools/lane-double-controls/README.md` (the route), `kit/arkhai-payments/README.md` (the engine's reservation method beside `advance`); `docs/development/TESTING.md`, "Private Service Dependencies" (the reservation control).
 - D18: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" (the watchdog cases with the storefront paused).
 - D19: `docs/development/TESTING.md`, "The canonical compute deal" — the rate rows and watchdog cases are Compose-lane, lane-double evidence.
