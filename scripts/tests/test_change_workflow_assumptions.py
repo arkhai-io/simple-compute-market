@@ -1,10 +1,20 @@
-"""Every make target and repository path the workflow's skills, its step table, and its
-make fragment name is one this repository says it provides, and each role the workflow
-asks of an adopting repository has a provision here.
+"""Every make target and repository path the workflow's skills name is the workflow's
+own; every one its step table and its make fragment name is one this repository says
+it provides; and each role the workflow asks of an adopting repository has a provision
+here.
 
-The roles are stated twice: in `change-workflow`'s `README.md`, what any adopting
-repository provides, and in `market-change-workflow`'s, how this one provides each.
-This repository provides them in two places: its workflow configuration,
+A skill is shared by every repository that adopts the workflow, so it names no
+repository's target or path (CW-n8tr): only the workflow's own — its guidance and the
+engineering guidance it rests on, OpenSpec's tree as the workflow knows it, the
+engine's command and package and the outcome schema it reads, and the make fragment's
+targets — or one this repository's table of exemptions lists, each owned by the open
+change that removes it. What a repository does not hold in common reaches a skill
+through its configuration and its guides, never through the skill's text.
+
+The step table and the make fragment are this repository's. The roles are
+stated twice: in `change-workflow`'s `README.md`, what any adopting repository
+provides, and in `market-change-workflow`'s, how this one provides each. This
+repository provides them in two places: its workflow configuration,
 `.agents/workflow.toml`, whose hooks' and evidence kinds' commands are provisions as
 they stand, and its statement of what the configuration does not hold. This test reads
 the configuration's commands and the two documents' tables, never the engine's
@@ -46,6 +56,26 @@ CONFIGURATION = ROOT / ".agents/workflow.toml"
 ROLES_HEADING = "What an adopting repository provides"
 PROVISIONS_HEADING = "How this repository provides the workflow's roles"
 GUIDANCE_ROLE = "The guidance documents every step reads"
+EXEMPTIONS_HEADING = "What the workflow's skills name of this repository"
+
+# The guidance a skill may cite: the workflow's, and the engineering guidance below it,
+# which the workflow's guidance links and so needs wherever the workflow goes. A file's
+# frontmatter states its layer, wherever it sits (CW-n6dm).
+GUIDANCE = ("docs/guidance/workflow/", "docs/guidance/engineering/")
+GUIDANCE_LAYERS = frozenset({"workflow", "engineering"})
+# OpenSpec's two trees as the workflow knows them: a change or a capability named by a
+# placeholder, never by its name, beside the change index and the archive.
+OPENSPEC = ("openspec/changes/", "openspec/specs/")
+CHANGE_INDEX = "openspec/changes/README.md"
+ARCHIVE = "archive"
+# What the workflow keeps in the archive beside the changes: the guidance reviews'
+# period ledger.
+ARCHIVE_FILES = frozenset({"guidance-reviews.jsonl"})
+# The engine's command and package, and the outcome schema it checks every step's last
+# turn against.
+ENGINE = frozenset({"scripts/change-workflow", ".agents/change-outcome.schema.json"})
+ENGINE_PACKAGE = "scripts/change_workflow/"
+_LAYER = re.compile(r"^tags:\s*\[([^\]]*)\]", re.M)
 
 # An inline code span, of one backtick or more, which may wrap across lines.
 _SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -140,28 +170,102 @@ def _shown(path: Path) -> str:
     return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
 
 
-def collected(root: Root, skills: Path = SKILLS, step_table: Path = STEP_TABLE,
-              fragment: Path = FRAGMENT) -> dict[str, set[str]]:
-    """Every make target and repository path the skills, the step table, and the
-    fragment name, the targets the fragment defines among them, each with where it is
-    named."""
+def _named(sources: list[tuple[str, list[str]]], root: Root) -> dict[str, set[str]]:
     where: dict[str, set[str]] = defaultdict(set)
-    sources: list[tuple[str, list[str]]] = [
-        (_shown(skill), code_of(skill.read_text("utf-8")))
-        for skill in sorted(path for pattern in WORKFLOW_SKILLS for path in skills.glob(pattern))]
-    table = tomllib.loads(step_table.read_text("utf-8"))
-    # A step's rules are under `[steps.<name>]`, the shared ones under `[common]`.
-    rows = [table.get("common", {}), *table.get("steps", {}).values()]
-    rules = [rule for row in rows for key in ("allow", "deny") for rule in row.get(key, [])]
-    sources.append((_shown(step_table), rules))
-    text = fragment.read_text("utf-8")
-    sources.append((_shown(fragment), text.splitlines()))
     for name, texts in sources:
         for code in texts:
             for found in (*make_targets(code), *paths(code, root)):
                 where[found].add(name)
-    for rule in _RULE.finditer(text):
-        where[f"make {rule['target']}"].add(_shown(fragment))
+    return where
+
+
+def skill_names(root: Root, skills: Path = SKILLS) -> dict[str, set[str]]:
+    """Every make target and repository path the workflow's skills name, each with the
+    skills naming it."""
+    return _named([(_shown(skill), code_of(skill.read_text("utf-8")))
+                   for skill in sorted(path for pattern in WORKFLOW_SKILLS
+                                       for path in skills.glob(pattern))], root)
+
+
+def fragment_targets(fragment: Path = FRAGMENT) -> frozenset[str]:
+    """The targets the make fragment defines."""
+    return frozenset(rule["target"] for rule in _RULE.finditer(fragment.read_text("utf-8")))
+
+
+def _guidance(path: str) -> bool:
+    """A guidance directory, or a file whose frontmatter's layer is the workflow's or
+    the engineering guidance's."""
+    if path in GUIDANCE:
+        return True
+    if not path.startswith("docs/guidance/") or not path.endswith(".md"):
+        return False
+    document = ROOT / path
+    layer = _LAYER.search(document.read_text("utf-8")) if document.is_file() else None
+    return layer is not None and bool(
+        {tag.strip() for tag in layer[1].split(",")} & GUIDANCE_LAYERS)
+
+
+def _openspec(path: str) -> bool:
+    """OpenSpec's trees, the change index, the archive and what the workflow keeps in
+    it, and anything in them named by a placeholder; never one change or capability by
+    its name, nor the repository's capability index."""
+    tree = next((tree for tree in OPENSPEC if path.startswith(tree)), None)
+    if tree is None:
+        return False
+    if path == CHANGE_INDEX:
+        return True
+    segments = path[len(tree):].split("/")
+    if tree == "openspec/changes/" and segments[0] == ARCHIVE:
+        segments = segments[1:] or [""]
+        if segments[0] in ARCHIVE_FILES:
+            return True
+    return segments[0] == "" or "<" in segments[0]
+
+
+def workflows_own(name: str, targets: frozenset[str]) -> bool:
+    """Whether `name`, a make target or a repository path, is the workflow's own: a
+    target the fragment defines, run here or in a checkout `-C` names by a placeholder
+    — another clone, a proposal's worktree — or a path the workflow holds."""
+    if name.startswith("make "):
+        words = name.split()
+        return words[-1] in targets and (len(words) == 2 or "<" in words[2])
+    return (name in ENGINE or name.startswith(ENGINE_PACKAGE) or _guidance(name)
+            or _openspec(name))
+
+
+def exemptions(markdown: str) -> dict[str, str]:
+    """The targets and paths a skill may name though they are no workflow's own, each
+    with the change that owns its removal: the first table under the exemptions'
+    heading, a name in code in its first cell and the change in its second."""
+    tables = _tables(section(markdown, EXEMPTIONS_HEADING))
+    found: dict[str, str] = {}
+    for row in tables[0] if tables else []:
+        owners = [match[2] for match in _SPAN.finditer(row[1])] if len(row) > 1 else []
+        for match in _SPAN.finditer(row[0]):
+            found[" ".join(match[2].split())] = owners[0] if owners else ""
+    return found
+
+
+def not_the_workflows(where: dict[str, set[str]], targets: frozenset[str],
+                      exempted: dict[str, str]) -> list[str]:
+    """Each name in `where` that is neither the workflow's own nor exempted, with the
+    skills naming it."""
+    return [f"{name} (named in {', '.join(sorted(where[name]))})" for name in sorted(where)
+            if not workflows_own(name, targets) and name not in exempted]
+
+
+def collected(root: Root, step_table: Path = STEP_TABLE,
+              fragment: Path = FRAGMENT) -> dict[str, set[str]]:
+    """Every make target and repository path the step table and the fragment name, the
+    targets the fragment defines among them, each with where it is named."""
+    table = tomllib.loads(step_table.read_text("utf-8"))
+    # A step's rules are under `[steps.<name>]`, the shared ones under `[common]`.
+    rows = [table.get("common", {}), *table.get("steps", {}).values()]
+    rules = [rule for row in rows for key in ("allow", "deny") for rule in row.get(key, [])]
+    text = fragment.read_text("utf-8")
+    where = _named([(_shown(step_table), rules), (_shown(fragment), text.splitlines())], root)
+    for target in fragment_targets(fragment):
+        where[f"make {target}"].add(_shown(fragment))
     return where
 
 
@@ -281,7 +385,26 @@ def listed_here(root: Root) -> set[str]:
             | configured(CONFIGURATION.read_text("utf-8"), root))
 
 
-def test_every_target_and_path_the_workflow_names_is_provided_here() -> None:
+def test_every_target_and_path_a_skill_names_is_the_workflows_own() -> None:
+    foreign = not_the_workflows(skill_names(tracked_root()), fragment_targets(),
+                                exemptions(PROVISIONS.read_text("utf-8")))
+
+    assert not foreign, "a workflow skill names a target or path that is not the " \
+                        "workflow's own; name it by its role:\n" + "\n".join(foreign)
+
+
+def test_every_exemption_is_named_by_a_skill_and_owned_by_an_open_change() -> None:
+    """An exemption goes with what it exempts: once no skill names it, or once the
+    change owning its removal is archived, which moves its directory away."""
+    exempted, named = exemptions(PROVISIONS.read_text("utf-8")), skill_names(tracked_root())
+
+    assert exempted
+    assert [name for name in exempted if name not in named] == []
+    assert [f"{name}: {owner or 'no owner'}" for name, owner in exempted.items()
+            if not owner or not (ROOT / "openspec/changes" / owner).is_dir()] == []
+
+
+def test_every_target_and_path_the_step_table_and_the_fragment_name_is_provided_here() -> None:
     root = tracked_root()
 
     missing = unlisted(collected(root), listed_here(root),
@@ -300,7 +423,7 @@ def test_each_role_has_a_provision_and_each_provision_a_role() -> None:
 
 # The collection itself, on texts and trees of the test's own.
 
-ROOT_OF_TEST = Root(frozenset({"openspec", "docs", ".agents", "helm"}),
+ROOT_OF_TEST = Root(frozenset({"openspec", "docs", ".agents", ".claude", "helm", "scripts"}),
                     frozenset({"AGENTS.md", "Makefile"}))
 
 
@@ -337,28 +460,91 @@ def test_a_path_is_rooted_in_the_repository() -> None:
                  ROOT_OF_TEST) == []
 
 
-def _sources(tmp_path: Path, skill: str = "", table: str = "", fragment: str = "") -> dict:
+def _skill(tmp_path: Path, text: str) -> dict[str, set[str]]:
     (tmp_path / "skills/change-extra").mkdir(parents=True)
-    (tmp_path / "skills/change-extra/SKILL.md").write_text(skill, "utf-8")
+    (tmp_path / "skills/change-extra/SKILL.md").write_text(text, "utf-8")
+    return skill_names(ROOT_OF_TEST, tmp_path / "skills")
+
+
+def _sources(tmp_path: Path, table: str = "", fragment: str = "") -> dict[str, set[str]]:
     (tmp_path / "table.toml").write_text(table, "utf-8")
     (tmp_path / "workflow.mk").write_text(fragment, "utf-8")
-    return collected(ROOT_OF_TEST, tmp_path / "skills", tmp_path / "table.toml",
-                     tmp_path / "workflow.mk")
+    return collected(ROOT_OF_TEST, tmp_path / "table.toml", tmp_path / "workflow.mk")
 
 
-def test_a_skill_naming_an_unlisted_target_is_named(tmp_path: Path) -> None:
-    """CW-m4ps's "A skill names a new target", against what this repository provides:
-    its statement and its configuration's commands, the latter alone providing
-    validation's preflight, `make check-uv-version`."""
-    assert "make check-uv-version" not in provided(PROVISIONS.read_text("utf-8"),
-                                                   PROVISIONS_HEADING, tracked_root())
-    where = _sources(tmp_path, skill="Run `make check-something`, then `make test`, then "
-                                     "`make check-uv-version`.\n")
+FRAGMENT_OF_TEST = frozenset({"validate", "check-change-index"})
 
-    missing = unlisted(where, listed_here(tracked_root()))
 
-    assert missing == [f"make check-something (named in "
-                       f"{tmp_path / 'skills/change-extra/SKILL.md'})"]
+def _shown_names(foreign: list[str]) -> list[str]:
+    return [line.split(" (named in ")[0] for line in foreign]
+
+
+def test_a_skill_naming_a_repositorys_check_is_named(tmp_path: Path) -> None:
+    """CW-n8tr's "A skill names a repository's check" and CW-m4ps's "A skill names a
+    new target": refused whether this repository's statement lists the target, its
+    configuration's commands alone name it, or nothing does."""
+    root = tracked_root()
+    assert "make check-comment-hygiene" in provided(PROVISIONS.read_text("utf-8"),
+                                                    PROVISIONS_HEADING, root)
+    assert "make check-uv-version" in configured(CONFIGURATION.read_text("utf-8"), root)
+    where = _skill(tmp_path, "Run `make check-comment-hygiene`, then `make check-something`, "
+                             "then `make check-uv-version`.\n")
+
+    foreign = not_the_workflows(where, FRAGMENT_OF_TEST, {})
+
+    skill = tmp_path / "skills/change-extra/SKILL.md"
+    assert foreign == [f"make check-comment-hygiene (named in {skill})",
+                       f"make check-something (named in {skill})",
+                       f"make check-uv-version (named in {skill})"]
+
+
+def test_a_skill_may_name_the_workflows_own_targets_and_paths(tmp_path: Path) -> None:
+    where = _skill(tmp_path, (
+        "Run `make validate CHANGE=<change>`, `make -C <clone> validate`, and "
+        "`make -C ../<x>-proposal check-change-index`; read "
+        "`docs/guidance/workflow/closeout.md#archival`, `docs/guidance/engineering/comments.md`, "
+        "`openspec/changes/README.md`, `openspec/changes/archive/<date>-<change>/`, "
+        "`openspec/changes/archive/guidance-reviews.jsonl`, and "
+        "`openspec/specs/<capability>/spec.md`; run `scripts/change-workflow next <change>`, "
+        "as `scripts/change_workflow/next_step.py` computes it; match "
+        "`.agents/change-outcome.schema.json`.\n"))
+
+    assert {"make validate", "make -C <clone> validate", "scripts/change-workflow",
+            "openspec/specs/<capability>/spec.md"} <= set(where)
+    assert not_the_workflows(where, FRAGMENT_OF_TEST, {}) == []
+
+
+def test_a_skill_naming_a_repositorys_paths_is_named(tmp_path: Path) -> None:
+    """The repository's own documents and its changes and capabilities by name, even in
+    OpenSpec's directories, are not the workflow's; nor is a fragment target run in one
+    of the repository's own directories."""
+    where = _skill(tmp_path, (
+        "Read `AGENTS.md`, `openspec/README.md#documentation-placement`, "
+        "`openspec/specs/README.md`, `openspec/specs/change-workflow/spec.md`, "
+        "`openspec/changes/some-change/notes.md`, "
+        "`openspec/changes/archive/2026-01-01-x/notes.md`, "
+        "`docs/development/ARCHITECTURE.md`, `docs/guidance/repository/README.md`, and "
+        "`.agents/evidence/helm.md`; run `make -C helm validate`.\n"))
+
+    assert _shown_names(not_the_workflows(where, FRAGMENT_OF_TEST, {})) == [
+        ".agents/evidence/helm.md", "AGENTS.md", "docs/development/ARCHITECTURE.md",
+        "docs/guidance/repository/README.md", "make -C helm validate",
+        "openspec/README.md", "openspec/changes/archive/2026-01-01-x/notes.md",
+        "openspec/changes/some-change/notes.md", "openspec/specs/README.md",
+        "openspec/specs/change-workflow/spec.md"]
+
+
+def test_an_exempted_name_is_admitted(tmp_path: Path) -> None:
+    exempted = exemptions(f"## {EXEMPTIONS_HEADING}\n\n| Named in a skill | Owned by |\n"
+                          "|---|---|\n| `make -C <package> test` | `some-change` |\n"
+                          "| `.claude/` and `.claude/change-steps.toml` | `some-change` |\n")
+    where = _skill(tmp_path, "Run `make -C <package> test`, then `make -C <package> lint`; "
+                             "an edit under `.claude/` is the orchestrator's.\n")
+
+    assert exempted == {"make -C <package> test": "some-change", ".claude/": "some-change",
+                        ".claude/change-steps.toml": "some-change"}
+    assert _shown_names(not_the_workflows(where, FRAGMENT_OF_TEST, exempted)) == [
+        "make -C <package> lint"]
 
 
 def test_only_the_guidance_provisions_directories_provide_what_lies_beneath() -> None:
@@ -385,7 +571,7 @@ def test_the_guidance_review_is_read_and_openspecs_own_skills_are_not(tmp_path: 
         (tmp_path / "skills" / name).mkdir(parents=True)
         (tmp_path / "skills" / name / "SKILL.md").write_text(text, "utf-8")
 
-    where = _sources(tmp_path)
+    where = skill_names(ROOT_OF_TEST, tmp_path / "skills")
 
     assert set(where) == {"openspec/changes/archive/x.jsonl"}
 

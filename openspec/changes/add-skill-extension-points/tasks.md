@@ -1305,7 +1305,7 @@ CW-m4ps, MCW-5tgp). Files: `scripts/tests/test_change_workflow_assumptions.py`, 
 `openspec/specs/market-change-workflow/README.md`'s "How this repository provides
 the workflow's roles" only where the test reads it.
 
-- [ ] 9.1 Invert the test for skills: a make target or repository path a skill names
+- [x] 9.1 Invert the test for skills: a make target or repository path a skill names
   is the workflow's own — `docs/guidance/workflow/`, OpenSpec's tree, the change
   index, the make fragment's targets, `scripts/change-workflow` — or in an exemption
   list naming `sandbox-unattended-workflow-steps` as its owner (implementation's
@@ -1314,8 +1314,108 @@ the workflow's roles" only where the test reads it.
   repository's statement (MCW-5tgp). Verify: the test passes on the skills as
   sections 7 and 8 left them, and a fixture skill naming `make
   check-comment-hygiene` fails it.
-- [ ] 9.2 Verification point: `test_change_workflow_assumptions.py`; `run pre-commit`
+  - Done in `scripts/tests/test_change_workflow_assumptions.py`:
+    - `skill_names` collects the skills apart from `collected`, which now reads the
+      step table and the fragment alone, still held to this repository's statement
+      and configuration.
+    - `not_the_workflows` refuses every skill name that is neither the workflow's
+      own (`workflows_own`) nor exempted, naming the skills. The workflow's own is:
+      - a target the fragment defines, run here or in a checkout `-C` names by a
+        placeholder (`make -C <clone> implement`), never in one of the repository's
+        directories;
+      - `scripts/change-workflow`, `scripts/change_workflow/`, and the outcome schema;
+      - the guidance directories `docs/guidance/workflow/` and
+        `docs/guidance/engineering/`, and a Markdown file beneath `docs/guidance/`
+        whose frontmatter tags it `workflow` or `engineering` (CW-n6dm: the
+        frontmatter states a file's layer, wherever it sits);
+      - OpenSpec's two trees as the workflow knows them: `openspec/changes/` and
+        `openspec/specs/`, the change index, the archive, the guidance reviews'
+        ledger in it, and a change or capability named by a placeholder. One named
+        by its name is refused, as are the capability index and `openspec/README.md`.
+    - The exemptions are a table, "What the workflow's skills name of this
+      repository", added to `openspec/specs/market-change-workflow/README.md` and
+      read by `exemptions`. It holds four names, each owned by
+      `sandbox-unattended-workflow-steps`:
+      - `make -C <package> test` and `make -C <package> migrate`;
+      - the step table, `.claude/change-steps.toml`, and `.claude/`.
+      The table is in a document because the repository's comment check refuses a
+      change's name in a test.
+  - Differing from the plan's list, the workflow's own also covers the engineering
+    guidance, the engine's package, and the outcome schema. CW-n8tr lists the
+    workflow's guidance, OpenSpec's tree, the change index, the fragment's targets,
+    and the engine's command:
+    - The engineering guidance is the layer below the workflow's, which the workflow's
+      guidance links, so the workflow cannot go without it. Eight skills cite it.
+    - The package and the schema are the engine's own, both in the engine's
+      assumptions table.
+    This reading of "its guidance" and "the engine's command" is for the round's
+    review and triage to confirm, or to return to design.
+  - Unit tests on fixture skills, all passing:
+    - `test_a_skill_naming_a_repositorys_check_is_named`, CW-n8tr's and CW-m4ps's
+      scenarios: `make check-comment-hygiene`, which the statement's tables list,
+      `make check-uv-version`, which only the configuration's commands name, and a
+      new target, each refused, naming the skill;
+    - `test_a_skill_may_name_the_workflows_own_targets_and_paths`;
+    - `test_a_skill_naming_a_repositorys_paths_is_named`, a fragment target run in
+      `helm` among them;
+    - `test_an_exempted_name_is_admitted`, the table read from a fixture.
+  - Two tests read this repository's skills and table, and both pass:
+    - `test_every_target_and_path_a_skill_names_is_the_workflows_own`;
+    - `test_every_exemption_is_named_by_a_skill_and_owned_by_an_open_change`, so an
+      exemption goes once nothing names it or its owner is archived.
+  - `test_every_target_and_path_the_step_table_and_the_fragment_name_is_provided_here`
+    keeps MCW-5tgp's check for the step table and the fragment.
+  - `run test-before` at the round's base, run before the exemptions moved to the
+    table, failed on the skill test's assertion, not at collection. It named every
+    repository target and path the skills then held, `AGENTS.md`,
+    `openspec/README.md`, and `scripts/validate_slice.py` among them. Every other
+    test passed there. Run again after the move, the two tests reading this
+    repository fail at the base for the table's absence, before any skill is read;
+    the first run is the one that shows the skills refused.
+  - `market-change-workflow/README.md`'s provisions paragraph now says the test holds
+    the step table and the fragment to its tables. Closeout's promotion (10.9) owes
+    the rest:
+    - that section's prose;
+    - `change-workflow/README.md`'s description of the test and of what the skills
+      keep.
+- [x] 9.2 Verification point: `test_change_workflow_assumptions.py`; `run pre-commit`
   passes. End-to-end: none.
+  - `test_change_workflow_assumptions.py`: 18 passed, its skill test reading every
+    skill as sections 7 and 8 left them; this is the inverted test 7.2 to 8.5 refer
+    to.
+  - `run pre-commit` passed whole: `after-functional-change`, `pre-commit-functional`
+    (`make validate-local`, every suite passing), and `pre-commit`.
+    - An earlier run failed `pre-commit` on two checks: the comment check, which read
+      the fixtures' change-document names and the owner check's `proposal.md` as
+      change references, and the history-wording check, on "no longer" in a
+      docstring. The fixtures now use other file names, the owner check reads the
+      change's directory, and the docstring says what holds.
+    - This note changes the tree that run checked.
+  - End-to-end: none — confirmed.
+  - The fresh-context check's findings, fixed:
+    - the test spelling the exemptions' owner, a change's name, which the comment
+      check refuses: the exemptions moved to the README table (9.1);
+    - OpenSpec's trees admitting any change or capability by name and the capability
+      index;
+    - the step table and `.claude/` admitted as the workflow's own, though the
+      allowlist they hold is the sandboxing change's to replace: now exemptions it
+      owns;
+    - a fragment target admitted in any `-C` directory, now only a placeholder
+      checkout's;
+    - a guidance file admitted by directory alone, now by its frontmatter's layer;
+    - the exemption test pinning the owner set, and checking no owner was open;
+    - the fixture test's claims beyond its assertions;
+    - two comments describing the plan;
+    - the 9.1 note's lists.
+  - Declined from the fresh-context check: amending CW-n8tr's wording for the
+    engineering guidance, the engine's package, and the outcome schema. The reading
+    is recorded in 9.1 for the round's review and triage; a requirement's wording
+    is design's.
+  - Handoff to closeout: 10.9's promotion owes the rest of `market-change-workflow`'s
+    "How this repository provides the workflow's roles" and `change-workflow`'s
+    description of the test and of what the skills keep. 10.6's index currency may
+    record, beside hooks for every node, the landing branch named `dev` and `origin`
+    in skills (8.5).
 
 ## 10. Closeout
 

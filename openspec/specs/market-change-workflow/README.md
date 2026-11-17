@@ -511,9 +511,9 @@ Each role is the workflow's, as
 states it; the provision is what fills it here: a field of this repository's
 workflow configuration, `.agents/workflow.toml`, or what the configuration does not
 hold. A test (`scripts/tests/test_change_workflow_assumptions.py`) fails when a make
-target or repository path the workflow's skills, its step table, or its make fragment
-name, the fragment's own targets among them, is missing from these two tables and
-from the configuration's commands, or when the two documents' roles differ.
+target or repository path the workflow's step table or its make fragment names, the
+fragment's own targets among them, is missing from these two tables and from the
+configuration's commands, or when the two documents' roles differ.
 
 | Role | Provided by |
 |---|---|
@@ -555,6 +555,19 @@ review.
 | The `workspace` remote a clone names the owner's workspace by | `workspace`, set by `scripts/change-workflow clone` |
 | The harness's session id in the environment, `CLAUDE_CODE_SESSION_ID` | Claude Code's |
 | The tools it invokes, `git`, `claude`, `codex`, and `sh`, which runs every command the configuration declares | each on the owner's path; the configuration's commands run `make`, and its `ci` and `pipeline` parts `gh` |
+
+## What the workflow's skills name of this repository
+
+The workflow's skills name no make target or path of an adopting repository, only the
+workflow's own (CW-n8tr), but for the exemptions below, each owned by the open change
+that removes it. The same test reads this table: it fails on a skill naming anything
+else, on an exemption no skill names, and on one whose owner is no open change.
+
+| Named in a skill | Owned by | Why |
+|---|---|---|
+| `make -C <package> test` | `sandbox-unattended-workflow-steps` | Implementation's command form for one project's tests, which the step table's allowlist matches and which goes with it |
+| `make -C <package> migrate` | `sandbox-unattended-workflow-steps` | A section's local bring-up, matched by the allowlist likewise |
+| `.claude/change-steps.toml` and `.claude/` | `sandbox-unattended-workflow-steps` | The step table, whose rules the skills cite and which denies every step edits under `.claude/`, so a plan gives such an edit to the orchestrator |
 
 ## Current limits
 
