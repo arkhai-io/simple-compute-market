@@ -60,6 +60,34 @@ class FakeParty:
         return TimeReading(self.source, self.now if self.source == "injected" else None)
 
 
+#: The signing skew a service and its typed client allow a timestamp.
+SKEW = 300
+
+
+class SignedFakeParty(FakeParty):
+    """A party whose status is a signed request answered signed: a read with the
+    harness more than the signing skew from the party's instant is refused, as
+    the service refuses a stale request and the client a stale answer. A set is
+    exempt, as the time-setting operation is."""
+
+    def __init__(self, name: str, kind: str, calls: list[str], *, harness: InjectedTime,
+                 now: int) -> None:
+        super().__init__(name, kind, calls, now=now)
+        self.harness = harness
+
+    def time(self) -> TimeReading:
+        if abs(self.harness.now() - self.now) > SKEW:
+            raise RuntimeError(f"401 stale_timestamp: signed at {self.harness.now()}")
+        return super().time()
+
+
+class ChainFakeParty(FakeParty):
+    """The chain, whose latest block names no source."""
+
+    def time(self) -> TimeReading:
+        return TimeReading(None, self.now)
+
+
 @pytest.fixture
 def restored() -> Iterator[None]:
     before = injected_time.installed()
@@ -158,11 +186,54 @@ def test_a_session_on_a_stack_left_ahead_starts_at_the_latest_instant_a_party_ho
     assert (behind.now, ahead.now) == (T + 86_400, T + 86_400)
 
 
-def test_the_session_start_counts_the_chain_s_latest_block_and_no_wall_time_party() -> None:
-    class Chain(FakeParty):
-        def time(self) -> TimeReading:
-            return TimeReading(None, self.now)
+def test_a_session_on_a_stack_left_past_the_signing_skew_reads_the_unsigned_parties_first() -> None:
+    calls: list[str] = []
+    ahead = T + 86_400
+    harness = InjectedTime(start=T)
+    storefront = SignedFakeParty("bob-storefront", "storefront", calls, harness=harness, now=ahead)
+    provisioning = SignedFakeParty("bob-provisioning", "provisioning", calls, harness=harness,
+                                   now=ahead)
+    credits = SignedFakeParty("credits-service", "credits", calls, harness=harness, now=ahead)
+    registry = FakeParty("registry-a", "registry", calls, now=ahead)
+    chain = ChainFakeParty("anvil", "chain", calls, now=ahead)
+    lane = LaneTime("injected", [storefront, provisioning, credits, registry, chain],
+                    harness=harness)
 
+    lane.start(T)
+
+    assert harness.now() == ahead
+    assert {party.now for party in (storefront, provisioning, credits, registry, chain)} == {ahead}
+
+
+def test_a_signed_party_restarted_behind_the_skew_is_moved_to_the_stack_s_instant() -> None:
+    calls: list[str] = []
+    ahead = T + 86_400
+    harness = InjectedTime(start=T)
+    # Restarted alone, its source began again at the wall instant.
+    storefront = SignedFakeParty("bob-storefront", "storefront", calls, harness=harness, now=T)
+    chain = ChainFakeParty("anvil", "chain", calls, now=ahead)
+
+    LaneTime("injected", [storefront, chain], harness=harness).start(T)
+
+    assert (harness.now(), storefront.now, chain.now) == (ahead, ahead, ahead)
+
+
+def test_a_signed_party_left_past_the_skew_beyond_every_unsigned_one_fails_naming_it() -> None:
+    # A run that stopped partway through a set moved a service but not the chain.
+    calls: list[str] = []
+    harness = InjectedTime(start=T)
+    storefront = SignedFakeParty("bob-storefront", "storefront", calls, harness=harness,
+                                 now=T + 86_400)
+    chain = ChainFakeParty("anvil", "chain", calls, now=T + 60)
+
+    with pytest.raises(LaneTimeError, match=rf"bob-storefront refused lane time {T + 60}: "
+                                            r"409 time_moves_forward"):
+        LaneTime("injected", [storefront, chain], harness=harness).start(T)
+
+    assert (calls, storefront.now) == (["bob-storefront"], T + 86_400)
+
+
+def test_the_session_start_counts_the_chain_s_latest_block_and_no_wall_time_party() -> None:
     class Wall(FakeParty):
         def time(self) -> TimeReading:
             return TimeReading("wall", T + 10_000)
@@ -170,7 +241,7 @@ def test_the_session_start_counts_the_chain_s_latest_block_and_no_wall_time_part
     calls: list[str] = []
     storefront = FakeParty("bob-storefront", "storefront", calls, now=T - 60)
     # The chain ran ahead of a held lane instant; its latest block counts.
-    chain = Chain("anvil", "chain", calls, now=T + 90)
+    chain = ChainFakeParty("anvil", "chain", calls, now=T + 90)
 
     _lane(storefront, chain, start=T).start(T)
 

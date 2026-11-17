@@ -252,7 +252,16 @@ every party; a lane provides its own configuration, so a missing party fails the
 setup rather than skipping. At the session's start the fixture sets every party to
 the wall time at that moment, or to the latest instant a party already holds when
 that is later — a chain a second ahead, or a stack an earlier run left ahead — so
-the start never sets a party back (D4; 45 session-start). The local Helm release's
+the start never sets a party back (D4; 45 session-start). It reads the parties it
+reaches with no signed timestamp first — the registries' bearer administrator
+route, the controls, the chain and the buyer's file, which every set moves — and
+moves the harness's source to the latest instant they hold before reading any
+signed status, so a stack left ahead past the signing skew answers it; a service
+still past the skew from that instant counts as holding none, so the set moves
+one restarted behind forward, and one left ahead by a run stopped partway through
+a set refuses it and fails the start by name (72 F1;
+rejected: exempting the administrator status read from freshness, which widens
+the identity exception, and requiring a fresh stack for each session). The local Helm release's
 validation names its storefront, provisioning service and registry too, on wall
 time, through the e2e-tests chart's `config` passed through whole as its pods'
 `e2e-tests` profile, so it reads each one's status (D16, D17; 45 F1). `lane_time.set(T)` moves the harness's own source

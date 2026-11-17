@@ -2589,6 +2589,52 @@ conftests, the runner profiles `e2e-tests/config/config-*.yml`, and
     handoff naming the removed `IDENTITY_WHEEL`; all fixed. Declined: a key
     spelled with the Kelvin sign, which Python lowercases to `k`, passes the
     ASCII pattern; only a deliberately crafted key reaches it.
+  - Pre-closeout triage fix (72 F1, the owner's choice C): a session against
+    a stack an earlier run left ahead past the signing skew failed its setup,
+    since `LaneTime.start` read every status with the harness still at the wall
+    instant, and each service refuses a signed request, and its client a signed
+    answer, more than 300 s from its own instant (only the time setting is
+    exempt). The start now reads first the parties reached with no signed
+    timestamp (`_UNSIGNED`: the registry, whose administrator route takes a
+    bearer key and answers unsigned, the controls, the chain and the buyer's
+    file), moves the harness to the latest instant they hold or the wall
+    instant, then reads the signed services and sets every party to the
+    latest. Every set moves those parties, so they hold the instant the run
+    before left. A signed service still past the skew from that instant cannot
+    be read, and counts as holding none: one restarted alone behind the rest,
+    which the start before this fix moved forward, is moved forward by the set
+    (its time setting exempt from freshness); one left ahead of the chain by a
+    run stopped partway through a set refuses the set, and the start fails
+    naming it. The delta's sentence says so ("a party whose instant the start
+    cannot read holds none, and one that then refuses the instant set fails
+    the setup naming it"), as D7 and `TESTING.md` do. No lane target reaches
+    the path: each brings its stack down first; a session run by hand against
+    a stack left up does.
+  - Evidence for 72 F1's fix: unit, `make test-e2e-unit` 955 passed, 1
+    skipped, among them, over a signed fake refusing reads more than the skew
+    from the harness: a stack left a day ahead, its storefront, provisioning
+    and credits services signed, starts with every party at that instant; a
+    signed service restarted behind the skew is moved to the stack's instant;
+    a signed service past the skew beyond every unsigned party fails naming it,
+    refusing the set. Against the start before the fix (put back for one run,
+    since `run test-before`'s project-less environment lacks the harness and
+    exits 4 collecting it), the first fails as the review said,
+    `bob-storefront cannot be read: 401 stale_timestamp`.
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`
+    on the final tree: `after-functional-change` and `pre-commit-functional`
+    (every suite) passed; of `pre-commit` only the citations check failed, on
+    closeout's `openspec/specs/injected-time/architecture.md` (18.9). The live
+    path, a session by hand against a stack left ahead, runs in no lane target
+    and so in no validation.
+  - Fresh-context check: it confirmed the order of reads, which parties read
+    unsigned (the registry's bearer administrator route answering unsigned,
+    the controls' token, the credits service signed), and the tests' level;
+    it found the first form failing a signed service restarted behind past
+    the skew, which the start before handled, and D7 and `TESTING.md`
+    silent on a service left ahead of every unsigned party, which the delta's
+    sentence did not admit. Fixed: an unreadable signed party holds no
+    instant at the start, the delta, D7 and `TESTING.md` say what follows,
+    and a test of the restarted service; a split test name joined.
 - [x] 15.5 The helper shared stages use to reach an instant: in an injected run it
   sets lane time; in a wall run it waits for an instant the Agreement fixes, and any
   other instant is a blocked skip naming the wall-time target. `wait_until` callers move

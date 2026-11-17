@@ -69,6 +69,12 @@ SET_ORDER: tuple[str, ...] = (
 #: Kinds whose status names no time source: the chain reports its latest
 #: block's stamp, and the buyer's file holds only an instant.
 _SOURCELESS = frozenset({"chain", "buyer"})
+#: Kinds whose status the harness reads with no timestamp a party checks for
+#: freshness: the registry's administrator route takes a bearer key and answers
+#: unsigned, a control takes its token, and the chain and the buyer's file take
+#: nothing. Every other party's status is a signed request whose answer is
+#: signed, each refused more than the signing skew from the harness's instant.
+_UNSIGNED = frozenset({"registry", "control", "chain", "buyer"})
 
 
 #: The longest wait `wait_until` accepts, so a mistaken instant fails the stage
@@ -222,14 +228,42 @@ class LaneTime:
         """The session's start: an injected run sets every party to ``wall_now``,
         or to the latest instant a party already holds — a run before this one on
         the same stack left lane time ahead of the wall clock, or the chain ran
-        ahead of it — so the start never sets a party back."""
-        if self.injected:
-            held = [reading.now for party in self.parties
-                    for reading in (self._read(party),)
-                    if reading.now is not None
-                    and (party.kind in _SOURCELESS or reading.source == "injected")]
-            self.set(max([wall_now, *held]))
+        ahead of it — so the start never sets a party back.
+
+        The parties read without a signed timestamp are read first, and the
+        harness moves to the latest instant they hold before any signed status
+        is read: a stack left ahead past the signing skew would refuse a status
+        request signed at the wall instant, and its answer would be refused
+        against it. Every set moves those parties too, so they hold the instant
+        the run before left. A signed party still more than the skew from the
+        harness — one restarted behind the rest, or one a run stopped partway
+        through a set left ahead of them — holds no instant the start can read:
+        the set moves it forward, or it refuses the set and the start fails
+        naming it."""
+        if self.harness is not None:
+            unsigned = [party for party in self.parties if party.kind in _UNSIGNED]
+            signed = [party for party in self.parties if party.kind not in _UNSIGNED]
+            self.harness.set(max([wall_now, self.harness.now(), *self._held(unsigned)]))
+            self.set(max([self.harness.now(), *self._held(signed, unreadable_holds_none=True)]))
         self.check_one_source()
+
+    def _held(self, parties: Iterable[TimeParty], *,
+              unreadable_holds_none: bool = False) -> list[int]:
+        """The instants ``parties`` hold on injected time, the chain's and the
+        buyer's file's among them; a party that cannot be read fails, or, with
+        ``unreadable_holds_none``, holds none."""
+        held = []
+        for party in parties:
+            try:
+                reading = self._read(party)
+            except LaneTimeError:
+                if not unreadable_holds_none:
+                    raise
+                continue
+            if reading.now is not None and (party.kind in _SOURCELESS
+                                            or reading.source == "injected"):
+                held.append(reading.now)
+        return held
 
     def reach(self, instant: int, *, fixed_by_agreement: bool) -> int:
         """Bring the lane to ``instant``, or past it; the lane instant after.

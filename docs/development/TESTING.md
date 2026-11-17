@@ -423,7 +423,15 @@ fails the setup naming a party it cannot reach. In an injected run it installs a
 injected source in the harness's own process, so every client the harness builds
 signs at lane time, and sets every party to the wall instant of the session's
 start, or to the latest instant a party already holds when a run before it on
-the same stack left lane time ahead. `LaneTime.set(T)` moves, in order, the
+the same stack left lane time ahead. It reads first the parties it reaches with
+no signed timestamp — the registries' administrator route, the controls, the
+chain and the buyer's file, which every set moves too — and moves its own source
+to the latest instant they hold before any signed status read, so a stack left
+ahead past the signing skew neither refuses its requests nor has its answers
+refused. A signed service still more than the skew from that instant holds no
+instant the start can read: the start's set moves one restarted behind the rest
+forward, and one a run stopped partway through a set left ahead refuses it, and
+the start fails naming it. `LaneTime.set(T)` moves, in order, the
 harness's source, each service through its typed client's `set_time`, the
 doubles and the sample app through `lane-double-controls`' client, the chain
 (its block time frozen with `anvil_setBlockTimestampInterval(0)`, then
