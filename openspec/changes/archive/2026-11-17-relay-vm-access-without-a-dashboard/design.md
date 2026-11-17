@@ -595,7 +595,13 @@ a lease on it run to its end, for a VM guest and a bare-metal grant alike:
    it reports to the site authority, the seam a disabled host already uses. No
    claim is then admitted against, placed on, or projected enabled for those
    hosts' declarations. `kit/site` does not change; the compute family composes
-   its own host and relay facts.
+   its own host and relay facts. "The hosts of every pool" is read as the hosts
+   placed in such a pool (`hosts.pool_id`) and the hosts whose declaration sits
+   in one (`capacity_buckets.pool_id`), since the two are recorded apart: a
+   bare-metal host may go unplaced while its one declaration is in a pool, and
+   a delivery takes its relay from the declaration's pool, so filtering on
+   placement alone would keep selling an unplaced host's capacity on a drained
+   relay, only to refuse it at acceptance.
 2. **No port is leased on it.** The allocator, the one place a lease is
    created, refuses a new owner on a disabled relay: `allocate_in_session`,
    which standalone `allocate` also runs, reads the relay row locked
@@ -607,7 +613,11 @@ a lease on it run to its end, for a VM guest and a bare-metal grant alike:
    the acceptance then commit a lease on a relay already disabled — reported
    `drained` in between. Fulfillment preparation still refuses a disabled relay
    first, through `check_relay_usable`, naming what the relay lacks
-   (06 F2).
+   (06 F2). The locked read also refreshes the row from the database
+   (`populate_existing`): preparation has already read the relay into the
+   acceptance's own session, and a locked read answered from that session's
+   identity map would see `enabled` as it was before a disable committed in
+   between.
 3. **Every leased job runs.** Execution no longer refuses a disabled relay: a
    create whose lease was allocated before the disable, and every teardown and
    reclaim, run. A relay that is absent, or holds no token or active grant key,
@@ -798,6 +808,38 @@ relay drains, for both domains — so one review covers it. Closeout then resume
 its remaining parts. Two rounds were weighed and rejected: the composition
 filter uses the seam host disabling already uses, so nothing in the round is
 risky enough to review apart.
+
+### How the drain was proven
+
+No lane here runs PostgreSQL, whose row lock is what serializes a disable
+against an acceptance in flight there. The race is therefore held three ways:
+in one order SQLite's single writer slot serializes the two (a test that would
+pass without the allocator's lock, and says so); in the other a session reads
+the relay enabled, unlocked, as preparation does, a disable commits, and the
+same session's allocation is refused; and an ORM listener renders each read for
+PostgreSQL and shows the relay read as `FOR UPDATE` before any lease write.
+
+The codec tests for a teardown and a reclaim on a disabled relay run at library
+integration over file-backed SQLite, not as the unit tests first planned: the
+resolver is the last layer before the database, which is proven against the
+real boundary (`docs/guidance/engineering/test-levels.md`). Neither codec reads
+`enabled`; they show the codec handing a removal to the resolver.
+
+The rebinding refusals' hints are asserted at both levels — whole at library
+integration, by key phrase through the 409 at application integration — though
+the second duplicates the first's wording, because a hint is only of use if it
+reaches the operator through the HTTP answer.
+
+The application drain test steps fulfillment convergence one cycle per record
+with the loop held paused from the start: the harness's mocked settings make
+the batch size 1, and stepping cycles between resumes raced the timer loop. A
+create held between acceptance and execution is reached by disabling its host
+after the claim is placed, so acceptance leases a port and answers
+`dispatch_pending` before the relay is disabled.
+
+`scripts/change-workflow run test-before` produced no evidence for the drain's
+tests: its environment cannot import the packages these suites import, so no
+run showed a test failing without the change.
 
 ## Alternatives considered
 

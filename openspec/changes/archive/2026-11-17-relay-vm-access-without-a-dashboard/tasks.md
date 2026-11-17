@@ -213,22 +213,9 @@ were done at; the open ones name none of the moved files.
       section 2's reconciliation behaviour is settled, then implement the
       decision or record why it stays deferred. This is a decision task, not an
       instruction to implement one of the three.
-      *Returned to design (2026-11-16).* The owner's direction: disabling a relay
-      is its drain, and removing the relay server is its operator's, outside this
-      repository. Closeout found that disabling a relay currently fails every
-      teardown on it, so the drain cannot work as built. `design.md`, "What
-      deletes a relay", has the findings and the questions; design replaces this
-      task with the work it settles.
-      *Replanned against the reviewed design (2026-11-17).* Decided in
-      `design.md` D1–D5: nothing deletes a relay, and disabling one drains it.
-      Sections 10a–10d implement the drain and 10e its procedure; 10e.3 ticks
-      this task once 10a–10d are complete.
-      *Met (10e.3):* nothing deletes a relay, and disabling one drains it. The
-      allocator refuses a new owner (10a), execution lets leased jobs run
-      (10a), the read reports `drained` (10b), refusals name the drain's scope
-      (10c), and the relay's pools' hosts take no new delivery (10d). The
-      procedure, retirement included, is in the seller guide and runbook §28
-      (10e).
+      *Met:* nothing deletes a relay, and disabling one drains it (`design.md`
+      D1–D5, on the owner's direction after closeout returned it to design on
+      2026-11-16), implemented by sections 10a–10e.
 - [x] 1A.8 Reject an update that would duplicate another relay's rendezvous,
       with both relay identifiers named. The unique constraint would catch it,
       but a constraint violation surfacing as a 500 is not an administration
@@ -422,23 +409,10 @@ rest nor withheld from a read.
       the Ansible job executor removes it in a `finally` covering success,
       failure, timeout, and cancellation (`test_no_file_outlives_its_run`), as
       decrypted key files are. No change records a dependency for it.
-      *Revised:* this task first asked for the file in a directory the
-      operation owns and removes, built in `contain-embedded-host-key-material`.
-      That change weighed a per-operation directory and rejected it (its design
-      D3): it fixes no failure anyone can name, and touches six code sites and
-      four fixtures. D3's revisit trigger is a third secret file per run, such
-      as a per-run `known_hosts` if SSH host-key checking is enabled, or a
-      provisioning container shared with another user. Ticking this task is a
-      decision for this change's closeout.
-      *Returned to design (2026-11-16).* The owner's direction: a provisioning
-      container is never shared between users, by design, and a user who opens
-      one to others has stepped out of scope. `design.md`, "Does the variables
-      file's handling need anything further?", has the question.
-      *Replanned against the reviewed design (2026-11-17).* `design.md` D6: the
-      existing handling meets the requirement, and no revisit trigger is
-      recorded against this change. 10e.3 ticks this task.
-      *Met (10e.3), as D6 records:* the existing `write_extra_vars` and
-      executor handling meets the requirement. No code changed for it.
+      *Revised:* this task first asked for a per-operation directory, which
+      `contain-embedded-host-key-material`'s design (D3) rejected.
+      *Met, as D6 records:* the existing handling meets the requirement, with
+      no revisit trigger recorded against this change; no code changed.
 
 **Validation:** `make test` in `provisioning/compute/service`.
 
@@ -1014,14 +988,10 @@ the VM and bare-metal adapters' codec tests.
       on a disabled relay before any port is claimed, naming the relay. Raise
       it as an allocator error, which `_lease_remote_port` in both domains'
       plans already turns into `ProviderConfigInvalidError`. (D1 item 2; 06 F2)
-      *Done:* the error is a new `RelayDisabledError`, exported from the relay
-      package, naming the relay and its rendezvous. The locked read also takes
-      `populate_existing=True`, which the plan did not name: preparation reads
-      the relay into the acceptance's own session first
-      (`relay_execution_fields` through `read_config_for_execution`), and a
-      locked read answered from that identity map would see `enabled` as it
-      was before a disable that committed in between. The second 10a.5 test
-      holds it.
+      *Done:* `RelayDisabledError`, exported from the relay package, names the
+      relay and its rendezvous. The locked read also refreshes the row
+      (`populate_existing`; why, `design.md` D1 item 2), held by 10a.5's second
+      test.
 - [x] 10a.2 In `RelayExecutionResolver.resolve_into`, drop the refusal of a
       disabled relay. An absent relay, a relay with no token, and a create's
       relay with no active grant key or no lease for its reservation are still
@@ -1033,23 +1003,17 @@ the VM and bare-metal adapters' codec tests.
       operator's answer…"), and any other the package's search for "disabled"
       finds — to the invariant: disabling a relay drains it; no new lease, and
       leased work runs. (D1; `docs/guidance/engineering/comments.md`)
-      *Done:* `execution.py` (module, error class, and `resolve_into`
-      docstrings), `route_service.py`'s module docstring, `allocator.py`'s
-      module and `allocate_in_session` docstrings, `pool_relays.py`'s
-      `check_relay_usable` docstring and refusal message, `RelayDisabledError`'s
-      docstring, and a comment on `Relay.enabled` in `db.py`. They say no port
-      is leased to a new delivery and leased work runs. None names the relay
-      read's `drained`, which 10b adds, or the deliverable-hosts filter, which
-      10d adds.
+      *Done:* in `execution.py`, `route_service.py`, `allocator.py`,
+      `pool_relays.py` (docstring and refusal message), and on `Relay.enabled`
+      in `db.py`; 10d extended the last two to the deliverable-hosts filter.
 - [x] 10a.4 Library integration, in
       `provisioning/compute/tests/integration/test_relay_port_allocator.py`:
       a new owner is refused on a disabled relay through `allocate` and through
       `allocate_in_session`, with no lease recorded; an owner already holding a
       lease receives it again; enabling the relay lets the new owner allocate.
       (Scenario "A new owner asks the allocator for a port on a disabled relay")
-      *Done:* `TestADisabledRelayLeasesNoNewPort`, four tests. The relay is
-      disabled through `RelayService.set_enabled`, the real administration
-      write. Library integration, passing.
+      *Done:* `TestADisabledRelayLeasesNoNewPort`, four tests, the relay
+      disabled through `RelayService.set_enabled`. Passing.
 - [x] 10a.5 Library integration, a database-concurrency test following
       `docs/guidance/engineering/concurrency-tests.md` with independent sessions
       and bounded explicit synchronization, in both orders: an acceptance that
@@ -1060,21 +1024,10 @@ the VM and bare-metal adapters' codec tests.
       holds, through an ORM execute listener, that the relay is read with a
       `FOR UPDATE` lock before the claim. (Scenario "A relay is disabled while
       an acceptance is in flight")
-      *Done:* `TestADisableRacingAnAcceptance`, three tests, library
-      integration, passing. First order: an acceptance thread holds SQLite's
-      writer slot, allocated and uncommitted. The disable thread starts, and an
-      engine `before_cursor_execute` listener signals just before it issues
-      its `UPDATE relays`. The test asserts the disable has not finished, then
-      lets the acceptance commit. Every wait is bounded at 10 s. The end state
-      is the relay disabled and holding the lease. This order shows SQLite's
-      single writer at work, not the allocator: it would pass without this
-      section's allocator change. Second order: independent sessions in
-      sequence. The acceptance session reads the relay enabled, unlocked, as
-      preparation does, then a disable commits, then that session's
-      allocation is refused and records no lease. Third: a `do_orm_execute`
-      listener renders each ORM read for PostgreSQL and shows the relay read
-      as `FOR UPDATE` before any `relay_port_leases` write. It also shows no
-      unlocked relay read.
+      *Done:* `TestADisableRacingAnAcceptance`, three tests, every wait bounded
+      at 10 s, passing. The first order shows SQLite's single writer, not the
+      allocator; the second and the rendered `FOR UPDATE` hold the allocator's
+      lock (`design.md`, "How the drain was proven").
 - [x] 10a.6 Library integration, in
       `provisioning/compute/tests/integration/test_relay_administration.py`:
       replace the parametrized case expecting a disabled relay to be refused
@@ -1083,36 +1036,22 @@ the VM and bare-metal adapters' codec tests.
       reservation holds the lease resolves and signs its grant — and keep the
       absent, no-token, no-grant-key, and wrong-reservation refusals.
       (Scenario "A relay is disabled between acceptance and execution")
-      *Done:* the parametrized case became `test_a_relay_with_no_token_fails_the_job`,
+      *Done:* `test_a_relay_with_no_token_fails_the_job`,
       `test_a_removal_on_a_disabled_relay_is_resolved`, and
-      `test_a_create_holding_its_lease_on_a_disabled_relay_is_signed_its_grant`.
-      The absent, no-grant-key, no-held-lease, and wrong-reservation refusals
-      stand as they were. Library integration, passing.
+      `test_a_create_holding_its_lease_on_a_disabled_relay_is_signed_its_grant`;
+      the other refusals stand. Passing.
 - [x] 10a.7 Unit, in each domain's codec suite
       (`domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py` and
       `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_codec.py`): a VM `vm_remove` and a bare-metal
       reclaim whose lease names a disabled relay prepare their job, as both
       codecs call the resolver.
-      *Done at a different level from the plan: library integration, not
-      unit.* Each codec prepares its removal through the family's real
-      `RelayExecutionResolver` over file-backed SQLite. The relay is created
-      and then disabled through `RelayService`. The test asserts the relay's
-      address and token reach the playbook variables and no grant is asked
-      for. The tests are:
-      - VM: `test_a_teardown_on_a_disabled_relay_is_prepared` in
-        `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`.
-      - Bare metal: `test_a_reclaim_on_a_disabled_relay_is_prepared` in a new
-        `domains/bare_metal/provisioning/adapter/tests/integration/test_relay_reclaim.py`.
-
-      Both pass. A first version was a unit test over a hand-written session
-      double. The fresh-context check refused it: the resolver is the last
-      layer before the database, which `test-levels.md` proves against the
-      real boundary. Neither codec reads `enabled`, so what these tests show
-      is the codec handing a removal to the resolver. The disabled-relay
-      behaviour itself is 10a.6's. The bare-metal adapter's `dev` group now
-      declares `cryptography>=42.0`, as the VM adapter's does, and
-      `sqlalchemy>=2.0`. Its lock was relocked with `make lock PROJECTS=…`,
-      and the lock diff is those two dev entries.
+      *Done at library integration, not unit* (why, `design.md`, "How the
+      drain was proven"): `test_a_teardown_on_a_disabled_relay_is_prepared` in
+      `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`
+      and `test_a_reclaim_on_a_disabled_relay_is_prepared` in
+      `domains/bare_metal/provisioning/adapter/tests/integration/test_relay_reclaim.py`,
+      both passing. The bare-metal adapter's `dev` group gained
+      `cryptography>=42.0` and `sqlalchemy>=2.0`, relocked.
 - [x] 10a.8 **Verification:** `make test` in `provisioning/compute`,
       `domains/vms/provisioning/adapter`, and
       `domains/bare_metal/provisioning/adapter` (unit and library integration);
@@ -1120,40 +1059,19 @@ the VM and bare-metal adapters' codec tests.
       End-to-end: none. None is owed: whether a relay is disabled is provisioning-service
       state that no relay or host sees, and the real relay lanes'
       teardowns run on enabled relays as before.
-      *Results:* `make test` passed in `provisioning/compute` (539), in
-      `domains/vms/provisioning/adapter` (293), and in
-      `domains/bare_metal/provisioning/adapter` (138), against a
-      `compute_provisioning` wheel rebuilt with `make dist-compute-provisioning`.
-      `make -C provisioning/compute/service test` also covers the allocator
-      and resolver, and passed: 622 unit and 540 application integration.
-      `scripts/change-workflow run pre-commit` passed: after-functional-change,
-      pre-commit-functional (every suite), and pre-commit.
-      `scripts/change-workflow run test-before` produced no evidence. It was
-      run after the commit on three of the four files holding this section's
-      tests: `test_relay_administration.py`, the VM
-      `test_relay_pool_configuration.py`, and the bare-metal
-      `test_relay_reclaim.py`. Each failed at collection, because its
-      environment (`uv run --no-project --with pytest --with pyyaml`) lacks the
-      packages these suites import (`market_resource_pools`,
-      `compute_provisioning`, `pydantic`). It was not run on
-      `test_relay_port_allocator.py`, which imports `RelayDisabledError`, a
-      name only this section adds, and so could only fail at import against
-      the base. No run showed a test failing without the change.
-      End-to-end scenarios: none covers this section, as planned, and none is
-      owed. No `Owed by validation:` line.
-      *Outside the plan:* `scripts/change-workflow run pre-commit` failed
-      comment hygiene on a line no change of this round wrote:
-      `scripts/tests/test_change_workflow_log.py`, whose comment named "section
-      4". The comment was reworded to say the same without the number.
+      *Results:* `make test` passed in `provisioning/compute` (539),
+      `domains/vms/provisioning/adapter` (293), and
+      `domains/bare_metal/provisioning/adapter` (138);
+      `make -C provisioning/compute/service test` passed (622 unit, 540
+      application integration); `run pre-commit` passed. `test-before`
+      produced no evidence (`design.md`, "How the drain was proven"). No
+      end-to-end scenario, none owed, no `Owed by validation:` line.
+      *Outside the plan:* a comment in `scripts/tests/test_change_workflow_log.py`
+      naming a section number was reworded.
 
 **Handoff (10a).** An adapter's or the service's suite sees a change to
-`provisioning/compute` only through the wheel: run `make
-dist-compute-provisioning` (and `make dist-compute-provisioning-contracts` for a
-contracts change) before `make -C <package> test`, which reinstalls from `.dist`.
-Package versions are not bumped here; 10b.3 bumps every package the round
-changes. On SQLite the relay row lock is not rendered. The writer slot, which
-acceptance takes with `begin_sqlite_write_transaction`, is what serializes a
-disable against an allocation there.
+`provisioning/compute` only through the wheel: `make dist-compute-provisioning`
+before `make -C <package> test`.
 
 ## 10b. The relay read reports the drain
 
@@ -1167,25 +1085,18 @@ through `RelayResponse` and needs no change.
 
 - [x] 10b.1 Add `active_lease_count: int` and `drained: bool` to `RelayResponse`,
       required, with no default. (D2; 06 F3)
-      *Done:* between `token_configured` and `grant_keys`, as D2's example
-      orders them, with the model's docstring stating both and why they are
-      required.
+      *Done.*
 - [x] 10b.2 Add both to `RelayView`, computed from `relay_port_leases`:
       `drained` is true exactly when the relay is disabled and holds no active
       lease. `list_relays` counts every relay's active leases in one grouped
       query; `_view` serves every write's response. Nothing is persisted. (D2)
-      *Done:* `RelayView.of` takes a required keyword `active_lease_count`.
-      `list_relays` passes the grouped count, `_view` passes
-      `RelayPortAllocator.count_held`, and `create_relay` passes 0, since a
-      relay just created holds no lease.
+      *Done:* `RelayView.of` requires `active_lease_count`, so no caller
+      inherits a default that would read a disabled relay as drained.
 - [x] 10b.3 Version the packages whose contents change as
       `docs/guidance/repository/package-versions.md` says: run
       `make check-version-bumps` and bump any package this change has not
       already bumped against `dev`, relocking where a lower bound moves.
-      *Done:* `dev` already carries this change's earlier sections, so every
-      package this round changes is bumped once. `make check-version-bumps`
-      checks only that no version moves more than one step, and it passed.
-      Bumps and lower bounds:
+      *Done;* `make check-version-bumps` passed:
 
       | Package | Version | Lower bounds raised |
       |---|---|---|
@@ -1196,35 +1107,21 @@ through `RelayResponse` and needs no change.
       | `arkhai-vms-provisioning-adapter` | 0.19.0 → 0.19.1 | compute `>=0.28.0` |
       | `arkhai-bare-metal-provisioning-adapter` | 0.13.0 → 0.13.1 | compute `>=0.28.0` |
 
-      The reasons for the raised bounds:
-      - Contracts are minor bumps because the response gains required fields,
-        an incompatible change for a reader of an older service. The
-        compute package is a minor bump because `RelayView.of`'s signature and
-        the allocator's and resolver's behaviour change.
-      - Compute's own route service builds `RelayResponse` from the view, so it
-        needs the contracts that carry the fields; with older contracts,
-        pydantic would drop them silently.
-      - The client parses the relay read, so its bound makes a client report
-        the drain. The client's code is unchanged.
-      - Each adapter's teardown or reclaim on a disabled relay depends on
-        10a's resolver; the fresh-context check of 10a raised this.
-      - The service's container changes in 10d, and this one bump covers it.
-
-      `make lock` relocked every project naming these packages, which changed
-      12 locks: these six projects', `provisioning/compute/ansible`, both
-      storefronts, `domains/compute/delivery`,
-      `domains/vms/provisioning/client`, and `e2e-tests`.
+      Contracts and compute are minor bumps: the response gains required
+      fields, and `RelayView.of` and the allocator's and resolver's behaviour
+      change. Each raised bound is a reader that needs the new fields or 10a's
+      resolver. `make lock` relocked the 12 projects naming these packages.
+      (The round's triage later bumped `arkhai-kit-resource-pools` 0.10.0 →
+      0.10.1; see 10d.)
 - [x] 10b.4 Unit, in `provisioning/compute/contracts/tests/unit/test_contracts.py`: a relay read shaped as
       `marketplace-v0.3.0` serves it, with neither field, fails to parse as
       `RelayResponse`. (Scenario "A client reads a service that does not report
       the drain")
-      *Done:* `test_a_relay_read_that_does_not_report_the_drain_is_refused`,
-      parametrized over missing either field or both, asserts the validation
-      error names exactly the missing fields.
-      `test_a_relay_read_reporting_the_drain_is_accepted` covers the read the
-      service now serves. The v0.3.0-shaped body was written from that
-      release's `RelayResponse` fields, not captured from a running service.
-      Unit, passing.
+      *Done:* `test_a_relay_read_that_does_not_report_the_drain_is_refused`
+      (either field or both missing) and
+      `test_a_relay_read_reporting_the_drain_is_accepted`, passing. The
+      v0.3.0-shaped body is written from that release's fields, not captured
+      from a running service.
 - [x] 10b.5 Library integration, in `test_relay_administration.py`: an enabled
       relay with no lease reads `drained` false; a disabled relay with one
       active lease reads count 1 and `drained` false; after that lease is
@@ -1232,29 +1129,16 @@ through `RelayResponse` and needs no change.
       enabled again, `drained` false. The list agrees with the read. (Scenarios
       "A disabled relay still carries a lease", "A disabled relay's last lease
       is released", "An enabled relay holds no lease")
-      *Done:* `TestTheDrainReport`, three tests, passing.
-      - The lease is allocated and released through `RelayPortAllocator`, with
-        a lease end 30 days ahead, and the test asserts the released lease's
-        grant expiry is still in the future.
-      - Each step reads `get_relay` and `list_relays` and asserts the two
-        agree. The create, disable, and enable steps also check the write's
-        own response; the release goes through the allocator, which returns
-        no relay view.
-      - A third test shows the grouped count is per relay: two leases on one
-        relay, and none on a second, disabled relay that reads drained.
+      *Done:* `TestTheDrainReport`, three tests, passing; the released lease's
+      grant expiry is asserted still in the future, and a third test holds the
+      grouped count per relay.
 - [x] 10b.6 Application integration through the canonical typed client, in
       `provisioning/compute/service/tests/integration/test_relays_api.py`: list,
       read, create, update, enable, disable, rotate, and grant-key activation
       each return both fields, and disabling a relay with a lease reads count 1
       and `drained` false.
       *Done:* `TestTheDrainReportOverTheApi`, two tests through
-      `ComputeProvisioningClient` over the in-process app, passing.
-      - The first takes each of the eight routes' responses and asserts each
-        one's count and `drained`; the client's parse would refuse a response
-        lacking either field.
-      - The second inserts a held lease row, as the suite's other holdings
-        tests do, then shows the disable, read, and list responses report
-        count 1 and `drained` false.
+      `ComputeProvisioningClient`, covering all eight routes, passing.
 - [x] 10b.7 **Verification:** `make test` in `provisioning/compute/contracts`,
       `provisioning/compute`, and `provisioning/compute/service` (unit, library
       integration, application integration);
@@ -1262,20 +1146,9 @@ through `RelayResponse` and needs no change.
       End-to-end: none, and none is owed: no scenario reads the relay
       administration routes.
       *Results:* `make test` passed in `provisioning/compute/contracts` (160)
-      and in `provisioning/compute` (542). `make -C provisioning/compute/service
-      test` passed: 622 unit and 542 application integration.
-      `scripts/change-workflow run pre-commit` passed: after-functional-change
-      (`make lock`), pre-commit-functional (`make check-packaging`, `make
-      test`), and pre-commit.
-      End-to-end: none covers this section, and none is owed. The real lanes'
-      `configured_relay` reads the relay through the typed client, so a lane
-      run against a service built from this branch parses the new fields. No
-      `Owed by validation:` line.
-
-**Handoff (10b).** `RelayView.of` requires `active_lease_count`, so a new
-caller states the count rather than inheriting a default that would read a
-disabled relay as drained. The e2e lane unit tests build relay reads as
-`SimpleNamespace`s and need no change.
+      and `provisioning/compute` (542); the service passed (622 unit, 542
+      application integration); `run pre-commit` passed. No end-to-end
+      scenario, none owed, no `Owed by validation:` line.
 
 ## 10c. Refusals name the drain's scope
 
@@ -1290,9 +1163,8 @@ Touches `provisioning/compute/src/compute_provisioning/relays/rebinding.py`.
       and a host's pool move; the relay's (disable the relay, wait until it
       reads `drained`, change, re-enable) for a relay's address or port and
       its token rotation. (D5)
-      *Done:* `_POOL_DRAIN_HINT` and `_RELAY_DRAIN_HINT`. `_refuse` takes the
-      hint, so each of the four checks states its scope at the call. The
-      relay's hint says the relay "reads drained", which is the read's field.
+      *Done:* `_POOL_DRAIN_HINT` and `_RELAY_DRAIN_HINT`, each check passing
+      its scope's hint to `_refuse`.
 - [x] 10c.2 Rewrite `rebinding.py`'s module docstring to state the two scopes:
       disabling a pool drains a pool, disabling a relay drains every pool on
       it, and no other drain exists. (D5; comments rule)
@@ -1302,42 +1174,20 @@ Touches `provisioning/compute/src/compute_provisioning/relays/rebinding.py`.
       scope's hint. Application integration, in `test_relays_api.py` and
       `test_pool_relays_api.py`: a relay move and a token rotation refused with
       409 carry the relay's hint, and a pool's relay change the pool's.
-      *Done:* one test per check asserts its scope's hint and the absence of
-      the other's. A second refusal of a check, such as clearing a pool's
-      relay, still asserts only that it is refused.
-      - Library integration, asserting each whole hint:
-        `_names_the_pools_drain` covers the pool's relay change and the host's
-        pool move in `test_pool_relays.py`. `_names_the_relays_drain` covers
-        the relay move and the token rotation in
-        `test_relay_administration.py`.
-      - Application integration, asserting each hint's key phrases through
-        the 409: the relay move, now also asserting 409, and the token
-        rotation in `test_relays_api.py` ("Disable the relay", "wait until the
-        relay reads drained", no pool's hint). The pool's relay change in
-        `test_pool_relays_api.py` ("Disable the pool", no relay's hint).
-
-      All pass. A host's pool move through the host routes is not asserted
-      for its hint at application level; the plan named none there.
+      *Done:* one test per check asserts its scope's hint and not the other's —
+      whole at library integration, by key phrase through the 409 at
+      application integration (why both, `design.md`, "How the drain was
+      proven"). All pass. A host's pool move is not asserted for its hint at
+      application level; the plan named none there.
 - [x] 10c.4 **Verification:** `make test` in `provisioning/compute` and
       `provisioning/compute/service` (library and application integration);
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none, and none is owed.
-      *Results:* `make test` passed in `provisioning/compute` (542).
-      `make -C provisioning/compute/service test` passed: 622 unit and 542
-      application integration.
-      `scripts/change-workflow run pre-commit` passed: after-functional-change,
-      pre-commit-functional, and pre-commit. A docstring in `rebinding.py`
-      was reworded during that run; `make check-comment-hygiene` and the
-      rebinding library suites (100) passed on the final text.
-      *Declined from the fresh-context check:* asserting the hints at the
-      application level duplicates the library tests' wording
-      (`test-levels.md`, "Coverage between the levels"). 10c.3 asks for both,
-      since the hint is only of use if it reaches the operator through the
-      409, so both stay. The application tests assert key phrases only, to
-      keep a rewording's edits few.
-      End-to-end: none, as planned, and none is owed. No `Owed by
-      validation:` line. `test-before` was not run: as 10a.8 records, its
-      environment cannot import these suites.
+      *Results:* `make test` passed in `provisioning/compute` (542); the
+      service passed (622 unit, 542 application integration); `run
+      pre-commit` passed, and the rebinding suites (100) and comment hygiene
+      on the final docstring. No end-to-end scenario, none owed, no `Owed by
+      validation:` line; `test-before` not run.
 
 ## 10d. A disabled relay's pools' hosts take no new delivery
 
@@ -1356,48 +1206,23 @@ deliverable-hosts composition, exported from `__init__.py`) and
       less every host whose pool's `pool_relays` row references a disabled
       relay, read in the caller's session, as `deliverable_host_ids` is. (D1
       item 1)
-      *Done, with one reading the plan did not state:* `RelayDeliverableHosts`
-      is in a new `relays/deliverability.py`, exported from the package. It
-      leaves out every host *placed* in a pool on a disabled relay
-      (`hosts.pool_id`), and also every host whose *declaration* sits in such
-      a pool (`capacity_buckets.pool_id`, read from the site's table in the
-      same session).
-      - A host's placement and its declaration's pool are recorded apart. The
-        bare-metal spec lets a host go unplaced while its one declaration
-        (`capacity_buckets.host_id` is unique) is in a pool. A delivery takes
-        its relay from the declaration's pool, so filtering on placement alone
-        would keep selling an unplaced host's capacity on a drained relay.
-        That host would then be refused at acceptance, which is the cost D1
-        rejected.
-      - The 10d.4 test met exactly this: `bare_metal_deal`'s host is
-        unplaced.
-      - The placement half is what the delta spec's "no host in a pool
-        referencing it MAY be among the hosts taking new delivery" requires.
-        The declared-in half leaves out more, which that MUST NOT allows.
-      - The filter reads the site's `capacity_buckets`, as `allocator.py`
-        already reads its reservations. `kit/site` does not change.
-      - This is offered for the round's review and triage as an implementation
-        reading of D1 item 1. It is written down in the module docstring and
-        here; the "Disabling a relay drains it" architecture subsection 11.16
-        plans is where it belongs permanently.
+      *Done:* `RelayDeliverableHosts` in `relays/deliverability.py`, exported
+      from the package, leaves out hosts placed in, or declared in, a pool on a
+      disabled relay (the reading, `design.md` D1 item 1; promoted to the
+      `physical-provisioning` companion, 11.16). It reads the site's
+      `capacity_buckets` in the same session; `kit/site` does not change.
 - [x] 10d.2 Pass it in `container.py` wherever `deliverable_hosts=host_authority`
       is passed today (the capacity ledger and scheduling, around lines 451 and
       609), so admission, placement, and projection read it. (D1 item 1)
-      *Done:* a `deliverable_hosts` provider over `host_authority` is passed to
-      `CapacityLedgerService` and `SqlAlchemySchedulingUnitOfWork`. The
-      integration harness (`tests/integration/conftest.py`) mirrors that
-      wiring. The unit test `test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts`
-      in `tests/unit/test_authority_composition.py` replaces the one that held
-      both to the host authority.
+      *Done:* a `deliverable_hosts` provider over `host_authority`, mirrored
+      in `tests/integration/conftest.py`, and held by
+      `test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts`.
 - [x] 10d.3 Library integration: a host in a pool on a disabled relay is left
       out; on an enabled relay, or in a pool with no relay, it is reported; a
       disabled host stays out whatever its relay.
       *Done:* `provisioning/compute/tests/integration/test_relay_deliverability.py`,
-      five tests over the real `HostAuthority` and the site's capacity table,
-      passing. They cover:
-      - the plan's three cases, and enabling the relay again;
-      - an unplaced host declared in the relay's pool, which is left out;
-      - a disable not yet committed in the caller's own session.
+      five tests, passing: the plan's cases, re-enabling, an unplaced host
+      declared in the pool, and a disable uncommitted in the caller's session.
 - [x] 10d.4 Application integration through the canonical typed client, beside
       the relay-bearing suites (`test_fulfillment_convergence.py`,
       `test_bare_metal_relay.py`, and `test_host_requirement_api.py`'s
@@ -1408,195 +1233,81 @@ deliverable-hosts composition, exported from `__init__.py`) and
       ports; and the relay then reads `drained` true. (Scenario "A relay is
       disabled while it carries deliveries")
       *Done:* `test_a_disabled_relay_takes_no_new_delivery_and_its_leases_drain`
-      in a new `provisioning/compute/service/tests/integration/test_relay_drain_api.py`,
-      passing. The flow:
-      - The VM delivery and the bare-metal grant are each accepted, run, and
-        converged `active` on one relay, holding ports 6100 and 6101.
-      - After the disable:
-        - Admission answers no capacity for a claim pinned to the VM
-          declaration; the same probe found capacity just before the disable.
-          An unpinned VM claim instead fell through to the bare-metal pool and
-          was refused as an undeclared mode, so the probe names the
-          declaration.
-        - Placement refuses a VM hold made before the disable
-          (`no_eligible_resource`).
-        - Both pools' declarations project not enabled.
-      - The site's bare-metal admission is not separately asserted; its one
-        exclusive machine is already held.
-      - Terminating both leases runs the VM teardown and the bare-metal
-        reclaim on the disabled relay to `torn_down`. `check_leases` releases
-        both ports, and the relay reads count 0 and `drained` true.
-
-      Two harness facts shaped the test:
-      - The VM create's mocked run reports the relay at its leased port, which
-        the codec requires for delivery evidence.
-      - The convergence loop is held paused for the whole test, the pause
-        repeated, at most 50 times, until it answers `at_gate`. One cycle is
-        stepped per record, because the harness's `MagicMock` settings make
-        the batch size `int(MagicMock())`, which is 1. Stepping cycles between
-        resumes raced the timer loop and failed intermittently.
+      in `provisioning/compute/service/tests/integration/test_relay_drain_api.py`,
+      passing: after the disable, admission finds no capacity on the pinned VM
+      declaration, placement refuses an earlier hold, both pools'
+      declarations project not enabled, and the teardown and reclaim run to
+      `torn_down`, releasing both ports, and the relay reads `drained` true.
+      The site's bare-metal admission is not separately asserted, its one
+      machine already held. How the test paces convergence, `design.md`, "How
+      the drain was proven".
 - [x] 10d.5 Application integration: fulfillment acceptance on a pool whose
       relay is disabled is refused, naming the relay, and records no lease.
       (Scenario "A claim reaches fulfillment on a disabled relay")
       *Done:* `test_acceptance_on_a_pool_whose_relay_is_disabled_leases_no_port`,
-      passing. A claim scheduled before the disable reaches acceptance.
-      Acceptance answers 422 `provider_config_invalid` and records no lease.
-      The relay is named on validation, which reports why (`'drain-relay'` in
-      its issue's message). Acceptance's answer carries the code alone, as
-      every provider-configuration refusal does, so the plan's "naming the
-      relay" is shown on validation.
+      passing: 422 `provider_config_invalid`, no lease. Acceptance's answer
+      carries the code alone, as every provider-configuration refusal does,
+      so the relay is shown named on validation.
 - [x] 10d.6 Application integration: a relay disabled while it holds a lease and
       enabled again before it drains returns its pools' hosts to new delivery,
       allocation on it resumes, and the leased delivery's job runs unaffected.
       (Scenario "A relay disabled by mistake is enabled again before it drains")
       *Done:* `test_a_relay_enabled_again_before_it_drains_takes_new_delivery`,
-      passing.
-      - A delivery is accepted, run, and converged `active`.
-      - The disable projects the declaration not enabled.
-      - The enable reads count 1, `drained` false. The declaration is
-        projected enabled, admission finds capacity, and a second claim is
-        placed and leased the next port.
-      - The first delivery stays `active` with its lease unchanged.
-
-      Its create job ran before the disable, so "runs unaffected" is shown as
-      its delivery and lease being untouched by the disable, not as a job
-      running during it. 10a.6 shows a create holding its lease resolving on a
-      disabled relay.
+      passing. "Runs unaffected" is shown as the delivery and its lease
+      untouched by the disable; a job running during one is 10a.6's and the
+      round triage's 15 F2 test.
 - [x] 10d.7 Confirm that the existing relay-omission test (task 9.9) holds the
       scenario "The definition document stops listing a drained relay" for a
       disabled relay, and add a disabled case if it does not.
-      *Corrected:* no relay-omission test existed. The startup suite covers a
-      disabled relay surviving a restart, and a document unmounted, but not a
-      document reconciled without an entry it listed.
+      *Corrected:* no relay-omission test existed;
       `test_a_drained_relay_the_document_stops_listing_is_left_as_it_is` in
-      `test_relay_administration.py` covers it, library integration, passing:
-      a two-relay document is reconciled with one dropped, and the dropped,
-      drained relay reads exactly as before.
+      `test_relay_administration.py` adds it, passing.
       *Outside the plan:* the importer's comment in `relays/definitions.py`
-      still said disabling a relay "would break … every live tunnel on it",
-      which 10a's search missed. It now gives D4's reason, provenance, and
-      says a listed relay is drained through its `enabled`.
+      now gives D4's reason.
 - [x] 10d.8 **Verification:** `make test` in `provisioning/compute` and
       `provisioning/compute/service` (library and application integration);
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none, and none is owed: the drain is provisioning-service
       state the application-integration suite reaches through the typed
       client, and no scenario disables a relay.
-      *Results:* `make test` passed in `provisioning/compute` (548).
-      `make -C provisioning/compute/service test` passed: 622 unit and 545
-      application integration, the three drain tests among them (each also
-      passed on two further runs).
-      `scripts/change-workflow run pre-commit` passed on the section's final
-      state: after-functional-change, pre-commit-functional (every suite), and
-      pre-commit.
-      End-to-end: none, as planned, and none is owed. No `Owed by
-      validation:` line. The comments 10a wrote on `Relay.enabled` and in
-      `route_service.py` now also say a disabled relay's pools' hosts take no
-      new delivery.
-      *Declined from the fresh-context check:* the drain test makes the
-      bare-metal declaration and reservation on the composed ledger, though
-      the site clients reach both (`integration-tests.md`, "Service-internal
-      state setup"). It does so through `bare_metal_deal`, the bare-metal
-      suites' one setup of a bare-metal deal, so this suite reaches the same
-      deal they do.
+      *Results:* `make test` passed in `provisioning/compute` (548); the
+      service passed (622 unit, 545 application integration, the drain tests
+      also on two further runs); `run pre-commit` passed. No end-to-end
+      scenario, none owed, no `Owed by validation:` line.
+      *Declined from the fresh-context check:* the drain test sets up the
+      bare-metal deal through `bare_metal_deal`, the bare-metal suites' one
+      setup, rather than through the site clients.
 
-**For the round's triage (10d).** Four permanent texts still define the
-deliverable-hosts report as "the identifiers of registered, enabled hosts",
-which no longer describes the compute composition's report:
-- `openspec/specs/fulfillment/spec.md`, the composition requirement's
-  paragraph on "one report of the hosts taking new delivery" (around lines
-  452–456) and its scenario "The compute composition reports the hosts taking
-  new delivery";
-- `openspec/specs/site-capacity/architecture.md` (around lines 46–48);
-- `docs/development/ARCHITECTURE.md` (around lines 702–705);
-- the `DeliverableHosts.deliverable_host_ids` docstring in
-  `kit/resource-pools/src/market_resource_pools/host_requirement.py`.
-
-*Settled by the round's triage (15 F1):* the fulfillment requirement, and
-`physical-provisioning`'s "Disabling a host keeps new deliveries off it", which
-also had the composition pass on the host authority's report, are MODIFIED in
-this change's deltas and merged by the archive (11.11). The two descriptions are
-11.16 rows. The docstring is fixed in the round's fix commit (below).
+**Permanent texts defining the deliverable-hosts report (15 F1).** The
+fulfillment requirement and `physical-provisioning`'s "Disabling a host keeps
+new deliveries off it" are MODIFIED in the deltas (11.11); the
+`site-capacity` companion and `ARCHITECTURE.md` are 11.16 rows; the
+`DeliverableHosts` docstring was fixed in the round's triage (below).
 
 **Round triage fixes (15-implementation, 17-implementation-owner).**
 - *O1:* `parse_relay_definitions` refuses an `enabled` that is not a YAML
-  boolean, an explicit `null` included, naming the entry. It no longer coerces
-  the value, which had read a quoted `"false"` as enabled. Hosts refuse the
-  same values. Unit, in a new `provisioning/compute/tests/unit/test_relay_definitions.py`:
-  `test_a_non_boolean_enabled_is_refused_naming_the_entry` (quoted `"false"`,
-  quoted `"no"`, `0`, `null`), `test_a_boolean_enabled_is_read_as_written`, and
-  `test_an_entry_omitting_enabled_is_enabled`.
+  boolean, `null` included, naming the entry, as hosts do; unit tests in
+  `provisioning/compute/tests/unit/test_relay_definitions.py`.
 - *O2:* `test_a_listed_relay_is_drained_through_its_entry_and_enabled_by_omission`
-  in `test_relay_administration.py`, library integration. A listed relay holding
-  a lease is reconciled to `enabled: false`: it is disabled, its lease is kept,
-  and it reads count 1 and `drained` false. After the lease is released it reads
-  `drained` true. A later revision omitting `enabled` enables it again.
+  in `test_relay_administration.py`.
 - *15 F2:* `test_a_create_accepted_before_its_relay_is_disabled_runs` in
-  `test_relay_drain_api.py`, application integration through the typed client.
-  The create is held between acceptance and execution by disabling its host
-  after the claim was placed: acceptance leases port 6100 and answers
-  `dispatch_pending`. The relay is then disabled and the host enabled. The
-  create runs, the delivery converges `active` on its original lease, and the
-  relay reads count 1 and `drained` false.
-- *15 F1:* the `DeliverableHosts.deliverable_host_ids` docstring in
-  `kit/resource-pools` names the hosts taking new delivery, less any the
-  composition withholds, rather than every registered, enabled host.
-  `arkhai-kit-resource-pools` 0.10.0 → 0.10.1, relocked by `make lock`.
-- *O3:* `docs/seller-frp-setup.md`, "Retiring a relay" step 4, says that the
-  next delivery on a repointed host rewrites its buyer-client settings, which
-  may restart the client, and that the host needs no preparing again.
-- *Evidence:*
-  - Focused suites, all passing: the new unit file and
-    `test_relay_administration.py` (93, unit and library integration), and
-    `test_relay_drain_api.py` (4, application integration; the new test also
-    passed on two further runs).
-  - `scripts/change-workflow run pre-commit` passed on the final state.
-    - after-functional-change relocked 15 projects for the kit bump.
-    - pre-commit-functional passed, `make test` included: `provisioning/compute`
-      556, and the service 622 unit and 546 application integration.
-    - pre-commit passed every check of the change.
-  - `scripts/change-workflow run test-before` produced no evidence, as 10a.8
-    records: it ran at the round's base and failed at collection, since its
-    environment cannot import `market_resource_pools`.
-  - *Fresh-context check:* one finding, fixed. The two parse-only `enabled`
-    tests were first written as parametrized library-integration tests, and
-    `test-levels.md` puts parsing at unit level, so they moved to
-    `tests/unit/test_relay_definitions.py`. It confirmed:
-    - no relay document or fixture in the repository passes a non-boolean
-      `enabled`;
-    - the stricter parser is covered by `arkhai-compute-provisioning`'s
-      existing minor bump against `marketplace-v0.3.0`;
-    - the new application test reaches the resolver only after the relay is
-      disabled;
-    - neither MODIFIED block drops any of main's text.
+  `test_relay_drain_api.py`.
+- *15 F1:* the `DeliverableHosts.deliverable_host_ids` docstring;
+  `arkhai-kit-resource-pools` 0.10.0 → 0.10.1, relocked.
+- *O3:* `docs/seller-frp-setup.md`, "Retiring a relay" step 4.
+- *Evidence:* the focused suites passed, and `run pre-commit` on the final
+  state (`provisioning/compute` 556; the service 622 unit, 546 application
+  integration). The fresh-context check's one finding, parse-only tests at
+  library integration, moved them to unit.
 
-**Pre-closeout triage fix (26-pre-closeout).**
-- *26 F1, outside the plan:* `RelayService.held_ports` is removed. Its docstring
-  gave deciding what deletion does to a relay with live leases as its reason,
-  which D3 settled, and it had no caller: the holdings read is `list_leases`,
-  the count is the relay read's `active_lease_count`, and every test reads held
-  ports through `RelayPortAllocator.held_ports`, which it duplicated.
-  `arkhai-compute-provisioning`'s existing 0.27.0 → 0.28.0 bump covers the
-  removal.
-- *Evidence:*
-  - `make -C provisioning/compute test` (unit and library integration): 556
-    passed.
-  - `scripts/change-workflow run pre-commit` passed: after-functional-change,
-    pre-commit-functional (`make test`, the service 622 unit and 546
-    application integration among it), and pre-commit, each closing "passed,
-    exit 0".
-  - `test-before`: not run; the fix adds no test.
-  - *Fresh-context check:* no problem found. No reference to the method
-    remains in code, tests, documents, or specifications; no import is left
-    unused; no requirement promises it; and no release has shipped 0.28.0, so
-    the minor bump covers it.
+**Pre-closeout triage fix (26-pre-closeout).** *26 F1, outside the plan:*
+`RelayService.held_ports`, which had no caller and duplicated
+`RelayPortAllocator.held_ports`, is removed, covered by the existing 0.28.0
+bump. `make -C provisioning/compute test` (556) and `run pre-commit` passed.
 
 **Handoff (10d).** The service's application-integration harness builds its own
-wiring in `tests/integration/conftest.py` and does not run `container.py`'s.
-A change to the container's composition is mirrored there, and the unit suite
-`test_authority_composition.py` holds the container itself. A test that steps
-fulfillment convergence across several records holds the loop paused from the
-start and steps one cycle per record (see 10d.4).
+wiring in `tests/integration/conftest.py`; a change to `container.py`'s
+composition is mirrored there.
 
 ## 10e. The procedure for draining and retiring a relay
 
@@ -1612,20 +1323,11 @@ records D6. Touches `docs/seller-frp-setup.md`,
       relay the definition document lists is disabled and enabled through its
       `enabled` entry, since an API disable is reverted when the document next
       changes. Present tense, describing the current system. (D4, D5)
-      *Done.*
-      - "Changing a relay later" now speaks of a delivery, a VM or a
-        bare-metal grant, rather than a VM.
-      - It lists the four refused changes with each scope's steps, and the
-        relay's steps name the disable, read, holdings, and enable routes and
-        `active_lease_count`.
-      - It states that a disable is reversible, and how a listed relay is
-        disabled.
-      - A new "Retiring a relay" subsection gives D5's five steps, links the
-        runbook's for step 3, and says what a reinstated server at the same
-        rendezvous takes (D3): a rotated token, and a key staged, configured
-        in its plugin with admission proven, then activated.
-      - Token rotation says that on a shared relay every registering operator
-        drains first, since an frps restart ends every session.
+      *Done:* "Changing a relay later" covers both domains, the four refused
+      changes with each scope's steps, reversibility, and a listed relay; a
+      new "Retiring a relay" gives D5's five steps and what a reinstated
+      server takes (D3); token rotation drains every registering operator's
+      relay on a shared server.
 - [x] 10e.2 In `docs/development/VALIDATION_RUNBOOK.md` §28: add "Retire a
       relay" for the relay's operator — wait for `drained: true` on the relay
       read, then remove the server, or on a shared relay this relay's active
@@ -1634,53 +1336,21 @@ records D6. Touches `docs/seller-frp-setup.md`,
       section's "stop admission and drain" steps ("Native systemd relay",
       "Container relay", "Rotate keys and change admission policy") as
       disabling the relay and waiting for `drained`. (D2, D5)
-      *Done.*
-      - "Retire a relay" follows "Rotate keys and change admission policy" and
-        gives the five steps for the relay's operator. It says why `drained`
-        does not wait for grant expiry (D2), and how to retire on a shared
-        relay.
-      - The restatements are the plugin's first introduction and listener
-        relocation (native), the frps restart and relocation (container), and
-        narrowing a range and a leaked token (rotation).
-      - Each restatement that restarts frps drains the server: the relay
-        disabled in every provisioning service that registers it.
-      - The leaked-token sequence also names each service's signed token
-        rotation.
-      - The compromised-key option keeps its condition, the leases that key
-        signed ending, as `grants_valid_until` reports.
-      - "Retire a relay" says which step is the relay operator's and which are
-        the site administrator's.
-      *Left as they were:* runbook "Prove admission" step 4 ("keep buyer
-      admission closed") and the seller guide's "before enabling buyer
-      admission" at registration, which describe a relay not yet carrying
-      buyers. The companion's own drain wording is closeout's (11.16).
+      *Done:* "Retire a relay" follows "Rotate keys and change admission
+      policy", naming each step's actor; every restatement that restarts frps
+      drains the relay in every provisioning service registering the server.
+      *Left as they were:* "Prove admission" step 4 and the seller guide's
+      registration wording, which describe a relay not yet carrying buyers.
 - [x] 10e.3 Tick 1A.7 once sections 10a–10d are complete, and 2A.7, which D6
       records as met by the existing handling with no revisit trigger.
-      *Done:* both ticked, with a note on each.
+      *Done.*
 - [x] 10e.4 **Verification:** `make check-doc-citations
       CHANGE=relay-vm-access-without-a-dashboard`;
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none.
-      *Results:* `make check-doc-citations CHANGE=relay-vm-access-without-a-dashboard`
-      passed (4 documents, every cited path resolves).
-      `scripts/change-workflow run pre-commit` passed on the final text (the
-      documents are inert paths, so the closing checks alone ran: the index,
-      the task list, the skills, strict OpenSpec validation, and
-      `check-repository`).
-      End-to-end: none, and none is owed. No `Owed by validation:` line.
-      *Outside the plan:* the change's row in `openspec/changes/README.md`
-      still read `ready for implementation`, which 10a should have set to `in
-      implementation`. It is set now, with the campaign's graph line and
-      paragraph brought to the same state.
-
-**Handoff (round).** Sections 10a–10e and the replanned 1A.7 and 2A.7 are
-complete. Closeout's remaining parts (11.4, 11.7–11.17) follow the round's
-triage. Two points carry into it:
-- 10d.1's reading of "the hosts of every pool": hosts placed in, or declared
-  in, such a pool.
-- 10d's list of permanent texts that still define the deliverable-hosts report
-  as "registered, enabled hosts", which the round's triage settled (15 F1): the
-  two spec requirements are in the deltas and the two descriptions in 11.16.
+      *Results:* `make check-doc-citations` passed (4 documents); `run
+      pre-commit` passed. No end-to-end scenario, none owed, no `Owed by
+      validation:` line.
 
 ## 11. Closeout
 
@@ -1725,10 +1395,18 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
       promoting into, so all four were repointed at their real locations —
       after checking, since a citation that resolves to the wrong file is worse
       than one that fails.
-- [ ] 11.4 **Narrative compression.** Compress completed-task notes to final behavior,
+- [x] 11.4 **Narrative compression.** Compress completed-task notes to final behavior,
       material validation evidence, unresolved or deferred work, and
       permanent-documentation destinations, moving durable rationale into `design.md`
       first, sections 10a–10e and the replanned 1A.7 and 2A.7 included.
+      *Done:* moved to `design.md` first — the allocator's refreshed locked
+      read and the placed-or-declared reading (D1 items 2 and 1), and a new
+      "How the drain was proven" (the race's three proofs, the codec tests'
+      level, the hints at two levels, the drain test's pacing, `test-before`'s
+      environment). Then 10a–10e's notes, 1A.7, 2A.7, and "Implementation
+      progress" were shortened to behaviour, evidence, and destinations; the
+      progress section's stale "release attached to the settlement record's
+      terminal transition" now names release with the reservation's capacity.
 - [x] 11.5 **Roadmap currency.** Decided for the campaign: **no separate
       goal.** The product already sells VMs on hosts it reaches by tunnel, so
       this is not capability it lacks — what the work fixes is that the
@@ -1777,24 +1455,54 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
 | Relay uniformity per host is a limit of one client per host, not of the model | `openspec/specs/physical-provisioning/architecture.md` |
 | Encrypting a configured secret at rest is part of the configuration pattern | `kit/config` module docstring |
 | One SSH key currently reaches every host in an environment; per-host material is supported and unused | recorded in this change's `design.md`; per-host keys are registered through the host API, and `contain-embedded-host-key-material` names one that cannot be decrypted, so no fix is owed |
-- [ ] 11.7 **Campaign index currency.** Update this change's row, and its campaign's
+- [x] 11.7 **Campaign index currency.** Update this change's row, and its campaign's
       dependency graph (the line naming it "returned to design: relay drain"), in
       `openspec/changes/README.md`, and run `make check-change-index`. Other rows'
       `Depends on` are left alone: archive cleanup releases dependents after the
       closeout gate.
-- [ ] 11.8 **Documentation citations.** After promotion, run
+      *Done:* the row reads `in closeout`, its Notes rewritten to the validation,
+      live evidence, settled gates, and promotion destinations; the campaign's
+      graph line and introduction say the change is in closeout and that
+      disabling a relay drains it. No other row's `Depends on` or status
+      changed; no row depends on this change. `make check-change-index`
+      passed. The row's link moves to the archive at 11.11.
+- [x] 11.8 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=relay-vm-access-without-a-dashboard` and resolve every
       match, then `scripts/change-workflow openspec validate
       relay-vm-access-without-a-dashboard --strict`.
-- [ ] 11.9 **End-to-end pipeline.** Record the passing run the latest validation names,
+      *Done:* `make check-doc-citations` passed (5 documents, every cited path
+      resolves); `scripts/change-workflow run pre-commit` passed — the index,
+      tasks, and skills checks, `validate relay-vm-access-without-a-dashboard
+      --strict` ("is valid"), and `make check-repository` (comment hygiene,
+      citations, specification index, decision destinations, history wording,
+      version bumps, local imports, capability index, guidance).
+- [x] 11.9 **End-to-end pipeline.** Record the passing run the latest validation names,
       its result, and the scenarios that exercise this change, or an explicit blocker
       naming its cause and the change that owns it, with the validations it gates
       treated as unrun. Sections 6 and 8 are met by the relay-backed real lane, as
       recorded there; sections 10a–10e have no covering scenario and owe none.
-- [ ] 11.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      *Recorded:* validation 31 passed at `ac5b91c71`, the merge of `dev` that
+      carries the pre-closeout triage's fix: pipeline run 44121374956 (e2e.yml)
+      succeeded — `e2e-apicredits`, `e2e-vm`, `e2e-bare-metal`,
+      `native-ansible-gate` — with local (`check-packaging`, `test`) and Helm
+      (render, deploy, served scenarios, payments and mediation checks) passing.
+      CI was not owed: no section carries an `Owed by validation:` line. No
+      pipeline or Helm scenario exercises relay access, so the run is regression
+      evidence only. The change's scenario, `e2e_vm_real_provisioning`, needs a
+      real KVM host and a deployed relay; it met sections 6 and 8 through
+      `prove-relay-provisioning`'s D9 mapping on an independent operator
+      deployment at `72b40a25b`. Closeout changes no code, so the run describes
+      the code the closeout commit carries: it names the merged `HEAD` closeout
+      started from, after the pre-closeout review, with no waiver.
+- [x] 11.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports (a failure needing a code or lock change returns the change to
       implementation).
-- [ ] 11.11 **Archival.** Last, once every other part is checked. The deltas now
+      *Done:* `scripts/change-workflow run pre-archive` at `ac5b91c71` passed:
+      `make check-packaging` (every lock, build, layer, scope, dependency, kind,
+      and release check OK) and `make check-architecture-change`, which reports
+      the change owns no architecture row. The change touched no `.agents/`,
+      `.claude/`, or `.codex/` path.
+- [x] 11.11 **Archival.** Last, once every other part is checked. The deltas now
       carry only the relay drain, written against main's text (06 F1): ADDED
       "Disabling a relay drains it" and "A relay reports whether it has drained",
       MODIFIED "A relay binding is fixed for a lease's life", "Relay admission
@@ -1809,24 +1517,65 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
       relay-vm-access-without-a-dashboard -y` merges the deltas and moves the change
       under `openspec/changes/archive/`; point the index row at the archived
       directory, and run `scripts/change-workflow openspec validate --specs --strict`.
-- [ ] 11.12 **Comment hygiene**, for sections 10a–10e: `make check-comment-hygiene`,
+      *Done:* each MODIFIED block was compared with main's requirement; `dev`'s
+      merge changed no specification, and no commit touched these requirements
+      after the deltas were written, so each carries all of main's text. The
+      archive merged the deltas (`fulfillment` 1 modified; `physical-provisioning`
+      2 added, 3 modified) and moved the change to
+      `openspec/changes/archive/2026-11-17-relay-vm-access-without-a-dashboard/`.
+      The diff of both `spec.md` files shows each requirement once, as its delta
+      states it, and nothing else changed. The index row links the archived
+      directory, and `scripts/change-workflow run pre-commit` validated every
+      specification strictly.
+- [x] 11.12 **Comment hygiene**, for sections 10a–10e: `make check-comment-hygiene`,
       then read the comments those sections added or rewrote against
       `docs/guidance/engineering/comments.md` — the invariant (disabling a relay
       drains it; the allocator refuses a new owner under the relay row's lock),
       never the change. A finding returns the change to implementation.
-- [ ] 11.13 **Import placement**, for sections 10a–10e: confirm the imports they
+      *Confirmed:* `make check-comment-hygiene` passed. The comments and
+      docstrings in `allocator.py`, `execution.py`, `deliverability.py`,
+      `rebinding.py`, `route_service.py`, `service.py`, `definitions.py`,
+      `pool_relays.py`, `db.py`, `container.py`, the contracts' `RelayResponse`,
+      and the kit's `DeliverableHosts` state the drain's invariant and its
+      reasons in the present tense, naming no change, task, review, or earlier
+      behaviour; the stale `held_ports` docstring (26 F1) is gone with the
+      method.
+- [x] 11.13 **Import placement**, for sections 10a–10e: confirm the imports they
       added are at module level; one that should move returns the change to
       implementation.
-- [ ] 11.14 **Documentation compliance**, for sections 10a–10e and the promotion
+      *Confirmed:* no indented import is among the lines 10a–10e and their
+      triage fixes added (`4568681ad..56c372624`); the new imports
+      (`deliverability.py`, `service.py`'s `func`, the new test modules') are
+      at module level.
+- [x] 11.14 **Documentation compliance**, for sections 10a–10e and the promotion
       below: `docs/seller-frp-setup.md`, runbook §28, and every promoted passage
       describe the current system, declaratively and with no wording relative to the
       change, and sit where the placement rules put them.
-- [ ] 11.15 **Roadmap currency.** In `docs/development/ROADMAP.md` Goal 1, the gap
+      *Done:* the seller guide's "Registering the relay", "Changing a relay
+      later" and "Retiring a relay", and runbook §28's restated drains and
+      "Retire a relay", read as present-tense procedure with no wording
+      relative to the change; they sit where D5 placed them, the procedure
+      beside the relay's existing administration, with the contract in the
+      specification. The promoted passages (11.16) are declarative, and each
+      decision sits where the placement tables put it: requirements in
+      `spec.md` by the archive, rationale and the mechanism in the
+      `physical-provisioning` companion, the cross-system report in
+      `ARCHITECTURE.md` and the `site-capacity` companion, and the goal's
+      state in the roadmap. Checked against the code: `deliverability.py`,
+      `allocator.py`, `execution.py`, `rebinding.py`, and `service.py` do what
+      the passages say.
+- [x] 11.15 **Roadmap currency.** In `docs/development/ROADMAP.md` Goal 1, the gap
       row "Relay deletion under live leases remains an open lifecycle decision…",
       owned by this change, is settled: remove it, and state in the goal's current
       state that disabling a relay drains it and its server's removal is the relay
       operator's. Name the edit in the design-promotion record (11.16).
-- [ ] 11.16 **Promotion** of the relay drain, completing the design-promotion record
+      *Done:* the gap row is removed; the buyer-access paragraph of Goal 1's
+      current state says disabling a relay drains it, for both domains, until
+      its read reports `drained`, that nothing deletes a relay, and that a
+      drained relay's server is its operator's to remove; the host-placement
+      paragraph's hosts taking new delivery now leave out hosts placed or
+      declared in a pool on a disabled relay. Named in 11.16's record.
+- [x] 11.16 **Promotion** of the relay drain, completing the design-promotion record
       with its own rows, since 11.6's table predates these decisions:
 
       | Accepted decision | Permanent location |
@@ -1840,14 +1589,37 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
       | D6 — a provisioning container is never shared between users, by design | `openspec/specs/physical-provisioning/architecture.md`, "Relay credentials stay on the host and in the service" |
       | D7 — implementation cadence | no permanent destination |
       | Roadmap: the relay-deletion gap row settled | `docs/development/ROADMAP.md`, Goal 1 (11.15) |
+      | D1 item 1's reading — hosts placed in, or declared in, such a pool | `openspec/specs/physical-provisioning/architecture.md`, "Disabling a relay drains it"; `openspec/specs/site-capacity/architecture.md` and `docs/development/ARCHITECTURE.md`, as above |
+      | D1, D5 — a leaked client token drains the relay in every registering service | `openspec/specs/physical-provisioning/architecture.md`, "Relay sharing and containment" |
+      | The usable-host rule's wording at the site layer | `openspec/specs/site-capacity/testing.md`, "Host Requirement Enforcement" |
+      | How the drain was proven | `design.md` only: change history |
+      | Campaign index | `openspec/changes/README.md`, the change's row, its campaign's graph line and introduction (11.7) |
 
       `physical-provisioning` has no `index.md`, so no index entry is owed; run
       `make check-spec-index CHANGE=relay-vm-access-without-a-dashboard`.
-- [ ] 11.17 **Guidance placement.** Read the guidance sections changed since the
+      *Done:* the `physical-provisioning` companion gained "Disabling a relay
+      drains it" after "Rebinding requires draining", which now states the two
+      scopes and the scoped refusal; "Relay credentials stay on the host and in
+      the service" states the variables file's protection and that a
+      provisioning container is never shared between users; "Relay sharing and
+      containment" drains a leaked token's relay. The `site-capacity` companion
+      and `ARCHITECTURE.md` describe the report as registered, enabled hosts
+      less any the composition withholds, naming the compute composition's
+      relay rule and linking the companion. The specification rows are written
+      by the archive (11.11). `make check-spec-index` result recorded at 11.8.
+- [x] 11.17 **Guidance placement.** Read the guidance sections changed since the
       return to design against the layer test; the drain's promotions go to a
       specification, its companion, a handbook-level guide, and the runbook, not to
       guidance, so record that this return touched no guidance if so, and run
       `make check-guidance`.
+      *Done:* since the return, one guidance passage changed:
+      `openspec/specs/site-capacity/testing.md`, "Host Requirement
+      Enforcement", whose statement of the usable-host rule now names a host
+      the composition reports taking new delivery rather than a registered,
+      enabled one. It pertains to `site-capacity` alone and stays beside its
+      specification; it states no rule beyond the capability, so the layer
+      test leaves it where it is. No placement needs a decision.
+      `make check-guidance` passed (104 files).
 
 ## Sequencing against the sibling changes
 
@@ -1866,53 +1638,31 @@ shares no code with this change, and neither depends on the other.
 
 ## Implementation progress
 
-169 of 177 tasks complete. What remains is listed below and is not padding: two
-decision gates and closeout.
-
-**Returned to design (2026-11-16)** for those two gates, on the owner's
-direction. Closeout found that disabling a relay fails every teardown on it,
-and the owner directed that disabling be the relay's drain, with the relay
-server's removal left to its operator outside this repository. Design settles
-both gates and adds the work they need. Planning, implementation, and closeout
-follow from there.
-
-**Replanned (2026-11-17)** against the reviewed design: sections 10a–10e
-implement the relay drain (D1–D5) and record D6, and closeout gains 11.12–11.17
-for the parts the drain reopens; the archive now merges the drain-only deltas.
+Every implementation task is complete. Closeout returned the change to design
+on 2026-11-16, on the owner's direction, for its two decision gates (1A.7 and
+2A.7); the design settled both (D1–D6), and sections 10a–10e implement the
+relay drain.
 
 **Done — the service.** The relay resource, its controller, encryption at rest
 under the profile key, the redacted/execution reader split, preserve-on-absent,
 rebinding refusal with drain, the port allocator with owner-idempotent
-allocation, release attached to the settlement record's terminal transition,
-reconciliation as a background worker, execution-time token resolution,
-pre-dispatch rejection, and the digest-gated definition importer.
+allocation, release with the reservation's capacity (`design.md`, "Lease
+release goes with the reservation's capacity"), reconciliation as a background
+worker, execution-time token resolution, pre-dispatch rejection, the
+digest-gated definition importer, and the relay drain.
 
 **Done — everything around it.** The storefront's removal of relay
 connectivity, the two host tunnel clients, VM creation without a dashboard, the
 chart wiring, relay methods on the canonical client, and the rewritten seller
 documentation.
 
-**Not done, by category.**
-
-- *The live gates are met:* section 6's reload gate and section 8. They were met
-  through `prove-relay-provisioning`'s D9 mapping, by an independent operator
-  deployment running `e2e_vm_real_provisioning` against a real host and a deployed
-  buyer relay. Reload preserves established sessions, so the per-VM client
-  fallback is not built, and the relay-uniformity limit behind section 1B's drain
-  rule stands. 8.2 and 8.6 are met as D9 restates them: refusal without a valid
-  grant, and release without physical reuse.
-- *A decision gate:* 1A.7, relay deletion with live leases. Deliberately open;
-  the schema forecloses none of the three answers.
-- *A decision gate met by existing handling:* 2A.7, the vars file's
-  permissions and lifetime. The file is created owner-only and `O_EXCL` and
-  removed on every ending of the run, which meets the permanent requirement;
-  the per-operation directory the task first named was rejected in
-  `contain-embedded-host-key-material`'s D3. Ticking it is this change's
-  closeout's.
-- *Level 2 tests:* complete. The relay controller, the lease lifecycle, and
-  relay-bearing requests are all driven through the real application and the
-  canonical client.
-- *Closeout:* 11.4 and 11.7–11.11.
+**The live gates are met:** section 6's reload gate and section 8, through
+`prove-relay-provisioning`'s D9 mapping, by an independent operator deployment
+running `e2e_vm_real_provisioning` against a real host and a deployed buyer
+relay. Reload preserves established sessions, so the per-VM client fallback is
+not built, and the relay-uniformity limit stands. 8.2 and 8.6 are met as D9
+restates them: refusal without a valid grant, and release without physical
+reuse.
 
 **A correction worth carrying forward.** Code review found the change claimed
 more than it did in three places, and each is now fixed rather than argued with:
