@@ -28,7 +28,7 @@ allow = [
   "Bash(scripts/change-workflow find*)",
   "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
-  "Bash(git merge-base*)", "Bash(git check-ignore*)",
+  "Bash(git merge-base*)", "Bash(git check-ignore*)", "Bash(git grep*)",
   # Any step may refresh its view of the remote's branches and tags, so one
   # reading the release record (the marketplace-v* tags) or the landing branch
   # reads the current one. A fetch moves remote-tracking refs and tags only,
@@ -153,7 +153,9 @@ allow = [
   "Bash(scripts/change-workflow push)",
   "Bash(git pull --ff-only workspace *)", "Bash(git config --get-regexp remote)",
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
-  "Bash(helm version*)", "Bash(make helm-values-schema)",
+  "Bash(helm version*)", "Bash(make helm-values-schema)", "Bash(make typecheck*)",
+  "Bash(make -C * typecheck*)", "Bash(make -C * first-use*)",
+  "Bash(uv run --find-links * pytest *)",
 ]
 # Triage fixes and re-checks one change; running two changes' validations
 # side by side deploys into another change's namespace.
@@ -181,6 +183,12 @@ allow = [
   # and a Compose stack under a project name of the session's own, so it never
   # touches another change's stack or a validation namespace.
   "Bash(make -C * migrate*)", "Bash(docker run --rm *)",
+  # A package's own type check and first-use example, and its tests run with
+  # another environment directory or wheelhouse: the forms sessions reach for.
+  "Bash(make -C * typecheck*)", "Bash(make -C * first-use*)",
+  "Bash(uv run --directory * pytest *)", "Bash(uv run --find-links * pytest *)",
+  # A section checking its delta specifications, through the configured OpenSpec.
+  "Bash(scripts/change-workflow openspec validate *)",
 ]
 deny = ["Bash(make run-e2e*)"]
 
@@ -218,6 +226,8 @@ allow = [
   "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
   "Bash(scripts/change-workflow run *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
+  "Bash(make -C * typecheck*)", "Bash(make -C * first-use*)",
+  "Bash(uv run --find-links * pytest *)", "Bash(scripts/change-workflow openspec validate *)",
 ]
 deny = ["Bash(make run-e2e*)", "Bash(git merge --abort*)", "Bash(git merge --quit*)"]
 

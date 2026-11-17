@@ -8,6 +8,9 @@ to the section before it, and nothing else in the file says so. A task numbered
 `N.m` under a heading other than `## N.` is that loss made visible: this check
 names each such task and the heading it sits under. Only tasks under a
 recognised `## N.` heading are checked, so a list in another format passes.
+The closeout section is known by its exact title, `Closeout`, alone, so a list
+with sections also fails where none is titled so, where more than one is, or where
+a section follows it.
 
 Run as `scripts/change-workflow check tasks <change>` (`make check-tasks`) by the
 skills that act on a task list before they do; its check, `task_problems`, is also
@@ -30,7 +33,8 @@ from pathlib import Path
 
 from .common import StepError, repository_root
 from .find import ChangeNotFound, change_directory
-from .next_step import TASKS_FILE, read_sections, section_heading, task_problems
+from .next_step import (TASKS_FILE, closeout_problems, read_sections, section_heading,
+                        task_problems)
 
 # An owed line, in a task's text or the section's notes, and its workflow.
 _OWED = re.compile(r"^\s*(?:- )?Owed by validation:\s*`(?P<workflow>[^`]+)`")
@@ -74,15 +78,17 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         print(f"OK: {args[0]} has no task list yet.")
         return 0
     shown = tasks.relative_to(root).as_posix()
-    if problems := task_problems(tasks.read_text("utf-8")):
+    text = tasks.read_text("utf-8")
+    if problems := task_problems(text) + closeout_problems(text):
         for problem in problems:
             print(f"{shown}:{problem}", file=sys.stderr)
         print(file=sys.stderr)
-        print("FAIL: a task sits under another section's heading; a heading is missing or\n"
-              "the task is misplaced. Nothing that reads the sections can act on it.",
-              file=sys.stderr)
+        print("FAIL: a task sits under another section's heading, or the closeout section,\n"
+              "titled `Closeout`, is missing, repeated, or not the last. Nothing that reads\n"
+              "the sections can act on it.", file=sys.stderr)
         return 1
-    print(f"OK: every numbered task of {shown} sits under its own section's heading.")
+    print(f"OK: every numbered task of {shown} sits under its own section's heading, "
+          "and its closeout section is its last.")
     return 0
 
 

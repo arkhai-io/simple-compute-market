@@ -124,6 +124,9 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # The change's task list, whose sections and checks say how far implementation got.
 TASKS_FILE = "tasks.md"
 _SECTION = re.compile(r"^## (?P<id>[0-9]+[A-Za-z]?)\. (?P<title>.+?)\s*$")
+# The title of the closeout section, the task list's last: closeout implements it,
+# and no round does.
+CLOSEOUT_TITLE = "Closeout"
 # A task is numbered for its section, `N.m`, when it is numbered at all.
 _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
                    r"(?P<number>(?P<section>[0-9]+[A-Za-z]?)\.[0-9]+\b)?")
@@ -212,8 +215,9 @@ class Section:
 
     @property
     def closeout(self) -> bool:
-        # Plans title it "Closeout", "Plan closeout", "Repository closeout", …
-        return "closeout" in self.title.lower()
+        # Known by its exact title alone: a section whose title merely mentions
+        # closeout, such as a pre-closeout review's preparation, is implemented.
+        return self.title == CLOSEOUT_TITLE
 
 
 @dataclass
@@ -347,6 +351,31 @@ def task_problems(text: str) -> list[str]:
         elif heading and (task := _TASK.match(line)) and task["section"] \
                 and task["section"].lower() != heading[0]:
             problems.append(f"line {number}: task {task['number']} sits under `{heading[1]}`")
+    return problems
+
+
+def closeout_problems(text: str) -> list[str]:
+    """Why a task list's closeout section cannot be told apart: a list with
+    sections has none titled `Closeout`, has more than one, or has one followed by
+    another section. Routing leaves the closeout section out of every round, so a
+    list naming it otherwise would have it implemented by a round, or a section
+    after it skipped. A list with no `## N.` sections is unaffected."""
+    sections = [(number, match) for number, line in enumerate(text.splitlines(), start=1)
+                if (match := _SECTION.match(line))]
+    if not sections:
+        return []
+    closeouts = [(number, match) for number, match in sections
+                 if match["title"] == CLOSEOUT_TITLE]
+    if not closeouts:
+        return [f"line {sections[-1][0]}: no section is titled `{CLOSEOUT_TITLE}`; the "
+                f"task list ends with its closeout section, `## N. {CLOSEOUT_TITLE}`"]
+    problems = [f"line {number}: a second section is titled `{CLOSEOUT_TITLE}`"
+                for number, _ in closeouts[1:]]
+    first = closeouts[0][0]
+    problems += [f"line {number}: section {match['id']} follows the closeout section; "
+                 "the closeout section is the task list's last"
+                 for number, match in sections if number > first
+                 and match["title"] != CLOSEOUT_TITLE]
     return problems
 
 
@@ -1196,14 +1225,15 @@ class Computation:
     # The round.
 
     def sections_problem(self) -> Result | None:
-        """Why the task list cannot be routed on: it has no sections, or a task sits
-        under another section's heading. The skills check the task list before
+        """Why the task list cannot be routed on: it has no sections, a task sits
+        under another section's heading, or its closeout section is missing,
+        repeated, or not its last. The skills check the task list before
         acting on it; this is the backstop for routing on its sections, since a
         list missing a heading would have whole sections repeated or skipped."""
         state = self.state
         if not state.sections:
             return self.unclassified("the task list has no sections")
-        if problems := task_problems(state.tasks):
+        if problems := task_problems(state.tasks) + closeout_problems(state.tasks):
             return self.unclassified("the task list is malformed: " + "; ".join(problems))
         return None
 

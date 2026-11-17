@@ -246,6 +246,15 @@ def refusal_prompt(kind: str, change: str, base: str | None, problems: Sequence[
     return prompt
 
 
+def with_direction(prompt: str, direction: str | None) -> str:
+    """`prompt` carrying the owner's direction to the review, in their words."""
+    if not direction:
+        return prompt
+    return (f"{prompt} The owner's direction to this review, in their words: "
+            f"{direction!r}. Look harder where it points, and still review the whole "
+            "change in the skill's format.")
+
+
 def review_prompt(kind: str, change: str, base: str | None) -> str:
     prompt = f"Use the change-review skill. Review kind: {kind}. Change: {change}."
     if kind != "design":
@@ -425,7 +434,8 @@ def _marker_text(text: str) -> str:
 def run_review(change: str, kind: str, *, base: str | None = None, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path | None = None,
                runner: CodexRunner = run_codex, claude: Runner = run_claude,
-               unvalidated: bool = False, head: Callable[[Path], str] = _reviewed_head,
+               unvalidated: bool = False, direction: str | None = None,
+               head: Callable[[Path], str] = _reviewed_head,
                changed_since: ChangedSince = changed_since, steps_path: Path | None = None,
                clock: Clock = utc_now,
                echo: Callable[[str], None] | None = lambda shown: print(
@@ -446,7 +456,9 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     change and the step table are the repository's the command runs in, unless
     `root` and `steps_path` name others. A reviewer interrupted, or whose runner
     failed, is passed on as it was raised, once `interrupted` is given what its log
-    line records beside its reason.
+    line records beside its reason. The owner's `direction`, when given, rides on
+    the prompt that starts or continues the reviewer, never on a correction of its
+    format.
     """
     started = clock()
     root = repository_root() if root is None else root
@@ -548,6 +560,7 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
                 prompt = continuation_prompt(kind, change, base, prior[2])
             else:
                 continuing, prompt = None, review_prompt(kind, change, base)
+            prompt = with_direction(prompt, direction)
             status, reached, session = attempt(ran, prompt, continuing)
             if reached is None or reached[0] != "unavailable":
                 break
@@ -711,8 +724,11 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     log = log_path(root, change)
     head = options.get("head", _reviewed_head)
     started = clock()
-    # The owner's choice of reviewer marks every line of the run, however it ends.
-    override: Entry = {"override": True} if options.get("model") or options.get("effort") else {}
+    # The owner's choice of reviewer, and their direction to the review, mark every
+    # line of the run, however it ends.
+    marks: Entry = {"override": True} if options.get("model") or options.get("effort") else {}
+    if options.get("direction"):
+        marks["direction"] = options["direction"]
 
     def logged(outcome: Entry, session: str | None, commit: str | None, extra: Entry) -> Entry:
         """The line, with what a reviewer on Claude invoked through `run`: a Codex
@@ -732,7 +748,7 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
             commit = head(root)
         except ReviewError:
             commit = None
-        record = {**(record or {}), **override}
+        record = {**(record or {}), **marks}
         denials = record.pop("denials", [])
         session = record.pop("session", None)
         return logged({"outcome": "stopped", "message": reason, "reason": reason,
@@ -768,4 +784,5 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
             + "); the corrected review passed.")
     reviewer.update(review_cost(path.parent / TRANSCRIPTS / path.with_suffix(".log").name,
                                 log, session, reviewer.get("harness"), started))
-    return logged(outcome, session, commit, {"kind": kind, "record": path.name, **reviewer})
+    return logged(outcome, session, commit,
+                  {"kind": kind, "record": path.name, **reviewer, **marks})

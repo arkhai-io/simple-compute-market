@@ -213,6 +213,12 @@ were done at; the open ones name none of the moved files.
       section 2's reconciliation behaviour is settled, then implement the
       decision or record why it stays deferred. This is a decision task, not an
       instruction to implement one of the three.
+      *Returned to design (2026-11-16).* The owner's direction: disabling a relay
+      is its drain, and removing the relay server is its operator's, outside this
+      repository. Closeout found that disabling a relay currently fails every
+      teardown on it, so the drain cannot work as built. `design.md`, "What
+      deletes a relay", has the findings and the questions; design replaces this
+      task with the work it settles.
 - [x] 1A.8 Reject an update that would duplicate another relay's rendezvous,
       with both relay identifiers named. The unique constraint would catch it,
       but a constraint violation surfacing as a 500 is not an administration
@@ -414,6 +420,10 @@ rest nor withheld from a read.
       as a per-run `known_hosts` if SSH host-key checking is enabled, or a
       provisioning container shared with another user. Ticking this task is a
       decision for this change's closeout.
+      *Returned to design (2026-11-16).* The owner's direction: a provisioning
+      container is never shared between users, by design, and a user who opens
+      one to others has stepped out of scope. `design.md`, "Does the variables
+      file's handling need anything further?", has the question.
 
 **Validation:** `make test` in `provisioning/compute/service`.
 
@@ -521,18 +531,34 @@ structural checks in `tests/test_ansible_structure.py`, which cover task files
 
 ## 6. Reload verification gate
 
-- [ ] 6.1 **[log]** Prove that `frpc reload` preserves established sessions.
+- [x] 6.1 **[log]** Prove that `frpc reload` preserves established sessions.
       Open an SSH session through a tunnel, append an unrelated proxy stanza,
       reload, and check the session is still alive. Supplied: the client's log
       across the reload, and evidence the session outlived it.
-- [ ] 6.2 **Decide and record** in `design.md`. If reload preserves sessions,
+      *Met through `prove-relay-provisioning`'s D9 mapping*, by the VM
+      real-provisioning lane's D8 sequence rather than a separate CLI reload: an
+      independent operator deployment ran `e2e_vm_real_provisioning` (47 passed) at
+      `72b40a25b` against a real KVM host and a deployed buyer relay running the
+      grant-admission plugin, and again on a branch from it whose only difference is
+      a bare-metal storefront fix. In each run the second guest's create job appended
+      its proxy and reloaded the buyer client through its admin API (`/api/reload`),
+      and its teardown removed the proxy and reloaded again. Through both, the first
+      guest's heartbeat session stayed open (stages 09f, 09k, 09n), with a longest
+      gap of 2.000 s and then 1.007 s. A later run on the same deployment,
+      purchasing through the shipped buyer, measured 1.006 s.
+      `prove-relay-provisioning`'s 16.2 and 16.7 recorded the same behaviour by its
+      accepted Arkhai method.
+- [x] 6.2 **Decide and record** in `design.md`. If reload preserves sessions,
       section 5 stands as written. If it does not, the recorded fallback is one
       `frpc` process per VM, and that decision is taken here rather than
       assumed either way now.
-- [ ] 6.3 If the fallback is needed, note that `transport.poolCount = 5` in the
+      *Decided: reload preserves sessions; section 5 stands and the per-VM client
+      fallback is not built.* Recorded under "Reload rather than restart".
+- [x] 6.3 If the fallback is needed, note that `transport.poolCount = 5` in the
       current template means five idle connections per VM, against a relay
       where `transport.maxPoolCount` is unset. Sizing is part of that decision,
       not a detail to discover later.
+      *Not applicable:* 6.2 does not take the fallback.
 
 ## 7. Tests
 
@@ -751,19 +777,52 @@ structural checks in `tests/test_ansible_structure.py`, which cover task files
 
 Requires a rented, initialized host and the deployed relay.
 
-- [ ] 8.1 **[log]** A proxy registered inside the configured window is accepted.
+The items below were met by the independent operator deployment that 6.1 describes,
+mapped by `prove-relay-provisioning`'s D9. The run's raw output stays with the operator.
+The outcomes recorded here are sanitized and name no address, host, or credential.
+
+- [x] 8.1 **[log]** A proxy registered inside the configured window is accepted.
       Supplied: the relay's log naming the port.
-- [ ] 8.2 **[log]** A proxy outside the window is refused. Supplied: the same
+      *Met:* the buyer relay's admission plugin logged one `admit` per guest, each
+      under the operator's grant-signing key, for the three leases the run allocated
+      (ports 6100–6102). Each create's status wait required the proxy running, and
+      the buyer connected through it.
+- [x] 8.2 **[log]** A proxy outside the window is refused. Supplied: the same
       log. This is what proves the window is enforced by the relay rather than
       only respected by the client.
-- [ ] 8.3 **[log]** Creating a second VM leaves the first VM's established SSH
+      *Met as restated by D9:* a proxy without a valid grant is refused. The
+      admission check against each deployed buyer relay refused five probes, each
+      for its own reason: no grant (`grant_missing`), a forged signature
+      (`signature_invalid`), a grant for another port (`port_mismatch`), a port
+      outside the operator's range (`port_outside_range`), and another operator's
+      key (`key_unknown`). For each, both the client and the plugin recorded the
+      refusal and the port stayed closed. Each relay's token was also refused by the
+      other relays. *Not shown live:* `frps` refusing a port outside its own
+      `allowPorts`. That the buyer relays allow only their window was read from
+      their configuration, not observed as a refusal.
+- [x] 8.3 **[log]** Creating a second VM leaves the first VM's established SSH
       session alive. Supplied: client log plus the surviving session.
-- [ ] 8.4 **[log]** The host's management tunnel is unaffected by VM creation
+      *Met:* stage 09k, by the heartbeat 6.1 describes.
+- [x] 8.4 **[log]** The host's management tunnel is unaffected by VM creation
       and teardown. Supplied: management client status across both.
-- [ ] 8.5 **[log]** A buyer connection string produced by the relay path
+      *Met:* the management client's unit, read on the host before and after the
+      module, was active with zero restarts, the same start time, and the same
+      configuration hash. The lane's checks of management connectivity before each
+      teardown (09i, 09l, 10b2) passed, every job having run over that tunnel.
+- [x] 8.5 **[log]** A buyer connection string produced by the relay path
       connects. Supplied: the string and a successful session.
-- [ ] 8.6 **[log]** Teardown releases the port, and it is reused by the next
+      *Met:* stages 09d and 09j. The buyer reached each guest at its delivered
+      relay string from the operator's machine, outside the cluster. An unrelated
+      key was refused (09e), and after teardown the string no longer connected
+      (09m, 11d).
+- [x] 8.6 **[log]** Teardown releases the port, and it is reused by the next
       VM. Supplied: allocation records before and after.
+      *Met as restated by D9:* teardown releases the port. The relay's holdings
+      read after the module showed every lease released, each keeping its grant
+      expiry and with no competing lease on its port. *Not shown physically:*
+      reuse. A released port is held until its grant's original expiry plus the
+      reuse margin, so a single run cannot show it; reuse after that hold is
+      covered by the allocator's integration suite.
 
 ## 9. Definition documents and deployment wiring
 
@@ -1054,9 +1113,15 @@ shares no code with this change, and neither depends on the other.
 
 ## Implementation progress
 
-142 of 170 tasks complete. What remains is listed below and is not padding: the
-live-hardware gates, two decision gates, the Level 2 tests still owed, and
-closeout.
+169 of 177 tasks complete. What remains is listed below and is not padding: two
+decision gates and closeout.
+
+**Returned to design (2026-11-16)** for those two gates, on the owner's
+direction. Closeout found that disabling a relay fails every teardown on it,
+and the owner directed that disabling be the relay's drain, with the relay
+server's removal left to its operator outside this repository. Design settles
+both gates and adds the work they need. Planning, implementation, and closeout
+follow from there.
 
 **Done — the service.** The relay resource, its controller, encryption at rest
 under the profile key, the redacted/execution reader split, preserve-on-absent,
@@ -1072,12 +1137,13 @@ documentation.
 
 **Not done, by category.**
 
-- *Needs the node:* section 6's reload gate and all of section 8. Sections 1–5
-  assume `frpc reload` preserves established sessions. If it does not, the
-  recorded fallback is one client per VM — which also removes the
-  relay-uniformity limit behind section 1B's drain rule, at no schema cost,
-  since the lease already carries a per-VM relay. Do not build per-VM clients
-  for that reason alone.
+- *The live gates are met:* section 6's reload gate and section 8. They were met
+  through `prove-relay-provisioning`'s D9 mapping, by an independent operator
+  deployment running `e2e_vm_real_provisioning` against a real host and a deployed
+  buyer relay. Reload preserves established sessions, so the per-VM client
+  fallback is not built, and the relay-uniformity limit behind section 1B's drain
+  rule stands. 8.2 and 8.6 are met as D9 restates them: refusal without a valid
+  grant, and release without physical reuse.
 - *A decision gate:* 1A.7, relay deletion with live leases. Deliberately open;
   the schema forecloses none of the three answers.
 - *A decision gate met by existing handling:* 2A.7, the vars file's
@@ -1089,8 +1155,7 @@ documentation.
 - *Level 2 tests:* complete. The relay controller, the lease lifecycle, and
   relay-bearing requests are all driven through the real application and the
   canonical client.
-- *Deployment consequences and closeout:* 10.2–10.4 and all of section 11,
-  including promotion.
+- *Closeout:* 11.4 and 11.7–11.11.
 
 **A correction worth carrying forward.** Code review found the change claimed
 more than it did in three places, and each is now fixed rather than argued with:
@@ -1155,10 +1220,12 @@ the known flakes recorded in the campaign handoff.
   `--syntax-check` and lint remain owed. Whether `make validate-inventory`
   passes vacuously is recorded elsewhere as a repository defect and was **not**
   confirmed here either way.
-- Section 6's reload gate and section 8 — need the rented host and the deployed
-  relay.
+- Section 6's reload gate and section 8 — needed the rented host and the deployed
+  relay. *Since met* by the operator deployment those sections record.
 
-**Owed, and not substitutable by anything above.** The live FRP gate. No test
+**Owed then, and not substitutable by anything above.** The live FRP gate, since
+met by sections 6 and 8 (one item is still not shown: a client restarted to
+adopt a rotated token reconnecting with it). No test
 here runs `frpc` or `frps`, so nothing above shows that a reload preserves an
 established session, that a proxy comes up, that the relay accepts a port inside
 its window and refuses one outside it, or that a client restarted to adopt a

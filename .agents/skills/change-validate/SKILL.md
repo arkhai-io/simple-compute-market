@@ -485,12 +485,14 @@ that a green pipeline is not evidence for this change.
 
 ## 7. Write the validation record
 
-Write `reviews/NN-validation.md` in the change's directory — what
-`scripts/change-workflow find <change>` prints, under the archive once closeout
-has archived the change — numbered after every
-file in `reviews/` and `reviews/transcripts/` at the moment you write it — a review
-started beside this validation may have taken a number since you began. Never
-overwrite a record: if the name exists, take the next number.
+Write the validation record at the path `scripts/change-workflow find
+--next-record validation <change>` prints, run at the moment you write it:
+`reviews/NN-validation.md` in the change's directory, under the archive once
+closeout has archived the change, numbered after every record and transcript as
+the engine numbers its own. Never count the number yourself, and never take it
+from the workflow log, whose `seq` numbers its lines, not records. A review started
+beside this validation may have taken a number since you began, which is why you
+ask when you write; never overwrite a record: if the path exists, ask again.
 
 The result, overall and per part, is one of:
 

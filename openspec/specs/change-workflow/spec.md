@@ -482,13 +482,28 @@ checked; one that failed or was inconclusive MUST be brought to the owner.
 Each `tasks.md` section MUST be a coherent slice that can be verified, sized by
 what it changes and what proves it, and MUST end at a verification point. The plan
 MUST NOT prescribe in `tasks.md` how sections are distributed across agent sessions
-or review rounds.
+or review rounds. The task list's last section MUST be its closeout section, headed
+`## N. Closeout` exactly; the engine MUST know the closeout section by that title
+alone, and its task-list check MUST fail a list with sections that has none so
+titled, more than one, or one followed by another section.
 
 #### Scenario: Planning writes a section
 
 - **WHEN** planning writes a section of the task list
 - **THEN** the section ends with a verification task naming the evidence that
   proves it, and the task list names no session or round
+
+#### Scenario: A section's title mentions closeout
+
+- **WHEN** a task list's section 6 is "Qualification scenarios and pre-closeout
+  review" and its section 7 is "Closeout"
+- **THEN** section 6 is implemented by a round, and closeout implements section 7
+
+#### Scenario: A section follows the closeout section
+
+- **WHEN** an amended plan adds section 12b after "## 12. Closeout"
+- **THEN** `scripts/change-workflow check tasks <change>` fails, naming section 12b,
+  and the next-step computation routes on no section of the list
 
 ### Requirement: CW-5h8e Evidence only a push produces is owed by validation
 
@@ -555,7 +570,10 @@ implement them.
 
 Each round MUST be recorded as it starts, from the latest plan's mapping, as its
 first round with a section not yet complete; a change with no mapping for its next
-incomplete section MUST ask the owner, once per round.
+incomplete section MUST ask the owner, once per round. A round recorded while the
+latest round is open — no implementation triage has finished or returned since it
+— MUST continue that round, whatever sections it names, keeping its last record and
+starting commit.
 
 #### Scenario: A round is recorded after the fact
 
@@ -572,6 +590,14 @@ incomplete section MUST ask the owner, once per round.
 - **THEN** the new round line keeps the open round's last record and starting
   commit and names the line it continues, so the round's reading, validation, and
   review still cover sections 1 to 4
+
+#### Scenario: A replan renumbers an open round's sections
+
+- **WHEN** a round naming sections 3 and 4 is open, section 3 and part of 4 are
+  committed, and a return to design re-plans the rest of section 4 as sections 5
+  and 6
+- **THEN** the round recorded for sections 5 and 6 continues the open round, and its
+  round view, validation, and review read every commit since the open round's base
 
 ### Requirement: CW-tc82 Each section is checked, handed off, and committed alone
 
@@ -990,8 +1016,19 @@ Each review of a change MUST be written as one Markdown file in that change's
 `reviews/` directory, numbered in the order reviews are produced, and that file MUST
 be the only record of its findings. The records' order MUST be establishable, by
 number or, where two records of different kinds share a number, by their file
-times, and a record MUST NOT be overwritten. Each finding MUST state its lens, its
-basis, its severity, and the evidence it cites.
+times, and a record MUST NOT be overwritten. A record's number MUST follow every
+record and transcript in `reviews/` when it is written, and a record a skill writes
+itself — a validation's, a triage's external copy — MUST take the path the engine
+gives it, `scripts/change-workflow find --next-record <kind> <change>`, never a
+number it counts. Each finding MUST state its lens, its basis, its severity, and
+the evidence it cites.
+
+#### Scenario: Validation writes its record
+
+- **WHEN** a change's reviews hold records up to 69 and its log's latest line is seq
+  134
+- **THEN** validation writes the path `find --next-record validation` prints,
+  `70-validation.md`, and no number from the log
 
 #### Scenario: Two records share a number
 
@@ -2459,6 +2496,22 @@ The orchestrating session MUST NOT name one.
 - **WHEN** the owner runs a review by hand naming a model the repository forbids
 - **THEN** the review runs on that model alone, and its record and log line mark it
   as the owner's override
+
+### Requirement: CW-f0cs The owner may direct one review where to look harder
+
+The owner MAY give one review run a direction in their words, through the review
+command's `--arguments` (the convenience target's `ARGUMENTS`). The reviewer's
+prompt MUST carry it, and every log line of that run MUST record it as `direction`.
+The reviewer MUST answer it and MUST still review the whole change in the review
+format, asking every question of its kind: a direction never narrows a review.
+
+#### Scenario: The owner points a pre-closeout review at the guidance edits
+
+- **WHEN** the owner runs a pre-closeout review with the direction "check the
+  guidance edits sit where the new layers put them"
+- **THEN** the reviewer's prompt carries those words, the review answers them
+  beside every other question of a pre-closeout review, and the run's log line
+  records them as its `direction`
 
 ### Requirement: CW-w2ld The orchestrating session's model is the configuration's
 
