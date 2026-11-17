@@ -1,8 +1,14 @@
 {{/*
-Shared helm-test configuration mounted by smoke-test pods.
+The shared "helm" profile, <release>-helm-profile: the topology this chart
+derives from the release (each service's in-cluster URL, the pins its clients
+trust, the chain, the development buyer's wallet), true for every test pod that
+mounts it: the smoke tests, contract validation and the end-to-end pods. A
+setting only some of them act on is not here: the
+e2e-tests chart's own "e2e-tests" profile carries the end-to-end scenarios'.
 
 Preferred smoke-test mode: global.smokeTests.config.profileFiles renders
-complete Dynaconf profile files directly. The generated profile is still kept
+complete Dynaconf profile files directly, into this same ConfigMap beside it,
+which the smoke pods mount instead. The generated profile is still kept
 when its name does not collide, so non-smoke hooks that mount config-helm.yml
 continue to work.
 */}}
@@ -182,6 +188,16 @@ states one. */ -}}
 {{- if $targetWalletAddress -}}
   {{- $_ := set $targetProfile "wallet_address" $targetWalletAddress -}}
 {{- end -}}
+{{- /* The principal the target publishes and answers as, where its config
+states one, which a test verifying its responses pins. */ -}}
+{{- $targetIdentity := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "identity") | fromJson -}}
+{{- $targetPrincipal := include "arkhai.storefrontConfigSection" (dict "doc" $targetIdentity "name" "principal") | fromJson -}}
+{{- $targetScheme := include "arkhai.storefrontConfigValue" (dict "doc" $targetPrincipal "name" "scheme") -}}
+{{- $targetIdentifier := include "arkhai.storefrontConfigValue" (dict "doc" $targetPrincipal "name" "identifier") -}}
+{{- if and $targetScheme $targetIdentifier -}}
+  {{- $_ := set $targetProfile "publisher_scheme" $targetScheme -}}
+  {{- $_ := set $targetProfile "publisher_identifier" $targetIdentifier -}}
+{{- end -}}
 {{- $_ := set $generated $component $targetProfile -}}
 {{- if and (eq (include "arkhai.storefrontConfigValue" (dict "doc" $alkahestConfig "name" "enabled")) "true") $rpc.enabled $rpc.host $rpc.port -}}
 {{- $_ := set $buyer "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port)) -}}
@@ -212,7 +228,7 @@ that storefront's signer. No VM agent or registry is the smoke tests' target. */
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-test-config
+  name: {{ .Release.Name }}-helm-profile
   labels:
     {{- include "arkhai-node-operator.labels" . | nindent 4 }}
 data:

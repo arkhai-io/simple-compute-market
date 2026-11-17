@@ -67,7 +67,7 @@ falls back to global.imageRepository, then bare image name.
 Name of the ConfigMap holding the e2e-tests profile, rendered from config.
 */}}
 {{- define "e2e-tests.configMapName" -}}
-{{- printf "%s-config" (include "e2e-tests.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-profile" (include "e2e-tests.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end }}
 
 {{/*

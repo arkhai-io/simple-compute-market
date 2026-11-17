@@ -208,13 +208,16 @@ TOPOLOGY_ROLLOUT_ORDER := registry provisioning storefront bare-metal-storefront
 # Development values topology-secrets derives every key from, never for a public
 # network: Foundry's published default mnemonic, and the Anvil account index of
 # each principal values.yaml, $(LOCAL_VALUES), and $(TOPOLOGY_VALUES) pin. Change
-# an index only together with the principal those files pin to it.
+# an index only together with the principal those files pin to it. The
+# registry's administrator key is a bearer string no file pins, derived at an
+# index no principal these releases run uses.
 DEV_MNEMONIC := test test test test test test test test test test test junk
 DEV_ACCOUNT_PROVISIONING            := 0
 DEV_ACCOUNT_BUYER                   := 1
 DEV_ACCOUNT_BOB                     := 2
 DEV_ACCOUNT_REGISTRY                := 3
 DEV_ACCOUNT_PROVISIONING_ADMIN      := 5
+DEV_ACCOUNT_REGISTRY_ADMIN          := 6
 DEV_ACCOUNT_BARE_METAL_STOREFRONT   := 8
 DEV_ACCOUNT_BARE_METAL_PROVISIONING := 9
 # The SSH key both provisioning services mount. Mock provisioning never opens a
@@ -285,6 +288,7 @@ topology-secrets:
 	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
 	DEV_ACCOUNT_BOB="$(DEV_ACCOUNT_BOB)" DEV_ACCOUNT_REGISTRY="$(DEV_ACCOUNT_REGISTRY)" \
 	DEV_ACCOUNT_PROVISIONING_ADMIN="$(DEV_ACCOUNT_PROVISIONING_ADMIN)" \
+	DEV_ACCOUNT_REGISTRY_ADMIN="$(DEV_ACCOUNT_REGISTRY_ADMIN)" \
 	DEV_ACCOUNT_BARE_METAL_STOREFRONT="$(DEV_ACCOUNT_BARE_METAL_STOREFRONT)" \
 	DEV_ACCOUNT_BARE_METAL_PROVISIONING="$(DEV_ACCOUNT_BARE_METAL_PROVISIONING)" \
 	PROVISIONING_SSH_KEY_FILE="$(PROVISIONING_SSH_KEY_FILE)" \

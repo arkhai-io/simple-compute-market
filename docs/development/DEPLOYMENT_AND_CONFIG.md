@@ -79,7 +79,7 @@ Where the charts differ:
   each value to its variable by name, so a new registry setting also needs
   a line in its ConfigMap template (see
   [`deployment-state`'s "Registry profile configuration"](../../openspec/specs/deployment-state/configuration.md#registry-profile-configuration)).
-- The provisioning chart and the umbrella's generated smoke-test profile
+- The provisioning chart and the umbrella's generated `helm` profile
   write JSON syntax into that YAML profile so 0x-prefixed EIP-191
   identifiers remain strings when Dynaconf reads it
   ([`helm.md`, "A hex value stays a string"](../guidance/engineering/helm.md#a-hex-value-stays-a-string)).
@@ -103,15 +103,19 @@ The provisioning chart's `mockMode` appends the `mock` profile to
 `ACTIVE_PROFILES`
 ([`helm.md`, "A chart value toggles a mock profile"](../guidance/engineering/helm.md#a-chart-value-toggles-a-mock-profile)).
 
-**The umbrella's smoke-test profile.** The generated `<release>-test-config`
-profile carries what its smoke hooks read and the release's values state: the
+**The umbrella's `helm` profile.** The generated `helm` profile, in the
+`<release>-helm-profile` ConfigMap the smoke-test pods, contract validation and
+the end-to-end pods mount, carries the topology the release's values state and
+those pods read: the
 registry pins `registry.authority_id` and `registry.identifier`, which are what the
 release's clients trust (`global.registryIdentity`), carried only for the internal
 registry and only for an EIP-191 identity, the one scheme the registry smoke test
 verifies; `buyer.wallet_address`, from the e2e-tests chart's development buyer
 identity; `seller.wallet_address`, from the target agent's `[Wallet].address` when its
 configuration states one, and absent when the agent derives its address from
-its key; and
+its key; `seller.publisher_scheme` and `seller.publisher_identifier`, the
+principal the target agent's `Identity.principal` states, which a test verifying
+its responses pins; and
 `provisioning.authority_scheme` and `provisioning.authority_identifier`, the
 provisioning signer the release's clients trust (`global.provisioningIdentity`),
 which the provisioning chart's own identity must equal. The provisioning smoke
@@ -132,13 +136,16 @@ hex value
 the `e2e-tests` profile, `config-e2e-tests.yml` in the chart's own ConfigMap, which
 its deal and scenarios pods mount and layer as `ACTIVE_PROFILES=helm,e2e-tests,e2e-secret`,
 so an end-to-end setting reaches them without a template line of its own and no
-other test pod reads it. The profile is a ConfigMap, so no credential goes there:
-the chart's schema refuses a key ending in `credential`, `private_key`, `_key`,
-`token` or `secret` at any depth, and a setting that needs one names the
-`e2e-secret` key holding it. `helm/local-values.yaml` states the release's
-`lane_time` there: wall mode, and the storefront, provisioning service and registry
-the end-to-end session reads the time source of, keyed by name, each credential
-named by its `e2e-secret` key. The registry's `/admin/status` takes its
+other test pod reads it: the smoke pods and contract validation read `helm` too,
+so a setting there would reach them. The profile is a ConfigMap, so
+no credential goes there: the chart's schema refuses a key ending in `credential`,
+`_key`, `token` or `secret`, in any case, at any depth, and a setting that needs
+one names the `e2e-secret` key holding it. `helm/local-values.yaml` states the
+release's `lane_time` there: wall mode, and the storefront, provisioning service
+and registry the end-to-end session reads the time source of, keyed by name. A
+party states none of their topology or credentials: each field ending in
+`_setting` names the setting its value is read from, each URL and pin the `helm`
+profile's and each credential its `e2e-secret` key. The registry's `/admin/status` takes its
 administrator key, which the local release gives it through
 `registry.secretProfile` (`arkhai-registry-runtime`'s `config-admin.env`).
 
@@ -487,7 +494,7 @@ release that enables both compute storefronts with the bare-metal storefront bou
 the release's own provisioning service (its derived `default` site, or a stated site on
 that URL), naming the second release's overlay; bound only to sites of its own, it
 renders. In a release whose VM storefront is disabled and whose dedicated bare-metal
-storefront is enabled, the umbrella's smoke-test profile checks that provisioning
+storefront is enabled, the umbrella's `helm` profile checks that provisioning
 trusts the bare-metal storefront's `Identity.principal` in place of a VM agent's.
 
 Locally the topology is two releases in one namespace. Release 1 is the umbrella as

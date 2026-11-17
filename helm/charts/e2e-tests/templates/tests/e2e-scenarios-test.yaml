@@ -2,7 +2,7 @@
 {{/*
 Helm test pod: the end-to-end scenarios scenarios.markers selects (a pytest
 marker expression), run inside the release's namespace, where they reach every
-service by its in-cluster name through the shared test-config's "helm" profile,
+service by its in-cluster name through the umbrella's shared "helm" profile,
 so no local port is involved; this chart's "e2e-tests" profile, its `config`,
 layers over it. A Helm validation selects its scenarios here and
 runs this pod alone (`helm test --filter name=<this pod>`).
@@ -42,15 +42,20 @@ spec:
         - name: XDG_STATE_HOME
           value: /var/lib/arkhai-buyer-state
       volumeMounts:
-        - name: test-config
+        # The three profiles the deal test's header describes, in layering
+        # order: "helm", the topology the smoke tests and contract validation
+        # read too; "e2e-tests", the settings only the end-to-end scenarios act
+        # on, kept out of "helm" so no other test pod acts on them;
+        # "e2e-secret", the credentials.
+        - name: helm-profile
           mountPath: /app/config/config-helm.yml
           subPath: config-helm.yml
           readOnly: true
-        - name: e2e-tests-config
+        - name: e2e-tests-profile
           mountPath: /app/config/config-e2e-tests.yml
           subPath: config-e2e-tests.yml
           readOnly: true
-        - name: e2e-secret
+        - name: e2e-secret-profile
           mountPath: /app/config/config-e2e-secret.yml
           subPath: config-e2e-secret.yml
           readOnly: true
@@ -63,13 +68,13 @@ spec:
           subPath: credential
           readOnly: true
   volumes:
-    - name: test-config
+    - name: helm-profile
       configMap:
-        name: {{ .Release.Name }}-test-config
-    - name: e2e-tests-config
+        name: {{ .Release.Name }}-helm-profile
+    - name: e2e-tests-profile
       configMap:
         name: {{ include "e2e-tests.configMapName" . }}
-    - name: e2e-secret
+    - name: e2e-secret-profile
       secret:
         secretName: {{ include "e2e-tests.secretName" . }}
     - name: buyer-profile-store

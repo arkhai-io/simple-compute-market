@@ -32,8 +32,8 @@ scenarios:
 
 # ---------------------------------------------------------------------------
 # The PAYMENTS settings the test pods read, in the keys e2e-tests/settings.toml's
-# [default.payments] declares; the umbrella writes them into the shared
-# test-config's "helm" profile. That profile is a ConfigMap, so only public
+# [default.payments] declares; the umbrella writes them into its shared "helm"
+# profile (<release>-helm-profile). That profile is a ConfigMap, so only public
 # settings are accepted here: the parties' marketplace credentials, development
 # authentication, and any key the schema does not name are refused. Empty adds
 # no payments settings.
@@ -46,7 +46,7 @@ payments: {}
 # test pods layer between the shared "helm" profile and "e2e-secret", so a
 # setting reaches them with no template line of its own and no other test pod
 # reads it. It is a ConfigMap, so no credential goes here, and the schema
-# refuses a key ending in credential, private_key, _key, token or secret at any
+# refuses a key ending in credential, _key, token or secret, in any case, at any
 # depth; a setting that needs one names the e2e-secret key holding it (the
 # lane_time parties' `<field>_setting`).
 # ---------------------------------------------------------------------------

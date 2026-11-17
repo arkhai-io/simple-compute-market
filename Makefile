@@ -15,11 +15,6 @@ GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)
 GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
-# The identity kit's exact release wheel, its version read from the kit's own
-# project: every consumer pins the kit exactly, and the review wheelhouse names
-# this one wheel, so `dist-identity` checks the build produced exactly it.
-IDENTITY_VERSION := $(shell sed -n 's/^version = "\(.*\)"$$/\1/p' ${CURDIR}/kit/identity/pyproject.toml)
-IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-$(IDENTITY_VERSION)-py3-none-any.whl
 
 .PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-workflow-credentials check-market-binary check-release-versions check-release-record check-uv-setup check-locks check-uv-version check-python-version check-build-requirements check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
@@ -121,13 +116,11 @@ dist-arkhai-core-registry: dist-registry-client ## Build arkhai-core-registry wh
 
 dist-registry: dist-registry-client ## Compatibility alias for dist-registry-client.
 
-dist-identity: ## Build the exact identity-kit release wheel into .dist/
+dist-identity: ## Build arkhai-kit-identity wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd kit/identity && uv build --wheel --out-dir $(DIST_DIR)
-	@test -n "$(IDENTITY_VERSION)" || \
-		(echo "ERROR: kit/identity/pyproject.toml states no version" && exit 1)
-	@test -f $(IDENTITY_WHEEL) || \
-		(echo "ERROR: expected exact identity wheel $(IDENTITY_WHEEL)" && exit 1)
+	cd kit/identity && $(MAKE) build DIST_DIR=$(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_kit_identity-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-identity produced a platform-specific wheel" && exit 1)
 
 dist-core: ## Build arkhai-core wheel into .dist/
 	-mkdir -p $(DIST_DIR)

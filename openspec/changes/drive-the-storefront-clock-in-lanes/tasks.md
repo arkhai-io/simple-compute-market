@@ -1226,6 +1226,13 @@ middleware).
     each embedded check (the exact pin, the lock record, the installed
     version); its test builds its fixture from the kit's version and holds a
     changed version to a changed required wheel.
+  - Round 3 triage fix, outside the plan (61 O1, revising round 2's): the
+    identity wheel takes no special treatment in the root `Makefile`.
+    `dist-identity` calls `kit/identity`'s own `build`, as every other wheel's
+    target calls its project's, with the same platform-specific-wheel check;
+    `IDENTITY_VERSION` and `IDENTITY_WHEEL` are gone. The review wheelhouse
+    script keeps its own derivation, since its bundle names that one wheel and
+    it refuses one missing. Evidence is under 15.4's round 3 note.
 - [x] 8.2 Each signed administrator surface above applies the exemption to its
   time-setting operation alone — the storefronts' `admin_time`, provisioning's and the
   credits service's setting operation — and to no other route (D14).
@@ -1336,9 +1343,9 @@ middleware).
     Sections 10 and 11 pass their operation's name as `time_setting_operation` to
     `ProvisioningAuthMiddleware` and `SiteAuthMiddleware` when their composition
     installs an injected source. The four packages bumped here (8.1) need no
-    further bump for those sections' APIs. Any further change to `kit/identity`'s
-    version must move the `Makefile`'s `IDENTITY_WHEEL` and the review-wheelhouse
-    script with it.
+    further bump for those sections' APIs. `kit/identity`'s version is read
+    from its own project wherever a wheel name needs it (the review-wheelhouse
+    script; 8.1's round 2 and 3 notes).
 
 ## 9. The storefronts' setting, route, status and warning
 
@@ -2528,6 +2535,60 @@ conftests, the runner profiles `e2e-tests/config/config-*.yml`, and
     choice of the e2e-tests profile. The second found those resolved and the
     schema's refusal described more broadly than its pattern and two task
     lines overbroad (reworded).
+  - Round 3 triage fixes (60 F1; the owner's 61 O2, O3, O4; O1 under 8.1):
+    - 60 F1: the e2e-tests chart's `config` schema refuses a key ending in
+      `credential`, `_key`, `token` or `secret` in any letter case (character
+      classes, since a JSON Schema pattern has no portable case flag), as the
+      harness reads a party's keys case-blind; the render test adds
+      mixed-case keys at three depths.
+    - O2: `helm/local-values.yaml`'s lane-time parties state none of the
+      release's topology: each URL and pin is a `<field>_setting` naming the
+      shared `helm` profile's setting (`seller.api_url`,
+      `provisioning.authority_identifier`, `registry.authority_id`, …), which
+      `parties_from` already resolved for credentials. The umbrella's profile
+      gains `seller.publisher_scheme` and `seller.publisher_identifier`, the
+      target agent's `Identity.principal`, the one pin it lacked. The render
+      test holds each topology setting to a value the profile sets (the three
+      URLs to their Services, the publisher to Bob's principal) and each
+      credential setting to a key `config-e2e-secret.yml` holds.
+    - O3: the umbrella's shared ConfigMap is `<release>-helm-profile`
+      (`helm/templates/tests/helm-profile.yaml`), mounted as the
+      `helm-profile` volume by every smoke pod, contract validation and the
+      end-to-end pods; the e2e-tests chart's own is `<release>-e2e-tests-profile`,
+      and the e2e pods' volumes are `helm-profile`, `e2e-tests-profile` and
+      `e2e-secret-profile`, the deal pod's header and both pods' mounts saying
+      what each profile holds and why `e2e-tests` is apart from `helm`.
+      validate-contracts takes 0.1.2, with the umbrella's pin; the other
+      changed subcharts and the umbrella already carry this change's bump.
+    - O4: `topology-secrets.sh` derives the registry's administrator key
+      from the mnemonic at `DEV_ACCOUNT_REGISTRY_ADMIN` (6, an index no
+      principal of the two releases uses), which `helm/Makefile` passes and
+      the script requires, and writes its `config-admin.env` with a heredoc.
+  - Evidence for the round 3 triage fixes: static configuration and render,
+    `make -C helm test-render` passed, among it the credential refusal's
+    mixed-case cases, the lane-time parties' settings resolving in the
+    rendered profiles, and the scenario pod rendering as the deal pod does;
+    release tooling, `make test-release-tooling` 3189 passed, built through
+    the new `dist-identity` (topology-secrets holding every credential the
+    parties name and the registry key it derives, the chart package keeping
+    `templates/tests/helm-profile.yaml`). `run test-before` at `5e0f28afc`:
+    the refusal test fails there (Helm renders `admin_Credential`, exit 0),
+    and the topology test fails at the renamed template;
+    `test_change_build_and_helm_targets.py` passes there, its credential
+    filter admitting the older values too. The harness is unchanged, and the
+    Helm parties' resolution runs first in validation's Helm part.
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`,
+    after the fixes and on the final tree: `after-functional-change` and `pre-commit-functional` (every suite)
+    passed; of `pre-commit` only the citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9).
+  - Fresh-context check: it found every fix as disposed, and four text
+    defects: `TESTING.md` still describing the parties at the chart's URLs,
+    comments and `DEPLOYMENT_AND_CONFIG.md` saying every Helm test pod
+    mounts the `helm` profile (the payments, mediation and health checks do
+    not), 8.1's note citing this note before it existed, and section 8's
+    handoff naming the removed `IDENTITY_WHEEL`; all fixed. Declined: a key
+    spelled with the Kelvin sign, which Python lowercases to `k`, passes the
+    ASCII pattern; only a deliberately crafted key reaches it.
 - [x] 15.5 The helper shared stages use to reach an instant: in an injected run it
   sets lane time; in a wall run it waits for an instant the Agreement fixes, and any
   other instant is a blocked skip naming the wall-time target. `wait_until` callers move

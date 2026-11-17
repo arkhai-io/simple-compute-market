@@ -14,10 +14,9 @@
 # from the controls project that generates it, and the payments lane double's
 # seller token, from its fixtures, which the storefronts' payments configuration
 # in local-values.yaml and bare-metal-release-values.yaml trusts and
-# authenticates with; Bob's credential toward the mediation lane double, the
+# authenticates with; and Bob's credential toward the mediation lane double, the
 # dispute authority release 1's registry recommends, from his Compose secret
-# overlay; and the registry's administrator key, the Compose lanes' development
-# value.
+# overlay.
 #
 # Inputs:
 #   NAMESPACE                          the namespace both releases run in, created
@@ -28,6 +27,7 @@
 #   DEV_ACCOUNT_BOB                    Bob's principal, administrator, wallet (2)
 #   DEV_ACCOUNT_REGISTRY               release 1's registry signer (3)
 #   DEV_ACCOUNT_PROVISIONING_ADMIN     release 1's provisioning administrator (5)
+#   DEV_ACCOUNT_REGISTRY_ADMIN         release 1's registry administrator key (6)
 #   DEV_ACCOUNT_BARE_METAL_STOREFRONT  release 2's storefront principal and wallet (8)
 #   DEV_ACCOUNT_BARE_METAL_PROVISIONING release 2's provisioning signer (9)
 #   PROVISIONING_SSH_KEY_FILE          the file both provisioning services mount
@@ -61,7 +61,8 @@ require() {
 }
 
 require NAMESPACE DEV_MNEMONIC DEV_ACCOUNT_PROVISIONING DEV_ACCOUNT_BUYER DEV_ACCOUNT_BOB \
-    DEV_ACCOUNT_REGISTRY DEV_ACCOUNT_PROVISIONING_ADMIN DEV_ACCOUNT_BARE_METAL_STOREFRONT \
+    DEV_ACCOUNT_REGISTRY DEV_ACCOUNT_PROVISIONING_ADMIN DEV_ACCOUNT_REGISTRY_ADMIN \
+    DEV_ACCOUNT_BARE_METAL_STOREFRONT \
     DEV_ACCOUNT_BARE_METAL_PROVISIONING PROVISIONING_SSH_KEY_FILE PAYMENTS_LANE_CA_FILE \
     PAYMENTS_LANE_ENV BOB_COMPOSE_SECRETS_FILE STOREFRONT_CA_BUNDLE_FILE TEST_VOLUMES TEST_VOLUME_SIZE
 
@@ -175,13 +176,15 @@ credential arkhai-registry-identity "$DEV_ACCOUNT_REGISTRY"
 
 # The registry's secret profile under local-values.yaml: the administrator key
 # every /admin route takes, through which the end-to-end session reads its time
-# source. The Compose lanes' committed development value
-# (dev-env/registry/config-registry-a.env), never for a public network;
-# config-e2e-secret.yml below repeats it as registry.admin_key.
-registry_admin_key=development-registry-admin-key
-printf 'REGISTRY_ADMIN_API_KEY=%s\n' "$registry_admin_key" >"$work/config-admin.env"
+# source. It is a bearer string, any non-empty value serving, so it is derived
+# as every other key is; config-e2e-secret.yml below repeats it as
+# registry.admin_key.
+registry_admin_key="$(key "$DEV_ACCOUNT_REGISTRY_ADMIN")"
+cat >"$work/config-admin.env" <<EOF
+REGISTRY_ADMIN_API_KEY=$registry_admin_key
+EOF
 apply arkhai-registry-runtime "config-admin.env=$work/config-admin.env"
-echo "  arkhai-registry-runtime: config-admin.env, the registry's development administrator key"
+echo "  arkhai-registry-runtime: config-admin.env, REGISTRY_ADMIN_API_KEY, Anvil account $DEV_ACCOUNT_REGISTRY_ADMIN"
 credential arkhai-bob-identity "$DEV_ACCOUNT_BOB"
 credential arkhai-provisioning-identity "$DEV_ACCOUNT_PROVISIONING"
 
@@ -240,7 +243,7 @@ registry:
   admin_key: "$registry_admin_key"
 EOF
 apply arkhai-e2e-credentials "config-e2e-secret.yml=$work/config-e2e-secret.yml"
-echo "  arkhai-e2e-credentials: buyer $DEV_ACCOUNT_BUYER, seller $DEV_ACCOUNT_BOB, provisioning admin $DEV_ACCOUNT_PROVISIONING_ADMIN and service $DEV_ACCOUNT_PROVISIONING, the registry's administrator key"
+echo "  arkhai-e2e-credentials: buyer $DEV_ACCOUNT_BUYER, seller $DEV_ACCOUNT_BOB, provisioning admin $DEV_ACCOUNT_PROVISIONING_ADMIN and service $DEV_ACCOUNT_PROVISIONING, registry admin key $DEV_ACCOUNT_REGISTRY_ADMIN"
 credential arkhai-buyer-profile-credential "$DEV_ACCOUNT_BUYER"
 
 # Both releases' storefronts' CA bundle, the committed lane CA, which

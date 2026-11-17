@@ -24,7 +24,7 @@
       }
     },
     "config": {
-      "description": "End-to-end settings passed through whole as the e2e-tests profile, a ConfigMap: a key ending in credential, private_key, _key, token or secret (lowercase or uppercase) is refused at any depth; a setting needing a credential names the e2e-secret key holding it.",
+      "description": "End-to-end settings passed through whole as the e2e-tests profile, a ConfigMap: a key ending in credential, _key (private_key among them), token or secret, in any case, is refused at any depth; a setting needing a credential names the e2e-secret key holding it.",
       "$ref": "#/definitions/publicSettings"
     },
     "seller": {"$ref": "#/definitions/publicPrincipal"},
@@ -49,7 +49,7 @@
     "publicSettings": {
       "type": "object",
       "propertyNames": {
-        "not": {"pattern": "(credential|CREDENTIAL|private_key|PRIVATE_KEY|_key|_KEY|token|TOKEN|secret|SECRET)$"}
+        "not": {"pattern": "([cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|_[kK][eE][yY]|[tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT])$"}
       },
       "additionalProperties": {"$ref": "#/definitions/publicValue"}
     },

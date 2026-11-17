@@ -195,10 +195,11 @@ e2e-tests:
   # naming the target, and the session reads the status of the storefront, the
   # provisioning service and the registry and fails naming any not on wall
   # time. The doubles are not named: their control token is in no Secret those
-  # pods mount. Parties are keyed by name, so an overlay changes one alone. Each
-  # URL and pin restates the release's own (a render test holds them to what
-  # the chart derives); each credential is named by the e2e-secret key holding
-  # it, never stated here.
+  # pods mount. Parties are keyed by name, so an overlay changes one alone. A
+  # field ending in _setting names the setting its value is read from: each URL
+  # and pin is the shared "helm" profile's, which the chart derives from the
+  # release, and each credential the e2e-secret profile's, so neither is stated
+  # here.
   config:
     lane_time:
       mode: wall
@@ -206,24 +207,24 @@ e2e-tests:
       parties:
         bob-storefront:
           kind: storefront
-          url: "http://arkhai-node-operator-storefront-bob:8001"
+          url_setting: seller.api_url
           admin_scheme: eip191
           admin_credential_setting: seller.admin_credential
-          publisher_scheme: eip191
-          publisher_identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+          publisher_scheme_setting: seller.publisher_scheme
+          publisher_identifier_setting: seller.publisher_identifier
         provisioning:
           kind: provisioning
-          url: "http://arkhai-node-operator-provisioning:8081"
+          url_setting: provisioning.api_url
           admin_scheme: eip191
           admin_credential_setting: provisioning.admin_credential
-          authority_scheme: eip191
-          authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          authority_scheme_setting: provisioning.authority_scheme
+          authority_identifier_setting: provisioning.authority_identifier
         registry:
           kind: registry
-          url: "http://arkhai-node-operator-registry:8080"
-          authority_id: registry-a
+          url_setting: registry.api_url
+          authority_id_setting: registry.authority_id
           authority_scheme: eip191
-          authority_identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+          authority_identifier_setting: registry.identifier
           caller_scheme: eip191
           caller_credential_setting: buyer.marketplace_credential
           admin_key_setting: registry.admin_key

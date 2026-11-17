@@ -31,7 +31,7 @@ dependencies:
     repository: "file://charts/provisioning"
     condition: provisioning.enabled
   - name: validate-contracts
-    version: "0.1.1"
+    version: "0.1.2"
     repository: "file://charts/validate-contracts"
     condition: validate-contracts.enabled
   - name: e2e-tests

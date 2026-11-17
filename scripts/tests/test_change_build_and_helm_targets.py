@@ -623,8 +623,11 @@ def test_topology_secrets_holds_every_credential_the_helm_lane_time_parties_name
     local = yaml.safe_load((HELM / "local-values.yaml").read_text())
     lane_time = local["e2e-tests"]["config"]["lane_time"]
     secret = yaml.safe_load((stored / "arkhai-e2e-credentials" / "config-e2e-secret.yml").read_text())
+    # The URLs and pins are named in the shared helm profile, which a render
+    # test holds; the credentials are named here.
     named = {path for party in lane_time["parties"].values()
-             for key, path in party.items() if key.endswith("_setting")}
+             for key, path in party.items()
+             if key.endswith(("_credential_setting", "_key_setting"))}
     assert lane_time["mode"] == "wall"
     assert named == {"seller.admin_credential", "provisioning.admin_credential",
                      "buyer.marketplace_credential", "registry.admin_key"}

@@ -507,7 +507,7 @@ def test_the_chart_package_stores_the_chart_and_none_of_its_tooling_or_tests(tmp
     assert not [path for path in stored
                 if path.split("/")[0] in {"scripts", "tests", "fixtures"}
                 or re.fullmatch(r"charts/[^/]+/tests/.*", path)]
-    assert {"Chart.yaml", "values.yaml", "templates/tests/test-config.yaml",
+    assert {"Chart.yaml", "values.yaml", "templates/tests/helm-profile.yaml",
             "charts/e2e-tests/templates/tests/e2e-scenarios-test.yaml",
             "charts/dev-env/files/alkahest_anvil_addresses.json"} <= stored
 

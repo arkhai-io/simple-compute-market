@@ -328,8 +328,8 @@ change's own namespace
 They run as a pod inside that
 namespace, the e2e-tests chart's `<release>-e2e-tests-e2e-scenarios` Helm test
 hook, rendered when `scenarios.markers` is set: it runs the change's own
-`e2e-tests` image with the release's `test-config` ConfigMap under the `helm`
-profile and the e2e-tests chart's own `e2e-tests` profile over it, the deal test
+`e2e-tests` image with the release's `<release>-helm-profile` ConfigMap under the
+`helm` profile and the e2e-tests chart's own `e2e-tests` profile over it, the deal test
 pod's environment and mounts, and reaches every service by
 its in-cluster name, as a lane's scenarios do on their compose network, so no local
 port is involved. Validation runs it alone (`helm test --filter name=<pod>`) and
@@ -442,11 +442,12 @@ release's validation names its storefront, provisioning service and registry, on
 wall time (not the doubles, whose control token no Secret its pods mount carries):
 `helm/local-values.yaml` states a `lane_time` section under `e2e-tests.config`,
 which the e2e-tests chart passes through whole as the `e2e-tests` profile its deal
-and scenarios pods layer, its parties keyed by name at the URLs and pins the chart
-derives. That profile is a ConfigMap, so each party names its credential by the key
-of the `e2e-secret` profile that holds it (`admin_credential_setting:
-seller.admin_credential`, for one), and the harness reads it from there; a party
-field written `<field>_setting` is read that way in any profile. A run whose
+and scenarios pods layer, its parties keyed by name. A party field written
+`<field>_setting` names the setting the harness reads its value from, in any
+profile: each party's URL and pins are named by the shared `helm` profile's
+settings the chart derives (`url_setting: seller.api_url`, for one), and, that
+profile being a ConfigMap, each credential by the key of the `e2e-secret` profile
+that holds it (`admin_credential_setting: seller.admin_credential`). A run whose
 profile has no `lane_time` section, a hosted target's, reads no status and has no
 lane time. A stage reaches an instant through `LaneTime.reach`: an injected run
 sets lane time there; a wall run — the real-provisioning lane, a run against hosted
