@@ -354,14 +354,14 @@ def test_the_merge_merges_a_fetched_branch_and_never_abandons_a_merge() -> None:
 
 def test_every_step_may_reach_the_workflow_through_its_command() -> None:
     """Every step computes the next step, reads the log, finds a change's records,
-    records an interactive outcome, and checks the index and the round view, through
-    the command; none opens or closes a round view, which is the owner's."""
+    records an interactive outcome, and checks the index, the task list, and the round
+    view, through the command; none opens or closes a round view, which is the owner's."""
     for name, rules in load_steps().items():
         for command in (f"next {CHANGE}", f"log {CHANGE} --last 3",
                         f"log {CHANGE} --branch feat/x", f"find --records {CHANGE}",
                         f"find --json {CHANGE}", f"cost {CHANGE}",
                         f"record {CHANGE} plan --outcome '{{}}'", "check index",
-                        "check round-view"):
+                        "check round-view", "check tasks", f"check tasks {CHANGE}"):
             assert _allows(rules, f"scripts/change-workflow {command}"), (name, command)
         assert {"Bash(scripts/change-workflow round-view*)",
                 "Bash(scripts/change-workflow round-done*)"} <= set(rules.deny), name
@@ -381,13 +381,9 @@ def test_a_steps_own_workflow_commands_are_the_ones_its_skill_runs() -> None:
     assert _allows(steps["closeout"], f"scripts/change-workflow check tasks {CHANGE}")
     assert _allows(steps["closeout"], "scripts/change-workflow check push")
     assert _allows(steps["archive-cleanup"], f"scripts/change-workflow history {CHANGE}")
-    # Planning checks the task list it writes.
-    assert _allows(steps["plan"], f"scripts/change-workflow check tasks {CHANGE}")
     for name in ("design", "plan", "implement", "triage", "merge", "archive-cleanup",
                  "review"):
         assert not _allows(steps[name], "scripts/change-workflow check push"), name
-    for name in ("design", "implement", "triage", "merge", "archive-cleanup", "review"):
-        assert not _allows(steps[name], f"scripts/change-workflow check tasks {CHANGE}"), name
     for name in ("design", "plan", "implement", "triage", "merge", "validate", "closeout",
                  "review"):
         assert not _allows(steps[name], f"scripts/change-workflow history {CHANGE}"), name
