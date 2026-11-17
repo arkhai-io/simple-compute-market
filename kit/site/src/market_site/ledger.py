@@ -50,6 +50,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
+import injected_time
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
     DeliverableHosts,
@@ -185,7 +186,7 @@ def _lease_window(
         if seconds <= 0:
             raise ValueError("lease_duration_seconds must be > 0")
         if start is None:
-            start = datetime.now(timezone.utc)
+            start = injected_time.now_datetime()
         end = start + timedelta(seconds=seconds)
     return start, end
 
@@ -1334,7 +1335,7 @@ class CapacityLedgerService:
             hold_expires_at = None
             if ttl_seconds is not None:
                 hold_expires_at = (
-                    datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
+                    injected_time.now_datetime() + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
             mirrored_units = int(requested.get(self._mirror_dimension, Decimal(0)))
             reservation = CapacityReservation(
@@ -1599,7 +1600,7 @@ class CapacityLedgerService:
         the time scheduling runs, since ``reserve()`` always creates it)
         would simply credit back nothing.
         """
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         instant_end = now + timedelta(microseconds=1)
         own_backing_resource_id = self._backing_resource_id(db, exclude_reservation_id)
         own_reservation = db.get(CapacityReservation, exclude_reservation_id)
@@ -1718,7 +1719,7 @@ class CapacityLedgerService:
             if window_start is not None:
                 reservation.lease_start_utc = window_start.isoformat()
             elif not reservation.lease_start_utc:
-                reservation.lease_start_utc = datetime.now(timezone.utc).isoformat()
+                reservation.lease_start_utc = injected_time.now_datetime().isoformat()
             db.add(
                 CapacityEvent(
                     kind="committed",
@@ -1790,7 +1791,7 @@ class CapacityLedgerService:
                 reason=failure_message or failure_reason,
             )
             reservation.state = state
-            reservation.released_at = datetime.now(timezone.utc).isoformat()
+            reservation.released_at = injected_time.now_datetime().isoformat()
             reservation.failure_reason = failure_reason
             reservation.failure_message = failure_message
             self._run_release_effect(db, reservation.capacity_reservation_id, state)
@@ -1888,7 +1889,7 @@ class CapacityLedgerService:
             old_dimensions = _reservation_dimensions(old_reservation, self._mirror_dimension)
             self._record_lease_end(db, old_reservation, cause="superseded")
             old_reservation.state = ReservationState.released.value
-            old_reservation.released_at = datetime.now(timezone.utc).isoformat()
+            old_reservation.released_at = injected_time.now_datetime().isoformat()
             old_reservation.failure_reason = "superseded"
             self._run_release_effect(
                 db, old_capacity_reservation_id, ReservationState.released.value
@@ -1913,7 +1914,7 @@ class CapacityLedgerService:
             hold_expires_at = None
             if ttl_seconds is not None:
                 hold_expires_at = (
-                    datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
+                    injected_time.now_datetime() + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
             mirrored_units = int(requested.get(self._mirror_dimension, Decimal(0)))
             new_reservation = CapacityReservation(
@@ -2044,7 +2045,7 @@ class CapacityLedgerService:
                     "lease tail; cannot activate"
                 )
             if reservation.activated_at_utc is None:
-                reservation.activated_at_utc = datetime.now(timezone.utc).isoformat()
+                reservation.activated_at_utc = injected_time.now_datetime().isoformat()
                 db.commit()
             return self._reservation_payload(reservation)
 
@@ -2109,7 +2110,7 @@ class CapacityLedgerService:
             if reservation.state not in _BEGIN_RELEASING_FROM:
                 return None
             self._record_lease_end(db, reservation, context=end_context)
-            reservation.release_requested_at = datetime.now(timezone.utc).isoformat()
+            reservation.release_requested_at = injected_time.now_datetime().isoformat()
             reservation.state = ReservationState.releasing.value
             self._set_release_job_id(reservation, release_job_id=release_job_id)
             db.commit()
@@ -2359,7 +2360,7 @@ class CapacityLedgerService:
             "version": 1, "kind": "lease_ended", "event_id": event_id,
             "capacity_reservation_id": reservation.capacity_reservation_id,
             "site_id": self._site_id,
-            "effective_at": context.get("effective_at", int(datetime.now(timezone.utc).timestamp())),
+            "effective_at": context.get("effective_at", injected_time.now()),
             "source_state": reservation.state, "cause": context.get("cause", cause),
             "reason": context.get("reason", reason), "caller": context.get("caller"),
             "claimed_deadline": context.get("claimed_deadline"), "deadline_phase": context.get("deadline_phase"),
@@ -2417,7 +2418,7 @@ class CapacityLedgerService:
         transaction. A lapse the release guard refuses keeps its hold for a
         later sweep.
         """
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         stale = (
             db.query(CapacityReservation)
             .filter(
@@ -2719,7 +2720,7 @@ class CapacityLedgerService:
         return q.order_by(CapacityReservation.created_at.desc()).first()
 
     def _resource_payload(self, db: Session, row: CapacityBucket) -> dict[str, Any]:
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         capacity = _resource_capacity(row, self._mirror_dimension)
         held = self._held_dimensions(
             db,

@@ -1,4 +1,4 @@
-"""A module's rules and clock advances on the lane's doubles are undone when it ends.
+"""A module's rules on the lane's doubles are undone when it ends.
 
 Each double is stood in for by a small in-memory control surface behind an
 httpx mock transport, so the controls package's typed client sends exactly the
@@ -13,27 +13,21 @@ import json
 
 import httpx
 import pytest
-from lane_double_controls import ClockView, ControlClient, Rule, RuleList, RuleView, Status
+from lane_double_controls import ControlClient, Rule, RuleList, RuleView
 from lane_double_controls.models import ControlErrorBody
 
 from tests.e2e.roles.helpers.cleanup import CleanupFailed
-from tests.e2e.roles.helpers.lane_doubles import (
-    LaneDoubleClock, clocks_reset_after, rules_removed_after,
-)
+from tests.e2e.roles.helpers.lane_doubles import rules_removed_after
 
 _TOKEN = "lane-double-control-public-development-token"
-_WALL = 1_800_000_000
 
 
 class FakeDouble:
-    """A double's rule book and perceived clock, as its control routes answer."""
+    """A double's rule book, as its control routes answer."""
 
-    def __init__(self, *, stuck_offset: int = 0, listing_fails: bool = False) -> None:
+    def __init__(self, *, listing_fails: bool = False) -> None:
         self.rules: dict[str, RuleView] = {}
-        self.offset = 0
         self.deleted: list[str] = []
-        # An offset a reset leaves in place, as a broken double would.
-        self.stuck_offset = stuck_offset
         # A rule listing answered with a server error, as a failing double would.
         self.listing_fails = listing_fails
 
@@ -65,20 +59,7 @@ class FakeDouble:
                 return httpx.Response(404, json=body.model_dump())
             self.deleted.append(rule_id)
             return httpx.Response(204)
-        if route == ("POST", "/test/clock/advance"):
-            self.offset += json.loads(request.content)["seconds"]
-            return httpx.Response(200, json=self._clock().model_dump(mode="json"))
-        if route == ("POST", "/test/clock/reset"):
-            self.offset = self.stuck_offset
-            return httpx.Response(200, json=self._clock().model_dump(mode="json"))
-        if route == ("GET", "/test/status"):
-            status = Status(perceived_now=_WALL + self.offset, offset_seconds=self.offset,
-                            contracts={})
-            return httpx.Response(200, json=status.model_dump(mode="json"))
         raise AssertionError(f"no control route {route}")
-
-    def _clock(self) -> ClockView:
-        return ClockView(perceived_now=_WALL + self.offset, offset_seconds=self.offset)
 
 
 class ModuleFailed(Exception):
@@ -140,36 +121,3 @@ def test_an_unreadable_listing_still_leaves_no_rule_installed() -> None:
             rules.install("mediation", _rule("mediation-outage"))
 
     assert (payments.rules, mediation.rules) == ({}, {})
-
-
-def test_the_clock_advances_both_doubles_together() -> None:
-    payments, mediation = FakeDouble(), FakeDouble()
-    clock = LaneDoubleClock({"payments": payments.client(), "mediation": mediation.client()})
-
-    nows = clock.advance(3600)
-
-    assert nows == {"payments": _WALL + 3600, "mediation": _WALL + 3600}
-    assert (payments.offset, mediation.offset) == (3600, 3600)
-
-
-def test_both_clocks_are_reset_after_a_failing_module() -> None:
-    payments, mediation = FakeDouble(), FakeDouble()
-
-    with pytest.raises(ModuleFailed):
-        with clocks_reset_after({"payments": payments.client(),
-                                 "mediation": mediation.client()}) as clock:
-            clock.advance(8 * 86_400)
-            raise ModuleFailed
-
-    assert (payments.offset, mediation.offset) == (0, 0)
-
-
-def test_a_double_that_keeps_an_offset_after_its_reset_is_named() -> None:
-    payments, mediation = FakeDouble(), FakeDouble(stuck_offset=60)
-
-    with pytest.raises(pytest.fail.Exception, match=r"mediation \(60s ahead\)"):
-        with clocks_reset_after({"payments": payments.client(),
-                                 "mediation": mediation.client()}) as clock:
-            clock.advance(60)
-
-    assert payments.offset == 0

@@ -4,8 +4,8 @@ import base64
 from collections.abc import Callable, Sequence
 import hashlib
 import json
-import time
 
+import injected_time
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from market_deal_lifecycle.adapters import DeliveryEndIntent, DisputeBinding, InterfaceRequest
 from market_deal_lifecycle.respondent import RespondentCase, RespondentPage
@@ -37,7 +37,7 @@ class MediationAdapter:
 
     def __init__(
         self, binding: DisputeBinding, agreement: dict, client: MediationClient | None = None, *,
-        clock: Callable[[], int] = lambda: int(time.time()),
+        clock: Callable[[], int] = injected_time.now,
         concurrence: SignedDeliveryEndClaim | None = None,
     ):
         if client is not None and client.authority != binding.authority:

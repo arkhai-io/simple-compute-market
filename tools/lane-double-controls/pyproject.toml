@@ -2,12 +2,15 @@
 name = "lane-double-controls"
 version = "0.1.0"
 license = "MIT"
-description = "The control contract of the end-to-end lanes' payments and mediation doubles: models, routes, typed client and transport-fault middleware"
+description = "The control contract of the end-to-end lanes' payments and mediation doubles and the API-credit sample app: models, routes, typed client, time control and transport-fault middleware"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     # Rulings and effects are validated against its vendored contract.
     "arkhai-kit-arkhai-mediation>=0.2.0",
+    # The time control wraps the component's route service, and the time view
+    # reads an instant by its one rule.
+    "arkhai-injected-time>=0.1.0",
     "httpx>=0.27,<1",
     "jsonschema>=4.23,<5",
     "pydantic>=2.7",

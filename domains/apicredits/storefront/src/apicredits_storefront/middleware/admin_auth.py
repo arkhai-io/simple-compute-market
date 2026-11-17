@@ -10,7 +10,11 @@ from market_identity import EMPTY_BODY, Identity
 
 import apicredits_storefront.container as container
 from apicredits_storefront.utils.config import resolve_admin_identities
-from core_storefront.auth import AuthError, authenticate_request
+from core_storefront.auth import (
+    AuthError,
+    admin_time_setting_operation,
+    authenticate_request,
+)
 from apicredits_storefront.middleware.response_auth import (
     bind_response_auth,
     bind_response_contract,
@@ -38,7 +42,9 @@ async def authenticate_admin(
 
     Routes whose contract a shared typed client defines -- the lifecycle
     controls every storefront serves -- verify the operation and resource that
-    client signs, rather than this storefront's route name and path.
+    client signs, rather than this storefront's route name and path. The
+    time-setting operation, while it is mounted, is verified without its
+    timestamp's freshness.
     """
     if container.resolved_sqlite_client is None:
         raise HTTPException(status_code=503, detail="storefront is not initialized")
@@ -58,6 +64,7 @@ async def authenticate_admin(
             expected_role="admin",
             replay_store=container.resolved_sqlite_client,
             allowed_principals=resolve_admin_identities().identities,
+            time_setting_operation=admin_time_setting_operation(),
         )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

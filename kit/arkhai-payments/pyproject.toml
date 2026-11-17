@@ -6,6 +6,7 @@ description = "Stateless client for the Arkhai payments HTTP API"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "arkhai-core==0.6.0",
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-identity>=0.4.0",
     "arkhai-kit-deal-lifecycle>=0.4.0",
     "arkhai-kit-deal-lifecycle-contracts>=0.2.0",

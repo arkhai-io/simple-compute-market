@@ -10,6 +10,7 @@ dependencies = [
     # The double's payments peer: it extends, reverses and lifts as the authority.
     "arkhai-kit-arkhai-payments>=0.6.0",
     "arkhai-kit-identity>=0.4.0",
+    "arkhai-injected-time>=0.1.0",
     "lane-double-controls>=0.1.0",
     # The lane CA generator's, from tools/lane-double-controls/tls: the image build
     # runs it in this environment to write the leaf key, which is never committed.

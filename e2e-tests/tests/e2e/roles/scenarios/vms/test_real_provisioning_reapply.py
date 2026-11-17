@@ -47,9 +47,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
+import injected_time
 import pytest
 from compute_provisioning_client import SyncComputeProvisioningClient
 
@@ -281,7 +282,7 @@ def _registrations(
     bare_metal_provisioning_client, bare_metal_site_reads, bare_metal_storefront_admin,
     real_bare_metal_target,
 ) -> dict[str, RegistrationSnapshot]:
-    now = datetime.now(timezone.utc)
+    now = injected_time.now_datetime()
     return {
         "vm": _registration(
             provisioning_client, site_capacity, real_vm_target,
@@ -448,7 +449,7 @@ class TestStage05_RegistrationsUnchanged:
             real_bare_metal_target,
         )
         reapply_state.after = after
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         faults = [fault for domain in ("vm", "bare_metal")
                   for fault in registration_faults(domain, reapply_state.before[domain],
                                                    after[domain], now=now)]

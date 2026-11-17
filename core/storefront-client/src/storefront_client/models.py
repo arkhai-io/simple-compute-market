@@ -191,6 +191,9 @@ class HealthResponse:
     #: ``kind`` among it; present on /api/v1/system/status where the storefront
     #: reports it.
     settlement: list[dict[str, Any]] | None = None
+    #: The storefront's time source: ``{"source": "injected", "now": <Unix
+    #: seconds>}`` or ``{"source": "wall"}``; present on /api/v1/system/status.
+    time: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -205,6 +208,7 @@ class HealthResponse:
             "settlement_manual_required",
             "lifecycle",
             "settlement",
+            "time",
         }
         raw_settlement = d.get("settlement")
         raw_chain_id = d.get("chain_id")
@@ -231,8 +235,21 @@ class HealthResponse:
                 if raw_settlement is not None
                 else None
             ),
+            time=dict(d["time"]) if d.get("time") is not None else None,
             extra={k: v for k, v in d.items() if k not in known},
         )
+
+
+@dataclass
+class TimeSettingResponse:
+    """Response from POST /api/v1/admin/time: the instant the storefront is at."""
+
+    source: str
+    now: int
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TimeSettingResponse":
+        return cls(source=d["source"], now=int(d["now"]))
 
 
 # ---------------------------------------------------------------------------

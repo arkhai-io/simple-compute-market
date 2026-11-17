@@ -60,9 +60,9 @@ spec:
           readOnly: true
         {{- end }}
   volumes:
-    - name: test-config
+    - name: helm-profile
       configMap:
-        name: {{ .Release.Name }}-test-config
+        name: {{ .Release.Name }}-helm-profile
     {{- include "registry.smokeTestSecretVolume" . | nindent 4 }}
     {{- if $credentialProfile.secretName }}
     - name: credential-profile

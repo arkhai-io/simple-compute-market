@@ -1,6 +1,11 @@
 {
   "distributions": [
     {
+      "key": "injected-time",
+      "path": "tools/injected-time",
+      "dist": "arkhai-injected-time"
+    },
+    {
       "key": "kit-schema-migrations",
       "path": "kit/schema-migrations",
       "dist": "arkhai-kit-schema-migrations"

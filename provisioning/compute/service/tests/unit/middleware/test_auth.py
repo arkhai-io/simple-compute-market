@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta, timezone
 
+import injected_time
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -89,7 +90,7 @@ def identities(request):
     return _signer(request.param, 17), _signer(request.param, 23)
 
 
-def _app(storefront, authority, route_table=_ROUTE_TABLE):
+def _app(storefront, authority, route_table=_ROUTE_TABLE, time_setting_operation=None):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -112,6 +113,7 @@ def _app(storefront, authority, route_table=_ROUTE_TABLE):
         replay_store_provider=lambda: replay,
         principal_authority_provider=lambda: _PrincipalAuthority(storefront),
         route_table=route_table,
+        time_setting_operation=time_setting_operation,
     )
 
     async def mutation(_: Request):
@@ -152,6 +154,7 @@ def _headers(
     role: str = "seller",
     method: str = "POST",
     route_table=_ROUTE_TABLE,
+    timestamp: int | None = None,
 ) -> dict[str, str]:
     contract, resource = route_table.resolve(method, path, body)
     operation = contract.operation
@@ -164,7 +167,7 @@ def _headers(
             operation=operation,
             resource=resource,
             request_id=request_id,
-            timestamp=int(time.time()),
+            timestamp=int(time.time()) if timestamp is None else timestamp,
             body_hash=canonical_body_hash(body),
         ),
     )
@@ -357,6 +360,124 @@ def _counting(calls):
         return {"ok": True, "count": calls["count"]}
 
     return mutation
+
+
+# A stand-in time-setting route under an operation of its own, which the
+# middleware is told, as the service's composition tells it its own.
+_TIME_SETTING = {
+    "method": "POST",
+    "path": "/api/v1/system/stand-in-time",
+    "operation": "stand_in_time",
+    "roles": ["admin"],
+}
+_TIME_SETTING_PATH = "/api/v1/system/stand-in-time"
+
+
+@pytest.fixture
+def injected_source():
+    """The process source, injected at the wall instant, restored afterwards."""
+    before = injected_time.installed()
+    source = injected_time.InjectedTime()
+    injected_time.install(source)
+    yield source
+    injected_time.install(before)
+
+
+@pytest.mark.parametrize("skew", (900, -900))
+def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(
+    identities, injected_source, skew
+):
+    storefront, authority = identities
+    table = assemble_service_route_table([_TIME_SETTING])
+    client, calls = _app(
+        storefront,
+        authority,
+        route_table=table,
+        time_setting_operation="stand_in_time",
+    )
+    client.app.add_api_route(_TIME_SETTING_PATH, _counting(calls), methods=["POST"])
+    skewed = injected_source.now() + skew
+
+    setting = client.post(
+        _TIME_SETTING_PATH,
+        json={"now": skewed},
+        headers=_headers(
+            _ADMIN_SIGNER,
+            _TIME_SETTING_PATH,
+            {"now": skewed},
+            request_id="set",
+            role="admin",
+            route_table=table,
+            timestamp=skewed,
+        ),
+    )
+    pause = client.post(
+        "/api/v1/system/lease-watchdog/pause",
+        json={},
+        headers=_headers(
+            _ADMIN_SIGNER,
+            "/api/v1/system/lease-watchdog/pause",
+            {},
+            request_id="pause",
+            role="admin",
+            route_table=table,
+            timestamp=skewed,
+        ),
+    )
+
+    assert setting.status_code == 200
+    assert pause.status_code == 403
+    assert pause.json() == {
+        "detail": "Marketplace authentication timestamp is outside the allowed skew"
+    }
+    assert calls["count"] == 1
+
+
+def _skewed_stand_in_setting(time_setting_operation, skewed):
+    storefront, authority = _signer("ed25519", 17), _signer("ed25519", 23)
+    table = assemble_service_route_table([_TIME_SETTING])
+    client, calls = _app(
+        storefront,
+        authority,
+        route_table=table,
+        time_setting_operation=time_setting_operation,
+    )
+    client.app.add_api_route(_TIME_SETTING_PATH, _counting(calls), methods=["POST"])
+    response = client.post(
+        _TIME_SETTING_PATH,
+        json={"now": skewed},
+        headers=_headers(
+            _ADMIN_SIGNER,
+            _TIME_SETTING_PATH,
+            {"now": skewed},
+            request_id="set",
+            role="admin",
+            route_table=table,
+            timestamp=skewed,
+        ),
+    )
+    return response, calls
+
+
+def test_an_unnamed_time_setting_operation_keeps_its_freshness(injected_source):
+    response, calls = _skewed_stand_in_setting(None, injected_source.now() + 900)
+
+    assert response.status_code == 403
+    assert calls["count"] == 0
+
+
+def test_under_wall_time_the_named_operation_keeps_its_freshness():
+    before = injected_time.installed()
+    injected_time.install(injected_time.WallTime())
+    try:
+        response, calls = _skewed_stand_in_setting(
+            "stand_in_time", int(time.time()) + 900
+        )
+    finally:
+        injected_time.install(before)
+
+    assert response.status_code == 403
+    assert calls["count"] == 0
 
 
 def test_wrong_role_principal_and_body_fail_before_dispatch(identities):

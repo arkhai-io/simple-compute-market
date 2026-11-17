@@ -28,6 +28,7 @@ from release_bom import (
     PUBLIC_VCS_URL,
     BomError,
     archive_digest,
+    archive_paths,
     dirhash,
     files_digest,
     git_ignored_files,
@@ -488,6 +489,27 @@ def test_local_state_under_the_chart_leaves_its_content_digest_unchanged(tmp_pat
     # package_chart refuses a stored path twice and a stored file in `left`.
     assert (package_chart(local, ignored=lambda _: left)
             == package_chart(clean, ignored=lambda _: set()))
+
+
+@pytest.mark.usefixtures("pinned_helm_on_path")
+def test_the_chart_package_stores_the_chart_and_none_of_its_tooling_or_tests(tmp_path) -> None:
+    # The files under helm/ that are not the chart — the Makefiles, scripts,
+    # release values, render tests and their fixtures — stay out of the package,
+    # so editing one takes no chart version; the Helm test pods' templates stay.
+    chart = _tracked_chart(tmp_path / "chart")
+    run_helm(["package", str(chart), "--destination", str(tmp_path)])
+    (archive,) = tmp_path.glob("arkhai-node-operator-*.tgz")
+    stored = {path.split("/", 1)[1] for path in archive_paths(archive)}
+
+    outside = {"Makefile", "local-values.yaml", "bare-metal-release-values.yaml",
+               "validation-capacity.toml", "charts/bare-metal-storefront/Makefile"}
+    assert not stored & outside, sorted(stored & outside)
+    assert not [path for path in stored
+                if path.split("/")[0] in {"scripts", "tests", "fixtures"}
+                or re.fullmatch(r"charts/[^/]+/tests/.*", path)]
+    assert {"Chart.yaml", "values.yaml", "templates/tests/helm-profile.yaml",
+            "charts/e2e-tests/templates/tests/e2e-scenarios-test.yaml",
+            "charts/dev-env/files/alkahest_anvil_addresses.json"} <= stored
 
 
 @pytest.mark.usefixtures("pinned_helm_on_path")

@@ -1,8 +1,9 @@
-"""The control contract of the lanes' payments and mediation doubles.
+"""The control contract of the lanes' payments and mediation doubles and the sample app.
 
-The contract a double serves and a scenario calls: the rule, clock, funding,
-rotation and ruling models, the control route declarations, the typed client and
-the transport-fault middleware. Nothing here imports a double.
+The contract a party serves and a scenario calls: the rule, time, funding,
+rotation and ruling models, the control route declarations, the time control
+over a party's source, the typed client and the transport-fault middleware.
+Nothing here imports a double.
 """
 
 from lane_double_controls.client import ControlClient
@@ -10,8 +11,6 @@ from lane_double_controls.middleware import Fault, FaultRequest, TransportFaultM
 from lane_double_controls.models import (
     CaseList,
     CaseView,
-    ClockAdvance,
-    ClockView,
     ControlError,
     FilingAnswer,
     Funded,
@@ -23,13 +22,13 @@ from lane_double_controls.models import (
     Ruling,
     SignerIdentity,
     Status,
+    TimeView,
 )
+from lane_double_controls.time_control import TimeControl
 
 __all__ = [
     "CaseList",
     "CaseView",
-    "ClockAdvance",
-    "ClockView",
     "ControlClient",
     "ControlError",
     "Fault",
@@ -44,5 +43,7 @@ __all__ = [
     "Ruling",
     "SignerIdentity",
     "Status",
+    "TimeControl",
+    "TimeView",
     "TransportFaultMiddleware",
 ]

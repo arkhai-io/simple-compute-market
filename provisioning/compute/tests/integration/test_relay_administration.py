@@ -961,6 +961,11 @@ def _segments(token: str) -> tuple[dict, dict]:
     return json.loads(_decoded(header)), json.loads(_decoded(claims))
 
 
+def _naive_utc(instant: int) -> datetime:
+    """An instant as the relay tables store times: UTC with no zone."""
+    return datetime.fromtimestamp(instant, timezone.utc).replace(tzinfo=None)
+
+
 def _verifies(token: str, public_key: str) -> bool:
     signing_input, _, signature = token.rpartition(".")
     key = serialization.load_der_public_key(base64.b64decode(public_key))
@@ -1052,11 +1057,12 @@ class TestGrantsAtExecution:
         assert relays.get_relay("site-a").grant_keys.retired[0].grants_valid_until is None
 
     def test_a_lease_allocated_after_a_retirement_does_not_extend_it(
-        self, relays, session_factory, settings
+        self, relays, session_factory, settings, source
     ):
         _make_relay(relays, token="admission-token")
         relays.stage_grant_key("site-a")
         relays.activate_grant_key("site-a")
+        source.set(source.now() + 1)
         RelayPortAllocator(session_factory).allocate(
             relay_id="site-a",
             owner_kind="fulfillment",
@@ -1066,6 +1072,65 @@ class TestGrantsAtExecution:
 
         (retired,) = relays.get_relay("site-a").grant_keys.retired
         assert retired.grants_valid_until is None
+
+    def test_a_lease_allocated_in_the_second_of_a_retirement_extends_it(
+        self, relays, session_factory, settings, source
+    ):
+        """Times are whole seconds, so a lease allocated in the second its key
+        was retired may hold that key's grant: the key stays valid for it."""
+        _make_relay(relays, token="admission-token")
+        relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+        RelayPortAllocator(session_factory).allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-same-second",
+            lease_ends_at=self._LEASE_END,
+        )
+
+        (retired,) = relays.get_relay("site-a").grant_keys.retired
+        assert retired.grants_valid_until == self._lease_row(session_factory).grant_expires_at
+
+    def test_a_lease_s_allocation_release_and_a_key_s_retirement_are_the_source_s_instants(
+        self, relays, session_factory, settings, source
+    ):
+        _make_relay(relays, token="admission-token")
+        allocator = RelayPortAllocator(session_factory)
+        start = source.now()
+        allocator.allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-1",
+            lease_ends_at=self._LEASE_END,
+        )
+        source.set(start + 10)
+        relays.stage_grant_key("site-a")
+        relays.activate_grant_key("site-a")
+        source.set(start + 20)
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+
+        row = self._lease_row(session_factory)
+        assert (row.created_at, row.released_at) == (_naive_utc(start), _naive_utc(start + 20))
+        (retired,) = relays.get_relay("site-a").grant_keys.retired
+        assert retired.retired_at == _naive_utc(start + 10)
+
+    def test_reconciliation_releases_a_lease_only_once_the_source_passes_its_grace(
+        self, relays, session_factory, settings, source
+    ):
+        _make_relay(relays, token="admission-token")
+        allocator = RelayPortAllocator(session_factory)
+        start = source.now()
+        allocator.allocate(
+            relay_id="site-a",
+            owner_kind="fulfillment",
+            owner_id="cr-1",
+            lease_ends_at=self._LEASE_END,
+        )
+
+        source.set(start + 3600)
+        assert allocator.reconcile(is_owner_released=lambda *_: True) == 0
+        source.set(start + 3601)
+        assert allocator.reconcile(is_owner_released=lambda *_: True) == 1
 
     def test_a_lease_with_no_host_carries_no_subject(self, relays, session_factory, settings):
         lease = self._relay_with_lease(relays, session_factory, host=None)

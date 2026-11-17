@@ -43,11 +43,11 @@ from __future__ import annotations
 from market_identity import EnvelopeCapture, capture_envelope
 
 import logging
-import time
 import urllib.parse
 from typing import Any
 
 import httpx
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     Identity,
@@ -90,9 +90,14 @@ from storefront_client.models import (
     SettleWaitResponse,
     StageEvent,
     StageEventListResponse,
+    TimeSettingResponse,
 )
 
 logger = logging.getLogger(__name__)
+
+#: The signed operation and resource of every storefront's time-setting route.
+ADMIN_TIME_OPERATION = "admin_time"
+ADMIN_TIME_RESOURCE = "time"
 
 
 class StorefrontClientError(Exception):
@@ -225,7 +230,7 @@ def _negotiate_new_proposal(
         "escrow_address": escrow_address,
         "fields": fields,
         "literal_fields": literals,
-        "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
+        "expiration_unix": escrow_expiration_unix or (injected_time.now() + 3600),
     }
     if rates is not None:
         proposal["rates"] = rates
@@ -924,6 +929,32 @@ class StorefrontClient(_StorefrontClientBase):
                 role="admin",
                 operation="admin_pause",
                 resource="",
+                request_id=request_id,
+            )
+        )
+
+    async def set_time(
+        self,
+        now: int,
+        *,
+        request_id: str | None = None,
+    ) -> TimeSettingResponse:
+        """POST /api/v1/admin/time: set an injected storefront to ``now``.
+
+        ``now`` is sent as given, Unix seconds; the storefront refuses anything
+        but an integer instant (422 ``invalid_time``) and an instant earlier
+        than its own (409 ``time_moves_forward``), raised as
+        :class:`StorefrontClientError`. A wall-time storefront serves no such
+        route. The request is signed at this process's instant, which the
+        storefront admits outside the signing skew for this operation alone.
+        """
+        return TimeSettingResponse.from_dict(
+            await self._authenticated_post(
+                "/api/v1/admin/time",
+                {"now": now},
+                role="admin",
+                operation=ADMIN_TIME_OPERATION,
+                resource=ADMIN_TIME_RESOURCE,
                 request_id=request_id,
             )
         )
@@ -2179,6 +2210,27 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 role="admin",
                 operation="admin_pause",
                 resource="",
+                request_id=request_id,
+            )
+        )
+
+    def set_time(
+        self,
+        now: int,
+        *,
+        request_id: str | None = None,
+    ) -> TimeSettingResponse:
+        """POST /api/v1/admin/time: set an injected storefront to ``now``.
+
+        The synchronous form of :meth:`StorefrontClient.set_time`.
+        """
+        return TimeSettingResponse.from_dict(
+            self._authenticated_post(
+                "/api/v1/admin/time",
+                {"now": now},
+                role="admin",
+                operation=ADMIN_TIME_OPERATION,
+                resource=ADMIN_TIME_RESOURCE,
                 request_id=request_id,
             )
         )

@@ -30,3 +30,18 @@ ConfigMaps, command arguments, images, listing bindings, or migration reports.
 Startup rejects missing wheels, duplicate modes/identities, assertion mismatch,
 unsupported versions, incomplete capabilities, or recoverable bindings that
 the frozen registry cannot resolve.
+
+## The storefront's time source
+
+Every storefront — VM, bare metal and API credits — reads `[Time] source` from its
+`storefront.toml`, `"wall"` when unset or `"injected"`; any other value refuses
+startup naming `[Time] source` and the value. The composition root installs the
+source through `market_storefront_kit.time_controls` before anything reads the
+time. Under `"injected"` the storefront starts frozen at the wall instant it
+started, logs that at startup, warns when `[Settlement.arkhai_payments]` declares
+`livemode = true`, and mounts `POST /api/v1/admin/time` behind its administrator
+authentication; its signed system status carries the time section in either mode.
+No chart default, production example or shipped storefront file sets it: only the
+lanes' storefront configurations do
+([`DEPLOYMENT_AND_CONFIG.md`, "The time source"](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#the-time-source);
+[injected time](../injected-time/architecture.md)).

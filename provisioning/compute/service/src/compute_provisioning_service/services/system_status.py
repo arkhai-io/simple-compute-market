@@ -22,6 +22,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+import injected_time
+
 from compute_provisioning import JobExecutorTable
 from compute_provisioning_contracts import (
     COMPUTE_PROVISIONING_CONTRACT_VERSION,
@@ -182,6 +184,7 @@ class SystemStatusService:
             ),
             execution=self.execution(),
             components=components,
+            time=injected_time.TimeRouteService(injected_time.installed()).status(),
         )
 
     @staticmethod

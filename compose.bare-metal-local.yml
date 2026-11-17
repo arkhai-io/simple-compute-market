@@ -26,6 +26,12 @@
 # PROVISIONING_MODE, `mock` unless the run says `real`, is the site's last
 # profile.
 services:
+  # Every party of the lane runs injected time, set by the lane-time fixture
+  # (e2e-tests/config/config-bare-metal-lane.yml names them), from configuration
+  # only the lanes load: the registry's lane profile
+  # (dev-env/registry/config-payments-lane.env), the site's
+  # (dev-env/provisioning/config-lane-time.yml) and the storefront's
+  # storefront.dev.toml.
   bare-metal-registry:
     environment:
       - CONFIG_DIRECTORY=/etc/arkhai/registry
@@ -43,11 +49,12 @@ services:
       - ./dev-env/identities/provisioning.identity.env
     environment:
       - CONFIG_DIRECTORY=/app/config
-      - ACTIVE_PROFILES=docker,bare-metal-site,${PROVISIONING_MODE:-mock}
+      - ACTIVE_PROFILES=docker,bare-metal-site,lane-time,${PROVISIONING_MODE:-mock}
     volumes:
       - ./provisioning/compute/service/src/compute_provisioning_service/config/config.yml:/app/config/config.yml:ro
       - ./provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml:/app/config/config-docker.yml:ro
       - ./dev-env/provisioning/config-bare-metal-site.yml:/app/config/config-bare-metal-site.yml:ro
+      - ./dev-env/provisioning/config-lane-time.yml:/app/config/config-lane-time.yml:ro
       - ./dev-env/bare-metal/hosts.yaml:/run/config/host-definitions.yaml:ro
       - ./dev-env/bare-metal/resource-pools.yaml:/run/config/resource-pools.yaml:ro
       # A placeholder, not a key: under the mock profile the site never opens

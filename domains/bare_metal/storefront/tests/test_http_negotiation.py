@@ -559,7 +559,7 @@ async def test_an_opening_on_a_refused_generation_is_refused_as_retryable(
 
 
 async def test_an_expired_confirmation_refuses_until_a_poll_confirms_the_site(
-    tmp_path,
+    tmp_path, injected_source
 ) -> None:
     """With the loops held and trading live, an opening more than the window
     after the site's last confirmed poll is refused as retryable, with no site
@@ -587,6 +587,8 @@ async def test_an_expired_confirmation_refuses_until_a_poll_confirms_the_site(
                     await _open_countered(buyer)
             refused_calls = site.calls - calls
 
+            # The step's poll is stamped a second after the startup one.
+            injected_source.set(int(loaded.timestamp()) + 1)
             await admin.admin_run_lifecycle_cycle("site-projections")
             polled = _confirmed_at(await admin.get_system_status())
             now[0] = polled + timedelta(seconds=1)

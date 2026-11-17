@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
 
+import injected_time
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
@@ -446,7 +446,7 @@ async def reserve_vm_settlement_start(
             negotiation_id=negotiation_id,
             owner=context.convergence_owner,
             lease_until=(
-                max(start, datetime.now(timezone.utc))
+                max(start, injected_time.now_datetime())
                 + timedelta(
                     seconds=float(storefront_config.settings.provisioning.timeout) + 60,
                 )
@@ -696,7 +696,7 @@ async def truncate_lease_for_terminal_settlement(
         cause=reason or "settlement_terminal",
     )
     end = EndService(
-        sqlite_client.db_path, VmPhysicalEnd(sqlite_client), clock=lambda: int(time.time()),
+        sqlite_client.db_path, VmPhysicalEnd(sqlite_client), clock=injected_time.now,
     )
     results = await end.drive_physical(agreement_ref)
     return results[-1].model_dump(mode="json") if results else None

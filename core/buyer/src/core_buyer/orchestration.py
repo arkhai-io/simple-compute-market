@@ -27,6 +27,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+import injected_time
 from market_core import SettlementStageTable
 
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
@@ -229,7 +230,7 @@ def submit_settlement_request(
         "buyer_principal": principal.model_dump(mode="json"),
     }
     request_id = uuid.uuid4().hex
-    timestamp = int(time.time())
+    timestamp = injected_time.now()
     last_exc: RuntimeError | None = None
     for attempt in range(1, max_attempts + 1):
         try:

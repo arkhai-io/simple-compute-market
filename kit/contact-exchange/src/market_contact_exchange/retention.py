@@ -19,8 +19,10 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Protocol
+
+import injected_time
 
 from .introduction_routes import LoadIntroduction
 from .settlement_config import INDEFINITE_RETENTION, ContactSettlementConfig
@@ -100,10 +102,6 @@ def retention_disclosure(policy: IntroductionRetentionPolicy) -> dict[str, Any]:
     }
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 class IntroductionRetentionService:
     """One deletion operation behind both the scheduled sweep and an operator.
 
@@ -120,7 +118,7 @@ class IntroductionRetentionService:
         select_expired: SelectExpiredIntroductions,
         delete_payloads: DeleteIntroductionPayloads,
         load: LoadIntroduction,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = injected_time.now_datetime,
         batch_limit: int = SWEEP_BATCH_LIMIT,
     ) -> None:
         if batch_limit <= 0:

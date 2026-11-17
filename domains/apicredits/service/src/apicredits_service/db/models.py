@@ -7,8 +7,7 @@ operator adjustments remain distinguishable by a null fulfillment identity.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
+import injected_time
 from sqlalchemy import (
     Column,
     DateTime,
@@ -21,9 +20,9 @@ from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+# Every time here is stamped by the application from the process's time source
+# (``injected_time.now_datetime``), never by the database's clock.
+_utcnow = injected_time.now_datetime
 
 
 class ApiKey(Base):

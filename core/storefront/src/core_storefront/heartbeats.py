@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import time as _time
 from typing import Any, Protocol, runtime_checkable
 
+import injected_time
 from market_identity import Identity
 
 DEFAULT_MAX_SKEW_SECONDS = 300.0
@@ -41,7 +41,7 @@ async def record_heartbeat(
 ) -> dict[str, Any]:
     """Validate and persist a monotonic heartbeat for the exact deal parties."""
 
-    now_f = _time.time() if now is None else now
+    now_f = float(injected_time.now()) if now is None else now
     if abs(now_f - sent_at_unix) > max_skew_seconds:
         raise HeartbeatError(
             f"heartbeat sent_at {sent_at_unix} outside ±{max_skew_seconds}s window",
@@ -81,5 +81,5 @@ def heartbeat_gap_seconds(
 
     if last is None:
         return None
-    now_f = _time.time() if now is None else now
+    now_f = float(injected_time.now()) if now is None else now
     return now_f - float(last["sent_at_unix"])

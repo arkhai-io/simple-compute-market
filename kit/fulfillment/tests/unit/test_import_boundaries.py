@@ -46,17 +46,20 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "scheduling.py": set(),
         "round_robin_policy.py": set(),
         "results.py": {"market_core", "pydantic", "typing"},
-        "scheduler.py": {"market_resource_pools", "market_resource_pools_contracts", "market_site"},
+        # The process time source decides whether a reservation has expired.
+        "scheduler.py": {
+            "injected_time", "market_resource_pools", "market_resource_pools_contracts", "market_site",
+        },
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
         # Preparation receives the acceptance session for local resource claims.
         "provider.py": {"market_core", "sqlalchemy"},
         "fulfillment.py": {"market_core", "market_resource_pools", "market_resource_pools_contracts"},
         "fulfillment_persistence.py": {"market_core", "market_resource_pools", "sqlalchemy"},
         "transitions.py": set(),
-        "db.py": {"sqlalchemy"},
+        "db.py": {"injected_time", "sqlalchemy"},
         # The tables' baseline, exported as the migration engine's type.
         "migrations.py": {"market_schema_migrations", "sqlalchemy"},
-        "settlement_repository.py": {"market_core", "sqlalchemy"},
+        "settlement_repository.py": {"injected_time", "market_core", "sqlalchemy"},
         "backoff.py": set(),
         "recovery_diagnostics.py": set(),
     }

@@ -328,8 +328,9 @@ change's own namespace
 They run as a pod inside that
 namespace, the e2e-tests chart's `<release>-e2e-tests-e2e-scenarios` Helm test
 hook, rendered when `scenarios.markers` is set: it runs the change's own
-`e2e-tests` image with the release's `test-config` ConfigMap under the `helm`
-profile, the deal test pod's environment and mounts, and reaches every service by
+`e2e-tests` image with the release's `<release>-helm-profile` ConfigMap under the
+`helm` profile and the e2e-tests chart's own `e2e-tests` profile over it, the deal test
+pod's environment and mounts, and reaches every service by
 its in-cluster name, as a lane's scenarios do on their compose network, so no local
 port is involved. Validation runs it alone (`helm test --filter name=<pod>`) and
 counts it as passed only on the pod's own exit status of 0, since `helm test`
@@ -395,6 +396,75 @@ Each successful fetch also creates `<run-id>.zip` beside the run directory,
 containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
 fetch means diagnostics were retrieved; it does not mean the tests passed.
+
+#### Lane time
+
+Every party of a lane perceives one time, which the scenario sets: the
+storefronts, the provisioning services and the sites they host, the registries,
+the API-credits service and the site ledger it hosts, the sample app and the
+metering middleware it hosts, both lane doubles, the chain, the buyer and the
+harness's own signing clients. Each service's time source is configuration
+(`[Time] source`, `time.source` or `TIME_SOURCE`, `"wall"` by default), and every
+Compose lane states `"injected"` for each of its parties in configuration only the
+lanes load: the registries' lane profile (`dev-env/registry/config-payments-lane.env`),
+the provisioning services' (`dev-env/provisioning/config-lane-time.yml`, layered
+through `ACTIVE_PROFILES`), each storefront's lane configuration
+(`storefront.*.lane.toml`, and the bare-metal lane's `storefront.dev.toml`), and
+the environment of the services configured by it — the credits service, the
+sample app and both doubles — in the lanes' own overlays. The full local stack
+stays on wall time, as does the local Helm release.
+
+The lane's runner profile (`e2e-tests/config/config-<lane>-lane.yml`, its
+`lane_time` section) names the run's mode and every party, each with what reaches
+it: its typed client and administrator credential, a double's or the sample app's
+control token, the chain's RPC endpoint, and the buyer's lane-time file. The
+session fixture `lane_time` (`e2e-tests/tests/e2e/roles/helpers/lane_time.py`)
+fails the setup naming a party it cannot reach. In an injected run it installs an
+injected source in the harness's own process, so every client the harness builds
+signs at lane time, and sets every party to the wall instant of the session's
+start, or to the latest instant a party already holds when a run before it on
+the same stack left lane time ahead. It reads first the parties it reaches with
+no signed timestamp — the registries' administrator route, the controls, the
+chain and the buyer's file, which every set moves too — and moves its own source
+to the latest instant they hold before any signed status read, so a stack left
+ahead past the signing skew neither refuses its requests nor has its answers
+refused. A signed service still more than the skew from that instant holds no
+instant the start can read: the start's set moves one restarted behind the rest
+forward, and one a run stopped partway through a set left ahead refuses it, and
+the start fails naming it. `LaneTime.set(T)` moves, in order, the
+harness's source, each service through its typed client's `set_time`, the
+doubles and the sample app through `lane-double-controls`' client, the chain
+(its block time frozen with `anvil_setBlockTimestampInterval(0)`, then
+`evm_setNextBlockTimestamp` and a mined block, so every block until the next set
+carries T), and the buyer's file through the time component's writer, then
+reads every party's status and fails naming any not at T, a status with no time
+section among them. Lane time only moves forward and is never reset: a module
+continues from the instant the one before left, and a set earlier than the
+harness's instant fails naming both instants. The buyer, started afresh for each
+stage, reads its time from that file on every read, as the `[time]` table of the
+configuration the harness generates for it names.
+
+A run is on injected or wall time throughout, and the session reads the status of
+every party its profile names and fails naming one on the other. The local Helm
+release's validation names its storefront, provisioning service and registry, on
+wall time (not the doubles, whose control token no Secret its pods mount carries):
+`helm/local-values.yaml` states a `lane_time` section under `e2e-tests.config`,
+which the e2e-tests chart passes through whole as the `e2e-tests` profile its deal
+and scenarios pods layer, its parties keyed by name. A party field written
+`<field>_setting` names the setting the harness reads its value from, in any
+profile: each party's URL and pins are named by the shared `helm` profile's
+settings the chart derives (`url_setting: seller.api_url`, for one), and, that
+profile being a ConfigMap, each credential by the key of the `e2e-secret` profile
+that holds it (`admin_credential_setting: seller.admin_credential`). A run whose
+profile has no `lane_time` section, a hosted target's, reads no status and has no
+lane time. A stage reaches an instant through `LaneTime.reach`: an injected run
+sets lane time there; a wall run — the real-provisioning lane, a run against hosted
+authorities, or the local Helm release — waits only for an instant the deal's
+Agreement fixes (`reach_agreement_instant` in `compute_deal_stages.py`), and a stage
+needing any other instant is a blocked skip naming the wall-time target, or that
+the run has no lane time where its profile names none. The
+hold-passed dispute module is the one that sets lane time days ahead, past a once
+part's hold.
 
 #### Release-image mode
 
@@ -621,8 +691,9 @@ doubles mirror their producers, as
 two: the payments double and the mediation double.
 
 **The lane doubles' controls.** Both lane doubles serve one typed control
-contract, `tools/lane-double-controls`, which the doubles and the end-to-end
-harness import; its [README](../../tools/lane-double-controls/README.md) lists
+contract, `tools/lane-double-controls`, which the doubles, the API-credit sample
+app's time control and the end-to-end harness import; its
+[README](../../tools/lane-double-controls/README.md) lists
 the rules, routes and refusals. Its controls are deterministic steps
 ([`test-doubles.md`, "Controls are deterministic steps"](../guidance/engineering/test-doubles.md#controls-are-deterministic-steps)).
 A transport fault abandons a started response, so SCM's clients see a transport
@@ -642,10 +713,12 @@ their payments configuration's `ca_bundle_path`, never `SSL_CERT_FILE`. Each lan
 target runs the runner under `ACTIVE_PROFILES=docker,payments-lane,<lane>-lane`
 (`RUNNER_PROFILES` in `e2e-tests/Makefile`): `config-payments-lane.yml` holds the
 double's target, receipt identity, fee policy, CA bundle path, accounts and the
-buyer's credentials, and `config-<lane>-lane.yml` only what differs by lane — the
-seller's marketplace credential, and in the bare-metal lane its price and
-dispute window — Dynaconf merging the
-`payments` section key by key. Unset, the runner runs under `docker` alone and
+buyer's credentials, and `config-<lane>-lane.yml` the payments settings that
+differ by lane — the seller's marketplace credential, and in the bare-metal lane
+its price and dispute window — Dynaconf merging the `payments` section key by
+key, and the lane's `lane_time` section: the run's time mode and every party the
+lane runs, with what the lane-time fixture reaches each by
+(`e2e-tests/tests/e2e/roles/helpers/lane_time.py`). Unset, the runner runs under `docker` alone and
 has no payments target. The runner's environment carries no payments value; the
 lane CA reaches it as one mount. Tests hold every value a lane profile restates
 to the fixture or identity file it comes from. Once the stack is up, each lane

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
+import injected_time
 from market_policy.ports.persistence import NegotiationThreadPersistencePort
 from market_policy.identity import Identity
 from market_identity import Identity as MarketIdentity
@@ -436,7 +436,9 @@ class NegotiationThreadStore:
         Returns:
             Round number that was assigned (computed atomically)
         """
-        timestamp = datetime.now().isoformat()
+        # UTC with no offset, the form the storefront's market-state store
+        # stamps its text timestamps in.
+        timestamp = injected_time.now_datetime().replace(tzinfo=None).isoformat()
 
         # Let SQLite compute the next round number atomically to avoid race conditions
         round_num = await self._sqlite.save_negotiation_message(

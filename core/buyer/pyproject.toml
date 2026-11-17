@@ -18,15 +18,17 @@ dependencies = [
   "arkhai-kit-policy",
   # Installed delivery sinks: the buyer's own copy of a revealed deal,
   # sent where they read things. No mechanism dependency comes with it.
-  "arkhai-kit-delivery==0.2.1",
+  "arkhai-kit-delivery==0.2.2",
   # Mechanism-neutral settlement selection and plan carriers.
   "arkhai-core>=0.6.0",
   # Installed mechanism registration, canonical priority, and recovery dispatch.
   "arkhai-kit-settlement-runtime==0.8.0",
   # Canonical principals, signer injection, and v2 request/response proofs.
-  "arkhai-kit-identity==0.4.0",
+  "arkhai-kit-identity==0.5.0",
   # Signed registry discovery with pinned authority responses.
   "arkhai-core-registry-client==0.13.0",
+  # The process time source every instant the buyer signs, stamps or compares reads.
+  "arkhai-injected-time>=0.1.0",
 ]
 
 [project.scripts]
@@ -41,7 +43,7 @@ packages = ["src/core_buyer"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 
 [dependency-groups]
 dev = [

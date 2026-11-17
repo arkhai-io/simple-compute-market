@@ -9,11 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import injected_time
 from market_settlement_runtime.models import (
     ConditionOutcome,
     EffectOutcome,
@@ -87,7 +87,7 @@ class AlkahestConditionalEscrowClient:
         chain_config_paths: Mapping[str, str | None] | None = None,
         default_chain: str | None = None,
         arbitration_probe_timeout: float = 5.0,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = injected_time.now,
     ) -> None:
         if arbitration_probe_timeout <= 0:
             raise ValueError("arbitration_probe_timeout must be positive")

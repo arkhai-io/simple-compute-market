@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 
+import injected_time
 from alkahest_py import AlkahestClient
 from market_alkahest.alkahest import (
     encode_recipient_demand,
@@ -135,7 +135,7 @@ def create_buyer_escrow(
     expiration = (
         int(expiration_unix)
         if expiration_unix is not None
-        else int(time.time()) + int(expiration_seconds)
+        else injected_time.now() + int(expiration_seconds)
     )
 
     client = AlkahestClient(

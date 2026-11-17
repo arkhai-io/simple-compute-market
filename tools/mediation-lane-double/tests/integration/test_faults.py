@@ -27,7 +27,7 @@ from market_arkhai_mediation.models import RespondentAfter
 from market_deal_lifecycle.terms import DisputeAuthority
 
 from loopback import serving
-from support import Lane, filing, run
+from support import T0, Lane, filing, run
 
 
 @dataclass
@@ -65,7 +65,7 @@ def test_unavailable_abandons_every_api_response_while_controls_answer(served: S
 
     run(calls())
 
-    assert served.controls.status().offset_seconds == 0
+    assert served.controls.status().time.now == T0
     assert served.controls.rules().rules[0].matched == 2
     assert served.lane.events(transaction, "extend") == []
     served.controls.delete_rule("down")

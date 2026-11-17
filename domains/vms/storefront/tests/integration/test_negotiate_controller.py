@@ -1019,7 +1019,7 @@ class TestSourceConfirmationWindow:
     nobody polls."""
 
     async def test_a_round_past_the_window_is_retryable_until_the_projection_is_stepped(
-        self, client, db, held_loops
+        self, client, db, held_loops, injected_source
     ):
         """Spec scenario "The loops are held past the confirmation window".
 
@@ -1057,6 +1057,8 @@ class TestSourceConfirmationWindow:
                 assert state.view("site-test", RESOURCE_POOL).fetched_at == seeded
 
                 calls = len(site.calls)
+                # The step's poll is stamped a second after the seeding one.
+                injected_source.set(int(seeded.timestamp()) + 1)
                 await admin.admin_run_lifecycle_cycle("site-projections")
                 stepped = state.view("site-test", RESOURCE_POOL).fetched_at
                 assert "resource_pool.version" in site.calls[calls:]

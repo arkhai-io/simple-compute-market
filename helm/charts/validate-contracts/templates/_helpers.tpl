@@ -133,13 +133,13 @@ not expose root helper templates reliably inside dependency charts. */}}
 {{- $config := $smoke.config | default dict -}}
 {{- if $config.profileFiles -}}
 {{- range $profile := keys $config.profileFiles | sortAlpha }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $profile }}.yml
   subPath: config-{{ $profile }}.yml
   readOnly: true
 {{- end -}}
 {{- else if $config.profile }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $config.profile }}.yml
   subPath: config-{{ $config.profile }}.yml
   readOnly: true

@@ -5,8 +5,8 @@ wherever the client can make the call, so the routes, bodies and error codes are
 the ones the kit's client sends and reads. A request the client will not send —
 one without a token, an approval whose Agreement is not the mandate's deal, or a
 body its models refuse — and the mandate read, for which it has no call, are built
-by hand, each with its reason beside it. The wall clock is injected; the rate
-and hold cases move time through the double's clock control, as a lane moves it.
+by hand, each with its reason beside it. The double's time is injected; the rate
+and hold cases set it through the double's time control, as a lane sets it.
 
 The suite claims the surface the engine serves: approval, attachment, receipts,
 snapshots, the balance, and the rate and hold surface — rate parts and payee-only
@@ -100,7 +100,7 @@ def test_a_retry_after_the_mandate_expires_returns_the_original_receipt(lane: La
     terms = mandate(lane)
     original = buyer.approve(terms)
 
-    lane.clock.now = terms["expires"] + 1
+    lane.time.set(terms["expires"] + 1)
 
     assert buyer.approve(terms) == original
 
@@ -251,7 +251,7 @@ def _mandate_read(lane: Lane, token: str, transaction: str) -> httpx.Response:
 #
 # A rate part here earns 1000 minor units an hour and reserves two hours ahead, so
 # an approval at T0 reserves two periods; a start refills one period more from a
-# funded payer. Time moves only through the clock control.
+# funded payer. Time moves only through the time control.
 
 
 def rate_terms(lane: Lane, *, payer: str = "buyer", nonce: str,
@@ -295,8 +295,11 @@ def event(lane: Lane, role: str | tuple[str, str], transaction: str, body: dict[
 
 
 def advance(lane: Lane, seconds: int) -> None:
+    """Set the double's time ``seconds`` past its current instant."""
     with lane.controls() as controls:
-        controls.advance_clock(seconds)
+        now = controls.status().time.now
+        assert now is not None
+        controls.set_time(now + seconds)
 
 
 def started(lane: Lane, terms: dict[str, Any], payer: str | tuple[str, str] = "buyer") -> str:
@@ -391,6 +394,22 @@ def test_an_after_stop_hold_releases_once_the_clock_passes_it(lane: Lane) -> Non
     [part] = snapshot(lane, transaction)["parts"]
     assert (part["status"], part["held"], part["released"]) == ("released", "0", "1000000")
     assert available(lane, "seller") == {"USD/6": "975000"}
+
+
+def test_a_once_hold_pays_out_at_the_next_read_once_time_is_set_to_its_release(
+        lane: Lane) -> None:
+    terms = once_terms(lane, nonce="once-release")
+    lane.client("buyer").approve(terms)
+    transaction = transaction_id(terms)
+    advance(lane, DAY - 1)
+    assert snapshot(lane, transaction)["parts"][0]["status"] == "held"
+
+    # Nothing runs between the set and the read: the read evaluates the hold
+    # against the instant the control set.
+    advance(lane, 1)
+
+    [part] = snapshot(lane, transaction)["parts"]
+    assert (part["status"], part["held"], part["released"]) == ("released", "0", "1000000")
 
 
 def test_a_partial_reverse_lands_before_and_after_a_stop(lane: Lane) -> None:

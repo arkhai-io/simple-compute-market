@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
+import injected_time
 from arkhai_bare_metal import CanonicalPrincipal
 from compute_provisioning_contracts.lease_ends import LEASE_ENDED_CALLBACK
 from arkhai_bare_metal.evidence_routes import (
@@ -21,7 +20,13 @@ from arkhai_bare_metal.evidence_routes import (
     BareMetalSignedLeaseReadyEvidence,
     evidence_resource,
 )
-from core_storefront.auth import AuthError, authenticate_request
+from core_storefront.auth import (
+    ADMIN_TIME_OPERATION,
+    ADMIN_TIME_RESOURCE,
+    AuthError,
+    admin_time_setting_operation,
+    authenticate_request,
+)
 from core_storefront.identity_authority import (
     IdentityAuthorityError,
     StorefrontIdentityAuthority,
@@ -93,11 +98,14 @@ from market_storefront_kit import (
     NegotiationControlRouteService,
     StageEventRouteService,
     StorefrontLifecycleRouteService,
+    StorefrontTimeRouteService,
+    TimeRouteError,
     TradingPauseRouteService,
     get_storefront_container,
     opening_proposal,
     refuse_introduction_fulfillment,
     refuse_introduction_settle,
+    time_refusal_body,
 )
 from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 
@@ -147,6 +155,10 @@ from .settlement_service import (
 
 router = APIRouter()
 
+# The time-setting route, a router of its own because the application mounts it
+# only while the process's source is injected.
+time_router = APIRouter()
+
 
 def _runtime(request: Request) -> BareMetalStorefrontRuntime:
     try:
@@ -172,6 +184,7 @@ async def _principal(
     allowed_principals: tuple[Identity, ...] | None = None,
     body: Any = EMPTY_BODY,
     now: int | None = None,
+    time_setting_operation: str | None = None,
 ) -> Identity:
     bind_response_contract(request, operation=operation, resource=resource)
 
@@ -196,6 +209,7 @@ async def _principal(
             expected_principal=expected_principal,
             allowed_principals=allowed_principals,
             now=now,
+            time_setting_operation=time_setting_operation,
         )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -261,7 +275,8 @@ async def _admin(
 
     ``operation`` and ``resource`` are the ones the canonical storefront client
     signs for the route, the same on every storefront, so one administrator
-    client works against any of them.
+    client works against any of them. The time-setting operation, while it is
+    mounted, is verified without its timestamp's freshness.
     """
     return await _principal(
         request=request,
@@ -271,6 +286,7 @@ async def _admin(
         expected_role="admin",
         allowed_principals=runtime.admin_principals.identities,
         body=body,
+        time_setting_operation=admin_time_setting_operation(),
     )
 
 
@@ -1234,7 +1250,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
     runtime = _runtime(request)
     as_site = request.headers.get("x-market-role") == "service"
     if as_site:
-        now = int(time.time())
+        now = injected_time.now()
         await _principal(
             request=request,
             runtime=runtime,
@@ -1259,6 +1275,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
             resource="system/status",
         )
     status = await runtime.status()
+    status["time"] = StorefrontTimeRouteService().status()
     if not as_site:
         overrides = runtime.pool_override_service()
         if overrides is not None:
@@ -1414,7 +1431,7 @@ async def admin_interrupt_deal(
         escrow_uid=negotiation_id,
         listing_id=agreement.listing_id,
         status="dry_run" if body.dry_run else result.outcome.status,
-        interrupted_at_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        interrupted_at_utc=injected_time.now_datetime().isoformat().replace("+00:00", "Z"),
         settlement_action=result.settlement_action,
         lifecycle_outcome=result.outcome.model_dump(mode="json"),
         delivery=result.delivery.model_dump(mode="json"),
@@ -1437,7 +1454,7 @@ async def capacity_released(
     """
     runtime = _runtime(request)
     operation = "fulfillment_capacity_released"
-    now = int(time.time())
+    now = injected_time.now()
     await _principal(
         request=request,
         runtime=runtime,
@@ -1473,7 +1490,7 @@ async def lease_ended(capacity_reservation_id: str, request: Request) -> dict[st
     if row is None:
         raise HTTPException(status_code=404, detail="reservation is not this storefront's")
     operation = LEASE_ENDED_CALLBACK["operation"]
-    now = int(time.time())
+    now = injected_time.now()
     await _principal(
         request=request, runtime=runtime, operation=operation,
         resource=capacity_reservation_id, expected_role="service",
@@ -1542,7 +1559,7 @@ async def rotate_marketplace_identity(
             _changing_identity_authority(runtime),
             request=body,
             operator=operator,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1569,7 +1586,7 @@ async def retire_marketplace_identity(
             _changing_identity_authority(runtime),
             request=body,
             operator=operator,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1608,7 +1625,7 @@ async def marketplace_identity_status(request: Request) -> IdentityStatusRespons
             StorefrontIdentityAuthority(runtime.db.db_path),
             authority=authority,
             subject=subject,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1692,6 +1709,30 @@ async def pause(request: Request) -> AdminPauseResponse:
         body=await _request_body(request),
     )
     return TradingPauseRouteService(runtime.trading_pause).pause()
+
+
+@time_router.post("/api/v1/admin/time")
+async def set_time(request: Request) -> JSONResponse:
+    """Set the storefront's injected time to the instant the body carries.
+
+    Authenticated without the request timestamp's freshness, as the
+    time-setting operation is; the response is signed at the instant set.
+    """
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation=ADMIN_TIME_OPERATION,
+        resource=ADMIN_TIME_RESOURCE,
+        body=await _request_body(request),
+    )
+    try:
+        answer = StorefrontTimeRouteService().set_time(await request.body())
+    except TimeRouteError as error:
+        return JSONResponse(
+            status_code=error.status_code, content=time_refusal_body(error)
+        )
+    return JSONResponse(content=answer)
 
 
 @router.post("/api/v1/admin/resume", response_model=AdminPauseResponse)

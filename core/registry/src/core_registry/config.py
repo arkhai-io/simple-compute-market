@@ -123,6 +123,11 @@ class Settings(BaseSettings):
         validation_alias="REGISTRY_BOOTSTRAP_API_KEY",
     )
 
+    # The process's time source: unset or "wall" for the wall clock, "injected"
+    # for a time the administrator sets through POST /admin/time. The
+    # composition root installs it, refusing any other value naming it.
+    time_source: str | None = Field(default=None, validation_alias="TIME_SOURCE")
+
     # Logging
     log_level: str = "info"
 

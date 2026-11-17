@@ -8,6 +8,7 @@ dependencies = [
     # The relay response reporting active_lease_count and drained.
     "arkhai-compute-provisioning-contracts>=0.15.0",
     "arkhai-core>=0.4.0",
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-config",
     "arkhai-kit-site>=0.10.0",
     "arkhai-kit-resource-pools>=0.3.0",

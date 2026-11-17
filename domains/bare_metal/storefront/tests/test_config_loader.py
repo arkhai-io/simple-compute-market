@@ -8,13 +8,14 @@ below is a development fixture and must never be used on a public network.
 from __future__ import annotations
 
 import pytest
-from market_arkhai_payments import resolve_payments_api_key
+from market_arkhai_payments import payments_livemode, resolve_payments_api_key
 from market_identity import Ed25519Signer
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
 from arkhai_bare_metal_storefront.config import (
     IDENTITY_CREDENTIAL_ENV,
     BareMetalConfigurationError,
+    configured_time_source,
     identity_credential,
     load_storefront_settings,
 )
@@ -68,6 +69,9 @@ def test_the_payments_mode_in_the_files_reaches_the_composed_stage(
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(settings.settlement)
 
     assert composition.arkhai_payments_stage().config.livemode is expected
+    # The mode the runtime's builder reads, which startup warns of beside an
+    # injected time source.
+    assert payments_livemode(settings.settlement) is expected
 
 
 def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
@@ -483,3 +487,26 @@ def test_administrators_are_every_subjects_principals(monkeypatch, tmp_path):
     principals = load_storefront_settings().administrator_principals()
 
     assert principals.identities == (ADMIN.identity, SELLER.identity)
+
+
+def test_the_time_source_is_wall_unless_set(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path)
+
+    assert configured_time_source() is None
+    assert load_storefront_settings().time.source == "wall"
+
+
+def test_an_injected_time_source_is_read_in_any_case(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path, toml='[Time]\nSOURCE = "injected"\n')
+
+    assert configured_time_source() == "injected"
+    assert load_storefront_settings().time.source == "injected"
+
+
+def test_a_misspelled_time_source_is_refused_naming_it(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path, toml='[Time]\nsource = "injectd"\n')
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert "[Time] source" in str(refused.value) and "injectd" in str(refused.value)

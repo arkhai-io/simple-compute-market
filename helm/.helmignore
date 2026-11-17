@@ -6,6 +6,19 @@
 # subchart's directory; the chart's Python tests leave their caches.
 Chart.lock
 charts/*.tgz
+# The files under helm/ that are not the chart, kept out of every package so a
+# change to one changes no packaged file and takes no chart version: the
+# tooling that deploys and tests the chart, the release values a deployment
+# layers on it, and its render tests and their fixtures.
+/Makefile
+charts/*/Makefile
+/scripts/
+/tests/
+charts/*/tests/
+/fixtures/
+/local-values.yaml
+/bare-metal-release-values.yaml
+/validation-capacity.toml
 __pycache__/
 *.pyc
 .pytest_cache/

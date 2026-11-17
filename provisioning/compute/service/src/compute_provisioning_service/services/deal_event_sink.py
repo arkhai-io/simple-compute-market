@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
 from typing import Any
+
+import injected_time
 from market_identity import TrustedIdentitySet
 from storefront_client import StorefrontClient, StorefrontClientError
 
@@ -154,7 +155,7 @@ class SqlAlchemyCapacityReleaseOutbox:
             if row is None:
                 raise RuntimeError("capacity release outbox reservation disappeared")
             row.attempt_count += 1
-            row.last_attempted_at = datetime.now(timezone.utc)
+            row.last_attempted_at = injected_time.now_datetime()
             row.delivered_at = row.last_attempted_at
             row.last_error = None
             session.commit()
@@ -172,7 +173,7 @@ class SqlAlchemyCapacityReleaseOutbox:
             if row is None:
                 raise RuntimeError("capacity release outbox reservation disappeared")
             row.attempt_count += 1
-            row.last_attempted_at = datetime.now(timezone.utc)
+            row.last_attempted_at = injected_time.now_datetime()
             row.last_error = error
             session.commit()
 
@@ -200,6 +201,6 @@ async def notify_storefront_capacity_released(
         offering_mode=str(offering_mode),
         event_kind="capacity_released",
         payload={"released_at": released_at},
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=injected_time.now_datetime(),
     )
     return await sink.deliver(event)

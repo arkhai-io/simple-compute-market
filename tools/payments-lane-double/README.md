@@ -12,8 +12,8 @@ The double serves the payments service's HTTP API over the payments kit's
 clock-injected engine, `PaymentsAuthority`
 (`kit/arkhai-payments/src/market_arkhai_payments/fixtures/authority.py`), the same
 engine the kit's in-process `FakePaymentsClient` runs, so there is one ledger
-implementation for both. The engine reads the double's perceived clock (see
-Controls). State is in memory in one process, one lock serialising requests, and
+implementation for both. The engine reads the double's time (see Controls).
+State is in memory in one process, one lock serialising requests, and
 is lost on restart: a run lives only as long as its lane.
 
 It mirrors the service's API — its routes, bearer authentication, approval
@@ -72,33 +72,41 @@ client calls them. They are lane-private: no lane publishes the port to its host
   before any other, and that rule's listing counts it. `GET /test/rules` lists the
   rules with their counts; `DELETE /test/rules/{rule_id}` removes one. The control
   and health routes are never faulted.
-- **Clock.** The engine reads a perceived clock, wall time plus an offset.
-  `POST /test/clock/advance` moves it forward, and the engine's due state — a
-  notice stop taking effect, funding exhaustion, a matured hold — shows at the
-  next read, with nothing running in the background; `POST /test/clock/reset`
-  returns it to wall time. Admission reads it too.
+- **Time.** The double reads one time source, the time component's
+  ([`tools/injected-time`](../injected-time/README.md)), installed from
+  `PAYMENTS_LANE_DOUBLE_TIME_SOURCE`: `"wall"` by default, `"injected"` in a lane
+  whose every party shares one time the scenario sets. Under injected time the
+  instant holds until
+  `POST /test/time {"now": <Unix seconds>}` sets it forward, and the engine's due
+  state — a notice stop taking effect, funding exhaustion, a matured hold — shows
+  at the next read, with nothing running in the background; an earlier instant is
+  refused 409 `time_moves_forward`, a body other than `{"now": <instant>}` 422
+  `invalid_time`. Admission reads the same time. A wall-time double serves no
+  time route.
 - **Funding.** `POST /test/funding` credits an account in the account file with
   minor units of `USD/6`; any other account is 404 `account_not_found`.
 - **Signer rotation.** `POST /test/signer/rotate` signs every later receipt and
   snapshot with the fixture's `rotation_seed`; a receipt signed before keeps its
   signature, and a snapshot embedding it verifies under both keys.
-- **Status.** `GET /test/status` reports the perceived now, the offset and the
-  SHA-256 of each installed contract resource, read from the payments kit wheel.
+- **Status.** `GET /test/status` reports the time, `{"source": "injected", "now":
+  …}` or `{"source": "wall"}`, and the SHA-256 of each installed contract
+  resource, read from the payments kit wheel.
 
 A control refusal is `{"code", "message"}`: 401 `authentication_required` without
 the control token, 422 `invalid_request` for a malformed or unsupported rule,
-409 `rule_exists`, 404 `rule_not_found`.
+409 `rule_exists`, 404 `rule_not_found`, and the time control's 409
+`time_moves_forward` and 422 `invalid_time`.
 
 ## What it claims
 
 Its suite drives the payments kit's real client against the app through an
-in-process transport, and over loopback HTTP for the transport faults, with the
-clock moved through the control, and claims what the engine serves: approval, Agreement
+in-process transport, and over loopback HTTP for the transport faults, with
+injected time set through the control, and claims what the engine serves: approval, Agreement
 attachment, signed receipts, transaction snapshots, reverses and the balance read;
 and the rate and hold surface — rate parts and payee-only `start`, `stop` with
-notice and the earliest pending stop taking effect when the clock reaches it,
-per-part `end`, funding exhaustion at funded-through, `afterStop` holds releasing
-once the clock passes them, partial `reverse` before and after a stop, and
+notice and the earliest pending stop taking effect when time reaches it,
+per-part `end`, funding exhaustion at funded-through, once and `afterStop` holds
+releasing once time passes them, partial `reverse` before and after a stop, and
 `extend` and `lift` with `hold_not_extendable`, `extension_not_found` and
 `extension_closed`. Each answer is the engine's. A scenario passing against the
 double establishes this repository's use of the payments boundary, never the
@@ -145,7 +153,9 @@ HTTPS on port 8443 under the service name `payments-double`. A deployment supply
 its own server certificate mounts it over `tls/double.pem` and `tls/double.key.pem`
 there. Outside the image, `python -m payments_lane_double` reads
 `PAYMENTS_LANE_DOUBLE_FIXTURES`, `PAYMENTS_LANE_DOUBLE_TLS`,
-`PAYMENTS_LANE_DOUBLE_HOST` and `PAYMENTS_LANE_DOUBLE_PORT`.
+`PAYMENTS_LANE_DOUBLE_HOST` and `PAYMENTS_LANE_DOUBLE_PORT`; the image reads
+`PAYMENTS_LANE_DOUBLE_TIME_SOURCE` too, and any value but `"wall"` or
+`"injected"` refuses startup, naming it.
 `PAYMENTS_LANE_DOUBLE_TLS` names a directory holding the leaf and its key under
 the image's names, `double.pem` and `double.key.pem`: `make tls` in the controls
 project writes them as `payments-double.pem` and `payments-double.key.pem`, to be
@@ -192,7 +202,7 @@ copied there under those names.
   payments check reads the seller's balance.
 - `make test` (here) runs the unit and application integration suite: the kit's real
   `PaymentsClient` and the controls' typed client against the app through an
-  in-process transport, with an injected wall clock, and the transport faults
+  in-process transport, with injected time, and the transport faults
   against the app served by uvicorn on loopback, since only a real server
   abandons a response. From the repository root,
   `make test-payments-lane-double` runs it, as part of `make test` and the Tests

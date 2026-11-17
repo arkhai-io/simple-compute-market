@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+import injected_time
 from market_deal_lifecycle.adapters import (
     DisputeAdapterTable, DisputeBinding, PaymentAdapterTable, PaymentBinding,
     submit_dispute, submit_payment,
@@ -66,7 +66,7 @@ class BuyerLifecycle:
         observe_hint: HintObserver | None = None,
         end_journal: BuyerEndJournal | None = None, evidence: EvidenceStore | None = None,
         watchdog: WatchdogJournal | None = None,
-        clock: Callable[[], int] = lambda: int(time.time()),
+        clock: Callable[[], int] = injected_time.now,
     ) -> None:
         self._resolve = deal
         self.payments = payments
