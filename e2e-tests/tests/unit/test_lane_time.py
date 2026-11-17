@@ -2,12 +2,16 @@
 
 The parties are fakes that record each call and answer as the profile's parties
 do; the profile builder is held to the profile's names and kinds; a signing
-client the harness builds is shown to sign at the harness's injected instant.
-Every value is a public development fixture, never used on any network.
+client the harness builds is shown to sign at the harness's injected instant,
+and a session starts on a stack left ahead through the storefront's typed
+client, over a transport that verifies each request and signs each answer as
+the storefront does. Every value is a public development fixture, never used
+on any network.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
@@ -17,8 +21,29 @@ import injected_time
 import pytest
 from injected_time import InjectedTime, TimeFile, WallTime
 from lane_double_controls import TimeView
-from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
+from market_identity import (
+    EMPTY_BODY,
+    AuthenticatedRequest,
+    Ed25519Signer,
+    Identity,
+    ResponseEnvelope,
+    SignatureProof,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_response,
+    verify_request,
+)
 from storefront_client import SyncStorefrontClient
+from storefront_client.auth import (
+    IDENTITY_IDENTIFIER_HEADER,
+    IDENTITY_SCHEME_HEADER,
+    REQUEST_ID_HEADER,
+    ROLE_HEADER,
+    SIGNATURE_HEADER,
+    SIGNATURE_VERSION_HEADER,
+    TIMESTAMP_HEADER,
+)
+from storefront_client.client import ADMIN_TIME_OPERATION, ADMIN_TIME_RESOURCE
 
 from tests.e2e.roles.buyer_cli import _time_section
 from tests.e2e.roles.helpers.compute_deal_stages import reach_agreement_instant
@@ -233,6 +258,107 @@ def test_a_signed_party_left_past_the_skew_beyond_every_unsigned_one_fails_namin
     assert (calls, storefront.now) == (["bob-storefront"], T + 86_400)
 
 
+_ADMIN_SEED = b"lane-time-suite-admin-seed-32byt"
+_PUBLISHER = Ed25519Signer(b"lane-time-suite-store-seed-32byt")
+#: The storefront routes lane time reaches, by path: the operation and resource
+#: each request is signed over.
+_STOREFRONT_ROUTES = {
+    "/api/v1/system/status": ("admin_system_status", "system/status"),
+    "/api/v1/admin/time": (ADMIN_TIME_OPERATION, ADMIN_TIME_RESOURCE),
+}
+
+
+class WireStorefront:
+    """A storefront on injected time, as its typed client meets it on the wire.
+
+    Each request's signature and timestamp are verified as the storefront's
+    administrator verification does it, a timestamp more than the signing skew
+    from the storefront's own instant refused but for the time setting's; each
+    answer is signed at the storefront's instant, which the client holds to the
+    skew against its own. It reserves no request id against replay, and its
+    status holds only the time section.
+    """
+
+    def __init__(self, now: int) -> None:
+        self.now = now
+        self.stamps: list[tuple[str, int]] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        operation, resource = _STOREFRONT_ROUTES[request.url.path]
+        body = json.loads(request.content) if request.content else EMPTY_BODY
+        principal = Identity(scheme=request.headers[IDENTITY_SCHEME_HEADER],
+                             identifier=request.headers[IDENTITY_IDENTIFIER_HEADER])
+        signed = AuthenticatedRequest(
+            protocol=request.headers[SIGNATURE_VERSION_HEADER],
+            role=request.headers[ROLE_HEADER], principal=principal, method=request.method,
+            operation=operation, resource=resource,
+            request_id=request.headers[REQUEST_ID_HEADER],
+            timestamp=int(request.headers[TIMESTAMP_HEADER]),
+            body_hash=canonical_body_hash(body),
+            proof=SignatureProof(scheme=principal.scheme,
+                                 value=request.headers[SIGNATURE_HEADER]))
+        self.stamps.append((operation, signed.timestamp))
+        result = verify_request(
+            signed, body=body, now=self.now, max_skew=SKEW, expected_role="admin",
+            expected_method=request.method, expected_operation=operation,
+            expected_resource=resource,
+            expected_principals=TrustedIdentitySet(
+                identities=(Ed25519Signer(_ADMIN_SEED).identity,)),
+            time_setting_operation=ADMIN_TIME_OPERATION)
+        if not result.verified:
+            return httpx.Response(401, json={"code": result.code.value})
+        if operation == ADMIN_TIME_OPERATION:
+            if body["now"] < self.now:
+                return self._answer(signed, 409, {"code": "time_moves_forward"})
+            self.now = body["now"]
+            return self._answer(signed, 200, {"source": "injected", "now": self.now})
+        return self._answer(signed, 200, {"status": "ok",
+                                          "time": {"source": "injected", "now": self.now}})
+
+    def _answer(self, signed: AuthenticatedRequest, status: int, body: dict) -> httpx.Response:
+        response = sign_response(signer=_PUBLISHER, envelope=ResponseEnvelope(
+            role="seller", principal=_PUBLISHER.identity, method=signed.method,
+            operation=signed.operation, resource=signed.resource,
+            request_id=signed.request_id, timestamp=self.now, status=status,
+            body_hash=canonical_body_hash(body)))
+        return httpx.Response(status, json=body, headers={
+            SIGNATURE_VERSION_HEADER: response.protocol,
+            IDENTITY_SCHEME_HEADER: response.principal.scheme.value,
+            IDENTITY_IDENTIFIER_HEADER: response.principal.identifier,
+            ROLE_HEADER: response.role,
+            REQUEST_ID_HEADER: response.request_id,
+            TIMESTAMP_HEADER: str(response.timestamp),
+            SIGNATURE_HEADER: response.proof.value,
+        })
+
+
+def test_a_session_starts_through_the_storefront_s_typed_client_on_a_stack_left_past_the_skew(
+        restored) -> None:
+    ahead = T + 86_400
+    storefront = WireStorefront(now=ahead)
+    chain = ChainFakeParty("anvil", "chain", [], now=ahead)
+
+    def parties(section: Any) -> list[Any]:
+        # Built as the profile's storefront party is, over the typed client;
+        # the harness's injected source is installed by then, so the client
+        # signs at, and checks each answer against, the harness's instant.
+        client = SyncStorefrontClient(
+            "http://storefront.test", Ed25519Signer(_ADMIN_SEED), caller_role="admin",
+            expected_publishers=TrustedIdentitySet(identities=(_PUBLISHER.identity,)),
+            transport=httpx.MockTransport(storefront))
+        return [ClientParty("bob-storefront", "storefront", client.set_time,
+                            lambda: client.get_system_status().time), chain]
+
+    lane = lane_time_of({"mode": "injected", "parties": []}, parties=parties, start=lambda: T)
+
+    assert lane is not None and lane.now() == ahead
+    assert (ADMIN_TIME_OPERATION, ahead) in storefront.stamps
+    # The status reads were signed at the stack's instant, never at the wall
+    # instant the session began from, and their answers were verified there.
+    assert ("admin_system_status", ahead) in storefront.stamps
+    assert {stamp for _, stamp in storefront.stamps} == {ahead}
+
+
 def test_the_session_start_counts_the_chain_s_latest_block_and_no_wall_time_party() -> None:
     class Wall(FakeParty):
         def time(self) -> TimeReading:
@@ -440,7 +566,7 @@ def test_a_client_built_in_an_injected_run_signs_at_the_harness_s_instant(restor
         stamps.append(request.headers["X-Market-Timestamp"])
         return httpx.Response(503)
 
-    signer = Ed25519Signer(b"lane-time-suite-admin-seed-32byt")
+    signer = Ed25519Signer(_ADMIN_SEED)
     publisher = Identity(scheme="ed25519", identifier=signer.identity.identifier)
     client = SyncStorefrontClient("http://storefront.test", signer, caller_role="admin",
                                   expected_publishers=TrustedIdentitySet(identities=(publisher,)),

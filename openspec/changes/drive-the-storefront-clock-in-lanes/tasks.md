@@ -2635,6 +2635,40 @@ conftests, the runner profiles `e2e-tests/config/config-*.yml`, and
     sentence did not admit. Fixed: an unreadable signed party holds no
     instant at the start, the delta, D7 and `TESTING.md` say what follows,
     and a test of the restarted service; a split test name joined.
+  - Round 17a's triage fix (82 F1, the owner's choice of a test through the
+    real client): the start's tests above double every signed party above its
+    typed client, so the real client's signing and its check of an answer's
+    timestamp never ran in the start. One e2e unit test now starts a session on
+    a stack left a day ahead through the storefront's real
+    `SyncStorefrontClient`, built in the test as the profile's storefront party
+    is, over a transport (`WireStorefront`) that verifies each request with
+    `verify_request` at the storefront's own instant (300 s skew, the time
+    setting exempt) and signs each answer at that instant; a chain fake holds
+    the same instant. It asserts the start reaches the stack's instant and
+    every request, the status reads among them, reached the storefront signed
+    there. The service half — a non-setting request refused outside the skew,
+    the setting admitted — stays proven by each service's own integration
+    tests; no production code changed.
+  - Evidence for 82 F1's fix: unit, `make test-e2e-unit` 956 passed, 1
+    skipped. With the start before 72 F1's fix put back for one run, the new
+    test fails, `bob-storefront cannot be read: HTTP 401: missing
+    X-Market-Signature-Version header` (the double's refusal is unsigned);
+    `run test-before` does not apply, since the commit before this fix already
+    holds the start the test proves.
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`
+    on the final tree: `after-functional-change` passed and rebuilt nothing;
+    `pre-commit-functional` (every suite) passed; of `pre-commit` only the
+    citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9).
+  - Fresh-context check: it found the first form patching
+    `SyncStorefrontClient` in the helper module, a name the module imports
+    (`test-seams.md`, "Injected collaborators"); a second spelling of the
+    admin seed; the double's docstring not stating that it reserves no request
+    id and serves only a time section; and an assertion on the double's own
+    instant that held whatever the start did. All fixed: the party is built in
+    the test through `lane_time_of`'s `parties` seam, the seed is one constant,
+    the docstring states both deviations, and the assertion is replaced by one
+    that the time setting reached the storefront at the stack's instant.
 - [x] 15.5 The helper shared stages use to reach an instant: in an injected run it
   sets lane time; in a wall run it waits for an instant the Agreement fixes, and any
   other instant is a blocked skip naming the wall-time target. `wait_until` callers move
@@ -3009,6 +3043,8 @@ cites a design decision by id, which code may not
     section changed only a docstring. It is to be run again in its place
     regardless. The change's index row is set back to `in implementation`;
     closeout sets it `in closeout` again.
+  - The round's triage then added one e2e unit test of the session start
+    (82 F1, recorded in 15.4's notes); it changes no production source.
 
 ## 18. Closeout
 
