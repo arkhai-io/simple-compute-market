@@ -28,18 +28,29 @@ Every scenario follows the discipline of
 Here a scenario holds its loops through the pause and step controls under
 ["Pause the loop, then advance it explicitly"](deterministic-tests.md#pause-the-loop-then-advance-it-explicitly), and
 initializes what the deal needs. It previews each move through the route's
-evaluate twin or the loop's dry run. The instants a stage may wait for are those
-the deal's Agreement fixes, such as its start, since no control moves the
-storefronts', sites' or buyer's clock (`wait_until` in
-`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`). Only the lane
-doubles have a perceived clock a control moves: each reads wall time plus an
-offset that a control moves forward, a scenario advances both doubles together
-through the `lane_double_clock` fixture
-(`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser resets
-both to wall time whatever the module's outcome, and no storefront step follows
-an advance within its module, since the storefront reads wall time. What a
-stage produced goes into the shared deal state for the stages that depend on
-it, and whatever happened, the fixture's finaliser resumes the loops.
+evaluate twin or the loop's dry run. What a stage produced goes into the shared
+deal state for the stages that depend on it, and whatever happened, the
+fixture's finaliser resumes the loops.
+
+A stage reaches an instant through lane time: one time every party of a lane
+perceives, which the scenario sets
+([`TESTING.md`, "Lane time"](../../development/TESTING.md#lane-time) gives the
+parties and the fixture that sets them). Here:
+
+- every Compose lane runs on injected lane time, every party set to one instant
+  together and confirmed at it;
+- a stage reaches an instant by setting lane time, never by waiting, and waits
+  only for its own request's effect;
+- lane time only moves forward and is never reset: each module continues from the
+  instant the one before it left;
+- a party the run's profile names but cannot reach fails the setup rather than
+  skipping;
+- a run on wall time — an external-topology run, or one against the local Helm
+  release — waits only for an instant the deal's Agreement fixes, such as its
+  start, and a stage needing any other instant is a blocked skip naming the
+  wall-time target; the shared stages reach both through one helper;
+- a run is on one time source throughout, and the session fails naming a party on
+  another.
 
 A message a stage sends off the request path, such as the seller-side
 introduction mail, is read back from the lane's Mailpit. The introduction
@@ -104,4 +115,5 @@ module logs each observation's outcome after its last stage
 
 A VM lease's end is reached by moving its agreed end into the past and stepping
 one lease-watchdog cycle with the watchdog held, which runs exactly the service
-code a wall-clock expiry runs; lease durations stay fixed.
+code an expiry runs; lease durations stay fixed. Back-dating is admitted below
+setting lane time, and weaker than it.

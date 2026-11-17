@@ -396,6 +396,54 @@ containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
 fetch means diagnostics were retrieved; it does not mean the tests passed.
 
+#### Lane time
+
+Every party of a lane perceives one time, which the scenario sets: the
+storefronts, the provisioning services and the sites they host, the registries,
+the API-credits service and the site ledger it hosts, the sample app and the
+metering middleware it hosts, both lane doubles, the chain, the buyer and the
+harness's own signing clients. Each service's time source is configuration
+(`[Time] source`, `time.source` or `TIME_SOURCE`, `"wall"` by default), and every
+Compose lane states `"injected"` for each of its parties in configuration only the
+lanes load: the registries' lane profile (`dev-env/registry/config-payments-lane.env`),
+the provisioning services' (`dev-env/provisioning/config-lane-time.yml`, layered
+through `ACTIVE_PROFILES`), each storefront's lane configuration
+(`storefront.*.lane.toml`, and the bare-metal lane's `storefront.dev.toml`), and
+the environment of the services configured by it — the credits service, the
+sample app and both doubles — in the lanes' own overlays. The full local stack
+stays on wall time, as does the local Helm release.
+
+The lane's runner profile (`e2e-tests/config/config-<lane>-lane.yml`, its
+`lane_time` section) names the run's mode and every party, each with what reaches
+it: its typed client and administrator credential, a double's or the sample app's
+control token, the chain's RPC endpoint, and the buyer's lane-time file. The
+session fixture `lane_time` (`e2e-tests/tests/e2e/roles/helpers/lane_time.py`)
+fails the setup naming a party it cannot reach. In an injected run it installs an
+injected source in the harness's own process, so every client the harness builds
+signs at lane time, and sets every party to the wall instant of the session's
+start, or to the latest instant a party already holds when a run before it on
+the same stack left lane time ahead. `LaneTime.set(T)` moves, in order, the
+harness's source, each service through its typed client's `set_time`, the
+doubles and the sample app through `lane-double-controls`' client, the chain
+(its block time frozen with `anvil_setBlockTimestampInterval(0)`, then
+`evm_setNextBlockTimestamp` and a mined block, so every block until the next set
+carries T), and the buyer's file through the time component's writer, then
+reads every party's status and fails naming any not at T, a status with no time
+section among them. Lane time only moves forward and is never reset: a module
+continues from the instant the one before left, and a set earlier than the
+harness's instant fails naming both instants. The buyer, started afresh for each
+stage, reads its time from that file on every read, as the `[time]` table of the
+configuration the harness generates for it names.
+
+A run is on injected or wall time throughout, and the session fails naming a party
+on the other. A stage reaches an instant through `LaneTime.reach`: an injected run
+sets lane time there; a wall run — the real-provisioning lane, a run against hosted
+authorities, or the local Helm release — waits only for an instant the deal's
+Agreement fixes (`reach_agreement_instant` in `compute_deal_stages.py`), and a stage
+needing any other instant is a blocked skip naming the wall-time target. The
+hold-passed dispute module is the one that sets lane time days ahead, past a once
+part's hold.
+
 #### Release-image mode
 
 A locally verifiable scenario also runs on a release candidate's images, as part of
