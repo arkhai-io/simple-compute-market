@@ -82,16 +82,15 @@ archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "
 format-retries = 1
 
 [validation]
-# Engine, `run validation <change> preflight`, for change-validate: before any kind,
-# a failure ending validation as environmental.
+# Engine, `gather <change>`, for change-validate: before any kind, a failure ending
+# validation as environmental.
 preflight = ["make check-uv-version"]
 
-# Engine, `config parts <change>` and `run validation <change> <kind>
-# run|start|collect`, for change-validate: validation's evidence kinds, in order,
-# each assessed from its guide; engine, `history`, copies the evidence under each
-# pattern's fixed directory, which Git ignores. `local` and `helm` describe the tree
-# they ran on; `pipeline` and `ci` the commit, since their runs are dispatched for it
-# and CI's baseline is chosen by its ancestry.
+# Engine, `evidence` and `gather`, for change-validate: validation's evidence kinds,
+# in order, each assessed from its guide; engine, `history`, copies the evidence
+# under each pattern's fixed directory, which Git ignores. `local` and `helm`
+# describe the tree they ran on; `pipeline` and `ci` the commit, since their runs are
+# dispatched for it and CI's baseline is chosen by its ancestry.
 
 [validation.evidence.pipeline]
 # Started first, right after the guarded push: it is the slowest kind.
@@ -103,7 +102,7 @@ guide    = ".agents/evidence/pipeline.md"
 
 [validation.evidence.ci]
 # Started once for each workflow a complete section owes, each run named by its
-# workflow (`run validation <change> ci start --owed <workflow>`).
+# workflow (`gather <change> --kind ci --owed <workflow>` for one again).
 required = "owed"
 start    = "make run-ci WORKFLOW={owed}"
 collect  = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}"

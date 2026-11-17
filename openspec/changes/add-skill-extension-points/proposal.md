@@ -75,7 +75,7 @@ The workflow has no release, so none of these is migrated (CW-c2tw):
 | `[validation.parts.<name>]` | becomes `[validation.evidence.<kind>]`; `evidence` a pattern with `{tree}` or `{commit}`, and `{owed}` in an owed kind's; adds `required` and a required `guide` | no |
 | Hooks `before-<step>`, `after-<step>` | added, optional, no defaults; a review's run by its runner | yes |
 | Placeholders `{tree}`, `{commit}`, `{inputs}`, `{kind}` | added | yes |
-| `evidence <change> [--json]`, `gather <change> [--kind <kind> [--owed <argument>]] [--lapsed]`, `run before\|after <step> <change>` | added | yes |
+| `evidence <change> [--json]`, `gather <change> [--kind <kind> [--owed <argument>] [--lapsed]]`, `run before\|after <step> <change>` | added | yes |
 | `run validation … preflight\|run\|start\|collect`, `config parts` | fold into `gather` and `evidence` | no |
 | `run cleanup` | kept for reruns; also the built-in action before archive cleanup | yes |
 | The validation record | adds `Tree:` and each kind's source; `Parts:` becomes `Evidence:`, which the engine does not parse | yes |

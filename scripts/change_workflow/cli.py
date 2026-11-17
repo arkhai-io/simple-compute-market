@@ -27,9 +27,9 @@ The others reach the module that holds them: `next` the next-step computation,
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
 of a change's history, `cost` its cost report, `push` the guarded push, `config`
 how the repository's workflow configuration resolved, `config load` a step's
-documents, or with `common` those every session reads, and `config parts`
-validation's plan for a change, `evidence` which evidence each kind needs for a
-change's `HEAD` and what is present, `run` and `openspec`
+documents, or with `common` those every session reads, `evidence` which evidence
+each kind needs for a change's `HEAD` and what is present, `gather` the gathering
+of what is missing, or of a new attempt of one kind (`gather`), `run` and `openspec`
 the repository's hooks and its OpenSpec command (`hooks`), `check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
 default checks (`check change`), a review's format check on standard input (`check
@@ -63,16 +63,16 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import clone as clones
-from . import (config, cost_report, diagram, evidence, find, graph, history, hook, hooks,
-               index, next_step, push, round_view, skills, tasks, wait)
+from . import (config, cost_report, diagram, evidence, find, gather, graph, history, hook,
+               hooks, index, next_step, push, round_view, skills, tasks, wait)
 from .clone import clone_of
-from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, Entry, StepError, repository_root
+from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
 from .log import (Checkout, branch_decisions, direction, git_checkout, history_log_path,
                   last_entries, log_path, note_orchestrator, note_round, open_log, read_log,
-                  record_interactive, recorded_landing, waived_kinds)
+                  record_interactive, recorded_landing)
 from .records import git_head
 from .review import check_review, review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
@@ -333,7 +333,7 @@ def _parser() -> argparse.ArgumentParser:
                           help="the owner's direction to revisit the finished triage run at "
                                "this seq, which `resume` then continues with their words")
     decision.add_argument("--waives", default=None,
-                          help="the parts of validation the owner waives for later "
+                          help="the evidence kinds the owner waives for later "
                                "validations, ','-separated, on the condition --decision "
                                "states")
     next_ = commands.add_parser("next", help="compute the change's next step")
@@ -392,32 +392,34 @@ def _parser() -> argparse.ArgumentParser:
     config_ = commands.add_parser(
         "config", help="list how every field of the repository's workflow configuration "
                        "resolved; `config load <step>` a step's documents, `config load "
-                       "common` those every session reads; `config parts <change>` "
-                       "validation's plan")
-    config_.add_argument("action", nargs="?", choices=("load", "parts"), default=None)
-    config_.add_argument("subject", nargs="?", default=None, metavar="step|change")
+                       "common` those every session reads")
+    config_.add_argument("action", nargs="?", choices=("load",), default=None)
+    config_.add_argument("subject", nargs="?", default=None, metavar="step")
     config_.add_argument("--json", action="store_true", help="print it as JSON")
+    gather_ = commands.add_parser(
+        "gather", help="gather the evidence HEAD lacks, or with --kind a new attempt of one "
+                       "kind, as the engine's hook table allows the step")
+    gather_.add_argument("change")
+    gather_.add_argument("--kind", default=None,
+                         help="gather a new attempt of this kind, whatever is present")
+    gather_.add_argument("--owed", default=None,
+                         help="with --kind, an owed kind: the one argument to gather")
+    gather_.add_argument("--lapsed", action="store_true",
+                         help="with --kind, a kind the owner waived whose waiver has lapsed")
+    gather_.add_argument("--base", default=None,
+                         help="the branch the change lands on, for a command naming {base}; "
+                              "the one its clone recorded by default")
     run_ = commands.add_parser(
         "run", help="run one of the repository's hooks for a change, as the engine's hook "
                     "table allows the step")
-    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP,
-                                       hooks.TEST_BEFORE))
+    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.CLEANUP, hooks.TEST_BEFORE))
     run_.add_argument("change")
-    run_.add_argument("part", nargs="?", default=None,
-                      help="validation only: `preflight`, or the part to run")
-    run_.add_argument("phase", nargs="?", default=None, choices=hooks.PHASES,
-                      help="validation's part only: run, start, or collect")
-    run_.add_argument("--owed", default=None,
-                      help="an owed part only: the workflow its run is for")
     run_.add_argument("--test", dest="tests", action="append", default=[],
                       help="test-before only: a test file, as HEAD holds it, to run against "
                            "the earlier commit; repeat for more")
     run_.add_argument("--at", default=None,
                       help="test-before only: the commit to run against; the current "
                            "round's base by default")
-    run_.add_argument("--lapsed", default=None,
-                      help="a part the owner waived only: why the waiver's condition no "
-                           "longer holds, so the part runs")
     run_.add_argument("--base", default=None,
                       help="the branch the change lands on, for a command naming {base}; "
                            "the one its clone recorded by default")
@@ -684,39 +686,16 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
                 "round-view": (round_view.main, ["check"]),
                 "config": (config.main, ["check"]),
                 "graph": (_graph, None)}[args.check]
-    if args.command == "config" and args.action != "parts":
+    if args.command == "config":
         if args.action == "load":
             if args.subject is None or args.json:
                 raise _Usage("config load takes the step whose documents it prints, or "
                              "`common`, and no --json")
             return config.main, ["load", args.subject]
         if args.subject is not None:
-            raise _Usage("config alone takes no argument; `config load <step>` and `config "
-                         "parts <change>` take one")
+            raise _Usage("config alone takes no argument; `config load <step>` takes one")
         return config.main, ["show", *(["--json"] if args.json else [])]
     return None
-
-
-def _config_parts(args: argparse.Namespace, root: Path) -> int:
-    """Validation's plan for the change: the configuration's parts, an owed part
-    once per workflow its complete sections owe."""
-    if args.subject is None:
-        raise _Usage("config parts takes the change whose plan it prints")
-    configuration = config.load(root)
-    try:
-        directory = change_directory(root, args.subject)
-    except ChangeNotFound as exc:
-        raise StepError(str(exc)) from exc
-    config.require(configuration, config.EVIDENCE, needed_by="validation")
-    owed = tasks.owed_lines(directory / next_step.TASKS_FILE, tasks.owed_kinds(configuration))
-    if refused := [line.refusal for line in owed if line.refusal]:
-        raise StepError("; ".join(refused))
-    runs = config.plan(configuration, [(line.section, line.kind or "", line.argument or "")
-                                       for line in owed])
-    waived = _waived(root, args.subject)
-    print(config.plan_json(configuration, runs, waived) if args.json
-          else "\n".join(config.plan_lines(configuration, runs, waived)))
-    return 0
 
 
 def _round_base(root: Path, change: str) -> str | None:
@@ -726,7 +705,7 @@ def _round_base(root: Path, change: str) -> str | None:
     return rounds[-1].get("commit") if rounds else None
 
 
-def _parts(root: Path, given: str) -> list[str]:
+def _kinds(root: Path, given: str) -> list[str]:
     """The evidence kinds a waiver names, each one the configuration declares."""
     names = [name.strip() for name in given.split(",") if name.strip()]
     declared = {kind.name for kind in config.load(root).kinds or ()}
@@ -734,12 +713,6 @@ def _parts(root: Path, given: str) -> list[str]:
         raise StepError(f"the waiver names evidence kinds validation does not declare: "
                         f"{', '.join(unknown)}; declared: {', '.join(sorted(declared))}")
     return names
-
-
-def _waived(root: Path, change: str) -> dict[str, Entry]:
-    """The evidence kinds the owner waived in the change's log."""
-    path = log_path(root, change)
-    return waived_kinds(read_log(path)) if path.exists() else {}
 
 
 def _graph(root: Path) -> int:
@@ -754,26 +727,23 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         return start(args, root, wrapper, launch)
     if args.command == "clone" and args.change == "where":
         return _clone_where(args, root)
-    if args.command == "config" and args.action == "parts":
-        return _config_parts(args, root)
+    if args.command == "gather":
+        if args.kind is None and (args.owed is not None or args.lapsed):
+            raise _Usage("--owed and --lapsed qualify --kind")
+        return gather.main(args.change, root=root, configuration=config.load(root),
+                           environ=environ,
+                           base=args.base or find.landing_branch(root, args.change),
+                           kind=args.kind, owed=args.owed, lapsed=args.lapsed)
     if args.command == "run":
-        if args.hook == hooks.VALIDATION:
-            if args.part is None or (args.part == hooks.PREFLIGHT) != (args.phase is None):
-                raise _Usage("run validation takes `preflight`, or a part and its phase")
-        elif (args.part, args.phase, args.owed, args.lapsed) != (None, None, None, None):
-            raise _Usage(f"run {args.hook} takes the change alone")
         if args.hook != hooks.TEST_BEFORE and (args.tests or args.at):
             raise _Usage("--test and --at belong to run test-before")
         # The branch the change lands on, for a command naming `{base}`: the one
         # given, or the one its clone recorded.
         base = args.base or find.landing_branch(root, args.change)
         return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
-                          environ=environ, base=base, part=args.part, phase=args.phase,
-                          owed=args.owed, lapsed=args.lapsed, tests=args.tests,
+                          environ=environ, base=base, tests=args.tests,
                           commit=(args.at or _round_base(root, args.change)
-                                  if args.hook == hooks.TEST_BEFORE else None),
-                          waived=(_waived(root, args.change)
-                                  if args.hook == hooks.VALIDATION else None))
+                                  if args.hook == hooks.TEST_BEFORE else None))
     if args.command == "check" and args.check == "change":
         configuration = config.load(root)
         try:
@@ -870,7 +840,7 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                                  target=args.target,
                                  branch=args.branch,
                                  resumes=args.resumes,
-                                 waives=(_parts(root, args.waives)
+                                 waives=(_kinds(root, args.waives)
                                          if args.waives is not None else None),
                                  # A branch decision is about the change whose log
                                  # holds it, which is where steps look.

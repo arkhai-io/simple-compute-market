@@ -748,7 +748,8 @@ def test_the_command_line_reports_the_clone_and_its_bootstrap(
 # Removing a clone.
 
 REVIEWS = Path("openspec/changes/archive/2026-10-22-seed-pool/reviews")
-EVIDENCE = Path(".snapshot/validation/0123456789ab")
+VALIDATED = "0123456789abcdef0123456789abcdef01234567"
+EVIDENCE = Path(".snapshot/validation") / VALIDATED
 
 
 def _merged_clone(workspace: Path) -> Path:
@@ -759,7 +760,7 @@ def _merged_clone(workspace: Path) -> Path:
     _git(clone, "push", "-q", "origin", f"{BRANCH}:{BRANCH}", f"{BRANCH}:dev")
     (clone / REVIEWS).mkdir(parents=True)
     (clone / REVIEWS / "02-validation.md").write_text(
-        "- **Commit:** 0123456789abcdef on feat/seed-pool\n", "utf-8")
+        f"- **Commit:** {VALIDATED} on feat/seed-pool\n", "utf-8")
     (clone / REVIEWS / "workflow.jsonl").write_text('{"step": "archive-cleanup"}\n', "utf-8")
     (clone / EVIDENCE).mkdir(parents=True)
     (clone / EVIDENCE / "summary.json").write_text("{}\n", "utf-8")
@@ -889,9 +890,9 @@ def test_named_evidence_the_clone_lacks_is_reported_and_does_not_refuse_removal(
     # Deleting the clone cannot lose evidence it does not hold, so evidence named
     # by a record and held nowhere is named in the report rather than refused.
     clone = _merged_clone(workspace)
-    pruned = Path(".snapshot/validation/fedcba987654")
+    pruned = Path(".snapshot/validation") / ("f" * 40)
     (clone / REVIEWS / "03-validation.md").write_text(
-        f"- **Commit:** {pruned.name}3210 on feat/seed-pool\n", "utf-8")
+        f"- **Commit:** {pruned.name} on feat/seed-pool\n", "utf-8")
 
     assert clones.main(["remove", CHANGE], root=workspace) == 0
 

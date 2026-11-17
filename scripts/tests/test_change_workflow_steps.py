@@ -170,12 +170,10 @@ def test_each_committing_step_pushes_only_through_the_guarded_push() -> None:
 
 def test_only_validation_dispatches_a_ci_workflow() -> None:
     """No step's rules name a dispatch's make target: validation dispatches through
-    `run`, which the engine's hook table holds to the validate step (CW-u4pc)."""
+    `gather`, which the engine's hook table holds to the validate step (CW-u4pc)."""
     for name, rules in load_steps().items():
         assert not _allows(rules, "make run-ci WORKFLOW=tests.yml"), name
-    assert _allows(load_steps()["validate"],
-                   f"scripts/change-workflow run validation {CHANGE} ci start --owed tests.yml")
-    assert HOOK_STEPS["validation"] == {"validate"}
+    assert HOOK_STEPS["gather"] == {"validate"}
 
 
 HOOK_COMMANDS = {
@@ -223,7 +221,7 @@ def test_openspec_runs_through_the_configured_command() -> None:
 
 def test_every_step_may_read_the_configurations_resolution() -> None:
     for name, rules in load_steps().items():
-        for command in ("config load design", f"config parts {CHANGE}", "config --json"):
+        for command in ("config load design", "config --json"):
             assert _allows(rules, f"scripts/change-workflow {command}"), (name, command)
 
 

@@ -528,219 +528,68 @@ def test_run_refuses_an_unknown_change(tmp_path: Path,
     assert "no-such-change" in capsys.readouterr().err
 
 
-# Validation's preflight and parts, the kept marker, and the closing line.
+# The functional hooks' tree and commit, and a start's marker.
 
-PARTS = ("[validation]\npreflight = \"make check-uv-version\"\n\n"
-         + evidence_kind("pipeline", identity="commit", start="make run-e2e",
-                         collect="make fetch-e2e-logs E2E_AFTER_RUN={after}")
-         + evidence_kind("ci", required="owed", identity="commit",
-                         start="make run-ci WORKFLOW={owed}",
-                         collect="make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}")
+KINDS = ("[validation]\npreflight = \"make check-uv-version\"\n\n"
          + evidence_kind("local", run="make validate-local")
          + evidence_kind("helm", after="local", run="make validate-helm CHANGE={change}",
                          cleanup=["make record-capacity CHANGE={change}",
                                   "make -C helm teardown CHANGE={change}"]))
 LOCAL = evidence_kind("local", run="true")
-HELM_EVIDENCE = ".snapshot/evidence/{tree}/helm/*/summary.json"
-CI_EVIDENCE = ".snapshot/evidence/{commit}/ci-{owed}/*/summary.json"
 
 
-class Capture:
-    """Stands in for a `start`'s command: records it, and prints the next marker."""
+def test_a_functional_hooks_tree_is_the_tree_its_commit_then_holds(repository: Path) -> None:
+    """CW-v2dq: `run pre-commit`'s functional hooks get the worktree's tree as each
+    starts — after `after-functional-change` changed it, as a relock does — which the
+    commit then made of exactly those changes holds, and `HEAD`'s commit. Library
+    integration: a real Git repository and `sh`."""
+    configured(repository, TIERED.replace(
+        'pre-commit-functional = ["make check-packaging", "make test"]',
+        "pre-commit-functional = \"printf '%s %s' {tree} {commit} > ../tested.txt\"").replace(
+        'after-functional-change = "make lock"',
+        'after-functional-change = "printf relocked > src/lock.txt"').replace(
+        'pre-commit = "make check-repository"', 'pre-commit = "true"'))
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+                          capture_output=True, text=True).stdout.strip()
+    (repository / "src/module.py").write_text("changed\n", "utf-8")
+    (repository / "src/new.py").write_text("new\n", "utf-8")
 
-    def __init__(self, *printed: tuple[int, str | None]) -> None:
-        self.printed = list(printed)
-        self.commands: list[str] = []
+    assert main(["run", "pre-commit", CHANGE], root=repository, environ={}) == 0
+    for command in (["add", "--all"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                       "commit", "-q", "-m", "the changes tested"]):
+        subprocess.run(["git", *command], cwd=repository, check=True, capture_output=True)
 
-    def __call__(self, command: str, root: Path) -> tuple[int, str | None]:
-        self.commands.append(command)
-        return self.printed.pop(0)
-
-
-def _validating(root: Path, text: str = PARTS, shell: Shell | None = None,
-                capture: Capture | None = None, echoed: list[str] | None = None,
-                step: str | None = "validate", head: str = "c0ffee") -> Hooks:
-    runner = _hooks(root, text, environ={UNATTENDED: step} if step else {}, shell=shell,
-                    echoed=echoed)
-    runner.capture = capture or Capture()
-    runner.markers = lambda _: root / "markers"
-    runner.head = lambda _: head
-    return runner
-
-
-def test_the_preflight_runs_and_closes(tmp_path: Path) -> None:
-    shell, echoed = Shell(), []
-    runner = _validating(tmp_path, shell=shell, echoed=echoed)
-
-    assert runner.validation(CHANGE, None, "preflight")
-
-    assert shell.commands == ["make check-uv-version"]
-    assert echoed[-1] == "[change-workflow] validation preflight at c0ffee: passed, exit 0"
+    tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=repository, check=True,
+                          capture_output=True, text=True).stdout.strip()
+    assert (repository.parent / "tested.txt").read_text("utf-8") == f"{tree} {head}"
 
 
-def test_an_absent_preflight_is_skipped_saying_so(tmp_path: Path) -> None:
-    echoed: list[str] = []
-    runner = _validating(tmp_path, LOCAL, echoed=echoed)
+def test_only_the_functional_hooks_read_the_tree(tmp_path: Path) -> None:
+    """The tree is written only for a hook naming it."""
+    trees: list[Path] = []
+    runner = _hooks(tmp_path, "[hooks]\npre-archive = 'make a'\n"
+                              "pre-commit-functional = 'make b TREE={tree}'\n")
+    runner.tree = lambda root: trees.append(root) or "t0"
 
-    assert runner.validation(CHANGE, None, "preflight")
-
-    assert echoed == ["[change-workflow] validation preflight at c0ffee: skipped, not declared"]
-
-
-def test_a_part_ends_with_the_engines_closing_line(tmp_path: Path) -> None:
-    shell, echoed = Shell({f"make validate-helm CHANGE={CHANGE}": 2}), []
-    runner = _validating(tmp_path, shell=shell, echoed=echoed)
-
-    assert not runner.validation(CHANGE, None, "helm", "run")
-
-    assert echoed[-1] == (
-        f"[change-workflow] validation helm run at c0ffee: failed, exit 2: make validate-helm "
-        f"CHANGE={CHANGE} (exit 2); evidence {HELM_EVIDENCE}")
-    assert [i.entry() for i in runner.invoked] == [
-        {"hook": "validation", "part": "helm", "phase": "run",
-         "command": f"make validate-helm CHANGE={CHANGE}", "exit_status": 2,
-         "started": "2026-11-06T09:00:00Z", "seconds": 0.0}]
-
-
-def test_an_owed_parts_closing_line_names_its_workflow(tmp_path: Path) -> None:
-    echoed: list[str] = []
-    runner = _validating(tmp_path, capture=Capture((0, "401")), echoed=echoed)
-
-    assert runner.validation(CHANGE, None, "ci", "start", owed="ci.yml")
-
-    assert echoed[-1] == ("[change-workflow] validation ci ci.yml start at c0ffee: passed, "
-                          f"exit 0; evidence {CI_EVIDENCE}")
-
-
-@pytest.mark.parametrize("part,phase,owed,refused", [
-    ("ci", "start", None, "validation.evidence.ci is owed: give the workflow"),
-    ("local", "run", "ci.yml", "validation.evidence.local is not owed, so it takes no --owed"),
-    ("local", "start", None, "declares run, so it is run with run, not start"),
-    ("pipeline", "run", None, "declares start, collect, so it is run with start or collect"),
-    ("smoke", "run", None, "declares no evidence kind 'smoke'"),
-])
-def test_a_part_run_another_way_than_it_declares_is_refused(
-        tmp_path: Path, part: str, phase: str, owed: str | None, refused: str) -> None:
-    shell = Shell()
-    runner = _validating(tmp_path, shell=shell)
-
-    with pytest.raises((hooks.HookError, config.ConfigError), match=refused):
-        runner.validation(CHANGE, None, part, phase, owed)
-    assert shell.commands == []
-
-
-WAIVED = {"helm": {"seq": 7, "decision": "waive helm while no chart changes"}}
-
-
-def test_a_waived_part_is_refused_unread(tmp_path: Path) -> None:
-    shell = Shell()
-    runner = _validating(tmp_path, shell=shell)
-
-    with pytest.raises(hooks.HookError, match="waived by the owner's decision at seq 7"):
-        runner.validation(CHANGE, None, "helm", "run", waived=WAIVED)
-    assert shell.commands == []
-
-
-def test_a_lapsed_waiver_runs_its_part_and_says_why(tmp_path: Path) -> None:
-    shell = Shell()
-    runner = _validating(tmp_path, shell=shell)
-
-    assert runner.validation(CHANGE, None, "helm", "run", waived=WAIVED,
-                             lapsed="the merge brought a chart change")
-
-    assert shell.commands == [f"make validate-helm CHANGE={CHANGE}"]
-    assert runner.invoked[-1].entry()["lapsed"] == "the merge brought a chart change"
-
-
-def test_a_lapse_names_a_waiver(tmp_path: Path) -> None:
-    with pytest.raises(hooks.HookError, match="no owner's decision waives"):
-        _validating(tmp_path).validation(CHANGE, None, "local", "run", waived=WAIVED,
-                                         lapsed="why")
-
-
-def test_only_validation_runs_its_parts(tmp_path: Path) -> None:
-    with pytest.raises(hooks.HookError, match="the implement step may not run validation"):
-        _validating(tmp_path, step="implement").validation(CHANGE, None, "local", "run")
+    runner.hook("pre-archive", CHANGE, None)
+    assert trees == []
+    runner.hook("pre-commit-functional", CHANGE, None)
+    assert trees == [tmp_path]
+    assert runner.shell.commands == ["make a", "make b TREE=t0"]
 
 
 @pytest.mark.parametrize("arguments", [
-    ["run", "validation", CHANGE], ["run", "validation", CHANGE, "local"],
-    ["run", "validation", CHANGE, "preflight", "run"],
+    ["run", "validation", CHANGE], ["run", "validation", CHANGE, "local", "run"],
     ["run", "pre-commit", CHANGE, "local"], ["run", "cleanup", CHANGE, "--owed", "ci.yml"],
+    ["config", "parts", CHANGE],
 ])
-def test_run_takes_each_form_alone(tmp_path: Path, arguments: list[str]) -> None:
-    configured(_change(tmp_path), PARTS)
+def test_run_takes_each_form_alone_and_validation_has_no_run(tmp_path: Path,
+                                                             arguments: list[str]) -> None:
+    """`run` runs hooks alone, and `config` has no `parts`: validation gathers and
+    reports evidence through `gather` and `evidence`. Each is a usage error."""
+    configured(_change(tmp_path), KINDS)
 
     assert main(arguments, root=tmp_path, environ={}) == 2
-
-
-def test_two_owed_runs_are_collected_side_by_side(tmp_path: Path) -> None:
-    """CW-x9bt: each collect waits past its own start's marker."""
-    shell = Shell()
-    runner = _validating(tmp_path, shell=shell, capture=Capture((0, "401"), (0, "402")))
-
-    assert runner.validation(CHANGE, None, "ci", "start", owed="ci.yml")
-    assert runner.validation(CHANGE, None, "ci", "start", owed="docker.yml")
-    assert runner.validation(CHANGE, None, "ci", "collect", owed="docker.yml")
-    assert runner.validation(CHANGE, None, "ci", "collect", owed="ci.yml")
-
-    assert runner.capture.commands == ["make run-ci WORKFLOW=ci.yml",
-                                       "make run-ci WORKFLOW=docker.yml"]
-    assert shell.commands == ["make validate-ci WORKFLOW=docker.yml CI_AFTER_RUN=402",
-                              "make validate-ci WORKFLOW=ci.yml CI_AFTER_RUN=401"]
-
-
-def test_the_pipeline_is_collected(tmp_path: Path) -> None:
-    """CW-x9bt: the engine fills `{after}`, with no marker passed by the skill."""
-    shell = Shell()
-    runner = _validating(tmp_path, shell=shell, capture=Capture((0, "40733870392")))
-
-    runner.validation(CHANGE, None, "pipeline", "start")
-    runner.validation(CHANGE, None, "pipeline", "collect")
-
-    assert shell.commands == ["make fetch-e2e-logs E2E_AFTER_RUN=40733870392"]
-
-
-def test_a_retried_start_replaces_its_marker(tmp_path: Path) -> None:
-    shell = Shell()
-    runner = _validating(tmp_path, shell=shell, capture=Capture((0, "401"), (0, "405")))
-
-    runner.validation(CHANGE, None, "pipeline", "start")
-    runner.validation(CHANGE, None, "pipeline", "start")
-    runner.validation(CHANGE, None, "pipeline", "collect")
-
-    assert shell.commands == ["make fetch-e2e-logs E2E_AFTER_RUN=405"]
-
-
-@pytest.mark.parametrize("printed", [(1, "401"), (0, None)])
-def test_a_start_that_failed_or_printed_nothing_keeps_no_marker(
-        tmp_path: Path, printed: tuple[int, str | None]) -> None:
-    runner = _validating(tmp_path, capture=Capture((0, "399"), printed))
-    runner.validation(CHANGE, None, "pipeline", "start")
-
-    runner.validation(CHANGE, None, "pipeline", "start")
-
-    with pytest.raises(hooks.HookError, match="has kept a marker"):
-        runner.validation(CHANGE, None, "pipeline", "collect")
-
-
-def test_a_collect_with_no_marker_names_the_start_to_run(tmp_path: Path) -> None:
-    shell = Shell()
-    runner = _validating(tmp_path, shell=shell)
-
-    with pytest.raises(hooks.HookError,
-                       match=rf"run `scripts/change-workflow run validation {CHANGE} ci start "
-                             r"--owed ci.yml` first"):
-        runner.validation(CHANGE, None, "ci", "collect", owed="ci.yml")
-    assert shell.commands == []
-
-
-def test_a_marker_is_kept_for_its_commit(tmp_path: Path) -> None:
-    started = _validating(tmp_path, capture=Capture((0, "401")), head="aaaa")
-    started.validation(CHANGE, None, "pipeline", "start")
-
-    with pytest.raises(hooks.HookError, match="at bbbb has kept a marker"):
-        _validating(tmp_path, head="bbbb").validation(CHANGE, None, "pipeline", "collect")
 
 
 def test_a_start_passes_its_output_through_and_keeps_its_last_line(
@@ -775,27 +624,32 @@ def test_a_declared_command_keeps_the_callers_variables_but_not_makes_recursion(
     assert shown == {"HELM_CONTEXT": "kind"}
 
 
-# `run cleanup`: every part's cleanup, as one list.
+# `run cleanup`: every kind's cleanup, as one list.
+
+def _cleaning(root: Path, text: str = KINDS, shell: Shell | None = None,
+              echoed: list[str] | None = None, step: str = "archive-cleanup") -> Hooks:
+    return _hooks(root, text, environ={UNATTENDED: step}, shell=shell, echoed=echoed)
+
 
 def test_a_changes_validation_left_resources(tmp_path: Path) -> None:
-    """CW-ikmm: archive cleanup runs the Helm part's cleanup, in order."""
+    """CW-ikmm: archive cleanup runs the Helm kind's cleanup, in order."""
     shell, echoed = Shell(), []
-    runner = _validating(tmp_path, shell=shell, echoed=echoed, step="archive-cleanup")
+    runner = _cleaning(tmp_path, shell=shell, echoed=echoed)
 
     assert runner.cleanup(CHANGE, None)
 
     assert shell.commands == [f"make record-capacity CHANGE={CHANGE}",
                               f"make -C helm teardown CHANGE={CHANGE}"]
-    assert [(i.part, i.phase) for i in runner.invoked] == [("helm", "cleanup")] * 2
+    assert [(i.kind, i.phase) for i in runner.invoked] == [("helm", "cleanup")] * 2
 
 
-def test_a_parts_cleanup_finds_nothing(tmp_path: Path) -> None:
+def test_a_kinds_cleanup_finds_nothing(tmp_path: Path) -> None:
     """CW-ikmm: a cleanup that removes nothing succeeds; one failing still lets the
     rest run, and fails the cleanup."""
-    text = PARTS.replace('run = "make validate-local"',
+    text = KINDS.replace('run = "make validate-local"',
                          'run = "make validate-local"\ncleanup = "make dist-clean"')
     shell = Shell({"make dist-clean": 0, f"make record-capacity CHANGE={CHANGE}": 1})
-    runner = _validating(tmp_path, text, shell=shell, step="archive-cleanup")
+    runner = _cleaning(tmp_path, text, shell=shell)
 
     assert not runner.cleanup(CHANGE, None)
 
@@ -803,9 +657,23 @@ def test_a_parts_cleanup_finds_nothing(tmp_path: Path) -> None:
                               f"make -C helm teardown CHANGE={CHANGE}"]
 
 
-def test_no_part_declaring_a_cleanup_is_skipped_saying_so(tmp_path: Path) -> None:
+def test_a_cleanup_is_given_the_checkouts_tree_and_commit(tmp_path: Path) -> None:
+    """CW-v2dq: a kind's cleanup is one of its commands, given the tree and the
+    commit."""
+    shell = Shell()
+    runner = _cleaning(tmp_path, evidence_kind("helm", run="true",
+                                               cleanup="make clean TREE={tree} AT={commit}"),
+                       shell=shell)
+    runner.tree = lambda _: "t0"
+
+    assert runner.cleanup(CHANGE, None)
+
+    assert shell.commands == ["make clean TREE=t0 AT=c0ffee"]
+
+
+def test_no_kind_declaring_a_cleanup_is_skipped_saying_so(tmp_path: Path) -> None:
     echoed: list[str] = []
-    runner = _validating(tmp_path, LOCAL, echoed=echoed, step="archive-cleanup")
+    runner = _cleaning(tmp_path, LOCAL, echoed=echoed)
 
     assert runner.cleanup(CHANGE, None)
 
@@ -814,7 +682,7 @@ def test_no_part_declaring_a_cleanup_is_skipped_saying_so(tmp_path: Path) -> Non
 
 def test_only_archive_cleanup_runs_the_cleanups(tmp_path: Path) -> None:
     with pytest.raises(hooks.HookError, match="the validate step may not run cleanup"):
-        _validating(tmp_path).cleanup(CHANGE, None)
+        _cleaning(tmp_path, step="validate").cleanup(CHANGE, None)
 
 
 # What a run invoked, kept by its session for its line.
@@ -825,17 +693,21 @@ def _ignoring_records(root: Path) -> Path:
     return root
 
 
-def test_validations_helm_part_fails(repository: Path) -> None:
+def test_validations_helm_kind_fails(repository: Path) -> None:
     """CW-q5fy: library integration, a real `sh` and Git directory; the run's line
-    lists the part with its resolved command and exit status 2."""
+    lists the gathering's kind with its resolved command and exit status 2."""
     configured(_ignoring_records(repository), evidence_kind("helm", run="exit 2") + MODELS)
+    # The gathering describes HEAD, so the configuration is committed.
+    for command in (["add", "--all"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                       "commit", "-q", "-m", "configure"]):
+        subprocess.run(["git", *command], cwd=repository, check=True, capture_output=True)
     ran: list[int] = []
 
     class Validating(FakeClaude):
-        """A validation run whose step runs the Helm part."""
+        """A validation run whose step gathers the Helm kind."""
 
         def __call__(self, command, cwd, feed, step) -> int:
-            ran.append(main(["run", "validation", CHANGE, "helm", "run"], root=repository,
+            ran.append(main(["gather", CHANGE, "--kind", "helm"], root=repository,
                             environ={SESSION_ID: SESSION, UNATTENDED: step}))
             return super().__call__(command, cwd, feed, step)
 
@@ -843,9 +715,9 @@ def test_validations_helm_part_fails(repository: Path) -> None:
         "validate", CHANGE)
 
     assert ran == [1]
-    (invoked,) = line["invoked"]
-    assert {key: invoked[key] for key in ("hook", "part", "phase", "command", "exit_status")} \
-        == {"hook": "validation", "part": "helm", "phase": "run", "command": "exit 2",
+    (invoked,) = [entry for entry in line["invoked"] if entry.get("kind") == "helm"]
+    assert {key: invoked[key] for key in ("hook", "kind", "phase", "command", "exit_status")} \
+        == {"hook": "gather", "kind": "helm", "phase": "run", "command": "exit 2",
             "exit_status": 2}
 
 
@@ -1013,25 +885,6 @@ def test_a_codex_review_sees_no_session_of_whatever_started_it(
                       f"import os; print(os.environ.get({SESSION_ID!r}))"], log) == 0
 
     assert log.read_text("utf-8") == "None\n"
-
-
-def test_an_owed_start_and_collect_through_the_command(repository: Path,
-                                                       capfd: pytest.CaptureFixture[str]
-                                                       ) -> None:
-    """Library integration: a real `sh` and Git directory, through `cli.main`."""
-    configured(repository, evidence_kind("ci", required="owed", identity="commit",
-                                         start="echo dispatched {owed}; echo 77",
-                                         collect="echo waited past {after} for {owed}"))
-    environ = {UNATTENDED: "validate"}
-
-    assert main(["run", "validation", CHANGE, "ci", "start", "--owed", "ci.yml"],
-                root=repository, environ=environ) == 0
-    assert main(["run", "validation", CHANGE, "ci", "collect", "--owed", "ci.yml"],
-                root=repository, environ=environ) == 0
-
-    out = capfd.readouterr().out
-    assert "dispatched ci.yml\n77\n" in out
-    assert "waited past 77 for ci.yml\n" in out
 
 
 def test_run_cleanup_through_the_command(repository: Path) -> None:

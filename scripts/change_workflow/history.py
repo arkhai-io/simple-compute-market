@@ -20,14 +20,14 @@ owner's call. Only regular files are copied. Nothing rebuildable is: only
 `reviews/` and the evidence directories its records name, never a wheelhouse, an
 environment, or a zip of logs.
 
-An evidence directory holds one directory per tree, commit, or run it is evidence
-of. The evidence a change's records name is, under each evidence directory, each
-`<directory>/<name>` they cite, and the evidence of each validation record's commit
-(`**Commit:**`, kept under its first twelve characters) and of each record's
-pipeline run (`**Pipeline:** run <id>`), under whichever directories hold it.
-Transcripts are not read for it: they cite whatever a session read, another clone's
-evidence included. Named evidence the clone does not hold is reported, not refused:
-a cited path absent, and a commit or run no evidence directory holds, under each.
+An evidence directory holds one directory per tree or commit it is evidence of. The
+evidence a change's records name is, under each evidence directory, each path they
+cite — a directory, or the directory holding a cited file — and the evidence of each
+validation record's tree (`**Tree:**`) and commit (`**Commit:**`), each under its
+full object name, under whichever directories hold it. Transcripts are not read for
+it: they cite whatever a session read, another clone's evidence included. Named
+evidence the clone does not hold is reported, not refused: a cited path absent, and
+a tree or commit no evidence directory holds, under each.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-hak6 and CW-rf50.
 """
@@ -47,10 +47,8 @@ from . import config
 from .common import StepError, repository_root
 from .find import REVIEWS, ChangeNotFound, change_directory, is_archived, workspace_of
 
-_VALIDATED_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{12,40})\b", re.M)
-_PIPELINE_RUN = re.compile(r"^- \*\*Pipeline:\*\*\s*run\s+([0-9]+)\b", re.M)
-# A validation keeps a commit's evidence under its first twelve characters.
-_SHORT_COMMIT = 12
+# A validation record's commit and tree, each its full object name.
+_IDENTITY = re.compile(r"^- \*\*(?:Commit|Tree):\*\*\s*`?([0-9a-f]{40})\b", re.M)
 
 
 class HistoryError(RuntimeError):
@@ -71,16 +69,18 @@ class Synced:
 
 
 def _cited(directory: Path) -> re.Pattern[str]:
-    """A citation of a commit's or run's evidence under `directory`, its name taken."""
-    return re.compile(re.escape(directory.as_posix()) + r"/([0-9A-Za-z][0-9A-Za-z_-]*)"
-                      r"(?![0-9A-Za-z_-])")
+    """A citation of a path under `directory`, the path below it taken: segments of
+    names, attempts, and files, never `.` or `..`, nor the full stop ending a
+    sentence."""
+    segment = r"[0-9A-Za-z](?:[0-9A-Za-z_.-]*[0-9A-Za-z_-])?"
+    return re.compile(re.escape(directory.as_posix()) + rf"((?:/{segment})+)/?"
+                      r"(?![0-9A-Za-z_-]|\.[0-9A-Za-z_-])")
 
 
 def named_evidence(reviews: Path, evidence: Sequence[str]) -> tuple[list[Path], list[str]]:
     """What the records in `reviews` name under the evidence directories `evidence`,
-    relative to the checkout: each cited path, and the name of each validated commit,
-    under its first twelve characters, and each pipeline run, whose directory the
-    records do not say."""
+    relative to the checkout: each cited path, and each validated tree and commit,
+    whose directory the records do not say."""
     directories = [Path(entry.rstrip("/")) for entry in evidence]
     cited: set[Path] = set()
     keys: set[str] = set()
@@ -89,9 +89,9 @@ def named_evidence(reviews: Path, evidence: Sequence[str]) -> tuple[list[Path], 
             continue
         text = record.read_text("utf-8", errors="replace")
         for directory in directories:
-            cited.update(directory / name for name in _cited(directory).findall(text))
-        keys.update(commit[:_SHORT_COMMIT] for commit in _VALIDATED_COMMIT.findall(text))
-        keys.update(_PIPELINE_RUN.findall(text))
+            cited.update(Path(directory.as_posix() + below)
+                         for below in _cited(directory).findall(text))
+        keys.update(_IDENTITY.findall(text))
     return sorted(cited), sorted(keys)
 
 
@@ -117,6 +117,8 @@ def _history(clone: Path, change: str, evidence: Sequence[str] | None = None
             raise HistoryError(str(exc)) from exc
     cited, keys = named_evidence(reviews, evidence)
     directories = [Path(entry.rstrip("/")) for entry in evidence]
+    # A cited file is copied with the directory holding it.
+    cited = sorted({path if not (clone / path).is_file() else path.parent for path in cited})
     held = [path for path in cited if (clone / path).is_dir()]
     absent = [path for path in cited if not (clone / path).is_dir()]
     for key in keys:
@@ -125,6 +127,8 @@ def _history(clone: Path, change: str, evidence: Sequence[str] | None = None
         if not found:
             absent += [directory / key for directory in directories
                        if directory / key not in absent]
+    # A directory inside another copied is copied with it, once.
+    held = [path for path in held if not any(other in path.parents for other in held)]
     return [reviews.relative_to(clone), *sorted(held)], sorted(absent)
 
 

@@ -536,21 +536,21 @@ STEPS: tuple[str, ...] = tuple(dict.fromkeys(d.runs for d in TABLE if d.runs))
 KINDS: tuple[str, ...] = tuple(dict.fromkeys(node.kind for node in NODES
                                              if node.step == "review" and node.kind))
 
-# Which steps may run each hook through `scripts/change-workflow run`: the workflow's
-# structure, which no repository changes. Only implementation, triage, and the merge
-# make functional changes, so only they relock or run the functional checks;
-# validation changes nothing it validates (CW-af15), and so runs only its own parts.
-# A `pre-commit` reports and changes nothing, so a review may run it. `validation`
-# is the preflight and every part's commands, `cleanup` every part's cleanup as one
-# list. `pre-push` and `post-clone` are run by the engine's own push and clone, by
-# no step.
+# Which steps may run each hook through `scripts/change-workflow run`, and the
+# gathering through `gather`: the workflow's structure, which no repository changes.
+# Only implementation, triage, and the merge make functional changes, so only they
+# relock or run the functional checks; validation changes nothing it validates
+# (CW-af15), and so only gathers evidence. A `pre-commit` reports and changes
+# nothing, so a review may run it. `gather` is the preflight and every kind's
+# commands, `cleanup` every kind's cleanup as one list. `pre-push` and `post-clone`
+# are run by the engine's own push and clone, by no step.
 HOOK_STEPS: dict[str, frozenset[str]] = {
     "after-functional-change": frozenset({"implement", "triage", "merge"}),
     "pre-commit-functional": frozenset({"implement", "triage", "merge"}),
     "pre-commit": frozenset({"design", "plan", "implement", "triage", "merge", "closeout",
                              "archive-cleanup", "review"}),
     "pre-archive": frozenset({"closeout"}),
-    "validation": frozenset({"validate"}),
+    "gather": frozenset({"validate"}),
     "cleanup": frozenset({"archive-cleanup"}),
     "test-before": frozenset({"implement", "triage"}),
 }

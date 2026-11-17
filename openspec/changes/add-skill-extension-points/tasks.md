@@ -339,7 +339,7 @@ CW-ikmm's rerun, CW-q5fy's kinds, CW-e7lm's waivers). Files: `scripts/change_wor
 `HOOK_STEPS`), `test_change_workflow_hooks.py`, `test_change_workflow_cli.py`,
 `test_change_history.py`, `test_change_workflow_evidence.py`.
 
-- [ ] 3.1 Add `gather <change>`: the preflight, the guarded push of `HEAD`, every
+- [x] 3.1 Add `gather <change>`: the preflight, the guarded push of `HEAD`, every
   missing `start` kind and owed argument dispatched, the missing `run` kinds in
   order keeping `after`, then each started kind collected; present evidence never
   touched; a waived kind skipped unless a merge since it was last assessed lapses
@@ -347,32 +347,165 @@ CW-ikmm's rerun, CW-q5fy's kinds, CW-e7lm's waivers). Files: `scripts/change_wor
   every other kind still runs. Verify: library-integration tests for CW-g6th's
   "Gathering leaves present evidence alone" and CW-g4oz's dispatch-before-run order,
   with the commands doubled as shell scripts writing at the pattern.
-- [ ] 3.2 Add `gather <change> --kind <kind> [--owed <argument>] [--lapsed]`: a new
+  - Done in a new module, `scripts/change_workflow/gather.py`, since the guarded
+    push imports the hook runner and the gathering needs both.
+    - `Gathering.missing` reads `evidence.change_report` and gathers each `missing`
+      entry. A `waived` entry with nothing present is gathered only when the lapse
+      seam names why. A refused owed line fails the gathering.
+    - The push runs only when a start is due. A refused push skips every start, as a
+      failed attempt, and still runs the run kinds.
+    - A failed preflight gathers nothing, keeping the configuration's "a failure
+      ending validation as environmental". Otherwise evidence gathered in a refused
+      environment would count as present.
+    - The gathering refuses a worktree whose tree is not `HEAD`'s, so `{tree}` is the
+      tree `evidence` reads.
+  - The lapse is mechanical (`merge_lapse`), read per kind: a merge among the
+    commits since the kind last ran, which is the `commit` of the latest validation
+    whose logged `invoked` names the kind, or else the latest validation.
+    - With no validation logged, nothing lapses.
+    - A commit Git cannot read lapses the waiver.
+    - A lapsed attempt's closing line says why. A lapsed waiver over present evidence
+      is reported as present, not gathered.
+    - A run's `invoked` names the kinds its gathering ran, but not those it found
+      present. So "since it last ran" falls back to the latest validation when no
+      run invoked the kind.
+  - Tests, in a new `scripts/tests/test_change_workflow_gather.py` rather than the
+    files the plan named, beside the module. They are library integration: a real
+    temporary repository, `evidence` reading what each kind's shell command wrote at
+    its pattern, and the push and the lapse doubled at the gathering's seams. All
+    pass:
+    - `test_the_gathering_starts_every_dispatch_then_runs_then_collects`;
+    - `test_a_long_kind_declared_before_a_dispatched_one`, CW-g4oz's scenario;
+    - `test_gathering_leaves_present_evidence_alone`, CW-g6th's scenario;
+    - a failing kind, a refused push, a failed preflight, an absent preflight, and a
+      worktree that is not `HEAD`'s;
+    - `test_only_validation_gathers`;
+    - a waived kind skipped, a waiver lapsed (through the seam), and a lapsed waiver
+      over present evidence;
+    - `merge_lapse` reading a real merge per kind, and an unreadable commit;
+    - `test_the_command_gathers_a_waived_kind_a_merge_lapsed`, the lapse read from
+      the log and Git through `cli.main`.
+    `test_validation_gathers_this_repositorys_kinds` doubles the hook runner's shell,
+    since this repository's commands build and deploy.
+- [x] 3.2 Add `gather <change> --kind <kind> [--owed <argument>] [--lapsed]`: a new
   attempt of that kind whatever is present, of one owed argument or each owed
   without `--owed`; a waived kind refused without `--lapsed` (D4; CW-g6th). Verify:
   library-integration tests for CW-g6th's one-workflow rerun scenario and the
   refusal of a waived kind.
-- [ ] 3.3 Key a start's marker by tree or commit, kind, and owed argument, fill
+  - Done: `Gathering.again`.
+    - `--owed` must name an argument a complete section owes.
+    - `--lapsed` is refused for a kind not waived.
+    - `--owed` and `--lapsed` without `--kind` are usage errors.
+    - `--lapsed` is a flag, the skill writing the reason in the record; the
+      invocation records `lapsed: "gathered with --lapsed"`.
+    - The proposal's interface row now reads `gather <change> [--kind <kind>
+      [--owed <argument>] [--lapsed]]`, as D7 and this task have it, `--lapsed`
+      qualifying `--kind`.
+  - Library-integration tests, all passing:
+    - `test_one_owed_workflow_is_rerun_after_an_environmental_failure`, CW-g6th's
+      scenario, the new attempt current by path order;
+    - `test_a_kind_is_gathered_again_whatever_is_present`;
+    - `test_a_waived_kind_is_refused_without_lapsed`;
+    - `test_a_new_attempt_is_refused_naming_why`;
+    - `test_an_owed_kind_no_section_owes_has_nothing_to_gather`;
+    - `test_the_command_gathers_and_keeps_what_it_ran`, through `cli.main`, with
+      the session's kept invocations read back.
+- [x] 3.3 Key a start's marker by tree or commit, kind, and owed argument, fill
   `{after}` from it, fill `{tree}`, `{commit}`, and `{owed}` in a kind's commands,
   and close each kind with its line naming the kind, argument, identity, result,
   exit status, and evidence (CW-x9bt); record each invocation as `invoked` on the
   run's line (CW-q5fy). Verify: CW-x9bt's two scenarios and CW-q5fy's Helm scenario
   as library-integration tests.
-- [ ] 3.4 Fill `{tree}` and `{commit}` in `after-functional-change` and
+  - Done:
+    - `hooks.marker_key(identity, kind, owed)`. `Hooks.start`, `keep_marker`, and
+      `kept_marker` are the hook runner's for the gathering.
+    - A kind's `{tree}` is `HEAD`'s tree, which the gathering checks the worktree
+      holds; `{commit}` is `HEAD`'s.
+    - Each attempt closes with `[change-workflow] gather <kind> [<argument>] at
+      <tree|commit> <id>: <result>; evidence <current match|none>`.
+    - `Invoked.part` is now `Invoked.kind`, so a run's `invoked` entries say
+      `"hook": "gather", "kind": …`.
+  - Library-integration tests, all passing:
+    - `test_two_owed_runs_are_collected_side_by_side`;
+    - `test_the_pipeline_is_collected_past_the_marker_its_start_printed`, which also
+      reads the marker kept for `<commit> pipeline`;
+    - `test_each_kind_closes_with_its_line`;
+    - `test_a_later_start_replaces_its_marker` and
+      `test_a_start_that_failed_or_printed_nothing_keeps_no_marker_and_is_not_collected`;
+    - CW-q5fy's Helm scenario as `test_validations_helm_kind_fails` in
+      `test_change_workflow_hooks.py`: a wrapper run with the harness doubled, whose
+      step runs `gather --kind helm` through `cli.main` on a real repository.
+- [x] 3.4 Fill `{tree}` and `{commit}` in `after-functional-change` and
   `pre-commit-functional` from the worktree the hook runs on (CW-v2dq; D3).
   Verify: a library-integration test of `run pre-commit` with a hook echoing
   `{tree}` matching the tree of the commit then made.
-- [ ] 3.5 Remove `run validation … preflight|run|start|collect` and `config parts`,
+  - Done: `Hooks.identities` reads the tree only for a command naming it, as each
+    functional hook starts, so `pre-commit-functional` sees the tree after
+    `after-functional-change`'s relock.
+  - Tests, both passing:
+    - `test_a_functional_hooks_tree_is_the_tree_its_commit_then_holds`, library
+      integration: `run pre-commit` through `cli.main` on a real repository. Its
+      `after-functional-change` writes a file into the worktree, as a relock does,
+      and its `pre-commit-functional` writes `{tree} {commit}` outside the worktree;
+      the tree matches the commit then made, the written file included;
+    - `test_only_the_functional_hooks_read_the_tree`, a unit test.
+- [x] 3.5 Remove `run validation … preflight|run|start|collect` and `config parts`,
   `gather` and `evidence` replacing them (D15); `HOOK_STEPS` admits `gather` for
   validate and the wrapper (section 5). `run cleanup <change>` runs every kind's
   `cleanup` in declaration order as one list (CW-ikmm). Verify: the CLI tests
   assert the removed subcommands exit 2 and CW-ikmm's two scenarios pass.
-- [ ] 3.6 `history` copies the evidence paths the change's records name, under each
+  - Done:
+    - `run`'s choices lose `validation`, and `config` loses `parts`.
+    - `config.PlannedRun`, `plan`, `plan_lines`, and `plan_json` are gone, as are
+      `hooks.VALIDATION`, `PREFLIGHT`, and `PHASES`.
+    - `HOOK_STEPS["gather"]` is `{"validate"}`; the wrapper's use is section 5's.
+    - `run cleanup` fills `{tree}` and `{commit}`.
+  - Tests, all passing:
+    - `test_run_takes_each_form_alone_and_validation_has_no_run`, in the hooks file:
+      `run validation …` and `config parts` exit 2;
+    - CW-ikmm's two scenarios (`test_a_changes_validation_left_resources`,
+      `test_a_parts_cleanup_finds_nothing`);
+    - `test_a_cleanup_is_given_the_checkouts_tree_and_commit`.
+  - The step-table test now asserts `HOOK_STEPS["gather"]`. The step table itself
+    (4.5) still grants `run *`, which no longer reaches validation.
+  - `change-validate` still names `run validation` and `config parts` until 4.6, so
+    between this commit and section 4's the skill names commands that are gone.
+- [x] 3.6 `history` copies the evidence paths the change's records name, under each
   pattern's fixed directory, with each record's tree and commit (CW-hak6, unchanged
   in intent). Verify: `test_change_history.py` copies a record's cited
   `.snapshot/evidence/<tree>/local/<attempt>/` directory.
-- [ ] 3.7 Verification point: the suites above; `run pre-commit` passes. End-to-end:
+  - Done: a citation under an evidence directory now takes the whole path below it.
+    - A cited file brings the attempt directory holding it, and a directory inside
+      another copied is copied once.
+    - Each record's `**Tree:**` and `**Commit:**` name a key under each directory,
+      by its full object name.
+    - The pipeline run's id and the twelve-character commit are not read, since no
+      kind keys evidence by them.
+    - A citation ending a sentence leaves its full stop out
+      (`test_a_citation_ending_a_sentence_names_the_path_without_its_full_stop`).
+  - `test_change_history.py`, all passing:
+    - `test_the_first_copy_brings_the_records_and_named_evidence_to_the_same_paths`
+      copies the record's tree and commit directories and the cited
+      `.snapshot/evidence/<tree>/helm/<attempt>/` from its cited `summary.json`,
+      leaving the tree's other attempt;
+    - the absent-evidence and no-kind tests.
+  - `test_change_clone.py`'s removal tests use full commits.
+- [x] 3.7 Verification point: the suites above; `run pre-commit` passes. End-to-end:
   none.
+  - Correction: checked though `run pre-commit` does not pass whole, as in 1.10.
+    `pre-commit` passed; `pre-commit-functional` failed only on the same two
+    step-table tests (`57b7baaad`'s lifted deny rules), every other suite passing.
+    After the fresh-context check's fixes, `run pre-commit` ran again with the same
+    result: the scripts' 3227 passed but for the same two; `pre-commit` passed.
+  - End-to-end: none — confirmed.
+  - `run test-before` on `test_change_history.py` fails at the round's base, mostly
+    in setup, since the base engine refuses a kinds configuration.
+  - Handoff to section 4:
+    - The repository's kind commands can now take `TREE={tree}` and
+      `COMMIT={commit}`.
+    - `pre-commit-functional` can name `{tree}`.
+    - `scripts/change-workflow gather` and `evidence` are what `change-validate` and
+      `change-orchestrate` move to.
 
 ## 4. This repository's kinds, scripts, and commands
 

@@ -1,6 +1,5 @@
 """The repository's workflow configuration, `change_workflow.config`: its check, its
-fields' kinds, its evidence kinds, how they resolved, a step's documents, and
-validation's plan."""
+fields' kinds, its evidence kinds, how they resolved, and a step's documents."""
 
 from __future__ import annotations
 
@@ -14,8 +13,6 @@ import pytest
 from change_workflow import config
 from change_workflow.cli import main
 from change_workflow.config import ConfigError
-from change_workflow.next_step import TASKS_FILE
-from change_workflow.tasks import owed_lines
 from change_workflow_fixtures import (CHANGE, CONFIGURED, MODELS, VALID, FakeClaude, configured,
                                       event_lines, evidence_kind, make_wrapper)
 
@@ -337,8 +334,8 @@ pre-commit = ["echo ${HOME}", "awk '{print $1}' x", "make check CHANGE={change} 
 
 
 @pytest.mark.parametrize("command", [["config"], ["config", "--json"], ["check", "config"],
-                                     ["config", "load", "design"],
-                                     ["config", "parts", CHANGE]])
+                                     ["config", "load", "design"], ["evidence", CHANGE],
+                                     ["gather", CHANGE]])
 def test_a_key_is_misspelled(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                              command: list[str]) -> None:
     """CW-w8ne: every subcommand reading the file refuses, naming the field."""
@@ -712,146 +709,16 @@ def test_an_absent_or_empty_list_loads_nothing(tmp_path: Path) -> None:
     assert _checked("[load]\ncommon = []\n").documents("design", tmp_path) == []
 
 
-# `config parts <change>`: validation's plan.
+# A waiver names the kinds the configuration declares.
 
-PARTS = FOUR_KINDS
-
-TASKS = """# Tasks
-
-## 1. Hooks
-
-- [x] 1.1 Run them.
-- [x] 1.2 Verification: the suite passes. End-to-end: none.
-  Owed by validation: `ci.yml`, job `lint` — passes.
-
-## 2. Images
-
-- [x] 2.1 Build them.
-
-Owed by validation: `docker.yml`, job `build` — builds.
-
-## 3. Charts
-
-- [ ] 3.1 Render them.
-  Owed by validation: `helm.yml`, job `render` — renders.
-
-## 4. Closeout
-
-- [ ] 4.1 Archive.
-"""
-
-
-def _change(root: Path, tasks: str) -> None:
-    directory = root / "openspec/changes" / CHANGE
-    directory.mkdir(parents=True)
-    (directory / TASKS_FILE).write_text(tasks, "utf-8")
-
-
-def test_two_sections_owe_ci_workflows(tmp_path: Path,
+def test_a_waiver_names_declared_kinds(tmp_path: Path,
                                        capsys: pytest.CaptureFixture[str]) -> None:
-    """CW-g4oz: the `ci` part listed twice, by workflow; an owed line under an
-    incomplete section owes nothing yet."""
-    configured(tmp_path, PARTS)
-    _change(tmp_path, TASKS)
-
-    assert main(["config", "parts", CHANGE, "--json"], root=tmp_path) == 0
-
-    shown = json.loads(capsys.readouterr().out)
-    assert shown["preflight"] == ["make check-uv-version"]
-    assert [(run["name"], run["shape"], run["after"], run["sections"])
-            for run in shown["runs"]] == [
-        ("pipeline", "start-collect", None, []),
-        ("ci ci.yml", "start-collect", None, ["1"]),
-        ("ci docker.yml", "start-collect", None, ["2"]),
-        ("local", "run", None, []),
-        ("helm", "run", "local", []),
-    ]
-    assert shown["runs"][1]["owed"] == "ci.yml"
-    assert shown["runs"][0]["evidence"] == ".snapshot/evidence/{commit}/pipeline/*/summary.json"
-
-
-def test_the_plan_reads_as_lines(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    configured(tmp_path, PARTS)
-    _change(tmp_path, TASKS)
-
-    assert main(["config", "parts", CHANGE], root=tmp_path) == 0
-
-    ci = ".snapshot/evidence/{commit}/ci-{owed}/*/summary.json"
-    assert [line.split() for line in capsys.readouterr().out.splitlines()] == [
-        ["preflight", "make", "check-uv-version"],
-        ["pipeline", "start,", "collect", "evidence",
-         ".snapshot/evidence/{commit}/pipeline/*/summary.json"],
-        ["ci", "ci.yml", "start,", "collect", "owed", "by", "section", "1", "evidence", ci],
-        ["ci", "docker.yml", "start,", "collect", "owed", "by", "section", "2", "evidence", ci],
-        ["local", "run", "evidence", ".snapshot/evidence/{tree}/local/*/summary.json"],
-        ["helm", "run", "after", "local", "evidence",
-         ".snapshot/evidence/{tree}/helm/*/summary.json"],
-    ]
-
-
-def test_the_plan_names_the_owners_waivers(tmp_path: Path,
-                                           capsys: pytest.CaptureFixture[str]) -> None:
-    """A part the owner waived names the decision, whose condition validation judges."""
-    configured(tmp_path, PARTS)
-    _change(tmp_path, TASKS)
-    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--waives", "helm,pipeline",
-                 "--decision", "waive helm and the pipeline while no chart changes",
-                 "--reason", "the owner's words"], root=tmp_path) == 0
-    capsys.readouterr()
-
-    assert main(["config", "parts", CHANGE], root=tmp_path) == 0
-    lines = capsys.readouterr().out.splitlines()
-    assert main(["config", "parts", CHANGE, "--json"], root=tmp_path) == 0
-    runs = json.loads(capsys.readouterr().out)["runs"]
-
-    assert lines[1].split()[:7] == ["pipeline", "waived", "by", "the", "owner", "at", "seq"]
-    assert lines[-1].startswith("helm") and "no chart changes" in lines[-1]
-    assert [run["name"] for run in runs if "waived" in run] == ["pipeline", "helm"]
-
-
-def test_a_waiver_names_declared_parts(tmp_path: Path,
-                                       capsys: pytest.CaptureFixture[str]) -> None:
-    configured(tmp_path, PARTS)
-    _change(tmp_path, TASKS)
+    configured(tmp_path, FOUR_KINDS)
+    (tmp_path / "openspec/changes" / CHANGE).mkdir(parents=True)
 
     assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--waives", "smoke",
                  "--decision", "d", "--reason", "r"], root=tmp_path) != 0
     assert "does not declare: smoke" in capsys.readouterr().err
-
-
-def test_no_section_owes_ci_evidence(tmp_path: Path,
-                                     capsys: pytest.CaptureFixture[str]) -> None:
-    """CW-g4oz: an owed part with no owing complete section is listed not owed."""
-    configured(tmp_path, PARTS)
-    _change(tmp_path, "# Tasks\n\n## 1. Hooks\n\n- [x] 1.1 Run them.\n")
-
-    assert main(["config", "parts", CHANGE, "--json"], root=tmp_path) == 0
-
-    runs = json.loads(capsys.readouterr().out)["runs"]
-    assert [(run["name"], run["not_owed"]) for run in runs] == [
-        ("pipeline", False), ("ci", True), ("local", False), ("helm", False)]
-
-
-def test_two_lines_owing_one_workflow_are_one_run(tmp_path: Path) -> None:
-    tasks = tmp_path / TASKS_FILE
-    tasks.write_text("## 1. A\n\n- [x] 1.1 x.\n  Owed by validation: `ci.yml`, job a\n\n"
-                     "## 2. B\n\n- [x] 2.1 y.\n  Owed by validation: `ci.yml`, job b\n", "utf-8")
-
-    owed = [(line.section, line.kind or "", line.argument or "")
-            for line in owed_lines(tasks, ("ci",))]
-    runs = config.plan(_kinds_checked(tmp_path, PARTS), owed)
-
-    assert [(run.name, run.sections) for run in runs if run.kind.owed] == [
-        ("ci ci.yml", ("1", "2"))]
-
-
-def test_a_plan_without_kinds_is_refused(tmp_path: Path,
-                                         capsys: pytest.CaptureFixture[str]) -> None:
-    _change(tmp_path, TASKS)
-
-    assert main(["config", "parts", CHANGE], root=tmp_path) == 1
-
-    assert "validation needs validation.evidence" in capsys.readouterr().err
 
 
 def test_the_repositorys_own_configuration_passes_its_check(
@@ -910,24 +777,3 @@ def test_every_table_of_the_repositorys_file_says_who_uses_it() -> None:
             assert below, line
         else:
             assert any(user in comment for comment in above + below for user in users), line
-
-
-def test_validation_runs_this_repositorys_parts(tmp_path: Path,
-                                               capsys: pytest.CaptureFixture[str]) -> None:
-    """MCW-r4tx: with a complete section owing `tests.yml`, the plan starts the
-    pipeline and the owed CI run, then runs the local part, then the Helm part after
-    it, from this repository's own file."""
-    configured(tmp_path, (REPOSITORY / config.CONFIGURATION).read_text("utf-8"))
-    _change(tmp_path, "## 1. A section\n\n- [x] 1.1 Done.\n  - Owed by validation: "
-                      "`tests.yml`, job `py`, its suite passing.\n")
-
-    assert main(["config", "parts", CHANGE, "--json"], root=tmp_path) == 0
-
-    shown = json.loads(capsys.readouterr().out)
-    assert shown["preflight"] == ["make check-uv-version"]
-    assert [(run["name"], run["shape"], run["after"]) for run in shown["runs"]] == [
-        ("pipeline", "start-collect", None),
-        ("ci tests.yml", "start-collect", None),
-        ("local", "run", None),
-        ("helm", "run", "local"),
-    ]

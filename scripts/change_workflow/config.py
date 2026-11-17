@@ -46,9 +46,8 @@ A review's draft the format check refuses is sent back to the reviewer that wrot
 it, for correction, as many times as `review.format-retries` says: once when the
 field is absent, never when it is 0.
 
-`config` lists every field and how it resolved, each kind's guide among them, `config
-load <step>` the documents a step's skill reads, and `config parts <change>`
-validation's plan for the change.
+`config` lists every field and how it resolved, each kind's guide among them, and
+`config load <step>` the documents a step's skill reads.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
 CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-t3ev, CW-g1gn, CW-r5qk, CW-k7gd, CW-h3ks,
@@ -801,99 +800,9 @@ def resolution_lines(configuration: Configuration) -> list[str]:
     return lines
 
 
-# Validation's plan for a change.
-
-@dataclass(frozen=True)
-class PlannedRun:
-    """One run of a kind in validation's plan: an owed kind's names the argument it
-    is owed for and the sections owing it, or is `not owed`."""
-
-    kind: Kind
-    owed: str | None = None
-    sections: tuple[str, ...] = ()
-    not_owed: bool = False
-
-    @property
-    def name(self) -> str:
-        return f"{self.kind.name} {self.owed}" if self.owed else self.kind.name
-
-    def entry(self) -> dict[str, Any]:
-        return {"name": self.name, "part": self.kind.name, "owed": self.owed,
-                "not_owed": self.not_owed, "sections": list(self.sections),
-                "shape": "run" if self.kind.run is not None else "start-collect",
-                "after": self.kind.after, "evidence": self.kind.evidence}
-
-
-def plan(configuration: Configuration,
-         owed: Sequence[tuple[str, str, str]]) -> list[PlannedRun]:
-    """Each run of a kind, in declaration order: an owed kind once per argument the
-    complete sections owe it (`owed`, each a section, a kind, and an argument), or
-    once as not owed. Two lines owing one argument are one run, owed by both
-    sections, since a run is named by its argument."""
-    require(configuration, EVIDENCE, needed_by="validation")
-    by_argument: dict[str, dict[str, list[str]]] = {}
-    for section, kind_name, argument in owed:
-        sections = by_argument.setdefault(kind_name, {}).setdefault(argument, [])
-        if section not in sections:
-            sections.append(section)
-    runs: list[PlannedRun] = []
-    for kind in configuration.kinds or ():
-        if not kind.owed:
-            runs.append(PlannedRun(kind))
-        elif not by_argument.get(kind.name):
-            runs.append(PlannedRun(kind, not_owed=True))
-        else:
-            runs.extend(PlannedRun(kind, argument, tuple(sections))
-                        for argument, sections in by_argument[kind.name].items())
-    return runs
-
-
-def _waiver(waived: Mapping[str, Mapping[str, Any]], kind: str) -> str:
-    entry = waived.get(kind)
-    return f"waived by the owner at seq {entry['seq']}: {entry['decision']}" if entry else ""
-
-
-def plan_lines(configuration: Configuration, runs: Sequence[PlannedRun],
-               waived: Mapping[str, Mapping[str, Any]] | None = None) -> list[str]:
-    """The plan as lines; a kind the owner waived names the decision waiving it,
-    whose condition validation judges before running or skipping it."""
-    waived = waived or {}
-    preflight = "; ".join(configuration.preflight) if configuration.preflight else "none"
-    lines = [f"{'preflight':<20} {preflight}"]
-    for run in runs:
-        if waiver := _waiver(waived, run.kind.name):
-            lines.append(f"{run.name:<20} {waiver}")
-            continue
-        if run.not_owed:
-            lines.append(f"{run.name:<20} not owed")
-            continue
-        shape = run.kind.shape + (f"   after {run.kind.after}" if run.kind.after else "")
-        owing = (f"owed by section{'s' if len(run.sections) > 1 else ''} "
-                 + ", ".join(run.sections)) if run.owed else ""
-        evidence = f"evidence {run.kind.evidence}"
-        lines.append("   ".join(text for text in (f"{run.name:<20} {shape:<17}", owing,
-                                                   evidence) if text).rstrip())
-    return lines
-
-
-def plan_json(configuration: Configuration, runs: Sequence[PlannedRun],
-              waived: Mapping[str, Mapping[str, Any]] | None = None) -> str:
-    waived = waived or {}
-    entries = []
-    for run in runs:
-        entry = run.entry()
-        if (decision := waived.get(run.kind.name)) is not None:
-            entry["waived"] = {"seq": decision["seq"], "decision": decision["decision"]}
-        entries.append(entry)
-    return json.dumps({"preflight": list(configuration.preflight)
-                       if configuration.preflight is not None else None,
-                       "runs": entries}, ensure_ascii=False)
-
-
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     """`config [--json]`, `config load <step>` or `config load common`, and `check
-    config`, as `cli` hands them on; `config parts`, which reads a change's task
-    list, is `cli`'s."""
+    config`, as `cli` hands them on."""
     parser = argparse.ArgumentParser(prog="change-workflow config")
     parser.add_argument("action", choices=("show", "load", "check"))
     parser.add_argument("step", nargs="?", default=None)
