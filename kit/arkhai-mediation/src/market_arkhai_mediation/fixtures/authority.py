@@ -89,6 +89,10 @@ class MediationContractFake:
             agreement = request.url.params["agreement"]
             after = int(request.url.params["after"])
             limit = int(request.url.params.get("limit", "100"))
+            # As the authority does, an Agreement is known from its first admitted
+            # filing, and a read of one nobody has filed on is refused, not empty.
+            if not any(entry["entry"]["agreement"] == agreement for entry in self.entries):
+                return httpx.Response(404, json={"code": "invalid_request"})
             entries = [
                 entry for entry in self.entries
                 if entry["entry"]["agreement"] == agreement and entry["entry"]["sequence"] > after

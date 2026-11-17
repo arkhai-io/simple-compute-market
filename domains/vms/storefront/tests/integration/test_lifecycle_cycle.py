@@ -1,7 +1,8 @@
 """VM servicing cycles run the kit's order: they preserve admission CAS, keep
-filings independent of physical failures, resume from the durable page position
-and finish report recovery."""
+filings independent of physical failures, observe an unfiled Agreement as no
+case, resume from the durable page position and finish report recovery."""
 
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -10,16 +11,17 @@ from compute_provisioning_contracts import LeaseEndedEvent, sign_lease_end
 from core_storefront.service_peers import ServicePeerTrust
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
-from market_deal_lifecycle.terms import decode_terms
+from market_deal_lifecycle.terms import DisputeAuthority, decode_terms
+from market_deal_lifecycle_client import LifecycleClient, SellerLifecycleClient
 from market_deal_lifecycle_contracts.models import LifecycleCommand
-from market_deal_servicing import EndSession, SellerSession
+from market_deal_servicing import EndSession, PhysicalResult, SellerSession
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
 from market_storefront import container
 from market_storefront.deal_lifecycle import VmDealLifecycle
 from pydantic import SecretStr
 
-from tests.integration.test_payment_settlement import LISTING, NEGOTIATION, SELLER, make
+from tests.integration.test_payment_settlement import BUYER, LISTING, NEGOTIATION, SELLER, make
 
 # Public deterministic development identity; never use on a public network.
 SITE = Ed25519Signer(b"\x51" * 32)
@@ -88,6 +90,60 @@ async def test_a_physical_failure_does_not_skip_the_deals_filing(make):
     with transaction(h.lifecycle.path) as conn:
         [filing] = [intent for intent in EndSession(conn).intents(NEGOTIATION) if intent.kind == "filing"]
     assert (filing.state, filing.result["status"]) == ("done", "accepted")
+
+
+class ReleasingSite:
+    """The end service's physical port when the site releases the resource at once."""
+
+    async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
+        return PhysicalResult(progress="released", done=True)
+
+
+@pytest.mark.asyncio
+async def test_a_released_deal_whose_authority_holds_no_record_is_listed_ended(make):
+    """A delivered once-only deal ended by its buyer and released, on which nobody
+    has filed: the authority answers its record read 404 invalid_request, which
+    the servicing cycle saves as a read showing no case, so the seller's typed
+    list shows the deal ended and its read an accepted dispute outcome."""
+    peer = MediationContractFake()
+    authority = DisputeAuthority.model_validate(peer.authority)
+    h = await make(
+        physical=lambda *_: ReleasingSite(),
+        # Public deterministic contract-fake credential; never use on a public network.
+        disputes={"DisputeCredential": [{
+            key: peer.authority[key] for key in ("interface", "origin", "account", "record_key")
+        } | {"api_key": "fixture-payee"}]},
+        mediation_transport=peer.transport(),
+    )
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    async with LifecycleClient("http://test", BUYER, TrustedIdentitySet(identities=(SELLER.identity,)),
+                               transport=h.transport) as buyer:
+        ack = await buyer.end_delivery(NEGOTIATION, operation_key="end")
+    assert ack.delivery.progress == "released"
+    seller = SellerLifecycleClient(h.administrator)
+    [before] = (await seller.list()).deals
+    assert (before.state, before.ending) == ("ending", ["case_unobserved"])
+
+    # What the deal-servicing loop steps.
+    await h.lifecycle.cycle()
+
+    # The cycle read the Agreement's record at its pinned authority, which holds
+    # none: nobody filed.
+    agreement, _ = h.lifecycle.accepted(NEGOTIATION)
+    assert decode_terms(agreement["settlement"]["lifecycle"]).adjudication.dispute == authority
+    digest = hashlib.sha256(canonical_json(agreement)).hexdigest()
+    assert ("/record", digest) in [
+        (request.url.path, request.url.params.get("agreement")) for request in peer.requests
+    ]
+    assert peer.entries == []
+    [summary] = (await seller.list()).deals
+    assert (summary.negotiation_id, summary.state, summary.ending) == (NEGOTIATION, "ended", [])
+    assert summary.open_cases == []
+    read = await seller.read(NEGOTIATION)
+    assert read.authority.outcome.status == "accepted"
+    assert read.authority.cases == [] and read.authority.disputes == []
 
 
 @pytest.mark.asyncio

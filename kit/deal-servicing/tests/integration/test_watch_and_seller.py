@@ -1,6 +1,11 @@
 from unittest.mock import AsyncMock, Mock
 
+from market_arkhai_mediation.adapter import MediationAdapter
+from market_arkhai_mediation.client import MediationClient, MediationCredential
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_arkhai_mediation.models import Filing
 from market_deal_lifecycle.adapters import DisputeAdapterTable, InterfaceRequest, PaymentAdapterTable, PaymentSelector
+from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CaseRecord, DisputeEvent, LifecycleCommand, ListDealsRequest,
     OpenExtension, PaymentEvent, PaymentPartObservation, Unknown,
@@ -11,6 +16,7 @@ from market_deal_servicing import (
 )
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.watch import WatchSession
+from pydantic import SecretStr
 
 
 async def test_ruling_applies_once_before_and_after_application_with_authority_actor(rig):
@@ -266,6 +272,77 @@ async def test_a_released_once_only_deal_is_ended_only_once_its_dispute_authorit
     await rig["watch"]().poll()
 
     assert await listed(rig, "deal") == ("ended", [])
+
+
+async def test_a_released_stopped_deal_nobody_filed_on_is_ended_until_a_party_files(rig):
+    # The mediation contract's peer holds no record of an Agreement nobody has
+    # filed on, and answers its first record page 404 invalid_request.
+    peer = MediationContractFake()
+    authority = DisputeAuthority.model_validate(peer.authority)
+    fixture = peer.data["filing"]["request"]
+    unfiled = SellerDeal(
+        negotiation_id="unfiled", commitment_ref=fixture["transaction"], domain="fixture",
+        buyer=rig["buyer"].identity, payment=PaymentSelector("fixture.payment.v1"), dispute=authority,
+        once_only=False,
+    )
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="unfiled", commitment_ref=fixture["transaction"], seller=rig["seller"].identity,
+            start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
+        ))
+        SellerSession(conn).register(unfiled)
+    stop = PaymentEvent(
+        negotiation_id="unfiled", commitment_ref=fixture["transaction"], part="0", kind="stop",
+        actor="payer-account", at=145, cause="payer", sequence=1,
+        authority_record_ref=fixture["transaction"] + ":events:1:part:0", settles_through="started_period",
+    )
+    payment = AsyncMock()
+    payment.read.return_value = AuthorityView(outcome=Accepted(), state="ended", parts=[PaymentPartObservation(
+        part="0", started_at=100, final_stop=stop, evidence_ref=fixture["transaction"] + ":snapshot:2:145",
+    )])
+    record_buyer_end(rig, "unfiled", progress="released")
+    # Public deterministic contract-fake credentials; never use on a public network.
+    async with MediationClient(
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=peer.transport(),
+    ) as payee, MediationClient(
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payer")),
+        transport=peer.transport(),
+    ) as payer:
+        adapter = MediationAdapter(
+            unfiled.dispute_binding, fixture["agreement"], payee, clock=lambda: rig["clock"][0],
+        )
+        service = SellerServicing(
+            rig["path"], payments=PaymentAdapterTable([(unfiled.payment, lambda _: payment)]),
+            disputes=DisputeAdapterTable([(authority.interface, lambda _: adapter)]),
+            credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        )
+
+        async def listed_unfiled():
+            [summary] = [deal for deal in (await service.list()).deals if deal.negotiation_id == "unfiled"]
+            return summary.state, summary.ending
+
+        # Before any watch, neither authority has been read.
+        assert await listed_unfiled() == ("ending", ["payment_running", "case_unobserved"])
+
+        watch = rig["watch"](deal=unfiled, payment=payment, dispute=adapter)
+        await watch.poll()
+        with transaction(rig["path"]) as conn:
+            saved = WatchSession(conn).view("unfiled", watch.dispute_record)
+        assert saved is not None and saved.outcome.status == "accepted"
+        assert saved.cases == [] and saved.disputes == []
+        assert await listed_unfiled() == ("ended", [])
+        read = await service.read("unfiled")
+        assert read.authority.outcome.status == "accepted" and read.authority.cases == []
+
+        await payer.file(Filing.model_validate({
+            "transaction": fixture["transaction"], "agreement": fixture["agreement"],
+            "request": {"kind": "effects", "effects": [{"kind": "reverse", "part": 0, "amount": "1"}]},
+            "claim": "Operator review requested.", "items": [],
+        }), idempotency_key="payer-filing")
+        await rig["watch"](deal=unfiled, payment=payment, dispute=adapter).poll()
+
+        assert await listed_unfiled() == ("ending", ["case_open"])
 
 
 async def test_a_released_deal_naming_no_dispute_authority_needs_no_dispute_read(rig):

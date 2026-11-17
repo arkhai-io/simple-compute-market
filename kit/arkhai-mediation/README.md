@@ -73,11 +73,17 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   Concurrent callers without a signed original, multiple originals and changed
   requests return repair required rather than allocate another case or amend by
   append. Safe linked revision/netting is not mapped by this client.
-  The authority may have no record for an Agreement until its first filing.
-  An initial `404 invalid_request` allows the original delivery-end writer to
-  proceed to filing; it is not a verified empty history for ordinary reads.
-  A usable filing acknowledgement still requires the signed filed entry, and
-  later-page errors or inaccessible records remain failures.
+  The authority has no record for an Agreement until its first filing, and
+  answers a read of the first record page `404 invalid_request`. `read`, which
+  the delivery-end filing also reads through, takes that answer as an accepted,
+  empty record: no dispute, no case. The authority gives a reader who is no party
+  the same answer, and no published route says which account a token
+  authenticates, so this rests on the credential authenticating the Agreement's
+  party, which the contract gives no way to check: under a credential for another
+  account every unfiled deal, and any case filed before the first accepted read,
+  reads as none. A usable filing acknowledgement still requires the signed filed
+  entry, and a `404` after a page was read, any other refusal, and every
+  verification failure remain failures.
   Pass `client=None` when only local `DeliveryEndClaims` signing/verification is
   available: receipt-only surrender needs no authority credential or network.
 - `read` verifies the pinned key, Agreement, transaction, sequence continuity and

@@ -2,6 +2,7 @@
 through the mounted application."""
 
 import asyncio
+import hashlib
 import json
 import logging
 from types import SimpleNamespace
@@ -23,7 +24,7 @@ from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_lifecycle.terms import decode_terms
-from market_deal_lifecycle_client import LifecycleClient, LifecycleClientError
+from market_deal_lifecycle_client import LifecycleClient, LifecycleClientError, SellerLifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage, LifecycleCommand
 from market_deal_servicing import EndSession, PhysicalResult, SellerSession
 from market_deal_servicing.evidence import transaction
@@ -362,6 +363,47 @@ async def test_a_failing_physical_end_still_dispatches_the_deals_filing_in_the_s
     with transaction(h.runtime.db.db_path) as conn:
         [filing] = [intent for intent in EndSession(conn).intents(h.negotiation_id) if intent.kind == "filing"]
     assert filing.result is not None
+
+
+@pytest.mark.asyncio
+async def test_a_released_deal_whose_authority_holds_no_record_is_listed_ended(harness):
+    """A settled once-only deal ended by its buyer and released, on which nobody
+    has filed: the authority answers its record read 404 invalid_request, which
+    the servicing cycle saves as a read showing no case, so the seller's typed
+    list shows the deal ended and its read an accepted dispute outcome."""
+    h = harness
+    h.serve()
+    await h.settle()
+    mediation = _mediation(h)
+    h.runtime.lifecycle.end.physical = UnreachableSite(failures=0)
+    async with peer(h) as buyer:
+        await buyer.end_delivery(h.negotiation_id, operation_key="end")
+    async with StorefrontClient(
+        "http://test", signer=ADMIN, caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
+        transport=httpx.ASGITransport(app=h.app),
+    ) as admin:
+        seller = SellerLifecycleClient(admin)
+        [before] = (await seller.list()).deals
+        assert (before.state, "case_unobserved" in before.ending) == ("ending", True)
+
+        await step(h, "deal-servicing")
+
+        [summary] = (await seller.list()).deals
+        read = await seller.read(h.negotiation_id)
+    # The cycle read the Agreement's record at its pinned authority, which holds
+    # none: nobody filed.
+    digest = hashlib.sha256(canonical_json(
+        json.loads(h.runtime.lifecycle.agreement_bytes(h.negotiation_id)),
+    )).hexdigest()
+    assert ("/record", digest) in [
+        (request.url.path, request.url.params.get("agreement")) for request in mediation.requests
+    ]
+    assert mediation.entries == []
+    assert (summary.negotiation_id, summary.state, summary.ending) == (h.negotiation_id, "ended", [])
+    assert summary.open_cases == []
+    assert read.authority.outcome.status == "accepted"
+    assert read.authority.cases == [] and read.authority.disputes == []
 
 
 @pytest.mark.asyncio

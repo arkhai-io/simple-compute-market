@@ -1736,7 +1736,7 @@ requirement "The seller half lists deals", its scenario "A deal nobody filed on 
 observed with no case" (`deal-lifecycle`). Touches `kit/arkhai-mediation` and the tests
 of `kit/deal-servicing`, both storefronts and the VM buyer.
 
-- [ ] 9A.1 In `kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`, `_read`
+- [x] 9A.1 In `kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`, `_read`
       answers a first-page `404 invalid_request` (no entries read yet) with an accepted,
       empty `AuthorityView` for every caller, so `read()` returns it; the
       `unregistered_for_filing` flag and its comment go, the delivery-end filing path
@@ -1752,7 +1752,29 @@ of `kit/deal-servicing`, both storefronts and the VM buyer.
       filed case; a `404` on a later page and a `5xx` stay failures;
       `test_semantic_filing.py`'s first read is now accepted, its one-case adoption
       unchanged; the delivery-end filing still files once and adopts.
-- [ ] 9A.2 Prove the seller's and the buyer's sides over the kit's fake. In
+      Done, differing from the plan in one name: `_read` is folded into `read()`, the
+      one read path, which the delivery-end filing now calls, so the flag goes with the
+      private method. A `404 invalid_request` before any page was read answers an
+      accepted, empty `AuthorityView`; the comment states D16's unchecked premise and
+      its limit. The fake's `/record` answers `404 {"code":
+      "invalid_request"}` for an Agreement no entry names. Kit 0.3.1; the bounds of the
+      two storefronts, the two compute buyers (each already bumped by this change) and
+      `kit/deal-servicing`'s dev group raised to `>=0.3.1`; `make lock` moved every lock
+      naming the kit. The kit README's paragraph on the initial `404` now describes the
+      read (12.9's D16 entry notes it). Library integration
+      (`tests/integration/test_unfiled_read.py`, new, through the kit's client): against
+      the contract peer's own answers, the first read of an unfiled Agreement sees the
+      peer's `404` and is accepted with no dispute and no case, and after a filing the
+      next read shows the filed case; with the peer's record answer replaced, a first
+      page holding the filed record and more after it, then a `404`, is rejected, and a
+      first-page `503`, `404 authentication_required` and `403 invalid_request` stay
+      failures (pending, rejected, rejected). The client refuses a page with more after
+      it and no entries, so a page read before a `404` always holds an entry. `test_semantic_filing.py`'s first read, now against
+      the peer itself rather than a transport answering the `404`, is accepted and
+      empty, and both delivery-end callers still adopt one case with one POST. `make
+      -C kit/arkhai-mediation test`: 121 passed, the contract, generated-model and
+      mypy checks passing.
+- [x] 9A.2 Prove the seller's and the buyer's sides over the kit's fake. In
       `kit/deal-servicing/tests/integration/test_watch_and_seller.py`, a deal naming a
       dispute authority with no record, released, its rate part stopped: the watch saves
       a dispute view with no case, the list shows it `ended` with no `ending`, and a
@@ -1760,20 +1782,108 @@ of `kit/deal-servicing`, both storefronts and the VM buyer.
       (`domains/vms/buyer/tests/test_lifecycle_adoption.py`) of such a deal carries an
       accepted outcome. Verify (library integration): those cases pass with each
       package's suite.
-- [ ] 9A.3 One application-integration case per storefront: the composed storefront,
+      Done. Library integration, `kit/deal-servicing`
+      (`test_watch_and_seller.py::test_a_released_stopped_deal_nobody_filed_on_is_ended_until_a_party_files`,
+      the real `MediationAdapter` over the contract peer with the payee's credential,
+      the payment adapter a mock showing the rate part's payer stop): before any watch
+      the released deal lists `ending ["payment_running", "case_unobserved"]`; one
+      `DealWatch.poll` saves an accepted dispute view with no case and no dispute, and
+      the list shows `ended` with no `ending` and the seller's `read` an accepted
+      outcome with no case; the payer then files at the peer, the next poll reads the
+      case, and the list shows `ending ["case_open"]`. `make -C kit/deal-servicing
+      test`: 135 passed. VM buyer
+      (`domains/vms/buyer/tests/test_lifecycle_adoption.py::test_the_buyers_read_of_a_deal_nobody_filed_on_carries_an_accepted_outcome`),
+      narrower than library integration as `test-levels.md` defines it, since it has
+      no storage: the kit's `BuyerLifecycle` composed as `buyer_lifecycle()` composes
+      it — its dispute table holding the `MediationAdapter` over the VM buyer's
+      `_MediationPort` and the contract peer, its storefront and payment ports stubs —
+      reads the deal with one `/record` request and carries an accepted outcome, no
+      case and the payment's parts. It shows the kit's buyer read over the real
+      adapter; `buyer_lifecycle()` itself is not exercised, since `_MediationPort`
+      builds its client with no transport seam (handoff below). `make -C
+      domains/vms/buyer test`: 337 passed.
+- [x] 9A.3 One application-integration case per storefront: the composed storefront,
       read through its typed lifecycle client, lists a released, stopped deal whose
       authority holds no record of its Agreement `ended`
       (`domains/vms/storefront/tests/integration/test_lifecycle_cycle.py`,
       `domains/bare_metal/storefront/tests/integration/test_lifecycle_dispatch.py`).
       Verify (application integration): both cases pass, with each storefront's
       integration suite.
-- [ ] 9A.4 Verification point: `kit/arkhai-mediation`'s, `kit/deal-servicing`'s, the VM
+      Done, on each storefront's payments harness, not the recurring world, whose
+      dispute policy holds no credential: a once-only payments deal, the Agreement
+      pinning the contract peer's authority, its end service's physical end releasing
+      at once. VM (`test_lifecycle_cycle.py::test_a_released_deal_whose_authority_holds_no_record_is_listed_ended`,
+      over `test_payment_settlement`'s harness, the storefront configured with the
+      payee's credential for the authority and the peer as its mediation transport):
+      the deal is settled and delivered, the buyer ends it through the typed buyer
+      client (released), and the typed seller client's list (`SellerLifecycleClient`
+      over the administrator's storefront client) shows `ending ["case_unobserved"]`;
+      the lifecycle's `cycle()`, called directly — what `deal-servicing` steps; this
+      harness mounts no loop route — reads the Agreement's record at the peer, which
+      holds none, and the list shows it `ended`, no `ending`, no open case, and the
+      seller's typed `read` an accepted outcome with no case. Bare metal
+      (`test_lifecycle_dispatch.py::test_a_released_deal_whose_authority_holds_no_record_is_listed_ended`,
+      over its payments harness, `_mediation` injecting the peer's client and the
+      credential's availability rather than the storefront's configuration resolving
+      them): the deal is settled, the buyer ends it through the typed buyer client,
+      the list shows `ending` with `case_unobserved`, a `deal-servicing` step through
+      the typed admin client reads the record at the peer, and the list shows `ended`,
+      no `ending`, no open case, and the read an accepted outcome with no case. Both
+      pass with their modules (VM 6, bare metal 11) and with each storefront's whole
+      suite in `scripts/change-workflow run pre-commit` (VM unit 1199 passed, 1
+      skipped, integration 633; bare metal 676).
+- [x] 9A.4 Verification point: `kit/arkhai-mediation`'s, `kit/deal-servicing`'s, the VM
       buyer's and both storefronts' suites pass, and `scripts/change-workflow run
       pre-commit serve-running-rate-deals` passes. End-to-end: the recurring purchase's
       final `ended` check (`e2e_vm_recurring_purchase`,
       `e2e_bare_metal_recurring_purchase`, section 10) and every lane deal naming the
       mediation double read through it; the VM dispute scenarios (`e2e_vm_dispute_*`)
       file first, so the change reaches them only through reads after their filings.
+      Done: `make -C kit/arkhai-mediation test` (121 passed), `make -C
+      kit/deal-servicing test` (135), `make -C domains/vms/buyer test` (337), and
+      `scripts/change-workflow run pre-commit serve-running-rate-deals` with every
+      functional hook — every package's suite, among them the VM storefront (unit 1199
+      passed, 1 skipped; integration 633), bare metal (676), the bare-metal buyer,
+      the API-credits packages whose locks moved, and the e2e unit suite (991 passed,
+      1 skipped) — passed, and passed again after the fresh-context fixes. End-to-end
+      confirmed: no lane scenario asserts the read yet; until section 10 lands its
+      final `ended` check, the lane deals naming the mediation double read their
+      unfiled Agreements through it with nothing asserting the result, and the
+      `e2e_vm_dispute_*` scenarios meet it only in reads after their filings, which
+      the change leaves as they were. Owed by validation: none. `run test-before` was
+      not run: it runs a test file as `HEAD` holds it, and these files are uncommitted
+      until this commit; at the base the adapter read the `404` as a failure, so the
+      first `test_unfiled_read.py` case and the storefront and kit cases' `ended`
+      assertions fail there, by the code, not a run.
+      Fresh-context check: fixed — the VM storefront case writing the buyer's end into
+      the journal (it now ends through the typed buyer client); the seller's single
+      read, half of the delta scenario's THEN, unasserted (now asserted in the kit and
+      both storefront cases); the adapter's predicate (`after == 0 and not events`)
+      saying less than its comment (now: no page read), though the client already
+      refuses an empty page with more after it; a duplicate failure row in the kit's
+      parametrization; and these notes' overstatements — the VM buyer case's level, the
+      bare-metal credential, the kit file's framing, and the storefront suites not
+      named at 9A.3. Declined: driving the VM case's cycle through a loop route, which
+      `test_payment_settlement`'s harness does not mount (the bare-metal case steps
+      it); and testing the VM buyer through `buyer_lifecycle()`, which offers no
+      mediation transport seam — recorded as an unowned row. Not this section's: the
+      VM buyer's flat `tests/` layout, which predates the change.
+
+Section 9A handoff:
+
+- Every mediation read now treats a first-page `404 invalid_request` as no case, so
+  section 10.1's `Recurring10_SellerListsTheDealEnded` can reach `ended` once one
+  `deal-servicing` step has read the mediation double after the release. The lane
+  double answers that `404` for an unfiled Agreement already
+  (`tools/mediation-lane-double`, `service.py`'s `record`).
+- `MediationContractFake`'s `/record` refuses an Agreement no entry names. A test that
+  reads a deal's dispute view before any filing now sees an accepted empty view, not
+  the empty page it saw before; every suite in the repository passed with it.
+- The VM buyer's production composition (`buyer_lifecycle()`) has no mediation
+  transport seam; a buyer-side test of the dispute read composes `BuyerLifecycle` by
+  hand (the unowned row).
+- `openspec/specs/settlement-servicing/architecture.md`'s "Initial missing mediation
+  history permits the first filing only" is false now and stays for 12.9's D16 entry.
 
 ## 9B. The scenario programs the payments double's further reservation
 
@@ -2107,7 +2217,8 @@ campaign index currency.
         unchecked premise and its limit); `openspec/specs/settlement-servicing/architecture.md`,
         "Charge-first payment settlement" (its "Initial missing mediation history permits
         the first filing only" sentence); `kit/arkhai-mediation/README.md`, "Composition"
-        (its initial-`404` paragraph, "not a verified empty history for ordinary reads").
+        (its initial-`404` paragraph, "not a verified empty history for ordinary reads"),
+        already rewritten with the code in 9A.1.
       - D17: the `test-compatibility` spec, by the archive;
         `openspec/specs/test-compatibility/architecture.md`, "The in-lane payments double"
         and "Lane time and the doubles' controls" (the reservation control);
