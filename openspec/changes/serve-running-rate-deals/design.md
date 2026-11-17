@@ -494,9 +494,11 @@ complete. Once a party files, the next read returns the record and the deal is `
 again with `case_open` (D7). The kit's in-process fake answers a read of an Agreement it
 holds no record of with that `404`, as the authority and the lane double do, so kit and
 storefront tests meet it. `kit/arkhai-mediation` is at an unreleased 0.3.0
-(`marketplace-v0.3.0` carries 0.2.0), so this costs no further version; no wire form or
-stored record changes, and a deployed storefront's saved rejected observation is
-replaced by its next read.
+(`marketplace-v0.3.0` carries 0.2.0), so no deployed form is owed a compatibility path;
+the development branch already carries 0.3.0, so the changed contents take one patch
+step, 0.3.1 (`docs/guidance/repository/package-versions.md`, "A version changes when its
+contents change"). No wire form or stored record changes, and a deployed storefront's
+saved rejected observation is replaced by its next read.
 
 This read is not verified. The authority answers the same `404` to a reader who is no
 party to the Agreement, and none of the published routes tells a client which account
@@ -551,12 +553,15 @@ the wrong deal fails where it runs instead of passing with nothing reserved (60 
 
 ```http
 409 {"code": "no_running_rate_part", "message": "the transaction has no started, unstopped rate part"}
-``` The engine gains the public method
-behind it; `tools/lane-double-controls` gains the route and its typed client method; the
+```
+
+The engine gains the public method behind it; `tools/lane-double-controls` gains the route and its typed client method; the
 engine's reads, `advance` and its reservation at `start` are unchanged, and funding
 running out still shows at the next read once lane time passes the boundary.
-`kit/arkhai-payments` is at an unreleased 0.8.1 (`marketplace-v0.3.0` carries 0.6.1), so
-this costs no further version. A reservation is a stage of its own, declared only where
+`kit/arkhai-payments` is at an unreleased 0.8.1 (`marketplace-v0.3.0` carries 0.6.1),
+already one step past the development branch's 0.8.0 on this branch, so this costs no
+further version; `tools/lane-double-controls` and `tools/payments-lane-double` each take
+one patch step. A reservation is a stage of its own, declared only where
 the double runs (`test-doubles.md`, "Shared stages never depend on a double"); against
 the payments service its scheduler reserves instead.
 

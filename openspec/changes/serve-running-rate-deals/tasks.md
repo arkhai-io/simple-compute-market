@@ -10,7 +10,8 @@ change"), refreshes the locks it affects with the repository's lock tooling
 (`docs/guidance/engineering/dependencies-python.md`, "Imports go at module level"), and
 passes `scripts/change-workflow run pre-commit serve-running-rate-deals` before its
 commit. Sections 10 and 11 need `drive-the-storefront-clock-in-lanes` archived and merged
-into this branch first (D9).
+into this branch first (D9); it is. Sections 9A and 9B, added when the change returned to
+design from section 10's first lane run, deliver the tooling sections 10 and 11 run on.
 
 ## 1. Lifecycle contracts carry every field and the `ending` codes
 
@@ -1726,29 +1727,166 @@ Round 1 triage fixes' evidence (32 F1, 32 F2, 34 O1's U2, U3, U4):
   unreadable view (now reported and logged), and `examples/payment_smoke.py`'s
   post-construction replacement.
 
+## 9A. A deal nobody filed on is observed with no case
+
+Delivers the mediation adapter's read of an Agreement the authority holds no record of
+as an empty record, so such a deal can be listed *ended* and both halves' reads carry
+an accepted dispute outcome. Implements D16 (and D7's 44 F1 rule resolving through it);
+requirement "The seller half lists deals", its scenario "A deal nobody filed on is
+observed with no case" (`deal-lifecycle`). Touches `kit/arkhai-mediation` and the tests
+of `kit/deal-servicing`, both storefronts and the VM buyer.
+
+- [ ] 9A.1 In `kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`, `_read`
+      answers a first-page `404 invalid_request` (no entries read yet) with an accepted,
+      empty `AuthorityView` for every caller, so `read()` returns it; the
+      `unregistered_for_filing` flag and its comment go, the delivery-end filing path
+      reading through the same `_read` (D16). A `404` after a page was read, any other
+      status, and every verification failure stay failures, as today. In
+      `fixtures/authority.py`, `MediationContractFake`'s `/record` answers
+      `404 {"code": "invalid_request"}` for an Agreement no filing has made known, as the
+      authority and `tools/mediation-lane-double` do, instead of an empty page. Bump the
+      kit 0.3.0 → 0.3.1 and raise the bounds and locks of its dependents
+      (`package-versions.md`; `locks.md`). Verify (library integration,
+      `kit/arkhai-mediation/tests/integration/`): a read of an Agreement with no record
+      is accepted with no disputes and no cases; after a filing the next read shows the
+      filed case; a `404` on a later page and a `5xx` stay failures;
+      `test_semantic_filing.py`'s first read is now accepted, its one-case adoption
+      unchanged; the delivery-end filing still files once and adopts.
+- [ ] 9A.2 Prove the seller's and the buyer's sides over the kit's fake. In
+      `kit/deal-servicing/tests/integration/test_watch_and_seller.py`, a deal naming a
+      dispute authority with no record, released, its rate part stopped: the watch saves
+      a dispute view with no case, the list shows it `ended` with no `ending`, and a
+      filing then makes it `ending` with `case_open`. The buyer's read
+      (`domains/vms/buyer/tests/test_lifecycle_adoption.py`) of such a deal carries an
+      accepted outcome. Verify (library integration): those cases pass with each
+      package's suite.
+- [ ] 9A.3 One application-integration case per storefront: the composed storefront,
+      read through its typed lifecycle client, lists a released, stopped deal whose
+      authority holds no record of its Agreement `ended`
+      (`domains/vms/storefront/tests/integration/test_lifecycle_cycle.py`,
+      `domains/bare_metal/storefront/tests/integration/test_lifecycle_dispatch.py`).
+      Verify (application integration): both cases pass, with each storefront's
+      integration suite.
+- [ ] 9A.4 Verification point: `kit/arkhai-mediation`'s, `kit/deal-servicing`'s, the VM
+      buyer's and both storefronts' suites pass, and `scripts/change-workflow run
+      pre-commit serve-running-rate-deals` passes. End-to-end: the recurring purchase's
+      final `ended` check (`e2e_vm_recurring_purchase`,
+      `e2e_bare_metal_recurring_purchase`, section 10) and every lane deal naming the
+      mediation double read through it; the VM dispute scenarios (`e2e_vm_dispute_*`)
+      file first, so the change reaches them only through reads after their filings.
+
+## 9B. The scenario programs the payments double's further reservation
+
+Delivers the payments double's reservation control and its typed client, so a lane row
+reaches instants past a rate part's first reservation. Implements D17; requirement "Lane
+double controls are typed deterministic steps", its scenarios "A rate part's further
+periods are reserved", "A reservation is refused when no rate part runs" and "A rate
+part is not reserved unasked" (`test-compatibility`). Touches `kit/arkhai-payments`,
+`tools/lane-double-controls`, `tools/payments-lane-double`.
+
+- [ ] 9B.1 In `kit/arkhai-payments/src/market_arkhai_payments/fixtures/authority.py`, give
+      `PaymentsAuthority` a public reservation method: for a transaction, bring it to the
+      clock as a read does, then reserve each running rate part (started, not stopped)
+      through a named instant, as far as the part's end and the payer's balance allow, on
+      `_refill`'s arithmetic with the named instant as its lead; answer each such part's
+      index, its reserved-through instant and the periods added; refuse a transaction with
+      no running rate part, changing nothing. `advance`, the reads and the reservation at
+      `start` are unchanged (D17). The kit is already one step past dev (0.8.1); no
+      further bump. Verify (library integration, a case beside the engine's in
+      `kit/arkhai-payments/tests/`): a payer funded one period beyond the first
+      reservation is reserved one period further, the snapshot's `fundedThrough` moves to
+      it and a read at that instant shows the `terms` stop; reserving through the part's
+      end stops at the end; an unstarted, a once-only and a stopped part are refused with
+      nothing changed; without the method, time past the first reservation still stops
+      the part there.
+- [ ] 9B.2 In `tools/lane-double-controls`, add the reservation route,
+      `POST /test/transactions/{transaction}/reserve`, to the payments party in
+      `routes.py`, its request (`through`) and answer (`transaction`, `parts` with
+      `part`, `reserved_through`, `periods_added`) to `models.py`, the refusal code
+      `no_running_rate_part` beside the controls' typed codes, and the typed client's
+      `reserve(transaction, through)`; bump 0.1.0 → 0.1.1. Verify (unit,
+      `tests/unit/test_models.py`, `test_routes.py`): the models refuse a malformed body
+      and the route is the payments party's alone.
+- [ ] 9B.3 In `tools/payments-lane-double/src/payments_lane_double/app.py`, serve the
+      route over the engine's method, authenticated by the control token: `200` with the
+      answer, `409 no_running_rate_part` for a transaction with no running rate part,
+      `404` for an unknown transaction, both changing nothing. Bump 0.2.0 → 0.2.1, which
+      also covers section 10's second payer in `fixtures/accounts.toml`; refresh the
+      lock. Verify (application integration,
+      `tools/payments-lane-double/tests/integration/test_controls.py`, through the typed
+      client over HTTP, the payments kit's client reading): the three delta scenarios —
+      reserved one period further with the signed snapshot's funded boundary at the
+      answer and the `terms` stop there once injected time reaches it; refused for an
+      unstarted, a once-only and a stopped part with the snapshot unchanged; not
+      reserved unasked.
+- [ ] 9B.4 Write the double's `README.md` "Controls" (the reservation control: what it
+      reserves, its bounds, its refusal; nothing reserved unasked) and "What it claims",
+      and `tools/lane-double-controls/README.md`'s "The controls" (the route).
+- [ ] 9B.5 Verification point: `kit/arkhai-payments`', `tools/lane-double-controls`' and
+      `tools/payments-lane-double`'s suites pass, and `scripts/change-workflow run
+      pre-commit serve-running-rate-deals` passes. End-to-end: section 10's rate rows
+      and section 11's watchdog cases, each of whose reservation stages calls it.
+
 ## 10. Rate deals qualified in both lanes on lane time
 
-Delivers D9; requirements "A recurring purchase is delivered end to end in each compute
-lane" and "Rate deals are qualified in both compute lanes on lane time"
-(`test-compatibility`). Needs `drive-the-storefront-clock-in-lanes` landed. Touches
-`e2e-tests`.
+Replanned against the reviewed design (D16–D19, design review 60): the unchecked tasks
+below replace the earlier 10.1–10.3; the earlier plan's notes and the work-in-progress
+record further down are kept as history.
 
-- [ ] 10.1 Rewrite both recurring purchases on the lane-time helper: set lane time to the
-      Agreement's start, step `delivery-recovery`, assert activation, the rate `start` and
-      availability; the buyer's `end`, step `deal-servicing`, assert the started period
-      charged, the entitled stop recorded, the teardown and `ended` once released (D9).
-      Verify: `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase` pass.
-- [ ] 10.2 Add `e2e_vm_rate_servicing` and `e2e_bare_metal_rate_servicing`, one deal per
-      row, shipped presets, default buyer, lane declaration `[charged, returned]`: funds
-      running out (lane time past the funded boundary; exhaustion classified, teardown at
-      the boundary, the buyer's message); spot preemption (`deals preempt`, lane time to
-      the request plus the seller notice; the entitled stop, the unstarted period
-      returned); the maximum term (lane time to the Agreement's end; `returned`, the term
-      end classified, not exhaustion). Each labelled lane-double evidence. Verify: both
-      markers pass in their lanes; `e2e-tests/tests/unit/` passes.
-- [ ] 10.3 Verification point: both lanes' runs pass. End-to-end: the four markers above.
+Delivers the recurring purchase and the three rate rows on lane time in both Compose
+lanes, labelled lane-double evidence. Implements D9 and D19, consuming D16 (9A) and D17
+(9B); requirements "A recurring purchase is delivered end to end in each compute lane"
+and "Rate deals are qualified in both compute lanes on lane time" (`test-compatibility`).
+Needs `drive-the-storefront-clock-in-lanes` landed (it is archived and merged). Touches
+`e2e-tests`, and `tools/payments-lane-double`'s fixture (the second payer, already
+committed, its version bumped in 9B).
 
-Note from 44 F1's fix (`reviews/44-implementation.triage.md`): a lane deal names a
+- [ ] 10.1 Finish both recurring purchases on the lane-time helper, as written in the
+      work in progress: set lane time to the Agreement's start, step `delivery-recovery`,
+      assert activation, the rate `start` and availability; the buyer's `end` a minute
+      into the first period, step `deal-servicing`, assert the started period charged,
+      the entitled stop recorded, the teardown, and `Recurring10_SellerListsTheDealEnded`
+      showing `ended` once released, which 9A's read makes reachable (D9, D16). Verify
+      (system): `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase` pass.
+- [ ] 10.2 Add the reservation stage to
+      `e2e-tests/tests/e2e/roles/helpers/rate_servicing_stages.py`: a stage of its own,
+      declared only in the lane modules (`test-doubles.md`, "Shared stages never depend
+      on a double"), calling 9B's `reserve` through the harness's typed control client
+      and failing on any refusal; it records the answer's `reserved_through` for the
+      stages after it (D17). Remove `move_lane_time_through`; each row sets lane time
+      straight to its instant (D9). Verify (unit, `e2e-tests/tests/unit/`): the stage
+      order check (`ORDERS`) holds every row with its reservation before the lane-time
+      set it serves.
+- [ ] 10.3 Rewrite the rows in `scenarios/{vms,bare_metal}/rate_servicing/` on the stage:
+      funds running out funds `rate_payer` one period beyond its first reservation,
+      reserves through the Agreement's end, sets lane time to the reserved boundary,
+      steps `deal-servicing`, and asserts the `terms` stop there — after the first
+      reservation's end, before the Agreement's end — its consequences (cause, instant,
+      no filing, teardown) and the buyer's `delivery` read's `funding_stop`; the maximum
+      term reserves the shared buyer's part through the Agreement's end, sets it, and
+      asserts `returned`, the term-end consequences and no exhaustion; preemption
+      reserves through the stop's effective time where the seller's notice runs past the
+      first reservation, then as before. Shipped presets, default buyer, lane
+      declaration `[charged, returned]`, each labelled lane-double evidence (D9, D19).
+      Verify (unit, `e2e-tests/tests/unit/`): `make -C e2e-tests test-unit` passes.
+- [ ] 10.4 Diagnose why the registry answered `404` for the funds-running-out and
+      preemption rows' listings, which the storefront created open, while the maximum
+      term's and the recurring purchase's published; fix it in the harness, or, if the
+      cause is a defect in a storefront or the registry, fix it here when small and
+      understood, recording the evidence, and otherwise stop and report it
+      (`docs/guidance/workflow/changes.md`, "Defects found during a change"). Verify: the
+      rows' listings publish in 10.5's runs.
+- [ ] 10.5 Run both lanes. Verify (system): `make -C e2e-tests test-e2e-vm
+      "E2E_MODULE=e2e_vm_recurring_purchase or e2e_vm_rate_servicing"` and `make -C
+      e2e-tests test-e2e-bare-metal "E2E_BARE_METAL_MODULE=e2e_bare_metal_recurring_purchase
+      or e2e_bare_metal_rate_servicing"` pass, each leaving no payment hold, mock rule
+      or held loop, each stack taken down after; `e2e-tests/README.md` and the Makefile's
+      lane lists describe the modules as run.
+- [ ] 10.6 Verification point: the `e2e-tests` unit suite and both lanes' runs pass.
+      End-to-end: `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase`,
+      `e2e_vm_rate_servicing`, `e2e_bare_metal_rate_servicing`.
+
+Earlier plan's note, kept as history. Note from 44 F1's fix (`reviews/44-implementation.triage.md`): a lane deal names a
 dispute authority, so 10.1's `ended` also needs the lane storefront's servicing cycle to
 have saved one verified read of that authority; until then the seller list shows the
 deal `ending` with `case_unobserved`.
@@ -1822,24 +1960,41 @@ Section 10 work in progress (uncommitted, round 2's session; no task checked yet
 
 ## 11. The buyer's watchdog against a delivered deal
 
-Delivers D10; requirement "The buyer's watchdog is qualified against a delivered deal"
-(`test-compatibility`). Needs `drive-the-storefront-clock-in-lanes` landed. Touches
-`e2e-tests` and, if the mock fulfillment result cannot name an endpoint, the test-only
-provisioning mock's result rules.
+Replanned against the reviewed design (D10, D18, design review 60): the unchecked tasks
+below replace the earlier 11.1–11.3, whose Compose fixture stopping the storefront the
+harness cannot run.
 
-- [ ] 11.1 Harness fixtures: a TCP listener on the compose host that a stage opens and
-      closes, the deal's mock fulfillment result disclosing it, and a fixture stopping and
-      starting the storefront's Compose service, waiting for it to report healthy, from
-      the lane's Compose arguments passed in the harness's environment by
-      `e2e-tests/Makefile` (D10). Verify (unit, `e2e-tests/tests/unit/`): the fixtures'
-      argument handling.
-- [ ] 11.2 Add `e2e_vm_rate_watchdog` and `e2e_bare_metal_rate_watchdog`: `buy` with the
-      watchdog from `available`; the storefront stopped and the listener closed for the
-      threshold of probes yields one payer stop the double accepts; a killed command reads
-      `unmonitored` once lane time passes its staleness bound; the resumed run reads
-      `monitored`. Each labelled lane-double evidence. Verify: both markers pass in their
-      lanes.
-- [ ] 11.3 Verification point: both lanes' runs pass. End-to-end: the two markers above.
+Delivers the buyer watchdog's four delivered-deal cases in both Compose lanes, labelled
+lane-double evidence. Implements D10, D18 and D19, with D17's reservation stage (9B,
+10.2); requirement "The buyer's watchdog is qualified against a delivered deal"
+(`test-compatibility`). Needs `drive-the-storefront-clock-in-lanes` landed (it is
+archived and merged). Touches `e2e-tests` and, only if a mock-provisioning rule cannot
+name the deal's endpoint, the test-only provisioning mock's result rules.
+
+- [ ] 11.1 Harness fixtures: a TCP listener in the harness's own container, where the
+      buyer runs, that a stage opens and closes, reachable at the container's address on
+      the lane's network; and a mock-provisioning rule the scenario installs, in each
+      lane, so the deal's fulfillment result discloses that listener as its endpoint
+      (D10). The rule is removed by the module's cleanup. Verify (unit,
+      `e2e-tests/tests/unit/`): the listener's open and close, and the rule's body naming
+      the listener's address.
+- [ ] 11.2 Add `e2e_vm_rate_watchdog` and `e2e_bare_metal_rate_watchdog` under
+      `scenarios/{vms,bare_metal}/`: `buy` with the watchdog opted in from `available`;
+      the reservation stage through the last instant the module sets, where that lies
+      past the deal's first reservation (10.2); the storefront's loops paused with the
+      lane's existing loop controls, the listener closed, lane time set through the
+      threshold of probes, then one payer stop accepted at the payments double with
+      nothing from the storefront between, and `deal-servicing` stepped to show the
+      buyer's entitled stop recorded and the teardown (D18); a killed command reading
+      `unmonitored` once lane time passes its last probe's staleness bound, and the
+      resumed run reading `monitored`. Each labelled lane-double evidence; markers in
+      `e2e-tests/pyproject.toml`, the Makefile's lane lists and `e2e-tests/README.md`.
+      Verify (unit, `e2e-tests/tests/unit/`): the stage order check holds both modules;
+      (system) `make -C e2e-tests test-e2e-vm E2E_MODULE=e2e_vm_rate_watchdog` and `make
+      -C e2e-tests test-e2e-bare-metal E2E_BARE_METAL_MODULE=e2e_bare_metal_rate_watchdog`
+      pass, each leaving no payment hold, mock rule or held loop.
+- [ ] 11.3 Verification point: the `e2e-tests` unit suite and both lanes' runs pass.
+      End-to-end: `e2e_vm_rate_watchdog`, `e2e_bare_metal_rate_watchdog`.
 
 ## 12. Closeout
 
@@ -1852,7 +2007,7 @@ campaign index currency.
       implementation.
 - [ ] 12.2 Import placement: confirm every import this change added is at module level, or
       return the change to implementation.
-- [ ] 12.3 Documentation compliance: re-check D1–D15 against
+- [ ] 12.3 Documentation compliance: re-check D1–D19 against
       `docs/guidance/workflow/openspec-documentation.md` and `openspec/README.md`,
       "Documentation placement", and that every permanent document written describes the
       current state.
@@ -1946,16 +2101,41 @@ campaign index currency.
         `openspec/specs/test-compatibility/architecture.md`, "Lifecycle contract evidence"
         (restart recovery's evidence).
       - D15: no permanent destination.
+      - D16: the `deal-lifecycle` spec, by the archive;
+        `deal-lifecycle/architecture.md`, "One end instant, transactional admission"
+        (*ended*'s dispute half: the authority's first-page `404` read as no case, its
+        unchecked premise and its limit); `openspec/specs/settlement-servicing/architecture.md`,
+        "Charge-first payment settlement" (its "Initial missing mediation history permits
+        the first filing only" sentence); `kit/arkhai-mediation/README.md`, "Composition"
+        (its initial-`404` paragraph, "not a verified empty history for ordinary reads").
+      - D17: the `test-compatibility` spec, by the archive;
+        `openspec/specs/test-compatibility/architecture.md`, "The in-lane payments double"
+        and "Lane time and the doubles' controls" (the reservation control);
+        `docs/development/TESTING.md`, "Private Service Dependencies" (the doubles'
+        controls paragraph); `kit/arkhai-payments/README.md`, "Installed contract and
+        authority fixture" (the reservation method beside `advance`); the double's and
+        the controls' READMEs, written in 9B.4.
+      - D18, D19: `docs/development/TESTING.md`, "The canonical compute deal" (the
+        watchdog cases with the storefront paused; the rate rows and watchdog cases as
+        Compose-lane, lane-double evidence), beside the `test-compatibility` spec by the
+        archive.
       - The owner's principles: `docs/guidance/workflow/changes.md`, "Defects found during
         a change" (a change taking on another change's work names the move in its proposal
         and that change's row Notes); `docs/guidance/repository/package-versions.md`,
         "Compatibility is owed to what a release has shipped" (a released client is not
         owed compatibility with a later storefront; the staged deprecation pattern stays
-        available).
+        available); `docs/guidance/engineering/test-doubles.md`, "A double mirrors its
+        producer" (a producer's scheduled actions, such as reserving ahead, are answers a
+        scenario programs; a double gains no internal behaviour a scenario could
+        program); `docs/guidance/repository/deterministic-tests.md`, "Pause the loop, then
+        advance it explicitly" (a local end-to-end test holds a party's time-based signals
+        by pausing it, never by stopping it; external-topology tests handle time
+        differently).
       Run `make check-spec-index CHANGE=serve-running-rate-deals`; no touched capability
       has an `index.md`, and `openspec/specs/README.md` needs no row.
-- [ ] 12.10 Guidance placement: read the two guidance paragraphs promoted in 12.9 against
-      the layer test, then run `make check-guidance`.
+- [ ] 12.10 Guidance placement: read the four guidance paragraphs promoted in 12.9 against
+      the layer test — `test-doubles.md`'s in the engineering layer, the other three in
+      the repository's and the workflow's — then run `make check-guidance`.
 - [ ] 12.11 Documentation citations: run `make check-doc-citations
       CHANGE=serve-running-rate-deals` and resolve every match, then
       `scripts/change-workflow openspec validate serve-running-rate-deals --strict`.

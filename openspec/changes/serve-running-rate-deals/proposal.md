@@ -117,7 +117,7 @@ None.
 - Configuration: interval keys for `deal-servicing` and `delivery-recovery`, defaulting to today's intervals; released keys keep their meaning.
 - Operations: loop names change in both storefronts; lane stages and operator documentation follow.
 - Buyer behaviour: the default buyer's refusals are unchanged; a deal nobody filed on reads with an accepted dispute outcome.
-- Packages beyond the compute family: `kit/arkhai-mediation`'s read of an Agreement with no record and its fake (D16); `kit/arkhai-payments`' engine reservation method, `tools/payments-lane-double`'s reservation control and second payer, and `tools/lane-double-controls`' route and client (D17). Neither kit's version moves past its unreleased one.
+- Packages beyond the compute family: `kit/arkhai-mediation`'s read of an Agreement with no record and its fake (D16); `kit/arkhai-payments`' engine reservation method, `tools/payments-lane-double`'s reservation control and second payer, and `tools/lane-double-controls`' route and client (D17). `kit/arkhai-mediation` takes 0.3.1 and the two lane tools a patch step each; `kit/arkhai-payments` is already one step past the development branch. No released version is changed.
 
 ## Dependencies and Related Changes
 
