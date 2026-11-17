@@ -107,7 +107,20 @@ def approve_rate(h, *, entitled, payer_notice=300):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entitled,kind", [(False, None), (False, "failure"), (True, "failure"), (True, "preemption")])
 async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independently(make, entitled, kind):
-    h = await make()
+    teardown = asyncio.Event()
+
+    class Teardown:
+        """The harness's delivery as the physical end, marking when teardown has run."""
+
+        def __init__(self, delivery):
+            self.delivery = delivery
+
+        async def apply_end(self, *args, **kwargs):
+            result = await self.delivery.apply_end(*args, **kwargs)
+            teardown.set()
+            return result
+
+    h = await make(physical=lambda _, delivery: Teardown(delivery))
     if entitled:
         approve_rate(h, entitled=True)
     else:
@@ -123,12 +136,6 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
         mediation.lose_next_response = True
         agreement, _ = h.lifecycle.accepted(NEGOTIATION)
         authority = decode_terms(agreement["settlement"]["lifecycle"]).adjudication.dispute
-        teardown = asyncio.Event()
-
-        async def physical(*args, **kwargs):
-            result = await h.delivery.apply_end(*args, **kwargs)
-            teardown.set()
-            return result
 
         async def handle(request):
             if request.method == "POST":
@@ -137,7 +144,6 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
                 await asyncio.wait_for(teardown.wait(), timeout=5)
             return mediation.handle(request)
 
-        h.lifecycle.end.physical = type("Physical", (), {"apply_end": staticmethod(physical)})()
         # Public deterministic fixture credential, never a live account token.
         client = MediationClient(
             authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
@@ -164,6 +170,8 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
                 return await client.admin_interrupt_deal(NEGOTIATION, **body)
 
             body = {"reason": "development reclaim", "operation_key": "admin-demo", "interruption_kind": kind}
+            # Nothing before the interruption has run the physical end.
+            assert not teardown.is_set()
             preview = await interrupt(body | {"dry_run": True})
             assert preview["status"] == "dry_run"
             response = await interrupt(body)

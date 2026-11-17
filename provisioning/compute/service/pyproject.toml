@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.25.0"
+version = "0.25.1"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
@@ -18,7 +18,7 @@ dependencies = [
     # The engine the chain runs on, over the service's SQLAlchemy engine.
     "arkhai-kit-schema-migrations[sqlalchemy]>=0.1.0",
     "arkhai-compute-provisioning-ansible>=0.8.0",
-    "arkhai-core-storefront-client==0.29.0",
+    "arkhai-core-storefront-client==0.29.1",
     "arkhai-kit-identity==0.4.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",

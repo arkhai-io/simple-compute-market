@@ -179,7 +179,8 @@ async def listed(rig, negotiation_id):
     return summary.state, summary.ending
 
 
-async def test_a_released_rate_deal_is_ended_only_once_every_part_has_stopped(rig):
+def register_rate(rig) -> SellerDeal:
+    """A committed rate deal, ``rate``, beside the rig's once-only ``deal``."""
     rate = SellerDeal(
         negotiation_id="rate", commitment_ref="rate-commitment", domain="fixture",
         buyer=rig["buyer"].identity, payment=PaymentSelector("fixture.payment.v1"), dispute=rig["authority"],
@@ -191,6 +192,11 @@ async def test_a_released_rate_deal_is_ended_only_once_every_part_has_stopped(ri
             start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
         ))
         SellerSession(conn).register(rate)
+    return rate
+
+
+async def test_a_released_rate_deal_is_ended_only_once_every_part_has_stopped(rig):
+    rate = register_rate(rig)
     running = PaymentPartObservation(part="0", started_at=100, evidence_ref="rate-commitment:snapshot:1:140")
     rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[running])
     await rig["watch"](deal=rate).poll()
@@ -213,6 +219,61 @@ async def test_a_released_rate_deal_is_ended_only_once_every_part_has_stopped(ri
     await rig["watch"](deal=rate).poll()
 
     assert await listed(rig, "rate") == ("ended", [])
+
+
+async def test_a_released_rate_deal_never_observed_at_the_payment_authority_is_ending(rig):
+    rate = register_rate(rig)
+    # The buyer ended at the storefront and the resource is released before
+    # any watch has read the payment authority, so no part's stop is verified.
+    record_buyer_end(rig, "rate", progress="released")
+
+    assert await listed(rig, "rate") == ("ending", ["payment_running"])
+
+    # A view that lists no part verifies no stop either.
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[])
+    await rig["watch"](deal=rate).poll()
+
+    assert await listed(rig, "rate") == ("ending", ["payment_running"])
+
+
+async def test_a_released_once_only_deal_never_observed_is_ended(rig):
+    # A once-only deal has no rate part to stop.
+    record_buyer_end(rig, "deal", progress="released")
+
+    assert await listed(rig, "deal") == ("ended", [])
+
+
+async def test_a_released_rate_deal_still_billing_stays_unserviceable_until_its_part_stops(rig):
+    rate = register_rate(rig)
+    running = PaymentPartObservation(part="0", started_at=100, evidence_ref="rate-commitment:snapshot:1:140")
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[running])
+    await rig["watch"](deal=rate).poll()
+    record_buyer_end(rig, "rate", progress="released")
+    # The storefront restarts with no adapter composed for the deals' mechanism.
+    api = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([]),
+        disputes=DisputeAdapterTable([(rig["authority"].interface, lambda _: rig["dispute"])]),
+        credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        missing_adapters={"fixture.payment.v1": "[Settlement].fixture"},
+    )
+    reason = "repair required: fixture.payment.v1 has no lifecycle adapter; configure [Settlement].fixture"
+
+    # Released, but its part last showed no stop: still open, so still reported
+    # beside the once-only deal that has no end.
+    assert sorted(api.unserviceable()) == [("deal", reason), ("rate", reason)]
+
+    # A part's stop observed while its adapter was composed closes the deal.
+    stop = PaymentEvent(
+        negotiation_id="rate", commitment_ref="rate-commitment", part="0", kind="stop", actor="payer-account",
+        at=145, cause="payer", sequence=1, authority_record_ref="rate-commitment:events:1:part:0",
+        settles_through="started_period",
+    )
+    rig["payment"].read.return_value = AuthorityView(
+        outcome=Accepted(), state="ended", parts=[running.model_copy(update={"final_stop": stop})],
+    )
+    await rig["watch"](deal=rate).poll()
+
+    assert api.unserviceable() == [("deal", reason)]
 
 
 async def test_each_outstanding_condition_is_named_and_a_later_case_returns_a_deal_to_ending(rig):

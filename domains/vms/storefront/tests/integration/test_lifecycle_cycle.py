@@ -60,7 +60,8 @@ async def test_a_physical_failure_does_not_skip_the_deals_filing(make):
     """A delivered deal ended by an administrator's failure end, its filing
     journaled, whose site cannot be reached: the cycle still dispatches the
     filing to the mediation authority and attempts the physical end again."""
-    h = await make()
+    site = UnreachableSite()
+    h = await make(physical=lambda *_: site)
     h.serve()
     await h.settle()
     await h.delivered()
@@ -77,8 +78,7 @@ async def test_a_physical_failure_does_not_skip_the_deals_filing(make):
     assert await h.lifecycle.seller.record_operator_end(
         command, actor=SELLER.identity, reason="fixture failure",
     ) is None
-    site = UnreachableSite()
-    h.lifecycle.end.physical = site
+    assert site.calls == 0
 
     await h.lifecycle.cycle()
 

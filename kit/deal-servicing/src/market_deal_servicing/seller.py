@@ -248,9 +248,13 @@ class SellerServicing:
         """Each open deal of a mechanism named in ``missing_adapters`` that has
         no adapter composed, with its repair reason.
 
-        A deal is open until its resource is proven released after a recorded
-        end; every registered deal is read, committed or not, since an
-        uncommitted one still holds capacity a storefront must end.
+        A deal is open until the seller list's rule would call it ended: a
+        recorded end, its resource proven released, nothing outstanding at
+        either authority as last observed (``_outstanding``). With no adapter
+        nothing observes its payment again, so a released deal whose part last
+        showed no stop stays reported until the adapter is restored. Every
+        registered deal is read, committed or not, since an uncommitted one
+        still holds capacity a storefront must end.
         """
         found: builtins.list[tuple[str, str]] = []
         continuation: str | None = None
@@ -259,18 +263,35 @@ class SellerServicing:
                 deals, continuation = SellerSession(conn).page(
                     ListDealsRequest(limit=100, continuation=continuation), committed_only=False,
                 )
-                ended = {
-                    deal.negotiation_id for deal in deals
-                    if EndSession(conn).selected_end(deal.negotiation_id) is not None
-                    and EndSession(conn).read(deal.negotiation_id).progress == "released"
-                }
             for deal in deals:
-                if deal.negotiation_id in ended or deal.payment.mechanism not in self.missing_adapters:
+                if deal.payment.mechanism not in self.missing_adapters:
                     continue
-                if self.payments.resolve(PaymentBinding(deal.negotiation_id, deal.payment)) is None:
+                if self.payments.resolve(PaymentBinding(deal.negotiation_id, deal.payment)) is not None:
+                    continue
+                if not self._ended(deal):
                     found.append((deal.negotiation_id, self._unserviceable_reason(deal)))
             if continuation is None:
                 return found
+
+    def _ended(self, deal: SellerDeal) -> bool:
+        """Whether the seller list's rule calls the deal ended, from its saved views.
+
+        A deal whose views cannot be read is not shown ended, so it stays
+        reported rather than failing the report.
+        """
+        with transaction(self.path) as conn:
+            end = EndSession(conn)
+            selected = end.selected_end(deal.negotiation_id)
+            progress = end.read(deal.negotiation_id).progress
+        if selected is None:
+            return False
+        try:
+            authority = self._authority(deal, self._watch(deal))
+        except Exception:
+            logger.exception("unserviceable deal %s: its authority views cannot be read", deal.negotiation_id)
+            return False
+        open_cases = [case.case_ref for case in authority.cases if case.state != "closed"]
+        return not self._outstanding(deal, authority, progress, open_cases)
 
     async def watch(self, negotiation_id: str):
         deal = await asyncio.to_thread(self._deal, negotiation_id)
@@ -322,7 +343,7 @@ class SellerServicing:
             if deal.once_only:
                 state = "running"
             if selected:
-                ending = self._outstanding(authority, delivery.progress, open_cases)
+                ending = self._outstanding(deal, authority, delivery.progress, open_cases)
                 state = "ending" if ending else "ended"
             if authority.state == "repair_required" or delivery.progress == "repair_required":
                 state, ending = "repair_required", []
@@ -337,7 +358,8 @@ class SellerServicing:
         return DealPage(deals=summaries, continuation=continuation)
 
     def _outstanding(
-        self, authority: AuthorityView, progress: PhysicalProgress, open_cases: builtins.list[str],
+        self, deal: SellerDeal, authority: AuthorityView, progress: PhysicalProgress,
+        open_cases: builtins.list[str],
     ) -> builtins.list[EndingCode]:
         """What still keeps a deal with a recorded end from being ended.
 
@@ -346,12 +368,20 @@ class SellerServicing:
         stopped or past its end, so nothing more can bill, and the dispute
         authority holds no open case, so nothing more can be ruled. A case
         opened later makes it ending again.
+
+        A deal that is not once-only bills through rate parts, and the payment
+        authority's view of it lists every one, started or not; a view listing
+        none, or no view yet saved, verifies no stop, so its payment is still
+        running. A once-only deal has no rate part to stop.
         """
         now = self.clock()
         ending: builtins.list[EndingCode] = []
         if progress != "released":
             ending.append("release_pending")
-        if any(part.final_stop is None and (part.end_at is None or part.end_at > now) for part in authority.parts):
+        if (not deal.once_only and not authority.parts) or any(
+            part.final_stop is None and (part.end_at is None or part.end_at > now)
+            for part in authority.parts
+        ):
             ending.append("payment_running")
         if open_cases:
             ending.append("case_open")

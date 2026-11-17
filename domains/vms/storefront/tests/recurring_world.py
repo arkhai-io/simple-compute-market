@@ -43,7 +43,6 @@ import market_storefront.container as container
 from market_storefront.controllers.settle_controller import router as settle_router
 from market_storefront.controllers.settle_controller import settlements_router
 from market_storefront.deal_lifecycle import VmDealLifecycle
-from market_storefront.delivery_lifecycle import VmPhysicalEnd
 from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.settlement_composition import (
@@ -282,13 +281,14 @@ async def settlement(
     coordinator = VmPaymentsCoordinator(
         domain=domain, db=world.app.db, stage=stage, capacity=capacity.effects(), fulfillment=provisioning,
     )
+    # The lifecycle's capacity runtime and fulfillment client are the delivery
+    # site's, which its end service's physical end and the delivery-recovery
+    # loop's re-drive use, rather than the runtime the storefront's configured
+    # sites would build.
     lifecycle = VmDealLifecycle(
         world.app.db, TEST_MARKETPLACE_SIGNER, coordinator, composition.disputes, fulfillment=provisioning,
-        **({"clock": clock} if clock is not None else {}),
+        capacity=capacity, **({"clock": clock} if clock is not None else {}),
     )
-    # The end service's physical end, over the same site as delivery, rather
-    # than the runtime the storefront's configured sites would build.
-    lifecycle.end.physical = VmPhysicalEnd(world.app.db, capacity=capacity, fulfillment=provisioning)
     coordinator.lifecycle = lifecycle
     previous = container.resolved_settlement_composition
     container.resolved_settlement_composition = replace(

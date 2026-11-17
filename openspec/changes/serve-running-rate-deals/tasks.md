@@ -260,6 +260,16 @@ committed work.
   of its own and resize 2.5. The work above is committed as a work in progress, its
   storefront suites failing those four tests in each storefront, and no task is checked.
 
+Round 1 triage fix, 32 F1 (`reviews/32-implementation.triage.md`): the seller list's
+`_outstanding` takes the deal and counts a deal that is not once-only, whose saved
+payment view lists no part or that has none, as `payment_running`, so a released rate
+deal is never `ended` before the payment authority is seen (D7's settled note). Library
+integration, `kit/deal-servicing/tests/integration/test_watch_and_seller.py`: a released
+rate deal never observed, then observed with no parts, lists `ending
+["payment_running"]`; a released once-only deal never observed lists `ended`. A rate
+deal ended before its part ever started stays `payment_running` until that part's
+terms end, as the requirement's words ask.
+
 ## 2A. Both storefronts deliver a rate deal in their recurring test worlds
 
 Delivers each storefront's application-level evidence that a rate deal is committed,
@@ -424,6 +434,19 @@ Section 2A handoff:
 - In bare metal, the lifecycle row's `state` is provisioning's state as last read; the
   settle-driven delivery leaves it `dispatch_pending` while end service records the deal
   available.
+
+Round 1 triage fix, 34 O1's U2 (`reviews/34-implementation-owner.triage.md`), outside
+the plan: `VmDealLifecycle` takes `capacity=` (a capacity runtime) and `physical=`; its
+end service's physical end is built over its capacity and fulfillment, its site-report
+recovery's fulfillment client over its capacity, and the release failure action
+(`failure_actions._release_capacity`) uses the composition lifecycle's runtime before
+building one. The composition root passes neither, so production keeps the configured
+sites' cached runtime. `tests/recurring_world.py`, `test_payment_settlement.py` (its
+harness's `physical=` factory), `test_lifecycle_failures.py`, `test_lifecycle_admin.py`,
+`test_lifecycle_cycle.py`, `test_fulfillment_resume_runtime.py` and
+`examples/payment_smoke.py` construct with them rather than replacing
+`lifecycle.end.physical`. New unit case `test_failure_policy.py::
+test_the_release_uses_the_deal_lifecycles_capacity_runtime`. The unowned row is removed.
 
 ## 2B. The recurring purchases are delivered in both lanes
 
@@ -858,6 +881,16 @@ Section 4 handoff:
 - The VM composition is rebuilt by every `dataclasses.replace`, each time building an
   equal stage; a test needing the composition's exact stage object reads it after its
   last replace.
+
+Round 1 triage fix, 32 F2 (`reviews/32-implementation.triage.md`): `unserviceable()`
+reports a missing-adapter deal until the seller list's rule (`_outstanding`, as 32 F1
+refines it) finds nothing outstanding over its saved views (`_ended`), not only until
+its resource is released, so a released rate deal whose part last showed no stop stays
+in the startup log and `unserviceable_deals` (D8's settled note); a deal whose views
+cannot be read stays reported, logged. Library integration,
+`test_watch_and_seller.py::test_a_released_rate_deal_still_billing_stays_unserviceable_until_its_part_stops`.
+Both storefronts' startup and status call `unserviceable()` unchanged, so 4.2's
+application cases stand for them.
 
 ## 5. What the buyer is shown
 
@@ -1441,6 +1474,21 @@ Section 8 handoff:
   right after 9.1; the purchase drivers' `servicing_loop` names and the other loop
   names are 9.2's.
 
+Round 1 triage fix, 34 O1's U3 (`reviews/34-implementation-owner.triage.md`):
+`vm_delivery_path` and `read_vm_credentials` default to the deal lifecycle's capacity
+runtime (its effects) and fulfillment client, so the `delivery-recovery` loop's re-drive
+reaches the site a composition's lifecycle was given. 8.2's three VM cases move from
+`test_fulfillment_resume_runtime.py`'s direct pass to the new
+`tests/integration/test_delivery_recovery_loop.py`, application integration: the
+recurring world's served storefront, its loops held, `delivery-recovery` stepped once
+through the typed admin client — the waiting deal re-checked once, claimed at
+`begin_fulfillment` by a `delivery-recovery:` owner and released, `ready` and activated,
+`redriven` 1; another worker's claim skipped, nothing re-checked, `redriven` 0; the
+impostor-pinned stage's re-check refused with its warning, nothing begun, the claim
+released. The older direct callers (`test_vm_delivery_path.py`'s three,
+`test_fulfillment_resume_runtime.py`'s four Alkahest cases) are the narrowed unowned
+row; the payment rig's unused `clock=` is removed.
+
 ## 9. One loop layout, and restart recovery proven
 
 Delivers D5's layout and D14's restart evidence; requirement "Both compute storefronts run
@@ -1613,6 +1661,35 @@ Section 9 handoff:
   asserts teardown after a restart needs the site to outlive it (section 2A's handoff).
 - The chart is 0.5.0 (the bare-metal values schema accepts the two new keys);
   `make helm-values-schema` regenerates it when the bare-metal settings change again.
+
+Round 1 triage fix, 34 O1's U4 (`reviews/34-implementation-owner.triage.md`), outside
+the plan: `core/storefront-client`'s `admin_run_lifecycle_cycle` docstrings, sync and
+async, list the loops the compute storefronts register; the client is 0.29.1, and
+`provisioning/compute/service`, its one exact pin moved, 0.25.1. The unowned row is
+removed. `drive-the-storefront-clock-in-lanes` also edits that client, so whichever
+change merges second resolves its version line.
+
+Round 1 triage fixes' evidence (32 F1, 32 F2, 34 O1's U2, U3, U4):
+- library integration, `kit/deal-servicing`: 133 passed;
+- unit, VM storefront: 1197 passed, 1 skipped, the new failure-policy case among them;
+- application integration, VM storefront: 623 passed, the three moved re-drive cases
+  among them; bare-metal storefront: 663 passed;
+- `scripts/change-workflow run pre-commit`: `after-functional-change … passed, exit 0`
+  and `pre-commit-functional … passed, exit 0` (every package's suite, the e2e unit
+  suite 911 passed, 1 skipped, the release tooling 3123); its `pre-commit` hook
+  refused once on history wording and once on a function-level import in the new
+  unit case, both fixed, and `make check-repository CHANGE=serve-running-rate-deals
+  CHANGE_BASE=dev` then passed every check, with the VM unit suite run again (1197
+  passed, 1 skipped);
+- `run test-before` on `test_watch_and_seller.py` exits at collection (no
+  `market_deal_lifecycle` in its environment), showing nothing;
+- fresh-context check: found no correctness defect; fixed — `resume_incomplete_fulfillments_once`'s
+  docstring, the release failure action's untested lifecycle branch (now the unit case
+  above) and its comment and attribute read, the payment rig's dead `clock=`, an
+  ordering guard in `test_lifecycle_admin.py` (`teardown` unset before the interruption),
+  `VmDealLifecycle`'s docstring and its `physical is not None` test, `_ended` failing the report on an
+  unreadable view (now reported and logged), and `examples/payment_smoke.py`'s
+  post-construction replacement.
 
 ## 10. Rate deals qualified in both lanes on lane time
 

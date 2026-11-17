@@ -304,6 +304,16 @@ Rejected: a free-text reason, which carries one reason and invites matching on
 wording; no new field, which makes triage a read per deal; and staging the field's
 emission for once-only deals for 0.1.0 clients.
 
+*Settled at round 1's triage (32 F1):* a deal that is not once-only bills through rate
+parts, and the payment authority's view of it lists every part, started or not; so
+when its last saved view lists no part, or none has been saved, no stop is verified
+and it is `ending` with `payment_running`. A once-only deal has no rate part to stop.
+Rejected: requiring the latest payment observation to postdate the recorded end, which
+guards no window the payments adapter leaves (an unstarted part is already listed
+without a stop) and whose instant a backdated end defeats; and a new
+`payment_unknown` code, since `payment_running`'s text already says no stop is
+verified.
+
 ### D8 — A storefront that cannot service its deals starts and reports them
 
 With the refusal gone, what services a payment deal, once-only or rate, is the
@@ -318,6 +328,13 @@ servicing declaration withdraws new offers and acceptances only, as already buil
 Rejected: refusing to start, which takes the storefront's other business down for one
 mechanism's configuration mistake; and refusing only for rate deals, which treats one
 missing stage differently by deal kind.
+
+*Settled at round 1's triage (32 F2):* a deal is open, and reported, until the seller
+list's D7 rule would call it ended, read from its last saved views: a released rate
+deal whose part last showed no stop stays reported until the adapter is restored.
+Rejected: reporting every such deal with a recorded end until an explicit
+financial-completion marker exists, which no record holds, so released once-only
+deals would be reported forever.
 
 ### D9 — Lane rows set lane time
 

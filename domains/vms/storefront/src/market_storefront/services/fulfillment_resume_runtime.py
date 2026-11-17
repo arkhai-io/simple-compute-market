@@ -147,8 +147,10 @@ async def resume_incomplete_fulfillments_once(
     controller records, and the timer carries on.
 
     ``capacity`` is the guarded capacity effects and ``fulfillment_client``
-    the per-site fulfillment client; each is built from the storefront's
-    runtime when first used, so a pass with nothing to resume needs neither.
+    the per-site fulfillment client; each defaults to the deal lifecycle's
+    capacity runtime and fulfillment client, and is otherwise built from the
+    configured sites when first used, so a pass with nothing to resume needs
+    neither.
     Returns how many deliveries the pass drove.
     """
     db = sqlite_client

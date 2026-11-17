@@ -67,8 +67,13 @@ def instant(value: str) -> int:
 class VmDealLifecycle:
     def __init__(
         self, db, signer, payments, disputes, *, clock=lambda: int(time.time()), fulfillment=None,
-        mediation_transport=None,
+        capacity=None, physical=None, mediation_transport=None,
     ):
+        """``capacity`` is the storefront's capacity runtime and ``fulfillment``
+        its per-site fulfillment client, which the end service's physical end,
+        site-report recovery, the delivery path and the release failure action
+        use; when not given, each is built from the configured sites' runtime.
+        ``physical`` replaces the end service's physical end built over them."""
         self.db = db
         self.path = Path(db.db_path)
         self.signer = signer
@@ -76,12 +81,17 @@ class VmDealLifecycle:
         self.dispute_config = disputes.config
         self.clock = clock
         self.fulfillment = fulfillment
+        self.capacity = capacity
         # The transport every mediation client sends through; None gives each
         # client its own connection to the Agreement-pinned origin.
         self.mediation_transport = mediation_transport
         self.evidence = SQLiteEvidenceStore(self.path)
         self.clients = {}
-        self.end = EndService(self.path, VmPhysicalEnd(db), clock=clock)
+        self.end = EndService(
+            self.path,
+            physical if physical is not None else VmPhysicalEnd(db, capacity=capacity, fulfillment=fulfillment),
+            clock=clock,
+        )
         self.ingress = DeliveryIngress(
             self.path, clock=clock, verify_site=self.verify_site, receipt_claim=self.receipt_claim,
             classify_site=self.classify_site,
@@ -335,7 +345,9 @@ class VmDealLifecycle:
         if view.progress == "released" and any(item.evidence_id == history_ref for item in evidence.items):
             return
         thread = await self.db.load_thread_binding(negotiation_id=negotiation_id)
-        fulfillment = self.fulfillment or build_fulfillment_client(build_capacity_runtime(lambda: self.db).client())
+        fulfillment = self.fulfillment or build_fulfillment_client(
+            (self.capacity or build_capacity_runtime(lambda: self.db)).client()
+        )
         lease = await fulfillment.get_lease(reservation, site_id=thread.site_id)
         for report in lease.end_reports:
             await asyncio.to_thread(self.ingress.site_report, negotiation_id, body=canonical_json(report), headers={})

@@ -262,11 +262,13 @@ class Harness(SimpleNamespace):
 
 async def _harness(
     tmp_path, *, deposit=False, actions=("emit_event",), authority=None, disputes=None,
-    mediation_transport=None, payments=None,
+    mediation_transport=None, payments=None, physical=None,
 ):
     """``authority`` replaces the Agreement's dispute authority, ``disputes`` is
-    the storefront's dispute configuration document, and ``mediation_transport``
-    the network under every mediation client."""
+    the storefront's dispute configuration document, ``mediation_transport``
+    the network under every mediation client, and ``physical`` builds the end
+    service's physical end from the database and the harness's delivery, the
+    delivery itself by default."""
     delivery = Delivery()
     domain = replace(
         build_vm_storefront_domain(),
@@ -282,9 +284,9 @@ async def _harness(
     lifecycle = VmDealLifecycle(
         db, SELLER, coordinator, RegistryDisputePolicy.from_document(disputes or {}),
         mediation_transport=mediation_transport,
+        physical=physical(db, delivery) if physical is not None else delivery,
     )
     coordinator.lifecycle = lifecycle
-    lifecycle.end.physical = delivery
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = registry
     _container.resolved_marketplace_signer = SELLER
