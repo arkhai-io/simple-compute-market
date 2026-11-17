@@ -2958,6 +2958,30 @@ Delivers D8 and D16's ladder. Touches `docs/guidance/engineering/system-tests.md
     registry, provisioning, payments-lane-double and mediation-lane-double
     0.1.2.
 
+## 17a. A test docstring names no design decision
+
+Delivers the fix closeout's return names (18.1's note): a docstring the change added
+cites a design decision by id, which code may not
+(`docs/guidance/workflow/change-references.md`). Touches
+`domains/apicredits/service/tests/integration/test_system_time.py` only.
+
+- [ ] 17a.1 Reword the docstring of
+  `test_the_composed_service_admits_the_time_setting_alone_outside_the_skew` so it
+  says what the test checks without naming `D14`: the time-setting operation, the one
+  request admitted outside the signing skew, as the composition wires it — a setting
+  signed 900 s ahead of the service is admitted and moves it, and a status read signed
+  there is refused.
+  - Verify: no comment or docstring the change added names a decision, section, task
+    or review id — a search of the change's added Python lines for `D[0-9]+` and
+    section numbers finds none; `make check-comment-hygiene` passes.
+- [ ] 17a.2 Section verification.
+  - Application integration: the API-credits service's suite in `make test-domains`
+    passes, `test_system_time.py` among it.
+  - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`,
+    whose functional checks pass and whose citations check names only closeout's
+    `openspec/specs/injected-time/architecture.md`.
+  - End-to-end: none; a docstring changes no behaviour, and none is owed.
+
 ## 18. Closeout
 
 The workflow's parts (`docs/guidance/workflow/closeout.md`) in order, the
