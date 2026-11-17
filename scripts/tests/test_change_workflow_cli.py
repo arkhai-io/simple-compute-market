@@ -99,6 +99,8 @@ def _printed(capsys: pytest.CaptureFixture[str], run: Callable[[], int]) -> tupl
     (["find", "--active", CHANGE], lambda root: find.main(["--active", CHANGE], root=root)),
     (["find", "--archived", CHANGE], lambda root: find.main(["--archived", CHANGE], root=root)),
     (["find", "--records", CHANGE], lambda root: find.main(["--records", CHANGE], root=root)),
+    (["find", "--next-record", "validation", CHANGE],
+     lambda root: find.main(["--next-record", "validation", CHANGE], root=root)),
     (["clone", CHANGE], lambda root: clone.main(["create", CHANGE], root=root)),
     (["clone", CHANGE, "--branch", "b", "--from", "main"],
      lambda root: clone.main(["create", CHANGE, "--branch", "b", "--from", "main"], root=root)),
@@ -199,6 +201,8 @@ def test_the_subcommands_this_module_runs_reach_no_other() -> None:
 @pytest.mark.parametrize("arguments", [
     [], ["deploy"], ["start"], ["start", "review", CHANGE], ["start", "design"],
     ["find"], ["find", "--records", "--json", CHANGE], ["find", "--active", "--archived", CHANGE],
+    ["find", "--next-record", "validation", "--json", CHANGE],
+    ["find", "--next-record", "validation", "--records", CHANGE],
     ["clone", "where"], ["clone", "a", "b"], ["clone", "where", CHANGE, "--from", "dev"],
     ["check"], ["check", "lint"], ["hook", "pre-compaction"], ["next"], ["review", CHANGE],
 ])

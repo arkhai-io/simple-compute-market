@@ -1268,14 +1268,31 @@ def test_a_closeout_section_a_plan_maps_is_left_out_of_its_round(tmp_path: Path)
     assert recorded["step"] == "round-view"
 
 
-@pytest.mark.parametrize("title", ["Closeout", "Plan closeout", "Repository closeout",
-                                   "Closeout after review follow-up"])
-def test_a_closeout_section_is_known_by_its_title(tmp_path: Path, title: str) -> None:
+def test_a_section_mentioning_closeout_is_implemented_by_a_round(tmp_path: Path) -> None:
+    # Only the section titled exactly `Closeout` is closeout's: one preparing the
+    # pre-closeout review is work a round implements.
     root = _repository(tmp_path, "ready for implementation",
-                       tasks=SECOND_DONE.replace("## 4. Closeout", f"## 4. {title}"))
+                       tasks=SECOND_DONE.replace("## 3. Third",
+                                                 "## 3. Qualification and pre-closeout review"))
     _planned(root, [[[2], [3, 4]]])
 
     assert _next(root)["sections"] == [[3]]
+
+
+@pytest.mark.parametrize("tasks", [
+    SECOND_DONE.replace("## 4. Closeout", "## 4. Plan closeout"),
+    SECOND_DONE + "\n## 5. Closeout's fixes\n\n- [ ] 5.1 Fix.\n",
+    SECOND_DONE + "\n## 5. Closeout\n\n- [ ] 5.1 Again.\n",
+], ids=["no-closeout", "section-after-closeout", "two-closeouts"])
+def test_a_task_list_whose_closeout_section_is_ambiguous_is_not_routed(
+        tmp_path: Path, tasks: str) -> None:
+    root = _repository(tmp_path, "ready for implementation", tasks=tasks)
+    _planned(root, [[[2], [3]]])
+
+    result = _next(root)
+
+    assert result["step"] == "unclassified"
+    assert "the task list is malformed" in result["reason"]
 
 
 def test_a_planned_round_naming_a_section_the_task_list_lacks_goes_to_the_owner(

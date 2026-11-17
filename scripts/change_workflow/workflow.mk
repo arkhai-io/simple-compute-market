@@ -56,8 +56,8 @@ plan: ## Open a Claude Code planning session for an OpenSpec change; unattended,
 implement: ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve or the owner's direction to the sections, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS)$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))'))$(CHANGE_WORKFLOW_RUN)
 
-review: ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout|merge [REVIEW_BASE=<branch>] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
-	@$(CHANGE_WORKFLOW) review "$(CHANGE)" --kind "$(KIND)" $(if $(strip $(REVIEW_BASE)),--base "$(REVIEW_BASE)") $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
+review: ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude; ARGUMENTS is the owner's direction to the review, where to look harder (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout|merge [ARGUMENTS=<text>] [REVIEW_BASE=<branch>] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
+	@$(CHANGE_WORKFLOW) review "$(CHANGE)" --kind "$(KIND)" $(if $(strip $(REVIEW_BASE)),--base "$(REVIEW_BASE)") $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)$(CHANGE_WORKFLOW_ARGUMENTS)
 
 triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start triage "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
@@ -109,7 +109,7 @@ change-history: ## Copy an archived change's records and the validation evidence
 check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
 	@$(CHANGE_WORKFLOW) check index
 
-check-tasks: ## Fail if a task of a change's task list sits under another section's heading: a heading is missing or the task misplaced (CHANGE=<change>)
+check-tasks: ## Fail if a task of a change's task list sits under another section's heading — a heading is missing or the task misplaced — or its closeout section, titled Closeout, is missing, repeated, or not its last (CHANGE=<change>)
 	@$(CHANGE_WORKFLOW) check tasks "$(CHANGE)"
 
 check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills

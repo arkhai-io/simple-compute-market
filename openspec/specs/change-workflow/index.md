@@ -58,11 +58,11 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Sections and sessions
 
-- [CW-5r7l](spec.md#requirement-cw-5r7l-a-section-is-a-verifiable-slice) — each section is a coherent slice ending at a verification point; `tasks.md` prescribes no session distribution.
+- [CW-5r7l](spec.md#requirement-cw-5r7l-a-section-is-a-verifiable-slice) — each section is a coherent slice ending at a verification point; `tasks.md` prescribes no session distribution; its last section, titled exactly `Closeout`, is the closeout section.
 - [CW-5h8e](spec.md#requirement-cw-5h8e-evidence-only-a-push-produces-is-owed-by-validation) — evidence only a push produces is owed by validation and never gates a task's completion.
 - [CW-0ia3](spec.md#requirement-cw-0ia3-an-implementation-session-starts-fresh-unless-the-owner-continues-one) — implementation starts in a fresh session unless the owner names an earlier one to continue.
 - [CW-al17](spec.md#requirement-cw-al17-the-implementation-cadence-is-settled-in-design-and-mapped-by-the-plan) — design settles the cadence of sessions and rounds; planning orders sections by it and reports the mapping.
-- [CW-v6nj](spec.md#requirement-cw-v6nj-each-round-is-recorded-as-it-starts) — each round is recorded as it starts from the plan's mapping; an unmapped round asks the owner.
+- [CW-v6nj](spec.md#requirement-cw-v6nj-each-round-is-recorded-as-it-starts) — each round is recorded as it starts from the plan's mapping; an unmapped round asks the owner; a round recorded while one is open continues it.
 - [CW-tc82](spec.md#requirement-cw-tc82-each-section-is-checked-handed-off-and-committed-alone) — each section is handed off, compliance-checked by a fresh-context agent, and committed on its own.
 - [CW-1u53](spec.md#requirement-cw-1u53-a-failed-premise-returns-the-change-with-its-work-in-progress) — a plan invalidated by discovered code returns the change, its work committed and pushed as in progress.
 
@@ -102,7 +102,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Review records
 
-- [CW-p2b2](spec.md#requirement-cw-p2b2-each-review-is-one-numbered-record) — each review is one never-overwritten numbered file in `reviews/`, the only record of its findings.
+- [CW-p2b2](spec.md#requirement-cw-p2b2-each-review-is-one-numbered-record) — each review is one never-overwritten numbered file in `reviews/`, the only record of its findings; a record a skill writes takes the engine's `find --next-record` path.
 - [CW-2nb2](spec.md#requirement-cw-2nb2-a-later-review-reads-earlier-findings-from-the-records) — later reviews read earlier findings and dispositions from the records, even when continuing a reviewer session.
 - [CW-ovuj](spec.md#requirement-cw-ovuj-review-records-are-untracked-and-their-durable-content-is-promoted) — `reviews/` is untracked and uncited by permanent documents; durable content is promoted at closeout.
 - [CW-5e24](spec.md#requirement-cw-5e24-a-reviews-transcript-is-kept-and-never-read-as-a-record) — a review's raw transcript may be kept, untracked, but no review or triage step reads it.
@@ -257,6 +257,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-1dld](spec.md#requirement-cw-1dld-a-run-with-no-available-model-stops-and-a-waiting-run-resumes-on-its-own) — a run with no available model stops; network errors retry without fallback; waiting runs resume on their model.
 - [CW-clhl](spec.md#requirement-cw-clhl-a-review-names-a-reviewer-other-than-its-rows-first) — a review on a fallback model names its reviewer; a reviewer session continues only on the same harness.
 - [CW-d1sm](spec.md#requirement-cw-d1sm-the-owner-may-override-one-reviews-model) — the owner may name any model or effort for one hand-run review, marked as an override, without fallback.
+- [CW-f0cs](spec.md#requirement-cw-f0cs-the-owner-may-direct-one-review-where-to-look-harder) — the owner may give one review a direction in their words, carried on its prompt and log line; it never narrows the review.
 - [CW-w2ld](spec.md#requirement-cw-w2ld-the-orchestrating-sessions-model-is-the-configurations) — the orchestrating session starts on the model and effort the configuration's `models.orchestrator` names.
 
 ### Cost

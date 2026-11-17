@@ -611,11 +611,12 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     landing between rounds, a design revision among them, are not the round's.
 
     A round recorded while the latest round is still open — no implementation
-    triage has finished or returned since it — over sections that round already
-    names continues it: an owner's direction, or a plan amended mid-round, names
-    only the sections left, and the round's reading, validation, and review must
-    still cover the sections already done. Such a line keeps the open round's
-    `after` and `commit` and names it as `continues`.
+    triage has finished or returned since it — continues it, whatever sections it
+    names: an owner's direction names only the sections left, and a plan amended
+    mid-round, after a return to design or planning, may split or renumber them,
+    yet everything committed since the open round's base is still untriaged, and
+    its reading, validation, and review must cover it. Such a line keeps the open
+    round's `after` and `commit` and names it as `continues`.
 
     `carries` names the owner records numbered at or below `after` that no triage
     has read: notes the owner wrote while no review awaited a triage, on a
@@ -630,7 +631,7 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     if after is not None and (isinstance(after, bool) or not isinstance(after, int)
                               or after < 0):
         raise StepError(f"a round's after is a record number; got {after!r}")
-    continued = _open_round(path, sections) if after is None else None
+    continued = _open_round(path) if after is None else None
     if continued is not None:
         return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
                                    "sections": sections, "by": by,
@@ -661,9 +662,9 @@ def untriaged_owner_notes(reviews: Path, after: int) -> list[int]:
                   and not entry.with_name(entry.name[:-3] + ".triage.md").is_file())
 
 
-def _open_round(path: Path, sections: Any) -> Entry | None:
-    """The latest round, when it is still open and names every section in
-    `sections`; otherwise None."""
+def _open_round(path: Path) -> Entry | None:
+    """The latest round, when it is still open: no implementation triage has
+    finished or returned since it. None otherwise."""
     entries = read_log(path) if path.exists() else []
     latest = next((e for e in reversed(entries) if e.get("outcome") == "round"), None)
     if latest is None or not isinstance(latest.get("after"), int):
@@ -671,9 +672,7 @@ def _open_round(path: Path, sections: Any) -> Entry | None:
     if any(e["seq"] > latest["seq"] and e.get("outcome") in ("finished", "returned")
            and ran(IMPLEMENTATION_TRIAGE, e, entries) for e in entries):
         return None
-    named = {str(s) for session in latest.get("sections") or () for s in session}
-    wanted = {str(s) for session in sections for s in session}
-    return latest if wanted <= named else None
+    return latest
 
 
 def _row_archived(directory: Path) -> bool:

@@ -210,9 +210,10 @@ def test_every_step_runs_the_repositorys_hooks_through_the_command() -> None:
 
 def test_openspec_runs_through_the_configured_command() -> None:
     """The steps that validate or archive a change run OpenSpec through the command,
-    which runs the configured `openspec.command` (CW-i2we); no rule pins a version."""
+    which runs the configured `openspec.command` (CW-i2we); no rule pins a version.
+    Implementation and the merge check a change's deltas as they change them."""
     for name, rules in load_steps().items():
-        runs = name in ("design", "plan", "triage", "closeout")
+        runs = name in ("design", "plan", "implement", "triage", "merge", "closeout")
         assert _allows(rules, f"scripts/change-workflow openspec validate {CHANGE} --strict") \
             == runs, name
         for pinned in (f"bunx @fission-ai/openspec@1.14.0 validate {CHANGE} --strict",

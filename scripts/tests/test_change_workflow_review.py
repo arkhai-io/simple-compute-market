@@ -189,6 +189,34 @@ def test_a_review_on_the_rows_models_is_no_override(tmp_path: Path) -> None:
     assert "reviewer-override" not in (reviews_of(root) / f"01-{kind}.md").read_text("utf-8")
 
 
+def test_the_owners_direction_rides_on_the_prompt_and_marks_the_line(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+    direction = "check the guidance edits sit where the new layers put them"
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, direction=direction,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    assert calls[0][-1] == (
+        f"Use the change-review skill. Review kind: design. Change: {CHANGE}. The owner's "
+        f"direction to this review, in their words: {direction!r}. Look harder where it "
+        "points, and still review the whole change in the skill's format.")
+    assert (line["outcome"], line["direction"]) == ("finished", direction)
+    assert "override" not in line
+
+
+def test_a_review_with_no_direction_records_none(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    assert "direction" not in line and "owner's direction" not in calls[0][-1]
+
+
 def test_the_owners_unavailable_model_has_no_fallback(tmp_path: Path) -> None:
     root = repository(tmp_path)
     claude = claude_review(review_text("design"))

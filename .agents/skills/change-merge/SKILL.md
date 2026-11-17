@@ -251,7 +251,10 @@ if it refuses, stop and report its reasons.
 ## 7. Choose the exit
 
 After the archive, choose the exit as "After the archive" says instead of this
-step. Before closeout, judge the merge, then take the exit it merits:
+step. When the owner's direction to this merge names its exit — another
+pre-closeout review, or a waived validation — take that exit: still give your own
+judgement below and its evidence in your message, but do not ask again. Otherwise,
+before closeout, judge the merge, then take the exit it merits:
 
 - **Review.** Recommend another pre-closeout review when the merge changed what
   the change does, so the pre-closeout review just triaged no longer describes it:

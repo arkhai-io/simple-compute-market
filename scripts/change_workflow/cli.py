@@ -237,6 +237,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
                         help="run a pre-closeout review without a passing validation of HEAD")
+    review.add_argument("--arguments", default="",
+                        help="the owner's direction to this review, in their words: where to "
+                             "look harder, never a narrower review; recorded on its log line")
     stop_ = commands.add_parser(
         "stop", help="stop the change's run in progress, in its clone when it has one, which "
                      "is logged `stopped`")
@@ -342,6 +345,9 @@ def _parser() -> argparse.ArgumentParser:
     found.add_argument("--archived", action="store_true", help="refuse an active change")
     found.add_argument("--records", action="store_true",
                        help="its records: this checkout's, else the owner's workspace's")
+    found.add_argument("--next-record", metavar="KIND",
+                       help="the path of its next record of KIND, numbered after every "
+                            "record and transcript, as the engine numbers its own")
     find_.add_argument("--json", action="store_true",
                        help="print name, directory, archived, records, format, and base, the "
                             "branch the change lands on, as JSON")
@@ -635,7 +641,11 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
         if args.json and args.records:
             raise _Usage("--json prints the records of this checkout alone, so it takes no "
                          "--records")
+        if args.json and args.next_record:
+            raise _Usage("--next-record prints a path, so it takes no --json")
         flag = [f"--{name}" for name in ("active", "archived", "records") if getattr(args, name)]
+        if args.next_record:
+            flag = ["--next-record", args.next_record]
         return find.main, [*flag, *(["--json"] if args.json else []), args.change]
     if args.command == "clone" and args.change != "where":
         if args.where_change is not None:
@@ -811,7 +821,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         _round_view_closed(root)
         line = review_and_log(args.change, args.kind, root=wrapper.root, base=args.base,
                               model=args.model or None, effort=args.effort or None,
-                              fresh=args.fresh, unvalidated=args.unvalidated)
+                              fresh=args.fresh, unvalidated=args.unvalidated,
+                              direction=args.arguments.strip() or None)
         if line["outcome"] != "stopped":
             print(f"Review written to {line['record']}", file=sys.stderr)
         return _logged(line)
