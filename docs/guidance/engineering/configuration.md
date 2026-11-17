@@ -103,8 +103,8 @@ A test control that must live in the production image — because the test runs 
 images a release ships, not a test build — is a setting that defaults to off. The
 production configuration omits it, so a deployment that never names it never turns
 it on, and committed configuration outside the test stacks never sets it, which a
-static check over the charts' defaults, their production examples and the shipped
-presets holds. A service does not refuse the control in production: no service can
+static check over every committed configuration a deployment outside the test
+stacks would load holds. A service does not refuse the control in production: no service can
 reliably recognise production, and a refusal tied to one other setting protects
 only the services that carry that setting while suggesting every service is
 protected. Instead a service with the control on says so — at startup, and on its

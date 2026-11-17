@@ -32,7 +32,7 @@ Every production process MUST read the time of the world — any instant it stor
 
 ### Requirement: Injected time is frozen at the instant last set and moves only forward
 
-An injected source MUST return exactly the instant last set, in Unix seconds, until it is set again. A set MUST refuse an instant earlier than the current one, `409 time_moves_forward`, and change nothing. A process configured for injected time MUST start frozen at the wall instant it started.
+An injected source MUST return exactly the instant last set, in Unix seconds, until it is set again. A set through the time-setting route MUST refuse an instant earlier than the current one, `409 time_moves_forward`, and change nothing. A service configured for injected time MUST start frozen at the wall instant it started; a process that reads its injected time from a time file, such as the buyer, MUST take the instant the file holds at each read, as `buyer-orchestration`'s "The buyer reads injected time from a lane-time file" requires.
 
 #### Scenario: Time is held between sets
 
@@ -69,7 +69,7 @@ The time component MUST depend only on the standard library, name no market conc
 
 ### Requirement: An injected process announces its time
 
-A process configured for injected time MUST log that at startup and MUST report `{"time": {"source": "injected", "now": <Unix seconds>}}` on its status surface; a wall-time process MUST report `{"time": {"source": "wall"}}`. A process with an Arkhai payments section whose `livemode` is `true` MUST log a warning when its time is injected. Nothing MUST refuse injected time.
+A process configured for injected time MUST log that at startup. A service MUST report `{"time": {"source": "injected", "now": <Unix seconds>}}` on its status surface under injected time and `{"time": {"source": "wall"}}` under wall time; a process with no status surface, such as the buyer, announces its injected time only at startup. A process with an Arkhai payments section whose `livemode` is `true` MUST log a warning when its time is injected. Nothing MUST refuse injected time.
 
 #### Scenario: Status shows injected time
 

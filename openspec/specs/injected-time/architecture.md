@@ -135,8 +135,9 @@ instant on every signed hop, and make comparing two parties' instants exact. One
 parser in the component reads the value wherever it is parsed, so a boolean, a
 float, a string or any other member is refused everywhere alike.
 
-A process configured for injected time starts frozen at the wall instant it
-started. Starting from the wall time, rather than a fixed epoch, keeps time-pinned
+A service configured for injected time starts frozen at the wall instant it
+started; the buyer's time file holds the instant the harness last wrote. Starting
+from the wall time, rather than a fixed epoch, keeps time-pinned
 material valid — a payments receipt key's pin, checked at the snapshot's instant,
 and a certificate, checked on real time.
 
@@ -155,8 +156,8 @@ more value an operator can set wrong. A refusal coupled to payments `livemode`
 would protect only the parties with payments configured while suggesting all were
 protected. So production configuration simply never sets `"injected"`
 ([`configuration.md`, "A test control the production image carries is off by default"](../../../docs/guidance/engineering/configuration.md#a-test-control-the-production-image-carries-is-off-by-default)):
-a process with injected time logs it at startup and reports it with its current
-instant on its status, a party with an Arkhai payments section whose `livemode` is
+a process with injected time logs it at startup and, where it has a status
+surface, reports it with its current instant there, a party with an Arkhai payments section whose `livemode` is
 `true` also logs a warning, and a static check refuses `"injected"` in every
 committed configuration outside the lanes' own
 ([`deployment-state`'s spec](../deployment-state/spec.md)).
