@@ -67,10 +67,12 @@ Each kind's import reconciles as
 [`definition-documents.md`, "Reconciliation follows the document, not the process"](../../../docs/guidance/engineering/definition-documents.md#reconciliation-follows-the-document-not-the-process)
 says.
 
-A relay absent from the document is **retained**. Disabling one would break
-every pool referencing it and every live tunnel on it, which is a far worse
-outcome than a stale row and is not what an operator editing an unrelated entry
-is asking for. A relay established from a document and then administered through
+A relay absent from the document is **retained**. Disabling one drains it:
+every pool referencing it stops taking new delivery until it is enabled again,
+while the deliveries already leased on it run to their end. That is an
+operator's explicit decision, made through the relay's `enabled` entry or the
+API, not what an operator editing an unrelated entry is asking for, and a stale
+row costs far less. A relay established from a document and then administered through
 the API is one relay, not two.
 
 A capacity declaration absent from the document is **retained**, as a relay is.

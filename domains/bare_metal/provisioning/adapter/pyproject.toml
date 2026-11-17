@@ -8,7 +8,8 @@ dependencies = [
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-core>=0.4.0",
     "arkhai-bare-metal>=0.13.0",
-    "arkhai-compute-provisioning>=0.24.0",
+    # The relay resolver that lets a disabled relay's reclaims run.
+    "arkhai-compute-provisioning>=0.28.0",
     "arkhai-compute-provisioning-ansible>=0.6.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-kit-fulfillment>=0.5.0",
@@ -30,7 +31,11 @@ dev = [
     # The backing delegates and pool declarations the view tests build pool
     # contexts from.
     "arkhai-kit-resource-pools-contracts>=0.3.0",
+    # The tests generate throwaway Fernet keys.
+    "cryptography>=42.0",
     "pytest>=9.0.2",
+    # The integration tests' embedded database.
+    "sqlalchemy>=2.0",
     "pytest-asyncio>=0.23",
 ]
 

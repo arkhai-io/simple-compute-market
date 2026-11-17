@@ -16,16 +16,23 @@ a fake agreeing with the code.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
+from sqlalchemy import event
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.relays import (
     Relay,
+    RelayDisabledError,
     RelayPortAllocator,
     RelayPortLease,
+    RelayService,
     RelayWindowExhaustedError,
 )
 
@@ -359,6 +366,237 @@ class TestAllocation:
             )
             with pytest.raises(IntegrityError):
                 db.commit()
+
+
+def _relay_service(session_factory) -> RelayService:
+    """The relay administration a disable goes through. Changing a relay's
+    availability reads no host's connection, so no codec is composed."""
+    return RelayService(session_factory, connection_codecs=ConnectionCodecs([]))
+
+
+def _owners(session_factory) -> list[str]:
+    with session_factory() as db:
+        return sorted(row.owner_id for row in db.query(RelayPortLease).all())
+
+
+class TestADisabledRelayLeasesNoNewPort:
+    """Disabling a relay drains it, and the allocator, the one place a lease is
+    created, is where that holds: a new owner is refused whoever asks, and an
+    owner already holding a lease receives it again, since its delivery is
+    among the work the drain lets finish."""
+
+    def test_a_new_owner_is_refused_standalone_and_no_lease_is_recorded(
+        self, allocator, session_factory
+    ):
+        _relay(session_factory)
+        _relay_service(session_factory).set_enabled("site-a", False)
+
+        with pytest.raises(RelayDisabledError, match="site-a"):
+            allocator.allocate(
+                relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
+            )
+
+        assert _owners(session_factory) == []
+
+    def test_a_new_owner_is_refused_in_the_callers_transaction(
+        self, allocator, session_factory
+    ):
+        _relay(session_factory)
+        _relay_service(session_factory).set_enabled("site-a", False)
+
+        with session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            with pytest.raises(RelayDisabledError, match="site-a"):
+                allocator.allocate_in_session(
+                    db, relay_id="site-a", lease_ends_at=_ENDED,
+                    owner_kind="fulfillment", owner_id="cr-1",
+                )
+            db.commit()
+
+        assert _owners(session_factory) == []
+
+    def test_an_owner_holding_a_lease_receives_it_again(self, allocator, session_factory):
+        _relay(session_factory)
+        held = allocator.allocate(
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
+        )
+        _relay_service(session_factory).set_enabled("site-a", False)
+
+        again = allocator.allocate(
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
+        )
+        with session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            in_session = allocator.allocate_in_session(
+                db, relay_id="site-a", lease_ends_at=_ENDED,
+                owner_kind="fulfillment", owner_id="cr-1",
+            )
+            db.commit()
+
+        assert again == held
+        assert in_session == held
+        assert allocator.held_ports("site-a") == [held.remote_port]
+
+    def test_enabling_the_relay_again_lets_the_new_owner_allocate(
+        self, allocator, session_factory
+    ):
+        _relay(session_factory)
+        relays = _relay_service(session_factory)
+        relays.set_enabled("site-a", False)
+        with pytest.raises(RelayDisabledError):
+            allocator.allocate(
+                relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
+            )
+
+        relays.set_enabled("site-a", True)
+        lease = allocator.allocate(
+            relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
+        )
+
+        assert allocator.held_ports("site-a") == [lease.remote_port]
+
+
+class TestADisableRacingAnAcceptance:
+    """A disable committed while an acceptance is in flight either waits for
+    it, its lease then among the relay's, or is seen by it, and the acceptance
+    is refused: a disabled relay holding no lease never then gains one.
+
+    Independent sessions on a file-backed database, each step started only
+    once the other has reached the point it waits on, with every wait bounded.
+    SQLite has one writer, so here an acceptance holding the writer slot makes
+    a disable wait whatever the allocator reads; on PostgreSQL that wait is the
+    relay row's lock, which no lane here runs, so the last test holds that the
+    allocator takes it.
+    """
+
+    def test_a_disable_waits_for_an_acceptance_that_has_allocated(
+        self, allocator, session_factory, relay_engine
+    ):
+        _relay(session_factory)
+        allocated, disabling, commit = threading.Event(), threading.Event(), threading.Event()
+        outcomes: dict[str, object] = {}
+
+        @event.listens_for(relay_engine, "before_cursor_execute")
+        def report_the_disables_write(conn, cursor, statement, parameters, context, many):
+            if threading.current_thread().name == "disabler" and statement.lstrip().upper().startswith(
+                "UPDATE RELAYS"
+            ):
+                disabling.set()
+
+        def accept() -> None:
+            try:
+                with session_factory() as db:
+                    begin_sqlite_write_transaction(db)
+                    lease = allocator.allocate_in_session(
+                        db, relay_id="site-a", lease_ends_at=_ENDED,
+                        owner_kind="fulfillment", owner_id="cr-1",
+                    )
+                    allocated.set()
+                    if not commit.wait(timeout=10):
+                        raise TimeoutError("the test never let the acceptance commit")
+                    db.commit()
+                    outcomes["accept"] = lease
+            except Exception as exc:
+                outcomes["accept"] = exc
+            finally:
+                allocated.set()
+
+        def disable() -> None:
+            try:
+                outcomes["disable"] = _relay_service(session_factory).set_enabled(
+                    "site-a", False
+                )
+            except Exception as exc:
+                outcomes["disable"] = exc
+            finally:
+                disabling.set()
+
+        acceptor = threading.Thread(target=accept, name="acceptor")
+        disabler = threading.Thread(target=disable, name="disabler")
+        acceptor.start()
+        try:
+            assert allocated.wait(timeout=10), "the acceptance never allocated"
+            disabler.start()
+            # The disable is about to issue its write while the acceptance,
+            # allocated and uncommitted, holds the database's writer slot, so
+            # it cannot have finished: it completes only after that commit.
+            assert disabling.wait(timeout=10), "the disable never reached its write"
+            assert "disable" not in outcomes, outcomes.get("disable")
+        finally:
+            commit.set()
+            acceptor.join(timeout=10)
+            if disabler.ident is not None:
+                disabler.join(timeout=10)
+        assert not acceptor.is_alive()
+        assert not disabler.is_alive()
+
+        lease = outcomes["accept"]
+        assert not isinstance(lease, Exception), lease
+        assert not isinstance(outcomes["disable"], Exception), outcomes["disable"]
+        with session_factory() as db:
+            assert db.get(Relay, "site-a").enabled is False
+        assert allocator.held_ports("site-a") == [lease.remote_port]
+
+    def test_an_acceptance_that_read_the_relay_enabled_is_refused_after_a_disable(
+        self, allocator, session_factory
+    ):
+        """Preparation reads the relay in the acceptance's session, unlocked,
+        before allocation; a disable committing in between is seen by the
+        allocator's own read, not answered from that earlier one."""
+        _relay(session_factory)
+        with session_factory() as acceptance:
+            assert acceptance.get(Relay, "site-a").enabled is True
+            _relay_service(session_factory).set_enabled("site-a", False)
+
+            begin_sqlite_write_transaction(acceptance)
+            with pytest.raises(RelayDisabledError):
+                allocator.allocate_in_session(
+                    acceptance, relay_id="site-a", lease_ends_at=_ENDED,
+                    owner_kind="fulfillment", owner_id="cr-1",
+                )
+            acceptance.rollback()
+
+        assert _owners(session_factory) == []
+        with session_factory() as db:
+            assert db.get(Relay, "site-a").enabled is False
+
+    def test_the_relay_is_read_for_update_before_a_port_is_claimed(
+        self, allocator, session_factory, relay_engine
+    ):
+        """What makes the first order hold on PostgreSQL: the relay row is read
+        with ``FOR UPDATE`` before the claim writes, so a disable's update of
+        that row waits for the acceptance's commit. Each ORM read is rendered
+        for PostgreSQL, since SQLite does not render the lock."""
+        _relay(session_factory)
+        trace: list[str] = []
+
+        @event.listens_for(relay_engine, "before_cursor_execute")
+        def claims(conn, cursor, statement, parameters, context, many):
+            if statement.lstrip().upper().startswith(
+                ("INSERT INTO RELAY_PORT_LEASES", "UPDATE RELAY_PORT_LEASES")
+            ):
+                trace.append("claim")
+
+        with session_factory() as db:
+
+            @event.listens_for(db, "do_orm_execute")
+            def reads(state):
+                if not state.is_select:
+                    return
+                rendered = str(state.statement.compile(dialect=postgresql.dialect()))
+                if "FROM relays" in rendered:
+                    trace.append("relay locked" if "FOR UPDATE" in rendered else "relay")
+
+            begin_sqlite_write_transaction(db)
+            allocator.allocate_in_session(
+                db, relay_id="site-a", lease_ends_at=_ENDED,
+                owner_kind="fulfillment", owner_id="cr-1",
+            )
+            db.commit()
+
+        assert "claim" in trace
+        assert "relay locked" in trace[: trace.index("claim")], trace
+        assert "relay" not in trace, trace
 
 
 class TestTheReleasePrimitive:

@@ -702,10 +702,14 @@ A pool's provider also decides whether declarations in the pool need a host to
 deliver through. Each provider declares it, and the provisioning composition
 supplies the per-provider requirement as plain data. Where the pool is backed and
 its provider needs a host, a declaration has a usable host only when it names one
-that is registered and enabled; the composition that owns hosts tells the lower
-layers which hosts those are through a `DeliverableHosts` report, the identifiers
-of registered, enabled hosts, which each layer reads in the transaction that
-decides, so the site owns no host record. Site admission, the site's rebind
+taking new delivery; the composition that owns hosts tells the lower layers which
+hosts those are through a `DeliverableHosts` report, the identifiers of
+registered, enabled hosts less any it withholds — in the compute composition,
+every host placed or declared in a pool on a disabled relay, since disabling a
+relay drains it
+([physical provisioning, "Disabling a relay drains it"](../../openspec/specs/physical-provisioning/architecture.md#disabling-a-relay-drains-it))
+— which each layer reads in the transaction that decides, so the site owns no
+host record. Site admission, the site's rebind
 recheck, and settlement scheduling each refuse a declaration with no usable host,
 and the site's offered read, from which every projection is built, projects it not
 enabled: the same layer-by-layer recheck, so no layer relies on another having

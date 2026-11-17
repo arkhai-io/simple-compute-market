@@ -33,6 +33,15 @@ from market_resource_pools import PoolValidationError
 _KEY = Fernet.generate_key().decode()
 
 
+def _names_the_pools_drain(message: str) -> None:
+    """A refusal of a pool's relay reference or a host's pool names the pool's
+    drain: disabling the pool clears it, and the relay need not stop."""
+    assert "Disable the pool" in message
+    assert "wait for these leases to be released" in message
+    assert "re-enable the pool" in message
+    assert "Disable the relay" not in message
+
+
 @pytest.fixture
 def relays(session_factory):
     service = RelayService(
@@ -155,6 +164,7 @@ class TestTheWriteRunsTheRebindingRule:
             _set(session_factory, "bm-pool", "site-b")
 
         assert "bm-host-1:6100" in str(excinfo.value)
+        _names_the_pools_drain(str(excinfo.value))
         assert _read(session_factory, "bm-pool") == "site-a"
 
     def test_clearing_is_a_change_and_is_refused_too(self, session_factory, relays, pools):
@@ -239,10 +249,12 @@ class TestAHostMoveReadsTheFamilysReference:
         _set(session_factory, "bm-other", "site-b")
         _lease(session_factory, pool_id="bm-pool", host="host-1")
 
-        with session_factory() as db, pytest.raises(RelayRebindingRefused):
+        with session_factory() as db, pytest.raises(RelayRebindingRefused) as excinfo:
             check_host_pool_change(
                 db, host_id="host-1", current_pool_id="bm-pool", new_pool_id="bm-other"
             )
+
+        _names_the_pools_drain(str(excinfo.value))
 
 
 class TestTheExecutionFields:

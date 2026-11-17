@@ -45,8 +45,12 @@ dispatch until the host is enabled again.
 
 Which hosts take new delivery is the host registry's fact, and the site keeps no
 copy of it. The composition that owns hosts supplies a `DeliverableHosts` report,
-the identifiers of registered, enabled hosts, and the ledger and the scheduler read
-it in the session of the transaction that decides. The fact keeps one authority and
+the identifiers of registered, enabled hosts less any it withholds from new
+delivery, and the ledger and the scheduler read it in the session of the
+transaction that decides. The compute composition withholds every host placed
+in, or declared in, a pool on a disabled relay, which is how a relay's drain
+keeps new deliveries off it without the site learning of relays
+([physical provisioning, "Disabling a relay drains it"](../physical-provisioning/architecture.md#disabling-a-relay-drains-it)). The fact keeps one authority and
 is read where it is kept, so the decision is judged against the host state its own
 transaction sees, and nothing is copied, migrated, or put on a wire. That holds only
 if the transaction has begun before the first read the decision rests on. The SQLite
