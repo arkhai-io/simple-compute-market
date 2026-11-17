@@ -16,7 +16,9 @@ status and fails naming any that does not report T, a status with no time
 section among them. Lane time only moves forward and is never reset: a set
 earlier than the harness's instant fails naming the harness and both instants,
 and a party refusing a set fails naming that party. At the session's start
-every party is set to the wall instant of that moment.
+every party is set to the wall instant of that moment, or to the latest instant
+a party already holds when a run before this one on the same stack left lane
+time ahead. The chain is frozen between sets.
 
 In a wall run nothing is set: a stage reaches an instant the Agreement fixes by
 waiting for it, and any other instant is a blocked skip naming the wall-time
@@ -211,9 +213,16 @@ class LaneTime:
                 + "; ".join(astray))
 
     def start(self, wall_now: int) -> None:
-        """The session's start: an injected run sets every party to ``wall_now``."""
+        """The session's start: an injected run sets every party to ``wall_now``,
+        or to the latest instant a party already holds — a run before this one on
+        the same stack left lane time ahead of the wall clock, or the chain ran
+        ahead of it — so the start never sets a party back."""
         if self.injected:
-            self.set(wall_now)
+            held = [reading.now for party in self.parties
+                    for reading in (self._read(party),)
+                    if reading.now is not None
+                    and (party.kind in _SOURCELESS or reading.source == "injected")]
+            self.set(max([wall_now, *held]))
         self.check_one_source()
 
     def reach(self, instant: int, *, fixed_by_agreement: bool) -> int:
@@ -283,13 +292,22 @@ class ClientParty:
 
 @dataclass
 class ChainParty:
-    """The lane's dev chain: its next block stamped at the instant, then mined."""
+    """The lane's dev chain: its block time frozen, its next block stamped at the
+    instant, then mined.
+
+    Left to itself the chain stamps each block with the wall clock, running ahead
+    of a held lane instant by the real time since the last set, and refuses a
+    later set that falls behind its latest block. With the interval between
+    block stamps set to zero, every block after a set carries the set instant
+    until the next set.
+    """
 
     name: str
     rpc: Callable[[str, list[Any]], Any]
     kind: str = "chain"
 
     def set_time(self, now: int) -> None:
+        self.rpc("anvil_setBlockTimestampInterval", [0])
         self.rpc("evm_setNextBlockTimestamp", [now])
         self.rpc("evm_mine", [])
 
@@ -311,6 +329,10 @@ class BuyerFileParty:
         self.file.write(now)
 
     def time(self) -> TimeReading:
+        # The harness writes the file at the session's first set; before it, a
+        # fresh run has none, which holds no instant rather than failing.
+        if not self.file.path.exists():
+            return TimeReading(None, None)
         return TimeReading(None, self.file.now())
 
 
@@ -432,7 +454,8 @@ def buyer_time_file(section: Mapping[str, Any] | None) -> str | None:
 
 
 def wall_instant() -> int:
-    """The wall instant the session starts an injected run at."""
+    """The wall instant the session starts an injected run at, unless a party
+    already holds a later one."""
     return int(time.time())
 
 

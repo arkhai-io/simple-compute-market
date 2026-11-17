@@ -2524,49 +2524,223 @@ configuration they mount for every party, the e2e runner profiles,
 `e2e-tests/tests/e2e/roles/scenarios/vms/dispute/test_hold_passed.py`, and the stages
 that advanced the doubles.
 
-- [ ] 16.1 Each lane's committed configuration sets the injected source for every
+- [x] 16.1 Each lane's committed configuration sets the injected source for every
   party: each storefront's `[Time] source`, provisioning's and the credits service's
   `time.source`, each registry's `TIME_SOURCE`, the sample app's
   `APICREDITS_SAMPLE_APP_TIME_SOURCE` and control token, both doubles, and the buyer
   profile's `[time]` section with the file path the harness writes (D21, D19).
   - Verify: the e2e unit tests' stack checks read each lane's Compose configuration and
     find every party injected.
-- [ ] 16.2 `test_hold_passed.py` sets lane time past the part's terms end and release
+  - Done: each party's setting is in the configuration form it takes its
+    settings in, in files only the lanes load, so the full local stack stays on
+    wall time (12.2's handoff; `configuration.md`, "Application settings stay
+    out of the environment"): every lane registry's `TIME_SOURCE` in the
+    registries' lane profile, `dev-env/registry/config-payments-lane.env`,
+    which each layers through `ACTIVE_PROFILES`; each provisioning service's
+    `time.source` in a new lane profile, `dev-env/provisioning/config-lane-time.yml`,
+    which each lane's overlay mounts and layers before the run's mode
+    (`ACTIVE_PROFILES=docker,<site>,lane-time,<mode>`); each storefront's
+    `[Time] source` in its lane configuration — `storefront.bob.lane.toml`,
+    `storefront.credits.lane.toml`, the bare-metal lane's own
+    `storefront.dev.toml`, and a new `storefront.alice.lane.toml`, Alice's
+    full-stack file with `[Time]`, which `compose.vms-lane.yml` mounts in its
+    place as Bob's lane file is; and, in the environment they take their
+    settings from, in the lanes' own overlays, the credits service's
+    `APICREDITS_TIME__SOURCE` (its trusted principals beside it),
+    the sample app's source and control token and both doubles'
+    sources (`compose.apicredits-lane.yml`, `compose.payments-double.yml`).
+    Each lane profile's `lane_time.mode` is now `injected`, and the API-credit
+    lane's names the sample app (`kind: control`). The buyer's `[time]` table
+    is the harness's generated configuration (15.2), naming
+    `/tmp/arkhai-lane-time/now.json` in the runner. Static tests follow:
+    `scripts/tests/test_lane_compose.py` holds the VM provisioning services'
+    `ACTIVE_PROFILES` with `lane-time` and its mount in the VM lane and
+    without either in the full stack, and a new
+    `test_the_full_local_stack_runs_wall_time` holds the rendered full stack to
+    no injected source, no lane profile and no lane configuration;
+    `test_bare_metal_compose.py` holds the site's profiles;
+    `test_committed_stack_values.py` the registries' lane profile's
+    `TIME_SOURCE`; and `e2e-tests`' `test_domain_stack_configuration.py` holds
+    each lane storefront copy to its stack profile but for payments and its
+    `[Time]`.
+  - Evidence, static configuration, `e2e-tests/tests/unit/test_lane_time_profiles.py`:
+    every service party of each lane — every party its profile names but the
+    chain and the buyer's file, which the harness sets — runs `injected` by
+    the lane's own configuration, read in that party's form (the storefront
+    file its overlay mounts, the lane profile its `ACTIVE_PROFILES` layers, its
+    environment), each overlay read as committed rather than rendered with the
+    files under it; Alice's lane file is her full-stack file but for `[Time]`;
+    each profile's mode is `injected`; the sample app's control token is the
+    one its overlay gives it. `make test-e2e-unit` 950 passed; `make
+    test-release-tooling` 3185 (the rendered-stack tests among them).
+- [x] 16.2 `test_hold_passed.py` sets lane time past the part's terms end and release
   instant instead of advancing the doubles (D18).
   - Verify: `make -C e2e-tests` runs the VM lane's `e2e_vm_dispute_hold_passed` module
     locally and it passes.
-- [ ] 16.3 Run each lane locally (`make -C e2e-tests test-e2e`).
+  - Done: stages 20 and 21 set lane time — every party's — a second past the
+    part's terms end, then past its release instant, through
+    `lane_time.reach(…, fixed_by_agreement=False)`, so on a wall-time run stage
+    20 is a blocked skip (the instants are days ahead) and stages 21 and 22
+    skip naming the stage before them; section 13's module fixture over the
+    doubles' controls is gone. The marker's description, the
+    Makefile's lane comment and the e2e README's row and paragraph say what
+    the module now does, and that a later module starts days later.
+  - Evidence, system: the module ran in 16.3's VM lane run and passed, every
+    stage of it.
+- [x] 16.3 Run each lane locally (`make -C e2e-tests test-e2e`).
   - Verify: the three lanes pass, every module on injected time, the session fixture
     confirming every party; record each lane's pass counts in the task note.
-- [ ] 16.4 Section verification.
+  - Evidence, system, on the final configuration: `make -C e2e-tests test-e2e`
+    (the three lanes one after another, each stack taken down after), every
+    module on injected time with the session fixture setting and confirming
+    every party at the session's start: VM 310 passed (nothing failed or
+    skipped), bare metal 115 passed, API credits 4 passed
+    (`test_credits_full_deal` and the payment deal's three tests). The same
+    counts came from the per-lane targets on the overlay-environment form
+    before the fresh-context check moved each setting into lane-owned files.
+    No API-credit module moves lane time, so its run sits at the session's
+    start, close to wall time: it shows every party injected and confirmed,
+    not that a metered call signs at an advanced instant (the sample app's
+    suite shows that, 13.3).
+  - The VM lane's first run failed one stage, the canonical deal's 08b, and
+    skipped the 20 that depend on it: `evm_setNextBlockTimestamp` refused the
+    late-settlement instant as lower than the chain's latest block. Between
+    sets the chain stamped blocks with the wall clock, running ahead of lane
+    time (D15's accepted drift), and the hold-passed module had already moved
+    lane time days ahead, so a set of a few seconds fell behind it. Fixed in
+    15's `ChainParty`, as 15.3 left open: each set first calls
+    `anvil_setBlockTimestampInterval(0)`, which the lane's Anvil admits, so
+    every block after a set carries the set instant until the next — the chain
+    is frozen between sets (D15's "freeze where it can"). The unit test of the
+    chain party holds the three calls. Also fixed: `LaneTime.start` now starts
+    at the latest instant any injected party holds, the chain's latest block
+    included, or the wall instant if later, so a rerun against a lane's stack
+    left ahead never sets a party back (D4); and a fresh run's missing buyer
+    file reads as holding no instant until the first set writes it. Unit
+    tests: a stack left ahead, the chain's block counted, a wall-time party's
+    instant not taken, the missing file.
+  - For the round's triage: `test-compatibility`'s delta (and D7, D11) has the
+    fixture set every party "at the session's start to the wall instant at
+    that moment"; the start now takes a later instant when a party already
+    holds one — on a fresh lane only the chain's latest block, a second or so
+    ahead, and on a rerun against a stack left ahead its parties' instant. The
+    delta wants a MODIFIED wording ("the wall instant at that moment, or the
+    latest instant a party already holds"); the code is as above.
+  - Owed by validation: none new; the pipeline's three lane jobs (`e2e.yml`, run
+    by validation's pipeline part) run every module on injected time.
+- [x] 16.4 Section verification.
   - System: the three lanes locally, 16.3.
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: every module of the three lanes, the hold-passed module
     (`e2e_vm_dispute_hold_passed`) the one that moves time; pre-review validation's
     Helm scenarios (`contracts`, `e2e_alkahest_escrow_codecs`,
     `e2e_alkahest_trusted_oracle`) in wall mode.
+  - Evidence: 16.3's lane runs; `make test-e2e-unit` 950, `make
+    test-release-tooling` 3185. `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes`, run once over sections 16 and 17
+    together, is recorded under 17.3.
+  - Confirmed end-to-end: every module of the three lanes ran on injected
+    time locally (16.3), the hold-passed module setting lane time days ahead;
+    the Helm scenarios run in wall mode by validation's Helm part, whose
+    profile names no lane parties (15.4's gap).
+  - Fresh-context check: it found each time source set as a container
+    environment variable against `configuration.md`'s rule (moved into
+    lane-owned files: the registries' and provisioning services' lane
+    profiles, the storefronts' lane configuration, Alice's new lane file; the
+    environment kept only for the credits service, the sample app and the
+    doubles, which take their settings from it) and the overlay comments'
+    reason and the loosened tests with it (reverted; the full stack is now
+    held to wall time), the static check reading overlays raw (kept, as
+    `test_domain_stack_configuration.py` reads them, and said in its
+    docstring; the rendered stacks are held by `test_lane_compose.py`), the
+    session start described as the wall instant (corrected in the module,
+    `TESTING.md` and `deal-scenarios.md`) and departing from the delta
+    (recorded above for triage), `system-tests.md`'s wait bullet contradicting
+    the new one (scoped to a run on the wall clock), its undefined "blocked
+    skip" and "set time" and a drift claim assuming frozen time (reworded,
+    and the proxy taken out of the ladder as the restriction it is),
+    `deal-scenarios.md` repeating `TESTING.md`'s mechanism and wording tied to
+    planned work (trimmed to rules, linking "Lane time"), the hold-passed
+    module's stages 21 and 22 failing on a wall run (they skip), the overlay
+    table in `DEPLOYMENT_AND_CONFIG.md` (added to 18.9's list), and claims
+    broader than their tests (the API-credit run, the start's unit tests, the
+    hold-passed skip, `TESTING.md`'s freeze, the `test-e2e` target; reworded).
 
 ## 17. The scenario rule restated
 
 Delivers D8 and D16's ladder. Touches `docs/guidance/engineering/system-tests.md`,
 `docs/guidance/repository/deal-scenarios.md`, and `docs/development/TESTING.md`.
 
-- [ ] 17.1 `system-tests.md`, "A scenario is a sequence of state changes": the clock
+- [x] 17.1 `system-tests.md`, "A scenario is a sequence of state changes": the clock
   bullet becomes reaching an instant by setting the time every party perceives,
   together, back-dating admitted below it and discouraged; a new section "Time a test
   does not control" states D16's ladder, neutrally (D8, D16).
   - Verify: `make check-guidance` passes.
-- [ ] 17.2 `deal-scenarios.md`, "The discipline every scenario follows", and
+  - Done: the bullet now reaches an instant by setting the time every
+    participant perceives, together, never by waiting or by moving one
+    participant alone, with the reason (signed or timestamped exchanges fail
+    past their tolerance, and a decision dated in another participant's future
+    is never acted on), and back-dating a record and stepping its loop
+    admitted below it, weaker and discouraged once time can be set; the wait
+    bullet's instant the scenario's data fixes is now a wall-clock run's.
+    "Time a test does not control" states the ladder — keep the component's
+    times out of the way, control them through its own control or a double,
+    back-dating below those, otherwise the wall clock with waits for instants
+    the scenario's data fixes and skips naming the instant and the component
+    — with a rewriting proxy set apart as serving only times not exercised,
+    that a run sets every participant's time or none, and that shared stages
+    reach instants through one helper, with a billing service and card
+    processor as its example. `make check-guidance` passes.
+- [x] 17.2 `deal-scenarios.md`, "The discipline every scenario follows", and
   `TESTING.md`, "4. System Integration Tests (End-to-End)": lane time across every
   party, the lane-time fixture and its order, never reset, the chain, the two run
   modes, the buyer's file; the doubles' perceived-clock text and `lane_double_clock`
   removed (D4, D7, D8, D15, D16, D19, D21).
   - Verify: `make check-doc-citations CHANGE=drive-the-storefront-clock-in-lanes`
     passes.
-- [ ] 17.3 Section verification.
+  - Done: `deal-scenarios.md`'s discipline paragraph on `wait_until` and the
+    doubles' perceived clock gives way to the rules of lane time — every
+    Compose lane injected and confirmed, setting rather than waiting, forward
+    only and never reset, a missing party failing the setup, the wall-time
+    run's Agreement-fixed waits and blocked skips through one helper, one
+    source per run — linking `TESTING.md`'s "Lane time" for the mechanism;
+    its back-dated VM lease end is kept, admitted below lane time. `TESTING.md`
+    gains "Lane time" under section 4: the parties and the lane-owned
+    configuration each lane states their sources in, the profile section, the
+    fixture's start (the wall instant, or a later one a party holds), set
+    order (the chain frozen, stamped and mined) and confirmation, never reset,
+    the buyer's file, the two run modes and the hold-passed module. Neither
+    held `lane_double_clock` text but the paragraph replaced; section 13
+    removed the e2e README's.
+  - Evidence: `make check-guidance` passes; `make check-doc-citations
+    CHANGE=drive-the-storefront-clock-in-lanes` reports only closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9). No permanent
+    document outside the specification and its companion (archive and 18.9)
+    and `ROADMAP.md` (18.5) still names the perceived clock,
+    `lane_double_clock` or the clock routes.
+- [x] 17.3 Section verification.
   - `make check-guidance`; `scripts/change-workflow run pre-commit
     drive-the-storefront-clock-in-lanes`.
   - End-to-end: none; documentation only.
+  - Evidence: `make check-guidance` passes. `scripts/change-workflow run
+    pre-commit drive-the-storefront-clock-in-lanes`, run over sections 16 and
+    17 together before they were committed apart: before the fresh-context
+    fixes and on the final tree alike, `after-functional-change` (`make lock`)
+    and `pre-commit-functional` (`make dist-clean`, `make check-packaging`,
+    `make test`, every suite) passed, and of `pre-commit` only the citations
+    check failed, on closeout's `openspec/specs/injected-time/architecture.md`
+    (18.9).
+  - Fresh-context check: one check covered sections 16 and 17; its findings
+    and their disposition are under 16.4.
+  - Handoff for closeout: 18.3's documentation compliance finds no permanent
+    document outside `test-compatibility`'s specification and companion and
+    `ROADMAP.md` naming the perceived clock; 18.9 owes, beyond its list,
+    `buyer-orchestration`'s companion (14.3) and `DEPLOYMENT_AND_CONFIG.md`'s
+    overlay table (16.4), both now in it. The round's triage has two
+    specification items: 5.1's relay key (done in round 1) and 16.3's session
+    start. This session grew very large: sections 13–17 in one session, with
+    two compactions' worth of context; the round's triage is better started
+    fresh.
 
 ## 18. Closeout
 
@@ -2618,6 +2792,9 @@ archive's writes; a part needing any other edit returns the change to implementa
   - `docs/development/DEPLOYMENT_AND_CONFIG.md`: "Profile-based configuration", a new
     subsection "The time source" — each party's setting, its default, the announcement
     and warning (D2); "Release topology" — the local Helm release on wall time (D17);
+    the overlay table's rows for the lanes' time settings (the registries' and
+    provisioning services' lane profiles, the storefronts' lane configuration, the
+    credits service's, sample app's and doubles' environment; 16.1);
   - `docs/guidance/engineering/configuration.md`: a new section "A test control the
     production image carries is off by default" — off by default, omitted from
     production configuration, never refused (D2);

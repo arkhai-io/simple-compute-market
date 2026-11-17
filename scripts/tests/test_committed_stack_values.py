@@ -164,7 +164,11 @@ def test_the_private_registry_bootstrap_key_is_the_one_its_clients_hold() -> Non
 def test_the_lane_profile_recommends_the_mediation_double() -> None:
     recommended = _dotenv(REGISTRY_PROFILES / "config-payments-lane.env")
     authority = _toml(MEDIATION_AUTHORITY)
-    assert set(recommended) == {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"}
+    # Beside the recommendation, the lanes' injected time, which the full local
+    # stack, never loading this profile, does not run.
+    assert set(recommended) == {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES",
+                                "TIME_SOURCE"}
+    assert recommended["TIME_SOURCE"] == "injected"
     assert json.loads(recommended["REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"]) == [
         {key: authority[key] for key in RECOMMENDED_KEYS}
     ]

@@ -24,7 +24,7 @@ payments:
 # (config-docker.yml's bare_metal_lane, config-payments-lane.yml,
 # dev-env/registry/), never for a public network.
 lane_time:
-  mode: wall
+  mode: injected
   target: "the bare-metal Compose lane"
   parties:
     - name: bare-metal-storefront

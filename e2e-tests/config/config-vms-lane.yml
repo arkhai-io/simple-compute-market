@@ -20,7 +20,7 @@ payments:
 # (config-docker.yml, config-payments-lane.yml, dev-env/registry/), never for a
 # public network.
 lane_time:
-  mode: wall
+  mode: injected
   target: "the VM Compose lane"
   parties:
     - name: bob-storefront

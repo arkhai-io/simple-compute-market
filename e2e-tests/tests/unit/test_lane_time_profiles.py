@@ -1,12 +1,15 @@
-"""Each lane profile's lane_time section builds, and restates its sources exactly.
+"""Each lane's time: its profile section builds and restates its sources, and its
+configuration injects every party.
 
 The committed runner profiles (`config/config-<lane>-lane.yml`) name every party
 of their lane; each is built over its typed client here, as the session fixture
 builds it, with no network call. Every value a section restates — an
 administrator credential or pin, a registry's administrator key, a double's
 control token, the credits operator — is held to the committed file it comes
-from, so a wrong copy fails here rather than as a lane's setup. Every value is a
-public development fixture, never used on any network.
+from, so a wrong copy fails here rather than as a lane's setup. And every
+service party is held to injected time by the lane's own configuration, read
+in the form that party takes its settings in. Every value is a public
+development fixture, never used on any network.
 """
 
 from __future__ import annotations
@@ -41,7 +44,47 @@ PARTIES = {
     "apicredits": [("credits-storefront", "storefront"), ("credits-service", "credits"),
                    ("api-credits-registry", "registry"), ("compute-registry", "registry"),
                    ("payments-double", "control"), ("mediation-double", "control"),
-                   ("anvil", "chain"), ("buyer-file", "buyer")],
+                   ("sample-app", "control"), ("anvil", "chain"), ("buyer-file", "buyer")],
+}
+#: Where each lane configures each service party's time source, in the form that
+#: party takes its settings in: a storefront's lane configuration file, mounted
+#: by the lane's overlay; a provisioning service's lane profile, and a
+#: registry's, each layered through the service's ACTIVE_PROFILES; and the
+#: environment of a service configured by it.
+CONFIGURED = {
+    "vms": {
+        "bob-storefront": ("storefront", "compose.vms-lane.yml", "bob-storefront"),
+        "alice-storefront": ("storefront", "compose.vms-lane.yml", "alice-storefront"),
+        "bob-provisioning": ("provisioning", "compose.vms-lane.yml", "provisioning"),
+        "alice-provisioning": ("provisioning", "compose.vms-lane.yml", "alice-provisioning"),
+        "registry-a": ("registry", "compose.vms-lane.yml", "registry"),
+        "registry-b": ("registry", "compose.vms-lane.yml", "registry-b"),
+    },
+    "bare-metal": {
+        "bare-metal-storefront": ("storefront", "compose.bare-metal-local.yml",
+                                  "bare-metal-storefront"),
+        "bare-metal-provisioning": ("provisioning", "compose.bare-metal-local.yml",
+                                    "bare-metal-provisioning"),
+        "bare-metal-registry": ("registry", "compose.bare-metal-local.yml",
+                                "bare-metal-registry"),
+    },
+    "apicredits": {
+        "credits-storefront": ("storefront", "compose.apicredits-lane.yml", "credits-storefront"),
+        "credits-service": ("environment", "compose.apicredits-lane.yml", "credits-service",
+                            "APICREDITS_TIME__SOURCE"),
+        "api-credits-registry": ("registry", "compose.apicredits-lane.yml",
+                                 "api-credits-registry"),
+        "compute-registry": ("registry", "compose.apicredits-lane.yml", "compute-registry"),
+        "sample-app": ("environment", "compose.apicredits-lane.yml", "sample-app",
+                       "APICREDITS_SAMPLE_APP_TIME_SOURCE"),
+    },
+}
+#: The doubles, which every lane layers from one overlay.
+DOUBLES = {
+    "payments-double": ("environment", "compose.payments-double.yml", "payments-double",
+                        "PAYMENTS_LANE_DOUBLE_TIME_SOURCE"),
+    "mediation-double": ("environment", "compose.payments-double.yml", "mediation-double",
+                         "MEDIATION_LANE_DOUBLE_TIME_SOURCE"),
 }
 #: The registry profile each lane registry reads its administrator key from.
 REGISTRY_PROFILES = {
@@ -89,8 +132,63 @@ def test_every_party_of_the_lane_is_named_and_built_over_its_client(lane: str, t
 
     parties = parties_from({"parties": entries})
 
-    assert section["mode"] in {"injected", "wall"}
+    assert section["mode"] == "injected"
     assert [(party.name, party.kind) for party in parties] == PARTIES[lane]
+
+
+def _service(compose: str, service: str) -> dict[str, Any]:
+    return yaml.safe_load((REPO / compose).read_text())["services"][service]
+
+
+def _environment(compose: str, service: str) -> dict[str, str]:
+    return dict(entry.split("=", 1) for entry in _service(compose, service).get("environment", []))
+
+
+def _source(form: str, compose: str, service: str, *variable: str) -> str | None:
+    """The time source a lane's configuration gives one service, read the way
+    that service takes its settings."""
+    if form == "environment":
+        return _environment(compose, service).get(variable[0])
+    if form == "storefront":
+        [mounted] = [volume.split(":")[0] for volume in _service(compose, service)["volumes"]
+                     if volume.split(":")[1] == "/etc/arkhai/storefront.toml"]
+        return tomllib.loads((REPO / mounted).read_text())["Time"]["source"]
+    profiles = _environment(compose, service)["ACTIVE_PROFILES"].split(",")
+    if form == "provisioning":
+        assert "lane-time" in profiles, service
+        lane = yaml.safe_load((REPO / "dev-env/provisioning/config-lane-time.yml").read_text())
+        return lane["time"]["source"]
+    assert "payments-lane" in profiles, service
+    return _env(REPO / "dev-env/registry/config-payments-lane.env").get("TIME_SOURCE")
+
+
+@pytest.mark.parametrize("lane", LANES)
+def test_every_service_party_of_the_lane_is_configured_for_injected_time(lane: str) -> None:
+    """`test-compatibility`'s "Every party in a lane shares one lane time": each
+    party the profile names, but the chain and the buyer's file, which the
+    harness sets, runs injected time by the lane's own configuration. Each
+    overlay is read as committed, not rendered with the files under it."""
+    services = {name for name, kind in PARTIES[lane] if kind not in {"chain", "buyer"}}
+    configured = {**CONFIGURED[lane], **DOUBLES}
+
+    assert services == set(configured)
+    for name, where in configured.items():
+        assert _source(*where) == "injected", name
+
+
+def test_alice_s_lane_configuration_is_her_full_stack_one_with_the_lane_s_time() -> None:
+    lane = tomllib.loads((REPO / "domains/vms/storefront/storefront.alice.lane.toml").read_text())
+    full = tomllib.loads((REPO / "domains/vms/storefront/storefront.alice.toml").read_text())
+
+    assert lane.pop("Time") == {"source": "injected"}
+    assert lane == full
+
+
+def test_the_sample_app_s_control_token_is_the_one_the_lane_gives_it() -> None:
+    environment = _environment("compose.apicredits-lane.yml", "sample-app")
+
+    assert _parties("apicredits")["sample-app"]["token"] == (
+        environment["APICREDITS_SAMPLE_APP_CONTROL_TOKEN"])
 
 
 @pytest.mark.parametrize("lane", LANES)

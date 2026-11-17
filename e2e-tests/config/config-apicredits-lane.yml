@@ -21,7 +21,7 @@ payments:
 # compose.apicredits-lane.yml's credits operator, Anvil 9), never for a public
 # network.
 lane_time:
-  mode: wall
+  mode: injected
   target: "the API-credit Compose lane"
   parties:
     - name: credits-storefront
@@ -66,6 +66,10 @@ lane_time:
       url: "https://mediation-double:8443"
       token: mediation-lane-double-control-public-development-token
       ca_bundle_path: /run/lane-doubles/lane-ca.pem
+    - name: sample-app
+      kind: control
+      url: "http://sample-app:8085"
+      token: sample-app-lane-control-public-development-token
     - name: anvil
       kind: chain
       url: "http://anvil:8545"

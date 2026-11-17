@@ -147,6 +147,42 @@ def test_the_session_start_sets_every_party_to_the_wall_instant() -> None:
     assert (calls, party.now) == (["bob-storefront"], T)
 
 
+def test_a_session_on_a_stack_left_ahead_starts_at_the_latest_instant_a_party_holds() -> None:
+    calls: list[str] = []
+    behind = FakeParty("bob-storefront", "storefront", calls, now=T - 60)
+    ahead = FakeParty("registry-a", "registry", calls, now=T + 86_400)
+    lane = _lane(behind, ahead, start=T)
+
+    lane.start(T)
+
+    assert (behind.now, ahead.now) == (T + 86_400, T + 86_400)
+
+
+def test_the_session_start_counts_the_chain_s_latest_block_and_no_wall_time_party() -> None:
+    class Chain(FakeParty):
+        def time(self) -> TimeReading:
+            return TimeReading(None, self.now)
+
+    class Wall(FakeParty):
+        def time(self) -> TimeReading:
+            return TimeReading("wall", T + 10_000)
+
+    calls: list[str] = []
+    storefront = FakeParty("bob-storefront", "storefront", calls, now=T - 60)
+    # The chain ran ahead of a held lane instant; its latest block counts.
+    chain = Chain("anvil", "chain", calls, now=T + 90)
+
+    _lane(storefront, chain, start=T).start(T)
+
+    assert (storefront.now, chain.now) == (T + 90, T + 90)
+
+    other = FakeParty("bob-storefront", "storefront", [], now=T - 60)
+    with pytest.raises(LaneTimeError, match=r"registry-a \(on wall time\)"):
+        _lane(other, Wall("registry-a", "registry", []), start=T).start(T)
+    # The wall-time party's instant was not taken for the start.
+    assert other.now == T
+
+
 def test_a_mix_of_sources_fails_naming_the_wall_time_party() -> None:
     lane = LaneTime("wall", [FakeParty("registry-a", "registry", [], source="wall"),
                              FakeParty("bob-storefront", "storefront", [])])
@@ -248,12 +284,14 @@ def test_the_chain_is_stamped_and_mined_and_read_from_its_latest_block() -> None
     chain = ChainParty("anvil", rpc)
     chain.set_time(T)
 
-    assert sent == [("evm_setNextBlockTimestamp", [T]), ("evm_mine", [])]
+    assert sent == [("anvil_setBlockTimestampInterval", [0]),
+                    ("evm_setNextBlockTimestamp", [T]), ("evm_mine", [])]
     assert chain.time() == TimeReading(None, T)
 
 
 def test_the_buyer_file_is_written_and_read_by_the_component(tmp_path) -> None:
     party = BuyerFileParty("buyer-file", TimeFile(tmp_path / "lane-time.json"))
+    assert party.time() == TimeReading(None, None)
 
     party.set_time(T)
 

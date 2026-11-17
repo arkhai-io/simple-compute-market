@@ -209,3 +209,8 @@ settlements = [
 # default_max_duration_seconds = 0 (or omitted) means "unlimited".
 default_min_price            = "100"
 default_max_duration_seconds = 0
+
+# Every party of the lane runs one injected time, which the lane-time fixture
+# sets.
+[Time]
+source = "injected"
