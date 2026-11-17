@@ -23,6 +23,18 @@ The procedure worked, and it was carried out by hand four times, from instructio
 written afresh for each session. It will be needed again whenever someone else's
 change has to be continued here.
 
+A change can also predate the workflow. `relay-vm-access-without-a-dashboard` was
+implemented and promoted before the workflow existed, so it had no log and no records.
+In closeout, the owner returned it to design, and that took hand edits:
+
+- Its index status was set back to `ready for design`, so that the next-step
+  computation, reading the status when there is no log, would name design.
+- The owner's two course corrections were written into its ledger by hand.
+
+Only then could `make orchestrate` create its clone and start design. This is the same
+need from another direction: a change whose state the workflow never recorded has to
+be brought to where orchestration can take it over.
+
 ## What Changes
 
 - A new skill, `change-intake`, run by the owner in their workspace, outside any
