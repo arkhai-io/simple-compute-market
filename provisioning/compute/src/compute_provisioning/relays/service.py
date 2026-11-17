@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 from market_config import encrypt_secret
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..hosts.connection import ConnectionCodecs
@@ -142,6 +142,14 @@ class RelayView:
     reach a credential through this type. ``token_configured`` answers the
     question an operator actually has — is this relay usable — without
     disclosing the value.
+
+    ``drained`` is true exactly when the relay is disabled and holds no active
+    lease. It is stable once true: the allocator leases no port on a disabled
+    relay to a new owner, so a drained relay's active leases cannot grow back.
+    It does not wait for a released lease's grant to expire: a lease is
+    released only with its capacity, once nothing it admitted remains, and a
+    grant is verified only by its own relay's keys, which go with the server.
+    Both are computed from the leases, so nothing is stored.
     """
 
     id: str
@@ -152,6 +160,8 @@ class RelayView:
     vm_port_range_count: int
     enabled: bool
     token_configured: bool
+    active_lease_count: int
+    drained: bool
     grant_keys: GrantKeysView
 
     @classmethod
@@ -160,8 +170,15 @@ class RelayView:
         row: Relay,
         retired: Iterable[RelayRetiredGrantKey] = (),
         held: Iterable[RelayPortLease] = (),
+        *,
+        active_lease_count: int,
     ) -> "RelayView":
-        """The view of a relay row, with its retired keys and its held leases."""
+        """The view of a relay row, with its retired keys, its held leases, and
+        how many leases it holds.
+
+        ``held`` serves the retired keys' validity and may be left empty when
+        the relay has none; ``active_lease_count`` is always the relay's own.
+        """
         held = tuple(held)
         active = None
         if row.grant_key_id is not None:
@@ -184,6 +201,8 @@ class RelayView:
             vm_port_range_count=row.vm_port_range_count,
             enabled=bool(row.enabled),
             token_configured=bool(row.relay_token_encrypted),
+            active_lease_count=active_lease_count,
+            drained=not row.enabled and active_lease_count == 0,
             grant_keys=GrantKeysView(
                 active=active,
                 staged=staged,
@@ -309,8 +328,21 @@ class RelayService:
                     RelayPortLease.released_at.is_(None)
                 ):
                     held.setdefault(lease.relay_id, []).append(lease)
+            # Every relay's active leases counted in one grouped query, rather
+            # than one count per relay.
+            counts: dict[str, int] = dict(
+                session.query(RelayPortLease.relay_id, func.count(RelayPortLease.id))
+                .filter(RelayPortLease.released_at.is_(None))
+                .group_by(RelayPortLease.relay_id)
+                .all()
+            )
             return [
-                RelayView.of(row, retired.get(row.id, ()), held.get(row.id, ()))
+                RelayView.of(
+                    row,
+                    retired.get(row.id, ()),
+                    held.get(row.id, ()),
+                    active_lease_count=counts.get(row.id, 0),
+                )
                 for row in rows
             ]
 
@@ -381,7 +413,8 @@ class RelayService:
                 row.relay_token_encrypted = self._encrypt(token)
             db.add(row)
             db.flush()
-            return RelayView.of(row)
+            # A relay just created holds no lease.
+            return RelayView.of(row, active_lease_count=0)
 
     def update_relay(
         self,
@@ -617,10 +650,13 @@ class RelayService:
             .order_by(RelayRetiredGrantKey.retired_at, RelayRetiredGrantKey.key_id)
             .all()
         )
-        held = (
-            RelayPortAllocator.active_leases_for_relay(db, row.id) if retired else []
-        )
-        return RelayView.of(row, retired, held)
+        if retired:
+            held = RelayPortAllocator.active_leases_for_relay(db, row.id)
+            count = len(held)
+        else:
+            held = []
+            count = RelayPortAllocator.count_held(db, row.id)
+        return RelayView.of(row, retired, held, active_lease_count=count)
 
     @staticmethod
     def _require(db: Session, relay_id: str) -> Relay:

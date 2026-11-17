@@ -181,6 +181,75 @@ class TestRelayAdministration:
             _make_relay(relays, vm_port_range_start=65500, vm_port_range_count=100)
 
 
+class TestTheDrainReport:
+    """Every relay read reports how many leases the relay holds and whether it
+    has drained: disabled, and holding none. The relay's operator relies on
+    ``drained`` to know the relay server may be removed."""
+
+    #: A lease end well ahead, so a released lease's grant has not expired.
+    _AHEAD = datetime.now(timezone.utc) + timedelta(days=30)
+
+    @staticmethod
+    def _both(relays, relay_id="site-a"):
+        """The relay as the read and the list report it."""
+        read = relays.get_relay(relay_id)
+        (listed,) = [view for view in relays.list_relays() if view.id == relay_id]
+        assert (listed.active_lease_count, listed.drained) == (
+            read.active_lease_count,
+            read.drained,
+        )
+        return read
+
+    def test_an_enabled_relay_holding_no_lease_is_not_drained(self, relays):
+        created = _make_relay(relays)
+
+        assert (created.active_lease_count, created.drained) == (0, False)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (0, False)
+
+    def test_a_relay_is_drained_once_disabled_and_its_last_lease_released(
+        self, relays, session_factory
+    ):
+        _make_relay(relays)
+        allocator = RelayPortAllocator(session_factory)
+        allocator.allocate(
+            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1",
+            lease_ends_at=self._AHEAD,
+        )
+
+        disabled = relays.set_enabled("site-a", False)
+        assert (disabled.active_lease_count, disabled.drained) == (1, False)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (1, False)
+
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+        (lease,) = relays.list_leases("site-a")
+        assert lease.released_at is not None
+        assert lease.grant_expires_at > datetime.now(timezone.utc).replace(tzinfo=None)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (0, True)
+
+        enabled = relays.set_enabled("site-a", True)
+        assert (enabled.active_lease_count, enabled.drained) == (0, False)
+        read = self._both(relays)
+        assert (read.active_lease_count, read.drained) == (0, False)
+
+    def test_each_relay_counts_its_own_leases(self, relays, session_factory):
+        _make_relay(relays, relay_id="site-a")
+        _make_relay(relays, relay_id="site-b", relay_addr="10.0.0.10")
+        allocator = RelayPortAllocator(session_factory)
+        for owner in ("cr-1", "cr-2"):
+            allocator.allocate(
+                relay_id="site-a", owner_kind="fulfillment", owner_id=owner,
+                lease_ends_at=self._AHEAD,
+            )
+        relays.set_enabled("site-b", False)
+
+        counted = {view.id: (view.active_lease_count, view.drained) for view in relays.list_relays()}
+
+        assert counted == {"site-a": (2, False), "site-b": (0, True)}
+
+
 class TestHoldings:
     """What a relay holds and has released, as the administrator reads it."""
 

@@ -1120,6 +1120,17 @@ the VM and bare-metal adapters' codec tests.
       and resolver, and passed: 622 unit and 540 application integration.
       `scripts/change-workflow run pre-commit` passed: after-functional-change,
       pre-commit-functional (every suite), and pre-commit.
+      `scripts/change-workflow run test-before` produced no evidence. It was
+      run after the commit on three of the four files holding this section's
+      tests: `test_relay_administration.py`, the VM
+      `test_relay_pool_configuration.py`, and the bare-metal
+      `test_relay_reclaim.py`. Each failed at collection, because its
+      environment (`uv run --no-project --with pytest --with pyyaml`) lacks the
+      packages these suites import (`market_resource_pools`,
+      `compute_provisioning`, `pydantic`). It was not run on
+      `test_relay_port_allocator.py`, which imports `RelayDisabledError`, a
+      name only this section adds, and so could only fail at import against
+      the base. No run showed a test failing without the change.
       End-to-end scenarios: none covers this section, as planned, and none is
       owed. No `Owed by validation:` line.
       *Outside the plan:* `scripts/change-workflow run pre-commit` failed
@@ -1146,38 +1157,117 @@ drained". Touches
 (`RelayView`, `list_relays`, `get_relay`, `_view`). The canonical client parses
 through `RelayResponse` and needs no change.
 
-- [ ] 10b.1 Add `active_lease_count: int` and `drained: bool` to `RelayResponse`,
+- [x] 10b.1 Add `active_lease_count: int` and `drained: bool` to `RelayResponse`,
       required, with no default. (D2; 06 F3)
-- [ ] 10b.2 Add both to `RelayView`, computed from `relay_port_leases`:
+      *Done:* between `token_configured` and `grant_keys`, as D2's example
+      orders them, with the model's docstring stating both and why they are
+      required.
+- [x] 10b.2 Add both to `RelayView`, computed from `relay_port_leases`:
       `drained` is true exactly when the relay is disabled and holds no active
       lease. `list_relays` counts every relay's active leases in one grouped
       query; `_view` serves every write's response. Nothing is persisted. (D2)
-- [ ] 10b.3 Version the packages whose contents change as
+      *Done:* `RelayView.of` takes a required keyword `active_lease_count`.
+      `list_relays` passes the grouped count, `_view` passes
+      `RelayPortAllocator.count_held`, and `create_relay` passes 0, since a
+      relay just created holds no lease.
+- [x] 10b.3 Version the packages whose contents change as
       `docs/guidance/repository/package-versions.md` says: run
       `make check-version-bumps` and bump any package this change has not
       already bumped against `dev`, relocking where a lower bound moves.
-- [ ] 10b.4 Unit, in `provisioning/compute/contracts/tests/unit/test_contracts.py`: a relay read shaped as
+      *Done:* `dev` already carries this change's earlier sections, so every
+      package this round changes is bumped once. `make check-version-bumps`
+      checks only that no version moves more than one step, and it passed.
+      Bumps and lower bounds:
+
+      | Package | Version | Lower bounds raised |
+      |---|---|---|
+      | `arkhai-compute-provisioning-contracts` | 0.14.0 → 0.15.0 | — |
+      | `arkhai-compute-provisioning` | 0.27.0 → 0.28.0 | contracts `>=0.15.0` |
+      | `arkhai-compute-provisioning-service` | 0.25.0 → 0.26.0 | contracts `>=0.15.0`, compute `>=0.28.0` |
+      | `arkhai-compute-provisioning-client` | 0.10.0 → 0.11.0 | contracts `>=0.15.0` |
+      | `arkhai-vms-provisioning-adapter` | 0.19.0 → 0.19.1 | compute `>=0.28.0` |
+      | `arkhai-bare-metal-provisioning-adapter` | 0.13.0 → 0.13.1 | compute `>=0.28.0` |
+
+      The reasons for the raised bounds:
+      - Contracts are minor bumps because the response gains required fields,
+        an incompatible change for a reader of an older service. The
+        compute package is a minor bump because `RelayView.of`'s signature and
+        the allocator's and resolver's behaviour change.
+      - Compute's own route service builds `RelayResponse` from the view, so it
+        needs the contracts that carry the fields; with older contracts,
+        pydantic would drop them silently.
+      - The client parses the relay read, so its bound makes a client report
+        the drain. The client's code is unchanged.
+      - Each adapter's teardown or reclaim on a disabled relay depends on
+        10a's resolver; the fresh-context check of 10a raised this.
+      - The service's container changes in 10d, and this one bump covers it.
+
+      `make lock` relocked every project naming these packages, which changed
+      12 locks: these six projects', `provisioning/compute/ansible`, both
+      storefronts, `domains/compute/delivery`,
+      `domains/vms/provisioning/client`, and `e2e-tests`.
+- [x] 10b.4 Unit, in `provisioning/compute/contracts/tests/unit/test_contracts.py`: a relay read shaped as
       `marketplace-v0.3.0` serves it, with neither field, fails to parse as
       `RelayResponse`. (Scenario "A client reads a service that does not report
       the drain")
-- [ ] 10b.5 Library integration, in `test_relay_administration.py`: an enabled
+      *Done:* `test_a_relay_read_that_does_not_report_the_drain_is_refused`,
+      parametrized over missing either field or both, asserts the validation
+      error names exactly the missing fields.
+      `test_a_relay_read_reporting_the_drain_is_accepted` covers the read the
+      service now serves. The v0.3.0-shaped body was written from that
+      release's `RelayResponse` fields, not captured from a running service.
+      Unit, passing.
+- [x] 10b.5 Library integration, in `test_relay_administration.py`: an enabled
       relay with no lease reads `drained` false; a disabled relay with one
       active lease reads count 1 and `drained` false; after that lease is
       released, while its grant has not expired, count 0 and `drained` true;
       enabled again, `drained` false. The list agrees with the read. (Scenarios
       "A disabled relay still carries a lease", "A disabled relay's last lease
       is released", "An enabled relay holds no lease")
-- [ ] 10b.6 Application integration through the canonical typed client, in
+      *Done:* `TestTheDrainReport`, three tests, passing.
+      - The lease is allocated and released through `RelayPortAllocator`, with
+        a lease end 30 days ahead, and the test asserts the released lease's
+        grant expiry is still in the future.
+      - Each step reads `get_relay` and `list_relays` and asserts the two
+        agree. The create, disable, and enable steps also check the write's
+        own response; the release goes through the allocator, which returns
+        no relay view.
+      - A third test shows the grouped count is per relay: two leases on one
+        relay, and none on a second, disabled relay that reads drained.
+- [x] 10b.6 Application integration through the canonical typed client, in
       `provisioning/compute/service/tests/integration/test_relays_api.py`: list,
       read, create, update, enable, disable, rotate, and grant-key activation
       each return both fields, and disabling a relay with a lease reads count 1
       and `drained` false.
-- [ ] 10b.7 **Verification:** `make test` in `provisioning/compute/contracts`,
+      *Done:* `TestTheDrainReportOverTheApi`, two tests through
+      `ComputeProvisioningClient` over the in-process app, passing.
+      - The first takes each of the eight routes' responses and asserts each
+        one's count and `drained`; the client's parse would refuse a response
+        lacking either field.
+      - The second inserts a held lease row, as the suite's other holdings
+        tests do, then shows the disable, read, and list responses report
+        count 1 and `drained` false.
+- [x] 10b.7 **Verification:** `make test` in `provisioning/compute/contracts`,
       `provisioning/compute`, and `provisioning/compute/service` (unit, library
       integration, application integration);
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none, and none is owed: no scenario reads the relay
       administration routes.
+      *Results:* `make test` passed in `provisioning/compute/contracts` (160)
+      and in `provisioning/compute` (542). `make -C provisioning/compute/service
+      test` passed: 622 unit and 542 application integration.
+      `scripts/change-workflow run pre-commit` passed: after-functional-change
+      (`make lock`), pre-commit-functional (`make check-packaging`, `make
+      test`), and pre-commit.
+      End-to-end: none covers this section, and none is owed. The real lanes'
+      `configured_relay` reads the relay through the typed client, so a lane
+      run against a service built from this branch parses the new fields. No
+      `Owed by validation:` line.
+
+**Handoff (10b).** `RelayView.of` requires `active_lease_count`, so a new
+caller states the count rather than inheriting a default that would read a
+disabled relay as drained. The e2e lane unit tests build relay reads as
+`SimpleNamespace`s and need no change.
 
 ## 10c. Refusals name the drain's scope
 

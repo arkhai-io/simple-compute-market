@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.27.0"
+version = "0.28.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -53,7 +53,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.27.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.28.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -95,7 +95,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -103,7 +103,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]

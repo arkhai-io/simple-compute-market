@@ -132,6 +132,63 @@ class TestRelayAdministrationOverTheApi:
             await relays.create_relay(_relay(vm_port_range_count=0))
 
 
+class TestTheDrainReportOverTheApi:
+    """Every relay response reports ``active_lease_count`` and ``drained``,
+    which the canonical client parses as required fields. The rule behind
+    them is asserted in the family kit's suite; what this adds is that every
+    route's serialization carries them, a held lease's count included."""
+
+    def _lease(self, owner_id: str = "cr-1") -> None:
+        with _container_module.resolved_session_factory() as db, db.begin():
+            db.add(
+                RelayPortLease(
+                    id=f"lease-{owner_id}",
+                    relay_id="site-a",
+                    remote_port=6100,
+                    host_id="kvm1",
+                    owner_kind="fulfillment",
+                    owner_id=owner_id,
+                )
+            )
+
+    async def test_every_relay_route_reports_the_drain(self, relays):
+        reported = {
+            "create": await relays.create_relay(_relay(token="admission-token")),
+            "update": await relays.update_relay("site-a", RelayUpdate(label="renamed")),
+            "rotate": await relays.rotate_relay_token(
+                "site-a", RelayTokenRotate(token="rotated")
+            ),
+        }
+        await relays.stage_relay_grant_key("site-a")
+        reported["activate"] = await relays.activate_relay_grant_key("site-a")
+        reported["disable"] = await relays.set_relay_enabled("site-a", False)
+        reported["read"] = await relays.get_relay("site-a")
+        (reported["list"],) = (await relays.list_relays()).relays
+        reported["enable"] = await relays.set_relay_enabled("site-a", True)
+
+        assert {route: (r.active_lease_count, r.drained) for route, r in reported.items()} == {
+            "create": (0, False),
+            "update": (0, False),
+            "rotate": (0, False),
+            "activate": (0, False),
+            "disable": (0, True),
+            "read": (0, True),
+            "list": (0, True),
+            "enable": (0, False),
+        }
+
+    async def test_a_disabled_relay_holding_a_lease_is_not_drained(self, relays):
+        await relays.create_relay(_relay())
+        self._lease()
+
+        disabled = await relays.set_relay_enabled("site-a", False)
+        fetched = await relays.get_relay("site-a")
+        (listed,) = (await relays.list_relays()).relays
+
+        for response in (disabled, fetched, listed):
+            assert (response.active_lease_count, response.drained) == (1, False)
+
+
 class TestGrantKeysOverTheApi:
     """A relay's grant keys are read by id and public half, and rotated in two
     steps; a private key never comes back."""
