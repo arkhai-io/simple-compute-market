@@ -330,10 +330,11 @@ def relay_definitions_document(
         diff = import_relay_definitions_in_session(
             db, yaml_text, relay_service=relay_service, settings=settings
         )
-        # No "disabled" count: a relay the document stops naming is retained.
-        # Disabling one would break every pool referencing it and every live
-        # tunnel on it, which is not what an operator editing an unrelated
-        # entry is asking for.
+        # No "disabled" count: a relay the document stops naming is left as it
+        # is. Relays are also created through the API, outside any document, so
+        # omission cannot mean drain: it would disable every relay the API
+        # created at the next reconciliation. A listed relay is drained through
+        # its entry's ``enabled``.
         return (
             f"created={len(diff.created)} updated={len(diff.updated)} "
             f"unchanged={len(diff.unchanged)}"

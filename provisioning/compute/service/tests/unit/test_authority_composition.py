@@ -25,7 +25,7 @@ from compute_provisioning.release import (
     FulfillmentReleaseStatusPort,
 )
 
-from compute_provisioning.relays import release_reservation_ports
+from compute_provisioning.relays import RelayDeliverableHosts, release_reservation_ports
 from compute_provisioning.relays.rebinding import relay_host_pool_change
 
 from compute_provisioning_service.container import Container
@@ -191,20 +191,24 @@ def test_release_is_composed_once_for_every_offering_mode():
     assert executor._teardown_port is container.fulfillment_teardown_port()
 
 
-def test_the_ledger_and_the_scheduler_read_the_host_authoritys_report():
+def test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts():
     """Admission, the site's offered read, and scheduling all judge a
     declaration's host by one report of the hosts taking new delivery: the
-    host authority, with the same host requirement beside it. A ledger or
-    unit of work built without it would accept any named host."""
+    host authority's, less the hosts of pools on a disabled relay, with the
+    same host requirement beside it. A ledger or unit of work built without it
+    would accept any named host, and one built over the host authority alone
+    would keep placing deliveries on a relay being drained."""
     container = _container()
-    host_authority = container.host_authority()
+    deliverable_hosts = container.deliverable_hosts()
 
     ledger = container.capacity_ledger_service()
     unit_of_work = container.scheduling_unit_of_work()
     scheduler = container.physical_settlement_scheduler()
 
-    assert ledger._deliverable_hosts is host_authority
-    assert unit_of_work.deliverable_hosts is host_authority
+    assert isinstance(deliverable_hosts, RelayDeliverableHosts)
+    assert deliverable_hosts._hosts is container.host_authority()
+    assert ledger._deliverable_hosts is deliverable_hosts
+    assert unit_of_work.deliverable_hosts is deliverable_hosts
     assert scheduler._unit_of_work is unit_of_work
     assert ledger._host_requirement is scheduler._host_requirement
     assert ledger._host_requirement == container.host_requirement()

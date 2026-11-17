@@ -445,6 +445,28 @@ class TestRelayDefinitionDocuments:
         assert diff.updated == ("site-a",)
         assert relays.get_relay("site-a").vm_port_range_start == 7100
 
+    def test_a_drained_relay_the_document_stops_listing_is_left_as_it_is(
+        self, relays, settings
+    ):
+        """Omission is not a drain and not a deletion: relays are also created
+        through the API, outside any document, so the document's silence about
+        one says nothing about it."""
+        listed = self._document()
+        listed["relays"].append(dict(
+            listed["relays"][0], id="site-b", relay_addr="10.0.0.10",
+            grant_key_secret_key="site_b_grant_key",
+        ))
+        settings.site_b_grant_key = GrantKey.generate().profile_form()
+        import_relay_definitions(yaml.safe_dump(listed), relay_service=relays, settings=settings)
+        relays.set_enabled("site-b", False)
+        before = relays.get_relay("site-b")
+        assert before.drained is True
+
+        diff = import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+
+        assert "site-b" not in diff.created + diff.updated + diff.unchanged
+        assert relays.get_relay("site-b") == before
+
     def test_an_unknown_field_is_refused(self):
         document = self._document()
         document["relays"][0]["token_secret_kye"] = "relay_token"

@@ -26,6 +26,7 @@ from .composition import (
     relay_contribution,
 )
 from .db import PoolRelay, Relay, RelayPortLease, RelayRetiredGrantKey
+from .deliverability import RelayDeliverableHosts
 from .definitions import (
     RELAY_DOCUMENT_KIND,
     RelayDefinitionError,
@@ -100,6 +101,7 @@ __all__ = [
     "RELAY_TOKEN_VARIABLE",
     "Relay",
     "RelayDefinitionError",
+    "RelayDeliverableHosts",
     "RelayDisabledError",
     "RelayEndpointConflictError",
     "RelayExecutionResolver",

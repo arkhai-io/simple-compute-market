@@ -1343,18 +1343,54 @@ deliverable-hosts composition, exported from `__init__.py`) and
 `provisioning/compute/service/src/compute_provisioning_service/container.py`.
 `kit/site` does not change.
 
-- [ ] 10d.1 In the relay package, compose the host authority's
+- [x] 10d.1 In the relay package, compose the host authority's
       `DeliverableHosts` (`kit/resource-pools`'s protocol): the hosts it reports,
       less every host whose pool's `pool_relays` row references a disabled
       relay, read in the caller's session, as `deliverable_host_ids` is. (D1
       item 1)
-- [ ] 10d.2 Pass it in `container.py` wherever `deliverable_hosts=host_authority`
+      *Done, with one reading the plan did not state:* `RelayDeliverableHosts`
+      is in a new `relays/deliverability.py`, exported from the package. It
+      leaves out every host *placed* in a pool on a disabled relay
+      (`hosts.pool_id`), and also every host whose *declaration* sits in such
+      a pool (`capacity_buckets.pool_id`, read from the site's table in the
+      same session).
+      - A host's placement and its declaration's pool are recorded apart. The
+        bare-metal spec lets a host go unplaced while its one declaration
+        (`capacity_buckets.host_id` is unique) is in a pool. A delivery takes
+        its relay from the declaration's pool, so filtering on placement alone
+        would keep selling an unplaced host's capacity on a drained relay.
+        That host would then be refused at acceptance, which is the cost D1
+        rejected.
+      - The 10d.4 test met exactly this: `bare_metal_deal`'s host is
+        unplaced.
+      - The placement half is what the delta spec's "no host in a pool
+        referencing it MAY be among the hosts taking new delivery" requires.
+        The declared-in half leaves out more, which that MUST NOT allows.
+      - The filter reads the site's `capacity_buckets`, as `allocator.py`
+        already reads its reservations. `kit/site` does not change.
+      - This is offered for the round's review and triage as an implementation
+        reading of D1 item 1. It is written down in the module docstring and
+        here; the "Disabling a relay drains it" architecture subsection 11.16
+        plans is where it belongs permanently.
+- [x] 10d.2 Pass it in `container.py` wherever `deliverable_hosts=host_authority`
       is passed today (the capacity ledger and scheduling, around lines 451 and
       609), so admission, placement, and projection read it. (D1 item 1)
-- [ ] 10d.3 Library integration: a host in a pool on a disabled relay is left
+      *Done:* a `deliverable_hosts` provider over `host_authority` is passed to
+      `CapacityLedgerService` and `SqlAlchemySchedulingUnitOfWork`. The
+      integration harness (`tests/integration/conftest.py`) mirrors that
+      wiring. The unit test `test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts`
+      in `tests/unit/test_authority_composition.py` replaces the one that held
+      both to the host authority.
+- [x] 10d.3 Library integration: a host in a pool on a disabled relay is left
       out; on an enabled relay, or in a pool with no relay, it is reported; a
       disabled host stays out whatever its relay.
-- [ ] 10d.4 Application integration through the canonical typed client, beside
+      *Done:* `provisioning/compute/tests/integration/test_relay_deliverability.py`,
+      five tests over the real `HostAuthority` and the site's capacity table,
+      passing. They cover:
+      - the plan's three cases, and enabling the relay again;
+      - an unplaced host declared in the relay's pool, which is left out;
+      - a disable not yet committed in the caller's own session.
+- [x] 10d.4 Application integration through the canonical typed client, beside
       the relay-bearing suites (`test_fulfillment_convergence.py`,
       `test_bare_metal_relay.py`, and `test_host_requirement_api.py`'s
       disabled-host cases): with a VM lease and a bare-metal lease on one
@@ -1363,22 +1399,123 @@ deliverable-hosts composition, exported from `__init__.py`) and
       and the bare-metal reclaim run when their leases end and release their
       ports; and the relay then reads `drained` true. (Scenario "A relay is
       disabled while it carries deliveries")
-- [ ] 10d.5 Application integration: fulfillment acceptance on a pool whose
+      *Done:* `test_a_disabled_relay_takes_no_new_delivery_and_its_leases_drain`
+      in a new `provisioning/compute/service/tests/integration/test_relay_drain_api.py`,
+      passing. The flow:
+      - The VM delivery and the bare-metal grant are each accepted, run, and
+        converged `active` on one relay, holding ports 6100 and 6101.
+      - After the disable:
+        - Admission answers no capacity for a claim pinned to the VM
+          declaration; the same probe found capacity just before the disable.
+          An unpinned VM claim instead fell through to the bare-metal pool and
+          was refused as an undeclared mode, so the probe names the
+          declaration.
+        - Placement refuses a VM hold made before the disable
+          (`no_eligible_resource`).
+        - Both pools' declarations project not enabled.
+      - The site's bare-metal admission is not separately asserted; its one
+        exclusive machine is already held.
+      - Terminating both leases runs the VM teardown and the bare-metal
+        reclaim on the disabled relay to `torn_down`. `check_leases` releases
+        both ports, and the relay reads count 0 and `drained` true.
+
+      Two harness facts shaped the test:
+      - The VM create's mocked run reports the relay at its leased port, which
+        the codec requires for delivery evidence.
+      - The convergence loop is held paused for the whole test, the pause
+        repeated, at most 50 times, until it answers `at_gate`. One cycle is
+        stepped per record, because the harness's `MagicMock` settings make
+        the batch size `int(MagicMock())`, which is 1. Stepping cycles between
+        resumes raced the timer loop and failed intermittently.
+- [x] 10d.5 Application integration: fulfillment acceptance on a pool whose
       relay is disabled is refused, naming the relay, and records no lease.
       (Scenario "A claim reaches fulfillment on a disabled relay")
-- [ ] 10d.6 Application integration: a relay disabled while it holds a lease and
+      *Done:* `test_acceptance_on_a_pool_whose_relay_is_disabled_leases_no_port`,
+      passing. A claim scheduled before the disable reaches acceptance.
+      Acceptance answers 422 `provider_config_invalid` and records no lease.
+      The relay is named on validation, which reports why (`'drain-relay'` in
+      its issue's message). Acceptance's answer carries the code alone, as
+      every provider-configuration refusal does, so the plan's "naming the
+      relay" is shown on validation.
+- [x] 10d.6 Application integration: a relay disabled while it holds a lease and
       enabled again before it drains returns its pools' hosts to new delivery,
       allocation on it resumes, and the leased delivery's job runs unaffected.
       (Scenario "A relay disabled by mistake is enabled again before it drains")
-- [ ] 10d.7 Confirm that the existing relay-omission test (task 9.9) holds the
+      *Done:* `test_a_relay_enabled_again_before_it_drains_takes_new_delivery`,
+      passing.
+      - A delivery is accepted, run, and converged `active`.
+      - The disable projects the declaration not enabled.
+      - The enable reads count 1, `drained` false. The declaration is
+        projected enabled, admission finds capacity, and a second claim is
+        placed and leased the next port.
+      - The first delivery stays `active` with its lease unchanged.
+
+      Its create job ran before the disable, so "runs unaffected" is shown as
+      its delivery and lease being untouched by the disable, not as a job
+      running during it. 10a.6 shows a create holding its lease resolving on a
+      disabled relay.
+- [x] 10d.7 Confirm that the existing relay-omission test (task 9.9) holds the
       scenario "The definition document stops listing a drained relay" for a
       disabled relay, and add a disabled case if it does not.
-- [ ] 10d.8 **Verification:** `make test` in `provisioning/compute` and
+      *Corrected:* no relay-omission test existed. The startup suite covers a
+      disabled relay surviving a restart, and a document unmounted, but not a
+      document reconciled without an entry it listed.
+      `test_a_drained_relay_the_document_stops_listing_is_left_as_it_is` in
+      `test_relay_administration.py` covers it, library integration, passing:
+      a two-relay document is reconciled with one dropped, and the dropped,
+      drained relay reads exactly as before.
+      *Outside the plan:* the importer's comment in `relays/definitions.py`
+      still said disabling a relay "would break … every live tunnel on it",
+      which 10a's search missed. It now gives D4's reason, provenance, and
+      says a listed relay is drained through its `enabled`.
+- [x] 10d.8 **Verification:** `make test` in `provisioning/compute` and
       `provisioning/compute/service` (library and application integration);
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none, and none is owed: the drain is provisioning-service
       state the application-integration suite reaches through the typed
       client, and no scenario disables a relay.
+      *Results:* `make test` passed in `provisioning/compute` (548).
+      `make -C provisioning/compute/service test` passed: 622 unit and 545
+      application integration, the three drain tests among them (each also
+      passed on two further runs).
+      `scripts/change-workflow run pre-commit` passed on the section's final
+      state: after-functional-change, pre-commit-functional (every suite), and
+      pre-commit.
+      End-to-end: none, as planned, and none is owed. No `Owed by
+      validation:` line. The comments 10a wrote on `Relay.enabled` and in
+      `route_service.py` now also say a disabled relay's pools' hosts take no
+      new delivery.
+      *Declined from the fresh-context check:* the drain test makes the
+      bare-metal declaration and reservation on the composed ledger, though
+      the site clients reach both (`integration-tests.md`, "Service-internal
+      state setup"). It does so through `bare_metal_deal`, the bare-metal
+      suites' one setup of a bare-metal deal, so this suite reaches the same
+      deal they do.
+
+**For the round's triage (10d).** Four permanent texts still define the
+deliverable-hosts report as "the identifiers of registered, enabled hosts",
+which no longer describes the compute composition's report:
+- `openspec/specs/fulfillment/spec.md`, the composition requirement's
+  paragraph on "one report of the hosts taking new delivery" (around lines
+  452–456) and its scenario "The compute composition reports the hosts taking
+  new delivery";
+- `openspec/specs/site-capacity/architecture.md` (around lines 46–48);
+- `docs/development/ARCHITECTURE.md` (around lines 702–705);
+- the `DeliverableHosts.deliverable_host_ids` docstring in
+  `kit/resource-pools/src/market_resource_pools/host_requirement.py`.
+
+The change's deltas modify only `physical-provisioning`, and closeout's 11.16
+has no row for these. The first needs a MODIFIED `fulfillment` requirement or a
+promotion row, which is the plan's to add. The docstring is a `kit/resource-pools`
+edit, which takes that package's version bump and a relock of every project
+naming it. Neither is made in this section.
+
+**Handoff (10d).** The service's application-integration harness builds its own
+wiring in `tests/integration/conftest.py` and does not run `container.py`'s.
+A change to the container's composition is mirrored there, and the unit suite
+`test_authority_composition.py` holds the container itself. A test that steps
+fulfillment convergence across several records holds the loop paused from the
+start and steps one cycle per record (see 10d.4).
 
 ## 10e. The procedure for draining and retiring a relay
 

@@ -9,10 +9,11 @@ and no storefront administers them.
 Deletion is deliberately absent. A relay carrying live port leases cannot
 simply be removed: the proxies it carries outlive the row, and a deletion that
 orphans leases loses the record of which ports on that rendezvous are bound.
-Disabling a relay drains it instead: no port on it is leased to a new delivery,
-and every delivery already holding a lease runs to its end. It is
-reversible, and a drained relay's row stays as the record its leases and pools
-point at; removing the relay server is its operator's, outside this service.
+Disabling a relay drains it instead: its pools' hosts take no new delivery, no
+port on it is leased to a new delivery, and every delivery already holding a
+lease runs to its end, until the relay reads drained. It is reversible, and a
+drained relay's row stays as the record its leases and pools point at; removing
+the relay server is its operator's, outside this service.
 """
 
 from __future__ import annotations
