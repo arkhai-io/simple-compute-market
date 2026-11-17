@@ -1277,24 +1277,59 @@ for a lease's life" (its drain paragraph, and the scenarios "A relay is repointe
 while it carries leases" and "A pool's relay reference change is refused").
 Touches `provisioning/compute/src/compute_provisioning/relays/rebinding.py`.
 
-- [ ] 10c.1 Split `_DRAIN_HINT` in two: the pool's (disable the pool, wait for
+- [x] 10c.1 Split `_DRAIN_HINT` in two: the pool's (disable the pool, wait for
       its leases to be released, change, re-enable) for a pool's relay reference
       and a host's pool move; the relay's (disable the relay, wait until it
       reads `drained`, change, re-enable) for a relay's address or port and
       its token rotation. (D5)
-- [ ] 10c.2 Rewrite `rebinding.py`'s module docstring to state the two scopes:
+      *Done:* `_POOL_DRAIN_HINT` and `_RELAY_DRAIN_HINT`. `_refuse` takes the
+      hint, so each of the four checks states its scope at the call. The
+      relay's hint says the relay "reads drained", which is the read's field.
+- [x] 10c.2 Rewrite `rebinding.py`'s module docstring to state the two scopes:
       disabling a pool drains a pool, disabling a relay drains every pool on
       it, and no other drain exists. (D5; comments rule)
-- [ ] 10c.3 Library integration, in the existing rebinding tests
+- [x] 10c.3 Library integration, in the existing rebinding tests
       (`provisioning/compute/tests/integration/test_pool_relays.py` and
       `test_relay_administration.py`): each of the four refusals carries its
       scope's hint. Application integration, in `test_relays_api.py` and
       `test_pool_relays_api.py`: a relay move and a token rotation refused with
       409 carry the relay's hint, and a pool's relay change the pool's.
-- [ ] 10c.4 **Verification:** `make test` in `provisioning/compute` and
+      *Done:* one test per check asserts its scope's hint and the absence of
+      the other's. A second refusal of a check, such as clearing a pool's
+      relay, still asserts only that it is refused.
+      - Library integration, asserting each whole hint:
+        `_names_the_pools_drain` covers the pool's relay change and the host's
+        pool move in `test_pool_relays.py`. `_names_the_relays_drain` covers
+        the relay move and the token rotation in
+        `test_relay_administration.py`.
+      - Application integration, asserting each hint's key phrases through
+        the 409: the relay move, now also asserting 409, and the token
+        rotation in `test_relays_api.py` ("Disable the relay", "wait until the
+        relay reads drained", no pool's hint). The pool's relay change in
+        `test_pool_relays_api.py` ("Disable the pool", no relay's hint).
+
+      All pass. A host's pool move through the host routes is not asserted
+      for its hint at application level; the plan named none there.
+- [x] 10c.4 **Verification:** `make test` in `provisioning/compute` and
       `provisioning/compute/service` (library and application integration);
       `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
       End-to-end: none, and none is owed.
+      *Results:* `make test` passed in `provisioning/compute` (542).
+      `make -C provisioning/compute/service test` passed: 622 unit and 542
+      application integration.
+      `scripts/change-workflow run pre-commit` passed: after-functional-change,
+      pre-commit-functional, and pre-commit. A docstring in `rebinding.py`
+      was reworded during that run; `make check-comment-hygiene` and the
+      rebinding library suites (100) passed on the final text.
+      *Declined from the fresh-context check:* asserting the hints at the
+      application level duplicates the library tests' wording
+      (`test-levels.md`, "Coverage between the levels"). 10c.3 asks for both,
+      since the hint is only of use if it reaches the operator through the
+      409, so both stay. The application tests assert key phrases only, to
+      keep a rewording's edits few.
+      End-to-end: none, as planned, and none is owed. No `Owed by
+      validation:` line. `test-before` was not run: as 10a.8 records, its
+      environment cannot import these suites.
 
 ## 10d. A disabled relay's pools' hosts take no new delivery
 

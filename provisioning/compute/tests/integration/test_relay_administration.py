@@ -104,6 +104,15 @@ def relays(session_factory, settings):
     )
 
 
+def _names_the_relays_drain(message: str) -> None:
+    """A refusal of a change on the relay's side names the relay's drain: it
+    affects every pool on the relay, so disabling one pool would not clear it."""
+    assert "Disable the relay" in message
+    assert "wait until the relay reads drained" in message
+    assert "enable the relay again" in message
+    assert "Disable the pool" not in message
+
+
 def _make_relay(relays, **overrides):
     fields = {
         "relay_id": "site-a",
@@ -724,7 +733,7 @@ class TestRebinding:
             relays.update_relay("site-a", relay_addr="10.0.0.20")
         message = str(excinfo.value)
         assert "kvm1:6100" in message
-        assert "Disable the pool" in message
+        _names_the_relays_drain(message)
 
     def test_a_relay_can_move_once_drained(self, session_factory, relays):
         self._relay_with_lease(session_factory, relays)
@@ -760,6 +769,7 @@ class TestRebinding:
             relays.rotate_token("site-a", "rotated")
 
         assert "kvm1:6100" in str(excinfo.value)
+        _names_the_relays_drain(str(excinfo.value))
 
     def test_a_token_can_be_set_before_any_host_dials(self, relays):
         """The ordinary case is unaffected: a relay with no leases has nothing

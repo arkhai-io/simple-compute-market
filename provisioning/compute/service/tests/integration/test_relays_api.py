@@ -50,6 +50,14 @@ def _client(transport):
     )
 
 
+def _names_the_relays_drain(message: str) -> None:
+    """A refusal of a change on the relay's side tells the operator to drain
+    the relay, not each pool on it."""
+    assert "Disable the relay" in message
+    assert "wait until the relay reads drained" in message
+    assert "Disable the pool" not in message
+
+
 def _relay(**overrides) -> RelayCreate:
     fields = {
         "id": "site-a",
@@ -382,9 +390,10 @@ class TestRebindingOverTheApi:
                 "site-a", RelayUpdate(relay_addr="203.0.113.20")
             )
 
+        assert excinfo.value.status_code == 409
         message = str(excinfo.value)
         assert "kvm1:6100" in message
-        assert "Disable the pool" in message
+        _names_the_relays_drain(message)
 
     async def test_the_same_relay_moves_once_drained(self, relays):
         await relays.create_relay(_relay())
@@ -431,4 +440,5 @@ class TestRebindingOverTheApi:
 
         assert excinfo.value.status_code == 409
         assert "kvm1:6100" in str(excinfo.value)
+        _names_the_relays_drain(str(excinfo.value))
 
