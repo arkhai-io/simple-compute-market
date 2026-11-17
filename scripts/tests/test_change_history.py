@@ -201,6 +201,23 @@ def test_the_first_copy_brings_the_records_and_named_evidence_to_the_same_paths(
     assert history.differences(clone, workspace, CHANGE) == []
 
 
+def test_a_runs_inputs_directory_is_copied_with_the_records(
+        workspace: Path, clone: Path) -> None:
+    """CW-i9np: what the actions and hooks around a run left is under the change's
+    records, so it is copied with them."""
+    _history(clone)
+    inputs = REVIEWS / "runs/20261021T091540Z-validate"
+    names = [inputs / "before/status.md", inputs / "before/gather.log",
+             inputs / "before/message.md", inputs / "after/status.md"]
+    for name in names:
+        _write(clone, name, f"{name.name}\n")
+
+    synced = history.sync(clone, workspace.resolve(), CHANGE)
+
+    assert {name.as_posix() for name in names} <= set(synced.copied)
+    assert history.differences(clone, workspace, CHANGE) == []
+
+
 def test_evidence_the_records_name_that_the_clone_lacks_is_reported(
         workspace: Path, clone: Path) -> None:
     _history(clone)

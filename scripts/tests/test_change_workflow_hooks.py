@@ -156,6 +156,22 @@ def test_a_make_recipe_inside_a_run_keeps_the_marker(tmp_path: Path) -> None:
 
     assert shown == "[implement]"
 
+
+def test_the_fragment_documents_every_step_hook_and_defines_none(tmp_path: Path) -> None:
+    """CW-h3ks: each step hook is a commented target, so an adopter meets it where
+    it looks, and none is a target, so none has a default."""
+    lines = FRAGMENT.read_text("utf-8").splitlines()
+
+    assert [hook for hook in config.STEP_HOOKS if f"# {hook}:" not in lines] == []
+    assert [line for line in lines if line.startswith(("before-", "after-"))] == []
+    (tmp_path / "Makefile").write_text(f"include {FRAGMENT}\n", "utf-8")
+    missing = subprocess.run(["make", "-n", "--no-print-directory", "before-implement"],
+                             cwd=tmp_path, capture_output=True, text=True,
+                             env={key: value for key, value in os.environ.items()
+                                  if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")})
+    assert missing.returncode != 0 and "No rule to make target" in missing.stderr
+
+
 def test_validation_asks_for_a_functional_hook(tmp_path: Path,
                                                capsys: pytest.CaptureFixture[str]) -> None:
     """CW-u4pc: `run` refuses, naming the hook and the validate step, and runs
@@ -695,26 +711,17 @@ def _ignoring_records(root: Path) -> Path:
 
 def test_validations_helm_kind_fails(repository: Path) -> None:
     """CW-q5fy: library integration, a real `sh` and Git directory; the run's line
-    lists the gathering's kind with its resolved command and exit status 2."""
+    lists the kind its gathering before the session ran, with its resolved command
+    and exit status 2."""
     configured(_ignoring_records(repository), evidence_kind("helm", run="exit 2") + MODELS)
     # The gathering describes HEAD, so the configuration is committed.
     for command in (["add", "--all"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
                                        "commit", "-q", "-m", "configure"]):
         subprocess.run(["git", *command], cwd=repository, check=True, capture_output=True)
-    ran: list[int] = []
 
-    class Validating(FakeClaude):
-        """A validation run whose step gathers the Helm kind."""
-
-        def __call__(self, command, cwd, feed, step) -> int:
-            ran.append(main(["gather", CHANGE, "--kind", "helm"], root=repository,
-                            environ={SESSION_ID: SESSION, UNATTENDED: step}))
-            return super().__call__(command, cwd, feed, step)
-
-    line = make_wrapper(repository, Validating((event_lines(VALID["finished"]), 0))).run(
+    line = make_wrapper(repository, FakeClaude((event_lines(VALID["finished"]), 0))).run(
         "validate", CHANGE)
 
-    assert ran == [1]
     (invoked,) = [entry for entry in line["invoked"] if entry.get("kind") == "helm"]
     assert {key: invoked[key] for key in ("hook", "kind", "phase", "command", "exit_status")} \
         == {"hook": "gather", "kind": "helm", "phase": "run", "command": "exit 2",

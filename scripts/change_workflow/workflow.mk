@@ -126,3 +126,32 @@ push-branch: ## Push exactly HEAD, unforced, to the current branch's own name on
 
 change-graph: ## Report where the workflow's graph diagram departs from the graph — each box and edge to add, change, or remove — to redraw it from; fails while it does
 	@$(CHANGE_WORKFLOW) check graph
+
+# The hooks around each step's session. Each is a command the workflow configuration
+# declares, `before-<step>` or `after-<step>` under `[hooks]`, and none has a default:
+# an absent or empty one runs nothing, and the engine probes for no target, so a
+# declared target that is missing fails as any command does. A `before-` hook runs
+# after the engine's own action before that step, and its failure prevents nothing;
+# an `after-` hook runs after a finished session, and its failure resumes it once.
+# Each is given `{inputs}`, the run's inputs directory, and a review's and a
+# triage's `{kind}`. A repository that writes a hook as a target of its own Makefile
+# writes it there, under the name below, and declares the command that runs it:
+#
+# before-design:
+# after-design:
+# before-review:
+# after-review:
+# before-triage:
+# after-triage:
+# before-plan:
+# after-plan:
+# before-implement:
+# after-implement:
+# before-validate:
+# after-validate:
+# before-merge:
+# after-merge:
+# before-closeout:
+# after-closeout:
+# before-archive-cleanup:
+# after-archive-cleanup:

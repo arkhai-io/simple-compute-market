@@ -15,11 +15,12 @@ and resolving are distinct because a run can be denied a call and still end with
 question or a proposed return: its denials are read first, and its outcome is
 answered or decided after. This module is the log's only writer.
 
-A run's line may carry `invoked`: each hook, part, and command the run invoked
-through `run` or the guarded push, with its owed workflow and phase where it has
-them, the command it resolved to, its exit status, when it started, and how long it
-took. The field is optional, so a line without it reads as before and the record
-set's format does not move.
+A run's line may carry `invoked`: each hook, kind, and command the run invoked
+through `run`, `gather`, the guarded push, or the actions and hooks around its
+session, with its owed argument and phase where it has them, the command it
+resolved to, its exit status, when it started, and how long it took; and `inputs`,
+its inputs directory relative to the change's records. Both fields are optional, so
+the record set's format does not depend on them.
 
 A finished merge's or archive cleanup's outcome carries `landing`, the remote,
 branch, and commit the run fetched, which the writer checks against the checkout
@@ -544,11 +545,13 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
 
 def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                        commit: str | None, invoked: Sequence[Entry] = (),
-                       checkout: Checkout | None = None, clock: Clock = utc_now) -> Entry:
+                       checkout: Checkout | None = None, inputs: str | None = None,
+                       clock: Clock = utc_now) -> Entry:
     """Append the outcome of a step the owner ran interactively, which records its
     own: checked as the wrapper checks an unattended run's, a finished merge's or
     archive cleanup's landing record against the `checkout` it ran in included, and
-    marked `interactive`, with what the session `invoked`, when it invoked anything.
+    marked `interactive`, with what the session `invoked`, when it invoked anything,
+    and its `inputs` directory, when it had one.
 
     A triage's finished or returned outcome is refused unless it names the records
     it triaged (`triage_outcome_problems`), as the wrapper records such a run
@@ -566,7 +569,8 @@ def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                         + "; ".join(problems))
     return record_outcome(path, step, outcome, session=session, commit=commit,
                           extra={"interactive": True,
-                                 **({"invoked": list(invoked)} if invoked else {})},
+                                 **({"invoked": list(invoked)} if invoked else {}),
+                                 **({"inputs": inputs} if inputs else {})},
                           checkout=checkout, clock=clock)
 
 

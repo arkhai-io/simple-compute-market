@@ -5,8 +5,9 @@ The gathering runs the preflight, pushes `HEAD` through the guarded push, starts
 every missing `start` kind — an owed kind once for each argument owed — runs the
 missing `run` kinds in declaration order, which keeps each `after`, then collects
 each started kind. What `evidence` reports present is never touched, whoever wrote
-it: evidence is gathered again only on the skill's word, through `--kind`, never
-because another step wrote it or it is old. A failed preflight gathers nothing,
+it, and its line says so, naming the current match: evidence is gathered again only
+on the skill's word, through `--kind`, never because another step wrote it or it is
+old. A failed preflight gathers nothing,
 since evidence gathered in an environment the preflight refused would count as
 present.
 
@@ -51,10 +52,11 @@ from typing import Any, Callable, Mapping, Sequence
 from . import evidence, push
 from .common import StepError
 from .config import COMMIT, OWED, TREE, Configuration, Kind
-from .evidence import MISSING, REFUSED, WAIVED, Report
+from .evidence import MISSING, PRESENT, REFUSED, WAIVED, Report
 from .find import ChangeNotFound, change_directory
 from .hooks import PREFIX, HookError, Hooks, Invoked, marker_key, result
 from .log import log_path, read_log
+from .running import invocations_directory
 
 GATHER = "gather"
 PREFLIGHT = "preflight"
@@ -149,6 +151,9 @@ class Gathering:
                 self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: refused, "
                                 f"{entry['refusal']}")
                 passed = False
+            elif entry["status"] == PRESENT:
+                self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: skipped, "
+                                f"present; evidence {entry['current']}")
             elif entry["status"] == MISSING:
                 attempts.append(Attempt(kinds[entry["kind"]], entry["owed"]))
             elif entry["status"] == WAIVED:
@@ -307,12 +312,14 @@ class Gathering:
 def main(change: str, *, root: Path, configuration: Configuration,
          environ: Mapping[str, str], base: str | None = None, kind: str | None = None,
          owed: str | None = None, lapsed: bool = False,
-         gathering: Gathering | None = None) -> int:
+         gathering: Gathering | None = None,
+         invocations: Callable[[Path], Path | None] = invocations_directory) -> int:
     """`gather <change> [--kind <kind> [--owed <argument>] [--lapsed]]`: 0 when
     everything it ran passed, 1 when anything failed or it was refused, its reason on
-    standard error. What ran is kept for the session's line, however it ended."""
+    standard error. What ran is kept for the session's line, however it ended, where
+    `invocations` says."""
     runner = gathering or Gathering(
-        Hooks(root, configuration, environ), change, base,
+        Hooks(root, configuration, environ, invocations=invocations), change, base,
         push=lambda: push.main(["push"], root=root, environ=environ),
         report=lambda: evidence.change_report(root, change, configuration),
         lapse=lambda kind: merge_lapse(root, change, kind))

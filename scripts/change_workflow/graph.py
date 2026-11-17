@@ -36,8 +36,9 @@ refuses every entry while it is not met (`entry_refusal`); a waivable one takes 
 owner's direction as its override.
 
 Beside the graph, `HOOK_STEPS` holds which steps may run each of the repository's
-hooks through `scripts/change-workflow run`; like the graph, no repository changes
-it (CW-u4pc).
+hooks through `scripts/change-workflow run`, and `STEP_ACTIONS` the engine's own
+actions before and after each step's session; like the graph, no repository changes
+either (CW-u4pc, CW-g6th, CW-ikmm).
 
 The change-workflow architecture shows the table as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
@@ -554,6 +555,23 @@ HOOK_STEPS: dict[str, frozenset[str]] = {
     "cleanup": frozenset({"archive-cleanup"}),
     "test-before": frozenset({"implement", "triage"}),
 }
+
+# When an action or a hook runs around a step's session.
+BEFORE, AFTER = "before", "after"
+# The engine's own actions around each step's session, by when they run and the
+# step, each a name of `HOOK_STEPS` run as that step: the gathering of the evidence
+# `HEAD` lacks before validation, and every kind's cleanup before archive cleanup.
+# Deterministic work belongs here, judgement to the step's skill. A repository's
+# `before-<step>` or `after-<step>` hook runs after the action of the same moment.
+STEP_ACTIONS: dict[tuple[str, str], tuple[str, ...]] = {
+    (BEFORE, "validate"): ("gather",),
+    (BEFORE, "archive-cleanup"): ("cleanup",),
+}
+
+
+def step_actions(when: str, step: str) -> tuple[str, ...]:
+    """The engine's actions `when` the step's session runs, before or after it."""
+    return STEP_ACTIONS.get((when, step), ())
 
 
 class TargetError(StepError):

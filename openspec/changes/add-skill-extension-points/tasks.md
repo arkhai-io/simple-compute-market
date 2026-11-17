@@ -742,35 +742,184 @@ D8; CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np, CW-b2xr, CW-q5fy). Fil
 `test_change_workflow_wrapper.py`, `test_change_workflow_hooks.py`,
 `test_change_workflow_cli.py`, `test_change_workflow_graph.py`.
 
-- [ ] 5.1 Add, beside `HOOK_STEPS` in `graph.py`, the table of each step's actions
+- [x] 5.1 Add, beside `HOOK_STEPS` in `graph.py`, the table of each step's actions
   before and after it, holding `gather` before `validate` and `run cleanup` before
   `archive-cleanup` (D7). Verify: a unit test of the table's entries.
-- [ ] 5.2 Give each run an inputs directory, `reviews/runs/<run>/before/` and
+  - Done: `graph.STEP_ACTIONS`, keyed by `(BEFORE|AFTER, step)`, each value a tuple
+    of `HOOK_STEPS` names; `step_actions(when, step)` reads it.
+  - Unit test `test_the_engine_gathers_before_validation_and_cleans_up_before_archive_cleanup`
+    in `test_change_workflow_graph.py` passes. It also holds each action to the hook
+    table's listing of its step.
+- [x] 5.2 Give each run an inputs directory, `reviews/runs/<run>/before/` and
   `…/after/`, named on its log line; write `status.md` with each action's or hook's
   closing line, exit status, and log path; keep each hook's printed output as a log;
   pass it as `{inputs}` (CW-i9np; CW-q5fy). `history` copies it (CW-hak6). Verify:
   library-integration tests for the layout, the log line's field, and CW-i9np's
   large-artifact scenario's layout.
-- [ ] 5.3 The wrapper runs the built-in action, then `before-<step>`, before the
+  - Done in a new module, `scripts/change_workflow/around.py`, which the wrapper,
+    the CLI, and (section 6) the review runner share:
+    - `<run>` is `<UTC start>-<step>`, claimed by an exclusive `mkdir`, so a second
+      run in one second takes `-2` (`claim_inputs`). The line's `inputs` names it
+      relative to `reviews/`.
+    - Each action or hook's output, its own and every program's it ran, goes to
+      `<name>.log` through `output_to`, which points file descriptors 1 and 2 and
+      `sys.stdout`/`sys.stderr` at the log. The wrapper's standard output carries
+      only the line a caller parses, so nothing an action prints may reach it.
+    - `status.md` holds, per action or hook, its exit status, its log, and the
+      engine's lines from the log: those starting `[change-workflow]` or `ERROR:`.
+      An absent or empty hook is "Not declared; nothing ran." or "Declared empty;
+      nothing ran.", with no log.
+    - What an action or hook ran is kept under a session id the engine makes for
+      it, then taken onto the run's line, so whatever an action keeps through the
+      engine lands there, the push's `pre-push` among it (by construction; no test
+      pushes from the wrapper's gathering), and nothing lands under the session of
+      whoever started the wrapper (an orchestrating session's, say).
+    - `gather.main` takes the keep directory (`invocations`), so `around` calls it
+      rather than composing a gathering of its own.
+    - `history` already copies all of `reviews/`, so no code changed for it.
+  - Library-integration tests, all passing:
+    - in a new `scripts/tests/test_change_workflow_around.py`: the layout, the line's
+      field, and the prompt
+      (`test_a_runs_inputs_are_named_on_its_line_and_hold_what_each_hook_printed`);
+      CW-i9np's large artifact as its layout, a 3 MB file beside `message.md`, in
+      neither the prompt nor `status.md`
+      (`test_a_hook_passes_a_large_artifact_beside_its_message`); a unit test of
+      the claim;
+    - in `test_change_history.py`: `test_a_runs_inputs_directory_is_copied_with_the_records`.
+- [x] 5.3 The wrapper runs the built-in action, then `before-<step>`, before the
   session, a review's and triage's hooks given `{kind}`; an absent or empty hook runs
   nothing and the run says so; a failing action or hook never prevents the session,
   its failure in `status.md` and the session's prompt naming the directory; a hook
   the check refuses refuses the step (D7, D8; CW-g6th, CW-h3ks, CW-b7fl). Verify:
   library-integration tests with the harness doubled for CW-g6th's failing-local
   scenario, CW-b7fl's scenario, and CW-h3ks's absent-hook scenario.
-- [ ] 5.4 After a `finished` outcome and before it is logged as final, the wrapper
+  - Done in `wrapper.py`:
+    - The directory is claimed, and the actions run, inside the run's held-signal
+      block, so a stop given meanwhile ends the run as its session would start.
+    - The prompt names `reviews/runs/<run>/before`, labelled as the target note is,
+      after the skill's invocation and anything given to it. Every run's prompt now
+      ends with it, so the tests asserting a prompt use `prompted` (fixtures).
+    - Nothing runs before a resumed run's session: it read its inputs as it
+      started. A resumed run still claims a directory, for what runs after it.
+    - A triage's `{kind}` is the next-step computation's (`triage_kind`, a seam on
+      the wrapper); a hook naming `{kind}` when it names none fails as a command
+      lacking a value does.
+    - A step hook runs through `Hooks.engine_hook`, held to no step's listing; the
+      actions run marked as the step's run, so the hook table still holds them.
+    - `gather` now says, for each kind present, that it skipped it and which match
+      is current, so the gathering's `status.md` names every kind.
+    - What the actions and hooks ran is on `invoked`, before and after what the
+      session invoked. A skipped hook is not, since it ran nothing.
+  - Library-integration tests in `test_change_workflow_around.py`, the harness
+    doubled by `FakeClaude`, each hook a real `sh` command, all passing. Each
+    scenario's test covers the engine's half: the session starts with the failure
+    in its inputs. What the skill then does — diagnose, stop and ask, or say the
+    hook was absent, as the orchestrating session does — is section 8's text, and no
+    test with the harness doubled can show it.
+    - CW-g6th's failing-local scenario on a real Git repository
+      (`test_the_local_suite_fails_during_gathering`), and present evidence left
+      alone before the session;
+    - CW-b7fl's (`test_an_environment_refresh_fails_before_implementation`);
+    - CW-h3ks's absent hook, shown for design and plan, and an empty one
+      (`test_no_hook_is_declared_before_a_step`); the review's own is section 6's;
+    - CW-ikmm's cleanup before archive cleanup's session
+      (`test_archive_cleanup_starts_after_every_kinds_cleanup`);
+    - a hook the check refuses, refusing the step before anything runs or is logged;
+    - a triage's hook given `{kind}`, the kind seam doubled; `triage_kind` itself by
+      a unit test in `test_change_workflow_wrapper.py`;
+    - nothing run before a resumed session.
+  - Not exercised by a test: a stop given while the actions run, and a hook naming
+    `{kind}` when the computation names none.
+  - `test_change_workflow_hooks.py`'s CW-q5fy Helm scenario now reads the kind the
+    wrapper's own gathering ran, which no longer needs the session to gather it.
+- [x] 5.4 After a `finished` outcome and before it is logged as final, the wrapper
   runs `after-<step>`; on failure it resumes the same session once with the
   failure; a second failure ends the run as a question naming the hook, with one
   final outcome logged (CW-a4fl). Verify: library-integration tests for CW-a4fl's
   implementation scenario and the second failure becoming a question.
-- [ ] 5.5 Add `run before|after <step> <change>` for interactive runs, held to its
+  - Done: `Wrapper._after_finished`. The resumed turn runs on the session's model,
+    into the same transcript, with the same target for a validation.
+    - Its first outcome is kept as `earlier`.
+    - A turn that ends other than finished is logged as it ended, the hook not run
+      again.
+    - The after directory is found where the change's records are once the session
+      ends, since closeout archives the change it runs for.
+    - A second run of a hook writes `<name>-2.log`, and `status.md` gains its
+      section.
+    - An action or hook the engine cannot run at all counts as a failure, written
+      to `status.md` in its place (`Wrapper._moment`).
+  - Library-integration tests, all passing:
+    - CW-a4fl's implementation scenario, its fix a file the doubled session's resumed
+      turn writes (`test_a_hook_after_implementation_finds_a_lint_failure`), the
+      resumed turn on the session and model the first ran;
+    - the second failure as a question;
+    - a resumed turn that asks, logged as it asked;
+    - what the engine cannot run after a session counted as a failure;
+    - no after-hook after a question;
+    - a validation's target kept through the resumed turn.
+  - Not exercised by a test: the after directory found once closeout has archived
+    the change.
+- [x] 5.5 Add `run before|after <step> <change>` for interactive runs, held to its
   step (CW-h3ks; CW-u4pc). Verify: library-integration tests running it for
   implement and refusing it for another step's marker.
-- [ ] 5.6 Document each step hook as a commented target in `workflow.mk`, with no
+  - Done: `around.interactive`, reached through `run`'s `before`/`after` choices,
+    which take the step, then the change.
+    - Within a session the directory is `reviews/runs/session-<session>-<step>/`,
+      so `run after` finds it again, and `record` names it as the line's `inputs`.
+      Outside one, a new directory is claimed. What ran is kept for the session's
+      line.
+    - A marker naming another step refuses it; `run before review` runs nothing
+      and says that a review run interactively is no run.
+  - Library-integration tests through `cli.main`, all passing: implement's before,
+    after, and `record` naming the directory and taking what ran; the refusal for
+    another step's marker; the interactive review; and the usage errors. A unit
+    test refuses a session id that would name another directory.
+- [x] 5.6 Document each step hook as a commented target in `workflow.mk`, with no
   default (D8). Verify: the fragment's comments name every `before-`/`after-` hook,
   it defines no new target, and the assumptions test passes.
-- [ ] 5.7 Verification point: the suites above; `run pre-commit` passes.
+  - Done: a comment block ends the fragment, one `# <hook>:` line per step hook.
+  - `test_the_fragment_documents_every_step_hook_and_defines_none` passes. It checks
+    the comment lines and that a real `make` finds no `before-implement` target.
+    The assumptions test passes: its collector reads `make <word>` in the fragment
+    as a target named, so the comment names none.
+- [x] 5.7 Verification point: the suites above; `run pre-commit` passes.
   End-to-end: none.
+  - `run pre-commit` passed whole: `after-functional-change`, `pre-commit-functional`
+    (`make validate-local`, every suite, the scripts' 3291 passing, its `local`
+    evidence `PASSED` for the worktree's tree), and `pre-commit` with the
+    repository's checks. The step-table tests pass again, the configuration's deny
+    lines being restored.
+    - An earlier run failed its `tree after` step because the worktree was edited
+      while it ran, every suite passing; and on the comment check, a test spelling
+      the task list's file name, now `next_step.TASKS_FILE`.
+    - This note, written after the run, changes the tree it checked, so validation
+      gathers `local` for the commit.
+  - `run test-before` on `test_change_workflow_around.py` fails at `HEAD` before the
+    section as it is collected, since `around` is new.
+  - End-to-end: none — confirmed; no scenario under `e2e-tests/` exercises the
+    workflow's tooling.
+  - The fresh-context check's findings, fixed:
+    - design-decision numbers in two test docstrings, now requirement ids;
+    - the gathering composed again in `around`, now `gather.main` given the keep
+      directory;
+    - two guards with no test, now tested;
+    - a test module's docstring overstating what it doubles;
+    - notes naming whole scenarios where the tests show the engine's half, and
+      claims no test exercised, now said so.
+  - Declined from the fresh-context check: the triage-only `{kind}` rule stated in
+    both the wrapper and the CLI, and the CLI borrowing the wrapper's seams for
+    `run before|after`. Each caller reads the kind its own way: the wrapper as a
+    run starts, the CLI for a session already open. The wrapper's seams are the
+    command's one set of them, so a second set would only duplicate it.
+  - Handoff to section 6:
+    - `around.Around(...).before(directory)` and `.after(directory)` are what the
+      review runner calls.
+    - `claim_inputs(reviews, "review", clock)` names its directory.
+    - `run before|after review` already says that an interactive review runs no
+      hooks (5.5).
+    - The question a second after-hook failure ends in is `around.after_question`,
+      worded for a resumed session; a review's, which resumes nothing, needs its own
+      wording.
 
 ## 6. A review's hooks
 

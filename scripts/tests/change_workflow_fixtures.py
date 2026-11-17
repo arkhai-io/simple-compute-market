@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from change_workflow.around import inputs_note
 from change_workflow.log import Checkout
 from change_workflow.steps import Model
 from change_workflow.wrapper import Wrapper
@@ -142,7 +143,15 @@ def make_wrapper(tmp_path: Path, claude: FakeClaude) -> Wrapper:
                    echo=None,
                    conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl",
                    runs=lambda _: None, checkout=lambda *_: ACCEPTING,
-                   target=lambda *_: None)
+                   target=lambda *_: None, kind=lambda *_: None)
+
+
+def prompted(invocation: str, step: str, number: int = 1) -> str:
+    """A step's invocation as its run's session is prompted: the run's inputs
+    directory, claimed at the tests' clock, the `number`th that second, named after
+    it."""
+    run = f"{AT.strftime('%Y%m%dT%H%M%SZ')}-{step}" + (f"-{number}" if number > 1 else "")
+    return f"{invocation} {inputs_note(Path('r') / 'runs' / run / 'before', Path('r'))}"
 
 
 def option(command: list[str], flag: str) -> str:

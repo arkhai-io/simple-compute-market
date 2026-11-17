@@ -30,7 +30,9 @@ how the repository's workflow configuration resolved, `config load` a step's
 documents, or with `common` those every session reads, `evidence` which evidence
 each kind needs for a change's `HEAD` and what is present, `gather` the gathering
 of what is missing, or of a new attempt of one kind (`gather`), `run` and `openspec`
-the repository's hooks and its OpenSpec command (`hooks`), `check` the
+the repository's hooks and its OpenSpec command (`hooks`), `run before|after` what
+the wrapper runs around a step's session, for a step held interactively (`around`),
+`check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
 default checks (`check change`), a review's format check on standard input (`check
 review`), and the graph diagram's comparison with the graph table, `hook
@@ -62,6 +64,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+from . import around
 from . import clone as clones
 from . import (config, cost_report, diagram, evidence, find, gather, graph, history, hook,
                hooks, index, next_step, push, round_view, skills, tasks, wait)
@@ -130,6 +133,8 @@ def interactive_outcome(change: str, step: str, outcome_text: str, session: str 
     refuses. What the session invoked for this change through `run`, and through
     the guarded push, that no line has taken yet is recorded as `invoked`, and
     forgotten once the line is written, so a refused record keeps it for the next.
+    The inputs directory `run before|after` used for the session's step, when it
+    ran, is named as `inputs`.
     """
     if environ.get(UNATTENDED_RUN):
         raise StepError(f"this run is the wrapper's ({UNATTENDED_RUN} is set), and the "
@@ -144,9 +149,13 @@ def interactive_outcome(change: str, step: str, outcome_text: str, session: str 
         raise StepError(f"--outcome is not JSON: {exc}") from exc
     directory = invocations(root)
     invoked = kept_invocations(directory, session, change)
-    line = record_interactive(log_path(root, change), step, outcome, session=session,
+    log = log_path(root, change)
+    inputs = around.session_inputs(log.parent, session, step)
+    line = record_interactive(log, step, outcome, session=session,
                               commit=head(root), invoked=invoked,
-                              checkout=checkout(root, change))
+                              checkout=checkout(root, change),
+                              inputs=around.named(inputs, log.parent) if inputs.is_dir()
+                              else None)
     drop_invocations(directory, session, invoked)
     return line
 
@@ -411,9 +420,12 @@ def _parser() -> argparse.ArgumentParser:
                               "the one its clone recorded by default")
     run_ = commands.add_parser(
         "run", help="run one of the repository's hooks for a change, as the engine's hook "
-                    "table allows the step")
-    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.CLEANUP, hooks.TEST_BEFORE))
-    run_.add_argument("change")
+                    "table allows the step; `run before|after <step> <change>` what the "
+                    "wrapper runs around a step's session, for a step held interactively")
+    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.CLEANUP, hooks.TEST_BEFORE,
+                                       graph.BEFORE, graph.AFTER))
+    run_.add_argument("subjects", nargs="+", metavar="change",
+                      help="the change; `run before|after` takes the step, then the change")
     run_.add_argument("--test", dest="tests", action="append", default=[],
                       help="test-before only: a test file, as HEAD holds it, to run against "
                            "the earlier commit; repeat for more")
@@ -715,6 +727,23 @@ def _kinds(root: Path, given: str) -> list[str]:
     return names
 
 
+def _around(args: argparse.Namespace, root: Path, environ: Mapping[str, str],
+            wrapper: Wrapper) -> int:
+    """`run before|after <step> <change>`: a triage's hooks given the kind of review
+    it triages, as the next-step computation names it."""
+    if len(args.subjects) != 2:
+        raise _Usage(f"run {args.hook} takes the step, then the change")
+    step, change = args.subjects
+    if step not in STEPS:
+        raise _Usage(f"{step!r} is no step of the workflow; its steps: {', '.join(STEPS)}")
+    return around.interactive(args.hook, step, change, root=root,
+                              reviews=log_path(root, change).parent,
+                              configuration=config.load(root), environ=environ,
+                              base=args.base or find.landing_branch(root, change),
+                              kind=wrapper.kind(root, change) if step == "triage" else None,
+                              clock=wrapper.clock, invocations=wrapper.invocations)
+
+
 def _graph(root: Path) -> int:
     """The diagram's comparison with the graph table, on the repository's own diagram."""
     return diagram.main(root=root)
@@ -737,6 +766,11 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
     if args.command == "run":
         if args.hook != hooks.TEST_BEFORE and (args.tests or args.at):
             raise _Usage("--test and --at belong to run test-before")
+        if args.hook in (graph.BEFORE, graph.AFTER):
+            return _around(args, root, environ, wrapper)
+        if len(args.subjects) != 1:
+            raise _Usage(f"run {args.hook} takes the change alone")
+        args.change = args.subjects[0]
         # The branch the change lands on, for a command naming `{base}`: the one
         # given, or the one its clone recorded.
         base = args.base or find.landing_branch(root, args.change)

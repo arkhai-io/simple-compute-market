@@ -37,20 +37,39 @@ gave, so a missing or mistaken one never stops a validation that finished. A
 validation started with no target to give — outside the route, or resuming a line
 that records none — is logged with the exit its session named.
 
+Every run has an inputs directory, named on its line as `inputs` (`around`). As a
+step's run starts, before its session, the wrapper runs the engine's actions for it
+and then the repository's `before-<step>` hook, and names the directory in the
+session's prompt; a failure among them prevents nothing, the session reading it
+from the directory. A resumed run's session has read its inputs already, so nothing
+runs before it. After a session that finished, before its outcome is logged, the
+wrapper runs the actions and the `after-<step>` hook: when one fails, the same
+session is resumed once with the failure, and when one fails again after it
+finished again, the run ends as a question to the owner naming the hook, so one
+outcome is logged and routing reads it. What the actions and hooks ran is on the
+line's `invoked`, before and after what the session invoked. A stop given while the
+actions run before the session ends the run as its session would start.
+
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
-CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, CW-q5fy, and CW-5ldi.
+CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, CW-q5fy, CW-5ldi,
+CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, and CW-i9np.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import config, next_step
+from .around import (Around, Ran, after_failure_note, after_question, claim_inputs, failures,
+                     inputs_note, named, write_status)
 from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_now
+from .find import landing_branch
+from .graph import AFTER, BEFORE
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
 from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
                       unreachable)
@@ -90,6 +109,19 @@ def validation_target(root: Path, change: str,
     if result.get("step") in _VALIDATING and isinstance(target, dict) and target:
         return dict(target)
     return None
+
+
+def triage_kind(root: Path, change: str,
+                compute: Callable[[Path, str], Entry] = next_step.compute) -> str | None:
+    """The kind of review a triage of `change` started now triages, which its hooks
+    are given as `{kind}`: the one the next-step computation names, or None when it
+    names no triage, such as a triage started by hand outside the route."""
+    try:
+        result = compute(root, change)
+    except StepError:
+        return None
+    kind = result.get("kind")
+    return kind if result.get("step") == "triage" and isinstance(kind, str) else None
 
 
 def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, Any],
@@ -222,6 +254,10 @@ class Wrapper:
     checkout: Callable[[Path, str], Checkout] = git_checkout
     # The target the next-step computation gives a validation as it starts.
     target: Callable[[Path, str], Entry | None] = validation_target
+    # The kind of review a triage triages, which its hooks are given.
+    kind: Callable[[Path, str], str | None] = triage_kind
+    # The environment the actions and hooks around a session run in.
+    environ: Mapping[str, str] = field(default_factory=lambda: os.environ)
 
     def run(self, step: str, change: str, *, arguments: str = "",
             sections: Sequence[int | str] | None = None, fresh: bool = False,
@@ -275,7 +311,7 @@ class Wrapper:
             arguments = " ".join(part for part in (arguments, target_note(target)) if part)
         return self._turn(step, rules, change, log, step_prompt(rules, change, arguments),
                           models, session=session, granted=granted, extra=extra,
-                          target=target)
+                          target=target, before=True)
 
     def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
         """Resume the step session of the run at `seq` with the owner's answer.
@@ -353,7 +389,8 @@ class Wrapper:
 
     def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
               models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
-              extra: Entry | None = None, target: Entry | None = None) -> Entry:
+              extra: Entry | None = None, target: Entry | None = None,
+              before: bool = False) -> Entry:
         """Run one turn and log it, recorded as in progress in the checkout until its
         line is written, however it ends.
 
@@ -364,12 +401,20 @@ class Wrapper:
                                                   clock=self.clock):
             return self._logged_turn(step, rules, change, log, prompt, models,
                                      session=session, granted=granted, extra=extra,
-                                     target=target)
+                                     target=target, before=before)
+
+    def _around(self, step: str, change: str) -> Around:
+        """The actions and hooks around a run of `step`, a triage's given the kind of
+        review it triages."""
+        return Around(self.root, config.load(self.root), change, step,
+                      kind=self.kind(self.root, change) if step == "triage" else None,
+                      base=landing_branch(self.root, change), environ=self.environ,
+                      invocations=self.invocations)
 
     def _logged_turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
                      models: Sequence[Model], *, session: str | None,
                      granted: Sequence[str] = (), extra: Entry | None = None,
-                     target: Entry | None = None) -> Entry:
+                     target: Entry | None = None, before: bool = False) -> Entry:
         """Run one turn on the first of `models` that is available, and log it.
 
         A model whose harness is missing, not signed in, or at its usage limit
@@ -385,21 +430,39 @@ class Wrapper:
         the archive has left.
         """
         schema = load_schema(self.schema_path)
-        before = self._before(log, session)
+        measured = self._before(log, session)
+        # A step's run names its inputs at the end of its prompt, after the skill's
+        # invocation and anything given to it; a resumed run's session read them
+        # as it started.
+        inputs = named(claim_inputs(log.parent, step, self.clock), log.parent)
+        extra = {**(extra or {}), "inputs": inputs}
+        if before:
+            prompt = f"{prompt} {inputs_note(log.parent / inputs / BEFORE, log.parent)}"
+        around = self._around(step, change)
         transcript = next_transcript(log.parent, step)
         progress = transcript.with_suffix(".progress")
-        named = transcript.relative_to(log.parent).as_posix()
+        shown = transcript.relative_to(log.parent).as_posix()
+        # What the actions and hooks ran before the session, and after it.
+        ahead: list[Entry] = []
+        behind: list[Entry] = []
+        if before:
+            ahead = self._actions(around.before, log.parent / inputs / BEFORE)
         attempts: list[Stream] = []
         outcome, status, failure, model, stream, passed_over, logged = (
             self._attempt_models(step, rules, prompt, schema, models, session, granted,
                                  transcript, progress, attempts, target))
-        extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
+        if failure is None and outcome.get("outcome") == "finished":
+            outcome, status, failure, stream, logged = self._after_finished(
+                step, rules, change, log, inputs, around, behind, outcome, status, model,
+                stream, logged, schema, session, granted, transcript, progress, attempts,
+                target)
+        extra = {**extra, **model.entry(), "exit_status": status, "transcript": shown}
         if passed_over:
             extra["unavailable"] = passed_over
         # Every attempt's turns: a retried attempt may have reported before it failed.
         if earlier := earlier_outcomes([r for a in attempts for r in a.results], logged):
             extra["earlier"] = earlier
-        extra.update(self._cost(attempts or [stream], session, before))
+        extra.update(self._cost(attempts or [stream], session, measured))
         ran = stream.session or session
         directory = self.invocations(self.root)
         # Every attempt's session: a retried or passed-over attempt ran under a
@@ -407,7 +470,7 @@ class Wrapper:
         sessions = list(dict.fromkeys(s for s in (session, *(a.session for a in attempts), ran)
                                       if s))
         taken = {s: kept_invocations(directory, s, change) for s in sessions}
-        if invoked := [entry for s in sessions for entry in taken[s]]:
+        if invoked := [*ahead, *(entry for s in sessions for entry in taken[s]), *behind]:
             extra["invoked"] = invoked
         try:
             log = log_path(self.root, change)
@@ -429,6 +492,66 @@ class Wrapper:
         if failure is not None and not isinstance(failure, Exception):
             raise failure
         return line
+
+    def _actions(self, moment: Callable[[Path], list[Ran]], directory: Path) -> list[Entry]:
+        """Run the actions and hooks before a session into `directory`, and return
+        what they invoked."""
+        return [entry for one in self._moment(moment, directory, BEFORE) for entry in one.invoked]
+
+    def _moment(self, moment: Callable[[Path], list[Ran]], directory: Path, when: str
+                ) -> list[Ran]:
+        """What the actions and hooks of one moment came to. One the engine cannot
+        run at all counts as a failure, written to `status.md` in their place, so it
+        informs the session or resumes it as any failing hook does."""
+        try:
+            return moment(directory)
+        except (OSError, StepError) as exc:
+            failed = [Ran(f"the engine's run of what comes {when} the session", 1,
+                          lines=[f"ERROR: {exc}"])]
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                write_status(directory, when, "the session", failed)
+            except OSError:
+                pass
+            return failed
+
+    def _after_finished(self, step: str, rules: StepRules, change: str, log: Path, inputs: str,
+                        around: Around, behind: list[Entry], outcome: Entry,
+                        status: int | None, model: Model, stream: Stream,
+                        logged: dict[str, Any] | None, schema: dict[str, Any],
+                        session: str | None, granted: Sequence[str], transcript: Path,
+                        progress: Path, attempts: list[Stream], target: Entry | None
+                        ) -> tuple[Entry, int | None, BaseException | None, Stream,
+                                   dict[str, Any] | None]:
+        """The actions and hook after a finished session, before its outcome is
+        logged: the outcome as it stands when they pass; else the session resumed
+        once with their failure, on its model, and when they fail again after it
+        finished again, a question to the owner naming them. What they invoked is
+        added to `behind`. Their directory is found where the change's records are
+        once the session ends, since closeout archives the change it runs for."""
+        failure: BaseException | None = None
+        for again in (False, True):
+            try:
+                reviews = log_path(self.root, change).parent
+            except StepError:
+                reviews = log.parent
+            directory = reviews / inputs / AFTER
+            ran = self._moment(around.after, directory, AFTER)
+            behind += [entry for one in ran for entry in one.invoked]
+            if not failures(ran):
+                break
+            resumed = stream.session or session
+            if again or not resumed:
+                outcome = {**after_question(step, directory, reviews, ran, outcome.get("message")),
+                           "denials": outcome.get("denials", [])}
+                logged = None
+                break
+            outcome, status, failure, _, stream, _, logged = self._attempt_models(
+                step, rules, after_failure_note(step, directory, reviews, ran), schema,
+                (model,), resumed, granted, transcript, progress, attempts, target)
+            if failure is not None or outcome.get("outcome") != "finished":
+                break
+        return outcome, status, failure, stream, logged
 
     def _attempt_models(self, step: str, rules: StepRules, prompt: str, schema: dict[str, Any],
                         models: Sequence[Model], session: str | None,
