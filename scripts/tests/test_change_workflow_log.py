@@ -1002,8 +1002,9 @@ def test_a_round_after_the_open_rounds_triage_starts_a_new_round(tmp_path: Path)
 
 
 def test_a_round_renumbered_by_a_replan_continues_the_open_round(tmp_path: Path) -> None:
-    # A return to design splits open section 4 into 4 to 6: the work committed
-    # since the open round's base is still untriaged, so the round keeps its base.
+    # A return to design splits the open round's last section into three: the work
+    # committed since the open round's base is still untriaged, so the round keeps
+    # its base.
     log = log_file(tmp_path)
     log.parent.mkdir()
     first = note_round(log, [[3, 4]], "plan", clock=clock, commit="base")
