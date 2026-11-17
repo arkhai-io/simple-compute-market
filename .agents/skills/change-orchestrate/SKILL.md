@@ -144,7 +144,7 @@ The computation names where the change is worked before any step:
   `reviews/` though its branch is checked out nowhere, so a clone would start
   without them. Relay both routes as the reason gives them: check out its branch
   in the workspace and go on there without a clone, or move it into a clone by
-  hand, as `docs/change-workflow-handbook.md` describes. Both are the owner's to
+  hand, as the workflow's handbook for the owner describes. Both are the owner's to
   carry out; recompute once they say it is done.
 - **`owner`, naming the workspace** — you were started in a clone of another
   change: tell the owner to start you in their workspace.
@@ -161,7 +161,8 @@ Rules the owner grants for a fresh run go on its target as
 records them as `granted`, and the step's next run is held to its table again.
 Always start a fresh run through its target, never the script directly: the target
 checks the change, refuses while a round view is open, and passes `SECTIONS`,
-`FRESH`, `SESSION_ID`, and `HELM_ALL_SCENARIOS` on.
+`FRESH`, and `SESSION_ID` on. A value of the owner's machine reaches a command
+through the environment, which the run inherits; never put one on a target.
 An implementation run's `ARGUMENTS` carries a merge's conflicts to resolve or the
 owner's direction to its sections, and a merge run's (`make merge ARGUMENTS=<text>`)
 the owner's direction to the merge, in their words, with any routing note beside it
@@ -251,6 +252,15 @@ when `usd_partial` is set, or a Codex review's tokens — and, for a resumed
 session, its `gap_s` and whether it read the cache (`cache_hit`). `make change-cost
 CHANGE=<change>` totals them by step and by round.
 
+Each run's line names its inputs directory (`inputs`, under the change's
+`reviews/`), whose `before/status.md` and `after/status.md` say what the engine's
+actions and the repository's hooks around the step did. When you report a run, say
+in one sentence for each hook it ran without — `status.md` saying "Not declared;
+nothing ran." or "Declared empty; nothing ran." — that the step ran with no such
+hook, naming it: "the review ran with no `before-review` hook declared". A hook
+that failed is the step's to explain: relay what its message says of it. An
+interactive review runs no hooks, and says so.
+
 Planning resumes the design session through the wrapper. Offer a fresh planning
 session (`make plan CHANGE=<change> UNATTENDED=1 FRESH=1`) only when the owner
 asks for one; you judge no session's size. Closeout and archive cleanup are
@@ -297,11 +307,20 @@ review ending beside a validation question must not receive its answer. Recheck
 that the run still waits before resuming. Pass the owner's answer faithfully,
 with proper shell quoting or structured command arguments.
 
+A run whose `after-<step>` hook failed again once its session was resumed with the
+failure ends as a question naming the hook and where its status and logs are; a
+review whose `after-review` failed ends so at once, its published record standing.
+Relay it as written, judging neither the hook nor the work: whether the hook or the
+step is wrong is the owner's to say. A step's such question is resumed with the
+owner's answer as any question is. A review's names no resume, since a review
+resumes no reviewer: the computation brings it to the owner, and their word is
+recorded as their direction ("The owner's directions"), never sent to the review.
+
 ### The owner's directions
 
 Every direction is the owner's: a confirmed return, a repeat review, a waiver of a
 step, and an intervention sending the change to any node of the graph; a waiver of
-parts of validation is a decision with no target (below). Record one only on
+evidence kinds of validation is a decision with no target (below). Record one only on
 their word, `--by owner`, its target as `--next <step>`, with `--kind <kind>` for
 a review or a triage (the kind of review it triages), `--sections '1,2;3'` for
 sections out of the plan's order, and `--target <step>` — itself qualified by
@@ -365,14 +384,15 @@ the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
 the paths in its reason; archive cleanup finds the direction in the log and writes
 the waiver to the ledger.
 
-When the owner waives parts of validation for later validations — "skip Helm and
-the pipeline for the rest of this change" — record their decision with no `--next`,
-naming the evidence kinds it waives, as `scripts/change-workflow evidence <change>`
-lists them, and the condition they are waived on, so the gathering skips them and
-validation finds the decision in the log (`change-workflow`'s CW-e7lm):
+When the owner waives evidence kinds of validation for later validations — "skip
+the deployment and the end-to-end run for the rest of this change" — record their
+decision with no `--next`, naming the evidence kinds it waives, as
+`scripts/change-workflow evidence <change>` lists them, and the condition they are
+waived on, so the gathering skips them and validation finds the decision in the log
+(`change-workflow`'s CW-e7lm):
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --waives helm,pipeline --decision "waive the helm and pipeline kinds of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+scripts/change-workflow note <change> orchestrator --by owner --waives <kind>,<kind> --decision "waive the <kind> and <kind> kinds of validation for the rest of this change, while <the condition>" --reason <the owner's words>
 ```
 
 Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only

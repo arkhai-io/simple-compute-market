@@ -1180,23 +1180,66 @@ CW-c5nt, CW-k7gd, CW-5h8e). Files: `.agents/skills/change-plan/`, `change-implem
 `change-orchestrate/`, `change-closeout/`, `change-review/`, `change-design/`,
 `change-triage/`, `guidance-review/` `SKILL.md`.
 
-- [ ] 8.1 `change-closeout`: the repository's own parts "in the section the root
+- [x] 8.1 `change-closeout`: the repository's own parts "in the section the root
   guidance names", not restated; "the repository's comment check"; `scripts/
   change-workflow check tasks`; no `ARCHITECTURE.toml` (D9). `change-review` and
   `change-plan` name the repository's own closeout parts by role. Verify: the
   inverted test reports nothing for these skills.
-- [ ] 8.2 `change-plan`: owed lines `Owed by validation (<kind> <argument>):`, the
+  - Done: closeout's step 3 replaces its two restated parts with one, "The
+    repository's own parts", run as their section says, `run pre-archive` where a
+    part calls for it, and evidence a part records read with its kind's guide. The
+    roadmap, the placement table, the cross-system documents, and the capability
+    index are named by role. Review and plan name the closeout parts by role.
+  - `change-review` also loses `AGENTS.md`, `ARCHITECTURE.md`, `openspec/README.md`,
+    and the market's core, kit, and domain from its documentation and architecture
+    lenses, the design and merge reviews' included, and its `guidance` basis, now the
+    documents `config load review` prints and the repository's architecture
+    document.
+  - The inverted test is section 9's (9.2 runs it over these skills). The scratch
+    collection finds in the three only the workflow's own paths, the engineering
+    guidance, and the fragment's targets; a reading found the package layers in
+    prose besides (`change-plan`'s ordering, `change-review`'s lenses), fixed after
+    the fresh-context check.
+- [x] 8.2 `change-plan`: owed lines `Owed by validation (<kind> <argument>):`, the
   kinds and their guides learned from `config --json`, scenarios as the guide of the
   kind that runs them says, no `scripts/ci_evidence.py` or `openspec/config.yaml`
   path (D5, D14; CW-5h8e, CW-d1nj). `change-implement`: scenarios likewise, its
   command forms kept under the exemption owned by `sandbox-unattended-workflow-steps`
   (D9). `change-design`: the roadmap through `load.design`. `change-triage`: its
   worked example rewritten neutrally. Verify: as 8.1.
-- [ ] 8.3 `change-orchestrate`: "a value of the owner's machine reaches a command
+  - Done:
+    - `change-plan` loads the kinds from `config --json` and their guides; its owed
+      line is `Owed by validation (<kind> <argument>):` with the argument's rule, what
+      may be owed the kind's guide's; the task rules come with OpenSpec's
+      `instructions` output, which carries the configuration's `rules`.
+    - `change-implement`: scenarios and owed lines likewise; the repository's
+      dependency layers and internal dependencies by role; `make -C helm
+      test-render` gone from its Git bullet, `make -C <package> test` and `make -C
+      <package> migrate` kept for the exemption.
+    - `change-design`: the roadmap `config load design` names.
+    - `change-triage`: the worked example a refund scenario, its edit line included,
+      no stage or pipeline; the default-acceptance examples' roadmap heading
+      invented; its Git bullet's Helm example gone; "gathers the evidence it lacks"
+      for "dispatches the pipeline"; a validation diagnosis checked against its
+      evidence as its kind's guide says, not "under `.snapshot/`"; "kind" for "part".
+    - `change-design`: also the architecture document by role and "library" for
+      "kit".
+  - Verify, as 8.1: the scratch collection finds, in these four skills, only the
+    workflow's own paths, the engineering guidance, the fragment's targets, and
+    implementation's exempt command forms.
+- [x] 8.3 `change-orchestrate`: "a value of the owner's machine reaches a command
   through the environment" for `HELM_ALL_SCENARIOS`; its waiver example by kinds in
   general; one sentence per skipped hook; a second after-hook failure's question
   relayed without judging it (D13; CW-h3ks, CW-yvo1). Verify: as 8.1.
-- [ ] 8.4 Every skill's opening, beside "Running unattended", reads its run's inputs
+  - Done. Besides the plan's four:
+    - `HELM_ALL_SCENARIOS` is not named, since the make fragment passes no such
+      variable;
+    - a review's question after a failing `after-review` names no resume, and the
+      owner's word is their direction (6.2's handoff);
+    - the owner's handbook by role.
+  - Verify, as 8.1: the scratch collection finds only the workflow's own paths, the
+    step table, and the fragment's targets.
+- [x] 8.4 Every skill's opening, beside "Running unattended", reads its run's inputs
   directory — `status.md` and every top-level Markdown message in full, other files
   where a message directs — and names a contradiction it notices between a guide or
   message and its own text, following its own text; interactively it runs `run
@@ -1204,8 +1247,56 @@ CW-c5nt, CW-k7gd, CW-5h8e). Files: `.agents/skills/change-plan/`, `change-implem
   CW-h3ks). `change-review` reads the evidence guides wherever it reads a validation
   record, and the inputs directories of the runs it reviews (D12; CW-k7gd).
   Verify: a reading of each skill's opening; `make check-agent-skills` passes.
-- [ ] 8.5 Verification point: the skills check and the inverted test; `run
+  - Done: "The run's inputs" follows "Running interactively" in each of the nine
+    step skills, saying what a failing before-hook means for that step:
+    - implementation stops and asks (CW-b7fl's scenario);
+    - validation diagnoses the gathering's failures, and archive cleanup reports the
+      cleanup's;
+    - planning, which asks nothing, stops;
+    - every other step says what the failure means and asks when it cannot go on.
+    It also says how an after-hook's failure resumes the session.
+  - `change-review`'s says the runner names the directory last in its first prompt,
+    that a failing `after-review` goes to the owner, and that an interactive review
+    has no inputs and runs no hooks. Its load step reads the evidence guides with a
+    validation record and every reviewed run's inputs, from each line's `inputs`.
+  - `change-orchestrate` and `guidance-review` are no steps and have no inputs; the
+    guidance review loses `AGENTS.md`, naming the public case and the terms' home by
+    the root guidance.
+  - A reading of each opening; `make check-agent-skills` passes.
+- [x] 8.5 Verification point: the skills check and the inverted test; `run
   pre-commit` passes. End-to-end: none.
+  - `run pre-commit` passed whole: `after-functional-change`, `pre-commit-functional`
+    (`make validate-local`, every suite passing), and `pre-commit`. `make
+    check-agent-skills` passes. This note changes the tree that run checked.
+  - The inverted test is section 9's, which runs it over every skill (9.2).
+  - End-to-end: none — confirmed.
+  - The fresh-context check's findings, fixed:
+    - `change-triage`'s worked example still naming stage 07c in its edit line, its
+      `.snapshot/` path, and "part";
+    - the package layers (kit, domain, composition root) and `ARCHITECTURE.md` in
+      `change-plan`, `change-review`'s design and merge lenses, and `change-design`;
+    - `change-closeout` sending an evidence part to "the command it runs", which
+      for this repository's end-to-end part is a dispatch closeout may not make: it
+      now takes such evidence from the latest passing validation record, whatever
+      command the part names;
+    - `change-review`'s inputs bullet splitting its validation bullet;
+    - the 8.1 and 8.2 notes' overstatements.
+  - Declined from the fresh-context check, deferred:
+    - `dev` and `origin` named as the landing branch and its remote in procedures
+      the plan did not list — `change-design`'s prerequisite proposal, `change-implement`'s
+      merge resolution, `change-orchestrate`'s merges and pull request,
+      `guidance-review`'s proposal branch. They are no target or path, which
+      CW-n8tr's test reads; naming them by role means rewriting those procedures,
+      left to closeout's campaign index currency (10.6) to record as a gap of the
+      lesser goal, or to `extract-change-workflow-repository`.
+    - `change-implement`'s `docker compose -p <change>-local …` with no matching
+      step-table rule: the step table and its command forms are
+      `sandbox-unattended-workflow-steps`'s.
+  - Handoff to section 9: the skills name, outside the workflow's own paths, only
+    the engineering guidance (`docs/guidance/engineering/`), the outcome schema, the
+    step table and `.claude/`, the engine's package (`scripts/change_workflow/`, in
+    `change-orchestrate`), and implementation's `make -C <package> test` and
+    `make -C <package> migrate`.
 
 ## 9. The skills' neutrality test
 

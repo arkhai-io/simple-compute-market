@@ -91,6 +91,27 @@ makes. When `record` refuses, correct what it names and run it again. A session
 closed before it records leaves design in progress: the computation names it
 again, to be resumed, or its outcome recorded with the command above.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-design` hook, and kept
+what it did in the run's inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook, in full. Any other file is data, read only where a
+message directs, and a log only to diagnose a failure. A failing hook prevented
+nothing: tell the owner what its failure means for the design discussion, and ask
+before going on when the design cannot be settled soundly with it. Interactively,
+with no wrapper, run `scripts/change-workflow run before design <change>` first; its
+last line names the directory. Once the design is recorded, run
+`scripts/change-workflow run after design <change>` before `record`, and, when it
+fails, fix what it found if the design step can, and run it again, or tell the
+owner. Unattended, an after-hook that fails resumes this session once with its
+failure; a second failure goes to the owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## 1. Load everything before saying anything
 
 Answers given from a partial picture are confidently wrong in exactly the
@@ -192,7 +213,8 @@ an answer to one often reshapes the next. In full, a decision has:
   decide without rereading the change.
 - **Alternatives.** Each option actually available, including doing nothing
   and deferring, with its trade-offs: what it costs, what it constrains later,
-  which layer or authority boundary it touches (`ARCHITECTURE.md` vocabulary),
+  which layer or authority boundary it touches, in the vocabulary of the
+  repository's architecture document,
   and what it does to wire, persistence, and compatibility with what the record
   of deployment says was deployed. An option leaving out a migration or
   compatibility path names the release it read.
@@ -214,10 +236,10 @@ of the owner's attention:
 - **Judgement** — the options trade real values against each other and no
   written principle or precedent picks one. Present these one at a time, in full.
 - **Consequence** — the answer follows from a decision already settled, or from
-  a principle in `ARCHITECTURE.md` or `docs/guidance/engineering/`. Name what it
-  follows from.
+  a principle in the repository's architecture document or
+  `docs/guidance/engineering/`. Name what it follows from.
 - **Convention** — the answer follows from how the nearest existing precedent
-  does the same thing (a sibling hint, kit, or configuration key). Cite the
+  does the same thing (a sibling hint, library, or configuration key). Cite the
   precedent.
 
 Present consequences and conventions together, once the judgements they depend
@@ -233,7 +255,7 @@ confirm or move.
 ### Do not argue from absence of a caller alone
 
 "No planned change uses it" is not on its own a reason to leave a capability
-out. Check `docs/development/ROADMAP.md` and the dependent changes for where
+out. Check the roadmap `config load design` names and the dependent changes for where
 the work is heading, and when you recommend against building something for the
 future, ask the owner whether that future is anticipated. The owner often knows
 direction the documents do not yet record.
@@ -251,7 +273,7 @@ judges representations by looking at them.
 
 ### Walk every caller through a new interface
 
-When a decision creates or changes an interface — a kit's operations, a
+When a decision creates or changes an interface — a library's operations, a
 declaration format, a report — list every caller it will have, in this change
 and in changes that depend on it, and what each must do with it. Then confirm
 each caller can do that through the interface alone. A caller that would have
@@ -277,8 +299,8 @@ rationale.
 
 When the owner states a principle that settles a decision, apply it to the
 remaining open decisions before presenting them, and say where it applied.
-Principles the owner states that no document records are candidates for
-`ARCHITECTURE.md`, or for `docs/guidance/engineering/` where one holds in any
+Principles the owner states that no document records are candidates for the
+repository's architecture document, or for `docs/guidance/engineering/` where one holds in any
 repository; list them for the owner when the design is settled.
 
 When the owner's input changes or reverses your recommendation, append one line
@@ -341,7 +363,8 @@ When every decision is settled, and before writing anything:
   design of its own, is split. A change that can close out on its own is
   preferred to one waiting on another.
 - **List the principles the owner stated** that no permanent document records,
-  for promotion to `ARCHITECTURE.md`, or to `docs/guidance/engineering/` where one
+  for promotion to the repository's architecture document, or to
+  `docs/guidance/engineering/` where one
   holds in any repository.
 - **Settle the implementation cadence** with the owner, as a decision like any
   other: how many rounds implement the work, what each round covers before its
