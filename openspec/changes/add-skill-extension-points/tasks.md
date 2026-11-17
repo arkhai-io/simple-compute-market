@@ -548,6 +548,22 @@ their tests.
   word before the section's session starts; the session commits it with the
   section. Verify: `test_change_workflow_steps.py` passes, and the assumptions test
   passes.
+  - Not yet done; the edit is not in the worktree. The first session tried to restore
+    the lifted deny lines, and the harness refused the edit under `.claude/` even
+    with the deny rule lifted (log seq 37): no allow rule names `.claude/`. The edit
+    is the orchestrator's, or a run's granted `Edit(.claude/change-steps.toml)`:
+    - `[steps.validate]` allow: `Bash(scripts/change-workflow gather *)` and
+      `Bash(scripts/change-workflow evidence *)`;
+    - review, triage, merge, closeout, and archive cleanup allow:
+      `Bash(scripts/change-workflow evidence *)`;
+    - restore the four deny lines `57b7baaad` commented out: `Edit(.claude/**)`,
+      `Write(.claude/**)`, `Edit(.agents/workflow.toml)`, and
+      `Write(.agents/workflow.toml)`. Until they are back,
+      `test_no_step_may_edit_the_configuration` and
+      `test_no_step_may_edit_its_own_permissions` fail in every `make test`.
+    No grant names a removed subcommand: `run *` stays for the hooks. The session
+    making section 4 updates `test_change_workflow_steps.py` to assert the new
+    grants.
 - [ ] 4.6 Move `change-validate` and `change-orchestrate` to the new commands only —
   `evidence` in place of `config parts`, `gather` and `gather --kind` in place of
   `run validation`, evidence paths in place of `.snapshot/validation/` — leaving
