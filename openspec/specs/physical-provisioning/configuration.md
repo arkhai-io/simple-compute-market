@@ -8,7 +8,7 @@ The definition documents the provisioning service is given, as this repository's
 instance of
 [`definition-documents.md`](../../../docs/guidance/engineering/definition-documents.md):
 their settings, the order startup imports them in, how each kind applies the method,
-and the relays' secrets. The pool document's own rules are
+and the relays' secrets; and the service's time source. The pool document's own rules are
 [`resource-pool-management`'s](../resource-pool-management/configuration.md#pool-definitions).
 
 ## Definition documents
@@ -144,3 +144,17 @@ with a negative grace or a reuse margin that is not positive. Keep the relay
 and provisioning clocks synchronized with skew well below the reuse margin; the
 relay plugin checks expiry against its own clock with no leeway. These values
 are service settings, not pool fields or buyer inputs.
+
+## The service's time source
+
+The provisioning service reads `time.source` from its profile, `"wall"` when unset
+or `"injected"`; any other value refuses startup, naming the setting and the value.
+Under `"injected"` it starts frozen at the wall instant it started, logs that at
+startup, and mounts `POST /api/v1/system/time` behind its signed administrator
+authentication; its system status carries the time section in either mode. The
+lease watchdog, lease termination, the job engine and the site it hosts read that
+source. A service whose relays admit real proxies runs on wall time: the relay
+plugin checks a grant's expiry on its own clock, which no lane time moves. No
+packaged profile or chart default sets it; only the lanes' `lane-time` profile,
+`dev-env/provisioning/config-lane-time.yml`, layered through `ACTIVE_PROFILES`, does
+([injected time](../injected-time/architecture.md)).

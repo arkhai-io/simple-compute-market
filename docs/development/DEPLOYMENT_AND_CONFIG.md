@@ -67,6 +67,37 @@ What a service takes from its environment, where its secrets and trust are
 configured, and how its settings are named are
 [`service-configuration.md`](../guidance/repository/service-configuration.md).
 
+### The time source
+
+Every party reads the time of the world from one process time source its
+composition root installs from one setting, `"wall"` by default or `"injected"`
+([injected time](../../openspec/specs/injected-time/architecture.md)):
+
+| Party | Setting |
+|---|---|
+| VM, bare-metal and API-credits storefronts | `[Time] source` in `storefront.toml` |
+| Compute provisioning service | `time.source` in its profile |
+| API-credits service | `time.source` (`APICREDITS_TIME__SOURCE`) |
+| Registry | `TIME_SOURCE` in its profile env file |
+| API-credits sample app | `APICREDITS_SAMPLE_APP_TIME_SOURCE` |
+| Payments and mediation lane doubles | `PAYMENTS_LANE_DOUBLE_TIME_SOURCE`, `MEDIATION_LANE_DOUBLE_TIME_SOURCE` |
+| Buyer | `[time] source`, with `[time] file` naming its time file under `"injected"` |
+
+Any other value refuses startup, naming the setting and the value. Unset, a party
+runs on wall time and mounts no time-setting route. Under `"injected"` a service
+starts frozen at the wall instant it started, logs at startup that its time is
+injected, reports its instant in its status's time section, and moves only when its
+administrator sets it, and a party with an Arkhai payments section whose `livemode`
+is `true` also logs a warning; the buyer reads its instant from its time file on
+every read, refusing to start when the file is missing or invalid. Nothing refuses injected time, since no party can
+recognise production: committed configuration outside the lanes never sets it,
+which `scripts/tests/test_committed_time_sources.py` holds for the chart
+defaults, the local Helm releases' values, the production examples and the
+shipped presets
+([`configuration.md`, "A test control the production image carries is off by default"](../guidance/engineering/configuration.md#a-test-control-the-production-image-carries-is-off-by-default)).
+Only the Compose lanes set it, in configuration only they load ("Per-domain stack
+composition" below).
+
 ## Kubernetes: ConfigMap and Secret mounting
 
 What every chart renders for its service is
@@ -380,8 +411,9 @@ of whose headers gives the command it belongs to:
 | `compose.vms-local.yml` | the VM services' identities; Bob's and Alice's `storefront.toml` and secret overlays; both VM registries' profiles and credentials; both provisioning services' site profiles; the development Alkahest address book; the VM buyer service |
 | `compose.apicredits-local.yml` | the API-credit services' identities and admin key; the storefront's `storefront.toml` and secret overlay; the API-credit registry's profile; the credits buyer service |
 | `compose.bare-metal-local.yml` | the bare-metal registry's and site's profiles, identities and definition documents; the storefront's development `storefront.toml`, secret overlay, address book and lane CA; the buyer service and Mailpit |
-| `compose.payments-double.yml` | the payments lane double, run by every end-to-end lane and never by the full local stack |
+| `compose.payments-double.yml` | the payments lane double, run by every end-to-end lane and never by the full local stack; both lane doubles on injected time (`PAYMENTS_LANE_DOUBLE_TIME_SOURCE`, `MEDIATION_LANE_DOUBLE_TIME_SOURCE`) |
 | `compose.vms-lane.yml`, `compose.apicredits-lane.yml` | each lane's own bindings: its payment storefront's lane configuration and the lane CA, and the registry profile recommending the double's pinned dispute authority; the API-credit lane also runs a compute-schema registry of its own, which the credits scenario routes discovery away from and the full local stack never runs, since VM's registry fills that role there |
+| the lanes' time settings | every party of a lane on injected time, in configuration only the lanes load: the registries' lane profile `dev-env/registry/config-payments-lane.env`; the provisioning services' `dev-env/provisioning/config-lane-time.yml`, layered as the `lane-time` profile through `ACTIVE_PROFILES` by `compose.vms-lane.yml` and `compose.bare-metal-local.yml`; each storefront's lane configuration (`storefront.bob.lane.toml`, `storefront.alice.lane.toml`, `storefront.credits.lane.toml`, and the bare-metal lane's `storefront.dev.toml`); and, in `compose.apicredits-lane.yml`, the credits service's `APICREDITS_TIME__SOURCE`, its lane `admin` principal, and the sample app's `APICREDITS_SAMPLE_APP_TIME_SOURCE` and control token. The full local stack stays on wall time |
 
 The committed sources are: `dev-env/identities/` for every identity and each
 storefront's secret overlay (`*.storefront.secrets.toml`, holding its wallet key
@@ -531,6 +563,14 @@ does. The `payments-ca-bundle` ConfigMap holds the lane CA, which issues both
 doubles' certificates. Each storefront's payments check test pod reads the
 double's seller account, and Bob's mediation check test pod reads the mediation
 double's respondent listing. The release serves no payment or dispute scenario.
+
+The local release runs on wall time, every party in both releases with no time
+source set: it serves interactive use, where a frozen release would sit still, and
+pre-review validation, whose scenarios set no time. The end-to-end session reads
+the time section of release 1's storefront, provisioning service and registry
+through the `lane_time` section of the e2e-tests profile, and fails naming any
+that reports injected time before a scenario runs; a stage needing an instant the
+Agreement does not fix is a blocked skip there.
 
 - `make helm-topology-secrets` creates or replaces, idempotently, every Secret both
   releases read, and the `payments-ca-bundle` ConfigMap, in its namespace, which it

@@ -238,7 +238,10 @@ holds:
 - a framework-free route service for the setting route and the status section.
 
 Every package and the doubles depend on it; each service's HTTP binding stays its own.
-`make check-architecture` gains the allowance for depending on it. It is a new
+`make check-architecture` gains the allowance for depending on it (corrected in
+implementation: the check skips `tools/`, so the allowance is each package's own
+`allowed-dependencies` entry, with no `ARCHITECTURE.toml` row; "Implementation
+record", §1). It is a new
 capability, `injected-time`, with its own specification.
 
 Rejected: a `kit/time` foundation kit with the standard library only, as
@@ -532,3 +535,73 @@ anyway.
 ## Open Questions
 
 None. Previews at a chosen instant are a non-goal (`proposal.md`).
+
+## Implementation record
+
+Findings and alternatives from implementation that the decisions above do not hold,
+moved here from `tasks.md`'s notes.
+
+- §1 (1.7): `make check-architecture` skips `tools/`, so `arkhai-injected-time` is no
+  project in its model: depending on it forms no internal edge, and naming it in a
+  kind allowlist would fail the check's configuration rule. D6's allowance is instead
+  each package's own `allowed-dependencies` entry; no `ARCHITECTURE.toml` row.
+- §1 (1.8): the source returns whole seconds, wall time included, so a converted
+  `time.time()` or `datetime.now()` read loses its fraction; that matters only where
+  something ordered or compared sub-second instants, judged per read.
+- §3 (3.1): without `injected_time = "arkhai-injected-time"` under
+  `[tool.arkhai.architecture.import-roots]`, `make check-architecture` reads the
+  import as a distribution `injected-time` the package's allowlist does not name.
+- §3 (3.1), §5 (5.1): whole seconds broke tests that compared a source read with a
+  sub-second wall read, expected two stamps to differ without time moving, or failed
+  only past half a wall second or when two rows fell in one second; such tests drive
+  an injected source. Until section 7 converted the signing clients, a signed test
+  injected an instant 120 s behind wall: inside the 300 s skew, yet told apart from a
+  wall read.
+- §3 (3.2), §5 (5.2): injected time holds one instant across many writes, so a query
+  ordering by a store-written timestamp ties; ties break by an insertion key (`rowid`,
+  `id`) where the table has one, and none was added where PostgreSQL, which has no
+  `rowid`, may serve.
+- §3 (3.4): stored leases on lane time — the fulfillment claim and poll interval,
+  settlement servicing's retry, the storefronts' convergence leases — do not lapse
+  while injected time is held; a lane stage sets time past them or steps the loop.
+- §5 (5.1): a retired relay key's validity counted leases allocated strictly before
+  its retirement, which sub-second stamps ordered. Within one whole second before
+  cannot be told from after, so a same-second lease counts (`<=`): the bound may be
+  later than needed, never earlier than a grant in use (the MODIFIED delta, 33
+  relay-key).
+- §5 (5.3): a service suite installs its internal dependencies as wheels from
+  `.dist`; after editing a kit, `make dist` (or `make lock`) runs first or the suite
+  tests the old code.
+- §8 (8.2): the storefronts authenticate in module functions no composition builds,
+  so they read the installed source per request; the provisioning and site
+  middlewares are built by a composition and take the operation in their
+  constructor. Since section 10 both exempt it only while the installed source is
+  settable, since the provisioning app and route table are built once at import and
+  shared by its tests.
+- §9, §11: a composed app reads the installed source when it is built, and composing
+  a service installs its configured source; a test installs its own source before
+  building the app (after composing, where composition installs one) and restores it
+  after. A test's stand-in at a real time route's path is shadowed by the real route
+  under injected time.
+- §12 (12.1): rejected for the static check, rendering with Helm and Compose: a
+  render drops keys a chart does not template (the registry chart renders a fixed
+  list) and gates the test on both tools; parsing the files refuses more and needs
+  neither.
+- §12 (12.2), §16 (16.1): the storefront files a lane shares with the full local
+  stack (`storefront.alice.toml`, `storefront.dev.toml`) could not carry injected
+  time without putting the full stack on it; the lanes took files and profiles of
+  their own (`storefront.alice.lane.toml`, the registries' and provisioning's lane
+  profiles).
+- §15 (15.4, 45 F1): the local release's lane-time section was first merged into the
+  shared `helm` profile; contract validation's pod, which layers `helm` alone, would
+  then start the lane-time fixture without credentials and fail, so the section took
+  its own `e2e-tests` profile, on the owner's choice.
+- §15 (15.4, 60 F1): the credential-key refusal uses character classes since a JSON
+  Schema pattern has no portable case flag. Declined: a key spelled with the Kelvin
+  sign, which Python lowercases to `k`, passes the ASCII pattern; only a crafted key
+  reaches it.
+- §16 (16.3): D15's check answered — the lane's Anvil admits
+  `anvil_setBlockTimestampInterval(0)`, adopted, so the chain is frozen between sets.
+  Found when the first VM run's stage 08b failed: between sets the chain stamped wall
+  time and ran ahead, and once the hold-passed module had moved lane time days ahead
+  a later set fell below the latest block, which `evm_setNextBlockTimestamp` refuses.
