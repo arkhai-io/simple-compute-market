@@ -147,11 +147,15 @@ None.
   applying to fields a read never returned.
 - `vm-storefront-fulfillment`: the storefront's provisioning settings keys are
   removed with the field.
+- `fulfillment`: the hosts taking new delivery that the compute composition
+  reports leave out every host in a pool referencing a disabled relay.
 
-All three were promoted into `openspec/specs/` by hand at the first closeout
+The first three were promoted into `openspec/specs/` by hand at the first closeout
 (task 11.6), and later changes have since rewritten some of what was promoted.
 The change's deltas therefore carry only what remains to promote: the relay
-drain, under `physical-provisioning` (06 F1).
+drain, under `physical-provisioning` (06 F1), and its consequence for the
+hosts-taking-new-delivery report, under `fulfillment` and `physical-provisioning`'s
+"Disabling a host keeps new deliveries off it" (15 F1).
 
 ## Non-Goals
 

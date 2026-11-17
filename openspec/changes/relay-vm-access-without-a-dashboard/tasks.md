@@ -1512,11 +1512,63 @@ which no longer describes the compute composition's report:
 - the `DeliverableHosts.deliverable_host_ids` docstring in
   `kit/resource-pools/src/market_resource_pools/host_requirement.py`.
 
-The change's deltas modify only `physical-provisioning`, and closeout's 11.16
-has no row for these. The first needs a MODIFIED `fulfillment` requirement or a
-promotion row, which is the plan's to add. The docstring is a `kit/resource-pools`
-edit, which takes that package's version bump and a relock of every project
-naming it. Neither is made in this section.
+*Settled by the round's triage (15 F1):* the fulfillment requirement, and
+`physical-provisioning`'s "Disabling a host keeps new deliveries off it", which
+also had the composition pass on the host authority's report, are MODIFIED in
+this change's deltas and merged by the archive (11.11). The two descriptions are
+11.16 rows. The docstring is fixed in the round's fix commit (below).
+
+**Round triage fixes (15-implementation, 17-implementation-owner).**
+- *O1:* `parse_relay_definitions` refuses an `enabled` that is not a YAML
+  boolean, an explicit `null` included, naming the entry. It no longer coerces
+  the value, which had read a quoted `"false"` as enabled. Hosts refuse the
+  same values. Unit, in a new `provisioning/compute/tests/unit/test_relay_definitions.py`:
+  `test_a_non_boolean_enabled_is_refused_naming_the_entry` (quoted `"false"`,
+  quoted `"no"`, `0`, `null`), `test_a_boolean_enabled_is_read_as_written`, and
+  `test_an_entry_omitting_enabled_is_enabled`.
+- *O2:* `test_a_listed_relay_is_drained_through_its_entry_and_enabled_by_omission`
+  in `test_relay_administration.py`, library integration. A listed relay holding
+  a lease is reconciled to `enabled: false`: it is disabled, its lease is kept,
+  and it reads count 1 and `drained` false. After the lease is released it reads
+  `drained` true. A later revision omitting `enabled` enables it again.
+- *15 F2:* `test_a_create_accepted_before_its_relay_is_disabled_runs` in
+  `test_relay_drain_api.py`, application integration through the typed client.
+  The create is held between acceptance and execution by disabling its host
+  after the claim was placed: acceptance leases port 6100 and answers
+  `dispatch_pending`. The relay is then disabled and the host enabled. The
+  create runs, the delivery converges `active` on its original lease, and the
+  relay reads count 1 and `drained` false.
+- *15 F1:* the `DeliverableHosts.deliverable_host_ids` docstring in
+  `kit/resource-pools` names the hosts taking new delivery, less any the
+  composition withholds, rather than every registered, enabled host.
+  `arkhai-kit-resource-pools` 0.10.0 → 0.10.1, relocked by `make lock`.
+- *O3:* `docs/seller-frp-setup.md`, "Retiring a relay" step 4, says that the
+  next delivery on a repointed host rewrites its buyer-client settings, which
+  may restart the client, and that the host needs no preparing again.
+- *Evidence:*
+  - Focused suites, all passing: the new unit file and
+    `test_relay_administration.py` (93, unit and library integration), and
+    `test_relay_drain_api.py` (4, application integration; the new test also
+    passed on two further runs).
+  - `scripts/change-workflow run pre-commit` passed on the final state.
+    - after-functional-change relocked 15 projects for the kit bump.
+    - pre-commit-functional passed, `make test` included: `provisioning/compute`
+      556, and the service 622 unit and 546 application integration.
+    - pre-commit passed every check of the change.
+  - `scripts/change-workflow run test-before` produced no evidence, as 10a.8
+    records: it ran at the round's base and failed at collection, since its
+    environment cannot import `market_resource_pools`.
+  - *Fresh-context check:* one finding, fixed. The two parse-only `enabled`
+    tests were first written as parametrized library-integration tests, and
+    `test-levels.md` puts parsing at unit level, so they moved to
+    `tests/unit/test_relay_definitions.py`. It confirmed:
+    - no relay document or fixture in the repository passes a non-boolean
+      `enabled`;
+    - the stricter parser is covered by `arkhai-compute-provisioning`'s
+      existing minor bump against `marketplace-v0.3.0`;
+    - the new application test reaches the resolver only after the relay is
+      disabled;
+    - neither MODIFIED block drops any of main's text.
 
 **Handoff (10d).** The service's application-integration harness builds its own
 wiring in `tests/integration/conftest.py` and does not run `container.py`'s.
@@ -1606,8 +1658,8 @@ triage. Two points carry into it:
 - 10d.1's reading of "the hosts of every pool": hosts placed in, or declared
   in, such a pool.
 - 10d's list of permanent texts that still define the deliverable-hosts report
-  as "registered, enabled hosts", which closeout's promotion table does not
-  yet name.
+  as "registered, enabled hosts", which the round's triage settled (15 F1): the
+  two spec requirements are in the deltas and the two descriptions in 11.16.
 
 ## 11. Closeout
 
@@ -1724,8 +1776,10 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
 - [ ] 11.11 **Archival.** Last, once every other part is checked. The deltas now
       carry only the relay drain, written against main's text (06 F1): ADDED
       "Disabling a relay drains it" and "A relay reports whether it has drained",
-      MODIFIED "A relay binding is fixed for a lease's life" and "Relay admission
-      tokens are resolved at execution". So the archive merges them rather than
+      MODIFIED "A relay binding is fixed for a lease's life", "Relay admission
+      tokens are resolved at execution" and "Disabling a host keeps new
+      deliveries off it", and, under `fulfillment`, MODIFIED "A provider declares
+      whether its delivery needs a host" (15 F1). So the archive merges them rather than
       skipping them, and 11.6's hand synchronization is not applied twice, since
       none of its requirements is in the deltas any more. First compare each
       MODIFIED block with main's current requirement and carry into the block any
@@ -1761,6 +1815,7 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
       | D2 — the relay read's `active_lease_count` and `drained`, required, not waiting for grant expiry | `openspec/specs/physical-provisioning/spec.md`, "A relay reports whether it has drained" — written by the archive |
       | D4 — a relay the document stops listing is left as it is; a listed relay is drained through its `enabled` entry | `openspec/specs/physical-provisioning/spec.md`, "Disabling a relay drains it" (scenario) — written by the archive; the procedure in `docs/seller-frp-setup.md`, "Changing a relay later" (10e.1) |
       | D5 — the relay drain is the pool drain at the relay's scope; refusals name the scope | `openspec/specs/physical-provisioning/spec.md`, MODIFIED "A relay binding is fixed for a lease's life" — written by the archive; `openspec/specs/physical-provisioning/architecture.md`, "Rebinding requires draining"; the procedure in `docs/seller-frp-setup.md` and `docs/development/VALIDATION_RUNBOOK.md` §28 (10e) |
+      | D1 item 1 — the hosts taking new delivery the compute composition reports leave out every host placed in, or declared in, a pool referencing a disabled relay (10d.1) | `openspec/specs/fulfillment/spec.md`, MODIFIED "A provider declares whether its delivery needs a host", and `openspec/specs/physical-provisioning/spec.md`, MODIFIED "Disabling a host keeps new deliveries off it" — written by the archive; `openspec/specs/site-capacity/architecture.md` (the `DeliverableHosts` paragraph) and `docs/development/ARCHITECTURE.md` (the usable-host paragraph), each still calling the report "the identifiers of registered, enabled hosts" (15 F1) |
       | D6 — a provisioning container is never shared between users, by design | `openspec/specs/physical-provisioning/architecture.md`, "Relay credentials stay on the host and in the service" |
       | D7 — implementation cadence | no permanent destination |
       | Roadmap: the relay-deletion gap row settled | `docs/development/ROADMAP.md`, Goal 1 (11.15) |

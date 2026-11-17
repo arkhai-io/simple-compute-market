@@ -229,7 +229,10 @@ service:
    relay operator's step, outside the provisioning service; the
    [relay operations runbook](development/VALIDATION_RUNBOOK.md#retire-a-relay)
    gives it for both cases.
-4. Point any pool still referencing the relay at another relay.
+4. Point any pool still referencing the relay at another relay. The next
+   delivery on each host in a repointed pool rewrites the host's buyer-client
+   settings from the new relay, which may restart the client. That is safe,
+   since the host holds no lease, and the host needs no preparing again.
 5. Enable a relay again only when a server runs at its rendezvous. The service
    never checks that a relay server exists, so an enabled relay with no server
    sells capacity nothing can deliver.

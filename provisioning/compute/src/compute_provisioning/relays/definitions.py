@@ -126,6 +126,16 @@ def parse_relay_definitions(yaml_text: str) -> tuple[RelayDefinition, ...]:
             )
         seen_endpoints.add(endpoint)
 
+        # A listed relay is drained through this field, so a value that is not
+        # a YAML boolean is refused, as a host entry's is, rather than coerced:
+        # a quoted "false" would otherwise leave the relay selling.
+        enabled = entry.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise RelayDefinitionError(
+                f"relays[{index}] ('{relay_id}') has a non-boolean enabled: "
+                f"{enabled!r}; write true or false, unquoted"
+            )
+
         definitions.append(
             RelayDefinition(
                 id=relay_id,
@@ -136,7 +146,7 @@ def parse_relay_definitions(yaml_text: str) -> tuple[RelayDefinition, ...]:
                 grant_key_secret_key=str(entry["grant_key_secret_key"]),
                 label=entry.get("label"),
                 token_secret_key=entry.get("token_secret_key"),
-                enabled=bool(entry.get("enabled", True)),
+                enabled=enabled,
             )
         )
     return tuple(definitions)

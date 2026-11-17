@@ -150,3 +150,49 @@ The rendered variables file holds the decrypted token and MUST have the same lif
 
 - **WHEN** the relay a job's lease names is disabled after the job is accepted and before it executes
 - **THEN** the job executes, whether it creates the delivery or tears it down
+
+### Requirement: Disabling a host keeps new deliveries off it
+
+Disabling a registered host MUST keep new deliveries off it: no capacity
+declaration naming it, in a backed pool whose provider needs a host, MAY be
+admitted against, placed on, or projected enabled while it is disabled. Work
+already placed on it MUST be unaffected: an assignment made before the host was
+disabled keeps the host, its create waits at dispatch until the host is enabled
+again, and teardown and operator jobs run against the host. Enabling the host MUST
+lift that restriction: its declarations are then offered as any other declaration
+is, subject to their own `enabled`, their pool and its relay, fit, and
+availability. The host authority MUST report the hosts it registers and has
+enabled, as their identifiers, to the compute composition. The composition MUST
+supply the site authority, for admission and its projections, and settlement
+scheduling the hosts taking new delivery: those hosts, less every host placed in,
+or with a declaration in, a pool referencing a disabled relay ("Disabling a relay
+drains it").
+
+#### Scenario: A host is disabled
+
+- **WHEN** an operator disables a host named by an enabled declaration in a backed
+  pool whose provider needs a host
+- **THEN** a new claim is neither admitted against nor placed on that declaration,
+  and the declaration is projected not enabled
+
+#### Scenario: A disabled host already holds an assignment
+
+- **GIVEN** an assignment placed on a host before it was disabled
+- **WHEN** the assignment's create is dispatched while the host is disabled
+- **THEN** the create is refused and retried, and is submitted once the host is
+  enabled again
+
+#### Scenario: A disabled host is enabled again
+
+- **GIVEN** an enabled declaration, in an enabled backed pool whose provider needs
+  a host, naming a disabled host
+- **WHEN** an operator enables the host
+- **THEN** the declaration is again admitted against, placed on, and projected
+  enabled as any other eligible declaration is
+
+#### Scenario: A declaration is itself disabled when its host is enabled again
+
+- **GIVEN** a disabled declaration naming a disabled host
+- **WHEN** an operator enables the host
+- **THEN** the declaration is still neither admitted against, placed on, nor
+  projected enabled

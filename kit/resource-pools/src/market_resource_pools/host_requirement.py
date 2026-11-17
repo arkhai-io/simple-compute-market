@@ -41,7 +41,9 @@ class DeliverableHosts(Protocol):
     """The hosts taking new delivery, as the composition owning hosts reports them."""
 
     def deliverable_host_ids(self, db: Session) -> frozenset[str]:
-        """The identifiers of registered, enabled hosts, read in ``db``.
+        """The identifiers of the hosts taking new delivery: registered and
+        enabled, less any host the composition withholds from new delivery,
+        read in ``db``.
 
         Read in the caller's session, so the caller judges its decision against
         the host state its own transaction sees.

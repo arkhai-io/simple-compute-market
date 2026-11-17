@@ -337,6 +337,38 @@ async def test_acceptance_on_a_pool_whose_relay_is_disabled_leases_no_port(servi
     assert (await service.family.list_relay_leases(RELAY)).leases == []
 
 
+async def test_a_create_accepted_before_its_relay_is_disabled_runs(
+    service: Site, fake_ansible,
+):
+    """Scenario "A relay is disabled between acceptance and execution", for a
+    create: its port was leased at acceptance, so the disable lets it run.
+
+    The create is held between acceptance and execution by its host, disabled
+    after the claim was placed: job submission refuses a create against a
+    disabled host, and the create waits at dispatch until the host is enabled
+    again."""
+    await service.relay_with_a_vm_pool()
+    vm = await service.vm_hold()
+    fake_ansible.wait_for_playbook.side_effect = [_relayed_create(vm, 6100)]
+    await service.schedule_vm(vm)
+    await service.family.disable_host(VM_HOST)
+
+    accepted = await service.family.begin_fulfillment(service.vm_request(vm))
+
+    assert accepted.state == "dispatch_pending"
+    assert await service.held() == {vm: 6100}
+
+    disabled = await service.family.set_relay_enabled(RELAY, False)
+    assert (disabled.active_lease_count, disabled.drained) == (1, False)
+    await service.family.enable_host(VM_HOST)
+    await service.settle(records=1)
+
+    assert (await service.family.get_fulfillment_status(accepted.fulfillment_id)).state == "active"
+    assert await service.held() == {vm: 6100}
+    relay = await service.family.get_relay(RELAY)
+    assert (relay.enabled, relay.active_lease_count, relay.drained) == (False, 1, False)
+
+
 async def test_a_relay_enabled_again_before_it_drains_takes_new_delivery(
     service: Site, fake_ansible,
 ):

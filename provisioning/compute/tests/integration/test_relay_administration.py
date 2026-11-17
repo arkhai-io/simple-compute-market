@@ -467,6 +467,42 @@ class TestRelayDefinitionDocuments:
         assert "site-b" not in diff.created + diff.updated + diff.unchanged
         assert relays.get_relay("site-b") == before
 
+    def test_a_listed_relay_is_drained_through_its_entry_and_enabled_by_omission(
+        self, relays, settings, session_factory
+    ):
+        """A listed relay is drained through its entry's ``enabled``, since an
+        API disable is reverted when the document next changes. The drain is
+        written while the relay holds a lease, which is when an operator needs
+        it, and an entry omitting ``enabled`` enables the relay again."""
+        import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+        allocator = RelayPortAllocator(session_factory)
+        leased = allocator.allocate(
+            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1",
+            lease_ends_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        diff = import_relay_definitions(
+            self._yaml(enabled=False), relay_service=relays, settings=settings
+        )
+
+        assert diff.updated == ("site-a",)
+        disabled = relays.get_relay("site-a")
+        assert (disabled.enabled, disabled.active_lease_count, disabled.drained) == (
+            False, 1, False,
+        )
+        (lease,) = relays.list_leases("site-a")
+        assert (lease.remote_port, lease.released_at) == (leased.remote_port, None)
+
+        allocator.release(owner_kind="fulfillment", owner_id="cr-1")
+        drained = relays.get_relay("site-a")
+        assert (drained.active_lease_count, drained.drained) == (0, True)
+
+        diff = import_relay_definitions(self._yaml(), relay_service=relays, settings=settings)
+
+        assert diff.updated == ("site-a",)
+        enabled = relays.get_relay("site-a")
+        assert (enabled.enabled, enabled.drained) == (True, False)
+
     def test_an_unknown_field_is_refused(self):
         document = self._document()
         document["relays"][0]["token_secret_kye"] = "relay_token"
