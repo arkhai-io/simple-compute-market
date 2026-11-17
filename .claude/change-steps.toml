@@ -68,9 +68,7 @@ deny = [
   "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
   "Bash(scripts/change-workflow round-view*)", "Bash(scripts/change-workflow round-done*)",
   "Edit(.claude/**)", "Write(.claude/**)",
-  # Lifted for add-skill-extension-points' section 4 session, on the owner's word,
-  # so it can edit the configuration (task 4.4); restored when that session ends:
-  # "Edit(.agents/workflow.toml)", "Write(.agents/workflow.toml)",
+  "Edit(.agents/workflow.toml)", "Write(.agents/workflow.toml)",
   # A rule marked "Write-steering" refuses only a shell form that writes a file,
   # so the write goes through the Edit or Write tool; such a write is a gap, not
   # a workaround. Every other deny rule forbids the work itself.
