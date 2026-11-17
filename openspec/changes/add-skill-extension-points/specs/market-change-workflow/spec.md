@@ -9,8 +9,11 @@ check packaging, and run every suite, leaving `local` evidence for the tree it
 tested; check packaging and the change's architecture exceptions before the archive;
 and declare the evidence kinds `local`, `helm` after it with a cleanup recording the
 capacity measured and removing the change's namespace and images, `pipeline`, and
-owed `ci`, each with its guide under `.agents/evidence/` and its evidence under
-`.snapshot/evidence/{tree}/`.
+owed `ci`, each with its guide under `.agents/evidence/`; `local` and `helm` keep
+their evidence under `.snapshot/evidence/{tree}/`, and `pipeline` and `ci`, whose
+runs MCW-zk52 and MCW-7hr1 tie to the commit under validation and whose baseline
+MCW-2lzw chooses by its ancestry, under `.snapshot/evidence/{commit}/`, `ci`'s per
+owed workflow; each attempt is a directory named by its UTC start time.
 
 #### Scenario: Validation runs this repository's parts
 
@@ -24,6 +27,12 @@ owed `ci`, each with its guide under `.agents/evidence/` and its evidence under
 - **WHEN** an implementation's functional checks pass for the tree it then commits
 - **THEN** validation of that commit finds the `local` kind present and gathers only
   the others
+
+#### Scenario: A pipeline run for another commit with the same tree
+
+- **WHEN** a pipeline run's evidence exists for a commit whose message was since
+  amended, and the amended commit is validated
+- **THEN** the pipeline kind is missing for it and its own run is dispatched
 
 ### Requirement: MCW-5tgp This repository provides the workflow's roles
 

@@ -26,8 +26,8 @@ holds it to this.
 
 ### Requirement: CW-k7gd An evidence kind has a guide the steps read
 
-Each evidence kind the configuration declares MAY name a guide: Markdown, prose
-only, saying how to read the kind's evidence, how its failures are told apart, what
+Each evidence kind the configuration declares MUST name a guide, which MUST NOT be
+empty: Markdown, prose only, saying how to read the kind's evidence, how its failures are told apart, what
 its section of the validation record adds, what its cleanup writes, and what a
 section's verification names for it. Validation, planning, implementation, the
 merge, archive cleanup, and the reviews reading a validation record MUST read the
@@ -37,6 +37,11 @@ guides of the kinds they handle.
 
 - **WHEN** a merge conflicts over a tracked file a kind's cleanup writes
 - **THEN** the merge resolves it as that kind's guide says
+
+#### Scenario: A kind names no guide
+
+- **WHEN** a kind is declared with no `guide`, or with one naming an empty file
+- **THEN** every reader of the configuration refuses, naming the kind's `guide`
 
 ### Requirement: CW-c5nt A skill names a contradiction it notices and follows its own text
 
@@ -65,19 +70,30 @@ it. A test MUST fail on any other, naming the skill.
 - **THEN** the test fails, naming the target and the skill, and the skill names the
   repository's comment check by its role
 
-### Requirement: CW-t3ev Evidence describes a tree
+### Requirement: CW-t3ev Evidence describes a tree, or a commit where its result depends on history
 
-Evidence MUST describe the Git tree it was gathered against: `git write-tree` of the
-worktree as tested, its changes added to a temporary index that honours `.gitignore`.
-It MUST be reused for any commit whose tree is that tree. Where the engine computes
-the tree — through `{tree}` or its own gathering — the identity is the engine's;
-evidence written otherwise names its tree on its writer's word.
+An evidence kind's pattern MUST hold exactly one of `{tree}` and `{commit}`, and its
+evidence describes what that placeholder names. Evidence of a `{tree}` kind MUST
+describe the Git tree it was gathered against: `git write-tree` of the worktree as
+tested, its changes added to a temporary index that honours `.gitignore`; it MUST be
+reused for any commit whose tree is that tree. Evidence of a `{commit}` kind, whose
+result depends on the commit's history, MUST describe that commit, `HEAD`'s full
+object name, and MUST NOT be reused for another commit sharing its tree. Where the
+engine computes the identity — through a placeholder or its own gathering — it is
+the engine's; evidence written otherwise names its identity on its writer's word.
 
 #### Scenario: Implementation's checks stand for validation's
 
 - **WHEN** implementation's functional checks leave `local` evidence for the tree it
   then commits
 - **THEN** validation of that commit finds `local` present and does not gather it
+
+#### Scenario: A commit amended only in its message
+
+- **WHEN** a commit validated with a `{commit}` pipeline kind is amended only in its
+  message, and the amended commit is validated
+- **THEN** its `{tree}` kinds are present and its pipeline kind is missing and
+  gathered
 
 ### Requirement: CW-g1gn What the workflow writes after implementation is ignored by Git
 
@@ -94,22 +110,26 @@ directory Git does not ignore.
 
 ### Requirement: CW-p4rs Evidence counts by its presence
 
-Evidence MUST count by being present at its kind's pattern for the tree, whoever
+Evidence MUST count by being present at its kind's pattern for the tree or commit
+its pattern keys, whoever
 wrote it: a step, the engine, or whatever placed it from beyond the checkout. The
 workflow MUST NOT fetch evidence from beyond the checkout.
 
 #### Scenario: Evidence from an external topology
 
 - **WHEN** a run of tests needing a topology no checkout holds is placed at the
-  pipeline kind's pattern for the tree
+  pipeline kind's pattern for the commit
 - **THEN** `evidence` reports the pipeline kind present, and validation assesses it
 
 ### Requirement: CW-r5qk An evidence kind is required always or when owed
 
 Each evidence kind MUST be declared required `always` or when `owed`. An owed kind is
 required once for each argument a complete section's `Owed by validation (<kind>
-<argument>):` line names. A line naming no kind MUST be read as the one owed kind,
-and refused when there is more than one. A waiver MUST name kinds.
+<argument>):` line names, and its evidence MUST be present for each argument on its
+own: an owed kind's pattern MUST hold `{owed}`, and an owed argument MUST be a single
+path segment holding no glob character, a line naming another refused, naming its
+section. A line naming no kind MUST be read as the one owed kind, and refused when
+there is more than one. A waiver MUST name kinds.
 
 #### Scenario: A section owes the pipeline
 
@@ -117,17 +137,38 @@ and refused when there is more than one. A waiver MUST name kinds.
   `Owed by validation (pipeline): scenario test_spot_deal_settles passes`
 - **THEN** `evidence` lists the pipeline kind as required for that section
 
+#### Scenario: Two workflows are owed and one has evidence
+
+- **WHEN** complete sections owe `(ci tests.yml)` and `(ci docker.yml)`, and only
+  `tests.yml`'s evidence is present
+- **THEN** `evidence` lists `ci tests.yml` present and `ci docker.yml` missing
+
+#### Scenario: An owed kind's pattern omits its argument
+
+- **WHEN** an owed kind declares `evidence = ".snapshot/evidence/{commit}/ci/*/summary.json"`
+- **THEN** every reader of the configuration refuses, naming the kind's `evidence`
+
 ### Requirement: CW-e2vd The engine reports which required evidence is present
 
-`evidence <change>`, and its `--json`, MUST list for `HEAD`'s tree each required
-kind, its pattern, and the evidence matching it, as present, missing, waived with
-the decision's `seq`, or not required.
+`evidence <change>`, and its `--json`, MUST list for `HEAD`'s tree or commit, as
+each kind's pattern keys it, each required kind and an owed kind's argument, its
+pattern, and the evidence matching it, as present, missing, waived with the
+decision's `seq`, or not required. When several files match one kind and argument,
+it MUST list them all and mark the last in path order as current; validation MUST
+assess the current one and name its path in the record.
 
 #### Scenario: Only local evidence exists
 
 - **WHEN** `local` evidence exists for `HEAD`'s tree and no other kind's does
 - **THEN** `evidence` lists `local` present with its path and every other required
   kind missing
+
+#### Scenario: A rerun beside a failed attempt
+
+- **WHEN** the Helm kind's pattern matches a failed attempt under
+  `20261117T1003Z/` and the rerun the owner allowed under `20261117T1140Z/`
+- **THEN** `evidence` lists both, the rerun as current, and validation assesses the
+  rerun
 
 ### Requirement: CW-a8ss Validation gathers what is missing and assesses all of it
 
@@ -160,7 +201,10 @@ A repository MAY declare `before-<step>` and `after-<step>` for each step a run 
 logged as; review and triage hooks receive `{kind}`. An absent or empty hook MUST run
 nothing, with no default, and the orchestrating session MUST say in one sentence that
 it ran the step without it. Interactively, the skill MUST run them through `run
-before|after <step> <change>`.
+before|after <step> <change>`, but for a review, which run interactively is no run
+and MUST run no hooks. A review's runner MUST run `before-review` before it starts
+the reviewer, giving the reviewer the run's inputs directory, and `after-review`
+once it has published the review's record.
 
 #### Scenario: No hook is declared before a review
 
@@ -186,13 +230,20 @@ step.
 An `after-<step>` hook MUST run only after a `finished` outcome, before that outcome
 is logged as final. When it fails, the wrapper MUST resume the same session once
 with the failure; when it fails again, the run MUST end as a question to the owner
-naming the hook.
+naming the hook. A failing `after-review` MUST resume no reviewer: the run MUST end
+as that question at once, its published record standing and never published again.
 
 #### Scenario: A hook after implementation finds a lint failure
 
 - **WHEN** `after-implement` fails after an implementation finishes
 - **THEN** the implementation session resumes with the failure, fixes and commits it,
   ends finished again, and the hook passes
+
+#### Scenario: A hook after a review fails
+
+- **WHEN** `after-review` fails once the review's runner has published `19-design.md`
+- **THEN** the run ends as a question to the owner naming the hook, the reviewer is
+  not resumed, and no second record is published
 
 ### Requirement: CW-i9np A run's inputs reach its session through a directory
 
@@ -215,8 +266,8 @@ directs.
 
 Validation MUST assess the evidence kinds the repository's configuration declares
 but those the owner waived (CW-e7lm), and each kind's evidence MUST describe the tree
-under validation (CW-t3ev), never another tree's build, run, or state, whoever wrote
-it (CW-p4rs).
+or commit under validation, as its pattern keys it (CW-t3ev), never another tree's or
+commit's build, run, or state, whoever wrote it (CW-p4rs).
 
 #### Scenario: A part finds only another commit's evidence
 
@@ -270,10 +321,11 @@ that kind, or when those commits include a merge.
 ### Requirement: CW-g4oz Validation runs the parts the configuration declares
 
 The configuration MUST declare each evidence kind under `[validation.evidence.<kind>]`
-with its requirement, its pattern holding `{tree}`, and `run` or `start` then
-`collect`, and MAY declare `after`, `cleanup`, and `guide`. The engine MUST gather
-started kinds before `run` kinds, each after the kind its `after` names, and refuse an
-`after` naming no declared kind or forming a cycle.
+with its requirement, its pattern holding `{tree}` or `{commit}` (CW-t3ev), `run` or
+`start` then `collect`, and its guide (CW-k7gd), and MAY declare `after` and
+`cleanup`. The engine MUST gather started kinds before `run` kinds, each after the
+kind its `after` names. The configuration's check MUST refuse an `after` naming no
+other kind declared before it, and a started kind's `after` naming a `run` kind.
 
 #### Scenario: Two sections owe CI workflows
 
@@ -286,6 +338,18 @@ started kinds before `run` kinds, each after the kind its `after` names, and ref
 - **WHEN** the configuration declares `local`, a `run` kind, before `pipeline`, a
   `start` and `collect` kind, and neither names an `after`
 - **THEN** the gathering starts `pipeline` before it runs `local`
+
+#### Scenario: A dispatched kind follows a long one
+
+- **WHEN** `pipeline`, a `start` and `collect` kind, declares `after = "local"`, a
+  `run` kind
+- **THEN** every reader of the configuration refuses, naming `pipeline`'s `after`,
+  since every start is dispatched before any `run` kind runs
+
+#### Scenario: A kind follows one declared after it
+
+- **WHEN** `local` declares `after = "helm"` and `helm` is declared below it
+- **THEN** every reader of the configuration refuses, naming `local`'s `after`
 
 #### Scenario: A repository has no Helm part
 
@@ -301,9 +365,11 @@ started kinds before `run` kinds, each after the kind its `after` names, and ref
 
 A declared command MUST promise only its exit status and, for a `start`, a last
 line of standard output naming the marker its `collect` waits past. The engine MUST
-keep that marker for the tree, the kind, and an owed kind's argument, a later `start`
+keep that marker for the tree or commit the kind's pattern keys, the kind, and an
+owed kind's argument, a later `start`
 of the same key replacing it, MUST fill `{after}` from it, and MUST end each kind's
-gathering with a closing line naming the kind, its argument, the tree, the result,
+gathering with a closing line naming the kind, its argument, the tree or commit, the
+result,
 the exit status, and the evidence.
 
 #### Scenario: Two owed runs are collected side by side
@@ -357,8 +423,8 @@ a commit with a functional change; `pre-archive`, before closeout's archive;
 
 A declared command MUST receive the workflow's values as shell-quoted placeholders,
 run with `sh -c` from the repository's root: `{change}`, `{base}`; `{remote}` in
-`pre-push`; `{owed}` in an owed kind; `{after}` in a `collect`; `{tree}` in a kind's
-commands and pattern and the functional hooks; `{kind}` in review and triage hooks;
+`pre-push`; `{owed}` in an owed kind; `{after}` in a `collect`; `{tree}` and
+`{commit}` in a kind's commands and pattern and the functional hooks; `{kind}` in review and triage hooks;
 `{inputs}` in step hooks. A value of the owner's machine MUST reach it through the
 environment.
 

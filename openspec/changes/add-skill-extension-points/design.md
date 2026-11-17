@@ -1,6 +1,7 @@
 # Design: add skill extension points
 
-Status: design settled, awaiting its design review.
+Status: design amended by the triage of its first design review (18 F1 to F5),
+awaiting another design review.
 
 ## Context
 
@@ -67,7 +68,7 @@ through `load.<step>`, which states nothing about what such a document holds, fa
 nothing when it is absent, and blurs guidance with instructions to a step; deferring
 to `extract-change-workflow-repository`, which depends on this design.
 
-### D2 — Evidence describes a tree
+### D2 — Evidence describes a tree, or a commit where its result depends on history
 
 Evidence describes the Git tree it was gathered against: `git write-tree` of the
 worktree as tested, its changes added to a temporary index that honours
@@ -76,8 +77,19 @@ implementation makes just after its functional checks has its `local` evidence
 already. Where the engine computes the tree — through `{tree}` or its own gathering —
 the identity is the engine's; evidence written otherwise names its tree on its
 writer's word (D3). Inputs outside the tree — the machine's tools, the cluster's
-state, `dev`'s CI baseline — are not captured, as validation does not control them
-today beyond its preflight.
+state — are not captured, as validation does not control them today beyond its
+preflight.
+
+A kind whose result depends on the commit's history rather than its tree describes
+the commit instead: a dispatched run whose head commit is the commit under
+validation, or a comparison with a baseline chosen by the commit's ancestry, as
+MCW-zk52, MCW-7hr1, and MCW-2lzw require here. Its pattern holds `{commit}`, which
+the engine fills with `HEAD`'s full object name, where a tree-keyed kind's holds
+`{tree}`; each pattern holds exactly one of them, so the identity is declared by the
+pattern and needs no field of its own (18 F3). Such evidence is not reused across
+two commits sharing a tree — a message amended, a revert, a squash — which costs
+little, since nearly every new commit changes the tree; the reuse this decision is
+for, implementation's `local` evidence, keys by tree.
 
 The digest is only as stable as the worktree's untracked files: a workflow file Git
 does not ignore would change the tree its own evidence documents. Every file a
@@ -89,14 +101,18 @@ cleanup's capacity figure, a tracked file, is written after the change's last
 validation by archive cleanup and committed alone (CW-e1sg), changing a tree no
 evidence needs to describe.
 
-Rejected: a commit, under which implementation's evidence, gathered before its
-commit exists, never counts; a tree ignoring inert paths, which removes the line
+Rejected: a commit for every kind, under which implementation's evidence, gathered
+before its commit exists, never counts; a tree for every kind, revising MCW-zk52,
+MCW-7hr1, and MCW-2lzw, under which a reused run's head and its `dev` comparison may
+describe another history; identity as a field of its own beside the pattern, which
+the pattern already states; a tree ignoring inert paths, which removes the line
 CW-j1ab draws before pre-closeout for documents a test checks for currency;
 identity by each kind's declared inputs, deferred (Open Questions); no reuse.
 
 ### D3 — Evidence counts by its presence, whoever produced it
 
-Evidence counts when it is present at its kind's pattern for the tree, whoever wrote
+Evidence counts when it is present at its kind's pattern for the tree or commit
+(D2), whoever wrote
 it: a step's hook, the engine's gathering, an agent, or whatever placed it from
 beyond the checkout. It is its producer's word; the workflow does not defend against
 agents misleading each other, who have no incentive to. Evidence from beyond the
@@ -112,9 +128,16 @@ which the layer above the orchestrating session already does.
 
 ### D4 — The engine reports presence; validation gathers what is missing and assesses everything
 
-`scripts/change-workflow evidence <change> [--json]` lists, for `HEAD`'s tree, each
-required kind, its pattern, and what matches: present, missing, waived with the
-decision's `seq`, or not required. Validation gathers each missing kind and assesses
+`scripts/change-workflow evidence <change> [--json]` lists, for `HEAD`'s tree or
+commit as each kind's pattern keys it (D2), each required kind — an owed kind once
+for each argument owed (D5) — its pattern, and what matches: present, missing,
+waived with the decision's `seq`, or not required. When several files match one
+kind and argument — a failed attempt and the rerun after an environmental diagnosis
+— it lists them all and marks the last in path order as current; validation
+assesses the current one and the record names its path. Writers name their attempts
+so that path order is time order — this repository's scripts by a UTC timestamp
+directory, as its guides say. Path order rather than modification time, which a copy
+from beyond the checkout (D3) may carry from anywhere (18 F1). Validation gathers each missing kind and assesses
 every kind's evidence from its guide: passed, failed (the commit or unknown), or
 environmental. Present failing evidence is diagnosed, never gathered again for a pass
 — only an environmental diagnosis and the owner's word rerun a kind, as today.
@@ -135,15 +158,19 @@ Each kind's configuration says `required = "always"` or `"owed"`. An owed kind i
 required once for each argument a complete section's owed line names, which now
 names its kind: `Owed by validation (ci tests.yml): job … — …`. A line naming no
 kind reads as the one owed kind, so plans already written read as before, and is
-refused where more than one kind is owed. Waivers are unchanged, naming kinds where
-they named parts. Present evidence of a kind not required is listed `not required`
+refused where more than one kind is owed. Evidence is present for each argument on
+its own: an owed kind's pattern holds `{owed}`, so a `tests.yml` result never makes
+`docker.yml` present, and an owed argument is a single path segment holding no glob
+character, the owed line refused otherwise, naming its section (18 F1). Waivers are
+unchanged, naming kinds where they named parts. Present evidence of a kind not required is listed `not required`
 and not assessed. Here `local`, `helm`, and `pipeline` are `always` and `ci` is
 `owed`.
 
 Rejected: owing limited to the one CI-shaped kind, leaving another repository's
 optional pipeline to a waiver per change; conditions on the paths a change touches,
 deferred with D2's declared inputs (Open Questions); conditions in a guide's prose,
-which the engine cannot report.
+which the engine cannot report; a manifest binding each matched file to its owed
+argument, a format and a parser for layouts no adopter has asked for.
 
 ### D6 — The configuration is the engine's injection, the guide the skill's
 
@@ -169,7 +196,9 @@ cleanup  = ["make record-capacity CHANGE={change}", "make -C helm teardown CHANG
 guide    = ".agents/evidence/helm.md"
 ```
 
-`after` stays optional. Guides live under `.agents/evidence/`, beside the skills they
+`after` stays optional; `guide` is required of every kind, since validation assesses
+each kind's evidence from its guide and a kind without one leaves it nothing to
+judge by (18 F4). Guides live under `.agents/evidence/`, beside the skills they
 extend: they are extensions to steps, not guidance, carry no layer tag, and are not
 loaded by `load.common`; after extraction `.agents/` stays the repository's. A part
 becomes an *evidence kind* — plain "kind" is the review kind's — and the record's
@@ -179,7 +208,9 @@ command (CW-f3qk), and no step edits it (CW-z5me).
 Rejected: the guide as the whole declaration, TOML frontmatter holding the engine's
 fields above the prose, which puts what the engine reads in the skill's injection;
 frontmatter holding only identity and requirement, the agent running commands
-written in prose, which gives up the engine's recording, markers, and hook table.
+written in prose, which gives up the engine's recording, markers, and hook table; an
+optional guide with a generic result format and a fallback assessment, a shared
+format every writer would produce, bringing back the machine verdict D4 rejects.
 
 ### D7 — The engine acts around steps, and a repository hooks each one
 
@@ -214,9 +245,21 @@ A failing `after-` hook goes back to the step that can fix it (CW-a4fl). After-h
 run only after a `finished` outcome, before the outcome is logged as final; on
 failure the wrapper resumes the same session once with the failure, and a second
 failure ends the run as a question to the owner naming the hook, so routing reads
-one outcome. A step that cannot act on a failure, review or validation, explains it
-in the resumed turn and the run ends as that question. Interactively the skill runs
+one outcome. Validation, which cannot act on a failure, explains it in the resumed
+turn and the run ends as that question. Interactively the skill runs
 `scripts/change-workflow run before|after <step> <change>` itself.
+
+A review runs through its own runner, `review.py`, not the wrapper, and its reviewer
+is read-only, so the runner holds the review's hooks (18 F5). It runs `before-review`
+before it starts the reviewer, giving the reviewer the run's inputs directory to
+read, which is all a read-only reviewer needs: a coordinator, say, hands it what it
+knows of another repository there. It runs `after-review` once it has published the
+record and before it logs the outcome as final, so a hook may read the record. A
+failing `after-review` resumes no reviewer — a resumed reviewer's final message
+would be taken for another review, and it can fix nothing — but ends the run as a
+question to the owner naming the hook, the published record standing and never
+published again. An interactive review is no run: it logs nothing and has no inputs
+directory, so it runs no hooks, and says so.
 
 A run's inputs reach its session through a directory under the change's records,
 `reviews/runs/<run>/before/` and `…/after/`, given to hooks as `{inputs}` and named
@@ -238,7 +281,10 @@ failing `before-` hook stopping the session; a failing `after-` hook carried for
 to the next session, which may not be able to fix it, or brought straight to the
 owner or the orchestrating session, which takes no position on the work (CW-yvo1);
 the hook's printed output as its message, which makes build noise instructions;
-reading every file in the directory, which loads accidental and large files whole.
+reading every file in the directory, which loads accidental and large files whole;
+review excluded from step hooks, which loses the hook that hands a reviewer what a
+coordinator knows; resuming the reviewer after a failing `after-review`, which risks
+a second published review.
 
 ### D8 — Hooks have no defaults
 
@@ -291,13 +337,17 @@ rows of the repository's guidance.
 The configuration's check (CW-w8ne), run by every reader, refuses, naming the field:
 a key or type under `[validation.evidence.<kind>]` it does not define; `required`
 outside `always` and `owed`; a kind with neither or both of `run` and `start` with
-`collect`; an `after` naming no declared kind or forming a cycle; an `evidence`
-pattern without `{tree}`, or whose fixed directory Git does not ignore; `{owed}`
-outside an owed kind; a `guide` that does not exist, failing closed as a `load`
-directory entry does; a hook key other than `before-` or `after-` a step in
-`graph.STEPS`; `{kind}` outside review and triage hooks, `{inputs}` outside step
-hooks, `{tree}` outside a kind's commands and pattern and the functional hooks. A
-guide restating the configuration is held by review. `check skills` is unchanged; the
+`collect`; an `after` naming no other kind declared before it, or a started kind's
+`after` naming a `run` kind — the shapes the gathering's order, every start before
+any run and the runs in declaration order, could not keep, which also rules out
+every cycle, as today's check does (18 F2); an `evidence` pattern holding neither or
+both of `{tree}` and `{commit}`, or whose fixed directory Git does not ignore; an
+owed kind's pattern without `{owed}`, and `{owed}` outside an owed kind; a kind
+without a `guide`, or whose guide does not exist or is empty, failing closed as a
+`load` directory entry does (18 F4); a hook key other than `before-` or `after-` a
+step in `graph.STEPS`; `{kind}` outside review and triage hooks, `{inputs}` outside
+step hooks, `{tree}` and `{commit}` outside a kind's commands and pattern and the
+functional hooks. A guide restating the configuration is held by review. `check skills` is unchanged; the
 inverted test of D9 is the workflow's own.
 
 Rejected: a separate `check guides`, since the configuration is the one place a guide
@@ -336,8 +386,10 @@ no release.
 
 `.agents/workflow.toml` declares four kinds — `local` (`always`, `run`), `helm`
 (`always`, `run`, after `local`, with the capacity and teardown cleanup), `pipeline`
-(`always`, `start` and `collect`), `ci` (`owed`, `start` and `collect`) — each with its
-pattern under `.snapshot/evidence/{tree}/<kind>/` and its guide under
+(`always`, `start` and `collect`), `ci` (`owed`, `start` and `collect`) — `local` and
+`helm` with their patterns under `.snapshot/evidence/{tree}/<kind>/`, `pipeline` and
+`ci` under `.snapshot/evidence/{commit}/<kind>/` (D2), `ci`'s holding `{owed}` (D5),
+each attempt in a UTC timestamp directory, and each kind with its guide under
 `.agents/evidence/`, which hold what leaves the skills. The preflight stays. This
 repository's validation scripts take the tree and write there, and
 `pre-commit-functional` leaves `local` evidence for the tree it tested. No step hook
@@ -350,12 +402,14 @@ validation requirements say "kind" where they named a part.
 One round before its review, so the change keeps moving while the owner is away. The
 change alters the tool validating it, so its work goes in this order, each session
 leaving the workflow runnable on its own branch: the evidence model — the
-configuration's kinds and their check, the tree, `evidence` and `gather`, the
+configuration's kinds and their check, the tree and the commit, `evidence` and
+`gather`, the
 record's fields, owed lines naming their kind, `history` by evidence paths, this
 repository's configuration and scripts, and `change-validate` and
 `change-orchestrate` moved to the new commands; then the actions around steps — the
-wrapper's table, the built-in gathering and cleanup, the hooks, the inputs directory,
-`run before|after`, the resumption after a failing after-hook; then the neutral
+wrapper's table, the built-in gathering and cleanup, the hooks, the review runner's
+hooks, the inputs directory, `run before|after`, the resumption after a failing
+after-hook; then the neutral
 skills — the four guides, every skill per D9 and D12 to D14 with D10's notice, and
 the inverted test.
 

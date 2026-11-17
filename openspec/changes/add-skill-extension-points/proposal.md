@@ -27,20 +27,24 @@ same checks on the very tree it commits: the workflow knows parts, not evidence.
 
 - **Evidence, not parts.** The workflow and engine know evidence kinds, not a
   repository's parts. Evidence describes a Git tree and is reused for any commit with
-  that tree, whoever wrote it; it counts by being present at its kind's pattern.
+  that tree — or, for a kind whose result depends on the commit's history, such as a
+  dispatched run, describes the commit — whoever wrote it; it counts by being present
+  at its kind's pattern, an owed kind's for each argument owed.
 - **Validation completes and assesses evidence.** `scripts/change-workflow evidence`
   reports which required kinds are present for `HEAD`'s tree; the engine gathers the
   missing ones before validation's session starts; the skill assesses every kind from
   its guide and writes the record, naming each kind's source.
 - **Kinds are declared in the configuration, explained in guides.** Each kind's
-  engine fields — requirement (`always` or `owed`), evidence pattern with `{tree}`,
-  commands, `after`, `cleanup` — sit in `[validation.evidence.<kind>]`; its guide,
-  prose under `.agents/evidence/`, tells the agent how to read and diagnose it and
-  restates nothing the configuration holds.
+  engine fields — requirement (`always` or `owed`), evidence pattern with `{tree}` or
+  `{commit}`, commands, `after`, `cleanup` — sit in `[validation.evidence.<kind>]`;
+  its guide, required, prose under `.agents/evidence/`, tells the agent how to read
+  and diagnose it and restates nothing the configuration holds.
 - **Hooks around every step.** A repository may declare `before-<step>` and
   `after-<step>` hooks; their messages reach the session through a per-run inputs
   directory. A failing before-hook informs the session; a failing after-hook resumes
-  the session once, then goes to the owner. The engine's own actions around steps —
+  the session once, then goes to the owner; a review's runner holds its hooks, and
+  a failing `after-review` goes to the owner directly. The engine's own actions
+  around steps —
   gathering before validate, cleanup before archive cleanup — use the same machinery.
 - **The base skills name no repository's targets or paths,** held by a test, the step
   table's command forms excepted until `sandbox-unattended-workflow-steps` lands.
@@ -67,9 +71,9 @@ The workflow has no release, so none of these is migrated (CW-c2tw):
 
 | Interface | Change | Compatible |
 |---|---|---|
-| `[validation.parts.<name>]` | becomes `[validation.evidence.<kind>]`; `evidence` a pattern with `{tree}`; adds `required` and `guide` | no |
-| Hooks `before-<step>`, `after-<step>` | added, optional, no defaults | yes |
-| Placeholders `{tree}`, `{inputs}`, `{kind}` | added | yes |
+| `[validation.parts.<name>]` | becomes `[validation.evidence.<kind>]`; `evidence` a pattern with `{tree}` or `{commit}`, and `{owed}` in an owed kind's; adds `required` and a required `guide` | no |
+| Hooks `before-<step>`, `after-<step>` | added, optional, no defaults; a review's run by its runner | yes |
+| Placeholders `{tree}`, `{commit}`, `{inputs}`, `{kind}` | added | yes |
 | `evidence <change> [--json]`, `gather <change> [--kind] [--lapsed]`, `run before\|after <step> <change>` | added | yes |
 | `run validation … preflight\|run\|start\|collect`, `config parts` | fold into `gather` and `evidence` | no |
 | `run cleanup` | kept for reruns; also the built-in action before archive cleanup | yes |
@@ -97,6 +101,7 @@ The workflow has no release, so none of these is migrated (CW-c2tw):
 - `scripts/change_workflow/`: `config.py` (kinds, hooks, placeholders, the check),
   `hooks.py`, `cli.py` (`evidence`, `gather`, `run before|after`), `wrapper.py` (the
   actions around steps, the inputs directory, resumption after an after-hook),
+  `review.py` (a review's hooks),
   `graph.py` (the actions table), `history.py`, `records.py`; their tests.
 - `.agents/workflow.toml`, the new `.agents/evidence/` guides, and this repository's
   validation scripts (`scripts/validate_slice.py`, `scripts/ci_evidence.py`,
