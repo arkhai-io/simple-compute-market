@@ -314,6 +314,39 @@ def test_the_profile_names_every_party_by_a_known_kind_and_its_fields(tmp_path) 
         parties_from({"parties": [{"name": "anvil", "kind": "chain"}]})
 
 
+def test_a_party_field_named_by_setting_is_read_from_that_setting() -> None:
+    held = {"secrets.chain_url": "http://anvil:8545"}
+    read: list[str] = []
+
+    def setting(path: str) -> Any:
+        read.append(path)
+        return held.get(path)
+
+    parties = parties_from({"parties": [
+        {"name": "anvil", "kind": "chain", "url_setting": "secrets.chain_url"},
+    ]}, setting=setting)
+
+    assert [(party.name, party.kind) for party in parties] == [("anvil", "chain")]
+    assert read == ["secrets.chain_url"]
+    with pytest.raises(LaneTimeError,
+                       match="'anvil' takes its url from setting 'secrets.missing', which"):
+        parties_from({"parties": [
+            {"name": "anvil", "kind": "chain", "url_setting": "secrets.missing"},
+        ]}, setting=setting)
+
+
+def test_parties_keyed_by_name_are_read_as_a_list_of_them_is(tmp_path) -> None:
+    file = tmp_path / "lane-time.json"
+    section = {"mode": "injected", "parties": {
+        "anvil": {"kind": "chain", "url": "http://anvil:8545"},
+        "buyer-file": {"kind": "buyer", "file": str(file)},
+    }}
+
+    assert [(party.name, party.kind) for party in parties_from(section)] == [
+        ("anvil", "chain"), ("buyer-file", "buyer")]
+    assert buyer_time_file(section) == str(file)
+
+
 def test_the_buyer_reads_the_lane_time_file_only_in_an_injected_run() -> None:
     parties = [{"name": "buyer-file", "kind": "buyer", "file": "/run/lane-time.json"}]
 

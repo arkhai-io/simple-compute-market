@@ -4,6 +4,7 @@ The domain's end-to-end (ARCHITECTURE.md, "API-credits market domain"):
 
     discover → negotiate (new key) → settle → consume to 402
              → buy again into the existing key → consume succeeds
+             → lane time an hour forward → each call charged once, to 402
 
 The topology (the API-credit lane): a registry speaking the ``api_credits``
 schema, the credits service, the credits storefront (self-seeds one
@@ -156,6 +157,7 @@ def test_credits_full_deal(
     credits_buyer_cli: BuyerCli,
     credits_deal_state: DomainDealState,
     credits_storefront_admin,
+    lane_time,
 ) -> None:
     _seed_published(credits_storefront_admin)
 
@@ -233,10 +235,10 @@ def test_credits_full_deal(
     )
     credits_deal_state.assert_complete()
 
-    # --- 3. Top up the SAME key with 2 more credits -----------------------
+    # --- 3. Top up the SAME key with 3 more credits -----------------------
     topup = credits_buyer_cli.run([
         "credits", "buy",
-        "--quantity", "2",
+        "--quantity", "3",
         "--key-id", key_id,
         # `market credits buy` has no --service-name; service selection
         # goes through the typed resource query, the same surface the
@@ -255,7 +257,7 @@ def test_credits_full_deal(
         "run_ended", predicate=lambda e: e.get("status") == "ready", timeout=10.0,
     )
 
-    # --- 4. Consume succeeds again, then the top-up grant exhausts ----------
+    # --- 4. Consume succeeds again ------------------------------------------
     # The lane runs the sample app with no verify cache, so the very next
     # request re-verifies the key and sees the top-up.
     recovered = _forecast(secret, base_url)
@@ -265,7 +267,20 @@ def test_credits_full_deal(
         "(APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0 in compose.apicredits-lane.yml)."
     )
     assert recovered.json()["forecast"] == "sunny"
-    final_credit = _forecast(secret, base_url)
-    assert final_credit.status_code == 200, final_credit.text
+
+    # --- 5. An hour of lane time later, each call is still charged once ----
+    # Lane time moves every party an hour forward, the sample app and the
+    # credits service among them, past the signing skew: the middleware's
+    # signed consume requests are accepted only because both sides moved. The
+    # two credits left are charged one per call, and the next call finds none.
+    # A blocked skip on a wall-time run, which cannot reach the instant.
+    if lane_time is None:
+        pytest.skip("blocked: an hour forward needs lane time, and the run has none")
+    lane_time.reach(lane_time.now() + 3600, fixed_by_agreement=False)
+    for i in range(2):
+        later = _forecast(secret, base_url)
+        assert later.status_code == 200, f"consume #{i+1} after the advance got {later.status_code}: {later.text}"
+        assert later.json()["forecast"] == "sunny"
     exhausted_again = _forecast(secret, base_url)
     assert exhausted_again.status_code == 402, exhausted_again.text
+    assert exhausted_again.json()["error"] == "insufficient_credits"

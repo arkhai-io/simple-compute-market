@@ -14,9 +14,10 @@
 # from the controls project that generates it, and the payments lane double's
 # seller token, from its fixtures, which the storefronts' payments configuration
 # in local-values.yaml and bare-metal-release-values.yaml trusts and
-# authenticates with; and Bob's credential toward the mediation lane double, the
+# authenticates with; Bob's credential toward the mediation lane double, the
 # dispute authority release 1's registry recommends, from his Compose secret
-# overlay.
+# overlay; and the registry's administrator key, the Compose lanes' development
+# value.
 #
 # Inputs:
 #   NAMESPACE                          the namespace both releases run in, created
@@ -171,6 +172,16 @@ PY
 
 # Release 1: the registry, Bob, and the provisioning service.
 credential arkhai-registry-identity "$DEV_ACCOUNT_REGISTRY"
+
+# The registry's secret profile under local-values.yaml: the administrator key
+# every /admin route takes, through which the end-to-end session reads its time
+# source. The Compose lanes' committed development value
+# (dev-env/registry/config-registry-a.env), never for a public network;
+# config-e2e-secret.yml below repeats it as registry.admin_key.
+registry_admin_key=development-registry-admin-key
+printf 'REGISTRY_ADMIN_API_KEY=%s\n' "$registry_admin_key" >"$work/config-admin.env"
+apply arkhai-registry-runtime "config-admin.env=$work/config-admin.env"
+echo "  arkhai-registry-runtime: config-admin.env, the registry's development administrator key"
 credential arkhai-bob-identity "$DEV_ACCOUNT_BOB"
 credential arkhai-provisioning-identity "$DEV_ACCOUNT_PROVISIONING"
 
@@ -210,7 +221,10 @@ echo "  arkhai-provisioning-runtime, arkhai-provisioning-ssh: mock provisioning'
 
 # Release 1's Helm tests: the e2e-tests chart's deal test, whose
 # config-e2e-secret.yml the registry smoke test also layers for the buyer's
-# credential, and the buyer CLI's profile credential.
+# credential, and the buyer CLI's profile credential. The end-to-end session's
+# lane_time parties (local-values.yaml's e2e-tests.config) name the
+# administrator credentials here by key: Bob's, provisioning's, and the
+# registry's administrator key.
 cat >"$work/config-e2e-secret.yml" <<EOF
 buyer:
   marketplace_credential: "$(key "$DEV_ACCOUNT_BUYER")"
@@ -222,9 +236,11 @@ provisioning:
   admin_credential: "$(key "$DEV_ACCOUNT_PROVISIONING_ADMIN")"
   service_credential: "$(key "$DEV_ACCOUNT_PROVISIONING")"
   authority_identifier: "$(address "$DEV_ACCOUNT_PROVISIONING")"
+registry:
+  admin_key: "$registry_admin_key"
 EOF
 apply arkhai-e2e-credentials "config-e2e-secret.yml=$work/config-e2e-secret.yml"
-echo "  arkhai-e2e-credentials: buyer $DEV_ACCOUNT_BUYER, seller $DEV_ACCOUNT_BOB, provisioning admin $DEV_ACCOUNT_PROVISIONING_ADMIN and service $DEV_ACCOUNT_PROVISIONING"
+echo "  arkhai-e2e-credentials: buyer $DEV_ACCOUNT_BUYER, seller $DEV_ACCOUNT_BOB, provisioning admin $DEV_ACCOUNT_PROVISIONING_ADMIN and service $DEV_ACCOUNT_PROVISIONING, the registry's administrator key"
 credential arkhai-buyer-profile-credential "$DEV_ACCOUNT_BUYER"
 
 # Both releases' storefronts' CA bundle, the committed lane CA, which

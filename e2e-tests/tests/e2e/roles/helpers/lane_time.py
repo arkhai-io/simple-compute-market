@@ -1,11 +1,13 @@
 """Lane time: one time, set by the scenario, that every party in a lane perceives.
 
-A run is injected or wall time throughout, as its runner profile's ``lane_time``
-section says (``mode``), and that section names every party the lane runs: each
-service with its typed client and administrator credential, both lane doubles
-and the sample app with their control tokens, the chain, and the buyer's
-lane-time file. A party the profile names but the run cannot reach fails the
-setup by name; nothing is skipped.
+A run is injected or wall time throughout, as its profile's ``lane_time`` section
+says (``mode``), and that section names the parties the run reaches, a list or a
+mapping keyed by name: in a Compose lane every party it runs — each service with
+its typed client and administrator credential, both lane doubles and the sample
+app with their control tokens, the chain, and the buyer's lane-time file; in the
+local Helm release's validation its storefront, provisioning service and
+registry. A party the profile names but the run cannot reach fails the setup by
+name; nothing is skipped.
 
 In an injected run the harness installs an injected source in its own process,
 so its signing clients sign at lane time, and ``LaneTime.set(T)`` moves, in
@@ -15,16 +17,20 @@ stamped at T and mined), and the buyer's file; it then reads every party's
 status and fails naming any that does not report T, a status with no time
 section among them. Lane time only moves forward and is never reset: a set
 earlier than the harness's instant fails naming the harness and both instants,
-and a party refusing a set fails naming that party. At the session's start
+and a party refusing a set fails naming that party. A party's field written
+``<field>_setting`` is read from the setting it names, so a profile without
+secrets, such as a Helm release's, leaves each credential in the secrets
+profile that already holds it. At the session's start
 every party is set to the wall instant of that moment, or to the latest instant
 a party already holds when a run before this one on the same stack left lane
 time ahead. The chain is frozen between sets.
 
 In a wall run nothing is set: a stage reaches an instant the Agreement fixes by
 waiting for it, and any other instant is a blocked skip naming the wall-time
-target. Either way the session reads every party's status and fails naming a
-mix of sources. A run whose profile names no lane parties has no lane time, and
-a stage there waits for an Agreement instant as a wall run does
+target. Either way the session reads the status of every party the profile
+names and fails naming a mix of sources. A run whose profile has no
+``lane_time`` section, a hosted target's, has no lane time and reads no status,
+and a stage there waits for an Agreement instant as a wall run does
 (``compute_deal_stages.reach_agreement_instant``).
 """
 
@@ -430,11 +436,51 @@ _BUILDERS: dict[str, Callable[[Mapping[str, Any]], TimeParty]] = {
 }
 
 
-def parties_from(section: Mapping[str, Any]) -> list[TimeParty]:
-    """Every party the ``lane_time`` section names, each over its typed client."""
+#: The suffix of a party field naming the setting that holds its value: a
+#: profile with no secrets of its own, such as a Helm release's ConfigMap
+#: profile, names the secrets profile's key rather than restating its value.
+_SETTING_SUFFIX = "_setting"
+
+
+def _setting(path: str) -> Any:
+    return settings.get(path)
+
+
+def _resolved(entry: Mapping[str, Any], setting: Callable[[str], Any]) -> dict[str, Any]:
+    """``entry`` with each ``<field>_setting`` replaced by ``<field>`` read from that setting."""
+    resolved = {key: value for key, value in entry.items() if not key.endswith(_SETTING_SUFFIX)}
+    for key, path in entry.items():
+        if not key.endswith(_SETTING_SUFFIX):
+            continue
+        field = key.removesuffix(_SETTING_SUFFIX)
+        value = setting(str(path))
+        if value in (None, ""):
+            raise LaneTimeError(
+                f"lane_time party {entry.get('name', '?')!r} takes its {field} from "
+                f"setting {path!r}, which the run's profiles do not set")
+        resolved[field] = value
+    return resolved
+
+
+def _entries(section: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The section's parties, a list of entries or a mapping keyed by name — the
+    form Helm values take, so an overlay changes one party alone."""
+    parties = section.get("parties") or []
+    if isinstance(parties, Mapping):
+        return [{**dict(entry or {}), "name": name} for name, entry in parties.items()]
+    return [dict(entry) for entry in parties]
+
+
+def parties_from(section: Mapping[str, Any], *,
+                 setting: Callable[[str], Any] = _setting) -> list[TimeParty]:
+    """Every party the ``lane_time`` section names, each over its typed client.
+
+    A field ``<field>_setting`` names the dotted setting its value is read from,
+    so a credential stays in the profile that holds the run's secrets.
+    """
     parties = []
-    for entry in section.get("parties") or []:
-        entry = {str(key).lower(): value for key, value in dict(entry).items()}
+    for entry in _entries(section):
+        entry = _resolved({str(key).lower(): value for key, value in entry.items()}, setting)
         _required(entry, "name")
         kind = _required(entry, "kind")
         if kind not in _BUILDERS:
@@ -447,9 +493,9 @@ def buyer_time_file(section: Mapping[str, Any] | None) -> str | None:
     """The buyer's lane-time file in an injected run, which its configuration names."""
     if not section or section.get("mode") != "injected":
         return None
-    for entry in section.get("parties") or []:
-        if dict(entry).get("kind") == "buyer":
-            return str(dict(entry).get("file") or "") or None
+    for entry in _entries(section):
+        if entry.get("kind") == "buyer":
+            return str(entry.get("file") or "") or None
     return None
 
 
@@ -462,7 +508,7 @@ def wall_instant() -> int:
 def lane_time_of(section: Mapping[str, Any] | None, *,
                  parties: Callable[[Mapping[str, Any]], list[TimeParty]] = parties_from,
                  start: Callable[[], int] = wall_instant) -> LaneTime | None:
-    """The run's lane time from its profile section, started; None for a run naming none.
+    """The run's lane time from its profile section, started; None with no section.
 
     An injected run installs an injected source in the harness's process before
     any party is built, so every client the harness builds signs at lane time.
@@ -484,8 +530,8 @@ def lane_time_of(section: Mapping[str, Any] | None, *,
 @pytest.fixture(scope="session", autouse=True)
 def lane_time() -> Iterator[LaneTime | None]:
     """The run's lane time, started at the session's start; None for a run whose
-    profile names no lane parties. A party missing, unreachable, astray or on
-    another source fails the setup by name."""
+    profile has no ``lane_time`` section. A party missing, unreachable, astray or
+    on another source fails the setup by name."""
     before = injected_time.installed()
     try:
         try:

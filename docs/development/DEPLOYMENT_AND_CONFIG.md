@@ -128,6 +128,20 @@ the deal test, so one Secret holds one copy. A Secret's profile file quotes ever
 hex value
 ([`helm.md`, "A hex value stays a string"](../guidance/engineering/helm.md#a-hex-value-stays-a-string)).
 
+**The e2e-tests profile.** The e2e-tests chart's `config` passes through whole as
+the `e2e-tests` profile, `config-e2e-tests.yml` in the chart's own ConfigMap, which
+its deal and scenarios pods mount and layer as `ACTIVE_PROFILES=helm,e2e-tests,e2e-secret`,
+so an end-to-end setting reaches them without a template line of its own and no
+other test pod reads it. The profile is a ConfigMap, so no credential goes there:
+the chart's schema refuses a key ending in `credential`, `private_key`, `_key`,
+`token` or `secret` at any depth, and a setting that needs one names the
+`e2e-secret` key holding it. `helm/local-values.yaml` states the release's
+`lane_time` there: wall mode, and the storefront, provisioning service and registry
+the end-to-end session reads the time source of, keyed by name, each credential
+named by its `e2e-secret` key. The registry's `/admin/status` takes its
+administrator key, which the local release gives it through
+`registry.secretProfile` (`arkhai-registry-runtime`'s `config-admin.env`).
+
 ### Storefront agents: pass-through configuration
 
 The VM and bare-metal storefronts do not use profiles; each reads up to three files
@@ -528,7 +542,10 @@ double's respondent listing. The release serves no payment or dispute scenario.
   (`STOREFRONT_CA_BUNDLE_FILE`, `/etc/arkhai/ca/ca-bundle.pem`), as
   [`configuration.md`, "A private CA is mounted once, and each client names it"](../guidance/engineering/configuration.md#a-private-ca-is-mounted-once-and-each-client-names-it)
   requires of a setting in a Secret the chart never renders; an entry stating
-  none keeps none.
+  none keeps none. It gives the registry the Compose lanes' development
+  administrator key, in `arkhai-registry-runtime`, and repeats it in
+  `arkhai-e2e-credentials` for the end-to-end session's read of the registry's
+  time source.
   `helm/scripts/topology-secrets.sh` says what each Secret holds. It also
   creates, if absent, the deal test's buyer-profile volume, `arkhai-buyer-profiles`,
   which no chart creates, and leaves an existing claim as it is.

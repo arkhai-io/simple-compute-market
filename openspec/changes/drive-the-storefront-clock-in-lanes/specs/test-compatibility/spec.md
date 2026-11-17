@@ -2,7 +2,7 @@
 
 ### Requirement: Every party in a lane shares one lane time the scenario sets
 
-Each Compose lane MUST run every party on injected time: every storefront, provisioning service, registry, the API-credits service and the sample app where the lane runs them, both doubles, and the buyer, with the harness's own signing clients reading its process source. One harness fixture MUST set every party at the session's start to the wall instant at that moment, and its set MUST move, in order, the harness's own source, each service, both doubles and the sample app, the chain and the buyer's lane-time file to one instant, then read every party's status and fail naming any that does not report it, a party whose status has no time section among them. Lane time MUST only move forward and MUST never be reset; a stage MAY set any forward instant, and a backward set MUST fail naming the party and both instants. A party the run's profile names but cannot reach MUST fail the setup rather than skip.
+Each Compose lane MUST run every party on injected time: every storefront, provisioning service, registry, the API-credits service and the sample app where the lane runs them, both doubles, and the buyer, with the harness's own signing clients reading its process source. One harness fixture MUST set every party at the session's start to the wall instant at that moment, or to the latest instant a party already holds when that is later, so the start never sets a party back, and its set MUST move, in order, the harness's own source, each service, both doubles and the sample app, the chain and the buyer's lane-time file to one instant, then read every party's status and fail naming any that does not report it, a party whose status has no time section among them. Lane time MUST only move forward and MUST never be reset; a stage MAY set any forward instant, and a backward set MUST fail naming the party and both instants. A party the run's profile names but cannot reach MUST fail the setup rather than skip.
 
 #### Scenario: Funds run out without waiting
 
@@ -35,12 +35,17 @@ At the session's start and at every lane-time set, the fixture MUST set the lane
 
 ### Requirement: A run uses one time source throughout
 
-A run MUST be injected or wall time throughout, and the session fixture MUST fail naming a mix. External-topology runs and runs against the local Helm release MUST run on wall time: there the lane-time helper MUST reach only an instant the Agreement fixes, by waiting for it, and a stage needing any other instant MUST be a blocked skip naming the wall-time target. Shared stages MUST reach instants only through that helper.
+A run MUST be injected or wall time throughout, and the session fixture MUST read the status of every party the run's profile names and fail naming a mix. Each Compose lane's profile MUST name every party the lane runs; the local Helm release's MUST name its storefront, provisioning service and registry, each credential named by the setting of the run's secrets profile that holds it. External-topology runs and runs against the local Helm release MUST run on wall time: there the lane-time helper MUST reach only an instant the Agreement fixes, by waiting for it, and a stage needing any other instant MUST be a blocked skip naming the wall-time target, or naming that the run has no lane time where its profile names none. Shared stages MUST reach instants only through that helper.
 
 #### Scenario: A time-driven module against a hosted target
 
 - **WHEN** a module that sets lane time to a funding boundary runs against hosted authorities
 - **THEN** its stage is a blocked skip naming the wall-time target, never a wait
+
+#### Scenario: A service in the local Helm release runs injected time
+
+- **WHEN** the local Helm release's validation runs its scenarios and its storefront, provisioning service or registry reports injected time
+- **THEN** the session fixture fails naming that service, before any scenario runs
 
 ### Requirement: Each lane double reads injected time the scenario sets
 

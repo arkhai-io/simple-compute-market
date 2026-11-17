@@ -1,14 +1,16 @@
 {{/*
 Helm test pod: full buyer-seller deal lifecycle (e2e_deal marker).
 
-Config is assembled from two dynaconf profiles:
+Config is assembled from three dynaconf profiles:
   1. "helm"       — config-helm.yml from the shared test-config ConfigMap
                     (non-secret topology: URLs, chain ID, registry addresses,
                      seller API URL, buyer wallet address, buyer chain_rpc_url)
-  2. "e2e-secret" — config-e2e-secret.yml from this subchart's Secret
+  2. "e2e-tests"  — config-e2e-tests.yml from this subchart's ConfigMap: its
+                    `config` value, passed through whole (public settings)
+  3. "e2e-secret" — config-e2e-secret.yml from this subchart's Secret
                     (seller + buyer private keys, admin API key)
 
-ACTIVE_PROFILES: "helm,e2e-secret"
+ACTIVE_PROFILES: "helm,e2e-tests,e2e-secret"
 CONFIG_DIRECTORY: /app/config
 
 The test-config ConfigMap is created by the umbrella chart's
@@ -38,7 +40,7 @@ spec:
         - --tb=short
       env:
         - name: ACTIVE_PROFILES
-          value: "helm,e2e-secret"
+          value: "helm,e2e-tests,e2e-secret"
         - name: CONFIG_DIRECTORY
           value: /app/config
         - name: XDG_DATA_HOME
@@ -49,6 +51,10 @@ spec:
         - name: test-config
           mountPath: /app/config/config-helm.yml
           subPath: config-helm.yml
+          readOnly: true
+        - name: e2e-tests-config
+          mountPath: /app/config/config-e2e-tests.yml
+          subPath: config-e2e-tests.yml
           readOnly: true
         - name: e2e-secret
           mountPath: /app/config/config-e2e-secret.yml
@@ -66,6 +72,9 @@ spec:
     - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
+    - name: e2e-tests-config
+      configMap:
+        name: {{ include "e2e-tests.configMapName" . }}
     - name: e2e-secret
       secret:
         secretName: {{ include "e2e-tests.secretName" . }}

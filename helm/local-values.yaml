@@ -158,6 +158,15 @@ registry:
     credentialProfile:
       secretName: arkhai-e2e-credentials
       profile: e2e-secret
+  # The administrator key every /admin route takes, through which the end-to-end
+  # session reads the registry's time source (`/admin/status`). It is a secret
+  # setting, so it arrives in arkhai-registry-runtime's config-admin.env, which
+  # `make -C helm topology-secrets` writes with the lanes' development value
+  # (never for a public network) and repeats in config-e2e-secret.yml as
+  # registry.admin_key.
+  secretProfile:
+    secretName: arkhai-registry-runtime
+    profile: admin
 api-credits-registry:
   persistence:
     retainOnUninstall: false
@@ -180,3 +189,41 @@ e2e-tests:
     api_key_env: PAYMENTS_BUYER_API_KEY
     buyer_account: 00000000-0000-4000-8000-0000000000b1
     seller_account: 00000000-0000-4000-8000-0000000000b2
+  # Settings the e2e-tests chart passes through whole as the deal and scenarios
+  # pods' "e2e-tests" profile. lane_time: the release runs on wall time, so a
+  # scenario reaching any instant its Agreement does not fix is a blocked skip
+  # naming the target, and the session reads the status of the storefront, the
+  # provisioning service and the registry and fails naming any not on wall
+  # time. The doubles are not named: their control token is in no Secret those
+  # pods mount. Parties are keyed by name, so an overlay changes one alone. Each
+  # URL and pin restates the release's own (a render test holds them to what
+  # the chart derives); each credential is named by the e2e-secret key holding
+  # it, never stated here.
+  config:
+    lane_time:
+      mode: wall
+      target: "the local Helm release"
+      parties:
+        bob-storefront:
+          kind: storefront
+          url: "http://arkhai-node-operator-storefront-bob:8001"
+          admin_scheme: eip191
+          admin_credential_setting: seller.admin_credential
+          publisher_scheme: eip191
+          publisher_identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        provisioning:
+          kind: provisioning
+          url: "http://arkhai-node-operator-provisioning:8081"
+          admin_scheme: eip191
+          admin_credential_setting: provisioning.admin_credential
+          authority_scheme: eip191
+          authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        registry:
+          kind: registry
+          url: "http://arkhai-node-operator-registry:8080"
+          authority_id: registry-a
+          authority_scheme: eip191
+          authority_identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+          caller_scheme: eip191
+          caller_credential_setting: buyer.marketplace_credential
+          admin_key_setting: registry.admin_key

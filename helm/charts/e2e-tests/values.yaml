@@ -40,6 +40,18 @@ scenarios:
 # ---------------------------------------------------------------------------
 payments: {}
 
+# ---------------------------------------------------------------------------
+# End-to-end settings, passed through whole as the "e2e-tests" profile
+# (config-e2e-tests.yml, this chart's ConfigMap), which the deal and scenarios
+# test pods layer between the shared "helm" profile and "e2e-secret", so a
+# setting reaches them with no template line of its own and no other test pod
+# reads it. It is a ConfigMap, so no credential goes here, and the schema
+# refuses a key ending in credential, private_key, _key, token or secret at any
+# depth; a setting that needs one names the e2e-secret key holding it (the
+# lane_time parties' `<field>_setting`).
+# ---------------------------------------------------------------------------
+config: {}
+
 # Public EIP-191 principals used by topology/render checks. The corresponding
 # wallet and identity credentials remain in the referenced Secret.
 seller:

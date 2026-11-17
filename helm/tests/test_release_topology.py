@@ -297,6 +297,75 @@ def test_release_one_runs_bob_on_its_own_provisioning_service() -> None:
     assert profile["registry"]["api_url"] == _service_url(manifest, f"{RELEASE_ONE}-registry")
 
 
+def _e2e_profile(manifest: str) -> dict:
+    return json.loads(_block(_source(manifest, "e2e-tests/templates/configmap.yaml"), "config-e2e-tests.yml"))
+
+
+def test_the_e2e_tests_config_passes_through_whole_to_the_e2e_pods_alone() -> None:
+    """Every key of e2e-tests.config is a setting of the e2e-tests profile,
+    which the deal and scenarios pods mount and layer between the shared helm
+    profile and the e2e-secret one, with no template line per setting; the
+    shared profile the other test pods read carries none of it."""
+    overlay = {"e2e-tests": {"config": {"pass_through": {"nested": [1, 2], "hex": "0x00ff"}},
+                             "scenarios": {"markers": "contracts"}}}
+    manifest = _release_one(overlay)
+
+    assert _e2e_profile(manifest)["pass_through"] == {"nested": [1, 2], "hex": "0x00ff"}
+    assert "pass_through" not in _smoke_profile(manifest)
+    for pod in ("e2e-deal-test.yaml", "e2e-scenarios-test.yaml"):
+        document = _source(manifest, f"charts/e2e-tests/templates/tests/{pod}")
+        lines = {line.strip() for line in document.splitlines()}
+        assert _env(document, "ACTIVE_PROFILES") == "helm,e2e-tests,e2e-secret", pod
+        assert {"mountPath: /app/config/config-e2e-tests.yml",
+                "subPath: config-e2e-tests.yml",
+                f"name: {RELEASE_ONE}-e2e-tests-config"} <= lines, pod
+
+
+def test_the_e2e_tests_config_refuses_a_credential_at_any_depth() -> None:
+    """The e2e-tests profile is a ConfigMap, so a key naming a credential is
+    refused wherever it sits; a key naming the e2e-secret setting that holds
+    one is not."""
+    for key, refused in (("admin_credential", {"admin_credential": "x"}),
+                         ("admin_key", {"lane_time": {"parties": {"a": {"admin_key": "x"}}}}),
+                         ("private_key", {"a": [{"private_key": "x"}]}),
+                         ("token", {"control": {"token": "x"}})):
+        rendered = _render(RELEASE_ONE, RELEASE_ONE_VALUES, {"e2e-tests": {"config": refused}})
+        assert rendered.returncode != 0, refused
+        assert f"invalid propertyName '{key}'" in rendered.stderr, (refused, rendered.stderr)
+    _release_one({"e2e-tests": {"config": {"a": {"admin_key_setting": "registry.admin_key"}}}})
+
+
+def test_the_local_release_s_lane_time_names_its_services_on_wall_time() -> None:
+    """local-values.yaml's lane_time, passed through e2e-tests.config, runs the
+    release's scenarios in wall mode and names its storefront, provisioning
+    service and registry at the URL and pins the chart derives for its other
+    tests, with no credential of its own: each is named by the e2e-secret
+    profile's key. The doubles it runs are not named."""
+    manifest = _release_one()
+    profile = _smoke_profile(manifest)
+    lane_time = _e2e_profile(manifest)["lane_time"]
+    parties = {party["kind"]: party for party in lane_time["parties"].values()}
+
+    assert "lane_time" not in profile
+    assert lane_time["mode"] == "wall" and lane_time["target"]
+    assert sorted(parties) == ["provisioning", "registry", "storefront"]
+    assert parties["storefront"]["url"] == profile["seller"]["api_url"]
+    assert parties["provisioning"]["url"] == profile["provisioning"]["api_url"]
+    assert parties["registry"]["url"] == profile["registry"]["api_url"]
+    assert parties["provisioning"]["authority_identifier"] == profile["provisioning"]["authority_identifier"]
+    assert parties["registry"]["authority_id"] == profile["registry"]["authority_id"]
+    assert parties["registry"]["authority_identifier"] == profile["registry"]["identifier"]
+    bob = json.loads(_block(_source(manifest, "storefront/templates/configmap.yaml"), "storefront.json"))
+    assert parties["storefront"]["publisher_identifier"] == bob["Identity"]["principal"]["identifier"]
+    for party in lane_time["parties"].values():
+        assert not any(key.endswith(("_credential", "_key")) for key in party), party
+    # The registry's administrator key, which its status route takes, arrives
+    # in the secret profile topology-secrets writes.
+    registry = _source(manifest, "charts/registry/templates/deployment.yaml")
+    assert _resolver_environment(registry)["ACTIVE_PROFILES"] == "production,admin"
+    assert 'secretName: "arkhai-registry-runtime"' in registry
+
+
 def test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_states() -> None:
     """The registry smoke test's pins are the registry the release's clients
     trust, which is the identity release 1's registry signs as; contract
@@ -882,8 +951,10 @@ def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resol
     alias, renders its identity, descriptor, settings, port and filter
     specification into its own `config-production.env`, mounted under the
     configuration directory, and its pod environment holds only the two
-    resolver variables. The settings nothing reads are not rendered."""
-    manifest = _release_one({"api-credits-registry": {"enabled": True}})
+    resolver variables. The settings nothing reads are not rendered. The local
+    release's own secret profile, its administrator key, is cleared here."""
+    manifest = _release_one({"api-credits-registry": {"enabled": True},
+                             "registry": {"secretProfile": {"secretName": "", "profile": ""}}})
     expected = {
         "registry": {
             "REGISTRY_AUTHORITY_ID": "registry-a",

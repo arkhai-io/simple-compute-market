@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Sequence
 
 import pytest
+import yaml
 
 import change_namespace
 
@@ -592,6 +593,45 @@ def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Pat
         (stored / "arkhai-bare-metal-storefront-runtime" / "storefront.secrets.toml").read_text()
     )
     assert "DisputeCredential" not in bare_metal
+
+
+def _dotted(document: dict, path: str) -> object:
+    value: object = document
+    for part in path.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
+
+
+def test_topology_secrets_holds_every_credential_the_helm_lane_time_parties_name(
+        tmp_path: Path) -> None:
+    """The local release's lane_time parties, passed through the e2e-tests
+    chart's config, name their credentials by e2e-secret key; topology-secrets
+    writes every key they name, and the registry's administrator key it writes
+    there is the one the registry's secret profile gives it."""
+    stored = tmp_path / "secrets"
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
+    # Development values only: cast answers every derivation with Anvil account 0's
+    # published key and address, never for a public network.
+    _executable(tmp_path, "cast", 'case "$2" in\n'
+                "  private-key) echo 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;;\n"
+                "  address) echo 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;;\n"
+                "esac\n")
+
+    created = _make("topology-secrets", "CHANGE=pilot", path=tmp_path)
+
+    assert created.returncode == 0, created.stderr
+    local = yaml.safe_load((HELM / "local-values.yaml").read_text())
+    lane_time = local["e2e-tests"]["config"]["lane_time"]
+    secret = yaml.safe_load((stored / "arkhai-e2e-credentials" / "config-e2e-secret.yml").read_text())
+    named = {path for party in lane_time["parties"].values()
+             for key, path in party.items() if key.endswith("_setting")}
+    assert lane_time["mode"] == "wall"
+    assert named == {"seller.admin_credential", "provisioning.admin_credential",
+                     "buyer.marketplace_credential", "registry.admin_key"}
+    assert all(_dotted(secret, path) for path in named), named
+    profile = local["registry"]["secretProfile"]
+    admin_env = (stored / profile["secretName"] / f"config-{profile['profile']}.env").read_text()
+    assert admin_env == f"REGISTRY_ADMIN_API_KEY={secret['registry']['admin_key']}\n"
 
 
 def test_topology_secrets_leaves_a_credential_stating_no_ca_bundle_without_one(

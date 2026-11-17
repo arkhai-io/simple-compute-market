@@ -250,7 +250,12 @@ standalone-component rule.
 One fixture replaces `lane_double_clock`. The run's profile names its mode (D16) and
 every party; a lane provides its own configuration, so a missing party fails the
 setup rather than skipping. At the session's start the fixture sets every party to
-the wall time at that moment. `lane_time.set(T)` moves the harness's own source
+the wall time at that moment, or to the latest instant a party already holds when
+that is later — a chain a second ahead, or a stack an earlier run left ahead — so
+the start never sets a party back (D4; 45 session-start). The local Helm release's
+validation names its storefront, provisioning service and registry too, on wall
+time, through the e2e-tests chart's `config` passed through whole as its pods'
+`e2e-tests` profile, so it reads each one's status (D16, D17; 45 F1). `lane_time.set(T)` moves the harness's own source
 first, then each storefront, provisioning service, registry and the API-credits
 service, then both doubles and, in the API-credits lane, the sample app (D18), then
 the chain (D15), then the buyer's file; it then reads every party's status and fails

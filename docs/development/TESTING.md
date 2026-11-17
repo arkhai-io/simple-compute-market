@@ -329,7 +329,8 @@ They run as a pod inside that
 namespace, the e2e-tests chart's `<release>-e2e-tests-e2e-scenarios` Helm test
 hook, rendered when `scenarios.markers` is set: it runs the change's own
 `e2e-tests` image with the release's `test-config` ConfigMap under the `helm`
-profile, the deal test pod's environment and mounts, and reaches every service by
+profile and the e2e-tests chart's own `e2e-tests` profile over it, the deal test
+pod's environment and mounts, and reaches every service by
 its in-cluster name, as a lane's scenarios do on their compose network, so no local
 port is involved. Validation runs it alone (`helm test --filter name=<pod>`) and
 counts it as passed only on the pod's own exit status of 0, since `helm test`
@@ -435,12 +436,24 @@ harness's instant fails naming both instants. The buyer, started afresh for each
 stage, reads its time from that file on every read, as the `[time]` table of the
 configuration the harness generates for it names.
 
-A run is on injected or wall time throughout, and the session fails naming a party
-on the other. A stage reaches an instant through `LaneTime.reach`: an injected run
+A run is on injected or wall time throughout, and the session reads the status of
+every party its profile names and fails naming one on the other. The local Helm
+release's validation names its storefront, provisioning service and registry, on
+wall time (not the doubles, whose control token no Secret its pods mount carries):
+`helm/local-values.yaml` states a `lane_time` section under `e2e-tests.config`,
+which the e2e-tests chart passes through whole as the `e2e-tests` profile its deal
+and scenarios pods layer, its parties keyed by name at the URLs and pins the chart
+derives. That profile is a ConfigMap, so each party names its credential by the key
+of the `e2e-secret` profile that holds it (`admin_credential_setting:
+seller.admin_credential`, for one), and the harness reads it from there; a party
+field written `<field>_setting` is read that way in any profile. A run whose
+profile has no `lane_time` section, a hosted target's, reads no status and has no
+lane time. A stage reaches an instant through `LaneTime.reach`: an injected run
 sets lane time there; a wall run — the real-provisioning lane, a run against hosted
 authorities, or the local Helm release — waits only for an instant the deal's
 Agreement fixes (`reach_agreement_instant` in `compute_deal_stages.py`), and a stage
-needing any other instant is a blocked skip naming the wall-time target. The
+needing any other instant is a blocked skip naming the wall-time target, or that
+the run has no lane time where its profile names none. The
 hold-passed dispute module is the one that sets lane time days ahead, past a once
 part's hold.
 

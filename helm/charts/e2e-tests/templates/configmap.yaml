@@ -1,0 +1,19 @@
+{{/*
+The e2e-tests profile: this chart's `config`, passed through whole as
+config-e2e-tests.yml, which the deal and scenarios test pods mount and layer
+between the shared "helm" profile and the Secret-backed "e2e-secret" one. An
+end-to-end setting reaches those pods with no template line of its own, and no
+other test pod reads it. It is a ConfigMap, so no credential goes here (the
+schema refuses a key ending in credential, private_key, _key, token or secret);
+a setting needing one names the e2e-secret key holding it.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "e2e-tests.configMapName" . }}
+  labels:
+    {{- include "e2e-tests.labels" . | nindent 4 }}
+data:
+  config-e2e-tests.yml: |
+    {{- /* JSON is valid YAML and keeps 0x-prefixed values as strings. */}}
+    {{- toPrettyJson (.Values.config | default dict) | nindent 4 }}

@@ -12,4 +12,4 @@ A static check MUST refuse `"injected"` as any party's time source in committed 
 #### Scenario: The local release is validated
 
 - **WHEN** pre-review validation runs its scenarios against the local Helm release
-- **THEN** every party reports wall time, and the scenarios set no time
+- **THEN** the session reads the status of the release's storefront, provisioning service and registry and finds each on wall time, and the scenarios set no time

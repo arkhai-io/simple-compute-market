@@ -3,7 +3,8 @@
 Helm test pod: the end-to-end scenarios scenarios.markers selects (a pytest
 marker expression), run inside the release's namespace, where they reach every
 service by its in-cluster name through the shared test-config's "helm" profile,
-so no local port is involved. A Helm validation selects its scenarios here and
+so no local port is involved; this chart's "e2e-tests" profile, its `config`,
+layers over it. A Helm validation selects its scenarios here and
 runs this pod alone (`helm test --filter name=<this pod>`).
 
 Its configuration, credentials, and volumes are the deal test's
@@ -33,7 +34,7 @@ spec:
         - --tb=short
       env:
         - name: ACTIVE_PROFILES
-          value: "helm,e2e-secret"
+          value: "helm,e2e-tests,e2e-secret"
         - name: CONFIG_DIRECTORY
           value: /app/config
         - name: XDG_DATA_HOME
@@ -44,6 +45,10 @@ spec:
         - name: test-config
           mountPath: /app/config/config-helm.yml
           subPath: config-helm.yml
+          readOnly: true
+        - name: e2e-tests-config
+          mountPath: /app/config/config-e2e-tests.yml
+          subPath: config-e2e-tests.yml
           readOnly: true
         - name: e2e-secret
           mountPath: /app/config/config-e2e-secret.yml
@@ -61,6 +66,9 @@ spec:
     - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
+    - name: e2e-tests-config
+      configMap:
+        name: {{ include "e2e-tests.configMapName" . }}
     - name: e2e-secret
       secret:
         secretName: {{ include "e2e-tests.secretName" . }}

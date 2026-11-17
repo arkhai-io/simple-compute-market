@@ -6,7 +6,15 @@ OUTFILE="${1:-${ROOT_DIR}/.snapshot/review-wheelhouse.tar.gz}"
 PROJECTS="${REVIEW_PROJECTS:-}"
 REVIEW_PYTHON="${REVIEW_PYTHON:-$(cat "${ROOT_DIR}/.python-version")}"
 MARKETPLACE_SOURCE_COMMIT="${REVIEW_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD)}"
-IDENTITY_WHEEL="arkhai_kit_identity-0.5.0-py3-none-any.whl"
+# The identity kit's version, read from its own project: every consumer pins the
+# kit exactly, and the bundle names its one release wheel.
+IDENTITY_PROJECT="${ROOT_DIR}/kit/identity/pyproject.toml"
+IDENTITY_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "${IDENTITY_PROJECT}" 2>/dev/null || true)"
+if [[ -z "${IDENTITY_VERSION}" ]]; then
+  echo "${IDENTITY_PROJECT} states no version" >&2
+  exit 2
+fi
+IDENTITY_WHEEL="arkhai_kit_identity-${IDENTITY_VERSION}-py3-none-any.whl"
 if [[ -z "${PROJECTS// }" ]]; then
   echo "REVIEW_PROJECTS must list one or more repository-relative Python projects" >&2
   exit 2
@@ -75,7 +83,8 @@ PY
     "${project_copy_dir}/pyproject.toml" \
     "${project_copy_dir}/uv.lock" \
     "${relative_wheelhouse}" \
-    "${BUNDLE_DIR}/wheelhouse" <<'PY'
+    "${BUNDLE_DIR}/wheelhouse" \
+    "${IDENTITY_VERSION}" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -84,6 +93,7 @@ pyproject = Path(sys.argv[1])
 lockfile = Path(sys.argv[2])
 relative_wheelhouse = sys.argv[3].replace("\\", "/")
 wheelhouse = Path(sys.argv[4])
+identity_version = sys.argv[5]
 
 # The source checkout may use editable path overrides for repository packages.
 # Those paths do not exist in the portable review bundle; the copied lockfile
@@ -187,14 +197,14 @@ project_text = pyproject.read_text()
 project_name_match = re.search(r'(?m)^name = "([^"]+)"$', project_text)
 project_name = project_name_match.group(1) if project_name_match else None
 for name, version in (
-    ("arkhai-kit-identity", "0.5.0"),
+    ("arkhai-kit-identity", identity_version),
 ):
     mentions = re.findall(rf'(?m)^\s*"{re.escape(name)}([^"]*)"', project_text)
     if mentions and any(value != f"=={version}" for value in mentions):
         raise SystemExit(f"{name} must be pinned exactly to {version}")
 
 for required_name, required_version in (
-    ("arkhai-kit-identity", "0.5.0"),
+    ("arkhai-kit-identity", identity_version),
 ):
     if required_name == project_name:
         continue
@@ -241,7 +251,8 @@ for project in ${PROJECTS}; do
         --no-install-project \
         --find-links "${BUNDLE_DIR}/wheelhouse"
   )
-  "${ENV_DIR}/${safe_project}/bin/python" - "${project_copy_dir}/pyproject.toml" <<'PY'
+  "${ENV_DIR}/${safe_project}/bin/python" - "${project_copy_dir}/pyproject.toml" \
+    "${IDENTITY_VERSION}" <<'PY'
 import importlib
 import importlib.metadata
 from pathlib import Path
@@ -251,7 +262,7 @@ import tomllib
 project = tomllib.loads(Path(sys.argv[1]).read_text())
 requirements = tuple(project.get("project", {}).get("dependencies", ()))
 for distribution, version, module in (
-    ("arkhai-kit-identity", "0.5.0", "market_identity"),
+    ("arkhai-kit-identity", sys.argv[2], "market_identity"),
 ):
     if not any(value.startswith(distribution) for value in requirements):
         continue

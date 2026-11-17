@@ -1218,6 +1218,14 @@ middleware).
     which the first pre-commit run found (`dist-identity` refused the missing
     0.4.0 wheel). `core/storefront-client/README.md`'s two pins, one stale before
     this section, name 0.30.0 and 0.5.0.
+  - Round 2 triage fix, outside the plan (O1): the identity wheel's version is
+    no longer copied by hand. The root `Makefile` reads `IDENTITY_VERSION` from
+    `kit/identity/pyproject.toml` for `IDENTITY_WHEEL`, and `dist-identity`
+    refuses a project stating none; `scripts/package-review-wheelhouse.sh`
+    reads it from the same file, refusing one stating none, and passes it to
+    each embedded check (the exact pin, the lock record, the installed
+    version); its test builds its fixture from the kit's version and holds a
+    changed version to a changed required wheel.
 - [x] 8.2 Each signed administrator surface above applies the exemption to its
   time-setting operation alone — the storefronts' `admin_time`, provisioning's and the
   credits service's setting operation — and to no other route (D14).
@@ -2445,6 +2453,81 @@ conftests, the runner profiles `e2e-tests/config/config-*.yml`, and
     of each party's status on the local Helm release, which needs a runner
     profile naming the release's parties and their administrator credentials
     there; it is not delivered by this section.
+  - Round 2 triage fix (45 F1): the local Helm release's validation now names
+    its storefront, provisioning service and registry, on wall time, so the
+    session reads each one's status and fails naming any not on wall time (`deployment-state`'s "The local release
+    is validated"), and its blocked skips name the target. The e2e-tests chart
+    gains `config`, passed through whole as the `e2e-tests` profile: its own
+    ConfigMap (`templates/configmap.yaml`, `config-e2e-tests.yml`), which the
+    deal and scenarios pods mount and layer as `helm,e2e-tests,e2e-secret`, so
+    no other test pod reads it and no setting takes a template line of its
+    own (the e2e-tests chart 0.2.0, the umbrella's pin with it; the umbrella's
+    0.5.0 already this change's). A first form merged it into the shared
+    `helm` profile; the fresh-context check found that contract validation's
+    pod, which layers `helm` alone, would then start the lane-time fixture
+    without the credentials and fail, so it took its own profile on the
+    owner's word. Its schema refuses a key ending in `credential`,
+    `private_key`, `_key`, `token` or `secret` at any depth.
+    `helm/local-values.yaml` states `e2e-tests.config.lane_time`: `mode:
+    wall`, `target: "the local Helm release"`, and Bob's storefront, the
+    provisioning service and the registry, keyed by name (`parties_from`
+    takes a mapping as well as the lanes' list, as `helm.md` keys a value an
+    overlay changes per entry), at the URLs and pins the chart derives. The
+    profile is a ConfigMap, so each credential is named by its `e2e-secret` key
+    (`admin_credential_setting: seller.admin_credential`,
+    `provisioning.admin_credential`, `buyer.marketplace_credential`,
+    `registry.admin_key`), which `parties_from` reads from the run's settings
+    for any field written `<field>_setting`, failing by name on one unset. The
+    registry's `/admin/status` needs an administrator key the release lacked:
+    `topology-secrets.sh` writes the lanes' development value into
+    `arkhai-registry-runtime`'s `config-admin.env`, which `registry.secretProfile`
+    mounts (`LOCAL_SECRETS` names it), and repeats it as `registry.admin_key` in
+    `config-e2e-secret.yml`. The doubles the release runs are not named: their
+    control token is in no Secret the pod mounts. The delta now has the fixture
+    read every party the profile names (a hosted profile names none), a
+    blocked skip naming that the run has no lane time where it names none,
+    and a scenario for an injected service in the Helm release;
+    `deployment-state`'s scenario says the session reads those three
+    services. `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` describe the
+    pass-through and the party list; D7 notes it.
+  - Evidence for the round 2 triage fixes (45 F1, F2, session-start, O1, the
+    chart package): static configuration and render, `make -C helm
+    test-render` passed, the new render tests among them (the e2e-tests
+    config reaching the e2e pods alone and refused a credential key, the
+    local release's lane_time naming its three services at the chart's URLs
+    and pins with the registry's admin profile mounted); unit, `make
+    test-e2e-unit` 952 passed, 1 skipped (a `_setting` field read from its
+    setting and refused unset, parties keyed by name); release tooling,
+    `make test-release-tooling` 3189 passed, among them topology-secrets
+    holding every setting the Helm parties name and the registry's key, the
+    chart package storing no non-chart file and keeping `templates/tests/`
+    (with the pinned Helm), and the wheelhouse requiring the wheel of the
+    kit's stated version. `run test-before` at `41dc2a7bc`: each of those
+    tooling tests fails there (the wheelhouse ignores the kit's version,
+    the package stores `Makefile` and `local-values.yaml`, `local-values`
+    has no `e2e-tests.config`); the harness's two new unit tests were not
+    run there (`test-before`'s project-less environment lacks the harness),
+    but at the base `parties_from` takes no `setting` and reads a mapping's
+    keys as entries, so each would fail. System, 45 F2: `make -C e2e-tests
+    test-e2e-apicredits` 4 passed, the credit deal's calls after the hour's
+    advance answering 200, 200, 402, run before parties took the keyed form
+    (the lanes' list path unchanged). The Helm wall-mode check itself runs
+    first in validation's Helm part, which no local test reaches.
+    `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`,
+    on the first form and on the final tree: `after-functional-change` and
+    `pre-commit-functional` (every suite) passed; of `pre-commit` only the
+    citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9).
+  - Fresh-context checks: the first found the first form's merge into the
+    shared `helm` profile breaking contract validation's pod (it layers
+    `helm` alone, and the lane-time fixture would start without the
+    credentials), the text naming every service where three are checked, no
+    schema guard against a credential in the ConfigMap, four subcharts'
+    packages changed without a bump, the parties listed where Helm values key
+    entries, and a docstring's None case; all fixed, the first on the owner's
+    choice of the e2e-tests profile. The second found those resolved and the
+    schema's refusal described more broadly than its pattern and two task
+    lines overbroad (reworded).
 - [x] 15.5 The helper shared stages use to reach an instant: in an injected run it
   sets lane time; in a wall run it waits for an instant the Agreement fixes, and any
   other instant is a blocked skip naming the wall-time target. `wait_until` callers move
@@ -2625,7 +2708,19 @@ that advanced the doubles.
     holds one — on a fresh lane only the chain's latest block, a second or so
     ahead, and on a rerun against a stack left ahead its parties' instant. The
     delta wants a MODIFIED wording ("the wall instant at that moment, or the
-    latest instant a party already holds"); the code is as above.
+    latest instant a party already holds"); the code is as above. Round 2
+    triage (45 session-start): the delta's sentence now reads "to the wall
+    instant at that moment, or to the latest instant a party already holds
+    when that is later, so the start never sets a party back", and D7 says
+    the same.
+  - Round 2 triage fix (45 F2): `test_credits_full_deal` now proves the
+    sample app's signed consume requests across an advance on the live lane
+    ("Metered calls continue after an advance"): the top-up buys 3 credits,
+    one is consumed, then `lane_time.reach(now + 3600, fixed_by_agreement=False)`
+    moves every party an hour forward, past the signing skew, and two more
+    calls answer 200 and the next 402 `insufficient_credits`, one credit per
+    call through the real credits service. On a wall-time run the step after
+    the advance is a blocked skip.
   - Owed by validation: none new; the pipeline's three lane jobs (`e2e.yml`, run
     by validation's pipeline part) run every module on injected time.
 - [x] 16.4 Section verification.
@@ -2741,6 +2836,20 @@ Delivers D8 and D16's ladder. Touches `docs/guidance/engineering/system-tests.md
     start. This session grew very large: sections 13–17 in one session, with
     two compactions' worth of context; the round's triage is better started
     fresh.
+  - Round 2 triage fix, outside the plan (45 F1's discussion): the chart
+    package stored every tracked file under `helm/` but the ignored ones, so
+    an edit to `local-values.yaml`, a Makefile, a script, a render test or a
+    fixture changed the chart's content digest. `helm/.helmignore` now names
+    those files (`/Makefile`, `charts/*/Makefile`, `/scripts/`, `/tests/`,
+    `charts/*/tests/`, `/fixtures/`, `/local-values.yaml`,
+    `/bare-metal-release-values.yaml`, `/validation-capacity.toml`), keeping
+    the templates, the Helm test pods' `templates/tests/`, values, schemas and
+    subchart files; `package-versions.md` says which edits take a chart
+    version and which do not. The umbrella's version is already this change's
+    bump (0.5.0); the four subcharts whose packages lose their `tests/` and
+    took no bump in this change take a patch, with the umbrella's pins:
+    registry, provisioning, payments-lane-double and mediation-lane-double
+    0.1.2.
 
 ## 18. Closeout
 
