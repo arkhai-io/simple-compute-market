@@ -219,6 +219,10 @@ were done at; the open ones name none of the moved files.
       teardown on it, so the drain cannot work as built. `design.md`, "What
       deletes a relay", has the findings and the questions; design replaces this
       task with the work it settles.
+      *Replanned against the reviewed design (2026-11-17).* Decided in
+      `design.md` D1–D5: nothing deletes a relay, and disabling one drains it.
+      Sections 10a–10d implement the drain and 10e its procedure; 10e.3 ticks
+      this task once 10a–10d are complete.
 - [x] 1A.8 Reject an update that would duplicate another relay's rendezvous,
       with both relay identifiers named. The unique constraint would catch it,
       but a constraint violation surfacing as a 500 is not an administration
@@ -424,6 +428,9 @@ rest nor withheld from a read.
       container is never shared between users, by design, and a user who opens
       one to others has stepped out of scope. `design.md`, "Does the variables
       file's handling need anything further?", has the question.
+      *Replanned against the reviewed design (2026-11-17).* `design.md` D6: the
+      existing handling meets the requirement, and no revisit trigger is
+      recorded against this change. 10e.3 ticks this task.
 
 **Validation:** `make test` in `provisioning/compute/service`.
 
@@ -980,6 +987,221 @@ values to confirm the mount renders and the document is not placed in a Secret.
       must not survive in permanent documentation because a change document
       needed to name the defect it was removing.
 
+## 10a. The allocator and execution drain a disabled relay
+
+Delivers D1's items 2 and 3: no lease is allocated on a disabled relay, whoever
+asks, under a lock on the relay row; every job already holding a lease runs.
+Implements "Disabling a relay drains it" (its allocator paragraph, and the
+scenarios "A new owner asks the allocator for a port on a disabled relay" and "A
+relay is disabled while an acceptance is in flight") and the MODIFIED "Relay
+admission tokens are resolved at execution". Touches
+`provisioning/compute/src/compute_provisioning/relays/` (`allocator.py`,
+`execution.py`, and comments in `db.py`, `pool_relays.py`, `route_service.py`) and
+the VM and bare-metal adapters' codec tests.
+
+- [ ] 10a.1 In `RelayPortAllocator.allocate_in_session`, which standalone
+      `allocate` also runs, keep returning an owner's existing active lease
+      first, then read the relay row locked (`with_for_update`, as
+      `RelayExecutionResolver.resolve_into` reads it) and refuse a new owner
+      on a disabled relay before any port is claimed, naming the relay. Raise
+      it as an allocator error, which `_lease_remote_port` in both domains'
+      plans already turns into `ProviderConfigInvalidError`. (D1 item 2; 06 F2)
+- [ ] 10a.2 In `RelayExecutionResolver.resolve_into`, drop the refusal of a
+      disabled relay. An absent relay, a relay with no token, and a create's
+      relay with no active grant key or no lease for its reservation are still
+      refused as `RelayUnusableAtExecutionError`. (D1 item 3; MODIFIED "Relay
+      admission tokens are resolved at execution")
+- [ ] 10a.3 Rewrite every comment and docstring in the relay package that
+      describes disabling as a stop refusing jobs — `execution.py`'s class and
+      method docstrings, `route_service.py`'s module docstring ("Disable is the
+      operator's answer…"), and any other the package's search for "disabled"
+      finds — to the invariant: disabling a relay drains it; no new lease, and
+      leased work runs. (D1; `docs/guidance/engineering/comments.md`)
+- [ ] 10a.4 Library integration, in
+      `provisioning/compute/tests/integration/test_relay_port_allocator.py`:
+      a new owner is refused on a disabled relay through `allocate` and through
+      `allocate_in_session`, with no lease recorded; an owner already holding a
+      lease receives it again; enabling the relay lets the new owner allocate.
+      (Scenario "A new owner asks the allocator for a port on a disabled relay")
+- [ ] 10a.5 Library integration, a database-concurrency test following
+      `docs/guidance/engineering/concurrency-tests.md` with independent sessions
+      and bounded explicit synchronization, in both orders: an acceptance that
+      has allocated but not committed, then a disable, ends with the relay
+      disabled and holding that lease; a disable committed first ends with the
+      acceptance refused and no lease. No lane here runs PostgreSQL, whose row
+      lock is what the first order relies on there, so the same suite also
+      holds, through an ORM execute listener, that the relay is read with a
+      `FOR UPDATE` lock before the claim. (Scenario "A relay is disabled while
+      an acceptance is in flight")
+- [ ] 10a.6 Library integration, in
+      `provisioning/compute/tests/integration/test_relay_administration.py`:
+      replace the parametrized case expecting a disabled relay to be refused
+      at execution (around line 767) with cases where it is not — a removal
+      (no port) resolves the address and token, and a create whose
+      reservation holds the lease resolves and signs its grant — and keep the
+      absent, no-token, no-grant-key, and wrong-reservation refusals.
+      (Scenario "A relay is disabled between acceptance and execution")
+- [ ] 10a.7 Unit, in each domain's codec suite
+      (`domains/vms/provisioning/adapter/tests/unit/test_vm_codec.py` and
+      `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_codec.py`): a VM `vm_remove` and a bare-metal
+      reclaim whose lease names a disabled relay prepare their job, as both
+      codecs call the resolver.
+- [ ] 10a.8 **Verification:** `make test` in `provisioning/compute`,
+      `domains/vms/provisioning/adapter`, and
+      `domains/bare_metal/provisioning/adapter` (unit and library integration);
+      `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
+      End-to-end: none. None is owed: whether a relay is disabled is provisioning-service
+      state that no relay or host sees, and the real relay lanes'
+      teardowns run on enabled relays as before.
+
+## 10b. The relay read reports the drain
+
+Delivers D2: every relay read reports `active_lease_count` and `drained`, both
+required in the typed response. Implements "A relay reports whether it has
+drained". Touches
+`provisioning/compute/contracts/src/compute_provisioning_contracts/relays.py`
+(`RelayResponse`) and `provisioning/compute/src/compute_provisioning/relays/service.py`
+(`RelayView`, `list_relays`, `get_relay`, `_view`). The canonical client parses
+through `RelayResponse` and needs no change.
+
+- [ ] 10b.1 Add `active_lease_count: int` and `drained: bool` to `RelayResponse`,
+      required, with no default. (D2; 06 F3)
+- [ ] 10b.2 Add both to `RelayView`, computed from `relay_port_leases`:
+      `drained` is true exactly when the relay is disabled and holds no active
+      lease. `list_relays` counts every relay's active leases in one grouped
+      query; `_view` serves every write's response. Nothing is persisted. (D2)
+- [ ] 10b.3 Version the packages whose contents change as
+      `docs/guidance/repository/package-versions.md` says: run
+      `make check-version-bumps` and bump any package this change has not
+      already bumped against `dev`, relocking where a lower bound moves.
+- [ ] 10b.4 Unit, in `provisioning/compute/contracts/tests/unit/test_contracts.py`: a relay read shaped as
+      `marketplace-v0.3.0` serves it, with neither field, fails to parse as
+      `RelayResponse`. (Scenario "A client reads a service that does not report
+      the drain")
+- [ ] 10b.5 Library integration, in `test_relay_administration.py`: an enabled
+      relay with no lease reads `drained` false; a disabled relay with one
+      active lease reads count 1 and `drained` false; after that lease is
+      released, while its grant has not expired, count 0 and `drained` true;
+      enabled again, `drained` false. The list agrees with the read. (Scenarios
+      "A disabled relay still carries a lease", "A disabled relay's last lease
+      is released", "An enabled relay holds no lease")
+- [ ] 10b.6 Application integration through the canonical typed client, in
+      `provisioning/compute/service/tests/integration/test_relays_api.py`: list,
+      read, create, update, enable, disable, rotate, and grant-key activation
+      each return both fields, and disabling a relay with a lease reads count 1
+      and `drained` false.
+- [ ] 10b.7 **Verification:** `make test` in `provisioning/compute/contracts`,
+      `provisioning/compute`, and `provisioning/compute/service` (unit, library
+      integration, application integration);
+      `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
+      End-to-end: none, and none is owed: no scenario reads the relay
+      administration routes.
+
+## 10c. Refusals name the drain's scope
+
+Delivers D5's refusal rule: a refusal under the rebinding rule names the drain
+at the scope that clears it. Implements the MODIFIED "A relay binding is fixed
+for a lease's life" (its drain paragraph, and the scenarios "A relay is repointed
+while it carries leases" and "A pool's relay reference change is refused").
+Touches `provisioning/compute/src/compute_provisioning/relays/rebinding.py`.
+
+- [ ] 10c.1 Split `_DRAIN_HINT` in two: the pool's (disable the pool, wait for
+      its leases to be released, change, re-enable) for a pool's relay reference
+      and a host's pool move; the relay's (disable the relay, wait until it
+      reads `drained`, change, re-enable) for a relay's address or port and
+      its token rotation. (D5)
+- [ ] 10c.2 Rewrite `rebinding.py`'s module docstring to state the two scopes:
+      disabling a pool drains a pool, disabling a relay drains every pool on
+      it, and no other drain exists. (D5; comments rule)
+- [ ] 10c.3 Library integration, in the existing rebinding tests
+      (`provisioning/compute/tests/integration/test_pool_relays.py` and
+      `test_relay_administration.py`): each of the four refusals carries its
+      scope's hint. Application integration, in `test_relays_api.py` and
+      `test_pool_relays_api.py`: a relay move and a token rotation refused with
+      409 carry the relay's hint, and a pool's relay change the pool's.
+- [ ] 10c.4 **Verification:** `make test` in `provisioning/compute` and
+      `provisioning/compute/service` (library and application integration);
+      `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
+      End-to-end: none, and none is owed.
+
+## 10d. A disabled relay's pools' hosts take no new delivery
+
+Delivers D1's item 1, its reversibility, and the drain end to end in the running
+service. Implements "Disabling a relay drains it" (its deliverability sentence,
+and the scenarios "A relay is disabled while it carries deliveries", "A claim
+reaches fulfillment on a disabled relay", "A relay disabled by mistake is enabled
+again before it drains", and "The definition document stops listing a drained
+relay"). Touches `provisioning/compute/src/compute_provisioning/relays/` (a
+deliverable-hosts composition, exported from `__init__.py`) and
+`provisioning/compute/service/src/compute_provisioning_service/container.py`.
+`kit/site` does not change.
+
+- [ ] 10d.1 In the relay package, compose the host authority's
+      `DeliverableHosts` (`kit/resource-pools`'s protocol): the hosts it reports,
+      less every host whose pool's `pool_relays` row references a disabled
+      relay, read in the caller's session, as `deliverable_host_ids` is. (D1
+      item 1)
+- [ ] 10d.2 Pass it in `container.py` wherever `deliverable_hosts=host_authority`
+      is passed today (the capacity ledger and scheduling, around lines 451 and
+      609), so admission, placement, and projection read it. (D1 item 1)
+- [ ] 10d.3 Library integration: a host in a pool on a disabled relay is left
+      out; on an enabled relay, or in a pool with no relay, it is reported; a
+      disabled host stays out whatever its relay.
+- [ ] 10d.4 Application integration through the canonical typed client, beside
+      the relay-bearing suites (`test_fulfillment_convergence.py`,
+      `test_bare_metal_relay.py`, and `test_host_requirement_api.py`'s
+      disabled-host cases): with a VM lease and a bare-metal lease on one
+      relay, disable it; the declarations of its pools' hosts are projected not
+      enabled and a new claim is neither admitted nor placed; the VM's teardown
+      and the bare-metal reclaim run when their leases end and release their
+      ports; and the relay then reads `drained` true. (Scenario "A relay is
+      disabled while it carries deliveries")
+- [ ] 10d.5 Application integration: fulfillment acceptance on a pool whose
+      relay is disabled is refused, naming the relay, and records no lease.
+      (Scenario "A claim reaches fulfillment on a disabled relay")
+- [ ] 10d.6 Application integration: a relay disabled while it holds a lease and
+      enabled again before it drains returns its pools' hosts to new delivery,
+      allocation on it resumes, and the leased delivery's job runs unaffected.
+      (Scenario "A relay disabled by mistake is enabled again before it drains")
+- [ ] 10d.7 Confirm that the existing relay-omission test (task 9.9) holds the
+      scenario "The definition document stops listing a drained relay" for a
+      disabled relay, and add a disabled case if it does not.
+- [ ] 10d.8 **Verification:** `make test` in `provisioning/compute` and
+      `provisioning/compute/service` (library and application integration);
+      `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
+      End-to-end: none, and none is owed: the drain is provisioning-service
+      state the application-integration suite reaches through the typed
+      client, and no scenario disables a relay.
+
+## 10e. The procedure for draining and retiring a relay
+
+Delivers D5's procedure and D4's consequence for a document-listed relay, and
+records D6. Touches `docs/seller-frp-setup.md`,
+`docs/development/VALIDATION_RUNBOOK.md` §28, and this task list.
+
+- [ ] 10e.1 In `docs/seller-frp-setup.md`: in "Registering the relay", token
+      rotation becomes disable the relay, wait for `drained: true`, rotate,
+      enable again; "Changing a relay later" names both drain scopes — the pool
+      for a pool's relay or a host's pool, the relay for its address, port, or
+      token — and adds retiring a relay in D5's five steps, including that a
+      relay the definition document lists is disabled and enabled through its
+      `enabled` entry, since an API disable is reverted when the document next
+      changes. Present tense, describing the current system. (D4, D5)
+- [ ] 10e.2 In `docs/development/VALIDATION_RUNBOOK.md` §28: add "Retire a
+      relay" for the relay's operator — wait for `drained: true` on the relay
+      read, then remove the server, or on a shared relay this relay's active
+      and retired keys and its range from the admission plugin; enable the
+      relay again only once a server runs at its rendezvous. Restate the
+      section's "stop admission and drain" steps ("Native systemd relay",
+      "Container relay", "Rotate keys and change admission policy") as
+      disabling the relay and waiting for `drained`. (D2, D5)
+- [ ] 10e.3 Tick 1A.7 once sections 10a–10d are complete, and 2A.7, which D6
+      records as met by the existing handling with no revisit trigger.
+- [ ] 10e.4 **Verification:** `make check-doc-citations
+      CHANGE=relay-vm-access-without-a-dashboard`;
+      `scripts/change-workflow run pre-commit relay-vm-access-without-a-dashboard`.
+      End-to-end: none.
+
 ## 11. Closeout
 
 Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
@@ -1026,7 +1248,7 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
 - [ ] 11.4 **Narrative compression.** Compress completed-task notes to final behavior,
       material validation evidence, unresolved or deferred work, and
       permanent-documentation destinations, moving durable rationale into `design.md`
-      first.
+      first, sections 10a–10e and the replanned 1A.7 and 2A.7 included.
 - [x] 11.5 **Roadmap currency.** Decided for the campaign: **no separate
       goal.** The product already sells VMs on hosts it reaches by tunnel, so
       this is not capability it lacks — what the work fixes is that the
@@ -1076,25 +1298,73 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
 | Encrypting a configured secret at rest is part of the configuration pattern | `kit/config` module docstring |
 | One SSH key currently reaches every host in an environment; per-host material is supported and unused | recorded in this change's `design.md`; per-host keys are registered through the host API, and `contain-embedded-host-key-material` names one that cannot be decrypted, so no fix is owed |
 - [ ] 11.7 **Campaign index currency.** Update this change's row, and its campaign's
-      dependency graph, in `openspec/changes/README.md`, or record that both are
-      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
-      dependents after the closeout gate.
+      dependency graph (the line naming it "returned to design: relay drain"), in
+      `openspec/changes/README.md`, and run `make check-change-index`. Other rows'
+      `Depends on` are left alone: archive cleanup releases dependents after the
+      closeout gate.
 - [ ] 11.8 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=relay-vm-access-without-a-dashboard` and resolve every
-      match, then `openspec validate relay-vm-access-without-a-dashboard --strict`.
+      match, then `scripts/change-workflow openspec validate
+      relay-vm-access-without-a-dashboard --strict`.
 - [ ] 11.9 **End-to-end pipeline.** Record the passing run the latest validation names,
       its result, and the scenarios that exercise this change, or an explicit blocker
       naming its cause and the change that owns it, with the validations it gates
-      treated as unrun. The live-hardware verification of sections 6 and 8 needs a
-      rented, initialized host and the deployed relay.
+      treated as unrun. Sections 6 and 8 are met by the relay-backed real lane, as
+      recorded there; sections 10a–10e have no covering scenario and owe none.
 - [ ] 11.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports (a failure needing a code or lock change returns the change to
       implementation).
-- [ ] 11.11 **Archival.** Last, once every other part is checked: `openspec archive
-      relay-vm-access-without-a-dashboard -y --skip-specs` moves the change under
-      `openspec/changes/archive/` without merging the deltas, which 11.6 synchronized
-      by hand; point the index row at the archived directory, and run
-      `openspec validate --specs --strict`.
+- [ ] 11.11 **Archival.** Last, once every other part is checked. The deltas now
+      carry only the relay drain, written against main's text (06 F1): ADDED
+      "Disabling a relay drains it" and "A relay reports whether it has drained",
+      MODIFIED "A relay binding is fixed for a lease's life" and "Relay admission
+      tokens are resolved at execution". So the archive merges them rather than
+      skipping them, and 11.6's hand synchronization is not applied twice, since
+      none of its requirements is in the deltas any more. First compare each
+      MODIFIED block with main's current requirement and carry into the block any
+      text main gained since, so the merge replaces nothing another change wrote.
+      Then `scripts/change-workflow openspec archive
+      relay-vm-access-without-a-dashboard -y` merges the deltas and moves the change
+      under `openspec/changes/archive/`; point the index row at the archived
+      directory, and run `scripts/change-workflow openspec validate --specs --strict`.
+- [ ] 11.12 **Comment hygiene**, for sections 10a–10e: `make check-comment-hygiene`,
+      then read the comments those sections added or rewrote against
+      `docs/guidance/engineering/comments.md` — the invariant (disabling a relay
+      drains it; the allocator refuses a new owner under the relay row's lock),
+      never the change. A finding returns the change to implementation.
+- [ ] 11.13 **Import placement**, for sections 10a–10e: confirm the imports they
+      added are at module level; one that should move returns the change to
+      implementation.
+- [ ] 11.14 **Documentation compliance**, for sections 10a–10e and the promotion
+      below: `docs/seller-frp-setup.md`, runbook §28, and every promoted passage
+      describe the current system, declaratively and with no wording relative to the
+      change, and sit where the placement rules put them.
+- [ ] 11.15 **Roadmap currency.** In `docs/development/ROADMAP.md` Goal 1, the gap
+      row "Relay deletion under live leases remains an open lifecycle decision…",
+      owned by this change, is settled: remove it, and state in the goal's current
+      state that disabling a relay drains it and its server's removal is the relay
+      operator's. Name the edit in the design-promotion record (11.16).
+- [ ] 11.16 **Promotion** of the relay drain, completing the design-promotion record
+      with its own rows, since 11.6's table predates these decisions:
+
+      | Accepted decision | Permanent location |
+      |---|---|
+      | D1, D3 — disabling a relay drains it, reversibly; nothing deletes a relay | `openspec/specs/physical-provisioning/spec.md`, "Disabling a relay drains it" and MODIFIED "Relay admission tokens are resolved at execution" — written by the archive (11.11) |
+      | D1 — removing the relay server is its operator's, outside this repository; the drain and its stated condition are this repository's part | `openspec/specs/physical-provisioning/architecture.md`, a new "Disabling a relay drains it" subsection under "Buyer access to provisioned hosts", after "Rebinding requires draining" |
+      | D2 — the relay read's `active_lease_count` and `drained`, required, not waiting for grant expiry | `openspec/specs/physical-provisioning/spec.md`, "A relay reports whether it has drained" — written by the archive |
+      | D4 — a relay the document stops listing is left as it is; a listed relay is drained through its `enabled` entry | `openspec/specs/physical-provisioning/spec.md`, "Disabling a relay drains it" (scenario) — written by the archive; the procedure in `docs/seller-frp-setup.md`, "Changing a relay later" (10e.1) |
+      | D5 — the relay drain is the pool drain at the relay's scope; refusals name the scope | `openspec/specs/physical-provisioning/spec.md`, MODIFIED "A relay binding is fixed for a lease's life" — written by the archive; `openspec/specs/physical-provisioning/architecture.md`, "Rebinding requires draining"; the procedure in `docs/seller-frp-setup.md` and `docs/development/VALIDATION_RUNBOOK.md` §28 (10e) |
+      | D6 — a provisioning container is never shared between users, by design | `openspec/specs/physical-provisioning/architecture.md`, "Relay credentials stay on the host and in the service" |
+      | D7 — implementation cadence | no permanent destination |
+      | Roadmap: the relay-deletion gap row settled | `docs/development/ROADMAP.md`, Goal 1 (11.15) |
+
+      `physical-provisioning` has no `index.md`, so no index entry is owed; run
+      `make check-spec-index CHANGE=relay-vm-access-without-a-dashboard`.
+- [ ] 11.17 **Guidance placement.** Read the guidance sections changed since the
+      return to design against the layer test; the drain's promotions go to a
+      specification, its companion, a handbook-level guide, and the runbook, not to
+      guidance, so record that this return touched no guidance if so, and run
+      `make check-guidance`.
 
 ## Sequencing against the sibling changes
 
@@ -1122,6 +1392,10 @@ and the owner directed that disabling be the relay's drain, with the relay
 server's removal left to its operator outside this repository. Design settles
 both gates and adds the work they need. Planning, implementation, and closeout
 follow from there.
+
+**Replanned (2026-11-17)** against the reviewed design: sections 10a–10e
+implement the relay drain (D1–D5) and record D6, and closeout gains 11.12–11.17
+for the parts the drain reopens; the archive now merges the drain-only deltas.
 
 **Done — the service.** The relay resource, its controller, encryption at rest
 under the profile key, the redacted/execution reader split, preserve-on-absent,

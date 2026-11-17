@@ -291,21 +291,28 @@ is rewritten as part of this change rather than left to contradict the code.
   work runs, and it is reversible → `openspec/specs/physical-provisioning/spec.md`
   ("Disabling a relay drains it", and the amended "Relay admission tokens are
   resolved at execution"); that removing the relay server is its operator's,
-  outside this repository → `openspec/specs/physical-provisioning/architecture.md`
+  outside this repository → `openspec/specs/physical-provisioning/architecture.md`,
+  a new "Disabling a relay drains it" subsection under "Buyer access to
+  provisioned hosts"
 - D2: the relay read's `active_lease_count` and `drained`, and why `drained`
   does not wait for grant expiry → `openspec/specs/physical-provisioning/spec.md`
   ("A relay reports whether it has drained")
 - D3: nothing deletes a relay; a drained row is kept disabled →
   `openspec/specs/physical-provisioning/spec.md` ("Disabling a relay drains it")
 - D4: a relay the document stops listing is left as it is →
-  `openspec/specs/physical-provisioning/spec.md` ("Disabling a relay drains it")
-  and its relay definitions requirement
+  `openspec/specs/physical-provisioning/spec.md` ("Disabling a relay drains it",
+  its scenario "The definition document stops listing a drained relay"); that a
+  listed relay is drained through its `enabled` entry → `docs/seller-frp-setup.md`,
+  "Changing a relay later"
 - D5: the relay drain is the pool drain at relay scope, with refusals naming
   the scope → `openspec/specs/physical-provisioning/spec.md` ("A relay binding is
-  fixed for a lease's life"); the procedure → `docs/seller-frp-setup.md` and
-  `docs/development/VALIDATION_RUNBOOK.md` §28
+  fixed for a lease's life") and `openspec/specs/physical-provisioning/architecture.md`
+  ("Rebinding requires draining"); the procedure → `docs/seller-frp-setup.md`
+  ("Registering the relay", "Changing a relay later") and
+  `docs/development/VALIDATION_RUNBOOK.md` §28 (a new "Retire a relay")
 - D6: a provisioning container is never shared between users, by design, which
   the transient secret files' confidentiality rests on →
-  `openspec/specs/physical-provisioning/architecture.md`
+  `openspec/specs/physical-provisioning/architecture.md`, "Relay credentials stay
+  on the host and in the service"
 - D7: no permanent destination — the implementation cadence orders this
   change's own work and describes nothing about the system
