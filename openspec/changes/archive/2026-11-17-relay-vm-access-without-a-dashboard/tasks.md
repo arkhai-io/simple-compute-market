@@ -1425,7 +1425,9 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
       registered through the host API; the goal's current state records them,
       and its gap table does not name that change.
 - [x] 11.6 **Promotion.**
-      Archival uses `--skip-specs`: this task synchronized the specification by hand.
+      This task synchronized the specification by hand at the first closeout. The
+      archive (11.11) later merged only the relay-drain deltas, without
+      `--skip-specs`, and 11.16 completes this record with the drain's rows.
 
 | Accepted decision | Permanent location |
 |---|---|
@@ -1455,6 +1457,13 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
 | Relay uniformity per host is a limit of one client per host, not of the model | `openspec/specs/physical-provisioning/architecture.md` |
 | Encrypting a configured secret at rest is part of the configuration pattern | `kit/config` module docstring |
 | One SSH key currently reaches every host in an environment; per-host material is supported and unused | recorded in this change's `design.md`; per-host keys are registered through the host API, and `contain-embedded-host-key-material` names one that cannot be decrypted, so no fix is owed |
+
+      The two lease-release rows record what was promoted here. A later change
+      rewrote that rule: a lease is now released with its reservation's capacity,
+      in the same transaction, and never on a fulfillment state alone
+      (`openspec/specs/physical-provisioning/spec.md`, "Relay port leases are
+      unique per relay" and "What is held for a reservation is returned with its
+      capacity").
 - [x] 11.7 **Campaign index currency.** Update this change's row, and its campaign's
       dependency graph (the line naming it "returned to design: relay drain"), in
       `openspec/changes/README.md`, and run `make check-change-index`. Other rows'
