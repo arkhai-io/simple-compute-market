@@ -2965,7 +2965,7 @@ cites a design decision by id, which code may not
 (`docs/guidance/workflow/change-references.md`). Touches
 `domains/apicredits/service/tests/integration/test_system_time.py` only.
 
-- [ ] 17a.1 Reword the docstring of
+- [x] 17a.1 Reword the docstring of
   `test_the_composed_service_admits_the_time_setting_alone_outside_the_skew` so it
   says what the test checks without naming `D14`: the time-setting operation, the one
   request admitted outside the signing skew, as the composition wires it — a setting
@@ -2974,13 +2974,41 @@ cites a design decision by id, which code may not
   - Verify: no comment or docstring the change added names a decision, section, task
     or review id — a search of the change's added Python lines for `D[0-9]+` and
     section numbers finds none; `make check-comment-hygiene` passes.
-- [ ] 17a.2 Section verification.
+  - Done: the docstring now opens "The time-setting operation, the one request
+    admitted outside the signing skew, as the composition wires it:" and keeps
+    the rest as it was. The test's code is unchanged.
+  - Evidence: a search of the Python lines `git diff dd86e550f` adds for a
+    decision id (`D` and a number), "section" and a number, a task number or a
+    finding id finds only four `# noqa: F401` lint codes, none of them an id.
+    `make check-comment-hygiene` passes. No test is shown failing before the
+    fix: a docstring changes no behaviour.
+- [x] 17a.2 Section verification.
   - Application integration: the API-credits service's suite in `make test-domains`
     passes, `test_system_time.py` among it.
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`,
     whose functional checks pass and whose citations check names only closeout's
     `openspec/specs/injected-time/architecture.md`.
   - End-to-end: none; a docstring changes no behaviour, and none is owed.
+  - Evidence: the API-credits service's suite (`make -C
+    domains/apicredits/service test`, `test_system_time.py` among it; unit and
+    application integration) has 90 passed, on its own and again inside `make
+    test`. `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes`: `after-functional-change` passed and
+    rebuilt nothing; `pre-commit-functional` passed (`make dist-clean`, `make
+    check-packaging`, `make test`, every suite). Of `pre-commit`, the index,
+    tasks and skills checks passed and so did the strict OpenSpec validation.
+    Only the citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9).
+  - Confirmed: no end-to-end scenario exercises a docstring, and the section
+    owes validation nothing.
+  - Fresh-context check: no findings. It confirmed the reworded docstring names
+    no id and matches what the test asserts, and that the evidence above claims
+    no more than was run.
+  - Handoff for closeout: 18.1's violation is fixed, so closeout runs again
+    from 18.1. 18.7's early run at `e846e92e0` still holds for the code: this
+    section changed only a docstring. It is to be run again in its place
+    regardless. The change's index row is set back to `in implementation`;
+    closeout sets it `in closeout` again.
 
 ## 18. Closeout
 

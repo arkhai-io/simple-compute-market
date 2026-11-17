@@ -156,7 +156,8 @@ def _skewed_admin_request(operation: str, body: Any, at: int) -> dict[str, Any]:
 async def test_the_composed_service_admits_the_time_setting_alone_outside_the_skew(
     composed,
 ):
-    """D14 as the composition wires it: a setting signed 900 s ahead of the
+    """The time-setting operation, the one request admitted outside the signing
+    skew, as the composition wires it: a setting signed 900 s ahead of the
     service is admitted and moves it; a status read signed there is refused.
     Raw requests, as a rejection-path test's are, asserting statuses only."""
     main = composed("injected")
