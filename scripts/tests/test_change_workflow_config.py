@@ -837,7 +837,9 @@ def test_two_lines_owing_one_workflow_are_one_run(tmp_path: Path) -> None:
     tasks.write_text("## 1. A\n\n- [x] 1.1 x.\n  Owed by validation: `ci.yml`, job a\n\n"
                      "## 2. B\n\n- [x] 2.1 y.\n  Owed by validation: `ci.yml`, job b\n", "utf-8")
 
-    runs = config.plan(_kinds_checked(tmp_path, PARTS), owed_lines(tasks))
+    owed = [(line.section, line.kind or "", line.argument or "")
+            for line in owed_lines(tasks, ("ci",))]
+    runs = config.plan(_kinds_checked(tmp_path, PARTS), owed)
 
     assert [(run.name, run.sections) for run in runs if run.kind.owed] == [
         ("ci ci.yml", ("1", "2"))]

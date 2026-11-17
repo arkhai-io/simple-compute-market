@@ -224,21 +224,60 @@ CW-t3ev, CW-p4rs, CW-r5qk, CW-e2vd, CW-zkhs). Files:
 waiver reading), `scripts/tests/test_check_tasks.py`, a new
 `scripts/tests/test_change_workflow_evidence.py`.
 
-- [ ] 2.1 Compute identity (D2; CW-t3ev): the tree as `git write-tree` of the
+- [x] 2.1 Compute identity (D2; CW-t3ev): the tree as `git write-tree` of the
   worktree as tested, its changes — staged, unstaged, untracked and not ignored —
   added to a temporary index (`GIT_INDEX_FILE`), never the checkout's own index; the
   commit as `HEAD`'s full object name. Verify: library-integration tests: a clean
   worktree's tree equals `HEAD^{tree}`; a dirty worktree's tree equals the tree of the
   commit that then commits exactly those changes; an ignored file changes nothing;
   the checkout's index is unchanged afterwards.
-- [ ] 2.2 Extend the owed-line reader in `tasks.py` (D5; CW-r5qk): `Owed by validation
+  - Done in the new `scripts/change_workflow/evidence.py`:
+    - `worktree_tree` copies the checkout's index (`git rev-parse --git-path index`)
+      into a temporary directory, runs `git add --all` and `git write-tree` with
+      `GIT_INDEX_FILE` naming the copy, and drops it.
+    - `head_tree` and `head_commit` read `HEAD^{tree}` and `HEAD`.
+  - Library-integration tests in `test_change_workflow_evidence.py`, on a real
+    temporary repository, all passing:
+    - `test_a_clean_worktrees_tree_is_heads`;
+    - `test_a_dirty_worktrees_tree_is_the_tree_its_commit_then_holds`: a staged
+      change with a further unstaged edit, an untracked file, and a deletion;
+    - `test_an_ignored_file_changes_no_tree`;
+    - `test_the_checkouts_index_is_left_as_it_was`: the index file's bytes and `git
+      status` are unchanged.
+- [x] 2.2 Extend the owed-line reader in `tasks.py` (D5; CW-r5qk): `Owed by validation
   (<kind> <argument>):` names its kind; a line naming no kind is the one owed kind,
   its argument the first word in backticks, refused when more than one kind is owed
   or it has no backticked argument; an argument that is empty, `.`, `..`, or holds
   `/`, whitespace, `*`, `?`, `[`, or `]` is refused, naming the section. `check
   tasks` reports a refusal. Verify: unit tests for each form and each refusal,
   including CW-r5qk's `(ci ..)` scenario and a legacy line read as `ci tests.yml`.
-- [ ] 2.3 Add `evidence <change> [--json]` (D4; CW-e2vd): for each kind, its
+  - Done: `tasks.read_owed` reads each owed line as a `tasks.Owed`: its section, its
+    line, its kind and argument, or its refusal.
+    - Lines are read against `tasks.owed_kinds(configuration)`, the names of the
+      kinds declared owed. `owed_lines(tasks, owed)` keeps the complete sections'.
+    - A refused line keeps the kind it names only when that kind is owed, so
+      `evidence` reports it under that kind; one naming a kind that is not owed is
+      reported under no kind, apart from the kind's own entry.
+    - Beyond the plan, two more lines are refused: one naming a kind that is not
+      owed, and one where no kind is owed. So is a line of neither form.
+    - `check tasks` loads the configuration and refuses any owed line in any section,
+      exiting 1 with each refusal's line; its OK message now says so.
+  - Unit tests in `test_check_tasks.py`, all passing:
+    - `test_an_owed_line_names_its_kind_and_argument`, each form, a line naming no
+      kind read as `ci tests.yml` among them;
+    - `test_an_owed_line_is_refused_naming_its_section`, one row per refusal — each
+      glob character alone, `]` included, and `(ci ..)` among them;
+    - `test_a_refused_line_keeps_the_owed_kind_it_names`;
+    - `test_only_the_sections_given_as_complete_owe_anything`;
+    - `test_the_owed_lines_of_a_task_list_are_its_complete_sections`, reading a file.
+  - A command-level test, `test_the_command_reports_a_refused_owed_line`, passes:
+    CW-r5qk's `(ci ..)` scenario through `check tasks` against a configuration on
+    disk, outside Git. The existing `check tasks` command tests now load the
+    configuration too.
+  - `log.waived_parts` is now `log.waived_kinds`, its refusals naming evidence kinds.
+    `config parts` (until section 3 removes it) groups owed arguments by kind and
+    refuses a task list with a refused line.
+- [x] 2.3 Add `evidence <change> [--json]` (D4; CW-e2vd): for each kind, its
   requirement — `always`, owed once per argument complete sections owe, `not
   required`, or `waived` with the decision's `seq` from the log's standing waivers
   (`log.waived_parts`, read as kinds) — its pattern filled with `HEAD`'s tree or
@@ -248,8 +287,47 @@ waiver reading), `scripts/tests/test_check_tasks.py`, a new
   two scenarios, CW-r5qk's two-workflow scenario, CW-t3ev's amended-message
   scenario (tree kinds present, the commit kind missing), and CW-zkhs's earlier-tree
   scenario.
-- [ ] 2.4 Verification point: `test_change_workflow_evidence.py` and
+  - Done: `evidence.change_report` lists each kind in declaration order:
+    - an `always` kind once;
+    - an owed kind once per argument the complete sections owe it, in first-owed
+      order, with the sections owing it; then each refused line naming it, as
+      `refused` with its refusal; or, owing none, once as `not required`;
+    - a refused line naming no owed kind, after every kind.
+  - Each entry also carries:
+    - its identity, and its pattern filled with `HEAD`'s tree, its commit, and the
+      argument (`*` for a kind not required), never shell-quoted (`evidence.filled`);
+    - every match in path order, the last `current`;
+    - a waived kind's waiver `seq` and decision.
+  - `scripts/change-workflow evidence <change> [--json]` prints it, exiting 0 however
+    much is missing and 1 when it cannot be read.
+  - Library-integration tests in `test_change_workflow_evidence.py`, all passing:
+    - CW-e2vd's two scenarios (`test_only_local_evidence_exists`,
+      `test_a_rerun_beside_a_failed_attempt`);
+    - CW-r5qk's two-workflow, pipeline, and `(ci ..)` scenarios, and a refused line
+      naming a kind owed always listed apart from that kind;
+    - CW-t3ev's amended-message scenario, whose commit is amended by Git;
+    - CW-zkhs's earlier-tree scenario;
+    - CW-p4rs, evidence placed at the pattern by hand;
+    - a waived kind;
+    - the command's lines and JSON;
+    - its refusal with no kinds declared.
+- [x] 2.4 Verification point: `test_change_workflow_evidence.py` and
   `test_check_tasks.py`; `run pre-commit` passes. End-to-end: none.
+  - Correction: checked though `run pre-commit` does not pass whole, as in 1.10.
+    - `after-functional-change` and `pre-commit` passed; the repository's checks
+      passed, citations included, now that `evidence.py` exists.
+    - `pre-commit-functional` failed only on the same two step-table tests, which
+      fail from `57b7baaad`'s lifted deny rules. Every other suite of `make test`
+      passed, the scripts' 3217 passed.
+    - After the fresh-context check's fixes, both section 2 test files were rerun:
+      56 passed.
+  - End-to-end: none — confirmed.
+  - Handoff to section 3:
+    - `evidence.change_report` is what `gather` needs to find what is missing: each
+      entry's `status`, `kind`, and `owed`.
+    - `evidence.worktree_tree` is what the functional hooks' `{tree}` takes.
+    - `evidence.filled` fills a pattern unquoted, where `config.fill` quotes a
+      command's values.
 
 ## 3. Gathering and cleanup by kind
 

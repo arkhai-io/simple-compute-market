@@ -832,9 +832,9 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     run, which `Wrapper.resume` then resumes once with the owner's words; it is
     refused unless that run is the latest triage of the reviews it triaged
     (`revisit_refusal`). It routes nothing: the resumed triage's outcome does.
-    `waives` names the parts of validation the owner waives for later validations,
-    on the condition the decision states; it directs nothing, and validation reads
-    it through `waived_parts`, judging whether the condition still holds.
+    `waives` names the evidence kinds the owner waives for later validations, on
+    the condition the decision states; it directs nothing, and validation reads it
+    through `waived_kinds`, judging whether the condition still holds.
     """
     if next_step is None and (kind, sections, target) != (None, None, None):
         raise StepError("a kind, sections, or target qualify the step a decision directs")
@@ -890,11 +890,11 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
         line["resumes"] = resumes
     if waives is not None:
         if by != "owner":
-            raise StepError("a waiver of validation's parts is the owner's")
+            raise StepError("a waiver of validation's evidence kinds is the owner's")
         if directs is not None:
-            raise StepError("a waiver of validation's parts directs no step")
+            raise StepError("a waiver of validation's evidence kinds directs no step")
         if not waives or not all(isinstance(p, str) and p for p in waives):
-            raise StepError(f"a waiver names one or more parts; got {list(waives)!r}")
+            raise StepError(f"a waiver names one or more evidence kinds; got {list(waives)!r}")
         line["waives"] = list(waives)
     if directs is not None:
         if by != "owner":
@@ -910,13 +910,13 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
     return line
 
 
-def waived_parts(entries: Sequence[Entry]) -> dict[str, Entry]:
-    """Each part of validation the owner waived, with the latest decision waiving it."""
+def waived_kinds(entries: Sequence[Entry]) -> dict[str, Entry]:
+    """Each evidence kind the owner waived, with the latest decision waiving it."""
     waived: dict[str, Entry] = {}
     for entry in entries:
         if entry.get("by") == "owner" and isinstance(entry.get("waives"), list):
-            for part in entry["waives"]:
-                waived[part] = entry
+            for kind in entry["waives"]:
+                waived[kind] = entry
     return waived
 
 

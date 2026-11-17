@@ -28,7 +28,8 @@ a change's clone, `round-view` and `round-done` the round view, `history` the co
 of a change's history, `cost` its cost report, `push` the guarded push, `config`
 how the repository's workflow configuration resolved, `config load` a step's
 documents, or with `common` those every session reads, and `config parts`
-validation's plan for a change, `run` and `openspec`
+validation's plan for a change, `evidence` which evidence each kind needs for a
+change's `HEAD` and what is present, `run` and `openspec`
 the repository's hooks and its OpenSpec command (`hooks`), `check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
 default checks (`check change`), a review's format check on standard input (`check
@@ -62,8 +63,8 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import clone as clones
-from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
-               next_step, push, round_view, skills, tasks, wait)
+from . import (config, cost_report, diagram, evidence, find, graph, history, hook, hooks,
+               index, next_step, push, round_view, skills, tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, Entry, StepError, repository_root
 from .convert import convert_change
@@ -71,7 +72,7 @@ from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
 from .log import (Checkout, branch_decisions, direction, git_checkout, history_log_path,
                   last_entries, log_path, note_orchestrator, note_round, open_log, read_log,
-                  record_interactive, recorded_landing, waived_parts)
+                  record_interactive, recorded_landing, waived_kinds)
 from .records import git_head
 from .review import check_review, review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
@@ -375,6 +376,11 @@ def _parser() -> argparse.ArgumentParser:
     viewing.add_argument("change")
     viewing.add_argument("--base", default=None)
     commands.add_parser("round-done", help="return the branch to the round's commit")
+    evidence_ = commands.add_parser(
+        "evidence", help="report which evidence each kind needs for HEAD's tree or commit, "
+                         "and what is present")
+    evidence_.add_argument("change")
+    evidence_.add_argument("--json", action="store_true", help="print it as JSON")
     history_ = commands.add_parser(
         "history", help="copy a change's history from its clone into the workspace")
     history_.add_argument("change")
@@ -647,6 +653,8 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
         if args.next_record:
             flag = ["--next-record", args.next_record]
         return find.main, [*flag, *(["--json"] if args.json else []), args.change]
+    if args.command == "evidence":
+        return evidence.main, [args.change, *(["--json"] if args.json else [])]
     if args.command == "clone" and args.change != "where":
         if args.where_change is not None:
             raise _Usage("clone takes one change, or `where` followed by the change")
@@ -699,7 +707,12 @@ def _config_parts(args: argparse.Namespace, root: Path) -> int:
         directory = change_directory(root, args.subject)
     except ChangeNotFound as exc:
         raise StepError(str(exc)) from exc
-    runs = config.plan(configuration, tasks.owed_lines(directory / next_step.TASKS_FILE))
+    config.require(configuration, config.EVIDENCE, needed_by="validation")
+    owed = tasks.owed_lines(directory / next_step.TASKS_FILE, tasks.owed_kinds(configuration))
+    if refused := [line.refusal for line in owed if line.refusal]:
+        raise StepError("; ".join(refused))
+    runs = config.plan(configuration, [(line.section, line.kind or "", line.argument or "")
+                                       for line in owed])
     waived = _waived(root, args.subject)
     print(config.plan_json(configuration, runs, waived) if args.json
           else "\n".join(config.plan_lines(configuration, runs, waived)))
@@ -724,9 +737,9 @@ def _parts(root: Path, given: str) -> list[str]:
 
 
 def _waived(root: Path, change: str) -> dict[str, Entry]:
-    """The parts of validation the owner waived in the change's log."""
+    """The evidence kinds the owner waived in the change's log."""
     path = log_path(root, change)
-    return waived_parts(read_log(path)) if path.exists() else {}
+    return waived_kinds(read_log(path)) if path.exists() else {}
 
 
 def _graph(root: Path) -> int:

@@ -824,26 +824,27 @@ class PlannedRun:
                 "after": self.kind.after, "evidence": self.kind.evidence}
 
 
-def plan(configuration: Configuration, owed: Sequence[tuple[str, str]]) -> list[PlannedRun]:
+def plan(configuration: Configuration,
+         owed: Sequence[tuple[str, str, str]]) -> list[PlannedRun]:
     """Each run of a kind, in declaration order: an owed kind once per argument the
-    complete sections owe (`owed`, each a section and an argument), or once as not
-    owed. Two lines owing one argument are one run, owed by both sections, since a
-    run is named by its argument."""
+    complete sections owe it (`owed`, each a section, a kind, and an argument), or
+    once as not owed. Two lines owing one argument are one run, owed by both
+    sections, since a run is named by its argument."""
     require(configuration, EVIDENCE, needed_by="validation")
-    by_argument: dict[str, list[str]] = {}
-    for section, argument in owed:
-        by_argument.setdefault(argument, [])
-        if section not in by_argument[argument]:
-            by_argument[argument].append(section)
+    by_argument: dict[str, dict[str, list[str]]] = {}
+    for section, kind_name, argument in owed:
+        sections = by_argument.setdefault(kind_name, {}).setdefault(argument, [])
+        if section not in sections:
+            sections.append(section)
     runs: list[PlannedRun] = []
     for kind in configuration.kinds or ():
         if not kind.owed:
             runs.append(PlannedRun(kind))
-        elif not by_argument:
+        elif not by_argument.get(kind.name):
             runs.append(PlannedRun(kind, not_owed=True))
         else:
             runs.extend(PlannedRun(kind, argument, tuple(sections))
-                        for argument, sections in by_argument.items())
+                        for argument, sections in by_argument[kind.name].items())
     return runs
 
 
