@@ -67,8 +67,11 @@ deny = [
   "Bash(git stash*)", "Bash(git clean*)", "Bash(git rebase*)",
   "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
   "Bash(scripts/change-workflow round-view*)", "Bash(scripts/change-workflow round-done*)",
-  "Edit(.claude/**)", "Write(.claude/**)",
-  "Edit(.agents/workflow.toml)", "Write(.agents/workflow.toml)",
+  # Lifted for add-skill-extension-points' first implementation session, on the
+  # owner's word, so it can edit the configuration and this table (tasks 1.8, 4.4,
+  # 4.5); restored when that session ends:
+  # "Edit(.claude/**)", "Write(.claude/**)",
+  # "Edit(.agents/workflow.toml)", "Write(.agents/workflow.toml)",
   # A rule marked "Write-steering" refuses only a shell form that writes a file,
   # so the write goes through the Edit or Write tool; such a write is a gap, not
   # a workaround. Every other deny rule forbids the work itself.
