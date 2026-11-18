@@ -68,10 +68,13 @@ Each storefront reads its registry's recommended dispute authorities once, at
 startup: `settlement_composition.disputes.refresh(...)` in the VM, bare-metal, and
 API-credit storefronts' server startup, through
 `kit/storefront/src/market_storefront_kit/dispute_configuration.py`. A failed read
-contributes no recommendations. A storefront that starts before its registry
-serves therefore holds no authority, offers no payments option, and refuses a
-payments listing with "no settlement option it may publish" until someone
-restarts it. Nothing reports why, beyond a warning at startup.
+contributes no recommendations. A storefront relying on registry recommendations
+alone — one whose local `[[Dispute]]` entries name no authority its options can
+use — that starts before its registry serves therefore holds no authority, offers
+no payments option, and refuses a payments listing with "no settlement option it
+may publish" until someone restarts it. Nothing reports why, beyond a warning at
+startup. A storefront with local entries publishes their options meanwhile, and
+keeps doing so.
 
 ### 5. A teardown that failed before its executor ran is recovered by hand
 
@@ -114,17 +117,21 @@ exceed, so a teardown that succeeds on a retry strands its lease for an operator
   `storefront-publication` scenario, a storefront integration test, and
   `converge_teardown` deleted.
 - **A storefront reads again a registry it could not read** (D6). Each publication
-  cycle re-reads the registries whose last read failed; while one is unread, the
-  storefront's settlement readiness reports `dispute_authorities_unread`. No
+  cycle re-reads the registries whose last read failed; while one is unread, each
+  affected mechanism's readiness reports it in its public details as
+  `dispute_authorities_unread`, which `settlement status` shows. It is a report,
+  not a readiness blocker, so publication and open listings are unchanged. No
   restart, and `/health` is unaffected.
 - **A teardown that never started runs again without an operator** (D3, D4, D5,
   D7, D8). An executor records that a job's execution is starting before it starts
-  anything (`execution_started_at`, shown on the job read). A failed teardown whose
-  execution never started is run again under `"{reservation}:teardown:rerun-{n}"`,
-  spaced by the job retry policy and bounded by `teardown_rerun_limit` (default 3),
+  anything (`execution_started_at`), and when a job finished (`finished_at`), both
+  shown on the job read. A failed teardown whose execution never started is run
+  again under `"{reservation}:teardown:rerun-{n}"`, spaced by the job retry policy
+  from the previous job's finish and bounded by `teardown_rerun_limit` (default 3),
   compensating teardowns included. The lease stays `releasing` while a rerun is
-  pending, and the stalled-teardown timeout becomes a counted diagnostic, so
-  `release_failed` means only that an operator must act. A teardown whose playbook
+  pending, and `release_failed` means only that an operator must act. The
+  stalled-teardown timeout stays the backstop, its default raised from 300 to 3600
+  seconds so a working retry or rerun never meets it. A teardown whose playbook
   started, or a cancelled one, keeps today's rule. The operator handbook's manual
   steps for leases left `release_failed` on a version-1 host become one
   retry-release per lease.
@@ -145,13 +152,14 @@ Design's decisions are `design.md` D1–D10.
 
 - `physical-provisioning`: a relayed delivery's relay (D1); a concurrent
   allocation for one owner (D2); a job's recorded start (D4); rerunning a teardown
-  that never started (D5, D7); the lease's release while a rerun is pending, and the
-  grace period as a diagnostic (D3, D8).
+  that never started, and the release status reading it (D5, D7); the lease's
+  release while a rerun is pending, under the grace period's backstop (D3, D8).
 - `fulfillment`: an equivalent acceptance that waited on another returns the first
   (D2).
-- `compute-provisioning-contract`: the job view's `execution_started_at` (D4).
+- `compute-provisioning-contract`: the job view's `execution_started_at` and
+  `finished_at` (D4, D5).
 - `settlement-configuration`: reading a registry again after a failed read, and
-  the `dispute_authorities_unread` blocker (D6).
+  reporting an unread registry in status (D6).
 - `storefront-publication`: a bare-metal end under a delivery conflict (D9).
 
 ### New Capabilities
@@ -183,7 +191,8 @@ None.
   outside its host's pool; a static test of the `relay-proxy` and `relay-client`
   roles.
 - `kit/fulfillment/src/market_fulfillment/settlement_repository.py`
-  (`accept_fulfillment`) and its tests.
+  (`accept_fulfillment`), `fulfillment_persistence.py` (`FulfillmentTransaction.accept`
+  and `FulfillmentAcceptanceDecision`), and their tests.
 - `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/fulfillment_service.py`
   (`converge_teardown` deleted) and `domains/bare_metal/storefront/tests/test_http_settlement.py`.
 - `kit/storefront/src/market_storefront_kit/dispute_configuration.py`, the three
@@ -192,18 +201,29 @@ None.
   `jobs/executor.py`, `jobs/db.py`, `jobs/migrations.py`), the Ansible executor
   (`provisioning/compute/ansible/src/compute_provisioning_ansible/executor.py`),
   `job_fulfillment.py`, `release.py`, `lease_lifecycle.py`, the compute provisioning
-  settings (`teardown_rerun_limit`), and the contracts package's job view.
+  settings (`teardown_rerun_limit`, `lease_watchdog_grace_period_seconds`), the
+  provisioning chart's and the umbrella chart's values, and the contracts package's
+  job view.
+- `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`, whose comment on the
+  lease back-date describes the 300-second grace.
 - `docs/operator-handbook.md` ("Upgrading a deployment").
-- One additive compute-provisioning migration (`execution_started_at`). No wire
-  form, stored record or configuration key `marketplace-v0.3.0` carries changes
-  meaning.
+- What the change changes against `marketplace-v0.3.0`, each admitted under the
+  pre-1.0 rule with the minor bumps the change takes:
+  - the job view gains the optional `execution_started_at` and `finished_at`;
+  - one additive compute-provisioning migration adds the two nullable job columns;
+  - a new setting, `teardown_rerun_limit`;
+  - `lease_watchdog_grace_period_seconds` keeps its meaning, and its default rises
+    from 300 to 3600 seconds;
+  - `market_fulfillment`'s exported `FulfillmentAcceptanceDecision` drops
+    `newly_accepted`.
 
 ## Dependencies and Related Changes
 
 - None.
-- `report-provisioning-failures-to-operators` raises its events from the rerun
-  predicate's `spent` outcome and from the lease lifecycle's count of leases
-  `releasing` past the grace, both of which this change provides.
+- `report-provisioning-failures-to-operators` depends on this change for its
+  design: it raises its events from the rerun predicate's `spent` outcome and from
+  a lease's `release_failed` with `teardown_timeout` past the grace, both of which
+  this change settles. Its row records the dependency.
 - `capacity-reservation-lifecycle-hardening` does not restate the teardown job
   rule; nothing to reconcile.
 - `inject-site-pool-authority` is unaffected: D1 adds no site read of pool state.
@@ -229,16 +249,20 @@ None.
   another).
 - D3: `physical-provisioning`'s specification ("An undelivered lease is released by
   what its fulfillment proves") and architecture companion ("Proof-driven
-  release"); `ARCHITECTURE.md`, "Release"; `docs/operator-handbook.md`, "Upgrading a
-  deployment".
+  release") and `configuration.md` (`lease_watchdog_grace_period_seconds`'s meaning
+  and 3600-second default, and `relay_grant_expiry_grace_seconds`'s sizing rule
+  restated over a working teardown's retries and reruns); `ARCHITECTURE.md`,
+  "Release"; `docs/operator-handbook.md`, "Upgrading a deployment", including
+  raising a grace pinned at 300.
 - D4: `physical-provisioning`'s specification (a job's recorded start) and
   `compute-provisioning-contract`'s specification (the job view's
-  `execution_started_at`).
+  `execution_started_at` and `finished_at`).
 - D5: `physical-provisioning`'s specification (rerunning a teardown that never
   started), its architecture companion ("Proof-driven release"), and its
   `configuration.md` (`teardown_rerun_limit`).
 - D6: `settlement-configuration`'s specification and `configuration.md` (when a
-  storefront reads its registries' recommendations, and the readiness blocker).
+  storefront reads its registries' recommendations, and how an unread registry is
+  reported without gating readiness).
 - D7: `physical-provisioning`'s specification, in the rerun requirement's
   compensating-teardown scenario.
 - D8: `physical-provisioning`'s specification and architecture companion, and

@@ -14,7 +14,10 @@ lease (`relays/execution.py`), and the lease is taken on the relay of the
 declaration's pool. A host has at most one capacity declaration
 (`CapacityBucket.host_id` is unique, `kit/site/src/market_site/db.py`), so every
 delivery on a host is in one pool and leased on one relay, whose pool reference
-cannot change while it holds a lease (`check_pool_relay_change`). A host's own
+cannot change while it holds a lease (`check_pool_relay_change`), and the
+declaration cannot move to another pool while a reservation holds capacity
+against it (`_refuse_reassignment_under_obligation`, `kit/site/src/market_site/ledger.py`).
+A host's own
 pool is placement intent that nothing admitting, scheduling, dispatching or
 selling reads (`ARCHITECTURE.md`, "Resource pools"). What remains are three rules
 that read the host's placement where the relay that matters is the declaration's
@@ -75,8 +78,8 @@ The deployed release is `marketplace-v0.3.0` (`git log --tags --no-walk
 - A PostgreSQL test lane (Open Questions).
 - Reading registry recommendations again after a successful read (D6).
 - Rerunning a teardown whose execution started, or a cancelled one.
-- The operator event for a spent rerun bound or a lease held `releasing`, which
-  `report-provisioning-failures-to-operators` owns.
+- The operator event for a spent rerun bound or a lease failed for
+  `teardown_timeout`, which `report-provisioning-failures-to-operators` owns.
 
 ## Decisions
 
@@ -86,13 +89,19 @@ A relayed delivery's port is leased on the relay of its capacity declaration's
 pool, whatever pool, if any, its host is placed in, and the job adding its proxy
 points the host's buyer-facing client at that relay before it adds the proxy. That
 is the system's rule already; this change states it as a `physical-provisioning`
-requirement and holds it with two tests:
+requirement and holds it with two tests. The rule rests on three facts: a host has
+at most one capacity declaration, a pool's relay reference cannot change while it
+holds a lease (`check_pool_relay_change`), and the site refuses to move a
+declaration to another pool while a reservation holds capacity against it
+(`_refuse_reassignment_under_obligation`); a later change relaxing any of them must
+answer for the rule (11 F9).
 
 - a static test of the family roles: a proxy add includes the client baseline
   synchronization from the job's relay address, port and token;
 - a compute-provisioning integration test: a host placed in a pool on relay R2, or
   unplaced, whose declaration sits in a pool on R1, is leased a port on R1 and
-  dispatched with R1's relay reference.
+  dispatched with R1's relay reference; and a declaration holding a lease is
+  refused a move to a pool on another relay.
 
 The corrected account goes to `physical-provisioning`'s companion, and the
 roadmap's gap closes. The management-route rule keeps reading the host's pool: it
@@ -117,25 +126,30 @@ declaration names its own pool".
 Two small fixes, each proven by a deterministic test on SQLite.
 
 **The allocator.** `allocate_in_session` looks up the owner's active lease after it
-takes the relay row's lock, so a claim that waited on the lock sees a lease
-committed meanwhile. On any `IntegrityError` it reads the owner's active lease
+takes the relay row's lock and before it refuses a missing or disabled relay, so a
+claim that waited on the lock sees a lease committed meanwhile, and an owner
+already holding a lease on a draining relay still receives it (11 F8). On any `IntegrityError` it reads the owner's active lease
 again and returns it when one now exists — the case of a concurrent claim on
 another relay, which the relay lock does not serialize — and moves to the next port
 only otherwise. `RelayWindowExhaustedError` therefore means the window is full. The
 two constraints are told apart by re-reading state, not by a dialect's constraint
 name, so the rule is the same on SQLite and PostgreSQL. Tests: the statement order
 rendered for the PostgreSQL dialect (owner lookup after `relays … FOR UPDATE`), as
-the existing relay-lock test does, and a test-only allocator subclass whose first
+the existing relay-lock test does; a test-only allocator subclass whose first
 owner lookup misses, standing for a lookup taken before another claim committed,
-which must return the existing lease.
+which must return the existing lease; and the existing drain scenario, an owner
+holding a lease on a disabled relay receiving it.
 
 **Acceptance.** `accept_fulfillment`'s locked select takes `populate_existing`, as
 the allocator's relay read already does, so an equivalent retry that waited on the
 row lock judges the committed row and returns the first acceptance's fulfillment
 without accepting, preparing or persisting again. Test: session 2 loads the row,
 session 1 accepts and commits, session 2 accepts and receives session 1's
-fulfillment ID. This is a defect found during the change, outside item 2's stated
-scope, recorded in the task notes.
+fulfillment ID. `FulfillmentTransaction.accept` drops its unlocked pre-read and
+`FulfillmentAcceptanceDecision` drops `newly_accepted`, which that read fed and no
+caller reads, so nothing in acceptance is judged from a read taken before the lock
+(11 F7); the kit takes a minor bump for the removed field. This is a defect found
+during the change, outside item 2's stated scope, recorded in the task notes.
 
 Neither fix changes a wire form, a stored record, or a configuration key.
 
@@ -151,13 +165,34 @@ pending (D5) as tearing down, and reports it failed only when none is pending: i
 execution started, its job was cancelled, reruns are disabled, or they are spent.
 The lease therefore stays `releasing` until the aggregate settles — `torn_down`
 releases it, a `teardown_failed` with no rerun pending sends it to
-`release_failed` — and `release_failed` means only that an operator must act.
+`release_failed` — or the grace below passes, and `release_failed` means only that
+an operator must act.
 
-The stalled-teardown timeout stops changing state. A releasing lease whose
-teardown is past the grace, still timed from when it entered `releasing`, is
-counted in the lease lifecycle's cycle diagnostics; the operator event for it is
-`report-provisioning-failures-to-operators`'s. This also stops a teardown that
-succeeds on a job retry from stranding its lease.
+The stalled-teardown timeout stays the backstop (11 F6).
+`lease_watchdog_grace_period_seconds` keeps its meaning: a lease still `releasing`
+past it, timed from when it entered `releasing`, goes to `release_failed` with
+`teardown_timeout`, whether its teardown is in progress or a rerun is pending. Its
+default rises from 300 to 3600 seconds, in the service's settings and in both
+charts' values, beyond the default teardown budget: the first job and three reruns,
+each up to four attempts backing off 60, 120 and 240 seconds, and the reruns'
+spacing of 60, 120 and 240 seconds — about 35 minutes with their runs. A teardown
+that succeeds on a job retry or a rerun therefore no longer strands its lease, and
+every stuck release — a status read that keeps raising, a teardown whose job
+vanished, a hung convergence — still reaches an operator within the hour. An
+operator who raises `teardown_rerun_limit` or the job retries, or whose teardowns
+run longer, raises the grace with them; a deployment that pinned 300 strands
+teardowns that succeed on a retry until it raises it, as the handbook's upgrade
+step says. The operator event for `teardown_timeout` is
+`report-provisioning-failures-to-operators`'s.
+
+`relay_grant_expiry_grace_seconds` stays 3600. Its sizing rule is restated over the
+teardown still due rather than over the watchdog grace: at least a teardown job's
+retries with their backoff, for the first job and `teardown_rerun_limit` reruns,
+plus the reruns' spacing, so a grant never expires while a working teardown is
+still due. Past the watchdog grace no teardown is due: the lease is
+`release_failed` and an operator acts. Raising the grant grace to cover the
+watchdog grace instead would hold every released port in quarantine for up to two
+hours after its lease's end, for no failure it prevents.
 
 A lease already `release_failed` whose aggregate has a rerun pending — the
 version-1 leftovers of `marketplace-v0.3.0` — needs one operator retry-release:
@@ -172,7 +207,12 @@ operator call for every recovered teardown and leaves the timeout stranding
 successful ones. A one-time sweep re-requesting release for the upgrade's
 leftovers, which is recovery machinery to save one documented call per lease.
 Keeping a state-changing timeout timed from the current teardown job, which keeps a
-clock that can still be wrong.
+clock that can still be wrong. Turning the timeout into a counted diagnostic that
+changes no state, which leaves a hung teardown invisible: the count has no surface
+an operator reads (11 F6). Keeping the grace as a diagnostic threshold beside a
+second, derived bound that changes state, which keeps two clocks. Surfacing the
+count on `check-leases` with no state change, a passive signal for a case where an
+operator must act.
 
 ### D4 — A job records that its execution is starting before it starts
 
@@ -180,8 +220,17 @@ clock that can still be wrong.
 starts anything that can act on the host — the Ansible executor before spawning
 the playbook. The job engine commits the instant to a new nullable
 `execution_started_at` column there; if the commit fails, the callback raises and
-nothing is spawned. A retry never clears it, as it never clears
-`execution_handle`.
+nothing is spawned. Three rules complete it (11 F10):
+
+- The callback raises unless the job is still `running`, so a job cancelled
+  between its claim and its start spawns nothing; the attempt fails through the
+  engine's internal-error path, which leaves a cancelled job cancelled. This is
+  unlike `report_handle`, which returns quietly on a cancelled job because its
+  playbook already runs.
+- A later attempt keeps the first recorded instant: the instant answers whether
+  execution ever started. A retry never clears it, as it never clears
+  `execution_handle`.
+- The instant comes from the process's time source, as `created_at` does.
 
 A job's execution never started when the job is `failed`, not `cancelled`, and
 records neither `execution_started_at` nor `execution_handle`. The handle is what
@@ -192,9 +241,11 @@ handle can never be read as "never started". The mock runner goes through the sa
 executor, so the lanes record the start too.
 
 The job read, `JobStatusResponse`, gains an optional `execution_started_at`, null
-for a job not started or recorded before the column; a client reading a service
-that does not report it reads null. The column is an additive migration in
-compute provisioning, and the contracts package takes a minor bump.
+for a job not started or recorded before the column, and an optional
+`finished_at` (D5), null for a job not finished or recorded before that column; a
+client reading a service that does not report them reads null. Both columns are
+one additive migration in compute provisioning, and the contracts package takes a
+minor bump.
 
 *Rejected.* The missing handle as it stands, which leaves the window after
 spawning, where a failed handle write makes a running playbook read as never
@@ -220,27 +271,54 @@ index. The aggregate's `teardown_provider_metadata` names the latest job as
 Rerun *n* is ready once the previous teardown job has been finished for the job
 retry policy's `delay_seconds(n − 1)`, up to `teardown_rerun_limit` reruns: a new
 compute provisioning setting, default 3, where 0 disables reruns and a negative
-value is refused at startup. The upgrade's leftovers finished long ago, so their
-first rerun is ready at once.
+value is refused at startup. A job's finish is recorded (11 F2): a new nullable
+`finished_at` column, which the engine's `_transition` stamps from the process's
+time source on every terminal status, in the same additive migration as
+`execution_started_at`. A job recorded before the column reads null and counts as
+finished long ago, so the upgrade's leftovers have their first rerun ready at once.
+`updated_at` is not used: it takes the database's clock, which tests cannot drive,
+and any later write moves it.
 
 One predicate in `compute_provisioning`, beside `compensable`, decides, answering
 `not_rerunnable` (started, cancelled, or reruns disabled), `waiting(until)`,
 `ready(n)`, or `spent(n)`. `dispatch_teardown` acts on `ready`; the release status
 port reports `waiting` and `ready` as tearing down and the others as failed, its
 message saying the execution never started and how many reruns were spent; the
-operator event `report-provisioning-failures-to-operators` adds reads `spent`. The
-provider's `JobReader` gains a read of the reservation's teardown jobs, served by
-the engine's existing listing by `capacity_reservation_id`; the status port reads
-the same rows in its own session. The fulfillment kit's convergence is unchanged:
-it requeues every `teardown_failed` row as now, and what a requeued dispatch
-submits is the provider's.
+operator event `report-provisioning-failures-to-operators` adds reads `spent`.
+
+The predicate reads the reservation's teardown jobs through one engine-internal
+read (11 F5): unpaginated, filtered to the reservation's jobs under the teardown
+action, returning a compute-owned record per job — its status, whether its
+execution started (by `execution_started_at`, or by its handle for a job recorded
+before that column), its `finished_at`, and its creation order. The provider's
+`JobReader` gains it, and the status port takes the same read. The engine's
+paginated listing is not used: it returns the create job beside the teardowns, as
+wire views carrying no action kind, handle or finish. The wire view gains only
+`execution_started_at` and `finished_at` (D4); the release status's message,
+saying the execution never started and how many reruns were spent, is the
+operator's account of a never-started teardown, so the view carries no derived
+flag. "Lease release delegates to durable fulfillment teardown" is modified to
+admit the predicate as the release status's one source beyond the aggregate, as
+`compensable` already reads the job-backed provider's metadata (11 F4); the
+release adapter still submits and polls no provider job.
+
+Convergence is unchanged. `FulfillmentConvergenceWatchdog`, provider-neutral in
+the compute provisioning service, requeues every `teardown_failed` row as now, and
+what a requeued dispatch submits is the provider's.
 
 *Rejected.* Carrying the attempt in the prepared operation, which changes a
-persisted envelope under a frozen schema version and teaches the kit's
+persisted envelope under a frozen schema version and teaches the
 provider-neutral convergence about reruns. A random job per rerun, which loses
 dispatch's crash safety. Reusing `default_max_retries` as the bound, which ties two
 meanings to one key, or a constant an operator facing a long transient outage
-cannot raise.
+cannot raise. Timing reruns from `updated_at`, which no test can drive, or not
+spacing them at all, which spends the bound in a few convergence cycles on an
+outage that would have cleared (11 F2). Serving the predicate from the paginated
+listing, or widening the wire view with the action kind and a derived started
+flag for data only the predicate needs (11 F5). Having the provider record the
+predicate's outcome on the aggregate so the status port stays aggregate-only, which
+needs a field on `extra="forbid"` metadata and a rule for when it goes stale
+(11 F4).
 
 ### D6 — A storefront reads again a registry it could not read
 
@@ -251,18 +329,33 @@ publication after the registry answers carries the payments option. A successful
 read is kept until the storefront restarts, as today.
 
 While a registry is unread and `use_registry_dispute_authorities` is true, the
-storefront's mechanism readiness carries the blocker `dispute_authorities_unread`
-on each mechanism whose options name a dispute authority, naming the registry and
-when its read last failed. The policy exposes its unread registries; each
-storefront passes them into the mechanism readiness inputs, as other readiness
-inputs are passed, after the Alkahest chain probe's precedent. `settlement status`
-shows it; `/health` does not depend on it.
+readiness of each mechanism whose options name a dispute authority reports it in
+its `public_details`, under `dispute_authorities_unread`: each unread registry and
+when its read last failed. It is a report, not a readiness blocker (11 F1): a
+mechanism with any blocker is unready, and publication suppresses every option of
+an unready mechanism, so a blocker would stop the options a seller's local
+`[[Dispute]]` entries compose today while a registry is down, and its kind would
+decide whether an open listing is closed or held. Readiness, publication and open
+listings are therefore unchanged by an unread registry. The policy exposes its
+unread registries; each storefront passes them into the mechanism readiness
+inputs, as other readiness inputs are passed, after the Alkahest chain probe's
+precedent. `settlement status` shows them; `/health` does not depend on them.
+
+Item 4's defect is a storefront relying on registry recommendations alone: one
+whose local entries name no authority its options can use. A storefront with local
+entries publishes their options while its registry is unread, today and after this
+change.
 
 *Rejected.* Reading every registry again periodically, which no one needs while
 registries do not change recommendations at runtime (Open Questions) and which
 raises whether a dropped recommendation republishes open listings. Refusing
 readiness until read, which still needs the re-read to ever become ready and takes
 a storefront serving existing buyers out of service whenever its registry is down.
+A readiness blocker on every mechanism whose options name an authority, which
+suppresses local-authority options while a registry is down (11 F1). A
+`reachability` blocker only where no authority is available without the registry,
+holding open listings meanwhile, which adds a publication behaviour to two
+specifications for a report D6 needs only to show.
 
 ### D7 — A compensating teardown reruns by the same rule
 
@@ -282,7 +375,9 @@ new job identity, within a bound" (D5, D7) and "A job records that its execution
 is starting before it starts" (D4). "An undelivered lease is released by what its
 fulfillment proves" is modified for D3, as are the release-failure scenarios of
 "Allocation-backed lease release" and "Site-backed release lifecycle", which now
-hold for a failure no rerun will retry. "Lease release and fulfillment teardown
+hold for a failure no rerun will retry, and "Lease release delegates to durable
+fulfillment teardown", whose release status reads the rerun predicate beside the
+aggregate (D5, 11 F4). "Lease release and fulfillment teardown
 have separate retry ownership" keeps its rule — the lease never creates a teardown
 — and its scenario states that a rerun is the provider's, under the same
 `fulfillment_id`. Closeout rewrites the companion's "Proof-driven release", whose
@@ -308,13 +403,19 @@ states.
 
 ### D10 — One round of three sessions
 
-The change is implemented in one round of three sessions, each owning its own
-files, before one implementation review:
+The change is implemented in one round of three sessions before one
+implementation review. Each session owns its own files but one: sessions 1 and 2
+both change the `compute_provisioning` package, which takes one version bump per
+change, so session 1 owns the `compute_provisioning` and contracts bumps, any
+dependents' lower bounds, and the lock refresh, and the plan makes session 2's
+section depend on session 1's (11 F11). Session 3's packages are its own.
 
-1. Item 5 (D3, D4, D5, D7, D8): the job engine's column and migration,
-   `report_starting`, the contract field, the rerun predicate, provider dispatch,
-   the status port and lease lifecycle, `teardown_rerun_limit`, and the operator
-   handbook.
+1. Item 5 (D3, D4, D5, D7, D8): the job engine's two columns and their migration,
+   `report_starting`, the contract fields, the internal teardown-job read, the
+   rerun predicate, provider dispatch, the status port and lease lifecycle,
+   `teardown_rerun_limit`, the watchdog grace's default in the settings and both
+   charts, the e2e helper's comment on the grace, the package bumps, and the
+   operator handbook.
 2. Items 1 and 2 (D1, D2): the relay guard tests, the allocator, and
    `kit/fulfillment`'s acceptance.
 3. Items 3 and 4 (D6, D9): the storefront kit, the three storefronts, and the
@@ -335,9 +436,13 @@ D9). One implementation review follows the round, then closeout.
 
 ## Risks / Trade-offs
 
-- **A hung convergence leaves a lease quietly `releasing`** (D3). It is counted in
-  the lease lifecycle's diagnostics; the durable operator event waits on
-  `report-provisioning-failures-to-operators`.
+- **A stuck release waits up to the grace before an operator sees it** (D3). A
+  hung convergence, a vanished job or a status read that keeps raising holds its
+  lease `releasing` for up to 3600 seconds by default, where 300 held it before;
+  it then reaches `release_failed` with `teardown_timeout`. The durable operator
+  event waits on `report-provisioning-failures-to-operators`.
+- **A deployment that pinned the grace at 300 still strands teardowns that succeed
+  on a retry** (D3), until it raises it, as the handbook's upgrade step says.
 - **A persistent pre-start cause spends the rerun bound in about seven minutes**
   (D5). That is intended: a persistent cause should reach an operator quickly; an
   operator facing a longer transient outage raises `teardown_rerun_limit`.
