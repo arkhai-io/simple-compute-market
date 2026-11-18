@@ -55,7 +55,7 @@ Allocation MUST read whether the owner already holds an active lease after it ta
 
 An executor MUST report that a job's execution is starting immediately before it starts anything that can act on the host — the Ansible executor before it spawns the playbook — and the job authority MUST record that instant on the job, as `execution_started_at`, from the process's time source, before the executor goes on. When the instant cannot be recorded, or the job is no longer running — cancelled since it was claimed — the report MUST fail, the executor MUST NOT start the execution, and the attempt fails, leaving a cancelled job cancelled. A later attempt MUST keep the first recorded instant. A retry MUST NOT clear the recorded instant or the recorded execution handle.
 
-A job's execution never started when the job is `failed`, not `cancelled`, and records neither `execution_started_at` nor an execution handle. A job recorded before `execution_started_at` existed is classified by its execution handle alone. A recorded start without a handle MUST count as started.
+A job's execution never started when the job is `failed`, not `cancelled`, records neither `execution_started_at` nor an execution handle, and records when it finished (`finished_at`). A job that reached a terminal status before `finished_at` existed MUST NOT be classified as never started, whether or not it records an execution handle: its engine recorded the handle only after spawning the playbook. A recorded start without a handle MUST count as started.
 
 #### Scenario: A job is refused before its playbook runs
 
@@ -87,10 +87,10 @@ A job's execution never started when the job is `failed`, not `cancelled`, and r
 - **WHEN** a job's playbook is spawned and recording its execution handle fails
 - **THEN** the job's recorded start remains, and its execution counts as started
 
-#### Scenario: A job recorded before the start column existed
+#### Scenario: A job finished before starts were recorded
 
-- **WHEN** a failed job recorded before `execution_started_at` existed is classified
-- **THEN** it counts as started exactly when it records an execution handle
+- **WHEN** a failed job that reached its terminal status before `execution_started_at` and `finished_at` existed, and records no execution handle, is classified
+- **THEN** it is not classified as never started
 
 ### Requirement: A teardown that never started is run again under a new job identity, within a bound
 
@@ -98,7 +98,7 @@ When a fulfillment's teardown job failed and its execution never started, the co
 
 Dispatching a teardown MUST adopt the reservation's latest teardown job, unless that job's execution never started and a rerun is ready; then it MUST submit rerun *n* under the job identity `"{reservation}:teardown:rerun-{n}"`, where *n* counts the teardown jobs already bound to the reservation, with the parameters of the teardown operation prepared before. A first teardown keeps the identity `"{reservation}:teardown"`. A dispatch that finds the rerun it submitted earlier as the latest job MUST adopt it. The fulfillment's teardown metadata MUST name the latest teardown job; its create job and the lease's release handle are unchanged.
 
-The job authority MUST record when a job reaches a terminal status, as `finished_at`, from the process's time source. Rerun *n* is ready once the previous teardown job's `finished_at` is the job retry policy's delay after *n* − 1 retries in the past; a job recorded before `finished_at` existed counts as finished long ago. No more than `teardown_rerun_limit` reruns are run. `teardown_rerun_limit` MUST default to 3; 0 disables reruns, and the provisioning service MUST refuse to start with a negative value. One compute-owned predicate MUST decide whether a teardown is not rerunnable, waiting for a rerun, ready for one, or has spent its reruns, from every teardown job bound to the reservation — each one's status, whether its execution started, its `finished_at`, and its order — read in one unpaginated read; dispatch, the release status, and operator reporting MUST all use it. A compensating teardown is run again by the same rule and keeps the reason `create_compensation`.
+The job authority MUST record when a job reaches a terminal status, as `finished_at`, from the process's time source. Rerun *n* is ready once the previous teardown job's `finished_at` is the job retry policy's delay after *n* − 1 retries in the past. No more than `teardown_rerun_limit` reruns are run. `teardown_rerun_limit` MUST default to 3; 0 disables reruns, and the provisioning service MUST refuse to start with a negative value. One compute-owned predicate MUST decide whether a teardown is not rerunnable, waiting for a rerun, ready for one, or has spent its reruns, from every teardown job bound to the reservation — each one's status, whether its execution started, its `finished_at`, and its order — read in one unpaginated read; dispatch, the release status, and operator reporting MUST all use it. A compensating teardown is run again by the same rule and keeps the reason `create_compensation`.
 
 #### Scenario: A teardown fails before its playbook starts
 
@@ -112,8 +112,8 @@ The job authority MUST record when a job reaches a terminal status, as `finished
 
 #### Scenario: A teardown left by an upgrade
 
-- **WHEN** a teardown job recorded before `finished_at` existed failed without starting, judged by its missing execution handle
-- **THEN** its first rerun is ready at once
+- **WHEN** a fulfillment's latest teardown job failed before `finished_at` existed and records no execution handle
+- **THEN** no rerun is submitted, and the teardown stays failed with its capacity held for an operator
 
 #### Scenario: A rerun succeeds
 
@@ -238,8 +238,11 @@ progress or a rerun of it is pending, until the grace period passes: a lease sti
 `releasing` after it MUST enter `release_failed` with the reason `teardown_timeout`, its
 capacity held, whatever its teardown's progress. The grace period MUST run from when the
 reservation entered `releasing`, not from the lease's end, and its default MUST exceed the
-time a teardown takes under the default job retries and reruns, so that a teardown
-succeeding on a retry or a rerun is not timed out. When the site refuses one of the lifecycle's
+default job retries' backoff and the default reruns' spacing with room for the playbook
+runs a teardown is expected to take, so that such a teardown succeeding on a retry or a
+rerun is not timed out. A teardown that outlasts the grace period is timed out like any
+other; an operator's retry-release then re-observes the same aggregate and releases the
+lease once it is `torn_down`. When the site refuses one of the lifecycle's
 writes because the reservation changed since it was read, the lifecycle MUST re-read the
 reservation and leave it in the state another actor recorded; in particular, it MUST NOT
 begin teardown after a refused move to `releasing`.
@@ -318,6 +321,12 @@ The compute provisioning composition MUST supply the site authority's release gu
 
 - **WHEN** a releasing lease is still `releasing` after the grace period, its teardown in progress, a rerun of it pending, or its status unreadable
 - **THEN** the lease enters `release_failed` with the reason `teardown_timeout` and capacity held, and an operator's retry-release re-observes the same aggregate
+
+#### Scenario: A timed-out teardown later succeeds
+
+- **GIVEN** a lease in `release_failed` with the reason `teardown_timeout`, whose teardown kept running past the grace period and has since reached `torn_down`
+- **WHEN** an operator retries its release
+- **THEN** the lease is released under the same fulfillment, and no second teardown is begun
 
 #### Scenario: A failed lease's teardown has a rerun pending
 
