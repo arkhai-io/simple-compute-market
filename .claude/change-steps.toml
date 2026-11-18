@@ -38,6 +38,9 @@ allow = [
   "Bash(scripts/change-workflow log*)", "Bash(scripts/change-workflow config *)",
   "Bash(scripts/change-workflow record*)",
   "Bash(scripts/change-workflow check round-view)", "Bash(scripts/change-workflow check index)",
+  # The task-list check only reads, and any step that edits tasks.md may run it,
+  # with the change named or not.
+  "Bash(scripts/change-workflow check tasks*)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
   "Bash(openspec show *)", "Bash(openspec status*)",
   "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
@@ -97,6 +100,7 @@ skill = "change-review"
 allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
          "Bash(make check-tasks*)", "Bash(make check-architecture)",
          "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)",
+         "Bash(scripts/change-workflow evidence *)",
          # The reviewer checks its draft with the format check the review is
          # published under, piping it on standard input, since it writes no file.
          "Bash(scripts/change-workflow check review *)", "Bash(make check-review*)"]
@@ -130,7 +134,6 @@ skill = "change-plan"
 resume_from = "design"
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
-  "Bash(scripts/change-workflow check tasks *)",
   "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
   "Bash(make check-*)",
   "Bash(make helm-values-schema)",
@@ -144,6 +147,7 @@ skill = "change-triage"
 allow = [
   "Edit", "Write", "Task",
   "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(make check-*)",
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
@@ -200,6 +204,9 @@ allow = [
   "Edit(openspec/changes/**/reviews/*-validation.md)",
   "Bash(scripts/change-workflow check push)",
   "Bash(scripts/change-workflow push)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow gather *)", "Bash(scripts/change-workflow evidence *)",
+  # One failing test of the scripts' suite run alone, to tell its cause.
+  "Bash(make test-release-tooling TESTS=*)",
   "Bash(make helm-values-schema)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
@@ -225,6 +232,7 @@ allow = [
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
   "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
   "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
   "Bash(make -C * typecheck*)", "Bash(make -C * first-use*)",
   "Bash(uv run --find-links * pytest *)", "Bash(scripts/change-workflow openspec validate *)",
@@ -242,6 +250,7 @@ allow = [
   # beside the code it describes without gaining any code path.
   "Edit(**/README.md)",
   "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)", "Bash(scripts/change-workflow check *)",
   "Bash(make helm-values-schema)",
@@ -257,6 +266,7 @@ allow = [
   "Edit(openspec/changes/archive/*/interventions.jsonl)",
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
   "Bash(scripts/change-workflow history*)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(make helm-values-schema)",
 ]
 deny = ["Bash(gh pr create*)"]

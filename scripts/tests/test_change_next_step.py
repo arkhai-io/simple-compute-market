@@ -235,6 +235,21 @@ def test_a_design_question_waits_for_the_owner(tmp_path: Path) -> None:
     assert result["seq"] == run["seq"]
 
 
+def test_a_reviews_question_names_no_resume(tmp_path: Path) -> None:
+    """CW-a4fl: a failing `after-review` ends the review's run as a question, and no
+    reviewer is resumed, so the owner settles it by their direction."""
+    root = _repository(tmp_path, "in design")
+    _log(root, "design", _done(_to("review", "design")))
+    _review(root, f"01-{KIND}.md")
+    run = _log(root, "review", QUESTION, kind=KIND, record=f"01-{KIND}.md")
+
+    result = _next(root)
+
+    assert (result["step"], result["awaiting"], result["seq"]) == ("owner", "a choice",
+                                                                   run["seq"])
+    assert "resume" not in result
+
+
 def test_a_task_under_another_sections_heading_is_not_routed_on(tmp_path: Path) -> None:
     root = _repository(tmp_path, "ready for implementation",
                        tasks=TASKS.replace("## 3. Third\n\n", ""))

@@ -36,8 +36,9 @@ refuses every entry while it is not met (`entry_refusal`); a waivable one takes 
 owner's direction as its override.
 
 Beside the graph, `HOOK_STEPS` holds which steps may run each of the repository's
-hooks through `scripts/change-workflow run`; like the graph, no repository changes
-it (CW-u4pc).
+hooks through `scripts/change-workflow run`, and `STEP_ACTIONS` the engine's own
+actions before and after each step's session; like the graph, no repository changes
+either (CW-u4pc, CW-g6th, CW-ikmm).
 
 The change-workflow architecture shows the table as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
@@ -536,24 +537,41 @@ STEPS: tuple[str, ...] = tuple(dict.fromkeys(d.runs for d in TABLE if d.runs))
 KINDS: tuple[str, ...] = tuple(dict.fromkeys(node.kind for node in NODES
                                              if node.step == "review" and node.kind))
 
-# Which steps may run each hook through `scripts/change-workflow run`: the workflow's
-# structure, which no repository changes. Only implementation, triage, and the merge
-# make functional changes, so only they relock or run the functional checks;
-# validation changes nothing it validates (CW-af15), and so runs only its own parts.
-# A `pre-commit` reports and changes nothing, so a review may run it. `validation`
-# is the preflight and every part's commands, `cleanup` every part's cleanup as one
-# list. `pre-push` and `post-clone` are run by the engine's own push and clone, by
-# no step.
+# Which steps may run each hook through `scripts/change-workflow run`, and the
+# gathering through `gather`: the workflow's structure, which no repository changes.
+# Only implementation, triage, and the merge make functional changes, so only they
+# relock or run the functional checks; validation changes nothing it validates
+# (CW-af15), and so only gathers evidence. A `pre-commit` reports and changes
+# nothing, so a review may run it. `gather` is the preflight and every kind's
+# commands, `cleanup` every kind's cleanup as one list. `pre-push` and `post-clone`
+# are run by the engine's own push and clone, by no step.
 HOOK_STEPS: dict[str, frozenset[str]] = {
     "after-functional-change": frozenset({"implement", "triage", "merge"}),
     "pre-commit-functional": frozenset({"implement", "triage", "merge"}),
     "pre-commit": frozenset({"design", "plan", "implement", "triage", "merge", "closeout",
                              "archive-cleanup", "review"}),
     "pre-archive": frozenset({"closeout"}),
-    "validation": frozenset({"validate"}),
+    "gather": frozenset({"validate"}),
     "cleanup": frozenset({"archive-cleanup"}),
     "test-before": frozenset({"implement", "triage"}),
 }
+
+# When an action or a hook runs around a step's session.
+BEFORE, AFTER = "before", "after"
+# The engine's own actions around each step's session, by when they run and the
+# step, each a name of `HOOK_STEPS` run as that step: the gathering of the evidence
+# `HEAD` lacks before validation, and every kind's cleanup before archive cleanup.
+# Deterministic work belongs here, judgement to the step's skill. A repository's
+# `before-<step>` or `after-<step>` hook runs after the action of the same moment.
+STEP_ACTIONS: dict[tuple[str, str], tuple[str, ...]] = {
+    (BEFORE, "validate"): ("gather",),
+    (BEFORE, "archive-cleanup"): ("cleanup",),
+}
+
+
+def step_actions(when: str, step: str) -> tuple[str, ...]:
+    """The engine's actions `when` the step's session runs, before or after it."""
+    return STEP_ACTIONS.get((when, step), ())
 
 
 class TargetError(StepError):

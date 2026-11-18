@@ -431,12 +431,16 @@ def test_resume_of_a_namespace_stating_no_workloads_fails(tmp_path: Path,
     assert not (tmp_path / "kubectl.log").exists()
 
 
-def _fake_docker(bin_dir: Path, present: Sequence[str], *, refuse: str = "") -> Path:
+def _fake_docker(bin_dir: Path, present: Sequence[str], *, refuse: str = "",
+                 containers: Sequence[str] = ()) -> Path:
     log = bin_dir / "docker.log"
     _executable(bin_dir, "docker", f"""echo "$*" >> {log}
 case "$1 $2" in
   "image inspect") case " {' '.join(present)} " in *" $3 "*) exit 0;; esac; exit 1;;
   "image rm") [ "$3" = "{refuse}" ] && {{ echo "image is in use" >&2; exit 1; }}; exit 0;;
+  "ps -aq") [ "$4" = "label=io.kubernetes.pod.namespace={NAMESPACE}" ] && \
+    printf '%s\\n' {' '.join(containers)}; exit 0;;
+  "rm -f") exit 0;;
 esac
 exit 1
 """)
@@ -461,6 +465,21 @@ def test_teardown_deletes_the_changes_namespace_and_the_images_it_built(
     assert [call for call in calls if call.startswith("image rm")] == [
         "image rm arkhai:e2e-tests-pilot", "image rm arkhai:storefront-pilot"]
     assert "arkhai:registry-pilot is not here" in torn_down.stdout
+
+
+def test_teardown_removes_the_namespaces_exited_containers_before_its_images(
+        tmp_path: Path) -> None:
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log")
+    docker_log = _fake_docker(tmp_path, ["arkhai:e2e-tests-pilot"],
+                              containers=["2883e4628c2f", "5f750490339e"])
+
+    torn_down = _make("teardown", "CHANGE=pilot", path=tmp_path)
+
+    assert torn_down.returncode == 0, torn_down.stderr
+    calls = docker_log.read_text().splitlines()
+    removed = [call for call in calls if call.startswith(("rm -f", "image rm"))]
+    assert removed == ["rm -f 2883e4628c2f", "rm -f 5f750490339e",
+                       "image rm arkhai:e2e-tests-pilot"]
 
 
 def test_teardown_deletes_only_in_the_context_it_is_given(tmp_path: Path) -> None:

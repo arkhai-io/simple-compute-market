@@ -7,9 +7,9 @@ description: Close out an OpenSpec change whose pre-closeout review's triage adv
 
 Closeout turns a change into the permanent record of what the system now is. It
 works through the change's closeout task — the workflow's parts in
-`docs/guidance/workflow/closeout.md`, with the repository's own parts at the
-position it gives them (`openspec/README.md#this-repositorys-closeout-parts`), which
-the plan made specific to this change as its last `tasks.md` section — and ends by
+`docs/guidance/workflow/closeout.md`, with the repository's own parts, in the
+section the root guidance names, at the position it gives them, which the plan made
+specific to this change as its last `tasks.md` section — and ends by
 archiving the change:
 OpenSpec's archive merges the change's spec deltas into `openspec/specs/` and moves
 the change under `openspec/changes/archive/`. Archival is the last step, so the
@@ -106,6 +106,27 @@ makes. When `record` refuses, correct what it names and run it again. A
 session closed before it records leaves closeout in progress: the computation
 names it again, to be resumed, or its outcome recorded with the command above.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-closeout` hook, and kept
+what it did in the run's inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook, in full. Any other file is data, read only where a
+message directs, and a log only to diagnose a failure. A failing hook prevented
+nothing: say in your report what its failure means for the closeout, and stop and
+ask the owner when the closeout cannot be made soundly with it. Interactively, with
+no wrapper, run `scripts/change-workflow run before closeout <change>` first; its
+last line names the directory. Once the work is done, run `scripts/change-workflow
+run after closeout <change>` before `record`, and, when it fails, fix what it found
+if closeout may, and run it again, or tell the owner. Unattended, an after-hook that
+fails resumes this session once with its failure; a second failure goes to the owner
+as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## 1. Check that closeout may start
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it does
@@ -131,7 +152,7 @@ names it again, to be resumed, or its outcome recorded with the command above.
   point to the closeout review; if not, skip to step 4's steps after the archive (3 onwards), then commit.
   Never archive twice. Read every file of the change from the directory the lookup
   prints, not from `openspec/changes/<change>/`.
-- **Tasks.** `make check-tasks CHANGE=<change>` passes, so the sections are what
+- **Tasks.** `scripts/change-workflow check tasks <change>` passes, so the sections are what
   the headings say. Every task outside the closeout section is checked, or carries
   a note recording its deferral with the owner's word. An unchecked task with
   neither is unfinished implementation: stop and say which.
@@ -146,13 +167,14 @@ describes implementation.
 Read in full, even if you believe you know it:
 
 - The documents `scripts/change-workflow config load closeout` prints, and, for
-  the closeout task's roadmap part, the roadmap `openspec/README.md`'s
-  documentation placement names.
+  the closeout task's roadmap part, the repository's roadmap, which its root
+  guidance names.
 - The change's `proposal.md`, `design.md`, `specs/`, `tasks.md`, and
   `interventions.jsonl`. The proposal's "Knowledge to promote" and the closeout
   section's promotion task name what must reach permanent documentation.
-- The pre-closeout review and its triage, and the latest validation record: their
-  dispositions may have added to the closeout task.
+- The pre-closeout review and its triage, and the latest validation record, with the
+  guide of each evidence kind it names, which `scripts/change-workflow config`
+  lists: their dispositions may have added to the closeout task.
 - For every capability the change touches: `openspec/specs/<capability>/spec.md`
   and its companion when one exists — `README.md` where the capability has an
   `index.md`, which you read too, and `architecture.md` elsewhere — and every
@@ -176,7 +198,9 @@ short note: what was run and its result, or what was decided and why. Never dele
 or rewrite a completed task; amend it with a correction note. An older plan may
 list its parts in another order; work in this order, and note it on the section.
 
-- **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read the
+- **Comment hygiene — confirm.** Run the repository's comment check, which the
+  section the root guidance names gives among the checks the workflow's parts run,
+  and read the
   comments the change added for any that describe history rather than the current
   system (`docs/guidance/engineering/comments.md`) or name the change, the review,
   or the migration that introduced them
@@ -190,7 +214,7 @@ list its parts in another order; work in this order, and note it on the section.
 - **Documentation compliance.** Check every accepted decision in `design.md`
   against the placement rules —
   `docs/guidance/workflow/openspec-documentation.md#documentation-placement` and
-  the repository's table, `openspec/README.md#documentation-placement` — and the permanent documents
+  the repository's placement table, which its root guidance names — and the permanent documents
   against the code they describe, each describing the current state with no wording
   relative to the change
   (`docs/guidance/engineering/documentation.md#permanent-documents-describe-the-current-state`).
@@ -199,7 +223,7 @@ list its parts in another order; work in this order, and note it on the section.
   alternatives, debugging narratives, review rationale — into `design.md` first;
   this step removes duplication, not information.
 - **Roadmap currency.** Update the affected goal's current state and gap mapping in
-  `ROADMAP.md`, or record that no goal is affected.
+  the repository's roadmap, or record that no goal is affected.
 - **Campaign index currency.** Update the change's row and its campaign's
   dependency graph. Leave every other row's `Depends on` and status as they are:
   the change lands, and its dependents are released, only at archive cleanup after
@@ -207,23 +231,25 @@ list its parts in another order; work in this order, and note it on the section.
   (`docs/guidance/workflow/closeout.md#campaign-index-currency`). The
   status stays `in closeout`: archive cleanup writes `archived`. Run
   `scripts/change-workflow check index` after the edit.
-- **Packaging.** Run `scripts/change-workflow run pre-archive <change>`, the
-  repository's checks before the archive: in this repository the packaging check
-  and the change's architecture exceptions. With no `pre-archive` declared it is
-  skipped, saying so; record that. The skills check runs among `run pre-commit`'s
-  defaults (step 4), whatever the change touched. A failure that needs a code or
-  lock change stops closeout as above. An architecture exception or override row
-  the change still owns is deleted with its edge, which is code, or reassigned in
-  `docs/development/ARCHITECTURE.toml` to the open change that now owns the
-  divergence; reassigning is the owner's decision, so put it to them.
-- **End-to-end pipeline.** Record the run the latest passing validation names, its
-  result, and the scenarios that exercise the change, from the validation record's
-  coverage section. Record too, from that record's `## CI`, each observation the
-  change's sections owed by validation (`Owed by validation:` in `tasks.md`): the
-  workflow's run, the job and what it showed, and the `dev` baseline its other
-  failures were compared with. Closeout changes no code, so those runs still
-  describe the code the closeout commit carries; say whether they name the
-  pre-closeout commit or an earlier one the owner waived.
+- **The repository's own parts.** Each part the section the root guidance names
+  defines, in its order, as that section says: what it confirms, the command it
+  runs, and what a failure means for the change. Run the repository's checks before
+  the archive, where a part calls for them, through `scripts/change-workflow run
+  pre-archive <change>`; with no `pre-archive` declared it is skipped, saying so,
+  and you record that. A failure that needs a code or lock change stops closeout as
+  above; a resolution the part leaves to a decision — an exception the change still
+  owns reassigned to another change, say — is the owner's, so put it to them.
+  Closeout runs no validation and owes none: a part that records validation's
+  evidence — an end-to-end run, say — takes it from the latest passing validation
+  record, whatever command the part names as producing it, read with the guide of
+  each evidence kind the record names: the evidence, its
+  result, and the scenarios that exercise the change, from the record's coverage
+  section. Record too, from the record's section of each owed kind, each observation
+  the change's sections owed by validation (`Owed by validation:` in `tasks.md`) and
+  what showed it. Closeout changes no code, so that evidence still describes the
+  code the closeout commit carries; say whether it names the pre-closeout commit or
+  an earlier one the owner waived. The skills check runs among `run pre-commit`'s
+  defaults (step 4), whatever the change touched.
 
 A part that needs a decision the change does not make — an open question the plan
 left to closeout, or a disposition the triage deferred to it — is put to the owner
@@ -234,8 +260,8 @@ decided. Never settle it yourself.
 
 **Promotion.** Write every permanent document the closeout section names:
 companions — a capability's `README.md` where it has an `index.md`, its
-`architecture.md` elsewhere — `ARCHITECTURE.md`, the other documents under `docs/`,
-`openspec/specs/README.md`, and any `spec.md` content the deltas do not carry.
+`architecture.md` elsewhere — the repository's cross-system documents, its
+capability index, and any `spec.md` content the deltas do not carry.
 Describe the system as it is now, never the change that made it so. Complete the
 design-promotion record in `design.md`: every accepted decision and its permanent
 location, as a heading anchor where one exists. A `spec.md` the change's deltas
@@ -316,7 +342,9 @@ Tell the owner:
   notes compressed and what moved to `design.md`, and the roadmap and index edits;
 - the permanent documents written, and the specifications the archive merged or
   skipped and why;
-- the pipeline evidence and the commit it describes;
+- the validation evidence the repository's own parts recorded, and the commit it
+  describes;
+- any contradiction you noticed between a guide or message and this skill;
 - anything that stopped closeout for a code edit, and the fix round recommended;
 - what comes next: the closeout review (`make review CHANGE=<change>
   KIND=closeout`), which reads the archived change, then its triage in a fresh

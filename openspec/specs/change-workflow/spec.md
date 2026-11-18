@@ -45,8 +45,19 @@ same change.
   the owner's notes, or the orchestrating session's observations — and the triage
   file beside it once it is triaged.
 - **Waiver.** The owner's decision to let a change pass a guard the owner may waive,
-  or to leave a part of validation unrun; a step may recommend one only on a written
+  or to leave an evidence kind unassessed; a step may recommend one only on a written
   criterion, and only the owner takes it.
+- **Evidence kind.** One kind of evidence validation assesses, such as a local suite
+  or an end-to-end pipeline run, declared in the repository's configuration with its
+  requirement, its pattern keyed by a Git tree or a commit, and its commands
+  (CW-g4oz). Plain "kind" in a review's context is the review's kind, not this.
+- **Guide.** The prose that tells an agent how to read one evidence kind's evidence,
+  named by its configuration entry and restating none of the entry's fields
+  (CW-k7gd).
+- **Step hook.** A repository's `before-<step>` or `after-<step>` hook, run around a
+  step's session (CW-h3ks).
+- **Inputs directory.** A run's directory under its change's records, where the engine
+  writes `status.md` and keeps each hook's output for the session to read (CW-i9np).
 - **Default acceptance.** A review finding the default rule admits (CW-d5ac),
   accepted without the owner's stated disposition and reported in the triage's table.
 - **Revisit.** The owner's correction of a default acceptance, or of the advancing
@@ -508,19 +519,18 @@ titled, more than one, or one followed by another section.
 ### Requirement: CW-5h8e Evidence only a push produces is owed by validation
 
 A section's verification MUST name only evidence an implementation session can
-produce. Evidence only a push produces MUST be named as owed by validation, as the
-repository's validation part that produces it identifies it, and MUST NOT gate a
-task's completion. A session that finds such evidence in a verification MUST check
-the task once its own evidence passes and name that evidence as owed by validation
-in the section's notes.
+produce. Evidence only a push produces MUST be named as owed by validation, by the
+evidence kind that produces it (CW-r5qk), and MUST NOT gate a task's completion. A
+session that finds such evidence in a verification MUST check the task once its own
+evidence passes and name that evidence as owed by validation in the section's notes.
 
 #### Scenario: A section owes CI evidence
 
 - **WHEN** a section's change can be shown only by a run of a CI workflow, which no
   push of the change's branch triggers
-- **THEN** the plan names the workflow, the job, and what it must show as owed by
-  validation, and the section's verification task is checked on its local evidence
-  alone
+- **THEN** the plan names the kind, the workflow, the job, and what it must show as
+  owed by validation, and the section's verification task is checked on its local
+  evidence alone
 
 #### Scenario: An older plan gates a task on a CI run
 
@@ -807,9 +817,9 @@ after any step, or if `HEAD` is no longer the validated commit after any step, a
 MUST then collect no further evidence, though it MAY still stop what it started. It
 MUST NOT regenerate lockfiles or any other tracked file, `tasks.md` included.
 
-#### Scenario: A part leaves the worktree dirty
+#### Scenario: A kind leaves the worktree dirty
 
-- **WHEN** a validation part leaves an uncommitted change in the worktree
+- **WHEN** an evidence kind's command leaves an uncommitted change in the worktree
 - **THEN** validation fails, collects no further evidence, and still stops what it
   started
 
@@ -827,63 +837,65 @@ implementation.
 
 ### Requirement: CW-zkhs Validation's parts are the repository's
 
-Validation MUST run the parts the repository's configuration declares (CW-g4oz) but
-those the owner waived (CW-e7lm), and each part's evidence MUST come from the commit
-under validation, never from another commit's build, run, or state.
+Validation MUST assess the evidence kinds the repository's configuration declares
+but those the owner waived (CW-e7lm), and each kind's evidence MUST describe the tree
+or commit under validation, as its pattern keys it (CW-t3ev), never another tree's or
+commit's build, run, or state, whoever wrote it (CW-p4rs).
 
-#### Scenario: A part finds only another commit's evidence
+#### Scenario: A kind finds only another commit's evidence
 
-- **WHEN** a validation part finds a finished run of its evidence only for an earlier
-  commit of the branch
-- **THEN** it does not report that run as evidence of the validated commit
+- **WHEN** evidence of a kind exists only for an earlier commit's tree
+- **THEN** it is not evidence of the validated commit, and the kind is missing
 
 ### Requirement: CW-e7lm Validation's result is passed, failed, or inconclusive
 
 A validation's result MUST be `passed`; `failed`, for a failure caused by the commit
 or of unknown cause; or `inconclusive`, when no failure is caused by the commit but
-a part produced no evidence for an environmental reason. Any part MAY be waived, and
-only by the owner. A waived part MUST be recorded as `waived`: an omission of
+a kind has no evidence for an environmental reason. Any kind MAY be waived, and
+only by the owner. A waived kind MUST be recorded as `waived`: an omission of
 evidence, neither passed, failed, nor inconclusive, counted in no result, which is
-judged on the parts that ran; a requirement that validation run a part, dispatch
-its workflows, or judge its evidence applies only to the parts not waived. A
-validation with every part waived MUST NOT be recorded: waiving validation entirely
+judged on the kinds assessed; a requirement that validation gather a kind, dispatch
+its workflows, or judge its evidence applies only to the kinds not waived. A
+validation with every kind waived MUST NOT be recorded: waiving validation entirely
 is the owner's direction past the guard it remedies. A waiver for later validations
-MUST be the owner's decision in the change's workflow log, naming the parts and the
-condition they are waived on; validation MUST read it before running any part, and
-MUST run a waived part, saying in the record that the waiver lapsed and why, when
-the condition does not hold over the commits since the last validation that ran
-that part, or when those commits include a merge.
+MUST be the owner's decision in the change's workflow log, naming the kinds and the
+condition they are waived on; validation MUST read it before assessing any kind, and
+MUST gather a waived kind, saying in the record that the waiver lapsed and why, when
+the condition does not hold over the commits since the last validation that assessed
+that kind, or when the commits since the last validation that ran it — or since the
+latest validation, when none ran it — include a merge (CW-g6th).
 
-#### Scenario: A part produces no evidence for an environmental reason
+#### Scenario: A kind has no evidence for an environmental reason
 
-- **WHEN** no failure is caused by the commit, and one part produced no evidence
-  because its environment was unavailable
+- **WHEN** no failure is caused by the commit, and one kind has no evidence because
+  its environment was unavailable
 - **THEN** the result is `inconclusive`, neither `passed` nor `failed`
 
-#### Scenario: Parts are waived for the rest of the change
+#### Scenario: Kinds are waived for the rest of the change
 
 - **WHEN** the change's log holds the owner's decision waiving the Helm and pipeline
-  parts on a condition that holds over the commits since those parts last ran
-- **THEN** validation runs neither, records both as `waived` naming the decision, and
-  judges the result on the local and CI parts
+  kinds on a condition that holds over the commits since those kinds were last
+  assessed
+- **THEN** validation gathers neither, records both as `waived` naming the decision,
+  and judges the result on the local and CI kinds
 
 #### Scenario: A standing waiver lapses at a merge
 
-- **WHEN** the commits since the pipeline last ran include a merge
-- **THEN** validation runs the pipeline despite the owner's waiver of it, and the
+- **WHEN** the commits since the pipeline kind last ran include a merge
+- **THEN** the pipeline kind is gathered despite the owner's waiver of it, and the
   record says the waiver lapsed at the merge
 
 #### Scenario: The owner waives an environmental failure
 
-- **WHEN** a part fails for an environmental reason and the owner waives it rather
+- **WHEN** a kind fails for an environmental reason and the owner waives it rather
   than remedy it
-- **THEN** the part is recorded as `waived`, and the result is judged on the other
-  parts rather than being `inconclusive` for it
+- **THEN** the kind is recorded as `waived`, and the result is judged on the other
+  kinds rather than being `inconclusive` for it
 
 ### Requirement: CW-a1nz An environmental failure goes to the owner with its remedy
 
 A failure diagnosed as environmental MUST be put to the repository owner with its
-remedy before the record is written, and its part rerun on the owner's word; every
+remedy before the record is written, and its kind gathered again on the owner's word; every
 attempt's evidence MUST be kept.
 
 #### Scenario: Validation needs an environmental remedy
@@ -943,7 +955,7 @@ be recorded in the intervention ledger.
 ### Requirement: CW-xg4v A validation failure is a finding, and missing evidence is not
 
 Each validation failure caused by the commit, or of unknown cause, MUST be presented
-as a finding, with its diagnosis checked against the logs; an `inconclusive` part
+as a finding, with its diagnosis checked against the logs; an `inconclusive` kind
 MUST be read as missing evidence, never as a finding.
 
 #### Scenario: Validation fails beside an implementation review
@@ -2711,20 +2723,20 @@ with the branch given as an argument.
 
 ### Requirement: CW-ikmm Archive cleanup removes a change's validation resources
 
-Archive cleanup MUST run the `cleanup` of every validation part that declares one,
-through `run cleanup <change>`, which runs them in declaration order as one list
-(CW-k9vd), and each cleanup MUST succeed when it finds nothing to clean. A tracked
-file a cleanup writes MUST be committed on its own.
+Before archive cleanup's session starts, the engine MUST run the `cleanup` of every
+evidence kind that declares one, in declaration order as one list (CW-k9vd), and each
+cleanup MUST succeed when it finds nothing to clean. `run cleanup <change>` MUST run
+the same list again. A tracked file a cleanup writes MUST be committed on its own.
 
 #### Scenario: A change's validation left resources
 
-- **WHEN** archive cleanup runs for a change whose Helm part left a namespace
-- **THEN** it runs that part's cleanup and reports what it removed
+- **WHEN** archive cleanup starts for a change whose Helm kind left a namespace
+- **THEN** the engine runs that kind's cleanup first, and the session reports what it
+  removed
 
-#### Scenario: A part's cleanup finds nothing
+#### Scenario: A kind's cleanup finds nothing
 
-- **WHEN** archive cleanup runs a part's cleanup for a change that part never
-  validated
+- **WHEN** the engine runs a kind's cleanup for a change that kind never validated
 - **THEN** the cleanup succeeds, removing nothing
 
 ### Requirement: CW-d8de Each skill has one source for every harness
@@ -2829,16 +2841,16 @@ from the graph's declaration alone.
 ### Requirement: CW-m4ps An adopting repository provides the workflow's roles
 
 The workflow MUST describe each field of the configuration, who uses it, and how,
-and each role an adopting repository provides outside it, with the skills that use
-it. A repository MUST state how it provides what the configuration does not hold. A
-test MUST fail on a make target or repository path the skills or step table name that
-both the statement and the configuration's commands omit.
+and each role an adopting repository provides outside it. A repository MUST state how
+it provides what the configuration does not hold. A test MUST fail on a make target
+or repository path the step table or the make fragment names that both the statement
+and the configuration's commands omit.
 
 #### Scenario: A skill names a new target
 
-- **WHEN** a skill is edited to run `make check-something` and this repository's
-  statement of its roles does not list that target
-- **THEN** the test fails, naming the target and the skill
+- **WHEN** a skill is edited to run `make check-something`
+- **THEN** the test fails, naming the target and the skill, since a skill names no
+  repository's target (CW-n8tr), whatever this repository's statement lists
 
 #### Scenario: A role has no provision
 
@@ -2941,8 +2953,8 @@ MUST govern the reviews it names.
 ### Requirement: CW-q3dm Waivers are recommended and the owner's to take
 
 A step that meets a guard the owner may waive MAY recommend a waiver only when a
-written criterion holds — the commits differ from validated ones only in paths no part
-of validation exercises; a failure is a known environmental one diagnosed in an earlier
+written criterion holds — the commits differ from validated ones only in paths no
+evidence kind exercises; a failure is a known environmental one diagnosed in an earlier
 validation record of the change; a review and a validation name commits that differ
 only in records or documentation; or a decision made after a return to design is
 confined to one requirement's wording or a choice the design review weighed — and the
@@ -3093,7 +3105,7 @@ be read as absent. `check config` MUST run the same check alone.
 
 ### Requirement: CW-t5hz A missing required field refuses only the steps that need it
 
-A required field — `hooks.pre-commit-functional`, at least one validation part,
+A required field — `hooks.pre-commit-functional`, at least one evidence kind,
 `repository.protected-branches`, and the models of each step run unattended and of
 the orchestrating session — MUST, when absent, make the engine refuse a step that
 needs it before launching it, naming the field. An explicit empty value MUST count
@@ -3116,7 +3128,8 @@ A repository's commands MUST be declared as hooks named by the moment they run:
 `after-functional-change`, after a step's last functional change and before its
 pre-commit hooks; `pre-commit`, before every commit; `pre-commit-functional`, before
 a commit with a functional change; `pre-archive`, before closeout's archive;
-`pre-push`, before the guarded push sends; `post-clone`, as a clone is made.
+`pre-push`, before the guarded push sends; `post-clone`, as a clone is made; and
+`before-<step>` and `after-<step>`, around each step's session (CW-h3ks).
 
 #### Scenario: A merge resolves a conflicted lock
 
@@ -3216,7 +3229,7 @@ records and the archive's own writes are exempt, where a requirement exempts the
 Before a commit changing any path outside the inert paths, a step MUST run
 `after-functional-change`, then `pre-commit-functional`, then `pre-commit`; before
 any other commit, `pre-commit` alone. Only implementation, triage, and the merge make
-functional commits. A tracked file a validation part's cleanup writes is the
+functional commits. A tracked file an evidence kind's cleanup writes is the
 repository's own record, made by its declared command, which answers for it:
 archive cleanup MUST commit it on its own, without the hooks (CW-ikmm).
 
@@ -3251,13 +3264,12 @@ reason, under `defaults.disable`. `check change <change>` MUST run them alone.
 
 ### Requirement: CW-v2dq A command receives its values through placeholders
 
-A declared command MUST receive the workflow's values as placeholders the engine
-fills in, shell-quoted, before running it with `sh -c` from the repository's root:
-`{change}`, `{base}`, `{remote}` in `pre-push` only, `{owed}` in an owed part only,
-filled from `run`'s `--owed <workflow>`, and `{after}` in a `collect` only. `run` MUST
-refuse `--owed` for a part not owed, and its absence for an owed part. A value of the
-owner's machine MUST reach the command through the environment, not the
-configuration.
+A declared command MUST receive the workflow's values as shell-quoted placeholders,
+run with `sh -c` from the repository's root: `{change}`, `{base}`; `{remote}` in
+`pre-push`; `{owed}` in an owed kind; `{after}` in a `collect`; `{tree}` and
+`{commit}` in a kind's commands and pattern and the functional hooks; `{kind}` in review and triage hooks;
+`{inputs}` in step hooks. A value of the owner's machine MUST reach it through the
+environment.
 
 #### Scenario: A placeholder is used where it is unavailable
 
@@ -3266,89 +3278,91 @@ configuration.
 
 ### Requirement: CW-g4oz Validation runs the parts the configuration declares
 
-Validation MUST run the parts the configuration declares but those waived: each
-`run` once, or `start` then `collect`; an owed part once per `Owed by validation:`
-line of a complete section. It MUST start every started part, in declared order,
-before it runs any `run` part, then run the `run` parts in declared order, each after
-the part its `after` names. It MUST run
-`validation.preflight` first, a failure ending it as environmental, and MUST
-diagnose each failure from the part's declared evidence. It MUST learn the parts from
-`config parts <change>`, never from the configuration's representation: the
-preflight, then each run of a part in declaration order with its shape, the part it
-follows, and its evidence, an owed part once per owed workflow, named by its part and
-that workflow, or once as not owed when no complete section owes it. Which parts are
-waived MUST stay validation's judgement, not the plan's. A part's `after` MUST name a
-part declared before it, and a part that is started and collected MUST follow only
-another such part, since every dispatch starts before any long part runs; the
-configuration's check MUST refuse any other `after`.
+The configuration MUST declare each evidence kind under `[validation.evidence.<kind>]`
+with its requirement, its pattern holding `{tree}` or `{commit}` (CW-t3ev), `run` or
+`start` then `collect`, and its guide (CW-k7gd), and MAY declare `after` and
+`cleanup`. The engine MUST gather started kinds before `run` kinds, each after the
+kind its `after` names. The configuration's check MUST refuse an `after` naming no
+other kind declared before it, and a started kind's `after` naming a `run` kind.
 
 #### Scenario: Two sections owe CI workflows
 
-- **WHEN** one complete section owes `ci.yml` and another owes `docker.yml`
-- **THEN** `config parts` lists the `ci` part twice, as `ci ci.yml` and `ci
-  docker.yml`, and validation starts and collects each by that name
+- **WHEN** one complete section owes `(ci ci.yml)` and another `(ci docker.yml)`
+- **THEN** `evidence` lists the `ci` kind twice, as `ci ci.yml` and `ci docker.yml`,
+  and the gathering starts and collects each by that name
 
-#### Scenario: A long part is declared before a dispatched one
+#### Scenario: A long kind is declared before a dispatched one
 
-- **WHEN** the configuration declares `local`, a `run` part, before `pipeline`, a
-  `start` and `collect` part, and neither names an `after`
-- **THEN** `config parts` lists `local` first, and validation starts `pipeline` before
-  it runs `local`
+- **WHEN** the configuration declares `local`, a `run` kind, before `pipeline`, a
+  `start` and `collect` kind, and neither names an `after`
+- **THEN** the gathering starts `pipeline` before it runs `local`
 
-#### Scenario: A repository has no Helm part
+#### Scenario: A dispatched kind follows a long one
 
-- **WHEN** a repository declares only a `local` part
-- **THEN** validation runs that part alone, and its record names no other
+- **WHEN** `pipeline`, a `start` and `collect` kind, declares `after = "local"`, a
+  `run` kind
+- **THEN** every reader of the configuration refuses, naming `pipeline`'s `after`,
+  since every start is dispatched before any `run` kind runs
+
+#### Scenario: A kind follows one declared after it
+
+- **WHEN** `local` declares `after = "helm"` and `helm` is declared below it
+- **THEN** every reader of the configuration refuses, naming `local`'s `after`
+
+#### Scenario: A repository has no Helm kind
+
+- **WHEN** a repository declares only a `local` kind
+- **THEN** validation assesses that kind alone, and its record names no other
 
 #### Scenario: No section owes CI evidence
 
-- **WHEN** a part is declared `owed` and no complete section has an `Owed by
-  validation:` line
-- **THEN** the part is not started, and the record says it is not owed
+- **WHEN** a kind is declared `owed` and no complete section owes it
+- **THEN** it is not gathered, and the record says it is not owed
 
 ### Requirement: CW-x9bt The engine keeps a started part's marker and closes each part
 
 A declared command MUST promise only its exit status and, for a `start`, a last
 line of standard output naming the marker its `collect` waits past. The engine MUST
-keep that marker for the commit, the part, and an owed part's workflow, a later
-`start` of the same key replacing it, MUST fill `{after}` from it, and MUST end each
-part with a closing line naming the part, its owed workflow, the commit, the result,
+keep that marker for the tree or commit the kind's pattern keys, the kind, and an
+owed kind's argument, a later `start`
+of the same key replacing it, MUST fill `{after}` from it, and MUST end each kind's
+gathering with a closing line naming the kind, its argument, the tree or commit, the
+result,
 the exit status, and the evidence.
 
 #### Scenario: Two owed runs are collected side by side
 
-- **WHEN** validation starts `ci` for `ci.yml`, which prints `401`, then for
-  `docker.yml`, which prints `402`, and collects both in the background
+- **WHEN** the gathering starts `ci` for `ci.yml`, which prints `401`, then for
+  `docker.yml`, which prints `402`, and collects both
 - **THEN** the collect of `ci.yml` waits past `401` and the collect of `docker.yml`
   past `402`
 
 #### Scenario: The pipeline is collected
 
-- **WHEN** a part's `start` printed `40733870392` last, and validation then runs its
-  `collect`
+- **WHEN** a kind's `start` printed `40733870392` last, and the gathering then runs
+  its `collect`
 - **THEN** the engine fills `{after}` with `40733870392`, with no marker passed by
-  the skill
+  a skill
 
 ### Requirement: CW-q5fy Each run's log line records what it invoked
 
-The log line of a run MUST record, as `invoked`, each hook, part, and command the run
-invoked through `run` or the guarded push, with its owed workflow and phase where it
-has them, the command it resolved to, its exit status, when it started, and how long
-it took. An unattended run's line is the wrapper's, an interactive run's the one
-`record` writes; an invocation outside any session MUST NOT be recorded. A clone's
-bootstrap, which belongs to no step's run, MUST be recorded in its bootstrap state
+The log line of a run MUST record, as `invoked`, each hook, kind, and command the run
+or its gathering invoked through the engine, with its argument and phase where it has
+them, the command it resolved to, its exit status, when it started, and how long it
+took, and MUST name the run's inputs directory. An invocation outside any session
+MUST NOT be recorded; a clone's bootstrap MUST be recorded in its bootstrap state
 (CW-8npg).
 
 #### Scenario: A step's push is refused by the pre-push hook
 
-- **WHEN** an unattended validation's guarded push runs `pre-push` and it exits 1
+- **WHEN** a validation's gathering pushes and `pre-push` exits 1
 - **THEN** the run's log line lists `pre-push` with its resolved command and exit
   status 1
 
-#### Scenario: Validation's Helm part fails
+#### Scenario: Validation's Helm kind fails
 
-- **WHEN** an unattended validation's `helm` part exits 2
-- **THEN** the run's log line lists that part with its resolved command and exit
+- **WHEN** the gathering's `helm` kind exits 2
+- **THEN** the run's log line lists that kind with its resolved command and exit
   status 2, whatever the validation record says
 
 ### Requirement: CW-s3ju The branch a change lands on is recorded where its orchestration began
@@ -3430,9 +3444,8 @@ through `openspec.command`, or `openspec` on the path when none is declared; `op
 ### Requirement: CW-o6kc The configuration's resolution is listed
 
 `config` MUST list every field and how it resolved — declared, default, disabled, or
-absent — with the command it resolves to, and `config --json` MUST give the same as
-structured output. `config parts <change>`, and its `--json`, MUST list validation's
-plan for the change (CW-g4oz).
+absent — with the command it resolves to, each evidence kind's guide among them, and
+`config --json` MUST give the same as structured output.
 
 #### Scenario: An optional hook is absent
 
@@ -3683,7 +3696,7 @@ network. An archive cleanup line with no `landing` MUST be read as checked.
 
 Archive cleanup run on a change whose index row already says `archived` MUST NOT
 release dependents, edit the row, or draft the pull request again. It MUST run the
-cleanup of every validation part, commit any tracked file that cleanup wrote, push,
+cleanup of every evidence kind, commit any tracked file that cleanup wrote, push,
 and copy the history, and MUST record what the cleanup reported by appending to the
 pull request's drafts.
 
@@ -3958,11 +3971,12 @@ Planning that settled a design question itself MUST recommend a waiver of anothe
 design review when a criterion of CW-q3dm holds, and the merge after the archive MUST
 NOT
 recommend waiving its validation after reconciling the change's own code. Validation
-MUST take a standing waiver of its parts only from the owner's decision in the
-workflow log, never from an instruction in its invocation. That decision MUST name the
-parts it waives, validation's plan MUST mark each waived part with the decision, and
-the engine MUST refuse to run or start a waived part unless validation states why the
-waiver's condition no longer holds. A standing waiver given as
+MUST take a standing waiver of its evidence kinds only from the owner's decision in
+the workflow log, never from an instruction in its invocation. That decision MUST
+name the kinds it waives; `evidence` MUST report each waived kind with the decision
+(CW-e2vd), the gathering MUST skip it unless a merge lapses the waiver, and `gather
+--kind` MUST refuse it without `--lapsed` (CW-g6th), and the validation record MUST say why the waiver's condition no
+longer holds when a waived kind is gathered (CW-e7lm). A standing waiver given as
 a triage's disposition MUST be that triage's ledger line, and one given outside a
 triage with no step's recommendation MUST stay in the workflow log alone. Archive
 cleanup MUST record the owner's waiver of its validation of a correction as a ledger
@@ -3970,17 +3984,304 @@ line under the closeout review's record, its finding `validated`.
 
 #### Scenario: A waiver given in a validation's invocation
 
-- **WHEN** validation is started with an argument asking it to skip a part
-- **THEN** it runs the part unless the change's workflow log holds the owner's
+- **WHEN** validation is started with an argument asking it to skip a kind
+- **THEN** it assesses the kind unless the change's workflow log holds the owner's
   decision waiving it
 
 #### Scenario: Validation passes over a standing waiver
 
-- **WHEN** the owner's decision in the workflow log waives the Helm part, and
-  validation starts that part without judging the waiver
-- **THEN** the engine refuses the run, naming the decision, and runs the part only
-  when validation gives the reason the waiver's condition lapsed, which the run's
-  record keeps
+- **WHEN** the owner's decision in the workflow log waives the Helm kind, and
+  validation runs `gather --kind helm` without judging the waiver
+- **THEN** the engine refuses, naming the decision, and gathers the kind only with
+  `--lapsed`, the validation record saying why the waiver's condition lapsed
+
+### Requirement: CW-d1nj A repository injects into the workflow through its configuration and its guides
+
+An adopting repository's configuration MUST hold every value the engine reads — what
+it runs, computes, orders, copies, or checks — and its guides MUST hold only what an
+agent is told. A value both need MUST live in the configuration, and a skill MUST
+learn it from the engine's structured output, never by reading the configuration's
+file.
+
+#### Scenario: A skill needs an evidence kind's pattern
+
+- **WHEN** the plan skill needs to know which evidence kinds may be owed
+- **THEN** it reads them from `config --json`, and no guide restates them
+
+### Requirement: CW-g2rs A guide restates nothing the configuration holds
+
+An evidence kind's guide MUST NOT restate a value its configuration entry holds, such
+as its commands, its evidence pattern, its requirement, or what it follows; review
+holds it to this.
+
+#### Scenario: A guide repeats its command
+
+- **WHEN** a guide's prose names the command its kind runs
+- **THEN** a review of the change that wrote it raises the duplication
+
+### Requirement: CW-k7gd An evidence kind has a guide the steps read
+
+Each evidence kind the configuration declares MUST name a guide, which MUST NOT be
+empty: Markdown, prose only, saying how to read the kind's evidence, how its failures are told apart, what
+its section of the validation record adds, what its cleanup writes, and what a
+section's verification names for it. Validation, planning, implementation, the
+merge, archive cleanup, and the reviews reading a validation record MUST read the
+guides of the kinds they handle.
+
+#### Scenario: The merge meets a file a cleanup writes
+
+- **WHEN** a merge conflicts over a tracked file a kind's cleanup writes
+- **THEN** the merge resolves it as that kind's guide says
+
+#### Scenario: A kind names no guide
+
+- **WHEN** a kind is declared with no `guide`, or with one naming an empty file
+- **THEN** every reader of the configuration refuses, naming the kind's `guide`
+
+### Requirement: CW-c5nt A skill names a contradiction it notices and follows its own text
+
+A guide or a hook's message MAY add to or narrow what a skill says. The workflow MUST
+NOT be taken to defend its obligations against the adopting repository's own
+extensions. A skill that notices a guide or message contradicting its own text MUST
+say so in its report and MUST follow its own text.
+
+#### Scenario: A guide is stale
+
+- **WHEN** a guide tells validation to write a record section the skill no longer
+  defines
+- **THEN** the validation's report names the contradiction and the record follows
+  the skill
+
+### Requirement: CW-n8tr The workflow's skills name no repository's targets or paths
+
+A make target or repository path a workflow skill names MUST be the workflow's own —
+its guidance, OpenSpec's tree, the change index, the make fragment's targets, or the
+engine's command — or one listed as an exemption owned by the change that removes
+it. A test MUST fail on any other, naming the skill.
+
+#### Scenario: A skill names a repository's check
+
+- **WHEN** a skill is edited to run `make check-comment-hygiene`
+- **THEN** the test fails, naming the target and the skill, and the skill names the
+  repository's comment check by its role
+
+### Requirement: CW-t3ev Evidence describes a tree, or a commit where its result depends on history
+
+An evidence kind's pattern MUST hold exactly one of `{tree}` and `{commit}`, and its
+evidence describes what that placeholder names. Evidence of a `{tree}` kind MUST
+describe the Git tree it was gathered against: `git write-tree` of the worktree as
+tested, its changes added to a temporary index that honours `.gitignore`; it MUST be
+reused for any commit whose tree is that tree. Evidence of a `{commit}` kind, whose
+result depends on the commit's history, MUST describe that commit, `HEAD`'s full
+object name, and MUST NOT be reused for another commit sharing its tree. Where the
+engine computes the identity — through a placeholder or its own gathering — it is
+the engine's; evidence written otherwise names its identity on its writer's word.
+
+#### Scenario: Implementation's checks stand for validation's
+
+- **WHEN** implementation's functional checks leave `local` evidence for the tree it
+  then commits
+- **THEN** validation of that commit finds `local` present and does not gather it
+
+#### Scenario: A commit amended only in its message
+
+- **WHEN** a commit validated with a `{commit}` pipeline kind is amended only in its
+  message, and the amended commit is validated
+- **THEN** its `{tree}` kinds are present and its pipeline kind is missing and
+  gathered
+
+### Requirement: CW-g1gn What the workflow writes after implementation is ignored by Git
+
+Every file a change's validation, its gathering, or a step hook writes after
+implementation MUST be ignored by Git, so that it never changes the tree its evidence
+describes. The configuration's check MUST refuse an evidence pattern whose fixed
+directory Git does not ignore.
+
+#### Scenario: An evidence pattern under a tracked directory
+
+- **WHEN** a kind declares `evidence = "reports/{tree}/*.json"` and `reports/` is not
+  ignored
+- **THEN** every reader of the configuration refuses, naming the kind's `evidence`
+
+### Requirement: CW-p4rs Evidence counts by its presence
+
+Evidence MUST count by being present at its kind's pattern for the tree or commit
+its pattern keys, whoever
+wrote it: a step, the engine, or whatever placed it from beyond the checkout. The
+workflow MUST NOT fetch evidence from beyond the checkout.
+
+#### Scenario: Evidence from an external topology
+
+- **WHEN** a run of tests needing a topology no checkout holds is placed at the
+  pipeline kind's pattern for the commit
+- **THEN** `evidence` reports the pipeline kind present, and validation assesses it
+
+### Requirement: CW-r5qk An evidence kind is required always or when owed
+
+Each evidence kind MUST be declared required `always` or when `owed`. An owed kind is
+required once for each argument a complete section's `Owed by validation (<kind>
+<argument>):` line names, and its evidence MUST be present for each argument on its
+own: an owed kind's pattern MUST hold `{owed}`. Every owed line MUST name an
+argument, a non-empty path segment that is neither `.` nor `..` and holds no `/`,
+whitespace, or glob character (`*`, `?`, `[`, `]`); the owed-line reader MUST refuse
+a line naming none or another, naming its section. A line naming no kind MUST be read
+as the one owed kind, its argument the first word in backticks, and refused when
+there is more than one owed kind. A waiver MUST name kinds.
+
+#### Scenario: A section owes the pipeline
+
+- **WHEN** a repository declares `pipeline` as owed and a complete section has
+  `Owed by validation (pipeline e2e.yml): scenario test_spot_deal_settles passes`
+- **THEN** `evidence` lists `pipeline e2e.yml` as required for that section
+
+#### Scenario: An owed argument climbs out of its directory
+
+- **WHEN** a complete section has `Owed by validation (ci ..): job lint — passes`
+- **THEN** the owed-line reader refuses the line, naming its section, and `evidence`
+  reports the refusal rather than a kind present or missing
+
+#### Scenario: Two workflows are owed and one has evidence
+
+- **WHEN** complete sections owe `(ci tests.yml)` and `(ci docker.yml)`, and only
+  `tests.yml`'s evidence is present
+- **THEN** `evidence` lists `ci tests.yml` present and `ci docker.yml` missing
+
+#### Scenario: An owed kind's pattern omits its argument
+
+- **WHEN** an owed kind declares `evidence = ".snapshot/evidence/{commit}/ci/*/summary.json"`
+- **THEN** every reader of the configuration refuses, naming the kind's `evidence`
+
+### Requirement: CW-e2vd The engine reports which required evidence is present
+
+`evidence <change>`, and its `--json`, MUST list for `HEAD`'s tree or commit, as
+each kind's pattern keys it, each required kind and an owed kind's argument, its
+pattern, and the evidence matching it, as present, missing, waived with the
+decision's `seq`, or not required. When several files match one kind and argument,
+it MUST list them all and mark the last in path order as current; validation MUST
+assess the current one and name its path in the record.
+
+#### Scenario: Only local evidence exists
+
+- **WHEN** `local` evidence exists for `HEAD`'s tree and no other kind's does
+- **THEN** `evidence` lists `local` present with its path and every other required
+  kind missing
+
+#### Scenario: A rerun beside a failed attempt
+
+- **WHEN** the Helm kind's pattern matches a failed attempt under
+  `20261117T1003Z/` and the rerun the owner allowed under `20261117T1140Z/`
+- **THEN** `evidence` lists both, the rerun as current, and validation assesses the
+  rerun
+
+### Requirement: CW-a8ss Validation gathers what is missing and assesses all of it
+
+Validation MUST gather each missing required kind and assess every required kind's
+evidence from its guide. Present failing evidence MUST be diagnosed, never gathered
+again for a pass; unreadable evidence MAY be gathered again, saying why. The record
+MUST name the tree and each kind's result and source, `present` or `gathered`.
+
+#### Scenario: Present evidence failed
+
+- **WHEN** `local` evidence present for the tree records a failing suite
+- **THEN** validation diagnoses the failure from it and does not run `local` again
+
+### Requirement: CW-g6th The engine gathers missing evidence before validation's session
+
+Before validation's session starts, the engine MUST run the preflight, push `HEAD`
+through the guarded push, start every missing `start` kind, run the missing `run`
+kinds in order, keeping each `after`, then collect each started kind. A gathering's
+failure MUST NOT prevent the session. A waived kind MUST be skipped unless a merge
+since it last ran lapses the waiver.
+
+`gather <change>` MUST gather only the required kinds and owed arguments that are
+missing and not waived, and MUST NOT gather a kind whose evidence is present. `gather
+<change> --kind <kind>` MUST gather a new attempt of that kind whatever is present: of
+the one owed argument `--owed <argument>` names, or of each argument the kind is owed
+without it. It MUST refuse a waived kind unless `--lapsed` is given. The skill MUST
+write the reason for a new attempt in the record beside the attempt's path.
+
+#### Scenario: The local suite fails during gathering
+
+- **WHEN** the gathering's `local` kind fails
+- **THEN** the session starts with that failure in its inputs and diagnoses it
+
+#### Scenario: Gathering leaves present evidence alone
+
+- **WHEN** `gather` runs for a commit whose `local` evidence is present and failing
+- **THEN** it does not run `local`, and validation diagnoses the present failure
+
+#### Scenario: One owed workflow is rerun after an environmental failure
+
+- **WHEN** `ci docker.yml` failed for an environmental reason, `ci tests.yml`
+  passed, and the owner allows a rerun
+- **THEN** `gather --kind ci --owed docker.yml` starts and collects a new attempt of
+  `docker.yml` alone, which `evidence` marks current, and the record names the
+  reason beside its path
+
+### Requirement: CW-h3ks Each step has a hook before and after it
+
+A repository MAY declare `before-<step>` and `after-<step>` for each step a run is
+logged as; review and triage hooks receive `{kind}`. An absent or empty hook MUST run
+nothing, with no default, and the orchestrating session MUST say in one sentence that
+it ran the step without it. Interactively, the skill MUST run them through `run
+before|after <step> <change>`, but for a review, which run interactively is no run
+and MUST run no hooks. A review's runner MUST run `before-review` before it starts
+the reviewer, giving the reviewer the run's inputs directory, and `after-review`
+once it has published the review's record.
+
+#### Scenario: No hook is declared before a review
+
+- **WHEN** a review starts and the configuration declares no `before-review`
+- **THEN** the review runs, and the orchestrating session says no `before-review`
+  hook was declared
+
+### Requirement: CW-b7fl A failing hook before a step informs its session
+
+A `before-<step>` hook that fails MUST NOT prevent the step's session: its closing
+line and log MUST be in the session's inputs, and the step's skill MUST say what the
+failure means for its work. A hook the configuration's check refuses MUST refuse the
+step.
+
+#### Scenario: An environment refresh fails before implementation
+
+- **WHEN** `before-implement` fails
+- **THEN** the implementation session starts, reads the failure from its inputs, and
+  stops to ask the owner rather than code in a broken environment
+
+### Requirement: CW-a4fl A failing hook after a step resumes its session once
+
+An `after-<step>` hook MUST run only after a `finished` outcome, before that outcome
+is logged as final. When it fails, the wrapper MUST resume the same session once
+with the failure; when it fails again, the run MUST end as a question to the owner
+naming the hook. A failing `after-review` MUST resume no reviewer: the run MUST end
+as that question at once, its published record standing and never published again.
+
+#### Scenario: A hook after implementation finds a lint failure
+
+- **WHEN** `after-implement` fails after an implementation finishes
+- **THEN** the implementation session resumes with the failure, fixes and commits it,
+  ends finished again, and the hook passes
+
+#### Scenario: A hook after a review fails
+
+- **WHEN** `after-review` fails once the review's runner has published `19-design.md`
+- **THEN** the run ends as a question to the owner naming the hook, the reviewer is
+  not resumed, and no second record is published
+
+### Requirement: CW-i9np A run's inputs reach its session through a directory
+
+Each run MUST have an inputs directory under its change's records, given to its hooks
+as `{inputs}` and named on its log line. The engine MUST write `status.md` and keep
+each hook's output as a log there. Every top-level Markdown file a hook writes MUST
+be read in full as the session loads; any other file is data, read where a message
+directs.
+
+#### Scenario: A hook passes a large artifact
+
+- **WHEN** `before-review` writes `message.md` and a multi-megabyte
+  `diff-summary.json` into `{inputs}`
+- **THEN** the review reads `message.md` in full and reads the JSON only where the
+  message directs
 
 ## Evidence
 
@@ -4020,11 +4321,18 @@ line under the closeout review's record, its finding `validated`.
   of change names on the workflow targets: `scripts/completions/make-change.bash`.
 - The repository's configuration, its check, and its resolution:
   `.agents/workflow.toml`, read by `scripts/change_workflow/config.py`
-  (`scripts/change-workflow config`, `config load`, `config parts`, `check config`);
-  the hooks and validation's parts: `scripts/change-workflow run`, `check change`, and
-  `openspec` (`scripts/change_workflow/hooks.py`), the hook table in
+  (`scripts/change-workflow config`, `config load`, `check config`); the hooks:
+  `scripts/change-workflow run`, `check change`, and `openspec`
+  (`scripts/change_workflow/hooks.py`), the hook table in
   `scripts/change_workflow/graph.py`, and each session's invocations in
   `scripts/change_workflow/running.py`.
+- Validation's evidence kinds: which evidence a commit has, `scripts/change-workflow
+  evidence` (`scripts/change_workflow/evidence.py`); gathering what is missing, or a
+  new attempt of one kind, `scripts/change-workflow gather`
+  (`scripts/change_workflow/gather.py`); each kind's guide, named by its configuration
+  entry.
+- The step hooks around a session and its inputs directory: `scripts/change-workflow
+  run before|after <step> <change>` (`scripts/change_workflow/around.py`).
 - A change's closing checks: `scripts/change-workflow run pre-commit`, which `make
   check-change` runs, the repository's own being `make check-repository`
   (`scripts/check_change.py`); its task list's sections: `make check-tasks`
@@ -4045,7 +4353,7 @@ line under the closeout review's record, its finding `validated`.
   the command's subcommands and exit statuses: `test_change_workflow_cli.py` and
   `test_change_workflow_command.py`; the roles and assumptions an adopting
   repository's statement must cover: `test_change_workflow_assumptions.py`.
-- This repository's validation parts, its Helm validation namespace, and its
+- This repository's evidence kinds, its Helm validation namespace, and its
   capacity record: `market-change-workflow`'s Evidence.
 
 The skills are instructions to an agent; that a session follows them is shown by the

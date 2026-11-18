@@ -60,8 +60,8 @@ the session, and every turn ends with an outcome matching
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
   a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`: `-C` names only a subdirectory a skill names, such as `make -C
-  helm test-render`. Remove a tracked file with
+  <a checkout>`: `-C` names only a subdirectory a skill names, such as a package's,
+  `make -C <package> test`. Remove a tracked file with
   `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
   Spell every command relative to the checkout's root, never with its absolute
   path: the rules match the relative forms only.
@@ -131,6 +131,28 @@ names it, before implementing — `scripts/change-workflow note <change> round
 --sections '<its sessions, as 1,2;3>' --by <its by>` — and implement its
 first session. When it names `implement`, the round is recorded already.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-implement` hook, and
+kept what it did in the run's inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook, in full. Any other file is data, read only where a
+message directs, and a log only to diagnose a failure. A failing hook prevented
+nothing, but it may leave the environment broken — an environment refresh that
+failed, say — so stop and ask the owner, with what it reported, rather than code in
+it. Interactively, with no wrapper, run `scripts/change-workflow run before
+implement <change>` first; its last line names the directory. Once the sections are
+committed and pushed, run `scripts/change-workflow run after implement <change>`
+before `record`, and, when it fails, fix what it found, commit and push the fix, and
+run it again. Unattended, an after-hook that fails resumes this session once with
+its failure: fix what it found, commit and push the fix, and end with your outcome
+again; a second failure goes to the owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## The owner's direction
 
 Invoked with sections and an argument after the change, the argument is the owner's
@@ -142,7 +164,8 @@ rather than choose.
 ## Resolving a merge's conflicts
 
 Invoked with no sections and an argument naming a merge's conflicted files —
-`resolve the merge conflicts in <files>` — you conclude a merge of `dev` that the
+`resolve the merge conflicts in <files>` — you conclude a merge of the branch the
+change lands on, or another the owner named, that the
 orchestrating session started on the owner's word and that stopped at conflicts in
 code the owner did not rule on. Steps 1 to 9 do not apply; this is the whole run,
 and it checks no task.
@@ -157,7 +180,7 @@ and it checks no task.
    tasks touch it and their notes, and what each side did to it: `git log --merge
    -p -- <file>`.
 3. **Resolve.** Edit each file so both sides hold: the change's behaviour as its
-   sections built it, and `dev`'s as its commits made it, with comments describing
+   sections built it, and the merged branch's as its commits made it, with comments describing
    the system that results. Where the two cannot both hold, the resolution is a
    decision: ask the owner, with the options and your recommendation. Then `git
    add` each resolved file.
@@ -170,7 +193,7 @@ and it checks no task.
    hooks rebuilt, to the merge.
 5. **Conclude.** `git commit -m "<Git's merge subject>" -m "<resolutions>"`
    concludes the merge without opening an editor: the subject is the one Git
-   wrote for it (`Merge branch 'dev' into <branch>`), and the paragraph names each
+   wrote for it (`Merge branch '<merged>' into <branch>`), and the paragraph names each
    conflicted file and how it was resolved. Push it with `scripts/change-workflow
    push`; if it refuses, stop and report its reasons. Report each file's resolution, and end `finished`. A merge is the
    owner's intervention, so where the change goes after it is theirs, not this
@@ -245,11 +268,9 @@ Work through the section's tasks in order. For each:
 - Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
   `test-levels.md`), through the seams and injected dependencies the code already
   offers rather than brute-force patching (`test-seams.md`).
-- Respect the dependency layers in `docs/guidance/repository/package-layers.md`;
-  `TYPE_CHECKING` imports count
+- Respect the dependency layers the repository's guidance draws, and take internal
+  dependencies as it says; `TYPE_CHECKING` imports count
   (`docs/guidance/engineering/dependencies-python.md`).
-  Internal dependencies come from wheels and locks through `scripts/uv_project.py`,
-  never editable sibling paths.
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
   what the code used to be (`docs/guidance/engineering/comments.md`;
@@ -269,21 +290,23 @@ Work through the section's tasks in order. For each:
   that calls the reconciler directly is not application integration, and a test that
   shows a listing becomes a candidate to close does not show it closes.
 - Before the section's last task is checked, confirm or correct the end-to-end
-  scenarios its plan says cover it, in the section's notes: the pytest markers in
-  `e2e-tests/` that exercise its behaviour once deployed, including any the section
-  added, or that none does. Validation reads this to say whether the pipeline's
-  result is evidence for the section.
+  scenarios its plan says cover it, in the section's notes: the scenarios that
+  exercise its behaviour once deployed, named as the guide of the evidence kind that
+  runs them says — `scripts/change-workflow config` names each kind's guide —
+  including any the section added, or that none does. Validation reads this to say
+  whether the end-to-end result is evidence for the section.
 - Confirm or correct, the same way, the section's `Owed by validation:` lines:
   evidence only a push produces, such as a CI workflow run a change branch's push
-  does not trigger, named by its workflow, its job, and what the job must show.
-  Every validation of the change dispatches each one once the section is complete
-  and judges it, so a line naming the wrong job or observation misdirects them all.
+  does not trigger, named by the owed kind that produces it and its argument, then
+  what must be shown, as the kind's guide gives it. Every validation of the change
+  gathers each one once the section is complete and judges it, so a line naming the
+  wrong argument or observation misdirects them all.
   A verification task that demands such evidence itself — an older plan, or a slip
   — is checked on the section's own evidence once that passes, and the push-only
   evidence is written as an `Owed by validation:` line in the section's notes; it
   never holds the task open, since no implementation session can produce it. Only
-  a workflow `scripts/ci_evidence.py` lists can be owed: owing another is a design
-  question (step 4).
+  what the owed kind's guide says may be owed can be: owing anything else is a
+  design question (step 4).
 
 Never delete or rewrite a completed task; amend it with a correction note when
 something it established changes.
@@ -299,7 +322,7 @@ the design does not make, do not guess and do not work around it:
    tests, and notes — as one work-in-progress commit, checking no task for it: the
    message names the change and the section, says the work is in progress, and why
    the change returns. No check need pass first: the change's branch is not
-   protected — only `main` and `dev` are — and a commit known not to work harms
+   protected — only the configuration's protected branches are — and a commit known not to work harms
    nothing on it, while no session is left to commit the work, and a dirty
    checkout blocks every later step's guarded push. Push it with `scripts/change-workflow push`; if it refuses, stop
    and report its reasons, leaving the commit as it is.
@@ -377,7 +400,7 @@ Commit the section's work, `tasks.md` included, as one commit, unreviewed: revie
 findings land as later commits. The message names the change and the section and
 says what it delivers. Then push it with `scripts/change-workflow push`, the
 guarded push of exactly `HEAD`; if it refuses, stop and report its reasons. A pushed branch starts
-nothing: validation dispatches the pipeline itself.
+nothing: validation's gathering dispatches what it needs itself.
 
 ## 8. Continue or stop
 
@@ -399,7 +422,10 @@ When the session stops, tell the owner, for each section implemented:
 - the evidence: each check and suite with its result;
 - what the fresh-context check found, what was fixed, and what was declined;
 - the handoff recorded;
-- what comes next — validation (`make validate CHANGE=<change>`) and one
+- what comes next. While the round's recorded sessions leave sections you were
+  not given, that is the round's next session, named by its sections, and nothing
+  else: validation and the review read the whole round. Once yours was the round's
+  last session, it is validation (`make validate CHANGE=<change>`) and one
   implementation review (`make review CHANGE=<change> KIND=implementation`), run
   side by side, and the owner's reading of the commits since the last round as
   uncommitted changes (`make round-view CHANGE=<change>`, closed with `make

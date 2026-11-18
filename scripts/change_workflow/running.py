@@ -34,8 +34,8 @@ guards it.
 The records live in the Git directory, as the round view's own state does, so
 they belong to the checkout the run is in and no branch carries them.
 
-Beside them, `<git-dir>/change-invocations/` keeps, by session id, each hook, part,
-and command a session invoked through `run` or the guarded push, until the
+Beside them, `<git-dir>/change-invocations/` keeps, by session id, each hook, kind,
+and command a session invoked through `run`, `gather`, or the guarded push, until the
 session's line takes them: the wrapper's for an unattended run, the review's for a
 review on Claude, `record`'s for one the owner holds. Each entry names its change,
 and a line takes only its own change's and the guarded push's, which names none.
