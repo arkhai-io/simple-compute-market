@@ -34,6 +34,7 @@ from market_alkahest.schemas import (
 )
 from market_arkhai_payments import PaymentSettlementData
 from market_alkahest.token import TokenResolutionError, resolve_token
+from market_deal_lifecycle_buyer import WaitClock
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -47,6 +48,7 @@ from .arkhai_payments import (
     payer_selection,
     payment_buyer,
     settle_payment,
+    sync_sleep,
 )
 from .deal_helpers import ChainSettings, resolve_chain_settings
 from .escrow_client import (
@@ -71,6 +73,10 @@ class BuyerStageContext:
     buyer_evm_address: str = ""
     build_escrow_terms: Callable | None = None
     create_escrow: Callable | None = None
+    #: The command's wait clock, pacing a payment's commit and settlement wait
+    #: and timing the Alkahest settlement wait, which pauses on ``sleep``; the
+    #: buy command gives ``sleep`` as this clock's, made synchronous.
+    clock: WaitClock = WaitClock()
 
 
 @dataclass(frozen=True)
@@ -86,6 +92,8 @@ class BuyerResumeContext:
     poll_interval: float
     timeout: float
     console: Console
+    #: The command's wait clock, pacing the resumed commit and settlement wait.
+    clock: WaitClock = WaitClock()
 
 
 @dataclass(frozen=True)
@@ -237,6 +245,7 @@ class AlkahestBuyerStage:
             confirm_settlement=confirm,
             settlement_poll_interval=context.poll_interval,
             settlement_total_timeout=context.timeout, sleep=context.sleep,
+            monotonic=context.clock.monotonic,
         )
         def record(stage, payload):
             if stage == "escrow_created":
@@ -291,7 +300,7 @@ class PaymentsBuyerStage:
         return make_payment_settle_hook(
             config=context.config, policy=context.resolve_policy(),
             timeout=context.timeout, interval=context.poll_interval,
-            confirm_settlement=context.confirm,
+            confirm_settlement=context.confirm, clock=context.clock,
         )(negotiation, on_event)
 
     def lifecycle(self, context):
@@ -317,6 +326,7 @@ class PaymentsBuyerStage:
                 negotiation_id=deal.negotiation_id, timeout=context.timeout,
                 interval=context.poll_interval,
                 on_event=lambda stage, body: log.event(stage, **body),
+                clock=context.clock,
             )
         except TimeoutError as exc:
             # A wait that runs out ends the resumed run ``timeout``, as a fresh
@@ -627,6 +637,8 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
             poll_interval=poll_interval,
             total_timeout=settlement_timeout,
             on_poll=_on_poll,
+            sleep=sync_sleep(context.clock),
+            monotonic=context.clock.monotonic,
         )
     except TimeoutError as exc:
         log.event("settle_terminal", status="timeout", error=str(exc))

@@ -2339,13 +2339,25 @@ makes stepped). Touches `core/buyer` (`core_buyer/orchestration.py`) and
 takes a further version (`docs/guidance/repository/package-versions.md`, "Versioning
 policy"); `arkhai-vms-buyer`'s lower bound on `arkhai-core-buyer` rises to `>=0.7.1`.
 
-- [ ] 10a.1 `core_buyer.orchestration.wait_for_settlement` takes a `monotonic` callable
+- [x] 10a.1 `core_buyer.orchestration.wait_for_settlement` takes a `monotonic` callable
       beside its `sleep`, defaulting to `time.monotonic`, and measures its deadline on
       it, so a caller's clock paces the whole wait (D20). Verify (unit,
       `core/buyer/tests/`): with a fake `monotonic` advanced only by the fake `sleep`,
       the wait polls until a terminal status and times out after `total_timeout` of
       fake time, never sleeping real time.
-- [ ] 10a.2 VM's settle path runs on the command's clock: `settle_payment`'s commit loop
+      Done: `wait_for_settlement(..., monotonic=time.monotonic)` measures its deadline
+      on `monotonic` and pauses on `sleep`. Differing from the plan's level: the
+      function reads the status through the module's own `poll_settlement_status`,
+      which no seam replaces, so the two new cases sit beside the existing one in
+      `tests/integration/test_settlement_progress_privacy.py`, against the same
+      loopback seller signing each status read (integration over a real HTTP
+      boundary, no application; its seller helper is now shared by the three
+      cases). With a fake clock whose `monotonic` advances only by its `sleep`: two
+      `pending` reads then `ready` return after two 30-second pauses, both given
+      to the fake sleep; always `pending` with a 90-second total polls at 0, 30, 60
+      and 90 seconds of fake time and raises `TimeoutError`. `make -C core/buyer
+      test`: 190 passed.
+- [x] 10a.2 VM's settle path runs on the command's clock: `settle_payment`'s commit loop
       reads the clock's `monotonic` and awaits its `sleep` where it reads
       `time.monotonic` and `asyncio.sleep` today, and its `wait_for_settlement` call,
       and `settlement_stages.py`'s other one (the resumed settle), pass the clock's
@@ -2362,12 +2374,68 @@ policy"); `arkhai-vms-buyer`'s lower bound on `arkhai-core-buyer` rises to `>=0.
       deal never arrives; and, once the site delivers, the same command enters its
       watchdog from `available`. The existing VM buyer tests that replace `wait_clock`
       (`domains/vms/buyer/tests/test_buy_resume_cli.py`) still pass.
-- [ ] 10a.3 Verification point: `make -C core/buyer test`, `make -C domains/vms/buyer
+      Done: `settle_payment` takes `clock: WaitClock = WaitClock()`; its deadline,
+      commit retries and settlement wait read `clock.monotonic` and pause on
+      `clock.sleep`, the settlement wait through `sync_sleep(clock)`, which runs the
+      clock's sleep on `run_sync`'s own loop. `make_payment_settle_hook`,
+      `BuyerStageContext`, `BuyerResumeContext` (`clock` defaulting to `WaitClock()`),
+      `make_legacy_settle_hook` and `run_settle_from_log` carry it; the Alkahest
+      resumed settle's `wait_for_settlement` takes the context clock's `monotonic`
+      and `sync_sleep`. `buy` and `buy --from` build one `wait_clock()` and hand it
+      to the settle and to `_watch`, so one clock paces commit, settlement and
+      watchdog. Beyond the plan, found by the fresh-context check: the Alkahest
+      fresh settle waited on `time.sleep` and `time.monotonic`, so core's
+      `make_escrow_settle_hook` takes `monotonic` too (default `time.monotonic`),
+      `buy` gives the stage context `sleep=sync_sleep(clock)` and the Alkahest
+      stage passes `context.clock.monotonic`; that settle's submit retries (core's
+      `submit_settlement_request`, on a propagation-lag refusal) still back off on
+      `time.sleep`, and no rate deal settles through Alkahest. The payments kit's
+      approval poll (`PaymentsClient.poll`) sleeps real time only while the service
+      has no snapshot of a transaction it just approved, which neither the service
+      nor the lane double answers. Versions, differing from the plan: the new
+      `monotonic` keywords are new public API, which takes a minor bump
+      (`docs/guidance/engineering/versioning.md`, "One bump per unit of work": a
+      package bumped only for a fix is bumped again for a larger edit), so
+      `arkhai-core-buyer` goes 0.7.1 → 0.8.0 (0.7.0 on the development branch),
+      `arkhai-vms-buyer` takes `>=0.8.0` and `arkhai-bare-metal-buyer`'s exact pin
+      moves to `==0.8.0`; both buyers are already a minor step past the
+      development branch. `make lock` relocked.
+      Application integration (`domains/vms/storefront/tests/integration/test_watchdog_buy.py`,
+      the composed storefront served on loopback, the shipped `buy` through its
+      Typer app, a `FakeWaitClock` whose sleeps advance its `monotonic` and return at
+      once): with the site unreachable throughout, `buy --watchdog
+      --settlement-timeout 600 --poll-interval 30` commits, reads the settle status
+      21 times at 30-second pauses of fake time, all twenty pauses given to the fake
+      clock, and ends the run `timeout` (exit 4), opted in and unprobed; with the
+      site unreachable until the clock's second pause, when the test, on its own
+      event loop, lets the site answer and settles again, the same command reads
+      `ready` at its third poll and enters its watchdog from `available`, builds
+      its probe for the endpoint its delivery disclosed (`203.0.113.10:2222`),
+      pauses between probes on the same clock (each later pause at most the
+      one-second interval) and, on its scripted answers, ends `stopped` (exit 0;
+      the rate start and the stop at the payments engine). The earlier test, which
+      timed out a fresh `buy` and re-entered the watchdog through `buy --from`, is
+      replaced; the resume's re-entry stays proven by `test_buy_resume_cli.py`
+      (unit), which now also shows the resumed settlement given the command's wait
+      clock; nothing here runs the resumed settle itself on a fake clock.
+      `make -C domains/vms/storefront test`: 1199 passed, 1 skipped, and 634 passed.
+      `run test-before` was not run: the test files are uncommitted until this
+      commit; at the base the 600-second settle wait would sleep real time and the
+      fake clock's pauses would stay empty.
+- [x] 10a.3 Verification point: `make -C core/buyer test`, `make -C domains/vms/buyer
       test` and `make -C domains/vms/storefront test` pass, and
       `scripts/change-workflow run pre-commit serve-running-rate-deals` passes.
       End-to-end: `e2e_vm_recurring_purchase`, `e2e_vm_payment_purchase` and every other
       VM lane module running `market buy` exercise the changed waits on the default
       clock; section 11's `e2e_vm_rate_watchdog` exercises them on the harness's clock.
+      Done: `make -C core/buyer test` 190 passed; `make -C domains/vms/buyer test` 337
+      passed; `make -C domains/vms/storefront test` passed (see 10a.2); `run
+      pre-commit` passed with every functional hook, every suite among them, over a
+      worktree also holding section 10b's uncommitted edits. End-to-end confirmed: the VM lane modules running `market buy`
+      as a subprocess (`e2e_vm_recurring_purchase`, `e2e_vm_payment_purchase` among
+      them) run the changed waits on the default `WaitClock`, the process's own
+      clock, as before; `e2e_vm_rate_watchdog` (section 11) runs them on the
+      harness's clock. Owed by validation: none.
 
 ## 10b. Bare metal's probe built from the access its caller read
 
@@ -2398,6 +2466,31 @@ takes no further version.
       `e2e_bare_metal_recurring_purchase` and the bare-metal lane's other buy modules run
       the changed factory only where a deal opted into the watchdog, which none does;
       section 11's `e2e_bare_metal_rate_watchdog` exercises it.
+
+Sections 10a and 10b handoff, for section 11:
+
+- A `WaitClock`'s `sleep` is awaited on event loops the command makes for itself:
+  VM's `run_sync` runs each commit and each settlement-wait pause (`sync_sleep`) in a
+  fresh thread with its own loop, bare metal's availability wait runs under its
+  `run_sync`, and the kit's `run_monitor` runs the watchdog with `asyncio.run` on the
+  command's own thread, where a `KeyboardInterrupt` raised from the clock's `sleep`
+  ends it as the buyer's interrupt does ("Watchdog stopped by the buyer before
+  deciding to stop"). A harness gate behind that `sleep` therefore cannot be an
+  `asyncio` primitive bound to the harness's loop; it must be thread-safe (a
+  `threading` condition awaited off the loop, or polled), and anything it does on the
+  harness's loop goes through `run_coroutine_threadsafe`, as
+  `domains/vms/storefront/tests/integration/test_watchdog_buy.py`'s `on_test_loop`
+  does.
+- VM's fresh `buy` waits for delivery in its settlement wait (`wait_for_settlement`
+  polling the settle status until `ready`), paced by `--poll-interval`; bare metal's
+  waits in `wait_until_available` after its commit, paced by its `--poll-interval`.
+  Each pause is one call of the clock's `sleep`, so a gate releasing one interval
+  lets exactly one poll follow.
+- `buy` builds one clock per command (VM: `wait_clock()` once in `buy` and once in
+  `buy --from`; bare metal: once in `_deliver_and_watch`), so a replaced `wait_clock`
+  may return the same gated clock on every call.
+- Bare metal's access route serves only while the lease is active; once the
+  watchdog's stop has ended it, the route answers 409.
 
 ## 11. The buyer's watchdog against a delivered deal
 

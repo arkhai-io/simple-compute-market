@@ -43,6 +43,7 @@ from core_buyer.orchestration import (
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
 from market_alkahest.schemas import EscrowProposal
+from market_deal_lifecycle_buyer import WaitClock
 from market_settlement_runtime.rate_publication import DefaultRefusal
 
 from .arkhai_payments import AgreedTerms  # noqa: F401 — public VM summary
@@ -117,8 +118,12 @@ def make_legacy_settle_hook(
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
     settlement_policy=None,
+    clock: WaitClock = WaitClock(),
 ) -> SettleFn:
-    """Bind VM stage invocation without constructing unselected resources."""
+    """Bind VM stage invocation without constructing unselected resources.
+
+    ``clock`` paces a payment's commit and settlement wait.
+    """
     context = BuyerStageContext(
         config=config, provision=provision,
         resolve_policy=lambda: settlement_policy or resolve_buyer_settlement_policy(),
@@ -126,6 +131,7 @@ def make_legacy_settle_hook(
         sleep=sleep, confirm=confirm_settlement,
         buyer_evm_address=buyer_evm_address,
         build_escrow_terms=build_escrow_terms, create_escrow=create_escrow,
+        clock=clock,
     )
     return _core_make_settle_hook(
         stages=buyer_settlement_stages(),

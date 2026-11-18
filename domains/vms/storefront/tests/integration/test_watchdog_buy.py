@@ -7,21 +7,20 @@ recurring wiring under a declaration listing ``charged`` and ``returned``
 mounted (``settlement``). The buyer negotiates the published on-demand option,
 approves its mandate at the in-process payments engine, which both sides read,
 and commits; the deal is delivered, and the watchdog the buyer opted into
-probes the endpoint its delivery disclosed once the deal is available. The VM
-buy waits for settlement on the wall clock, with no seam to drive that wait,
-so the test never lets it wait: the buy runs while the site is unreachable,
-reads the settle status once with the deal not yet available and exits at its
-timeout; the test then settles again with the site answering, waits on that
-delivery, and resumes the run, which reads the deal ready and re-enters the
-watchdog.
+probes the endpoint its delivery disclosed once the deal is available. The
+buy's commit, its settlement wait and the watchdog run on the command's wait
+clock, so the buy runs while the site is unreachable and waits for delivery on
+a fake clock that advances only by the sleeps it is given: never delivered, the
+wait times out in fake time; delivered while the command waits, the same
+command reads the deal ready and enters its watchdog.
 
 The buy command's own factories are its seam for the watchdog's probe and
 clock (``buy_cli.watchdog_probe``, ``buy_cli.wait_clock``): the probe answers
-from a script rather than a socket, and the clock's waits return at once. The
-buyer CLI's other collaborators are replaced at the names it resolves them
-through, some of them imported names and one inside core, as the VM buyer CLI's
-tests do until its command modules own factory seams (``docs/development/ROADMAP.md``
-records that gap):
+from a script rather than a socket, and the clock's sleeps return at once,
+having advanced its time. The buyer CLI's other collaborators are replaced at
+the names it resolves them through, some of them imported names and one inside
+core, as the VM buyer CLI's tests do until its command modules own factory
+seams (``docs/development/ROADMAP.md`` records that gap):
 
 * its identity (``common.resolve_fresh_buyer_identity`` and
   ``resolve_recovery_buyer_identity``), resolving to the world's buyer signer;
@@ -196,10 +195,39 @@ def _on_demand(listing: dict) -> dict:
     )
 
 
-def _scripted_probe(monkeypatch, answers: list[bool]) -> list:
+class FakeWaitClock:
+    """The buy command's wait clock in fake time.
+
+    Each sleep advances ``monotonic`` by its seconds and returns at once, after
+    awaiting ``on_sleep``. The command awaits its sleeps on event loops of its
+    own, in its own threads, so ``on_sleep`` reaches the test's loop through
+    ``on_test_loop``.
+    """
+
+    def __init__(self, on_sleep=None):
+        self.now = 1000.0
+        self.slept: list[float] = []
+        self.on_sleep = on_sleep
+
+    async def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+        if self.on_sleep is not None:
+            await self.on_sleep()
+
+    def wait_clock(self) -> WaitClock:
+        return WaitClock(monotonic=lambda: self.now, sleep=self.sleep)
+
+
+async def on_test_loop(loop: asyncio.AbstractEventLoop, coroutine) -> None:
+    """Run ``coroutine`` on the test's ``loop`` from another loop, and wait for it."""
+    await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coroutine, loop))
+
+
+def _seams(monkeypatch, answers: list[bool], clock: FakeWaitClock) -> list:
     """Replace the buy command's probe factory with ``answers``, one per probe,
-    and its clock's waits with ones that return at once; return the connection
-    details each built probe was given."""
+    and its wait clock with ``clock``; return the connection details each built
+    probe was given."""
     built: list = []
 
     def watchdog_probe(connection_details):
@@ -211,85 +239,139 @@ def _scripted_probe(monkeypatch, answers: list[bool]) -> list:
 
         return probe
 
-    async def no_wait(_seconds: float) -> None:
-        return None
-
     monkeypatch.setattr(buy_cli, "watchdog_probe", watchdog_probe)
-    monkeypatch.setattr(buy_cli, "wait_clock", lambda: WaitClock(sleep=no_wait))
+    monkeypatch.setattr(buy_cli, "wait_clock", clock.wait_clock)
     return built
+
+
+def _buy_arguments(*, timeout: int, interval: int) -> list[str]:
+    return [
+        "buy", "--yes", "--ssh-public-key", SSH_KEY, "--duration-seconds", "3600",
+        # The option's hourly 2.5, in base units: the seller's ask, which the
+        # buyer prices per fifteen-minute period.
+        "--initial-price", "2500000", "--max-price", "2500000",
+        "--registry-urls", REGISTRY_URL,
+        "--watchdog", "--watchdog-interval", "1", "--watchdog-threshold", "2",
+        "--settlement-timeout", str(timeout), "--poll-interval", str(interval),
+    ]
 
 
 def _events(run_id: str) -> list[dict]:
     return list(read_run(run_id, signer=BUYER_SIGNER))
 
 
-async def test_a_watched_purchase_is_monitored_from_available(tmp_path, monkeypatch):
+def _negotiation(run_id: str) -> str:
+    return next(
+        event["negotiation_id"] for event in _events(run_id) if event["event"] == "payment_approved"
+    )
+
+
+async def test_a_purchase_never_delivered_times_out_in_its_clocks_time(tmp_path, monkeypatch):
     payments = WallClockPayments(signer=PAYMENTS_SERVICE)
     runner = CliRunner()
+    clock = FakeWaitClock()
     async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled, \
             served(world.app.app) as url:
         await world.publish()
         (summary,) = (await world.app.client.list_listings(status="open")).listings
         listing = _registry_listing(world, summary.listing_id, url)
         _buyer(tmp_path, monkeypatch, listing, payments)
-        # The endpoint answers once, then stops answering for the threshold.
-        probed = _scripted_probe(monkeypatch, [True, False, False])
-        # The site is unreachable while the buy runs, so its delivery waits.
+        probed = _seams(monkeypatch, [True], clock)
+        # The site stays unreachable, so the deal is never delivered.
         settled.site.unreachable = True
 
-        bought = await asyncio.to_thread(runner.invoke, buyer_app, [
-            "buy", "--yes", "--ssh-public-key", SSH_KEY, "--duration-seconds", "3600",
-            # The option's hourly 2.5, in base units: the seller's ask, which
-            # the buyer prices per fifteen-minute period.
-            "--initial-price", "2500000", "--max-price", "2500000",
-            "--registry-urls", REGISTRY_URL,
-            "--watchdog", "--watchdog-interval", "1", "--watchdog-threshold", "2",
-            # A deadline of now: the settle status is read once, then the
-            # wait has run out, as it would after any longer timeout.
-            "--settlement-timeout", "0", "--poll-interval", "0.2",
-        ])
+        bought = await asyncio.to_thread(
+            runner.invoke, buyer_app, _buy_arguments(timeout=600, interval=30),
+        )
 
-        # The commit is accepted and the deal is not yet available, so the
-        # command exits at its timeout with the opt-in kept and nothing probed.
+        # The commit is accepted and the deal never available: the settle
+        # status is read every thirty seconds of the clock's time until the
+        # ten minutes run out, and the command exits at its timeout with the
+        # opt-in kept and nothing probed. Every pause went to the fake clock.
         assert bought.exit_code == 4, bought.output
         (run,) = list_runs()
-        first = _events(run.run_id)
-        events = {event["event"]: event for event in first}
-        negotiation_id = events["payment_approved"]["negotiation_id"]
-        assert events["settlement_submitted"]["body"]["status"] == "committed"
+        events = _events(run.run_id)
+        negotiation_id = _negotiation(run.run_id)
+        [submitted] = [event for event in events if event["event"] == "settlement_submitted"]
+        assert submitted["body"]["status"] == "committed"
+        polls = [event for event in events if event["event"] == "settlement_poll"]
+        assert len(polls) == 21 and polls[-1]["body"]["status"] != "ready"
+        assert clock.slept == [30] * 20
+        assert events[-1]["event"] == "run_ended" and events[-1]["status"] == "timeout"
         assert "Watchdog running" not in bought.output and probed == []
         opted_in = FileEvidenceStore(tmp_path / "buyer" / "evidence").watchdog.state(negotiation_id)
         assert opted_in is not None and opted_in.last_probe_at is None
         await settled.delivered(negotiation_id)
 
-        # The site answers again and a settle drives the delivery to its end:
-        # the deal is available and billing started.
-        settled.site.unreachable = False
-        await world.app.buyer.settle_agreement(negotiation_id)
-        await settled.delivered(negotiation_id)
-        with transaction(world.app.db.db_path) as conn:
-            assert EndSession(conn).read(negotiation_id).available_at is not None
-        assert payments.count("submit_event") == 1
 
-        # Resumed, the buy reads the deal ready and re-enters the watchdog it
-        # opted into: it states its bound and probes the endpoint the delivery
-        # disclosed, and after the threshold of failures sends the buyer's stop.
-        resumed = await asyncio.to_thread(runner.invoke, buyer_app, [
-            "buy", "--from", run.run_id, "--settlement-timeout", "0", "--poll-interval", "0.2",
-        ])
+async def test_a_watched_purchase_is_monitored_from_available(tmp_path, monkeypatch):
+    payments = WallClockPayments(signer=PAYMENTS_SERVICE)
+    runner = CliRunner()
+    loop = asyncio.get_running_loop()
+    async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled, \
+            served(world.app.app) as url:
+        await world.publish()
+        (summary,) = (await world.app.client.list_listings(status="open")).listings
+        listing = _registry_listing(world, summary.listing_id, url)
+        _buyer(tmp_path, monkeypatch, listing, payments)
+        delivered_at: list[int] = []
 
-        assert resumed.exit_code == 0, resumed.output
-        assert "Watchdog running" in resumed.output
+        async def deliver() -> None:
+            # The first delivery drive, held back by the unreachable site, has
+            # returned; the site answers again and a settle drives the delivery
+            # to its end: the deal is available and billing started.
+            (run,) = list_runs()
+            negotiation_id = _negotiation(run.run_id)
+            await settled.delivered(negotiation_id)
+            settled.site.unreachable = False
+            await world.app.buyer.settle_agreement(negotiation_id)
+            await settled.delivered(negotiation_id)
+            with transaction(world.app.db.db_path) as conn:
+                assert EndSession(conn).read(negotiation_id).available_at is not None
+            assert payments.count("submit_event") == 1
+
+        async def deliver_after_two_polls() -> None:
+            (run,) = list_runs()
+            polls = [event for event in _events(run.run_id) if event["event"] == "settlement_poll"]
+            if len(polls) == 2 and not delivered_at:
+                delivered_at.append(len(clock.slept))
+                await on_test_loop(loop, deliver())
+
+        clock = FakeWaitClock(on_sleep=deliver_after_two_polls)
+        # The endpoint answers once, then stops answering for the threshold.
+        probed = _seams(monkeypatch, [True, False, False], clock)
+        # The site is unreachable while the buy starts, so its delivery waits.
+        settled.site.unreachable = True
+
+        bought = await asyncio.to_thread(
+            runner.invoke, buyer_app, _buy_arguments(timeout=600, interval=30),
+        )
+
+        # The command waited for delivery on its clock, two settle reads
+        # finding the deal not yet available; delivered during its second
+        # pause, the deal reads ready, and the same command enters the
+        # watchdog it opted into: it states its bound, probes the endpoint
+        # the delivery disclosed, and after the threshold of failures sends
+        # the buyer's stop.
+        assert bought.exit_code == 0, bought.output
+        assert delivered_at == [2] and clock.slept[:2] == [30, 30]
+        assert "Watchdog running" in bought.output
+        (run,) = list_runs()
+        negotiation_id = _negotiation(run.run_id)
         [details] = probed
         endpoint = (VmConnectionDetails.model_validate_json(details) if isinstance(details, str)
                     else VmConnectionDetails.model_validate(details))
         # The endpoint ``vm_fulfillment_result`` delivers by default.
         assert (endpoint.host, endpoint.port) == ("203.0.113.10", 2222)
-        resumed_events = _events(run.run_id)[len(first):]
-        polls = [event for event in resumed_events if event["event"] == "settlement_poll"]
-        assert polls and polls[-1]["body"]["status"] == "ready"
-        [exited] = [event for event in resumed_events if event["event"] == "watchdog_exited"]
+        events = _events(run.run_id)
+        polls = [event for event in events if event["event"] == "settlement_poll"]
+        assert len(polls) == 3 and polls[-1]["body"]["status"] == "ready"
+        [exited] = [event for event in events if event["event"] == "watchdog_exited"]
         assert exited["reason"] == "stopped"
+        # The watchdog paused on the same clock after the settle wait, between
+        # its one-second probes.
+        watchdog_pauses = clock.slept[2:]
+        assert watchdog_pauses and all(0 < pause <= 1 for pause in watchdog_pauses)
         # The rate start, then the watchdog's stop.
         assert payments.count("submit_event") == 2
 
