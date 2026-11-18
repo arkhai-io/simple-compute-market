@@ -246,6 +246,9 @@ def write_listing_update(
     closed_by: str | None = None,
     reopened_by: str | None = None,
     rate_structure: Any = UNSET,
+    title: Any = UNSET,
+    description: Any = UNSET,
+    metadata: Any = UNSET,
 ) -> None:
     """Update the supplied listing columns inside the caller's transaction.
 
@@ -309,6 +312,14 @@ def write_listing_update(
     if rate_structure is not UNSET:
         updates.append("rate_structure=?")
         values.append(None if rate_structure is None else _serialize_json(rate_structure))
+    for name, value in (
+        ("title", title),
+        ("description", description),
+        ("metadata", metadata),
+    ):
+        if value is not UNSET:
+            updates.append(f"{name}=?")
+            values.append(None if value is None else _serialize_json(value))
     conn.execute(
         f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
         (*values, listing_id),
@@ -736,7 +747,10 @@ class SQLiteClient:
                   accepted_escrows TEXT,
                   settlement_options TEXT,
                   publication_clauses TEXT,
-                  demands TEXT
+                  demands TEXT,
+                  title TEXT,
+                  description TEXT,
+                  metadata TEXT
                 )
                 """
             )
@@ -759,6 +773,11 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN demands TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+            for column in ("title", "description", "metadata"):
+                try:
+                    cur.execute(f"ALTER TABLE listings ADD COLUMN {column} TEXT")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
             # Migrate: add paused column if missing (existing databases).
             try:
                 cur.execute(
@@ -1321,6 +1340,9 @@ class SQLiteClient:
         demands: Any | None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Any | None = None,
     ) -> None:
         _require_consistent_closure(status, closed_by)
         # An upsert names no reopener, so it may never overwrite a seller's
@@ -1351,9 +1373,12 @@ class SQLiteClient:
               publication_clauses,
               demands,
               closed_by,
-              rate_structure
+              rate_structure,
+              title,
+              description,
+              metadata
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
               closed_by=excluded.closed_by,
@@ -1370,7 +1395,10 @@ class SQLiteClient:
               settlement_options=excluded.settlement_options,
               publication_clauses=excluded.publication_clauses,
               demands=excluded.demands,
-              rate_structure=excluded.rate_structure
+              rate_structure=excluded.rate_structure,
+              title=excluded.title,
+              description=excluded.description,
+              metadata=excluded.metadata
             """,
             (
                 listing_id,
@@ -1391,6 +1419,9 @@ class SQLiteClient:
                 self._serialize_resource(demands),
                 closed_by,
                 self._serialize_resource(rate_structure),
+                title,
+                description,
+                self._serialize_resource(metadata),
             ),
         )
 
@@ -1414,6 +1445,9 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Any | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -1436,6 +1470,9 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
 
         await asyncio.to_thread(_save)
@@ -1460,6 +1497,9 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Any | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
@@ -1496,6 +1536,9 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
                 conn.execute(
                     """
@@ -1658,6 +1701,9 @@ class SQLiteClient:
         closed_by: str | None = None,
         reopened_by: str | None = None,
         rate_structure: Any = UNSET,
+        title: Any = UNSET,
+        description: Any = UNSET,
+        metadata: Any = UNSET,
     ) -> None:
         """Update the supplied listing columns.
 
@@ -1689,6 +1735,9 @@ class SQLiteClient:
                     closed_by=closed_by,
                     reopened_by=reopened_by,
                     rate_structure=rate_structure,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
                 conn.commit()
             except Exception:
@@ -1722,7 +1771,10 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           title,
+                           description,
+                           metadata
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1749,6 +1801,9 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "title",
+                    "description",
+                    "metadata",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -1770,6 +1825,7 @@ class SQLiteClient:
                     d.get("demands"),
                 )
                 d["rate_structure"] = _deserialize_json_object(d.get("rate_structure"))
+                d["metadata"] = _deserialize_json_object(d.get("metadata"))
                 return d
             finally:
                 conn.close()
@@ -4528,7 +4584,10 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           title,
+                           description,
+                           metadata
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -4554,6 +4613,9 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "title",
+                    "description",
+                    "metadata",
                 ]
                 rows = cur.fetchall()
                 result = []
@@ -4580,6 +4642,7 @@ class SQLiteClient:
                     d["rate_structure"] = _deserialize_json_object(
                         d.get("rate_structure")
                     )
+                    d["metadata"] = _deserialize_json_object(d.get("metadata"))
                     result.append(d)
                 return result
             finally:

@@ -15,6 +15,8 @@ import logging
 from collections.abc import Awaitable, Callable, Collection
 from typing import Any
 
+from market_core.listing_details import supplied_listing_details
+
 logger = logging.getLogger(__name__)
 
 RegistryClientFactory = Callable[[], Any]
@@ -66,6 +68,7 @@ async def publish_listing_to_registries(
     settlement_options = ensure_json_obj(listing_dict.get("settlement_options"), [])
     demands = ensure_json_obj(listing_dict.get("demands"), [])
     max_duration_seconds = listing_dict.get("max_duration_seconds")
+    details = supplied_listing_details(listing_dict)
 
     try:
         listing_storefront_url = listing_dict.get("storefront_url")
@@ -84,6 +87,7 @@ async def publish_listing_to_registries(
                 demands=demands,
                 max_duration_seconds=max_duration_seconds,
                 storefront_url=listing_storefront_url,
+                **details,
             )
             targets = list(registry_client.urls)
             if registry_urls is not None:

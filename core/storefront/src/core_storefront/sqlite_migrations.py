@@ -161,6 +161,12 @@ def _add_column_if_missing(
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
+def migrate_listing_details(conn: sqlite3.Connection) -> None:
+    """Add the seller-authored listing detail columns."""
+    for name in ("title", "description", "metadata"):
+        _add_column_if_missing(conn, "listings", name, "TEXT")
+
+
 def migrate_listing_rate_structure(conn: sqlite3.Connection) -> None:
     """Add the listing's rate structure: a domain-owned JSON term of sale.
 
@@ -2100,6 +2106,11 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261001_001_listing_rate_structure",
         migrate_listing_rate_structure,
+        required_tables=("listings",),
+    ),
+    Migration(
+        "20261118_001_listing_details",
+        migrate_listing_details,
         required_tables=("listings",),
     ),
 )

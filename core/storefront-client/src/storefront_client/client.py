@@ -1305,6 +1305,9 @@ class StorefrontClient(_StorefrontClientBase):
         settlement_config: dict[str, Any] | None = None,
         demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: dict[str, Any] | None = None,
         paused: bool = False,
         request_id: str | None = None,
     ) -> StorefrontListingCreateResponse:
@@ -1318,6 +1321,9 @@ class StorefrontClient(_StorefrontClientBase):
             "settlement_config": settlement_config,
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
+            "title": title,
+            "description": description,
+            "metadata": metadata,
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
@@ -2549,6 +2555,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         settlement_config: dict[str, Any] | None = None,
         demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: dict[str, Any] | None = None,
         paused: bool = False,
         request_id: str | None = None,
     ) -> StorefrontListingCreateResponse:
@@ -2562,6 +2571,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "settlement_config": settlement_config,
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
+            "title": title,
+            "description": description,
+            "metadata": metadata,
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
