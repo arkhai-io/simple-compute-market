@@ -15,11 +15,12 @@ and resolving are distinct because a run can be denied a call and still end with
 question or a proposed return: its denials are read first, and its outcome is
 answered or decided after. This module is the log's only writer.
 
-A run's line may carry `invoked`: each hook, part, and command the run invoked
-through `run` or the guarded push, with its owed workflow and phase where it has
-them, the command it resolved to, its exit status, when it started, and how long it
-took. The field is optional, so a line without it reads as before and the record
-set's format does not move.
+A run's line may carry `invoked`: each hook, kind, and command the run invoked
+through `run`, `gather`, the guarded push, or the actions and hooks around its
+session, with its owed argument and phase where it has them, the command it
+resolved to, its exit status, when it started, and how long it took; and `inputs`,
+its inputs directory relative to the change's records. Both fields are optional, so
+the record set's format does not depend on them.
 
 A finished merge's or archive cleanup's outcome carries `landing`, the remote,
 branch, and commit the run fetched, which the writer checks against the checkout
@@ -544,11 +545,13 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
 
 def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                        commit: str | None, invoked: Sequence[Entry] = (),
-                       checkout: Checkout | None = None, clock: Clock = utc_now) -> Entry:
+                       checkout: Checkout | None = None, inputs: str | None = None,
+                       clock: Clock = utc_now) -> Entry:
     """Append the outcome of a step the owner ran interactively, which records its
     own: checked as the wrapper checks an unattended run's, a finished merge's or
     archive cleanup's landing record against the `checkout` it ran in included, and
-    marked `interactive`, with what the session `invoked`, when it invoked anything.
+    marked `interactive`, with what the session `invoked`, when it invoked anything,
+    and its `inputs` directory, when it had one.
 
     A triage's finished or returned outcome is refused unless it names the records
     it triaged (`triage_outcome_problems`), as the wrapper records such a run
@@ -566,7 +569,8 @@ def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                         + "; ".join(problems))
     return record_outcome(path, step, outcome, session=session, commit=commit,
                           extra={"interactive": True,
-                                 **({"invoked": list(invoked)} if invoked else {})},
+                                 **({"invoked": list(invoked)} if invoked else {}),
+                                 **({"inputs": inputs} if inputs else {})},
                           checkout=checkout, clock=clock)
 
 
@@ -832,9 +836,9 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     run, which `Wrapper.resume` then resumes once with the owner's words; it is
     refused unless that run is the latest triage of the reviews it triaged
     (`revisit_refusal`). It routes nothing: the resumed triage's outcome does.
-    `waives` names the parts of validation the owner waives for later validations,
-    on the condition the decision states; it directs nothing, and validation reads
-    it through `waived_parts`, judging whether the condition still holds.
+    `waives` names the evidence kinds the owner waives for later validations, on
+    the condition the decision states; it directs nothing, and validation reads it
+    through `waived_kinds`, judging whether the condition still holds.
     """
     if next_step is None and (kind, sections, target) != (None, None, None):
         raise StepError("a kind, sections, or target qualify the step a decision directs")
@@ -890,11 +894,11 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
         line["resumes"] = resumes
     if waives is not None:
         if by != "owner":
-            raise StepError("a waiver of validation's parts is the owner's")
+            raise StepError("a waiver of validation's evidence kinds is the owner's")
         if directs is not None:
-            raise StepError("a waiver of validation's parts directs no step")
+            raise StepError("a waiver of validation's evidence kinds directs no step")
         if not waives or not all(isinstance(p, str) and p for p in waives):
-            raise StepError(f"a waiver names one or more parts; got {list(waives)!r}")
+            raise StepError(f"a waiver names one or more evidence kinds; got {list(waives)!r}")
         line["waives"] = list(waives)
     if directs is not None:
         if by != "owner":
@@ -910,13 +914,13 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
     return line
 
 
-def waived_parts(entries: Sequence[Entry]) -> dict[str, Entry]:
-    """Each part of validation the owner waived, with the latest decision waiving it."""
+def waived_kinds(entries: Sequence[Entry]) -> dict[str, Entry]:
+    """Each evidence kind the owner waived, with the latest decision waiving it."""
     waived: dict[str, Entry] = {}
     for entry in entries:
         if entry.get("by") == "owner" and isinstance(entry.get("waives"), list):
-            for part in entry["waives"]:
-                waived[part] = entry
+            for kind in entry["waives"]:
+                waived[kind] = entry
     return waived
 
 

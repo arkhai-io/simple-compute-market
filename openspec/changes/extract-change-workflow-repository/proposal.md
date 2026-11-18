@@ -136,6 +136,12 @@ repository keeps only its adoption.
 The lesser goal's gap "The workflow is not a separately versioned distribution"
 in `openspec/changes/README.md` is owned by this change and closes with it.
 
+So is the gap on `change-workflow`'s diagrams of the engine's parts and of a step
+run's life, which draw neither the evidence modules nor the actions and hooks
+around a step that `add-skill-extension-points` added: this change redraws both as
+it redraws the engine's boundary, given the redraw by that change's closeout
+triage (55 F4).
+
 ### Knowledge to promote
 
 To be determined at design completion.

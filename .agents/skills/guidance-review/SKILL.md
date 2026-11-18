@@ -32,8 +32,9 @@ of their own. Apart from that, the one file it writes is the period ledger's lin
 ## What reaches the repository
 
 Everything you write that the repository keeps — a proposal, its design, a summary
-the owner commits — is public (`AGENTS.md`, "Public repository discipline", which
-applies the public case of `docs/guidance/engineering/repository-content.md`). Only
+the owner commits — is as public as the repository: its root guidance says which case
+of `docs/guidance/engineering/repository-content.md` it selects, and in a public
+repository nothing private reaches it. Only
 aggregates — counts, rates — and the principles drawn from them reach it: no
 correction's wording, and no private name, path, identifier, or log. The period ledger
 is untracked, and holds figures only.
@@ -122,8 +123,9 @@ the ledger for comparison:
   correction. Note waivers the owner gave that no step recommended, by reason.
 - **Terms the owner asked about.** Each word or mechanism the owner asked an agent to
   explain, with how often, and whether its home defines it — the homes
-  `docs/guidance/workflow/terms.md` names, the market's in `AGENTS.md`'s "Domain
-  docs". An undefined term the owner asked about is a candidate entry,
+  `docs/guidance/workflow/terms.md` names, the repository's cross-subsystem terms in
+  the home its root guidance names. An undefined term the owner asked about is a
+  candidate entry,
   unless the change that met it added the entry then.
 
 The labelling is your reading of recorded text: say so, and say which counts a

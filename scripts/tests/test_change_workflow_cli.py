@@ -28,7 +28,8 @@ from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.review import check_review
 from change_workflow_fixtures import (CHANGE, CONFIGURED, LANDED, VALID, FakeClaude,
-                                      configured, event_lines, make_wrapper, option_rules)
+                                      configured, event_lines, ignore_evidence, make_wrapper,
+                                      option_rules, prompted)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -417,6 +418,7 @@ def test_the_merge_brings_in_the_branch_the_clone_recorded(tmp_path: Path) -> No
     root = _repository(tmp_path / "workspace", CHANGE)
     clone_root = find.clone_directory(root, CHANGE)
     _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
+    ignore_evidence(clone_root)
     (clone_root / ".git" / find.CLONE_MARKER).write_text(
         json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
         "utf-8")
@@ -503,7 +505,7 @@ def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -
                      "--allow", "Bash(make lock)"], root=root, launch=launched,
                     wrapper=make_wrapper(root, claude)) == 0
     assert launched.commands == []
-    assert claude.commands[0][2] == f"/change-merge {CHANGE} from dev"
+    assert claude.commands[0][2] == prompted(f"/change-merge {CHANGE} from dev", "merge")
     assert option_rules(claude.commands[0], "--allowedTools")[-1] == "Bash(make lock)"
 
 

@@ -22,16 +22,20 @@ siblings by relative import:
 - `index` — the change index, `openspec/changes/README.md`: its rows, each row's
   status and dependencies, and the check that holds it to the change directories;
 - `tasks` — the check that every task of a change's task list sits under its own
-  section's heading;
+  section's heading, and the owed lines its sections hold;
 - `next_step` — the next-step computation: where a change stands, read from its
   files and its log, and the step it names;
 - `config` — the repository's workflow configuration, `.agents/workflow.toml`, read
   and checked whole, and the subcommands that read it: `config`, `config load`,
-  `config parts`, and `check config`;
-- `hooks` — running the repository's hooks and validation's parts through `run`,
-  each ending with the engine's closing line, and the marker kept from a part's
-  dispatch for its collect; `pre-commit`'s default checks alone (`check change`);
-  and the repository's OpenSpec command (`openspec`);
+  and `check config`;
+- `hooks` — running the repository's hooks through `run`, each ending with the
+  engine's closing line, and the marker kept from a kind's dispatch for its
+  collect; `pre-commit`'s default checks alone (`check change`); and the
+  repository's OpenSpec command (`openspec`);
+- `evidence` — the tree or commit evidence describes, and which of it a change's
+  `HEAD` lacks (`evidence`);
+- `gather` — gathering the evidence a change's `HEAD` lacks, or a new attempt of one
+  kind (`gather`);
 - `steps` — the step table: each step's skill and the permission rules an
   unattended run of it is held to, and what a model a step runs on is; which models
   it runs on are the configuration's;

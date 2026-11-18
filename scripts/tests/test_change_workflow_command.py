@@ -56,17 +56,25 @@ def test_the_command_compares_this_checkouts_graph_diagram() -> None:
     assert ran.stdout.endswith("draws the table.\n")
 
 
-def test_next_gives_an_unclassified_results_reason_on_standard_error() -> None:
+def test_next_gives_an_unclassified_results_reason_on_standard_error(
+        tmp_path: Path) -> None:
     # The result stays on standard output, where a program reads it; exit 1 gives
-    # its reason on standard error, as every subcommand's refusal does.
+    # its reason on standard error, as every subcommand's refusal does. `next` runs
+    # in a shared clone of this checkout, which holds its committed state but none of
+    # its merge state: a merge in progress here, such as one stopped at its conflicts
+    # while the suites run, routes every change to its owner before any is looked up.
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout",
+                    str(SCRIPTS.parent), str(clone)], check=True)
+    subprocess.run(["git", "checkout", "--quiet", "HEAD", "--", "openspec"], cwd=clone,
+                   check=True)
     command = [str(COMMAND), "next", "no-such-change"]
-    ran = subprocess.run(command, cwd=SCRIPTS.parent, capture_output=True, text=True,
-                         check=False)
+    ran = subprocess.run(command, cwd=clone, capture_output=True, text=True, check=False)
     assert ran.returncode == 1
     result = json.loads(ran.stdout)
     assert result["step"] == "unclassified" and "no-such-change" in result["reason"]
     assert ran.stderr == f"ERROR: {result['reason']}\n"
-    plain = subprocess.run([*command, "--plain"], cwd=SCRIPTS.parent, capture_output=True,
+    plain = subprocess.run([*command, "--plain"], cwd=clone, capture_output=True,
                            text=True, check=False)
     assert (plain.returncode, plain.stderr) == (1, ran.stderr)
 
