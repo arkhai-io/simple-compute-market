@@ -822,30 +822,103 @@ per-registry read state and re-read (D6's read half; `settlement-configuration` 
 storefront reads again a registry whose recommendations it could not read", its
 read scenarios). Touches `core/storefront` and `kit/storefront`.
 
-- [ ] 7.1 In `core/storefront/src/core_storefront/multi_registry_client.py`,
+- [x] 7.1 In `core/storefront/src/core_storefront/multi_registry_client.py`,
   `MultiRegistryClient.get_descriptors` gains an optional selection of registry
   URLs, absent meaning every configured registry as now, reading and returning only
   those selected. Verify with the core storefront's tests for the client: a
   selection reads only the selected registries and an absent one reads all.
-- [ ] 7.2 In `kit/storefront/src/market_storefront_kit/dispute_configuration.py`,
+  Done: `get_descriptors(registries=None)`, a selection named as `urls` names
+  the registries, returned in configured order. Unit, the new
+  `core/storefront/tests/unit/test_multi_registry_descriptors.py`, 3 passed:
+  no selection reads every registry and keeps a failure apart as `None`; a
+  selection reads and returns only the selected registries (the other's
+  client counts no read); an empty selection reads nothing.
+- [x] 7.2 In `kit/storefront/src/market_storefront_kit/dispute_configuration.py`,
   `RegistryDisputePolicy` keeps, per registry, whether its last read succeeded and
   when it last failed (the injected time source); `refresh` records them; a new
   re-read reads only the registries whose last read failed, through the selection,
   keeping the others' recommendations; and the policy exposes its unread registries
   with their last failure. Verify with 7.3.
-- [ ] 7.3 Unit (`kit/storefront/tests`, beside the dispute configuration's tests):
+  Done: the policy keeps each registry's recommendations, the registries whose
+  last read failed, and each one's last failure, stamped by its `clock` (the
+  process's source, `injected_time.now_datetime`, by default). `refresh` reads
+  every registry as before and records each outcome, a client that cannot be
+  opened leaving every registry unread; `reread(client_factory)` builds no
+  client while none is unread, reads only the unread ones through the
+  selection, and resolves the authorities again only when one of them was
+  read, so a registry still down repeats no "No dispute authority" warning.
+  `unread_registries()` returns `UnreadRegistry(url, last_failed_at)` records.
+  Beyond the plan, so the three storefronts compose one projection rather
+  than three: `readiness_resources()`, the mechanism readiness resource
+  section 9 passes, `{"dispute_authorities_unread": [{"registry",
+  "last_failed_at"}]}` (ISO 8601) or `{}`, keyed by the exported
+  `DISPUTE_AUTHORITIES_UNREAD`. With `use_registry_dispute_authorities` false
+  nothing is read, so nothing is unread. The startup read passes every
+  registry as its selection, so both reads go through one call.
+- [x] 7.3 Unit (`kit/storefront/tests`, beside the dispute configuration's tests):
   a startup read in which one of two registries fails, then a re-read, reads only
   the failed one and adopts its recommendations while keeping the other's ("One of
   several registries could not be read"); a re-read after every read succeeded
   reads nothing ("A registry was read"); the unread registries are reported with
   their last failure until a read succeeds.
-- [ ] 7.4 Bump `core/storefront`'s package (minor, the additive parameter) and
+  Done: unit, the new `kit/storefront/tests/unit/test_dispute_configuration.py`
+  (the kit had no test of the policy), 5 passed. The registries are a double
+  of the cross-registry client the policy's factory builds, recording each
+  selection it is asked to read (the core client's own selection is 7.1's),
+  and the policy's clock is passed to its constructor. The three planned
+  cases — the unread registry's case also asserting that a re-read failing
+  again logs no second "No dispute authority" warning — plus a client that
+  cannot be opened leaving both registries unread, and a seller opting out of
+  recommendations reading and reporting nothing.
+- [x] 7.4 Bump `core/storefront`'s package (minor, the additive parameter) and
   `kit/storefront`'s (minor), raise `kit/storefront`'s lower bound on the core
   package, and refresh the locks. Verify with `make check-version-bumps` and `make
   check-locks`.
-- [ ] 7.5 Verification: `uv run pytest core/storefront/tests kit/storefront/tests`
+  Done: `arkhai-core-storefront` 0.18.0 → 0.19.0, `arkhai-kit-storefront`
+  0.11.0 → 0.12.0 on `arkhai-core-storefront>=0.19.0`. Beyond the plan, the
+  exact pins the two bumps move: `arkhai-kit-capacity-publication` pins the
+  core package (`==0.19.0`), so it takes a patch bump, 0.12.0 → 0.12.1, and
+  its pin moves in the provisioning service (already bumped by section 1);
+  the three storefronts pin the storefront kit and capacity publication, and
+  the VM storefront the bare-metal storefront, so the three storefronts' minor
+  bumps, which 9.3 planned, are taken here — `arkhai-vms-storefront` 0.28.0 →
+  0.29.0, `arkhai-bare-metal-storefront` 0.28.0 → 0.29.0,
+  `arkhai-apicredits-storefront` 0.21.0 → 0.22.0. Relocked the eleven
+  projects whose locks name any of them (`make lock PROJECTS=…`:
+  `core/storefront`, `kit/storefront`, `kit/capacity-publication`, the three
+  storefronts, `domains/bare_metal`, `domains/compute/delivery`,
+  `domains/vms/domain`, `e2e-tests`, `provisioning/compute/service`). Both
+  checks pass.
+- [x] 7.5 Verification: `uv run pytest core/storefront/tests kit/storefront/tests`
   passes, and `scripts/change-workflow run pre-commit
   resolve-delivery-correctness-gaps` passes. End-to-end: section 9's.
+  Done: `make -C core/storefront test` and `make -C kit/storefront test` pass
+  (237 and 146 after the fresh-context fixes); `pre-commit` passed, every suite
+  with it (`after-functional-change`, `pre-commit-functional` and `pre-commit`
+  at `703750505`), before those fixes and again after them (section notes).
+  End-to-end: section 9's, as planned.
+
+Section 7 notes (handoff):
+
+- Section 9's bumps are taken: the three storefronts are at their new minor
+  versions (7.4), so 9.3 raises lower bounds and relocks, and bumps nothing.
+  The exact pins section 8 will move are `arkhai-kit-arkhai-payments==0.8.0`
+  in the bare-metal storefront; check `git grep '"arkhai-kit-alkahest=='` too.
+- Section 9 composes `disputes.readiness_resources()` into the mechanism
+  readiness resources and calls `disputes.reread(<the registry client
+  factory>)` at publication's compose stage; the factory is the one each
+  server already hands `refresh` at startup.
+- A registry's client that cannot be opened (`MultiRegistryClient.__aenter__`
+  raising) leaves every selected registry unread, as one failing read does.
+- The fresh-context check's findings were taken: an undeclared test import
+  (`registry_client`) and the core client wrapped in the kit's unit test,
+  replaced by a double of the cross-registry client; the clock set by
+  assignment, now passed to the constructor; a refusal of an unconfigured
+  selection no caller could reach, removed with its test; a comment naming a
+  public detail section 8 has not yet added, and a docstring stating the
+  design's open assumption as fact, both restated; `_read`'s selection flag;
+  and three evidence claims (the warning claim, now asserted; the pre-commit
+  record; the readiness projection marked beyond the plan).
 
 ## 8. The mechanisms report an unread registry in their public details
 
