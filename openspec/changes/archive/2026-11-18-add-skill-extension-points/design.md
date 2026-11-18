@@ -1,7 +1,8 @@
 # Design: add skill extension points
 
 Status: design settled, amended by the triages of its design reviews (18 F1 to F5,
-26 F1 to F3); ready for planning.
+26 F1 to F3); implemented in one round, its pre-closeout review triaged (44 F1);
+closed out.
 
 ## Context
 
@@ -442,6 +443,109 @@ the inverted test.
 Rejected: three rounds with a review after each, which would halt for the owner's
 reading between them; the neutral skills first, before the guides' final form
 exists.
+
+## Settled during implementation
+
+What implementation and its triages decided within the decisions above, moved here
+from the task notes at closeout, with the alternatives they set aside.
+
+- **The waiver's lapse is measured from the last validation that ran the kind**
+  (review 36 F2). A waiver's condition is judged over the commits since the last
+  validation that assessed the kind, but the merge that lapses it over the commits
+  since the last validation whose logged `invoked` names the kind, or the latest
+  validation when none does: a run's `invoked` names what its gathering ran, not what
+  it found present. This errs only toward gathering a waived kind again, and a lapse
+  over present evidence gathers nothing. CW-e7lm and CW-g6th say so.
+- **The gathering's failures.** A failed preflight gathers nothing, so evidence is
+  never gathered in an environment the preflight refused; a refused push skips every
+  start, as a failed attempt, and still runs the run kinds; and the gathering refuses
+  a worktree whose tree is not `HEAD`'s, so `{tree}` is the tree `evidence` reads.
+- **History copies what each kind's full pattern matches** (reviews 36 F1 and 44 F1).
+  The engine first read only this repository's layout, then stopped its lookup at the
+  identity's segment; each copied evidence no pattern describes — a retired kind's
+  attempt, a stray file. Each kind keyed by a validated identity is now globbed by its
+  whole pattern, through the matcher the presence check uses, and a match is copied
+  with the directory holding it only when that directory is whole and no other kind's
+  pattern reaches it, otherwise alone. Narrowing the layouts the configuration admits
+  was set aside by the owner at 36 F1. A cited file directly in a directory two kinds
+  share would still bring that directory; no layout here has one.
+- **A review's question names no resume** (found in section 6). `resume` refuses a
+  review's line, so the next-step computation names no resume for a review's
+  question, a failing `after-review`'s included, and the owner settles it by their
+  direction.
+- **A hook's commands run in its action's environment** (found in section 6). The
+  hook runner gave its commands the process's environment, so the run's marker and
+  the engine's own session id never reached them; the action now makes its
+  environment the process's own while it runs, and nothing an action keeps lands
+  under the session of whoever started the wrapper.
+- **This repository's scripts compute the tree themselves.** A repository script
+  reaches the engine only through its command, and no command prints the worktree's
+  tree, so `scripts/validate_slice.py` holds its own computation, each held to Git's
+  answer — the tree the commit then holds — in its own suite; a test holding both to
+  one answer would import the engine, which the command boundary's test refuses. Both
+  copy the checkout's index keeping its time (`shutil.copy2`): a copy dated later made
+  Git pass over a file rewritten at the same size in the second the index was
+  written, giving `HEAD`'s tree.
+- **`TREE` and `COMMIT` keep their names.** The plan and D6 name them, and nothing
+  else reads either; prefixed names were declined. A `COMMIT` in the owner's
+  environment puts `make fetch-e2e-logs` in evidence mode, which the pipeline guide
+  may say.
+- **A pipeline attempt that found no run is present, failed evidence**, so the
+  gathering never retries it; only `gather --kind pipeline`, which dispatches anew,
+  replaces it. `make validate-local` names `HEAD` as `commit` even when it ran before
+  the commit it describes; the tree is its identity.
+- **Archive cleanup commits a cleanup's tracked file first** (found in section 7). A
+  file the engine's cleanup wrote before the session dirtied every check before the
+  commit that step 8 made, so the Worktree check now commits each such file alone
+  before anything else.
+- **The inverted skill test's reading of "the workflow's own"** (CW-n8tr). Besides
+  the workflow's guidance, OpenSpec's tree, the change index, the fragment's targets,
+  and the engine's command, it admits the engineering guidance — the layer the
+  workflow's guidance links, which eight skills cite — the engine's package, and the
+  outcome schema, both in the engine's assumptions; a guidance file by its
+  frontmatter's layer, not its directory; a change or capability only by a
+  placeholder; and a fragment target only in a placeholder checkout. The step table
+  and `.claude/` are exemptions owned by `sandbox-unattended-workflow-steps`, since
+  the allowlist they hold is that change's to replace. The exemptions are a table in
+  `market-change-workflow`'s companion because the repository's comment check refuses
+  a change's name in a test. Amending CW-n8tr's wording was declined as design's.
+- **Declined from the fresh-context checks:** the `{kind}`-for-triage rule stated in
+  both the wrapper and the CLI, each reading the kind its own way; the CLI's `run
+  before|after` borrowing the wrapper's seams, its one set; `--event
+  workflow_dispatch` for the pipeline's collect, which the target never passed; the
+  uv preflight's detail in a guide, the preflight being no kind's.
+- **Deferred:** `dev` and `origin` named as the landing branch and its remote in
+  `change-design`'s prerequisite proposal, `change-implement`'s merge resolution,
+  `change-orchestrate`'s merges and pull request, and `guidance-review`'s proposal
+  branch — no target or path, so CW-n8tr's test admits them — recorded as an unowned
+  gap of the lesser goal; and `change-implement`'s `docker compose -p <change>-local`
+  form, which no step-table rule matches, the step table's command forms being
+  `sandbox-unattended-workflow-steps`'.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — the workflow knows evidence, not parts; an extension attaches to what it extends | CW-zkhs and CW-k7gd in `openspec/specs/change-workflow/spec.md`, through the archive; `openspec/specs/change-workflow/README.md#validation-observes-a-committed-slice` and `#what-an-adopting-repository-provides` |
+| D2 — evidence describes a tree, or a commit where its result depends on history; the unignored-file risk | CW-t3ev and CW-g1gn; `change-workflow/README.md#validation-observes-a-committed-slice`, and `#current-limits` for the risk |
+| D3 — evidence counts by its presence, whoever produced it | CW-p4rs; `change-workflow/README.md#validation-observes-a-committed-slice` |
+| D4 — the engine reports presence; validation gathers what is missing and assesses everything | CW-e2vd, CW-a8ss, and CW-g6th; `change-workflow/README.md#validation-observes-a-committed-slice` and `#the-command-and-its-tiers` |
+| D5 — a kind is required always or when owed | CW-r5qk and CW-5h8e; `change-workflow/README.md#validation-observes-a-committed-slice` and `#sections-are-slices-sessions-are-the-owners`; `.agents/skills/change-plan/SKILL.md`; the CI guide `.agents/evidence/ci.md` |
+| D6 — the configuration is the engine's injection, the guide the skill's | CW-d1nj, CW-g2rs, CW-g4oz, and CW-o6kc; `change-workflow/README.md#a-repositorys-configuration`; `docs/change-workflow-handbook.md#customization` |
+| D7 — the engine acts around steps, and a repository hooks each one | CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np, CW-b2xr, CW-v2dq, and CW-q5fy; `change-workflow/README.md#a-step-runs-life`, `#the-hooks`, `#restrictions-bind-unattended-runs-only`, and `#routing-is-code-with-the-model-as-backstop`; `docs/change-workflow-handbook.md#what-each-step-does` and `#customization` |
+| D8 — hooks have no defaults | CW-h3ks; `change-workflow/README.md#the-hooks`; `scripts/change_workflow/workflow.mk`'s comment |
+| D9 — the base skills name no repository's targets or paths | CW-n8tr and CW-m4ps; MCW-5tgp in `openspec/specs/market-change-workflow/spec.md`; `change-workflow/README.md#leaf-skills-from-one-source` and `#what-an-adopting-repository-provides`; `market-change-workflow/README.md#what-the-workflows-skills-name-of-this-repository` |
+| D10 — the workflow does not defend its obligations against its own repository | CW-c5nt; `change-workflow/README.md#a-repositorys-configuration` and `#leaf-skills-from-one-source` |
+| D11 — the check holds structure | CW-w8ne's refusals as CW-g4oz, CW-t3ev, CW-g1gn, CW-r5qk, CW-k7gd, and CW-v2dq state them; `change-workflow/README.md#a-repositorys-configuration` |
+| D12 — reviews read what the reviewed step was given | CW-k7gd; `.agents/skills/change-review/SKILL.md` |
+| D13 — the orchestrating session | `.agents/skills/change-orchestrate/SKILL.md`; `change-workflow/README.md#the-orchestrator-relays-and-routes` |
+| D14 — end-to-end scenarios stay the workflow's | No permanent destination beyond the pipeline and CI guides, `.agents/evidence/pipeline.md` and `ci.md`: CW-av28 is unchanged |
+| D15 — the public interfaces changed | No permanent destination of its own: the interfaces are recorded in the requirements above and in `change-workflow/README.md#interfaces-are-tiered` and `#the-command-and-its-tiers` |
+| D16 — this repository's first guides and hooks | MCW-r4tx and MCW-5tgp; `market-change-workflow/README.md#validations-evidence-kinds` and `#how-this-repository-provides-the-workflows-roles`; `.agents/evidence/` |
+| D17 — implementation cadence | No permanent destination: the cadence is the change's own |
+| Settled during implementation (above) | History's matching, `change-workflow/README.md#history-lives-in-the-owners-workspace`; the waiver's lapse, CW-e7lm and `#validation-observes-a-committed-slice`; a review's question, `#the-orchestrator-relays-and-routes`; the scripts' tree and attempts, `market-change-workflow/README.md#validations-evidence-kinds`; the deferred landing branch and remote, `change-workflow/README.md#current-limits` and the change index's unowned gaps |
+| Roadmap currency | No roadmap goal affected; the change serves a lesser goal of the change index |
+| Campaign index currency | `openspec/changes/README.md`, "Lesser goal — Make the change workflow a tool any repository can adopt": the row, "Current state", the gap closed, and two unowned gaps |
 
 ## Open Questions
 

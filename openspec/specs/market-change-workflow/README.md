@@ -2,18 +2,18 @@
 
 The change workflow ([`change-workflow`](../change-workflow/README.md)) asks each
 repository that adopts it to fill a set of roles. This document says how this
-repository fills them, and why its own part of the workflow — validation's parts, the
-isolation of each change's Helm validation, its workflow values, and its checks — is
-shaped as it is. The [specification](spec.md) states this repository's requirements, and its
-[index](index.md) organizes them by id.
+repository fills them, and why its own part of the workflow — validation's evidence
+kinds, the isolation of each change's Helm validation, its workflow values, and its
+checks — is shaped as it is. The [specification](spec.md) states this repository's
+requirements, and its [index](index.md) organizes them by id.
 
 ## This repository is the workflow's first adopter
 
 The workflow is meant to be adopted by other repositories, and what every adopting
 repository will need is worked out here first. A general requirement in
 `change-workflow` states the rule and where a repository's part plugs in —
-validation's parts are the repository's (CW-zkhs); the push refuses the repository's
-protected branches (CW-59c7) and runs its pre-push hook where it declares one
+validation's evidence kinds are the repository's (CW-zkhs); the push refuses the
+repository's protected branches (CW-59c7) and runs its pre-push hook where it declares one
 (CW-p7kq); each step runs on the models the repository prefers (CW-ebmo); the clone's
 bootstrap is the repository's (CW-8npg) — and this capability states what this
 repository adds. It is the shape every adopting repository's own capability will
@@ -22,31 +22,63 @@ never need to be read out of them. The engine holds none either: this repository
 values are fields of its workflow configuration, `.agents/workflow.toml` (MCW-5tgp),
 and the branch a change lands on and the remote it is pushed to are read from Git.
 
-## Validation's parts
+## Validation's evidence kinds
 
 Validation describes one commit and fixes nothing (CW-a7dw, CW-af15). What evidence
 a commit of this repository needs follows from what it ships — Python packages built
 into wheels, services deployed by Helm charts, and end-to-end scenarios across
-several market lanes — so `.agents/workflow.toml` declares four parts (MCW-r4tx):
-`pipeline`, the end-to-end pipeline, dispatched by `make run-e2e` and collected by
-`make fetch-e2e-logs`; `ci`, owed, dispatched once per owed workflow by `make run-ci`
-and judged by `make validate-ci`; `local`, `make validate-local`; and `helm`, `make
-validate-helm`, declared after `local`, never beside it, since the two share Docker
-and the CPU. The two dispatches start first, the pipeline being the slowest. Each
-dispatch ends its output with the bare id of the workflow's newest run before it,
-the marker its collect waits past. A preflight, `make check-uv-version`, runs before
-every part. No local suite stands in for the pipeline, and the pipeline does not
-deploy the charts, so each part reports what only it can show. A validation for which
-the owner wants every Helm scenario, or another cluster, passes `HELM_ALL_SCENARIOS`
-or `HELM_CONTEXT` through the environment, which the Helm part's targets read; they
-are values of the owner's machine, not of the configuration.
+several market lanes — so `.agents/workflow.toml` declares four evidence kinds
+(MCW-r4tx): `pipeline`, the end-to-end pipeline, dispatched by `make run-e2e` and
+collected by `make fetch-e2e-logs`; `ci`, owed, dispatched once per owed workflow by
+`make run-ci` and judged by `make validate-ci`; `local`, `make validate-local`; and
+`helm`, `make validate-helm`, declared after `local`, never beside it, since the two
+share Docker and the CPU. The two dispatches start first, the pipeline being the
+slowest. Each dispatch ends its output with the bare id of the workflow's newest run
+before it, the marker its collect waits past. A preflight, `make check-uv-version`,
+runs before every kind. No local suite stands in for the pipeline, and the pipeline
+does not deploy the charts, so each kind reports what only it can show. A validation
+for which the owner wants every Helm scenario, or another cluster, passes
+`HELM_ALL_SCENARIOS` or `HELM_CONTEXT` through the environment, which the Helm kind's
+targets read; they are values of the owner's machine, not of the configuration.
 
-Each part keeps its evidence under `.snapshot/`: the local and Helm parts under
-`.snapshot/validation/<commit>/`, the `ci` part its job logs under
-`.snapshot/validation/<short commit>/ci/`, and the pipeline its logs under
-`.snapshot/e2e-logs/<run>/`. These are the evidence directories a change's records
-name, which `make change-history` copies into the owner's workspace and which move
-with a change into its clone.
+What an agent is told about each kind is its guide under `.agents/evidence/` —
+[`local.md`](../../../.agents/evidence/local.md),
+[`helm.md`](../../../.agents/evidence/helm.md),
+[`pipeline.md`](../../../.agents/evidence/pipeline.md), and
+[`ci.md`](../../../.agents/evidence/ci.md): how to read its evidence and tell its
+failures apart, its section of the validation record, what its cleanup writes, and
+what a plan names for it — where the scenarios are named, which CI workflows may be
+owed, and the owed line's form. The guides restate none of the configuration.
+
+`local` and `helm` describe the Git tree they ran on, and keep their evidence under
+`.snapshot/evidence/<tree>/<kind>/`; `pipeline` and `ci` describe the commit, under
+`.snapshot/evidence/<commit>/pipeline/` and `.snapshot/evidence/<commit>/ci-<workflow>/`,
+since the run each collects is the one dispatched for that commit (MCW-zk52, MCW-7hr1)
+and the CI kind's baseline is chosen by the commit's ancestry (MCW-2lzw), so neither
+may stand for another commit sharing its tree. Each attempt is a directory named by
+its UTC start time, `%Y%m%dT%H%M%S.%fZ`, so path order is time order, holding a
+`summary.json` that names its kind, tree, commit, and attempt beside its logs; a rerun
+sits beside the attempt it replaces. Each target takes its identity, `TREE=` or
+`COMMIT=`, as the engine fills `{tree}` and `{commit}`, refuses one the checkout does
+not hold, and without one describes what the checkout holds. The tree kinds check the
+tree before and after every step rather than a clean worktree, so they run on a
+worktree with changes, and a change to the tree mid-run fails the step. These are the
+evidence a change's records name, which `make change-history` copies into the owner's
+workspace and which move with a change into its clone.
+
+The functional checks before a commit are the `local` kind's own run: the
+configuration's `pre-commit-functional` is `make validate-local TREE={tree}`, which
+clears the wheelhouse, checks packaging, and runs every suite on the worktree as it
+stands, so the commit an implementation, triage, or merge makes already has its
+`local` evidence, and validation finds it present. That attempt's `summary.json`
+names as `commit` the `HEAD` it started on, the commit before; its tree is its
+identity. This repository's scripts compute the tree as the engine does, from a copy
+of the index keeping its time, since a script reaches the engine only through its
+command, which prints no tree.
+
+A pipeline fetch keeps an attempt whatever it found, so a fetch that found no run
+leaves a failed attempt saying why, which the gathering treats as present; only a new
+attempt of the kind, which dispatches a new run, replaces it.
 
 Validation never relocks: `make lock` would silently repair the stale lock `make
 check-packaging` exists to report, so relocking belongs to implementation, and a
@@ -54,12 +86,12 @@ stale lock sends the slice back.
 
 The wheelhouse in `.dist` is shared by every branch built in the checkout, and
 environments sync internal packages with an upgrade, so a higher version another
-branch left behind is installed in place of the one the commit builds. Each part
-that builds therefore starts from `make dist-clean`; the `ci` part builds nothing
+branch left behind is installed in place of the one the commit builds. Each kind
+that builds therefore starts from `make dist-clean`; the `ci` kind builds nothing
 (MCW-v3tf). End-to-end evidence comes from a pipeline run whose head is the commit,
 never an earlier run (MCW-zk52).
 
-The Helm part builds the service images, runs the chart's render checks, a skipped
+The Helm kind builds the service images, runs the chart's render checks, a skipped
 one failing (MCW-qeja), and runs the pipeline scenarios the default charts can serve,
 reporting every other one as not run against Helm rather than as passed (MCW-8h0r).
 It never starts from state another commit wrote, and never reaches another change's
@@ -67,10 +99,10 @@ deployment.
 
 ### The change's namespace
 
-Each change's Helm part deploys into a namespace of its own, `validate-<change>`, so
+Each change's Helm kind deploys into a namespace of its own, `validate-<change>`, so
 two changes' validations never uninstall each other's release (MCW-fnuh). A namespace
 alone does not isolate images: every image the chart deploys is pulled
-`IfNotPresent` from the one Docker daemon the development cluster reads, so the part
+`IfNotPresent` from the one Docker daemon the development cluster reads, so the kind
 builds every image under a tag fixed per change, the bare tag with `-<change>`
 appended, and deploys those tags. A tag per change, never per commit: a rebuilt image
 under a fixed tag rolls out by restarting pods, and two changes never write one tag,
@@ -78,7 +110,7 @@ so no build lock is needed. A namespace per validated commit was rejected becaus
 they accumulate; one per change is bounded by the active changes.
 
 The release is replaced by upgrading it from zero rather than uninstalling it
-(MCW-a0hu): the part scales the release's workloads to zero if a crashed run left any
+(MCW-a0hu): the kind scales the release's workloads to zero if a crashed run left any
 up, deletes its volume claims and the out-of-band test volume, waits until they are
 gone, creates the namespace's Secrets from development values, and upgrades the
 release, which restores the replica counts, so every pod starts new on the images
@@ -91,15 +123,15 @@ The scenarios run as a pod inside the namespace, from the change's own test imag
 and the release's in-cluster configuration, reaching services by name as the
 pipeline's lanes do on their compose network (MCW-notv); no local port is involved,
 since forwarding free ports per validation would need every scenario's addresses and
-the registry's published address overridden. Afterwards the part keeps every pod's
+the registry's published address overridden. Afterwards the kind keeps every pod's
 log, the namespace's events, the other namespaces' replica counts, and the rendered
 requests and limits beside the previous validation's, then scales the namespace to
 zero, keeping objects and volumes: leaving releases running would grow resident
-memory with the active changes. Without a change named, the part deploys into
+memory with the active changes. Without a change named, the kind's target deploys into
 `default` on bare tags, refusing a release volume an earlier install kept.
 
 `make validate-parallel CLONES="<clone> <clone>"` checks that isolation on the
-development cluster: it runs two clones' Helm parts at the same moment and reports
+development cluster: it runs two clones' Helm validations at the same moment and reports
 whether each kept to its own namespace, tags, and scenario pod, and left the other's
 release, volumes, and pods untouched, under `.snapshot/parallel-validation/<time>/`.
 It deploys two changes' releases, so it is a check of the tooling run by hand, not
@@ -155,26 +187,27 @@ scale-to-zero would bring back the cross-change coordination per-change namespac
 and tags removed, and recovery of a lease a crashed validation left, to prevent a
 failure that costs one rerun.
 
-A pod that then fails for memory is classified from the evidence the part kept, as
+A pod that then fails for memory is classified from the evidence the kind kept, as
 any failure is, since a commit that raises a request, lowers a limit, or leaks fails
 the same way (MCW-epkd): unscheduled or evicted while another change's release was
 up is contention, environmental whatever the resources, with any resource change
 named beside the remedy; killed at its own limit, with the limit in the rendered
 resources and no node pressure, is the commit's; anything else is of unknown cause.
 
-The figure, in `helm/validation-capacity.toml`, is written by archive cleanup from
-the change's latest validation, and only when that validation measured memory, so
+The figure, in `helm/validation-capacity.toml`, is written by the Helm kind's
+cleanup before archive cleanup's session, from the current Helm attempt of the tree
+the change's latest validation names, and only when that attempt measured memory, so
 a cluster with no metrics source leaves it absent and the preflight warns that it
 skipped its check; installing a metrics source cluster-wide for an advisory check
-was rejected. Archive cleanup also removes the change's namespace and images
-(MCW-7ts3). The figure is advisory and expected to be overwritten often — no
+was rejected. The cleanup also removes the change's namespace and images
+(MCW-7ts3), and archive cleanup commits the figure alone, as the Helm guide says. The figure is advisory and expected to be overwritten often — no
 branch's measurement is of the merged code, branches differ little, and it creeps
 up as the code grows — so a merge conflict over it keeps the later measurement.
 
 ### Evidence only a push produces
 
-The `ci` part dispatches, on the change's branch, each workflow a complete section
-owes, and judges the owed job and its observation from the run of the validated
+The `ci` kind dispatches, on the change's branch, each workflow a complete section
+owes as `Owed by validation (ci <workflow>):`, and judges the owed job and its observation from the run of the validated
 commit (MCW-gvqb, MCW-7hr1). It dispatches only workflows on a fixed list in its
 script, `scripts/ci_evidence.py`, which holds `tests.yml` (MCW-3i99): three workflows
 that accept a dispatch publish, so a plan line naming one would publish from a
@@ -216,7 +249,7 @@ with `dev` checked out records `dev` as the change's landing branch, which the m
 before closeout brings in and reviews read the change against, which a prerequisite
 change is proposed from, which the orchestrating session merges into a change's
 branch on the owner's word, and whose latest completed CI run is the baseline the
-`ci` part compares failures with. Nothing here makes `dev` a default: a change whose
+`ci` kind compares failures with. Nothing here makes `dev` a default: a change whose
 clone was made from another branch lands there.
 
 The make fragment's targets complete in bash: source
@@ -513,16 +546,21 @@ workflow configuration, `.agents/workflow.toml`, or what the configuration does 
 hold. A test (`scripts/tests/test_change_workflow_assumptions.py`) fails when a make
 target or repository path the workflow's step table or its make fragment names, the
 fragment's own targets among them, is missing from these two tables and from the
-configuration's commands, or when the two documents' roles differ.
+configuration's commands, or when the two documents' roles differ. The workflow's
+skills name none of this repository's targets or paths but the exemptions below
+([What the workflow's skills name of this repository](#what-the-workflows-skills-name-of-this-repository)).
+This repository declares no step hook, `before-<step>` or `after-<step>`: the engine's
+own gathering before validation and cleanup before archive cleanup are all it needs
+around a step.
 
 | Role | Provided by |
 |---|---|
-| Local validation of a commit: the repository's own checks and suites against the commit, built from it | the configuration's validation preflight, then its `local` part; `scripts/validate_slice.py`, which runs the local and Helm parts against the commit, clearing the wheelhouse first, and writes their evidence under `.snapshot/validation/`; the family `make validate-*` the step table grants the steps that fix code |
-| Validation in a deployed environment: the change's services built and run as the repository deploys them | the configuration's `helm` part, after `local`; `make validate-parallel*`, and the chart's render checks `make -C helm test-render`, in the change's own namespace, within the capacity `helm/validation-capacity.toml` records |
-| The end-to-end pipeline: a run whose head is the commit, its logs fetched | the configuration's `pipeline` part, dispatching the run and collecting its logs into `.snapshot/e2e-logs/`; the scenarios under `e2e-tests/`; the step table denies `make run-e2e*` to the steps that fix code |
-| CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | the configuration's owed `ci` part, dispatching only the workflows `scripts/ci_evidence.py` lists |
-| Removing a change's validation resources, and recording what they used, at archive cleanup | the `helm` part's `cleanup`, recording the capacity measured into `helm/validation-capacity.toml`, then removing the change's namespace and images |
-| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change`, `make lock`, and `pre-commit-functional`, `make dist-clean`, `make check-packaging`, and `make test`; the step table's grants for engineering work: `make test` and `make test*`, `make -C * test*` in a project (`make -C <package> test`), and one project's tests run directly as `uv run --directory * pytest *`, `uv run --project * pytest *`, or `uv run --find-links * pytest *`; `make lock`, `make lock*`; `make dist*`, `make -C * dist*`; `make init*`, `make -C * init*`; `make reinit*`, `make -C * reinit*`, and `make typecheck*`, `make -C * typecheck*`, and `make -C * first-use*`, the targets of a project's own `Makefile`; `uv lock --directory *`, a new project's first lock; a section's local bring-up, `make -C * migrate*` (`make -C <package> migrate`), `docker run --rm *`, and `docker compose -p *` up, down, ps, and logs under a project name of the session's own; `make build-*`, the images a lane runs, `make -C * e2e-*-down`, a lane's teardown, and `make -C e2e-tests e2e-*-logs`, its containers' logs; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
+| Local validation of a commit: the repository's own checks and suites against the commit, built from it | the configuration's validation preflight, then its `local` evidence kind, which `pre-commit-functional` also runs, and its guide `.agents/evidence/local.md`; `scripts/validate_slice.py`, which runs the local and Helm kinds against the tree, clearing the wheelhouse first, and writes their evidence under `.snapshot/evidence/`; the family `make validate-*` the step table grants the steps that fix code |
+| Validation in a deployed environment: the change's services built and run as the repository deploys them | the configuration's `helm` kind, after `local`, and its guide `.agents/evidence/helm.md`; `make validate-parallel*`, and the chart's render checks `make -C helm test-render`, in the change's own namespace, within the capacity `helm/validation-capacity.toml` records |
+| The end-to-end pipeline: a run whose head is the commit, its logs fetched | the configuration's `pipeline` kind, dispatching the run and collecting its logs into `.snapshot/evidence/`, and its guide `.agents/evidence/pipeline.md`; the scenarios under `e2e-tests/`; the step table denies `make run-e2e*` to the steps that fix code |
+| CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | the configuration's owed `ci` kind, dispatching only the workflows `scripts/ci_evidence.py` lists, and its guide `.agents/evidence/ci.md` |
+| Removing a change's validation resources, and recording what they used, at archive cleanup | the `helm` kind's `cleanup`, recording the capacity measured into `helm/validation-capacity.toml`, then removing the change's namespace and images |
+| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change`, `make lock`, and `pre-commit-functional`, `make validate-local`, which clears the wheelhouse, checks packaging, and runs every suite; the step table's grants for engineering work: `make test` and `make test*`, `make -C * test*` in a project (`make -C <package> test`), and one project's tests run directly as `uv run --directory * pytest *`, `uv run --project * pytest *`, or `uv run --find-links * pytest *`; `make lock`, `make lock*`; `make dist*`, `make -C * dist*`; `make init*`, `make -C * init*`; `make reinit*`, `make -C * reinit*`, and `make typecheck*`, `make -C * typecheck*`, and `make -C * first-use*`, the targets of a project's own `Makefile`; `uv lock --directory *`, a new project's first lock; a section's local bring-up, `make -C * migrate*` (`make -C <package> migrate`), `docker run --rm *`, and `docker compose -p *` up, down, ps, and logs under a project name of the session's own; `make build-*`, the images a lane runs, `make -C * e2e-*-down`, a lane's teardown, and `make -C e2e-tests e2e-*-logs`, its containers' logs; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
 | The packaging check before closeout | the configuration's `pre-commit-functional` and `pre-archive`: `make check-packaging`, which runs `make check-architecture` over `docs/development/ARCHITECTURE.toml`, and `make check-architecture-change` |
 | The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `scripts/change-workflow run pre-commit`; the checks they run and the step table grants as `make check-*` and `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index` |
 | The change index at a known path | `openspec/changes/README.md`, checked in a prerequisite's proposal checkout beside this one by `make -C ../<prerequisite>-proposal check-change-index` (`make -C ../*-proposal check-change-index`) |
@@ -546,7 +584,7 @@ review.
 | The change index's path | `openspec/changes/README.md` |
 | Its command and package, beside each other under `scripts/` | `scripts/change-workflow` and `scripts/change_workflow/`, whose computation and graph the orchestrating skill cites, `scripts/change_workflow/next_step.py` and `scripts/change_workflow/graph.py` |
 | The repository's workflow configuration, at a fixed path, checked whenever it is read | `.agents/workflow.toml`, which the step table denies every step to edit |
-| The step table, at a fixed path, in Claude Code's permission-rule syntax | `.claude/change-steps.toml`, its rules guarding `.claude/**` and `.agents/workflow.toml`, and granting the engine's `scripts/change-workflow run` for the hooks, `scripts/change-workflow openspec` for the configured OpenSpec command, and `scripts/change-workflow config` |
+| The step table, at a fixed path, in Claude Code's permission-rule syntax | `.claude/change-steps.toml`, its rules guarding `.claude/**` and `.agents/workflow.toml`, and granting the engine's `scripts/change-workflow run` for the hooks, `scripts/change-workflow gather` to validation, `scripts/change-workflow evidence` to the steps reading a validation, `scripts/change-workflow openspec` for the configured OpenSpec command, and `scripts/change-workflow config` |
 | The outcome schema, at a fixed path | `.agents/change-outcome.schema.json` |
 | The skills' one source, linked into each harness's directory | `.agents/skills`, under `.agents/`, linked from `.claude/` and `.codex/` |
 | The harness's local settings, which a clone links to the workspace's | `.claude/settings.local.json` |
@@ -554,7 +592,7 @@ review.
 | The graph diagram's place in this capability | `openspec/specs/change-workflow/diagrams/`, the workflow's own specification being `openspec/specs/change-workflow/spec.md` |
 | The `workspace` remote a clone names the owner's workspace by | `workspace`, set by `scripts/change-workflow clone` |
 | The harness's session id in the environment, `CLAUDE_CODE_SESSION_ID` | Claude Code's |
-| The tools it invokes, `git`, `claude`, `codex`, and `sh`, which runs every command the configuration declares | each on the owner's path; the configuration's commands run `make`, and its `ci` and `pipeline` parts `gh` |
+| The tools it invokes, `git`, `claude`, `codex`, and `sh`, which runs every command the configuration declares | each on the owner's path; the configuration's commands run `make`, and its `ci` and `pipeline` kinds `gh` |
 
 ## What the workflow's skills name of this repository
 
