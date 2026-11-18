@@ -1,13 +1,14 @@
 """A whole-host on-demand rate deal that runs to its maximum term, on the mock bare-metal lane.
 
 A profiled buyer buys a recurring on-demand option on one whole host through
-``market bare-metal buy``. The deal is delivered at the Agreement's start; lane
-time is then brought to the Agreement's end a period at a time, the deal staying
-funded, and one servicing step records the rate part's ``terms`` end there,
-returning a final partial period, and tears the deal down, after which the
-buyer's read names no funding stop. The stages are the recurring purchase's
-through its accepted money, then ``rate_servicing_stages.py``'s maximum-term
-row. Lane-double evidence; mock access is never evidence of real SSH.
+``market bare-metal buy``. The deal is delivered at the Agreement's start; the
+payments double then reserves the part through the Agreement's end, which the
+shared buyer's balance pays for, and lane time is set there, where one servicing
+step records the rate part's ``terms`` end, returning a final partial period,
+and tears the deal down, after which the buyer's read names no funding stop. The
+stages are the recurring purchase's through its accepted money, then
+``rate_servicing_stages.py``'s reservation and maximum-term row. Lane-double
+evidence; mock access is never evidence of real SSH.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
 from tests.e2e.roles.helpers.rate_servicing_stages import (
     MaximumTerm07_TermEnds,
     MaximumTerm08_NotFundsRunningOut,
+    Reservation06_ThroughTheAgreementsEnd,
 )
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     Recurring04_MandateApproved,
@@ -172,6 +174,10 @@ class TestRecurring07_AcceptedMoneyShown(Recurring07_AcceptedMoneyShown):
 
 
 class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
+
+
+class TestReservation06_ThroughTheAgreementsEnd(Reservation06_ThroughTheAgreementsEnd):
     pass
 
 

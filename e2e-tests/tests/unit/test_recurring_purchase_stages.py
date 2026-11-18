@@ -12,6 +12,8 @@ mock gates around them, the purchase stages, the stages of
 ``recurring_purchase_stages.py`` and, for a row, those of
 ``rate_servicing_stages.py`` — once each, in one order, with an empty body, and
 inserts only its listing stage and its stage closing the listing between them.
+A row setting lane time past its part's first reservation declares the payments
+double's reservation before that stage.
 A domain stage defined outside a scenario module, which a scenario subclasses,
 is read from its own module, so the handoff check sees what it writes.
 """
@@ -117,24 +119,32 @@ RECURRING_ORDER = [
     *READINESS, *PURCHASE, *DELIVERY, "Recurring08_BuyerEnds", *TEARDOWN,
     "Recurring09_PayerChargedOnePeriod", "Recurring10_SellerListsTheDealEnded",
 ]
-#: Funds running out: the second payer funded before the purchase, the deal
-#: stopped at its funded boundary, and the buyer told after the teardown.
+#: The payments double's further reservation, which a row declares before the
+#: stage setting lane time past the part's first reservation.
+RESERVATION = "Reservation06_ThroughTheAgreementsEnd"
+#: Funds running out: the second payer funded before the purchase, the part
+#: reserved as far as the balance pays, the deal stopped at its funded
+#: boundary, and the buyer told after the teardown.
 FUNDS_EXHAUSTED_ORDER = [
-    *READINESS, "Exhaustion00_PayerFundedForTwoPeriods", *PURCHASE, *DELIVERY,
-    "Exhaustion07_FundsRunOut", *TEARDOWN, "Exhaustion08_BuyerToldANewDealIsNeeded",
+    *READINESS, "Exhaustion00_PayerFundedOnePeriodBeyondTheFirstReservation", *PURCHASE,
+    *DELIVERY, RESERVATION, "Exhaustion07_FundsRunOut", *TEARDOWN,
+    "Exhaustion08_BuyerToldANewDealIsNeeded",
 ]
-#: A spot seller's preemption: the notice held, the stop taking effect, and the
-#: payer's return after the teardown.
+#: A spot seller's preemption: the notice held, the stop taking effect inside
+#: the part's first reservation, and the payer's return after the teardown.
 PREEMPTION_ORDER = [
     *READINESS, *PURCHASE, *DELIVERY, "Preemption07_SellerNoticeHeld",
     "Preemption08_StopTakesEffect", *TEARDOWN, "Preemption09_UnstartedPeriodReturned",
 ]
-#: The maximum term: the part ending at the Agreement's end, and the buyer's
-#: read after the teardown.
+#: The maximum term: the part reserved through the Agreement's end, ending
+#: there, and the buyer's read after the teardown.
 MAXIMUM_TERM_ORDER = [
-    *READINESS, *PURCHASE, *DELIVERY, "MaximumTerm07_TermEnds", *TEARDOWN,
+    *READINESS, *PURCHASE, *DELIVERY, RESERVATION, "MaximumTerm07_TermEnds", *TEARDOWN,
     "MaximumTerm08_NotFundsRunningOut",
 ]
+#: Each row stage that sets lane time past the part's first reservation, which
+#: the reservation must precede in its module.
+SETS_PAST_THE_FIRST_RESERVATION = ("Exhaustion07_FundsRunOut", "MaximumTerm07_TermEnds")
 
 ORDERS = {
     SCENARIOS / "vms" / "test_vm_recurring_purchase.py": RECURRING_ORDER,
@@ -220,6 +230,19 @@ def test_a_module_declares_the_shared_stages_once_in_order(scenario: Path):
 @pytest.mark.parametrize("scenario", ORDERS, ids=_label)
 def test_each_stage_is_handed_what_it_reads_by_an_earlier_stage(scenario: Path):
     assert handoff_faults(scenario) == []
+
+
+@pytest.mark.parametrize("scenario", ORDERS, ids=_label)
+def test_a_row_reserves_before_it_sets_lane_time_past_the_first_reservation(scenario: Path):
+    """A row's stage setting lane time past the part's first reservation comes
+    after the double's reservation, so the part is still funded there; a module
+    with no such stage declares no reservation."""
+    order = ORDERS[scenario]
+    setters = [order.index(name) for name in SETS_PAST_THE_FIRST_RESERVATION if name in order]
+    if not setters:
+        assert RESERVATION not in order
+        return
+    assert RESERVATION in order and order.index(RESERVATION) < min(setters), order
 
 
 def test_a_recurring_stage_out_of_order_is_refused(tmp_path):

@@ -742,8 +742,9 @@ unready lane-owned target and reports a blocked skip for an unready external
 one, as the payments helper does. The harness writes the buyer's
 `[[DisputeCredential]]`, with its `api_key_env` and `ca_bundle_path`, and hands
 the buyer's token to each `market` process under that variable, never into the
-runner's environment. Bob's storefront holds his dispute credential, with the
-lane CA as its `ca_bundle_path`, in his secret overlay. The lanes run no
+runner's environment. Each compute lane's storefront, Bob's and bare metal's,
+holds the seller's dispute credential, with the lane CA as its
+`ca_bundle_path`, in its secret overlay. The lanes run no
 `check-mediation`: the VM payment scenario's case stages and the VM dispute
 scenarios prove the storefront's mediation access, and the local release's Helm
 test runs the check ([`chart-render-tests.md`](../guidance/repository/chart-render-tests.md#where-they-live-and-how-they-run)).

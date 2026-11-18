@@ -4,8 +4,8 @@ The development stacks take their configuration from committed overlays,
 registry and site profiles, and secret overlays, and several of those restate a
 value whose source is another file: a registry's or site's pinned identity, the
 key that signs as it; a storefront's payments key, the payments double's
-fixtures; the lanes' recommended dispute authority and Bob's credential toward
-it, the mediation double's fixture; a CA bundle path, where its overlay binds
+fixtures; the lanes' recommended dispute authority and each compute lane
+storefront's credential toward it, the mediation double's fixture; a CA bundle path, where its overlay binds
 the lane CA. Each test here fails naming both sides when one drifts. Every value
 involved is a public development value, never for a public network.
 """
@@ -274,17 +274,30 @@ def test_each_storefront_secret_overlay_fits_the_configuration_beside_it(stack: 
             assert not {"api_key", "api_key_env", "development_auth"} & set(stated), name
 
 
-def test_the_vm_lane_dispute_credential_is_the_sellers_at_the_mediation_double() -> None:
-    """Bob's credential is bound to the mediation double's identity, holds the
-    seller's token there, and trusts the lane CA where the VM lane mounts it."""
+# Each compute lane's payment storefront, by the secret overlay holding its
+# dispute credential.
+_DISPUTE_CREDENTIALS = {
+    "bob.storefront.secrets.toml": ("vm", "bob-storefront"),
+    "bare-metal.storefront.secrets.toml": ("bare-metal", "bare-metal-storefront"),
+}
+
+
+@pytest.mark.parametrize(("overlay", "lane"), sorted(_DISPUTE_CREDENTIALS.items()))
+def test_each_compute_lane_dispute_credential_is_the_sellers_at_the_mediation_double(
+    overlay: str, lane: tuple[str, str],
+) -> None:
+    """Each compute lane storefront's credential is bound to the mediation
+    double's identity, holds the seller's token there, and trusts the lane CA
+    where its lane mounts it."""
+    stack, service = lane
     authority = _toml(MEDIATION_AUTHORITY)
-    (credential,) = _toml(IDENTITIES / "bob.storefront.secrets.toml")["DisputeCredential"]
+    (credential,) = _toml(IDENTITIES / overlay)["DisputeCredential"]
     assert {key: credential[key] for key in IDENTITY_KEYS} == {
         key: authority[key] for key in IDENTITY_KEYS
     }
     assert credential["api_key"] == authority["accounts"]["seller"]["token"]
     assert "api_key_env" not in credential
-    mounts = _mounts(_render("vm")["bob-storefront"])
+    mounts = _mounts(_render(stack)[service])
     assert mounts.get(credential["ca_bundle_path"]) == str(LANE_CA), credential["ca_bundle_path"]
 
 

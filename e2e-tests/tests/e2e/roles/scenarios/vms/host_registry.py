@@ -117,12 +117,15 @@ E2E_DISPUTE_MEDIATION_UNAVAILABLE_RESOURCE_ID = "compute-e2e-dispute-mediation-u
 E2E_DISPUTE_PAYMENTS_HOLD_RESOURCE_ID = "compute-e2e-dispute-payments-hold-001"
 E2E_DISPUTE_HOLD_PASSED_RESOURCE_ID = "compute-e2e-dispute-hold-passed-001"
 #: The resource each VM rate servicing row lists, and the GPU model only it
-#: declares, which the row's ``market buy`` discovers it by.
+#: declares, which the row's ``market buy`` discovers it by. Each model is one
+#: the registry's filter spec admits (``core_registry/filter-spec.yaml``): its
+#: publication route refuses a listing naming a model outside that list, so the
+#: storefront holds the listing open while the registry answers a read of it 404.
 E2E_RATE_FUNDS_EXHAUSTED_RESOURCE_ID = "compute-e2e-rate-funds-exhausted-001"
 E2E_RATE_PREEMPTION_RESOURCE_ID = "compute-e2e-rate-preemption-001"
 E2E_RATE_MAXIMUM_TERM_RESOURCE_ID = "compute-e2e-rate-maximum-term-001"
-E2E_RATE_FUNDS_EXHAUSTED_GPU_MODEL = "RTX 4060"
-E2E_RATE_PREEMPTION_GPU_MODEL = "RTX 4060 Ti"
+E2E_RATE_FUNDS_EXHAUSTED_GPU_MODEL = "RTX 4080 Super"
+E2E_RATE_PREEMPTION_GPU_MODEL = "RTX 4070 Super"
 E2E_RATE_MAXIMUM_TERM_GPU_MODEL = "RTX 4070 Ti"
 
 

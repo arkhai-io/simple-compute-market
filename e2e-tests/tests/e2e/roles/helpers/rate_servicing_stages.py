@@ -9,25 +9,37 @@ Agreement's start and the rate part's start. It then arms the teardown gate
 (``Stage09c2``) and ends the deal one way:
 
 - **funds running out** — an on-demand deal paid by the lane's second payer,
-  funded with exactly two periods' price before the purchase
-  (``Exhaustion00``): lane time set past the second period's end, where the
-  payments double records a ``terms`` stop at the funded boundary; the
-  storefront records that end at the boundary and tears the deal down, and the
-  buyer's read says a top-up cannot revive it (``Exhaustion07``,
-  ``Exhaustion08``);
+  funded before the purchase with one period's price beyond the part's first
+  reservation (``Exhaustion00``): the part is reserved through the Agreement's
+  end, which the balance stops one period further (``Reservation06``), and lane
+  time is set to that funded boundary, where the payments double records a
+  ``terms`` stop; the storefront records that end at the boundary and tears the
+  deal down, and the buyer's read says a top-up cannot revive it
+  (``Exhaustion07``, ``Exhaustion08``);
 - **a spot seller's preemption** — the seller's notice, as ``deals preempt``
   sends it, held by the payments double as a pending stop until lane time
   reaches the request's time plus the Agreement's seller notice; the storefront
   then records the seller's stop at that instant and tears the deal down, and
-  the period it stops in is returned (``Preemption07`` to ``Preemption09``);
-- **the maximum term** — lane time brought to the Agreement's end, one period at
-  a time so the deal stays funded; the rate part ends there with ``returned``,
-  the storefront records the term end and tears the deal down, and the buyer's
-  read does not call it funds running out (``MaximumTerm07``, ``MaximumTerm08``).
+  the period it stops in is returned (``Preemption07`` to ``Preemption09``).
+  That instant falls inside the part's first reservation, so the row reserves
+  nothing further;
+- **the maximum term** — the part reserved through the Agreement's end
+  (``Reservation06``) and lane time set there; the rate part ends with
+  ``returned``, the storefront records the term end and tears the deal down, and
+  the buyer's read does not call it funds running out (``MaximumTerm07``,
+  ``MaximumTerm08``).
 
 Each then runs the canonical teardown, ``Stage11a2`` and ``Stage11b``. Every
-instant is reached by setting lane time, never by waiting; a wall-time run
-reaches only the Agreement's end, and the other rows are blocked there.
+instant is reached by setting lane time straight to it, never by waiting.
+
+The payments service reserves a started rate part further by its own
+scheduler; the lane's payments double reserves only when its reservation
+control is called, so a row setting lane time past the part's first
+reservation first programs that reservation, as the service's scheduler would
+have made it (``Reservation06``). That stage touches a control only the double
+has, so it is a stage of its own, declared only by these rows, which run only
+against a Compose lane's doubles on injected lane time; anywhere else it is a
+blocked skip, and so is every row stage after it, which reads what it reserved.
 
 No storefront route reads how it classified an end, so a row observes what
 follows from the classification: the end recorded with its cause and instant,
@@ -42,6 +54,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -52,7 +65,8 @@ from market_deal_lifecycle_client import SyncSellerLifecycleClient
 from tests.e2e.roles.helpers.compute_deal import advance_storefront, assert_lease_watchdog_held
 from tests.e2e.roles.helpers.domain_deal import assert_market_run_succeeded, require_state
 from tests.e2e.roles.helpers.lane_doubles import payments_controls
-from tests.e2e.roles.helpers.payments import payment_setting
+from tests.e2e.roles.helpers.lane_time import LaneTime
+from tests.e2e.roles.helpers.payments import payment_flag, payment_setting
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     ASSET,
     PERIOD_GROSS,
@@ -60,7 +74,6 @@ from tests.e2e.roles.helpers.recurring_purchase_stages import (
     RecurringPurchaseDriver,
     RecurringPurchaseState,
     begin_teardown,
-    move_lane_time_through,
     payer_available,
     reach_lane_instant,
     transaction_snapshot,
@@ -68,8 +81,14 @@ from tests.e2e.roles.helpers.recurring_purchase_stages import (
 
 log = logging.getLogger(__name__)
 
-#: The periods the funds-running-out row's payer can pay for.
-FUNDED_PERIODS = 2
+#: The periods a rate part holds reserved once it starts: approval reserves the
+#: option's one period of reserve ahead, and the start tops the part up to cover
+#: that reserve ahead past its start, with the payments engine's minute of
+#: slack, which reaches into a second period.
+FIRST_RESERVATION_PERIODS = 2
+#: The periods the funds-running-out row's payer can pay for: one beyond the
+#: first reservation, so a further reservation adds exactly one.
+FUNDED_PERIODS = FIRST_RESERVATION_PERIODS + 1
 #: The spot row's seller notice: the shipped spot preset's realistic notice.
 SPOT_NOTICE_SECONDS = 120
 
@@ -79,6 +98,12 @@ class RateServicingState(RecurringPurchaseState):
     """What a rate servicing row's stages hand each other, beside the recurring
     purchase's."""
 
+    #: The instant the rate part's first reservation covered, read before
+    #: ``Reservation06`` reserves further.
+    first_reserved_through: Optional[int] = None
+    #: The instant the payments double's reservation control answered the part
+    #: reserved through: the funded boundary its snapshot then reports.
+    reserved_through: Optional[int] = None
     #: The instant the payments double stopped funding the deal.
     funded_boundary: Optional[int] = None
     #: The seller's notice was submitted at this lane instant, and its stop
@@ -112,6 +137,15 @@ def _recorded_end_with_no_filing(deal_driver: RecurringPurchaseDriver,
     return read
 
 
+def _require_lane_double(lane_time: LaneTime | None, what: str) -> None:
+    """A blocked skip unless the run is a Compose lane's: injected lane time and
+    the lane's own payments double, whose controls ``what`` calls."""
+    if lane_time is None or not lane_time.injected or not payment_flag("LANE_OWNED"):
+        pytest.skip(f"blocked: {what} is the lane's payments double's control, which only "
+                    "a Compose lane's injected run with its own payments target reaches "
+                    "(PAYMENTS.LANE_OWNED)")
+
+
 def _buyer_read(purchase_cli: Any, deal_driver: RecurringPurchaseDriver,
                 deal_state: RateServicingState) -> dict[str, Any]:
     """The buyer's own read of its run's deal, as its ``delivery`` command prints it."""
@@ -121,14 +155,58 @@ def _buyer_read(purchase_cli: Any, deal_driver: RecurringPurchaseDriver,
 
 
 # ===========================================================================
+# The payments double's further reservation
+# ===========================================================================
+
+class Reservation06_ThroughTheAgreementsEnd:
+    def test_r06_the_payments_double_reserves_the_part_through_the_agreements_end(
+        self, payments_config, lane_time, deal_state: RateServicingState,
+    ):
+        """The payments double reserves the running rate part through the
+        Agreement's end, as far as the payer's balance allows.
+
+        The payments service's scheduler would have kept the part reserved
+        ahead as lane time moved; the double reserves only when this control
+        asks, so the row programs it before setting lane time past the first
+        reservation. The control answers the one rate part and the instant it
+        is then reserved through, which the transaction's snapshot reports as
+        its funded boundary; any refusal fails the stage where it runs. The
+        Agreement's end is its start plus its duration, rounded up to the whole
+        second the payments mandate ends the part at.
+        """
+        require_state(deal_state, "_accepted_money_shown", "payer_account", "settlement_id",
+                      "agreement_end")
+        _require_lane_double(lane_time, "the further reservation")
+        first = int(_the_part(payments_config, deal_state)["rate"]["reservedThrough"])
+        end = math.ceil(deal_state.agreement_end.timestamp())
+        with payments_controls() as controls:
+            answer = controls.reserve(deal_state.settlement_id, end)
+        assert answer.transaction == deal_state.settlement_id, answer
+        (reserved,) = answer.parts
+        assert reserved.part == 0, answer
+        assert reserved.reserved_through <= end, answer
+        snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
+                                        deal_state.settlement_id)
+        (part,) = snapshot["parts"]
+        assert (int(part["rate"]["reservedThrough"]), snapshot.get("fundedThrough")) == (
+            reserved.reserved_through, reserved.reserved_through), (answer, snapshot)
+        deal_state.first_reserved_through = first
+        deal_state.reserved_through = reserved.reserved_through
+        log.info("[r06] Transaction %s's rate part, reserved through %s, reserved through %s "
+                 "toward the Agreement's end %s: %s periods added", deal_state.settlement_id,
+                 first, reserved.reserved_through, end, reserved.periods_added)
+
+
+# ===========================================================================
 # Funds running out
 # ===========================================================================
 
-class Exhaustion00_PayerFundedForTwoPeriods:
-    def test_e00_the_rate_payer_holds_exactly_two_periods(
-        self, payments_config, deal_state: RateServicingState,
+class Exhaustion00_PayerFundedOnePeriodBeyondTheFirstReservation:
+    def test_e00_the_rate_payer_holds_one_period_beyond_the_first_reservation(
+        self, payments_config, lane_time, deal_state: RateServicingState,
     ):
-        """The lane's second payer is funded with exactly two periods' price.
+        """The lane's second payer is funded with one period's price beyond the
+        part's first reservation.
 
         It starts with nothing, and only this row funds it, through the
         payments double's funding control; a run before this one on the same
@@ -136,6 +214,7 @@ class Exhaustion00_PayerFundedForTwoPeriods:
         the balance out or was stopped, returning what it had not earned. The
         purchase then pays from it (``Purchase01`` reads it as the payer).
         """
+        _require_lane_double(lane_time, "funding the rate payer")
         payer = str(payment_setting("RATE_PAYER_ACCOUNT"))
         assert payer, "PAYMENTS.RATE_PAYER_ACCOUNT is required for funds running out"
         funded = FUNDED_PERIODS * PERIOD_GROSS
@@ -158,28 +237,38 @@ class Exhaustion07_FundsRunOut:
         self, payments_config, provisioning_client, storefront_admin_client, lane_time,
         deal_driver: RecurringPurchaseDriver, deal_state: RateServicingState,
     ):
-        """Lane time past the second period's end stops the deal at its funded boundary.
+        """Lane time at the funded boundary stops the deal there.
 
-        The payer's balance paid for two periods from the rate part's start,
-        so the payments double funds the deal through their end and no
-        further. Lane time is set one second past that boundary and the
-        storefront's servicing steps once: the double records a ``terms`` stop
-        effective at the boundary, charging both periods, and the storefront
-        records that stop as the deal's end at the boundary, files nothing, and
-        carries the end out at the site (``begin_teardown``).
+        The part's first reservation covered its first two periods, and the
+        further reservation through the Agreement's end added the one period
+        the payer's balance still paid for, so the payments double funds the
+        deal through three periods from its start: after the first
+        reservation's end, before the Agreement's end. Lane time is set to that
+        boundary and the storefront's servicing steps once: the double records
+        a ``terms`` stop effective at the boundary, charging the three periods,
+        and the storefront records that stop as the deal's end at the boundary,
+        files nothing, and carries the end out at the site
+        (``begin_teardown``).
         """
         require_state(deal_state, "_accepted_money_shown", "payer_account", "settlement_id",
-                      "negotiation_id", "deal_lease", "_teardown_gate_armed")
+                      "negotiation_id", "deal_lease", "agreement_end", "_teardown_gate_armed",
+                      "first_reserved_through", "reserved_through")
         assert_lease_watchdog_held(provisioning_client)
-        part = _the_part(payments_config, deal_state)
-        started = int(part["started"])
-        boundary = int(part["rate"]["reservedThrough"])
-        assert boundary == started + FUNDED_PERIODS * PERIOD_SECONDS, (
-            f"the double funds the deal through {boundary}, not {FUNDED_PERIODS} periods "
-            f"from its start at {started}: {part}"
+        started = int(_the_part(payments_config, deal_state)["started"])
+        first = deal_state.first_reserved_through
+        boundary = deal_state.reserved_through
+        assert first == started + FIRST_RESERVATION_PERIODS * PERIOD_SECONDS, (
+            f"the part's first reservation covered through {first}, not "
+            f"{FIRST_RESERVATION_PERIODS} periods from its start at {started}"
         )
+        assert boundary == started + FUNDED_PERIODS * PERIOD_SECONDS, (
+            f"the double funds the deal through {boundary}, not the {FUNDED_PERIODS} periods "
+            f"from its start at {started} the payer paid for"
+        )
+        assert first < boundary < deal_state.agreement_end.timestamp(), (
+            first, boundary, deal_state.agreement_end)
         deal_state._deal_ending = True
-        reach_lane_instant(lane_time, boundary + 1, fixed_by_agreement=False)
+        reach_lane_instant(lane_time, boundary, fixed_by_agreement=False)
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
 
         part = _the_part(payments_config, deal_state)
@@ -236,7 +325,10 @@ class Preemption07_SellerNoticeHeld:
         instant asked: the payments authority enforces the Agreement's seller
         notice. The double accepts it as a pending ``payee`` stop effective that
         notice after the lane instant, and a servicing step before then records
-        no end: the deal is still delivered.
+        no end: the deal is still delivered. The stop takes effect inside the
+        part's first reservation, so lane time reaches it with no further
+        reservation; a notice running past that reservation would need the
+        double's reservation control first (``Reservation06``).
         """
         require_state(deal_state, "_accepted_money_shown", "payer_account", "settlement_id",
                       "negotiation_id", "deal_lease", "_teardown_gate_armed")
@@ -256,6 +348,10 @@ class Preemption07_SellerNoticeHeld:
         pending = part.get("pendingStop") or {}
         assert (pending.get("cause"), pending.get("at")) == ("payee", effective), part
         assert part.get("stop") is None, part
+        assert effective <= int(part["rate"]["reservedThrough"]), (
+            f"the seller's stop takes effect at {effective}, past the part's first "
+            f"reservation: {part}"
+        )
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
         read = deal_driver.lifecycle_read(deal_state.negotiation_id)
         assert read.delivery.recorded_end is None, read.delivery
@@ -337,22 +433,25 @@ class MaximumTerm07_TermEnds:
     ):
         """Lane time at the Agreement's end ends the rate part with ``returned``.
 
-        Lane time is brought to the Agreement's end a period at a time, the
-        transaction read at each instant as the storefront's own reads would,
-        so the double reserves each next period from the payer's balance and
-        the deal stays funded. At the end the storefront's servicing steps
+        The shared buyer's balance pays for the whole term, so the further
+        reservation reserved the part through the Agreement's end itself, and
+        lane time is set straight there. The storefront's servicing then steps
         once: the double records the part's ``terms`` stop at the Agreement's
         end, returning a final partial period, and the storefront records the
         term end at that instant, files nothing, and carries the end out at
         the site (``begin_teardown``).
         """
         require_state(deal_state, "_accepted_money_shown", "payer_account", "settlement_id",
-                      "negotiation_id", "deal_lease", "agreement_end", "_teardown_gate_armed")
+                      "negotiation_id", "deal_lease", "agreement_end", "_teardown_gate_armed",
+                      "reserved_through")
         assert_lease_watchdog_held(provisioning_client)
-        end = int(deal_state.agreement_end.timestamp())
+        end = math.ceil(deal_state.agreement_end.timestamp())
+        assert deal_state.reserved_through == end, (
+            f"the part is reserved through {deal_state.reserved_through}, short of the "
+            f"Agreement's end at {end}"
+        )
         deal_state._deal_ending = True
-        move_lane_time_through(lane_time, end,
-                               read=lambda: _the_part(payments_config, deal_state))
+        reach_lane_instant(lane_time, end, fixed_by_agreement=True)
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
 
         part = _the_part(payments_config, deal_state)

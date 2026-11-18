@@ -413,9 +413,11 @@ accepted money, under a shipped preset with a default buyer and the lane's
 (`tests/e2e/roles/helpers/rate_servicing_stages.py`):
 
 - funds running out: the deal is paid from the payments double's second payer
-  (`PAYMENTS.RATE_PAYER_ACCOUNT`), funded with exactly two periods' price
-  through the double's funding control; lane time is set past the second
-  period's end, the double records a `terms` stop at the funded boundary, the
+  (`PAYMENTS.RATE_PAYER_ACCOUNT`), funded through the double's funding control
+  with three periods' price, one beyond the two its rate part holds reserved
+  once started; the double's reservation control reserves the part through the
+  Agreement's end, which that balance stops one period further, and lane time is
+  set to that funded boundary, where the double records a `terms` stop; the
   storefront records that end there with no filing and tears the deal down, and
   the buyer's `delivery` read says a top-up cannot revive it;
 - a spot seller's preemption: the storefront's administrator submits the
@@ -423,20 +425,24 @@ accepted money, under a shipped preset with a default buyer and the lane's
   preempt` makes; the double holds it as a pending stop until lane time reaches
   the request's time plus the 120-second notice, when the storefront records the
   seller's stop at that instant with no filing and tears the deal down, and the
-  payer is returned what the deal had not earned;
-- the maximum term: lane time is brought to the Agreement's end a period at a
-  time, reading the transaction at each instant, since the double reserves a
-  funded deal's next period only at a read and a single set past what it has
-  reserved reads as funds running out; the part ends there `returned`, the
-  storefront records the term end with no filing and tears the deal down, and
-  the buyer's read names no funding stop.
+  payer is returned what the deal had not earned. That instant falls inside the
+  part's first reservation, so the row reserves nothing further;
+- the maximum term: the double's reservation control reserves the part through
+  the Agreement's end, which the shared buyer's balance pays for, and lane time
+  is set there; the part ends `returned`, the storefront records the term end
+  with no filing and tears the deal down, and the buyer's read names no funding
+  stop.
 
-No storefront route reads how it classified an end, so the rows observe what
-follows from the classification — the end's cause and instant, no filing, the
-teardown — and the buyer's read, which classifies with the same compute-family
-classifier; the storefront's classification itself is each storefront's
-application evidence. On a wall-time run the funds-running-out and preemption
-rows are blocked, since only lane time reaches their instants.
+The payments service keeps a started rate part reserved ahead by its own
+scheduler; the double reserves further only when its reservation control is
+called, and a read never reserves, so a row setting lane time past the part's
+first reservation first calls the control, in a stage of its own that only these
+rows declare, failing on any refusal. No storefront route reads how it
+classified an end, so the rows observe what follows from the classification —
+the end's cause and instant, no filing, the teardown — and the buyer's read,
+which classifies with the same compute-family classifier; the storefront's
+classification itself is each storefront's application evidence. Off a Compose
+lane's injected lane time and doubles the rows are blocked.
 
 ### Real bare-metal provisioning
 

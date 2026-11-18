@@ -558,8 +558,8 @@ configuration in the cluster, reaching the payments double by its Service name
 under the lane CA its image carries. Release 1's registry recommends the
 mediation double's identity, and Bob's overlay carries his `[[DisputeCredential]]`
 for it, as the VM lane's does, with its `ca_bundle_path` naming the storefront
-chart's CA file; release 2's storefront carries none, as the bare-metal lane's
-does. The `payments-ca-bundle` ConfigMap holds the lane CA, which issues both
+chart's CA file; release 2's storefront carries none, though the bare-metal
+lane's overlay carries one. The `payments-ca-bundle` ConfigMap holds the lane CA, which issues both
 doubles' certificates. Each storefront's payments check test pod reads the
 double's seller account, and Bob's mediation check test pod reads the mediation
 double's respondent listing. The release serves no payment or dispute scenario.

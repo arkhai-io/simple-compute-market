@@ -2067,14 +2067,33 @@ Needs `drive-the-storefront-clock-in-lanes` landed (it is archived and merged). 
 `e2e-tests`, and `tools/payments-lane-double`'s fixture (the second payer, already
 committed, its version bumped in 9B).
 
-- [ ] 10.1 Finish both recurring purchases on the lane-time helper, as written in the
+- [x] 10.1 Finish both recurring purchases on the lane-time helper, as written in the
       work in progress: set lane time to the Agreement's start, step `delivery-recovery`,
       assert activation, the rate `start` and availability; the buyer's `end` a minute
       into the first period, step `deal-servicing`, assert the started period charged,
       the entitled stop recorded, the teardown, and `Recurring10_SellerListsTheDealEnded`
       showing `ended` once released, which 9A's read makes reachable (D9, D16). Verify
       (system): `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase` pass.
-- [ ] 10.2 Add the reservation stage to
+      Done: the stages stand as the work in progress wrote them, but for
+      `transaction_snapshot`'s docstring, which said a read reserves further periods
+      (it never does; 9B's control does). System, each lane's Compose stack with mock
+      provisioning and both doubles, injected lane time: VM's passed in the 10.5 run,
+      `Recurring10` listing the deal `ended` with no code and its part's final stop
+      present (the stage asserts a final stop and logs its cause, `payer`). The
+      stage's docstring now says the dispute read it relies on is the authority's
+      first-page `404` taken as no case on D16's unchecked premise, not a verified
+      read. Bare metal's first run failed at `Recurring10` alone: the list showed
+      `repair_required`, since the bare-metal lane's secret overlay held no
+      `[[DisputeCredential]]` for the mediation double the deal names, so the seller
+      half reported "Agreement authority credential is missing". Fixed outside
+      `e2e-tests`, small and understood: `dev-env/identities/bare-metal.storefront.secrets.toml`
+      gains the seller's credential at the mediation double, as Bob's overlay holds
+      it; `scripts/tests/test_committed_stack_values.py`'s check that Bob's credential
+      restates the double's fixture now covers both compute lanes; and
+      `dev-env/identities/README.md`'s restated-values rows name it. The rerun of the
+      whole bare-metal lane (every default module, since the credential reaches the
+      payment deal's servicing too) passed, `Recurring10` listing the deal `ended`.
+- [x] 10.2 Add the reservation stage to
       `e2e-tests/tests/e2e/roles/helpers/rate_servicing_stages.py`: a stage of its own,
       declared only in the lane modules (`test-doubles.md`, "Shared stages never depend
       on a double"), calling 9B's `reserve` through the harness's typed control client
@@ -2083,7 +2102,32 @@ committed, its version bumped in 9B).
       straight to its instant (D9). Verify (unit, `e2e-tests/tests/unit/`): the stage
       order check (`ORDERS`) holds every row with its reservation before the lane-time
       set it serves.
-- [ ] 10.3 Rewrite the rows in `scenarios/{vms,bare_metal}/rate_servicing/` on the stage:
+      Done: `Reservation06_ThroughTheAgreementsEnd` reads the part's first
+      reservation from the snapshot, calls `ControlClient.reserve(settlement_id,
+      ceil(agreement_end))` through `payments_controls()`, asserts the answer names the
+      transaction and its one part, reserved no further than the end, and that the
+      snapshot's part `reservedThrough` and its `fundedThrough` then equal the answer,
+      and records `first_reserved_through` and `reserved_through` (new
+      `RateServicingState` fields). A refusal raises `ControlError` and fails the
+      stage; off injected lane time or a lane-owned payments target
+      (`PAYMENTS.LANE_OWNED`) it is a blocked skip, as `Exhaustion00`'s funding now is
+      (`_require_lane_double`), so every row stage reading what they wrote skips too. Declared by the
+      funds-running-out and maximum-term rows, after `Stage09c2` and before the row's
+      own lane-time set. The preemption row declares none, reading the plan's "where
+      the seller's notice runs past the first reservation" as a condition its lane
+      does not meet: the 120-second notice takes effect inside the two periods the
+      part holds once started, which `Preemption07` now asserts. `move_lane_time_through`
+      is gone and each row sets lane time straight to its instant. `e2e-tests` takes
+      `lane-double-controls>=0.2.0`, the version 9B gave the control. Unit
+      (`make -C e2e-tests test-unit`, 999 passed, 1 skipped):
+      `test_recurring_purchase_stages.py`'s order and handoff checks hold each module
+      to its expected order (`ORDERS`) — the handoff check already refuses a row
+      stage reading `reserved_through` before the reservation writes it — and a new
+      parametrized case holds each expected order to declare the reservation before
+      the row stages the test names as setting lane time past the first reservation
+      (`SETS_PAST_THE_FIRST_RESERVATION`, a hand-kept list; the case reads no module
+      itself), and no reservation in an order naming none.
+- [x] 10.3 Rewrite the rows in `scenarios/{vms,bare_metal}/rate_servicing/` on the stage:
       funds running out funds `rate_payer` one period beyond its first reservation,
       reserves through the Agreement's end, sets lane time to the reserved boundary,
       steps `deal-servicing`, and asserts the `terms` stop there — after the first
@@ -2095,22 +2139,120 @@ committed, its version bumped in 9B).
       first reservation, then as before. Shipped presets, default buyer, lane
       declaration `[charged, returned]`, each labelled lane-double evidence (D9, D19).
       Verify (unit, `e2e-tests/tests/unit/`): `make -C e2e-tests test-unit` passes.
-- [ ] 10.4 Diagnose why the registry answered `404` for the funds-running-out and
+      Done: funds running out funds `rate_payer` to `FUNDED_PERIODS` (three periods,
+      `FIRST_RESERVATION_PERIODS` plus one: approval reserves one period and the start
+      tops the part up to cover its reserve ahead plus the engine's 60-second slack,
+      two periods), renamed `Exhaustion00_PayerFundedOnePeriodBeyondTheFirstReservation`;
+      `Exhaustion07` asserts the first reservation two periods from the part's start,
+      the reserved boundary three, between the first reservation's end and the
+      Agreement's end, sets lane time to that boundary (not a second past it), steps
+      `deal-servicing`, and asserts as before. The maximum term asserts the part
+      reserved through `ceil(agreement_end)`, sets lane time there and asserts as
+      before. Preemption is unchanged but for the first-reservation assertion above.
+      Module docstrings, `e2e-tests/pyproject.toml`'s two row markers and
+      `e2e-tests/README.md`'s rows describe the reservation. Unit: as 10.2.
+- [x] 10.4 Diagnose why the registry answered `404` for the funds-running-out and
       preemption rows' listings, which the storefront created open, while the maximum
       term's and the recurring purchase's published; fix it in the harness, or, if the
       cause is a defect in a storefront or the registry, fix it here when small and
       understood, recording the evidence, and otherwise stop and report it
       (`docs/guidance/workflow/changes.md`, "Defects found during a change"). Verify: the
       rows' listings publish in 10.5's runs.
-- [ ] 10.5 Run both lanes. Verify (system): `make -C e2e-tests test-e2e-vm
+      Done, a harness defect: the two rows' GPU models, "RTX 4060" and "RTX 4060 Ti"
+      (`scenarios/vms/host_registry.py`), are not among the models the registry's
+      filter spec admits (`core/registry/src/core_registry/filter-spec.yaml`), whose
+      publication route refuses such a listing, while the maximum term's "RTX 4070 Ti"
+      and the recurring purchase's "RTX 4070" are. The rows now use "RTX 4080 Super"
+      and "RTX 4070 Super", admitted and used by no other scenario, and the constants'
+      comment says why. Diagnosed from the spec and the models, not the storefront's
+      logs; the 10.5 VM run published all three rows' listings (each row's `[03]`).
+- [x] 10.5 Run both lanes. Verify (system): `make -C e2e-tests test-e2e-vm
       "E2E_MODULE=e2e_vm_recurring_purchase or e2e_vm_rate_servicing"` and `make -C
       e2e-tests test-e2e-bare-metal "E2E_BARE_METAL_MODULE=e2e_bare_metal_recurring_purchase
       or e2e_bare_metal_rate_servicing"` pass, each leaving no payment hold, mock rule
       or held loop, each stack taken down after; `e2e-tests/README.md` and the Makefile's
       lane lists describe the modules as run.
-- [ ] 10.6 Verification point: the `e2e-tests` unit suite and both lanes' runs pass.
+      Done (system, each lane's Compose stack, mock provisioning, both doubles,
+      injected lane time; lane-double evidence, each module logging the label and the
+      doubles' contract hashes): `make -C e2e-tests test-e2e-vm "E2E_MODULE=e2e_vm_recurring_purchase
+      or e2e_vm_rate_servicing"` 121 passed, none skipped. Bare metal's run of the two
+      markers had 120 passed and `Recurring10` failed (10.1); after the credential fix,
+      `make -C e2e-tests test-e2e-bare-metal` over every default module of the lane,
+      the two markers among them, 219 passed. Each stack taken down after
+      (`e2e-vm-down`, `e2e-bare-metal-down`). What the runs showed, VM then bare
+      metal: funds running out reserved one period further (first reservation
+      start+1800, boundary start+2700, Agreement end start+3600), the `terms` stop and
+      the recorded end at the boundary, no filing, teardown, and the buyer's read
+      giving `FUNDING_STOP`; the maximum term reserved two periods further to the
+      end, the `returned` stop and the term end there, no funding stop; preemption's
+      seller notice held 120 seconds, the `payee` stop and the recorded end at its
+      effective time, the payer returned everything (the stop falls in the started
+      first period, returned under the spot preset). Each module's cleanup removed its
+      mock rules (bare metal also drained provisioning and removed the pool override)
+      and released every hold; "no payment hold" is read as 2B.2 read it. The
+      Makefile's lane lists already named both row markers; `e2e-tests/README.md`
+      describes the rows as run.
+- [x] 10.6 Verification point: the `e2e-tests` unit suite and both lanes' runs pass.
       End-to-end: `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase`,
       `e2e_vm_rate_servicing`, `e2e_bare_metal_rate_servicing`.
+      Done: as 10.2 and 10.5. End-to-end confirmed: those four markers, which the
+      lanes' default module lists and validation's pipeline (`make run-e2e`) select,
+      are the pipeline's evidence for this section; the two recurring purchases'
+      `Recurring10` is its evidence for 9A's unfiled-Agreement read (the deal listed
+      `ended`; no rate row reads the seller's list), and the funds-running-out and
+      maximum-term rows' `Reservation06` for 9B's reservation control. Owed by
+      validation: none. `scripts/change-workflow run pre-commit` passed with every
+      functional hook (the e2e unit suite 999 passed, 1 skipped; the release tooling
+      3208 passed, none skipped, so the parametrized credential check rendered both
+      lanes' Compose). `run test-before` was not run: the changed files are
+      uncommitted until this commit, and the lane stages fail at the base only
+      against a stack.
+      Fresh-context check: fixed — descriptions the credential left stale
+      (`docs/development/DEPLOYMENT_AND_CONFIG.md`'s release 2 sentence,
+      `docs/development/TESTING.md`'s mediation paragraph, `compose.bare-metal-local.yml`'s
+      overlay and CA comments, the stack-values test's module docstring); the rows
+      documented as blocked off a Compose lane where a wall-time run with a
+      lane-owned target would have failed or waited (the funding and reservation
+      stages now skip unless lane time is injected and the target lane-owned);
+      `Recurring10`'s docstring calling the unfiled read verified, against D16;
+      `Reservation06` claiming the funded boundary without reading `fundedThrough`
+      (now asserted); and these notes' 9A, `payer` and order-case claims. Declined:
+      splitting `MaximumTerm07` from the reservation's output so it could run against
+      the payments service — the rows run only against the lane's doubles (D19), the
+      reservation is already the stage of its own the rule asks for, and against the
+      service there is no lane time to set to the Agreement's end. Changes after the
+      lane runs touch only stage guards, an extra snapshot assertion, docstrings,
+      comments and documents; the lanes were not run again.
+
+Section 10 handoff:
+
+- The lane harness mounts `e2e-tests/tests` and `src` read-only from the worktree
+  (`e2e-tests/Makefile`, `test-buyer-machine`), so editing a stage while a lane runs
+  changes the run; edit only between runs. Each lane's stack must come down before
+  the other's starts (shared host ports); a run of the two markers takes about a
+  minute of stages once images are built.
+- A rate part holds two periods reserved once started (`FIRST_RESERVATION_PERIODS`):
+  approval reserves one period, the start tops up to its reserve ahead plus the
+  engine's 60-second slack. A row or watchdog case setting lane time past start plus
+  two periods (1800 seconds here) declares `Reservation06` first, or the double stops
+  the part `terms` at that boundary.
+- A VM scenario's GPU model must be one `core/registry/src/core_registry/filter-spec.yaml`
+  admits; the registry refuses to publish any other, and the storefront still
+  reports the listing open.
+- For section 11's disclosed endpoint: a mock rule's `result_stdout` replaces a job's
+  output (`compute_provisioning_contracts.mock_rules.MockRuleCreate`). VM's buyer
+  endpoint comes from the create output's `host` and `external_ssh_port`
+  (`domains/vms/provisioning/adapter/.../mock_output.py`, `_create_fact`), so a create
+  rule rendering that fact with the harness listener's address and port should
+  disclose it. Bare metal's grant output names the host route, but the buyer's
+  endpoint is built by the codec from the registered host record (`ssh_host`,
+  `ssh_port`; `domains/bare_metal/provisioning/adapter/.../mock_output.py`), so a
+  result rule may not move it there; 11.1's plan allows the test-only mock's result
+  rules to change only if a rule cannot name the endpoint, which bare metal may
+  need, or the host record registered with the listener's address. Not started.
+- The bare-metal lane's storefront now holds the seller's mediation credential, so
+  its servicing reads the mediation double for every payment deal there, as VM's
+  does; every bare-metal lane module passed with it.
 
 Earlier plan's note, kept as history. Note from 44 F1's fix (`reviews/44-implementation.triage.md`): a lane deal names a
 dispute authority, so 10.1's `ended` also needs the lane storefront's servicing cycle to

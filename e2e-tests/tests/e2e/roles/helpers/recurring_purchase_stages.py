@@ -56,7 +56,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -223,7 +222,8 @@ class RecurringPurchaseDriver(PurchaseDriver, Protocol):
 def transaction_snapshot(payments_config: Any, payer: str, transaction: str) -> dict[str, Any]:
     """The transaction's snapshot at the payments double, read with the payer's
     own token, as JSON. A read brings the transaction to the double's time,
-    reserving whatever further periods the payer's balance covers."""
+    recording any stop due by then, and never reserves a further period: only
+    the double's reservation control does (``rate_servicing_stages.py``)."""
     with buyer_payments_client(payments_config, payer) as client:
         signed = client.get_transaction(transaction)
     return signed.snapshot.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -248,26 +248,6 @@ def reach_lane_instant(lane_time: LaneTime | None, instant: int, *,
             pytest.skip(f"blocked: reaching {instant} needs lane time, and the run has none")
         return int(wait_until(datetime.fromtimestamp(instant, timezone.utc)).timestamp())
     return lane_time.reach(instant, fixed_by_agreement=fixed_by_agreement)
-
-
-def move_lane_time_through(lane_time: LaneTime | None, until: int, *,
-                           read: Callable[[], Any]) -> int:
-    """Bring an injected lane to ``until`` one period at a time, calling
-    ``read`` at each instant, and return the lane instant.
-
-    The payments double reserves a funded deal's next periods only when a read
-    brings the transaction to its time, so a single set past the periods it has
-    reserved reads as funds running out at their end. Stepping no more than a
-    period between reads keeps a funded deal funded, as the payments service's
-    own reservation keeps it. A wall run's clock moves on its own, so it only
-    waits for ``until``, an instant the Agreement fixes.
-    """
-    if lane_time is None or not lane_time.injected:
-        return reach_lane_instant(lane_time, until, fixed_by_agreement=True)
-    while lane_time.now() < until:
-        lane_time.reach(min(until, lane_time.now() + PERIOD_SECONDS), fixed_by_agreement=True)
-        read()
-    return lane_time.now()
 
 
 def seller_deal(storefront_admin_client: Any, negotiation_id: str) -> DealSummary:
@@ -681,7 +661,10 @@ class Recurring10_SellerListsTheDealEnded:
 
         ``Stage11b`` released the lease, which the storefront heard through the
         capacity-released callback. One servicing step then reads the deal's
-        authorities, saving a verified read of its dispute authority, and
+        authorities, saving a read of its dispute authority — for a deal nobody
+        filed on, the authority's answer that it holds no record of the
+        Agreement, read as no case on the premise that the storefront's
+        credential is the Agreement's payee's, which no route lets it check — and
         carries out what remains of its physical end, so the list, read as the
         storefront's administrator through the typed seller client, has every
         condition of *ended* to judge from its saved views: the resource

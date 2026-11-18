@@ -1,14 +1,15 @@
 """A VM on-demand rate deal whose funds run out, on the mock VM lane.
 
 The lane's buyer buys a recurring on-demand option through ``market buy``, paying
-from the lane's second payer, which the row funds with exactly two periods' price
-first. The deal is delivered at the Agreement's start; lane time is then set past
-the second period's end, where the payments double stops funding it, and one
-servicing step records the ``terms`` stop at the funded boundary and tears the
-deal down, after which the buyer's read says a top-up cannot revive it. The
-stages are the recurring purchase's through its accepted money, then
-``rate_servicing_stages.py``'s funds-running-out row. Lane-double evidence; mock
-delivery is never evidence of a real guest.
+from the lane's second payer, which the row first funds with one period's price
+beyond the part's first reservation. The deal is delivered at the Agreement's
+start; the payments double then reserves the part through the Agreement's end,
+which the balance stops one period further, and lane time is set to that funded
+boundary, where one servicing step records the ``terms`` stop and tears the deal
+down, after which the buyer's read says a top-up cannot revive it. The stages are
+the recurring purchase's through its accepted money, then
+``rate_servicing_stages.py``'s reservation and funds-running-out row. Lane-double
+evidence; mock delivery is never evidence of a real guest.
 """
 
 from __future__ import annotations
@@ -41,9 +42,10 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage11b_TeardownCompletion,
 )
 from tests.e2e.roles.helpers.rate_servicing_stages import (
-    Exhaustion00_PayerFundedForTwoPeriods,
+    Exhaustion00_PayerFundedOnePeriodBeyondTheFirstReservation,
     Exhaustion07_FundsRunOut,
     Exhaustion08_BuyerToldANewDealIsNeeded,
+    Reservation06_ThroughTheAgreementsEnd,
 )
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     Recurring04_MandateApproved,
@@ -121,7 +123,8 @@ class TestStage03_ListingCreated(VmRateListingCreated):
     pass
 
 
-class TestExhaustion00_PayerFundedForTwoPeriods(Exhaustion00_PayerFundedForTwoPeriods):
+class TestExhaustion00_PayerFundedOnePeriodBeyondTheFirstReservation(
+        Exhaustion00_PayerFundedOnePeriodBeyondTheFirstReservation):
     pass
 
 
@@ -186,6 +189,10 @@ class TestRecurring07_AcceptedMoneyShown(Recurring07_AcceptedMoneyShown):
 
 
 class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
+
+
+class TestReservation06_ThroughTheAgreementsEnd(Reservation06_ThroughTheAgreementsEnd):
     pass
 
 

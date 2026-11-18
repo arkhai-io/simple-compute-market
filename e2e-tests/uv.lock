@@ -494,7 +494,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13" },
     { name = "jsonschema", specifier = ">=4.21" },
-    { name = "lane-double-controls", specifier = ">=0.1.0" },
+    { name = "lane-double-controls", specifier = ">=0.2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=8.0" },
