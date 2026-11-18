@@ -23,17 +23,21 @@ or a zip of logs.
 The evidence a change's records name is, under each evidence directory, each path
 they cite — a directory, or the directory holding a cited file — and the evidence of
 each validation record's tree (`**Tree:**`) and commit (`**Commit:**`), each by its
-full object name. A kind keyed by that identity says where that is, by its pattern:
-what matches it as far as the segment holding its identity, the identity filled in
-and any other placeholder matching anything, file or directory, so evidence keyed by
-a whole directory, a file, or a name embedding the identity is found alike. A
-directory a kind's pattern reaches before its identity's segment holds every
-identity's evidence, so it is never copied whole: a cited file in it is copied
-alone, and a cited directory that is one is not copied, the evidence of the trees
-and commits the records name found in it by their patterns instead. Transcripts are
-not read for it: they cite whatever a session read, another clone's evidence
+full object name. A kind keyed by that identity says what that is, by its pattern:
+what matches it, the identity filled in and any other placeholder matching anything.
+A matching directory is copied itself, and a matching file with the directory
+holding it — an attempt, with its logs — when that directory holds that kind's
+evidence alone, and alone otherwise. So evidence keyed by a whole directory, a file,
+or a name embedding the identity is found alike, and nothing outside what matches,
+or the directories holding it, is copied. A directory a kind's
+pattern reaches before its identity's segment holds every identity's evidence, so it
+is never copied whole: a cited file in it is copied alone, and a cited directory
+that is one is not copied, the evidence of the trees and commits the records name
+found in it by their patterns instead; a directory another kind's pattern also
+reaches holds that kind's evidence too, so a match in it is copied alone. Transcripts
+are not read for it: they cite whatever a session read, another clone's evidence
 included. Named evidence the clone does not hold is reported, not refused: a cited
-path absent, and a tree or commit no kind's pattern finds, where each would be.
+path absent, and a tree or commit no kind's pattern finds, each pattern as filled.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-hak6 and CW-rf50.
 """
@@ -112,13 +116,11 @@ def _identity_segment(segments: Sequence[str]) -> int:
 
 
 def identity_glob(pattern: str, key: str) -> str:
-    """An evidence pattern as far as the segment holding its identity, `{tree}` or
-    `{commit}` filled with `key`, and any other placeholder matching anything: where
-    the evidence of the tree or commit `key` lies, a file or a directory."""
-    segments = pattern.split("/")
+    """An evidence pattern, `{tree}` or `{commit}` filled with `key`, and any other
+    placeholder matching anything: the evidence of the tree or commit `key`."""
     return config.PLACEHOLDER.sub(
         lambda match: key if match.group(1) in (config.TREE, config.COMMIT) else "*",
-        "/".join(segments[:_identity_segment(segments) + 1]))
+        pattern)
 
 
 def _shared(pattern: str) -> list[str]:
@@ -128,6 +130,18 @@ def _shared(pattern: str) -> list[str]:
     segments = pattern.split("/")
     return [config.PLACEHOLDER.sub("*", segment)
             for segment in segments[:_identity_segment(segments)]]
+
+
+def _directories(pattern: str) -> list[str]:
+    """The segments of an evidence pattern but its last, each a glob, its
+    placeholders matching anything: the directories its evidence lies in."""
+    return [config.PLACEHOLDER.sub("*", segment) for segment in pattern.split("/")[:-1]]
+
+
+def _reaches(path: Path, globs: Sequence[str]) -> bool:
+    """Whether `path` is one of the directories `globs` match, or lies above one."""
+    parts = path.parts
+    return len(parts) <= len(globs) and all(map(fnmatchcase, parts, globs))
 
 
 def _history(clone: Path, change: str) -> tuple[list[Path], list[Path]]:
@@ -148,17 +162,23 @@ def _history(clone: Path, change: str) -> tuple[list[Path], list[Path]]:
         configuration = config.load(clone)
     except StepError as exc:
         raise HistoryError(str(exc)) from exc
-    evidence = configuration.evidence()
     kinds = configuration.kinds or ()
-    cited, keys = named_evidence(reviews, evidence)
+    cited, keys = named_evidence(reviews, configuration.evidence())
     shared = [_shared(kind.evidence) for kind in kinds]
+    directories = [_directories(kind.evidence) for kind in kinds]
 
     def whole(path: Path) -> bool:
         """Whether `path` may be copied whole: no kind's pattern reaches it before
         its identity's segment, where it would bring every identity's evidence."""
-        parts = path.parts
-        return not any(len(parts) <= len(globs) and all(map(fnmatchcase, parts, globs))
-                       for globs in shared)
+        return not any(_reaches(path, globs) for globs in shared)
+
+    def owned(path: Path, index: int) -> bool:
+        """Whether `path`, a directory holding evidence of the kind at `index`, holds
+        that kind's alone, so it may be copied whole: it is whole, and no other
+        kind's pattern reaches it."""
+        return whole(path) and not any(_reaches(path, globs)
+                                       for other, globs in enumerate(directories)
+                                       if other != index)
 
     # A cited file is copied with the directory holding it, unless that directory
     # holds every identity's evidence; then it is copied alone.
@@ -169,13 +189,25 @@ def _history(clone: Path, change: str) -> tuple[list[Path], list[Path]]:
     absent = [path for path in cited if not (clone / path).exists()]
     for identity, key in keys:
         # A tree's evidence lies only where a kind keyed by the tree puts it, and a
-        # commit's where one keyed by the commit does.
-        globs = list(dict.fromkeys(identity_glob(kind.evidence, key) for kind in kinds
-                                   if kind.identity == identity))
-        found = [path.relative_to(clone) for glob in globs for path in sorted(clone.glob(glob))]
+        # commit's where one keyed by the commit does. A file matching a kind's
+        # pattern is copied with the directory holding it — an attempt, with its
+        # logs — when that directory holds that kind's evidence alone, and alone
+        # otherwise; a matching directory is copied itself.
+        globs: list[str] = []
+        found: list[Path] = []
+        for index, kind in enumerate(kinds):
+            if kind.identity != identity:
+                continue
+            globs.append(glob := identity_glob(kind.evidence, key))
+            # Matched as the presence check matches it, so the two agree on what a
+            # pattern finds.
+            for match in map(Path, config.matches(clone, glob)):
+                widen = (clone / match).is_file() and owned(match.parent, index)
+                found.append(match.parent if widen else match)
+        found = list(dict.fromkeys(found))
         held += [path for path in found if path not in held]
         if not found:
-            absent += [Path(glob) for glob in globs if Path(glob) not in absent]
+            absent += [Path(glob) for glob in dict.fromkeys(globs) if Path(glob) not in absent]
     # What lies inside a directory copied is copied with it, once.
     held = [path for path in held if not any(other in path.parents for other in held)]
     return [reviews.relative_to(clone), *sorted(held)], sorted(absent)

@@ -51,7 +51,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import evidence, push
 from .common import StepError
-from .config import COMMIT, OWED, TREE, Configuration, Kind
+from .config import COMMIT, OWED, TREE, Configuration, Kind, matches
 from .evidence import MISSING, PRESENT, REFUSED, WAIVED, Report
 from .find import ChangeNotFound, change_directory
 from .hooks import PREFIX, HookError, Hooks, Invoked, marker_key, result
@@ -304,7 +304,7 @@ class Gathering:
         """The attempt's closing line, naming its evidence as it now stands."""
         kind = attempt.kind
         pattern = evidence.filled(kind.evidence, {**identities, OWED: attempt.owed or "*"})
-        found = evidence.matches(self.hooks.root, pattern)
+        found = matches(self.hooks.root, pattern)
         self.hooks.echo(attempt.closing_line(f"{kind.identity} {identities[kind.identity]}",
                                              found[-1] if found else None))
 

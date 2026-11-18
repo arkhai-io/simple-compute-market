@@ -57,6 +57,7 @@ CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, and CW-r8fb.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import re
 import shlex
@@ -138,6 +139,12 @@ _UNFIXED = re.compile(r"[{*?\[\]]")
 def placeholders(command: str) -> list[str]:
     """The placeholders `command` names, in order."""
     return PLACEHOLDER.findall(command)
+
+
+def matches(root: Path, pattern: str) -> list[str]:
+    """Every path under `root` matching the filled evidence pattern `pattern`,
+    relative to it, in path order."""
+    return sorted(glob.glob(pattern, root_dir=root))
 
 
 def fill(command: str, values: Mapping[str, str]) -> str:

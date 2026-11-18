@@ -755,7 +755,8 @@ def test_the_command_line_reports_the_clone_and_its_bootstrap(
 
 REVIEWS = Path("openspec/changes/archive/2026-10-22-seed-pool/reviews")
 VALIDATED = "0123456789abcdef0123456789abcdef01234567"
-EVIDENCE = Path(".snapshot/validation") / VALIDATED
+# An attempt of the workspace's one kind, where its pattern puts the validated tree's.
+EVIDENCE = Path(".snapshot/validation") / VALIDATED / "local/20261022T1000Z"
 
 
 def _merged_clone(workspace: Path) -> Path:
@@ -906,7 +907,7 @@ def test_named_evidence_the_clone_lacks_is_reported_and_does_not_refuse_removal(
     assert not clone.exists()
     assert not (workspace / pruned).exists()
     assert ("Named by the records but not in this clone, so not copied: "
-            f"{pruned.as_posix()}") in capsys.readouterr().out
+            f"{pruned.as_posix()}/local/*/summary.json") in capsys.readouterr().out
 
 
 def test_a_record_that_differs_in_the_workspace_refuses_removal(workspace: Path) -> None:

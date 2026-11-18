@@ -118,7 +118,9 @@ def _history(clone: Path) -> None:
     _write(clone, REVIEWS / "transcripts/03-validate.progress",
            f"read .snapshot/evidence/{'b' * 40}/helm/1/summary.json\n")
     _write(clone, BY_TREE / "local/20261117T1003Z/summary.json", '{"passed": true}\n')
+    _write(clone, BY_TREE / "helm/20261117T1003Z/summary.json", '{"passed": true}\n')
     _write(clone, BY_TREE / "helm/20261117T1003Z/test.log", "helm\n")
+    _write(clone, BY_COMMIT / "pipeline/20261117T1003Z/summary.json", '{"passed": true}\n')
     _write(clone, BY_COMMIT / "pipeline/20261117T1003Z/actions.log", "pipeline\n")
     _write(clone, CITED / "summary.json", '{"passed": true}\n')
     # Beside the evidence but not named by any record: another attempt of the cited
@@ -184,7 +186,9 @@ def test_the_first_copy_brings_the_records_and_named_evidence_to_the_same_paths(
         (REVIEWS / "workflow.jsonl").as_posix(),
         (REVIEWS / "transcripts/03-validate.progress").as_posix(),
         (BY_TREE / "local/20261117T1003Z/summary.json").as_posix(),
+        (BY_TREE / "helm/20261117T1003Z/summary.json").as_posix(),
         (BY_TREE / "helm/20261117T1003Z/test.log").as_posix(),
+        (BY_COMMIT / "pipeline/20261117T1003Z/summary.json").as_posix(),
         (BY_COMMIT / "pipeline/20261117T1003Z/actions.log").as_posix(),
         (CITED / "summary.json").as_posix(),
     }
@@ -228,10 +232,10 @@ def test_evidence_the_records_name_that_the_clone_lacks_is_reported(
 
     synced = history.sync(clone, workspace, CHANGE)
 
-    # A commit no kind's pattern finds is reported where each kind keyed by the
-    # commit would put it; a cited path where it was cited.
+    # A commit no kind's pattern finds is reported as each kind keyed by the commit
+    # fills its pattern; a cited path where it was cited.
     assert synced.absent == [f".snapshot/evidence/{'7' * 40}/local/1",
-                             f".snapshot/evidence/{'9' * 40}"]
+                             f".snapshot/evidence/{'9' * 40}/pipeline/*/summary.json"]
     assert synced.refused == []
 
 
@@ -279,6 +283,67 @@ def test_the_kinds_pattern_says_which_evidence_the_records_name(
     assert history.differences(clone, workspace, CHANGE) == []
 
 
+def test_what_lies_beside_a_validated_trees_evidence_but_no_pattern_describes_is_not_copied(
+        workspace: Path, clone: Path) -> None:
+    """CW-hak6: a validated tree's evidence is what its kinds' patterns match, each
+    attempt with its logs, not everything under the directory its identity names."""
+    _history(clone)
+    # A retired kind's attempt, a stray file, and a file in a kind's directory
+    # outside any attempt, all under the validated tree.
+    strays = [BY_TREE / "retired/20261117T1003Z/summary.json", BY_TREE / "notes.txt",
+              BY_TREE / "local/notes.txt"]
+    for stray in strays:
+        _write(clone, stray, "stray\n")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert (BY_TREE / "helm/20261117T1003Z/test.log").as_posix() in synced.copied
+    for stray in strays:
+        assert not (workspace / stray).exists()
+    assert synced.absent == [] and synced.refused == []
+
+
+def test_a_pattern_matching_a_directory_copies_it_and_nothing_beside_it(
+        workspace: Path, clone: Path) -> None:
+    attempt = BY_TREE / "local/run-20261117T1003Z"
+    _write(clone, REVIEWS / "02-validation.md", VALIDATION_RECORD)
+    for name in (attempt / "summary.json", attempt / "test.log", BY_TREE / "local/notes.txt"):
+        _write(clone, name, "{}\n")
+    (clone / ".agents/workflow.toml").write_text(
+        _kind("local", ".snapshot/evidence/{tree}/local/run-*"), "utf-8")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert synced.copied == [(REVIEWS / "02-validation.md").as_posix(),
+                             (attempt / "summary.json").as_posix(),
+                             (attempt / "test.log").as_posix()]
+    assert not (workspace / BY_TREE / "local/notes.txt").exists()
+    assert synced.absent == [] and synced.refused == []
+
+
+def test_a_kinds_evidence_in_a_directory_another_kind_reaches_is_copied_alone(
+        workspace: Path, clone: Path) -> None:
+    """A file one kind keys directly in the tree's directory, where another kind's
+    attempts also lie, is copied without the directory holding it."""
+    report = BY_TREE / "report.json"
+    attempt = BY_TREE / "local/20261117T1003Z"
+    _write(clone, REVIEWS / "02-validation.md", VALIDATION_RECORD)
+    for name in (report, attempt / "summary.json", attempt / "test.log", BY_TREE / "notes.txt"):
+        _write(clone, name, "{}\n")
+    _write(clone, ".agents/evidence/report.md", "# The report kind\n")
+    (clone / ".agents/workflow.toml").write_text(
+        _kind("report", ".snapshot/evidence/{tree}/report.json")
+        + _kind("local", ".snapshot/evidence/{tree}/local/*/summary.json"), "utf-8")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert synced.copied == [(REVIEWS / "02-validation.md").as_posix(),
+                             (attempt / "summary.json").as_posix(),
+                             (attempt / "test.log").as_posix(), report.as_posix()]
+    assert not (workspace / BY_TREE / "notes.txt").exists()
+    assert synced.absent == [] and synced.refused == []
+
+
 def test_a_second_copy_extends_what_grew_adds_what_is_new_and_leaves_the_rest(
         workspace: Path, clone: Path) -> None:
     _history(clone)
@@ -294,7 +359,7 @@ def test_a_second_copy_extends_what_grew_adds_what_is_new_and_leaves_the_rest(
     assert synced.extended == [(REVIEWS / "workflow.jsonl").as_posix(),
                                (REVIEWS / "transcripts/03-validate.progress").as_posix()]
     assert synced.copied == [(REVIEWS / "06-orchestrator.md").as_posix()]
-    assert len(synced.unchanged) == 6 and synced.refused == []
+    assert len(synced.unchanged) == 8 and synced.refused == []
     assert (workspace / REVIEWS / "workflow.jsonl").read_bytes() == log.read_bytes()
     assert (workspace / REVIEWS / "transcripts/03-validate.progress").read_bytes() == (
         transcript.read_bytes())
@@ -379,7 +444,7 @@ def test_the_command_copies_from_a_clone_and_reports(
     assert history.main(["sync", CHANGE], root=clone) == 0
 
     out = capsys.readouterr().out
-    assert f"Into {workspace.resolve()}: 8 file(s) copied, 0 extended, 0 already there." in out
+    assert f"Into {workspace.resolve()}: 10 file(s) copied, 0 extended, 0 already there." in out
     assert (workspace / REVIEWS / "02-validation.md").is_file()
 
 

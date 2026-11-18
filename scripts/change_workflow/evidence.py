@@ -27,7 +27,6 @@ and CW-zkhs.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import shutil
@@ -95,11 +94,6 @@ def filled(pattern: str, values: Mapping[str, str]) -> str:
     """`pattern` with each placeholder replaced by its value as it is: a path, never
     a shell word, so nothing is quoted."""
     return config.PLACEHOLDER.sub(lambda match: values[match.group(1)], pattern)
-
-
-def matches(root: Path, pattern: str) -> list[str]:
-    """Every path under `root` matching `pattern`, relative to it, in path order."""
-    return sorted(glob.glob(pattern, root_dir=root))
 
 
 @dataclass(frozen=True)
@@ -172,7 +166,7 @@ def report(root: Path, configuration: Configuration, owed: Sequence[tasks.Owed],
             # A kind not required is matched for whatever any argument left.
             values = {TREE: tree, COMMIT: commit, OWED: required.owed or "*"}
             pattern = filled(kind.evidence, values)
-            found = matches(root, pattern)
+            found = config.matches(root, pattern)
             entry.update(identity=kind.identity, pattern=pattern, matches=found,
                          current=found[-1] if found else None)
         if required.refusal is not None:

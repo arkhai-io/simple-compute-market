@@ -537,6 +537,46 @@ CW-ikmm's rerun, CW-q5fy's kinds, CW-e7lm's waivers). Files: `scripts/change_wor
       - `pre-commit`: passed, exit 0.
       - This note changes the tree that run checked.
     - End-to-end: none — no scenario exercises the workflow's tooling.
+  - Pre-closeout triage fix, review 44 F1: the lookup above stopped at the identity's
+    segment, so with this repository's `{tree}/<kind>/*/summary.json` it copied the
+    whole `.snapshot/evidence/<tree>/`, and anything beside the evidence there — a
+    retired kind's attempts, a stray file — with it. Now:
+    - Each kind keyed by the identity is globbed by its full pattern (`identity_glob`),
+      through `config.matches`, the matcher the presence check uses. `matches` moved
+      from `evidence.py` to `config.py` so `history` can use it without an import
+      cycle, and `evidence.py` and `gather.py` call it there.
+    - A matching file is copied with the directory holding it — an attempt, with its
+      logs — only when that directory is whole and no other kind's pattern reaches
+      it; otherwise alone. A matching directory is copied itself.
+    - Missing evidence is reported as each kind's filled pattern, not the identity's
+      directory.
+    - An attempt holding no file its kind's pattern matches, such as an interrupted
+      run's logs alone, is no longer copied unless a record cites it; the fixtures'
+      attempts now hold a `summary.json`.
+    - Cited paths keep their handling, as the disposition said. A cited file directly
+      in a directory two kinds share would still bring that directory; no layout
+      here has one.
+    - Tests (library integration, a real temporary clone), in
+      `test_change_history.py`:
+      - `test_what_lies_beside_a_validated_trees_evidence_but_no_pattern_describes_is_not_copied`;
+      - `test_a_pattern_matching_a_directory_copies_it_and_nothing_beside_it`;
+      - `test_a_kinds_evidence_in_a_directory_another_kind_reaches_is_copied_alone`;
+      - each fails at `0646979cf` through `run test-before --at`, the strays copied,
+        as does the absent-evidence test's new report.
+      - `test_change_clone.py`'s removal fixture puts its evidence in an attempt
+        its kind's pattern matches.
+      - History, clone, evidence, gather and config suites: 276 passed.
+    - The fresh-context check found three problems, all fixed: a docstring sentence
+      the code contradicted; a pattern matching directories widened to their parent;
+      and history matching with `Path.glob` while the presence check used
+      `glob.glob`. It also noted the cited-file case above, declined as outside the
+      disposition.
+    - `run pre-commit` on the fix passed whole:
+      - `after-functional-change`: passed, exit 0;
+      - `pre-commit-functional` (`make validate-local`, every suite): passed, exit 0;
+      - `pre-commit`: passed, exit 0.
+      - This note changes the tree that run checked.
+    - End-to-end: none — no scenario exercises the workflow's tooling.
 - [x] 3.7 Verification point: the suites above; `run pre-commit` passes. End-to-end:
   none.
   - Correction: checked though `run pre-commit` does not pass whole, as in 1.10.
