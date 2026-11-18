@@ -23,7 +23,9 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
-from market_schema_migrations import CheckState, MigrationRefused, schema_snapshot
+from market_schema_migrations import Chain, CheckState, MigrationRefused, schema_snapshot
+from market_schema_migrations import migrate as migrate_chain
+from market_schema_migrations.sqlalchemy_adapter import SqlAlchemyMigrationConnection
 
 from compute_provisioning_service import config as config_module
 from compute_provisioning_service.config import settings
@@ -163,12 +165,18 @@ def test_tables_with_no_migration_record_are_refused_and_left_unchanged():
 
 
 def test_a_database_behind_the_chain_is_refused_at_startup_naming_what_is_pending():
+    """The database an image one migration older built: its schema and its
+    ledger both lack the chain's last migration."""
     engine = _sqlite_memory_engine()
-    migrate_database(engine)
-    with engine.begin() as connection:
-        connection.execute(
-            text("DELETE FROM schema_migrations WHERE id = :id"), {"id": CHAIN.ids[-1]}
-        )
+    older = Chain(
+        service=CHAIN.service,
+        command=CHAIN.command,
+        baselines=CHAIN.baselines,
+        migrations=CHAIN.migrations[:-1],
+        floor_ids=CHAIN.floor_ids,
+    )
+    with engine.connect() as connection:
+        migrate_chain(older, SqlAlchemyMigrationConnection(connection))
     schema = _schema(engine)
 
     result = check_database(engine)

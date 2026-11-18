@@ -259,6 +259,7 @@ class TestRelayInputsReachTheJob:
                 "host_id": "kvm1", "vm_action": "vm_remove", "offering_mode": "vm",
                 "relay_id": "site-a", "escrow_uid": "cr-1",
             },
+            report_starting=lambda: None,
             report_handle=lambda handle: None,
             report_logs=lambda logs: None,
         )

@@ -27,7 +27,7 @@ execution started and when it finished"). Touches `provisioning/compute` (the jo
 authority), `provisioning/compute/ansible`, `provisioning/compute/contracts`, and
 `provisioning/compute/service`'s migration chain.
 
-- [ ] 1.1 In `provisioning/compute/src/compute_provisioning/jobs/db.py`, add the
+- [x] 1.1 In `provisioning/compute/src/compute_provisioning/jobs/db.py`, add the
   nullable `execution_started_at` and `finished_at` columns to `JobRecord`. In
   `jobs/migrations.py`, add one additive migration after the baseline adding both
   columns to `ansible_jobs`, with an ID dated for this change, and compose it into
@@ -35,7 +35,16 @@ authority), `provisioning/compute/ansible`, `provisioning/compute/contracts`, an
   `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`
   after `SSH_CONNECTIONS_VERSION_2`. Existing rows read null in both. Verify with
   1.6's migration case. (D4, D5; `docs/guidance/engineering/migrations.md`.)
-- [ ] 1.2 In `jobs/executor.py`, give `JobRun` a `report_starting()` callback beside
+  Done: `EXECUTION_INSTANTS` (`20261118_001_ansible_jobs_execution_instants`),
+  exported as the package's `MIGRATIONS` tuple, as `market_site.migrations` does,
+  and composed as `*JOBS_MIGRATIONS` after `SSH_CONNECTIONS_VERSION_2`. Two
+  existing service tests assumed the chain's last migration was rerunnable over
+  its own effect, which an `ALTER TABLE ADD COLUMN` is not: the "behind the
+  chain" test in `test_database.py` now builds its behind database with a chain
+  lacking the last migration (an older image's database, schema and ledger
+  both), and `test_ssh_connection_version_migration.py`'s "job rows unchanged"
+  assertion admits the two new columns reading null.
+- [x] 1.2 In `jobs/executor.py`, give `JobRun` a `report_starting()` callback beside
   `report_handle`. In `jobs/engine.py`, `process_job` supplies it: it records the
   instant from the process's time source (`injected_time`, as `created_at` is) in a
   conditional write that succeeds only while the job is `running`, keeps an instant
@@ -45,12 +54,28 @@ authority), `provisioning/compute/ansible`, `provisioning/compute/contracts`, an
   1.5. (D4's three rules; requirement scenarios "The start cannot be recorded", "A
   job is cancelled before its start is recorded", "A retried job keeps its first
   start".)
-- [ ] 1.3 In `jobs/engine.py`'s `_transition`, stamp `finished_at` from the
+  Done: `report_starting` is a required `JobRun` field (no default: every
+  executor is handed it by the engine). It goes through `_transition` (expected
+  `running`, status `running`) with `execution_started_at =
+  coalesce(execution_started_at, <instant>)` inside the one conditional `UPDATE`,
+  so the first instant is kept by the statement itself; a refused transition
+  raises the new `JobNotRunningError` (exported from `jobs.engine`), a failed
+  write raises the database's error. The instant is `_utcnow()` (the source's
+  instant, naive UTC, as `next_retry_at` is stored). Every test that builds a
+  `JobRun` by hand gains `report_starting=lambda: None`: `compute/ansible`'s
+  `test_mock.py`, and five in the VM and bare-metal adapters' tests (no package
+  bump: tests are not packaged).
+- [x] 1.3 In `jobs/engine.py`'s `_transition`, stamp `finished_at` from the
   process's time source on every transition to a terminal status (`succeeded`,
   `failed`, `cancelled`), including `_fail` and the conditional `cancel_job` update,
   and never move it once set. `_status` fills the job view's two fields. Verify with
   1.5. (D5; `finished_at` from the process's time source, not `updated_at`.)
-- [ ] 1.4 In `provisioning/compute/ansible/src/compute_provisioning_ansible/executor.py`,
+  Done: `_transition` adds `finished_at = <instant>` to any terminal transition,
+  and `cancel_job`'s own `UPDATE` does the same. It is never moved because every
+  terminal transition expects `queued` or `running`, so a job finishes once; no
+  `coalesce` guards it (only the start's write needs one, `_first_start`, since a
+  retry starts again).
+- [x] 1.4 In `provisioning/compute/ansible/src/compute_provisioning_ansible/executor.py`,
   call `run.report_starting()` immediately before `runner.start_playbook`, after the
   codec's preparation and the inventory are written, so a refusal there records no
   start. The mock runner goes through the same executor. In
@@ -61,7 +86,16 @@ authority), `provisioning/compute/ansible`, `provisioning/compute/contracts`, an
   (`provisioning/compute/ansible/tests/unit/test_executor.py`): `report_starting` is
   called once before `start_playbook`, and not at all when the codec or inventory
   refuses.
-- [ ] 1.5 Library integration
+  Done. Unit (`test_executor.py`, 190 passed with the package's suite, 4 skipped
+  as before): the start is recorded once, immediately before `start_playbook`
+  (event order `["starting", "start_playbook"]`); a raising `report_starting`
+  spawns nothing and leaves no file; and a codec whose `prepare` refuses (as a
+  relay refusal does), the variables file's refusal (an extra variable naming a
+  job variable), and the inventory's (a host not over ssh, an undecryptable key)
+  record no start. Unit (`provisioning/compute/contracts/tests/unit/test_jobs.py`,
+  163 passed with the package's suite): a view without either instant reads null
+  in both, and reported instants are read as reported.
+- [x] 1.5 Library integration
   (`provisioning/compute/tests/integration/test_job_authority.py`): a job refused
   before its executor runs (no host, an unregistered host, an unsupported action)
   records no start and a `finished_at`; a job whose executor reports its start and
@@ -70,25 +104,57 @@ authority), `provisioning/compute/ansible`, `provisioning/compute/contracts`, an
   and its start stays `cancelled` with no start; a retried job keeps its first
   start; a spawned job whose handle write fails keeps its start; a terminal job's
   `finished_at` does not move. Drive the instants with the injected time source.
-- [ ] 1.6 Library integration of the migration
+  Done: library integration, 25 passed (`test_job_authority.py`; the compute
+  package's whole suite, 570 passed). The suite's job tables are built by the
+  package's own `BASELINE` and `MIGRATIONS` rather than `create_all`. The fake
+  executor reports its start before its handle, as a real one does. A start that
+  cannot be recorded is a real database refusal — a SQLite trigger aborting any
+  write of `execution_started_at` — not a patched call; the handle write that
+  fails is a handle the JSON column cannot serialize, so the write raises before
+  anything is stored. The cancellation case gates the executor before its start
+  (`_GatedStart`), cancels, then releases it, and asserts it never spawned. The
+  "finish does not move" case holds the behaviour (a refused cancel and a second
+  `process_job` leave it), which the status guard gives, not a guard of its own.
+- [x] 1.6 Library integration of the migration
   (`provisioning/compute/service/tests/integration/test_migration_chain.py`, as
   `docs/guidance/repository/migration-chain-tests.md` gives the chain's cases): a
   database adopted at the v0.3.0 floor gains both columns, its existing jobs reading
   null in both, and a fresh database builds them.
-- [ ] 1.7 Application integration through the typed client
+  Done: `test_a_v0_3_0_job_gains_execution_instants_that_read_null`, a failed
+  handleless job and a failed job with a handle seeded into the floor's DDL;
+  the chain's existing cases (fresh equals adopted, every mapped column created)
+  cover the new columns too.
+- [x] 1.7 Application integration through the typed client
   (`provisioning/compute/service/tests/integration/test_vms_api.py` or a sibling):
   a job read through the provisioning client carries `execution_started_at` and
   `finished_at` for a job that ran, and null `execution_started_at` with a
   `finished_at` for one refused before its playbook, as the contract's scenarios
   state.
-- [ ] 1.8 Bump `arkhai-compute-provisioning` (minor, the `JobRun` protocol and the
+  Done: `test_vms_api.py`'s `test_a_job_that_ran_is_read_with_its_start_and_its_finish`
+  (both instants, start not after finish), and the refused case asserted on the
+  existing undecryptable-key job in `test_unreadable_host_key_api.py` (no start,
+  a finish, no playbook started). These assert presence and order, not exact
+  instants: the service suite installs no time source of its own there; the exact
+  instants are 1.5's.
+- [x] 1.8 Bump `arkhai-compute-provisioning` (minor, the `JobRun` protocol and the
   job columns), `arkhai-compute-provisioning-ansible` (patch),
   `arkhai-compute-provisioning-contracts` (minor, the job view's fields) and
   `arkhai-compute-provisioning-service` (minor, the migration); raise the lower
   bounds of the packages that need the new fields (the ansible package and the
   service on `arkhai-compute-provisioning`, the service on the contracts); refresh
   the locks. Verify with `make check-version-bumps` and `make check-locks`.
-- [ ] 1.9 Verification: `uv run pytest provisioning/compute/tests
+  Done: `arkhai-compute-provisioning` 0.28.0 → 0.29.0, `-ansible` 0.8.1 → 0.8.2,
+  `-contracts` 0.15.0 → 0.16.0, `-service` 0.26.0 → 0.27.0. Beyond the plan's
+  bounds: `arkhai-compute-provisioning` itself now requires the contracts at
+  `>=0.16.0` (its `_status` builds the view with the new fields, which an older
+  contracts model would silently drop), and the service requires the ansible
+  package at `>=0.8.2` (an older executor never reports a start, so a job whose
+  handle write failed after its spawn would read as never started). Relocked the
+  twelve projects whose locks name any of the four (`make lock PROJECTS=…`:
+  `provisioning/compute` and its `ansible`, `contracts`, `client`, `service`; the
+  VM adapter, client and storefront; the bare-metal adapter and storefront;
+  `domains/compute/delivery`; `e2e-tests`). Both checks pass.
+- [x] 1.9 Verification: `uv run pytest provisioning/compute/tests
   provisioning/compute/ansible/tests provisioning/compute/contracts/tests
   provisioning/compute/service/tests` passes, and `scripts/change-workflow run
   pre-commit resolve-delivery-correctness-gaps` passes. End-to-end: every lane deal
@@ -96,6 +162,40 @@ authority), `provisioning/compute/ansible`, `provisioning/compute/contracts`, an
   `e2e_deal`, `e2e_vm_payment_purchase` and `e2e_bare_metal_mock_deal`; no scenario
   reads the new fields, and none is owed: the application-integration case is their
   evidence.
+  Done: each package's suite run in its own project — compute 570 passed,
+  ansible 190 passed (4 skipped), contracts 163 passed, the service (`make -C
+  provisioning/compute/service test`) 634 unit and 558 integration passed; the VM
+  and bare-metal adapters' suites, whose hand-built `JobRun`s changed, 287 and
+  138 passed. `pre-commit` passes (see the section's notes). End-to-end confirmed:
+  the three markers exist in `e2e-tests/pyproject.toml` and their lanes in
+  `e2e-tests/Makefile`; every lane executor is the `AnsibleJobExecutor` over the
+  mock runner, so each deal records both instants; no scenario reads them, and
+  none is owed.
+
+Section 1 notes (handoff):
+
+- Outside the plan: `docs/development/DEPLOYMENT_AND_CONFIG.md`'s list of the
+  migrations after the v0.3.0 baseline gains the new migration, since that list
+  describes the chain and would otherwise be stale.
+- `JobNotRunningError` and the start's `coalesce` live in `jobs/engine.py`. A
+  never-started classification is not implemented here: it is section 2's
+  teardown-job read, from `status`, `execution_started_at`, `execution_handle`
+  and `finished_at` as D4 states it.
+- An executor double in another package's tests that never calls
+  `report_starting` still runs, and its jobs then record no start; a test of the
+  rerun predicate must use a double that reports its start where it means a
+  started execution (section 2's executor refusing before the start is the
+  opposite case).
+- The service suite's `fake_ansible` goes through the real `AnsibleJobExecutor`,
+  so application-integration jobs record their start; the instants are naive
+  UTC as SQLite returns them.
+- `scripts/change-workflow run test-before … --at 81e3efa2a` was run on
+  `test_job_authority.py` and the Ansible `test_executor.py` and showed nothing:
+  it runs `uv run --no-project --with pytest`, so collection fails importing
+  `injected_time` and `compute_provisioning_contracts` before any test runs. No
+  fail-before evidence exists for this section's tests; the new ones read fields
+  and a callback the base commit lacks, so they would fail there at attribute
+  access or construction, not at their assertions.
 
 ## 2. A teardown that never started is run again, and its lease waits for it
 
