@@ -87,11 +87,11 @@ async def test_gpu_filters_exclude_a_listing_stating_no_gpu(registry_client) -> 
     found only by queries that bound no GPU field."""
     await registry_client.publish_listing(_listing("cpu-only", vcpu_count=16, ram_gb=64))
     await registry_client.publish_listing(
-        _listing("gpu", gpu_model="H100", gpu_count=1, vcpu_count=16, ram_gb=64)
+        _listing("gpu", gpu_model="GB10", gpu_count=1, vcpu_count=16, ram_gb=64)
     )
 
     assert await _ids(registry_client, gpu_count_min=1) == {"gpu"}
-    assert await _ids(registry_client, gpu_model="H100") == {"gpu"}
+    assert await _ids(registry_client, gpu_model="GB10") == {"gpu"}
     assert await _ids(registry_client, vcpu_count_min=16) == {"cpu-only", "gpu"}
 
 
