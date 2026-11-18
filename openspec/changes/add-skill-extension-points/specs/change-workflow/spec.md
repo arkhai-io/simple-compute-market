@@ -317,7 +317,8 @@ MUST be the owner's decision in the change's workflow log, naming the kinds and 
 condition they are waived on; validation MUST read it before assessing any kind, and
 MUST gather a waived kind, saying in the record that the waiver lapsed and why, when
 the condition does not hold over the commits since the last validation that assessed
-that kind, or when those commits include a merge.
+that kind, or when the commits since the last validation that ran it — or since the
+latest validation, when none ran it — include a merge (CW-g6th).
 
 #### Scenario: A part produces no evidence for an environmental reason
 
@@ -335,7 +336,7 @@ that kind, or when those commits include a merge.
 
 #### Scenario: A standing waiver lapses at a merge
 
-- **WHEN** the commits since the pipeline kind was last assessed include a merge
+- **WHEN** the commits since the pipeline kind last ran include a merge
 - **THEN** the pipeline kind is gathered despite the owner's waiver of it, and the
   record says the waiver lapsed at the merge
 

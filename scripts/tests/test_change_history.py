@@ -36,7 +36,8 @@ CITED = Path(".snapshot/evidence") / OTHER_TREE / "helm/20261117T1140Z"
 
 
 def _kind(name: str, pattern: str, shape: str = 'run = "true"') -> str:
-    return (f'[validation.evidence.{name}]\nrequired = "always"\n{shape}\n'
+    required = "owed" if "{owed}" in pattern else "always"
+    return (f'[validation.evidence.{name}]\nrequired = "{required}"\n{shape}\n'
             f'evidence = "{pattern}"\nguide = ".agents/evidence/{name}.md"\n')
 
 
@@ -142,9 +143,9 @@ def test_the_records_name_cited_paths_and_validated_trees_and_commits(
     cited, keys = history.named_evidence(reviews, EVIDENCE)
 
     assert cited == sorted([CITED, Path(f".snapshot/evidence/{'c' * 40}/local/1/summary.json")])
-    # Which directory holds a validated tree's or commit's evidence the records do
-    # not say; the copy looks under each.
-    assert keys == sorted([COMMIT, TREE])
+    # Where a validated tree's or commit's evidence lies the records do not say; the
+    # copy looks where each kind keyed by that identity puts it.
+    assert keys == [("commit", COMMIT), ("tree", TREE)]
 
 
 def test_a_citation_ending_a_sentence_names_the_path_without_its_full_stop(
@@ -227,8 +228,8 @@ def test_evidence_the_records_name_that_the_clone_lacks_is_reported(
 
     synced = history.sync(clone, workspace, CHANGE)
 
-    # A commit no evidence directory holds is reported under each; a cited path
-    # where it was cited.
+    # A commit no kind's pattern finds is reported where each kind keyed by the
+    # commit would put it; a cited path where it was cited.
     assert synced.absent == [f".snapshot/evidence/{'7' * 40}/local/1",
                              f".snapshot/evidence/{'9' * 40}"]
     assert synced.refused == []
@@ -246,6 +247,36 @@ def test_evidence_under_a_directory_no_kind_declares_is_not_copied(
     assert not any(name.startswith(".snapshot/evidence/") for name in synced.copied)
     assert f".snapshot/validation/{TREE}/local/1/summary.json" in synced.copied
     assert not (workspace / BY_COMMIT).exists()
+
+
+@pytest.mark.parametrize(("pattern", "named", "unnamed"), [
+    # Evidence keyed by a file directly in the evidence directory.
+    (".snapshot/runs/{tree}.json", f".snapshot/runs/{TREE}.json",
+     f".snapshot/runs/{OTHER_TREE}.json"),
+    # Evidence keyed by a directory whose name embeds the identity.
+    (".snapshot/runs/run-{tree}/summary.json", f".snapshot/runs/run-{TREE}/summary.json",
+     f".snapshot/runs/run-{OTHER_TREE}/summary.json"),
+    # Evidence keyed by a file in a directory per owed argument, which holds every
+    # tree's evidence of that argument.
+    (".snapshot/runs/{owed}/{tree}.json", f".snapshot/runs/tests.yml/{TREE}.json",
+     f".snapshot/runs/tests.yml/{OTHER_TREE}.json"),
+], ids=["file", "embedded", "owed"])
+def test_the_kinds_pattern_says_which_evidence_the_records_name(
+        workspace: Path, clone: Path, pattern: str, named: str, unnamed: str) -> None:
+    """CW-hak6 over any layout CW-t3ev admits: what the records name is copied, and
+    nothing else beside it, nor is named evidence the clone holds reported absent."""
+    _write(clone, REVIEWS / "02-validation.md",
+           VALIDATION_RECORD + f"\nCurrent: `{named}`.\n")
+    _write(clone, named, '{"passed": true}\n')
+    _write(clone, unnamed, '{"passed": false}\n')
+    (clone / ".agents/workflow.toml").write_text(_kind("local", pattern), "utf-8")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert synced.copied == [(REVIEWS / "02-validation.md").as_posix(), named]
+    assert synced.absent == [] and synced.refused == []
+    assert not (workspace / unnamed).exists()
+    assert history.differences(clone, workspace, CHANGE) == []
 
 
 def test_a_second_copy_extends_what_grew_adds_what_is_new_and_leaves_the_rest(

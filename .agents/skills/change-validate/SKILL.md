@@ -208,11 +208,13 @@ moves nothing here, and validation runs beside it.
   read the log's owner decisions for one too. For each kind such a decision
   waives, find the last validation record of the change whose `Evidence:` line —
   an older record's `Parts:` line — assessed that kind, and its `Commit:`. The
-  waiver lapses, and the kind is gathered, when the commits since then include a
-  merge (`git log --merges <that commit>..HEAD`), since a merge brings in code the
-  change did not write, or when the condition does not hold over what they change
-  (`git diff --stat <that commit> HEAD`); with no such record, judge the condition
-  over the change's own diff. The gathering lapses a waiver on a merge itself, its
+  waiver lapses, and the kind is gathered, when the condition does not hold over
+  what the commits since then change (`git diff --stat <that commit> HEAD`); with no
+  such record, judge the condition over the change's own diff. It lapses too when
+  the commits since the last validation that ran the kind — whose logged `invoked`
+  names it — or since the latest validation, when none ran it, include a merge
+  (`git log --merges <that commit>..HEAD`), since a merge brings in code the change
+  did not write. The gathering lapses a waiver on a merge itself, its
   closing line for the kind saying so; whether the condition still holds is yours
   to judge. Otherwise the kind is `waived`: it is not gathered, and the record
   names the decision's `seq`, its condition, and what you checked. A lapsed waiver

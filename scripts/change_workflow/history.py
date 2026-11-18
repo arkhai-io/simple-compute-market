@@ -17,17 +17,23 @@ session's lines, and another round on the pull request are written after the fir
 copy. Any other difference is refused, naming the file, and the workspace's file is
 never overwritten: it holds something the clone does not, and which is meant is the
 owner's call. Only regular files are copied. Nothing rebuildable is: only
-`reviews/` and the evidence directories its records name, never a wheelhouse, an
-environment, or a zip of logs.
+`reviews/` and the evidence its records name, never a wheelhouse, an environment,
+or a zip of logs.
 
-An evidence directory holds one directory per tree or commit it is evidence of. The
-evidence a change's records name is, under each evidence directory, each path they
-cite — a directory, or the directory holding a cited file — and the evidence of each
-validation record's tree (`**Tree:**`) and commit (`**Commit:**`), each under its
-full object name, under whichever directories hold it. Transcripts are not read for
-it: they cite whatever a session read, another clone's evidence included. Named
-evidence the clone does not hold is reported, not refused: a cited path absent, and
-a tree or commit no evidence directory holds, under each.
+The evidence a change's records name is, under each evidence directory, each path
+they cite — a directory, or the directory holding a cited file — and the evidence of
+each validation record's tree (`**Tree:**`) and commit (`**Commit:**`), each by its
+full object name. A kind keyed by that identity says where that is, by its pattern:
+what matches it as far as the segment holding its identity, the identity filled in
+and any other placeholder matching anything, file or directory, so evidence keyed by
+a whole directory, a file, or a name embedding the identity is found alike. A
+directory a kind's pattern reaches before its identity's segment holds every
+identity's evidence, so it is never copied whole: a cited file in it is copied
+alone, and a cited directory that is one is not copied, the evidence of the trees
+and commits the records name found in it by their patterns instead. Transcripts are
+not read for it: they cite whatever a session read, another clone's evidence
+included. Named evidence the clone does not hold is reported, not refused: a cited
+path absent, and a tree or commit no kind's pattern finds, where each would be.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-hak6 and CW-rf50.
 """
@@ -40,6 +46,7 @@ import re
 import shutil
 import sys
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Sequence
 
@@ -48,7 +55,7 @@ from .common import StepError, repository_root
 from .find import REVIEWS, ChangeNotFound, change_directory, is_archived, workspace_of
 
 # A validation record's commit and tree, each its full object name.
-_IDENTITY = re.compile(r"^- \*\*(?:Commit|Tree):\*\*\s*`?([0-9a-f]{40})\b", re.M)
+_IDENTITY = re.compile(r"^- \*\*(Commit|Tree):\*\*\s*`?([0-9a-f]{40})\b", re.M)
 
 
 class HistoryError(RuntimeError):
@@ -77,13 +84,15 @@ def _cited(directory: Path) -> re.Pattern[str]:
                       r"(?![0-9A-Za-z_-]|\.[0-9A-Za-z_-])")
 
 
-def named_evidence(reviews: Path, evidence: Sequence[str]) -> tuple[list[Path], list[str]]:
+def named_evidence(reviews: Path, evidence: Sequence[str]
+                   ) -> tuple[list[Path], list[tuple[str, str]]]:
     """What the records in `reviews` name under the evidence directories `evidence`,
-    relative to the checkout: each cited path, and each validated tree and commit,
-    whose directory the records do not say."""
+    relative to the checkout: each cited path, and each validated tree and commit, as
+    its identity — `tree` or `commit` — and its full object name, whose evidence the
+    records do not locate."""
     directories = [Path(entry.rstrip("/")) for entry in evidence]
     cited: set[Path] = set()
-    keys: set[str] = set()
+    keys: set[tuple[str, str]] = set()
     for record in sorted(reviews.iterdir()):
         if not record.is_file():
             continue
@@ -91,15 +100,40 @@ def named_evidence(reviews: Path, evidence: Sequence[str]) -> tuple[list[Path], 
         for directory in directories:
             cited.update(Path(directory.as_posix() + below)
                          for below in _cited(directory).findall(text))
-        keys.update(_IDENTITY.findall(text))
+        keys.update((label.lower(), key) for label, key in _IDENTITY.findall(text))
     return sorted(cited), sorted(keys)
 
 
-def _history(clone: Path, change: str, evidence: Sequence[str] | None = None
-             ) -> tuple[list[Path], list[Path]]:
-    """The directories of the change's history the clone holds, relative to it —
-    its records, then the evidence they name — and the named evidence it does not.
-    The evidence directories are the clone's configuration's unless given."""
+def _identity_segment(segments: Sequence[str]) -> int:
+    """The index of the segment holding a pattern's identity, which the
+    configuration's check requires it to hold."""
+    return next(index for index, segment in enumerate(segments)
+                if {config.TREE, config.COMMIT} & set(config.placeholders(segment)))
+
+
+def identity_glob(pattern: str, key: str) -> str:
+    """An evidence pattern as far as the segment holding its identity, `{tree}` or
+    `{commit}` filled with `key`, and any other placeholder matching anything: where
+    the evidence of the tree or commit `key` lies, a file or a directory."""
+    segments = pattern.split("/")
+    return config.PLACEHOLDER.sub(
+        lambda match: key if match.group(1) in (config.TREE, config.COMMIT) else "*",
+        "/".join(segments[:_identity_segment(segments) + 1]))
+
+
+def _shared(pattern: str) -> list[str]:
+    """The segments of an evidence pattern before its identity's, each a glob, its
+    placeholders matching anything: the directories they match hold the evidence of
+    every tree or commit."""
+    segments = pattern.split("/")
+    return [config.PLACEHOLDER.sub("*", segment)
+            for segment in segments[:_identity_segment(segments)]]
+
+
+def _history(clone: Path, change: str) -> tuple[list[Path], list[Path]]:
+    """What of the change's history the clone holds, relative to it — its records,
+    then the evidence they name, each a directory or a file — and the named evidence
+    it does not, as the clone's configuration declares its kinds."""
     try:
         directory = change_directory(clone, change)
     except ChangeNotFound as exc:
@@ -110,24 +144,39 @@ def _history(clone: Path, change: str, evidence: Sequence[str] | None = None
     reviews = directory / REVIEWS
     if not reviews.is_dir():
         raise HistoryError(f"{reviews.relative_to(clone)} does not exist in {clone}")
-    if evidence is None:
-        try:
-            evidence = config.load(clone).evidence()
-        except StepError as exc:
-            raise HistoryError(str(exc)) from exc
+    try:
+        configuration = config.load(clone)
+    except StepError as exc:
+        raise HistoryError(str(exc)) from exc
+    evidence = configuration.evidence()
+    kinds = configuration.kinds or ()
     cited, keys = named_evidence(reviews, evidence)
-    directories = [Path(entry.rstrip("/")) for entry in evidence]
-    # A cited file is copied with the directory holding it.
-    cited = sorted({path if not (clone / path).is_file() else path.parent for path in cited})
-    held = [path for path in cited if (clone / path).is_dir()]
-    absent = [path for path in cited if not (clone / path).is_dir()]
-    for key in keys:
-        found = [directory / key for directory in directories if (clone / directory / key).is_dir()]
+    shared = [_shared(kind.evidence) for kind in kinds]
+
+    def whole(path: Path) -> bool:
+        """Whether `path` may be copied whole: no kind's pattern reaches it before
+        its identity's segment, where it would bring every identity's evidence."""
+        parts = path.parts
+        return not any(len(parts) <= len(globs) and all(map(fnmatchcase, parts, globs))
+                       for globs in shared)
+
+    # A cited file is copied with the directory holding it, unless that directory
+    # holds every identity's evidence; then it is copied alone.
+    cited = sorted({path.parent if (clone / path).is_file() and whole(path.parent) else path
+                    for path in cited})
+    held = [path for path in cited
+            if (clone / path).is_file() or ((clone / path).exists() and whole(path))]
+    absent = [path for path in cited if not (clone / path).exists()]
+    for identity, key in keys:
+        # A tree's evidence lies only where a kind keyed by the tree puts it, and a
+        # commit's where one keyed by the commit does.
+        globs = list(dict.fromkeys(identity_glob(kind.evidence, key) for kind in kinds
+                                   if kind.identity == identity))
+        found = [path.relative_to(clone) for glob in globs for path in sorted(clone.glob(glob))]
         held += [path for path in found if path not in held]
         if not found:
-            absent += [directory / key for directory in directories
-                       if directory / key not in absent]
-    # A directory inside another copied is copied with it, once.
+            absent += [Path(glob) for glob in globs if Path(glob) not in absent]
+    # What lies inside a directory copied is copied with it, once.
     held = [path for path in held if not any(other in path.parents for other in held)]
     return [reviews.relative_to(clone), *sorted(held)], sorted(absent)
 
@@ -135,6 +184,10 @@ def _history(clone: Path, change: str, evidence: Sequence[str] | None = None
 def _files(clone: Path, tops: Sequence[Path]) -> list[Path]:
     files: list[Path] = []
     for top in tops:
+        if not (clone / top).is_dir() or (clone / top).is_symlink():
+            # A file is copied itself, and a link listed, so it is refused and named.
+            files.append(top)
+            continue
         for directory, subdirectories, names in os.walk(clone / top):
             subdirectories.sort()
             # A link to a directory is not walked into; it is listed, so it is refused

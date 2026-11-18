@@ -765,8 +765,9 @@ def _merged_clone(workspace: Path) -> Path:
     _commit(clone, "feature.txt", "the change\n")
     _git(clone, "push", "-q", "origin", f"{BRANCH}:{BRANCH}", f"{BRANCH}:dev")
     (clone / REVIEWS).mkdir(parents=True)
+    # The workspace's one kind is keyed by the tree, so the record's tree names it.
     (clone / REVIEWS / "02-validation.md").write_text(
-        f"- **Commit:** {VALIDATED} on feat/seed-pool\n", "utf-8")
+        f"- **Tree:** {VALIDATED}\n", "utf-8")
     (clone / REVIEWS / "workflow.jsonl").write_text('{"step": "archive-cleanup"}\n', "utf-8")
     (clone / EVIDENCE).mkdir(parents=True)
     (clone / EVIDENCE / "summary.json").write_text("{}\n", "utf-8")
@@ -898,7 +899,7 @@ def test_named_evidence_the_clone_lacks_is_reported_and_does_not_refuse_removal(
     clone = _merged_clone(workspace)
     pruned = Path(".snapshot/validation") / ("f" * 40)
     (clone / REVIEWS / "03-validation.md").write_text(
-        f"- **Commit:** {pruned.name} on feat/seed-pool\n", "utf-8")
+        f"- **Tree:** {pruned.name}\n", "utf-8")
 
     assert clones.main(["remove", CHANGE], root=workspace) == 0
 

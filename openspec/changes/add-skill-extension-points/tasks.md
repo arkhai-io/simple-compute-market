@@ -387,6 +387,15 @@ CW-ikmm's rerun, CW-q5fy's kinds, CW-e7lm's waivers). Files: `scripts/change_wor
       the log and Git through `cli.main`.
     `test_validation_gathers_this_repositorys_kinds` doubles the hook runner's shell,
     since this repository's commands build and deploy.
+  - Round-triage edit, review 36 F2: the task above says "since it was last
+    assessed", and the delta's CW-e7lm said the same. CW-g6th, D7, and `merge_lapse`
+    measure the merge from the last validation that *ran* the kind. CW-e7lm is now
+    split: the waiver's condition is measured from the last validation that assessed
+    the kind, and the merge from the last one that ran it, or the latest validation
+    when none did. Its merge scenario says "last ran". `change-validate`'s Waivers
+    paragraph says the same. No code changed: the invocation errs only toward
+    gathering a waived kind again, and a lapse over present evidence gathers
+    nothing.
 - [x] 3.2 Add `gather <change> --kind <kind> [--owed <argument>] [--lapsed]`: a new
   attempt of that kind whatever is present, of one owed argument or each owed
   without `--owed`; a waived kind refused without `--lapsed` (D4; CW-g6th). Verify:
@@ -490,6 +499,44 @@ CW-ikmm's rerun, CW-q5fy's kinds, CW-e7lm's waivers). Files: `scripts/change_wor
       leaving the tree's other attempt;
     - the absent-evidence and no-kind tests.
   - `test_change_clone.py`'s removal tests use full commits.
+  - Round-triage fix, review 36 F1: history read only the layout this repository's
+    patterns use. It copied a cited file with the directory holding it, and looked
+    up each tree and commit as a directory directly under each fixed directory. With
+    a pattern configuration admits, such as `.snapshot/runs/{tree}.json` or
+    `run-{tree}/`, it copied the whole evidence directory and reported the named
+    evidence absent. Now each kind's pattern is the authority:
+    - A validated tree or commit is looked up only under the kinds keyed by that
+      identity. The lookup globs each pattern as far as its identity's segment
+      (`identity_glob`), with `{owed}` matching anything, and copies what matches,
+      file or directory. `named_evidence` returns each key with its identity.
+    - A directory a pattern reaches before its identity's segment is never copied
+      whole. A cited file in one is copied alone, and a cited directory that is one is
+      not copied.
+    - Tests:
+      - `test_change_history.py` (library integration, a real temporary clone):
+        `test_the_kinds_pattern_says_which_evidence_the_records_name` for a
+        file-shaped, an embedded-identity, and an owed per-argument pattern, each
+        beside another tree's evidence. Each fails at `09584f30a` through `run
+        test-before --at`: the unnamed sibling is copied, or the named evidence is
+        reported absent.
+      - `test_change_clone.py`'s removal fixtures now name a `**Tree:**`, since
+        their one kind is tree-keyed.
+      - Both suites: 103 passed.
+    - The fresh-context check found five problems, all fixed:
+      - a pattern with `{owed}` before its identity still copied a per-argument
+        directory whole, so the shared directories are now every pattern's segments
+        before its identity, not only the fixed directory;
+      - a dropped cited directory the docstring didn't mention;
+      - two docstring phrases and a stale test comment;
+      - `change-validate` still measuring the merge lapse from the last assessment
+        (see 36 F2 under 3.1).
+    - `run pre-commit` on the fixes for 36 F1 and F2 passed whole:
+      - `after-functional-change`: passed, exit 0;
+      - `pre-commit-functional` (`make validate-local`: check-packaging and test
+        passed, every suite): passed, exit 0;
+      - `pre-commit`: passed, exit 0.
+      - This note changes the tree that run checked.
+    - End-to-end: none — no scenario exercises the workflow's tooling.
 - [x] 3.7 Verification point: the suites above; `run pre-commit` passes. End-to-end:
   none.
   - Correction: checked though `run pre-commit` does not pass whole, as in 1.10.
