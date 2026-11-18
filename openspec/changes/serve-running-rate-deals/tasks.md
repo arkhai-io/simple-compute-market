@@ -2326,43 +2326,172 @@ Section 10 work in progress (uncommitted, round 2's session; no task checked yet
   the owner's topology; the plan's lane evidence against the owner's live-evidence
   route.
 
+## 10a. Every wait of VM's `buy` on the command's wait clock
+
+Delivers VM's commit loop and settlement wait paced by the `buy` command's `wait_clock`,
+as bare metal's commit and availability waits already are, so a clock the harness
+programs paces every wait `buy` makes. Implements D20 (75 F1); requirement "The buyer's
+watchdog is qualified against a delivered deal" (`test-compatibility`: every wait `buy`
+makes stepped). Touches `core/buyer` (`core_buyer/orchestration.py`) and
+`domains/vms/buyer` (`arkhai_vms_buyer/arkhai_payments.py`, `settlement_stages.py`,
+`buy_cli.py`), and their tests. `arkhai-core-buyer` (0.7.1) and `arkhai-vms-buyer`
+(0.13.0) are already one step past the development branch on this branch, so neither
+takes a further version (`docs/guidance/repository/package-versions.md`, "Versioning
+policy"); `arkhai-vms-buyer`'s lower bound on `arkhai-core-buyer` rises to `>=0.7.1`.
+
+- [ ] 10a.1 `core_buyer.orchestration.wait_for_settlement` takes a `monotonic` callable
+      beside its `sleep`, defaulting to `time.monotonic`, and measures its deadline on
+      it, so a caller's clock paces the whole wait (D20). Verify (unit,
+      `core/buyer/tests/`): with a fake `monotonic` advanced only by the fake `sleep`,
+      the wait polls until a terminal status and times out after `total_timeout` of
+      fake time, never sleeping real time.
+- [ ] 10a.2 VM's settle path runs on the command's clock: `settle_payment`'s commit loop
+      reads the clock's `monotonic` and awaits its `sleep` where it reads
+      `time.monotonic` and `asyncio.sleep` today, and its `wait_for_settlement` call,
+      and `settlement_stages.py`'s other one (the resumed settle), pass the clock's
+      `monotonic` and a synchronous adapter of its `sleep`. The clock reaches the payment
+      stage from `buy_cli.wait_clock()` as bare metal's reaches its stage
+      (`arkhai_bare_metal_buyer/cli.py`, the settlement stage built with
+      `clock=wait_clock()`; `settlement_stages.py`'s `clock: WaitClock` parameter), so
+      the one factory paces commit, settlement and watchdog alike; the stage's default
+      stays `WaitClock()` (D20). Verify (application integration through the typed
+      client, `domains/vms/storefront/tests/integration/test_watchdog_buy.py`): a fresh
+      `buy --watchdog` whose `wait_clock` is a fake clock, its `monotonic` advanced
+      only by the sleeps it is given, waits for delivery while the composed storefront's
+      site holds it back, sleeping no real time and timing out in fake time when the
+      deal never arrives; and, once the site delivers, the same command enters its
+      watchdog from `available`. The existing VM buyer tests that replace `wait_clock`
+      (`domains/vms/buyer/tests/test_buy_resume_cli.py`) still pass.
+- [ ] 10a.3 Verification point: `make -C core/buyer test`, `make -C domains/vms/buyer
+      test` and `make -C domains/vms/storefront test` pass, and
+      `scripts/change-workflow run pre-commit serve-running-rate-deals` passes.
+      End-to-end: `e2e_vm_recurring_purchase`, `e2e_vm_payment_purchase` and every other
+      VM lane module running `market buy` exercise the changed waits on the default
+      clock; section 11's `e2e_vm_rate_watchdog` exercises them on the harness's clock.
+
+## 10b. Bare metal's probe built from the access its caller read
+
+Delivers bare metal's `watchdog_probe` taking the access the storefront disclosed,
+read by its caller, as VM's takes its delivery's connection details, so the harness's
+probe sees the disclosed endpoint while the buyer's own read of the access runs.
+Implements D20 (75 F2). Touches `domains/bare_metal/buyer`
+(`arkhai_bare_metal_buyer/cli.py`) and the tests that replace its probe factory.
+`arkhai-bare-metal-buyer` (0.9.0) is already one step past the development branch, so it
+takes no further version.
+
+- [ ] 10b.1 `watchdog_probe` takes the access mapping `fulfillment.access` serves, and
+      `_deliver_and_watch`, the one caller, which `buy` and its resume both reach, reads
+      it through `_recovered_transports` before building the probe; a disclosure naming
+      no host or port still raises the `ValueError` the caller reports as "Watchdog not
+      running". The fakes replacing it take the new argument:
+      `domains/bare_metal/buyer/tests/test_run_log_recovery.py`,
+      `domains/bare_metal/buyer/tests/test_watchdog_cli.py` and
+      `domains/bare_metal/storefront/tests/integration/test_watchdog_buy.py` (D20).
+      Verify (application integration through the typed client,
+      `domains/bare_metal/storefront/tests/integration/test_watchdog_buy.py`): the probe
+      factory receives exactly the access the composed storefront's access route serves
+      for the deal; (unit, `domains/bare_metal/buyer/tests/test_watchdog_cli.py`): a
+      disclosure without host or port leaves the deal unmonitored with that message.
+- [ ] 10b.2 Verification point: `make -C domains/bare_metal/buyer test` and `make -C
+      domains/bare_metal/storefront test` pass, and `scripts/change-workflow run
+      pre-commit serve-running-rate-deals` passes. End-to-end:
+      `e2e_bare_metal_recurring_purchase` and the bare-metal lane's other buy modules run
+      the changed factory only where a deal opted into the watchdog, which none does;
+      section 11's `e2e_bare_metal_rate_watchdog` exercises it.
+
 ## 11. The buyer's watchdog against a delivered deal
 
-Replanned against the reviewed design (D10, D18, design review 60): the unchecked tasks
-below replace the earlier 11.1–11.3, whose Compose fixture stopping the storefront the
-harness cannot run.
+Replanned against the reviewed design (D20, design review 75): the unchecked tasks below
+replace the earlier 11.1–11.3, whose listener and mock-provisioning rule no rule can
+disclose; those were themselves replanned (D10, D18, design review 60) from a fixture
+stopping the storefront. The work-in-progress record further down is kept as history.
 
-Delivers the buyer watchdog's four delivered-deal cases in both Compose lanes, labelled
-lane-double evidence. Implements D10, D18 and D19, with D17's reservation stage (9B,
-10.2); requirement "The buyer's watchdog is qualified against a delivered deal"
-(`test-compatibility`). Needs `drive-the-storefront-clock-in-lanes` landed (it is
-archived and merged). Touches `e2e-tests` and, only if a mock-provisioning rule cannot
-name the deal's endpoint, the test-only provisioning mock's result rules.
+Delivers the buyer watchdog's four delivered-deal cases in both Compose lanes on one deal
+each, the shipped `buy` run in the harness's process with its probe and every wait it
+makes programmed by the harness, labelled lane-double evidence. Implements D10, D18, D19
+and D20; requirement "The buyer's watchdog is qualified against a delivered deal"
+(`test-compatibility`). Consumes 10a and 10b. Needs `drive-the-storefront-clock-in-lanes`
+landed (archived and merged). Touches `e2e-tests` only.
 
-- [ ] 11.1 Harness fixtures: a TCP listener in the harness's own container, where the
-      buyer runs, that a stage opens and closes, reachable at the container's address on
-      the lane's network; and a mock-provisioning rule the scenario installs, in each
-      lane, so the deal's fulfillment result discloses that listener as its endpoint
-      (D10). The rule is removed by the module's cleanup. Verify (unit,
-      `e2e-tests/tests/unit/`): the listener's open and close, and the rule's body naming
-      the listener's address.
+- [ ] 11.1 An in-process buyer helper in `e2e-tests/tests/e2e/roles/helpers/`, with D20's
+      mock layer:
+      - it runs the shipped command — `buy`, `buy --from` and the buyer's read — through
+        its Typer app with `CliRunner` in a worker thread, as
+        `domains/vms/storefront/tests/integration/test_watchdog_buy.py` does, entering at
+        the `market` root so its callback reads the buyer's configuration;
+      - it replaces the domain CLI's `watchdog_probe` (VM
+        `arkhai_vms_buyer.buy_cli`, bare metal `arkhai_bare_metal_buyer.cli`, each with
+        its own signature after 10b) with a probe answering as the stage programs it,
+        reachable or not, making no network call and recording the endpoint it was built
+        for;
+      - it replaces the CLI's `wait_clock` with a `WaitClock` whose `now` is the
+        harness's installed lane-time source, whose `sleep` is a gate the stage releases
+        one interval at a time, and whose `monotonic` advances by each interval
+        released; a stage can wait until `buy` is parked at the gate, release one
+        interval, or deliver an interrupt at the gate, which ends the command as a
+        buyer's interrupt does;
+      - it writes the buyer's configuration with no `[time]` table, so the callback
+        installs no source and the harness's lane-time source stays installed (75 F3);
+      - it scopes the buyer's environment — its `XDG_*`, `HOME` and credential
+        variables — for the module with a module-scoped `pytest.MonkeyPatch` context,
+        undone when the module ends (75 F3);
+      - it refuses a read unless `buy` is parked at the gate or no command runs, so
+        `CliRunner`'s stream swaps nest (75 F3).
+      `e2e-tests/tests/e2e/roles/buyer_cli.py`'s docstring names the in-process watchdog
+      cases as the exception to driving the binary as a subprocess, and why (D20).
+      Verify (unit, `e2e-tests/tests/unit/`): one release advances `monotonic` by one
+      interval and lets exactly one sleep return; an interrupt at the gate ends the
+      command; the probe answers as programmed and records its endpoint; the written
+      configuration has no `[time]` table; the environment is restored when the context
+      ends; a read while `buy` is between gates is refused.
 - [ ] 11.2 Add `e2e_vm_rate_watchdog` and `e2e_bare_metal_rate_watchdog` under
-      `scenarios/{vms,bare_metal}/`: `buy` with the watchdog opted in from `available`;
-      the reservation stage through the last instant the module sets, where that lies
-      past the deal's first reservation (10.2); the storefront's loops paused with the
-      lane's existing loop controls, the listener closed, lane time set through the
-      threshold of probes, then one payer stop accepted at the payments double with
-      nothing from the storefront between, and `deal-servicing` stepped to show the
-      buyer's entitled stop recorded and the teardown (D18); a killed command reading
-      `unmonitored` once lane time passes its last probe's staleness bound, and the
-      resumed run reading `monitored`. Each labelled lane-double evidence; markers in
-      `e2e-tests/pyproject.toml`, the Makefile's lane lists and `e2e-tests/README.md`.
-      Verify (unit, `e2e-tests/tests/unit/`): the stage order check holds both modules;
-      (system) `make -C e2e-tests test-e2e-vm E2E_MODULE=e2e_vm_rate_watchdog` and `make
-      -C e2e-tests test-e2e-bare-metal E2E_BARE_METAL_MODULE=e2e_bare_metal_rate_watchdog`
-      pass, each leaving no payment hold, mock rule or held loop.
-- [ ] 11.3 Verification point: the `e2e-tests` unit suite and both lanes' runs pass.
-      End-to-end: `e2e_vm_rate_watchdog`, `e2e_bare_metal_rate_watchdog`.
+      `scenarios/{vms,bare_metal}/rate_watchdog/`, each one module on one deal with its
+      own registered host, taking its lane's hold fixtures as every lane module does
+      (`docs/guidance/repository/deterministic-tests.md`), so the storefront's loops are
+      the paused ones D18 names. In order (D20):
+      1. the in-process `buy` of a recurring on-demand option under the shipped preset,
+         default buyer, lane declaration `[charged, returned]`, with
+         `--watchdog --watchdog-interval 1 --watchdog-threshold 2`, parked at the gate
+         while it waits for delivery; the stage sets lane time to the Agreement's start
+         and steps `delivery-recovery` (and, in each lane, what the recurring purchase's
+         delivery stages step), then releases the wait; the command enters its watchdog
+         from `available`; one interval released with the probe reachable; the buyer's
+         read shows `monitored`, and the probe was built for the endpoint the deal
+         disclosed (VM's delivery's connection details; bare metal's access route);
+      2. lane time set a minute into the first period (`STOP_INTO_PERIOD_SECONDS`, as
+         `Recurring08`), so the later stop charges the started period;
+      3. an interrupt at the gate; lane time set past the last probe by one interval, the
+         probe timeout and `GRACE_SECONDS`, as the opt-in's settings give them; the read
+         shows `unmonitored`;
+      4. the in-process `buy --from`; one interval released with the probe reachable; the
+         read shows `monitored`;
+      5. the probe unreachable and the threshold's intervals released: the watchdog sends
+         one payer stop and hint, the command exits with the outcome `stopped`; the
+         signed snapshot read through the payments kit (`transaction_snapshot`) shows the
+         part started and stopped by `payer`, charged, and no other stop, so nothing from
+         the storefront came between; the storefront's lifecycle read shows the recorded
+         end with cause `payer` and no filing, recorded on the hint (D18);
+         `deal-servicing` stepped and the teardown begun (`begin_teardown`, as
+         `Recurring08`).
+      No instant passes the part's first reservation, so the modules declare no
+      reservation stage (D17's requirement binds only rows that do). Each module logs
+      the lane-double evidence label and the doubles' contract hashes, and is blocked off
+      injected lane time or a lane-owned payments target, as the rate rows are (D19).
+      Markers in `e2e-tests/pyproject.toml`, the Makefile's lane lists
+      (`E2E_MODULE`, `E2E_BARE_METAL_MODULE`) and `e2e-tests/README.md`. Verify (unit,
+      `e2e-tests/tests/unit/`): the stage order check (`ORDERS`) holds both modules,
+      with no reservation stage; the lane-holds check
+      (`test_scenario_lane_holds.py`) and the cleanup-order check hold them.
+- [ ] 11.3 Run both lanes. Verify (system, each lane's Compose stack, mock provisioning,
+      both doubles, injected lane time): `make -C e2e-tests test-e2e-vm
+      E2E_MODULE=e2e_vm_rate_watchdog` and `make -C e2e-tests test-e2e-bare-metal
+      E2E_BARE_METAL_MODULE=e2e_bare_metal_rate_watchdog` pass, each leaving no payment
+      hold, mock rule, held loop or running in-process command, each stack taken down
+      after.
+- [ ] 11.4 Verification point: `make -C e2e-tests test-unit` and both lanes' runs pass, and
+      `scripts/change-workflow run pre-commit serve-running-rate-deals` passes.
+      End-to-end: `e2e_vm_rate_watchdog`, `e2e_bare_metal_rate_watchdog`, which the
+      lanes' default module lists and validation's pipeline (`make run-e2e`) select.
 
 Section 11 work in progress (round 2's second session; returned to design, no task
 checked, no code written):
