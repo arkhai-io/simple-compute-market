@@ -7,7 +7,8 @@
 
 ## Validation notes
 
-- Registry: 139 unit + 55 integration (listings, identity publish, filter spec, filtering, asking rate) passed. Storefront: 182 unit passed. VM storefront: 1215 unit passed, 1 pre-existing skip. Bare metal: 224 domain + 590 storefront passed. API credits: 255 passed. Clients: 25 + 68 passed. Registry-client mypy clean.
+- Registry: 139 unit + 128 integration (full integration directory) passed. Storefront: 182 unit passed. VM storefront: 1215 unit + 530 integration passed, 1 pre-existing skip. Bare metal: 224 domain + 590 storefront passed. API credits: 255 passed. VM buyer: 215 passed. Clients: 25 + 68 passed. Registry-client mypy clean; the VM storefront's mypy reports pre-existing errors (145 on its base) and none in the touched files.
 - Signed publish → GET round trip with VM/bare-metal/API-credits resources carrying the fields: `docs/attachments/seller-listing-metadata/roundtrip.py`, output in `roundtrip-output.json` (run from `core/registry`). Covers refusal naming the field, the dry-run route, `$.metadata["acme.tier"]` filtering both by value and on missing, and unchanged reads for listings without the fields.
 - Migration 019 exercised by downgrade to 018 and re-upgrade on a stamped database; fresh databases create the columns through `create_all` and stamp head.
 - Tests that reach httpx fail on a machine with `ALL_PROXY` set to a SOCKS URL (`socksio` not installed); run suites with the proxy variables unset. Unrelated to this change.
+- Environments install internal packages as wheels from `.dist/`, so after editing a package run `make dist` and `make reinit` in every project that installs it before trusting a test run; a stale wheel fails as an extra-forbidden field.
