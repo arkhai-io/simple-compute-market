@@ -5,10 +5,11 @@ against the bare-metal app served over loopback with the installed recurring
 wiring under a declaration listing ``charged`` and ``returned``
 (``recurring_world``); beyond ``buyer_commands``' doubles, the buyer CLI's
 ``wait_clock`` factory runs its waits in fake time, and its ``watchdog_probe``
-factory answers from a script rather than a socket. The buyer approves the
-on-demand option's mandate at the in-process payments engine, which both sides
-read, and commits; the deal is delivered, and the watchdog the buyer opted into
-probes it from the moment it is available.
+factory, given the access the buyer read from the storefront, answers from a
+script rather than a socket. The buyer approves the on-demand option's mandate
+at the in-process payments engine, which both sides read, and commits; the
+deal is delivered, and the watchdog the buyer opted into probes it from the
+moment it is available.
 
 Every account, key and address here is a deterministic development value; none
 may be used on a public network.
@@ -87,13 +88,13 @@ def buyer_settings() -> str:
     )
 
 
-def scripted_probe(monkeypatch, answers: list[bool]) -> list[str]:
+def scripted_probe(monkeypatch, answers: list[bool]) -> list[dict]:
     """Replace the buyer CLI's probe factory with ``answers``, one per probe;
-    return the run each built probe was for."""
-    built: list[str] = []
+    return the access each built probe was given."""
+    built: list[dict] = []
 
-    def watchdog_probe(run_id: str, _config: str | None):
-        built.append(run_id)
+    def watchdog_probe(access):
+        built.append(dict(access))
         remaining = iter(answers)
 
         async def probe() -> bool:
@@ -149,7 +150,15 @@ async def test_a_watched_purchase_is_monitored_from_available(tmp_path, monkeypa
         # engine accepted.
         assert watched == {"run_id": purchase["run_id"], "negotiation_id": negotiation_id,
                            "available": True, "watchdog": "stopped"}
-        assert probed == [purchase["run_id"]]
+        # The probe was built from the access the buyer read from the
+        # storefront's access route for the deal while it was active: the
+        # endpoint the provisioning double's fulfillment result delivers. The
+        # route serves nothing once the stop has ended the lease.
+        [access] = probed
+        assert access["negotiation_id"] == negotiation_id and access["method"] == "ssh"
+        assert (access["host"], access["port"], access["username"]) == ("203.0.113.25", 2222, "tenant-a")
+        refused = buyer.invoke("access", "--run-id", purchase["run_id"])
+        assert refused.exit_code != 0 and "outside an active lease" in str(refused.exception)
         assert "Watchdog running" in bought.stderr
         assert payments.count("approve") == 1 and payments.count("submit_event") == 2
 

@@ -1,11 +1,12 @@
 """The bare-metal ``buy`` watchdog's resume, its bound and the deal read's status.
 
 Unit: the command module's own seams are replaced (``end_target``,
-``watchdog_journal``, ``watchdog_probe`` and ``wait_clock``), with a buyer
-lifecycle double whose storefront answers what each test scripts, an in-memory
-watchdog journal and a fake clock that sleeping advances. The read composes its
-status through the buyer half's real ``BuyerLifecycle`` over a storefront double,
-on the same fake clock.
+``watchdog_journal``, ``watchdog_probe``, ``wait_clock`` and
+``_recovered_transports``, whose fulfillment transport serves the deal's
+access), with a buyer lifecycle double whose storefront answers what each test
+scripts, an in-memory watchdog journal and a fake clock that sleeping advances.
+The read composes its status through the buyer half's real ``BuyerLifecycle``
+over a storefront double, on the same fake clock.
 """
 
 from contextlib import asynccontextmanager
@@ -73,16 +74,35 @@ class Clock:
 
 #: One failed probe reaches the threshold.
 IMMEDIATE = WatchdogSettings(interval_seconds=1, threshold=1, probe_timeout_seconds=1)
+#: The access the storefront discloses; a documentation address.
+ACCESS = {"host": "192.0.2.20", "port": 2201, "user": "tenant"}
+#: The command module's own probe factory, before any test replaces it.
+WATCHDOG_PROBE = cli.watchdog_probe
 ACTIVE = DeliveryView(progress="active")
 ENDED = DeliveryView(progress="end_recorded", recorded_end=RecordedEnd(
     ended_at=1, actor=ACTOR, cause="payer", source="watch",
 ))
 
 
-def install(monkeypatch, journal, clock, *, reads=(ACTIVE,), answers=(False,)):
+def disclosing(monkeypatch, access):
+    """The run's fulfillment transport serves ``access``; return the deals read."""
+    read = []
+
+    def access_of(negotiation_id):
+        read.append(negotiation_id)
+        return dict(access)
+
+    monkeypatch.setattr(cli, "_recovered_transports", lambda run_id, config: (
+        SimpleNamespace(negotiation_id="deal"), None, SimpleNamespace(access=access_of),
+    ))
+    return read
+
+
+def install(monkeypatch, journal, clock, *, reads=(ACTIVE,), answers=(False,), built=None):
     """Replace the seams. The storefront answers ``reads`` in turn, then the last
-    one again; ``reads`` of ``None`` is an unreadable storefront. Each probe
-    answers the next of ``answers``."""
+    one again; ``reads`` of ``None`` is an unreadable storefront. The run's
+    transport serves ``ACCESS``; each probe answers the next of ``answers``, and
+    each probe built is given an access, appended to ``built`` when given."""
     stopped = EndDeliveryProgress(negotiation_id="deal", observed_at=1, mode="normal_stop", payment=Accepted())
     remaining = list(reads)
 
@@ -112,13 +132,17 @@ def install(monkeypatch, journal, clock, *, reads=(ACTIVE,), answers=(False,)):
 
     probes, scripted = [], list(answers)
 
-    def watchdog_probe(run_id, config):
+    def watchdog_probe(access):
+        if built is not None:
+            built.append(access)
+
         async def probe():
             probes.append(clock.now)
             return scripted.pop(0)
 
         return probe
 
+    disclosing(monkeypatch, ACCESS)
     monkeypatch.setattr(cli, "end_target", end_target)
     monkeypatch.setattr(cli, "watchdog_journal", lambda: journal)
     monkeypatch.setattr(cli, "watchdog_probe", watchdog_probe)
@@ -129,7 +153,8 @@ def install(monkeypatch, journal, clock, *, reads=(ACTIVE,), answers=(False,)):
 def test_a_resume_re_enters_the_watchdog_and_states_its_bound_while_it_runs(monkeypatch):
     journal = Journal()
     journal.opt_in("deal", IMMEDIATE)
-    lifecycle, events, probes = install(monkeypatch, journal, Clock())
+    built = []
+    lifecycle, events, probes = install(monkeypatch, journal, Clock(), built=built)
 
     result = CliRunner().invoke(cli.bare_metal_app, ["buy", "--from", "run"])
 
@@ -138,10 +163,34 @@ def test_a_resume_re_enters_the_watchdog_and_states_its_bound_while_it_runs(monk
         "run_id": "run", "negotiation_id": "deal", "available": True, "watchdog": "stopped",
     }
     assert "at most 2 seconds" in result.stderr and "only while this command runs" in result.stderr
+    # The probe was built from the access the run's transport served.
+    assert built == [ACCESS]
     assert len(probes) == 1
     lifecycle.end.assert_awaited_once_with("deal")
     assert journal.state("deal").stop is not None
     assert events == ["watchdog_started", "watchdog_exited"]
+
+
+def test_a_disclosure_naming_no_endpoint_leaves_the_deal_unmonitored(monkeypatch):
+    journal = Journal()
+    journal.opt_in("deal", IMMEDIATE)
+    lifecycle, events, probes = install(monkeypatch, journal, Clock())
+    # The shipped probe factory, given an access naming no host or port.
+    monkeypatch.setattr(cli, "watchdog_probe", WATCHDOG_PROBE)
+    read = disclosing(monkeypatch, {"user": "tenant"})
+
+    result = CliRunner().invoke(cli.bare_metal_app, ["buy", "--from", "run"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
+        "run_id": "run", "negotiation_id": "deal", "available": True, "watchdog": None,
+    }
+    assert read == ["deal"]
+    assert ("Watchdog not running: the storefront disclosed no SSH endpoint for the watchdog "
+            "to probe; the deal is unmonitored.") in " ".join(result.stderr.split())
+    assert probes == [] and events == []
+    lifecycle.end.assert_not_awaited()
+    assert journal.state("deal").last_probe_at is None
 
 
 def test_a_deal_never_available_is_left_unmonitored_and_the_bound_is_never_stated(monkeypatch):

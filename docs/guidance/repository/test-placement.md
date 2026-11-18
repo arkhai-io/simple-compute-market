@@ -23,8 +23,9 @@ are command modules, whose factories are their one seam
 The bare-metal buyer CLI
 (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
 its tests replace `fresh_identity`, `recovery_identity`, `registry_client`,
-`payment_approval`, `end_target`, `watchdog_journal`, `watchdog_probe` and
-`wait_clock`. The other CLIs' tests, and one unit test in the bare-metal buyer
+`payment_approval`, `end_target`, `watchdog_journal`, `watchdog_probe`,
+`wait_clock` and `_recovered_transports`, which builds a run's deal, identity and
+fulfillment transport. The other CLIs' tests, and one unit test in the bare-metal buyer
 package, do not follow the rule: they replace library names and names the module
 imports, an unowned gap in
 [`ROADMAP.md`](../../development/ROADMAP.md), and are no model for a new test.

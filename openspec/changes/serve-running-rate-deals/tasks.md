@@ -2447,7 +2447,7 @@ Implements D20 (75 F2). Touches `domains/bare_metal/buyer`
 `arkhai-bare-metal-buyer` (0.9.0) is already one step past the development branch, so it
 takes no further version.
 
-- [ ] 10b.1 `watchdog_probe` takes the access mapping `fulfillment.access` serves, and
+- [x] 10b.1 `watchdog_probe` takes the access mapping `fulfillment.access` serves, and
       `_deliver_and_watch`, the one caller, which `buy` and its resume both reach, reads
       it through `_recovered_transports` before building the probe; a disclosure naming
       no host or port still raises the `ValueError` the caller reports as "Watchdog not
@@ -2460,12 +2460,45 @@ takes no further version.
       factory receives exactly the access the composed storefront's access route serves
       for the deal; (unit, `domains/bare_metal/buyer/tests/test_watchdog_cli.py`): a
       disclosure without host or port leaves the deal unmonitored with that message.
-- [ ] 10b.2 Verification point: `make -C domains/bare_metal/buyer test` and `make -C
+      Done: `watchdog_probe(access)` reads the mapping's `host` and `port`;
+      `_deliver_and_watch` reads `fulfillment.access(deal.negotiation_id)` through
+      `_recovered_transports` inside the same `try` that reports a `ValueError` as
+      "Watchdog not running", so a run that cannot be recovered is reported as
+      before. The three fakes take the access. The unit tests now also replace
+      `_recovered_transports`, a factory the command module defines, its transport
+      serving a fixed access; `docs/guidance/repository/test-placement.md`'s list of
+      the bare-metal buyer CLI's seams names it. Unit (`test_watchdog_cli.py`, within
+      `make -C domains/bare_metal/buyer test`, 87 passed): a resume's probe is built
+      from the access the run's transport served; with the shipped factory and an
+      access naming no host or port, the transport is read once, the command reports
+      "Watchdog not running: the storefront disclosed no SSH endpoint for the
+      watchdog to probe; the deal is unmonitored.", exits 0 with `available: true`
+      and `watchdog: null`, probes nothing and sends no stop. Application
+      integration (`test_watchdog_buy.py`, the composed storefront served on
+      loopback, the shipped `buy --watchdog`): the probe factory is given one
+      access, naming the deal and `ssh` and the endpoint the provisioning double's
+      fulfillment result delivers (`203.0.113.25:2222`, user `tenant-a`), which the
+      storefront's access route serves only while the lease is active; after the
+      watchdog's stop the route refuses the read ("outside an active lease").
+      Differing from the plan: the test compares the access's fields with the
+      double's delivered endpoint rather than with a second read of the route, which
+      the stop has closed by the time the command returns. `make -C
+      domains/bare_metal/storefront test`: 676 passed.
+- [x] 10b.2 Verification point: `make -C domains/bare_metal/buyer test` and `make -C
       domains/bare_metal/storefront test` pass, and `scripts/change-workflow run
       pre-commit serve-running-rate-deals` passes. End-to-end:
       `e2e_bare_metal_recurring_purchase` and the bare-metal lane's other buy modules run
       the changed factory only where a deal opted into the watchdog, which none does;
       section 11's `e2e_bare_metal_rate_watchdog` exercises it.
+      Done: both suites pass (10b.1); `run pre-commit` passed with every functional
+      hook, every suite among them, over a worktree holding this section's edits
+      with section 10a's, before 10a's commit; this section's commit adds nothing
+      that run did not cover. End-to-end confirmed: no bare-metal lane module opts
+      into the watchdog, so none reaches the changed factory;
+      `e2e_bare_metal_rate_watchdog` (section 11) does. Owed by validation: none.
+      `arkhai-bare-metal-buyer` takes no further version (0.9.0, a minor step past
+      the development branch's 0.8.0); its exact pin on `arkhai-core-buyer` moved
+      with 10a's bump.
 
 Sections 10a and 10b handoff, for section 11:
 
