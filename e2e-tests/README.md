@@ -60,8 +60,9 @@ ACTIVE_PROFILES=staging,staging-secrets
 
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
 `e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase`,
-`e2e_bare_metal_recurring_purchase`, `e2e_vm_rate_servicing` and
-`e2e_bare_metal_rate_servicing`, and the qualification modules
+`e2e_bare_metal_recurring_purchase`, `e2e_vm_rate_servicing`,
+`e2e_bare_metal_rate_servicing`, `e2e_vm_rate_watchdog` and
+`e2e_bare_metal_rate_watchdog`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -443,6 +444,42 @@ the end's cause and instant, no filing, the teardown — and the buyer's read,
 which classifies with the same compute-family classifier; the storefront's
 classification itself is each storefront's application evidence. Off a Compose
 lane's injected lane time and doubles the rows are blocked.
+
+### The buyer's watchdog against a delivered deal
+
+`e2e_vm_rate_watchdog` runs in the VM lane and `e2e_bare_metal_rate_watchdog` in
+the bare-metal lane, one module each under
+`tests/e2e/roles/scenarios/<domain>/rate_watchdog/`, on a deal of its own and
+lane-double evidence. The buyer's `buy --watchdog --watchdog-interval 1
+--watchdog-threshold 2` of a recurring on-demand option, its resume `buy --from`
+and its `delivery` read run in the harness's process rather than as
+subprocesses, through the `market` app's own entry under Typer's `CliRunner`
+(`tests/e2e/roles/helpers/in_process_buyer.py`): mock provisioning's endpoint
+reaches no machine and the watchdog paces its probes on a monotonic clock no
+lane control moves, so the harness replaces the domain CLI's `watchdog_probe`
+with a probe it programs, reachable or not, recording the endpoint it was built
+for, and its `wait_clock` with a clock whose sleeps park at a gate the stage
+releases one interval at a time, its `now` lane time. Every wait `buy` makes —
+its commit, its wait for the deal, the watchdog's — therefore moves only when a
+stage releases it. The buyer's configuration names no `[time]` table, so it
+reads the harness's lane-time source; its environment is set for the module and
+restored after; and a read runs only while `buy` is parked at the gate.
+
+Each module shares the recurring purchase's stages through the rate part's
+start, `buy` parked at the gate while delivery is stepped, then runs the cases
+in the one order a deal allows (`tests/e2e/roles/helpers/rate_watchdog_stages.py`):
+the wait released, the same `buy` enters its watchdog from available, its probe
+built for the endpoint the storefront disclosed, and the read shows `monitored`,
+again once lane time is a minute into the first period; an interrupt at the gate
+ends the command, and once lane time passes its last probe by one interval, the
+probe timeout and the reader's grace the read shows `unmonitored`, with no stop
+sent; `buy --from` reads `monitored` again; then, the storefront's loops held for
+the module, the probe answers unreachable for the two stepped intervals of the
+threshold, the watchdog sends one payer stop and hint, the payments double's
+events for the transaction are the storefront's `start` and the payer's `stop`,
+`buy` ends `stopped`, the storefront records the payer's end with no filing, and
+a `deal-servicing` step begins the teardown the shared teardown stages complete.
+Off a Compose lane's injected lane time and doubles the modules are blocked.
 
 ### Real bare-metal provisioning
 

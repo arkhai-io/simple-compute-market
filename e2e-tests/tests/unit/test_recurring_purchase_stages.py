@@ -1,19 +1,21 @@
-"""Recurring purchases' and rate servicing rows' stage sets are declared, ordered,
-and handed their inputs.
+"""Recurring purchases', rate servicing rows' and the watchdog cases' stage sets
+are declared, ordered, and handed their inputs.
 
 Read from source rather than collected, so a scenario module is checked without
 its lane's settings or services. Each module is one entry of ``ORDERS``, with
 the shared stages it declares in run order; a lane that runs another adds its
 entry.
 
-A recurring purchase, and each rate servicing row, declares the shared stages
-it runs — the canonical deal's readiness, delivery and teardown stages with the
-mock gates around them, the purchase stages, the stages of
-``recurring_purchase_stages.py`` and, for a row, those of
-``rate_servicing_stages.py`` — once each, in one order, with an empty body, and
+A recurring purchase, each rate servicing row and each watchdog module declares
+the shared stages it runs — the canonical deal's readiness, delivery and
+teardown stages with the mock gates around them, the purchase stages, the
+stages of ``recurring_purchase_stages.py`` and, for a row, those of
+``rate_servicing_stages.py``, for a watchdog module those of
+``rate_watchdog_stages.py`` — once each, in one order, with an empty body, and
 inserts only its listing stage and its stage closing the listing between them.
-A row setting lane time past its part's first reservation declares the payments
-double's reservation before that stage.
+A module setting lane time past its part's first reservation declares the
+payments double's reservation before that stage, and one that sets none
+declares no reservation.
 A domain stage defined outside a scenario module, which a scenario subclasses,
 is read from its own module, so the handoff check sees what it writes.
 """
@@ -45,11 +47,13 @@ COMPUTE_TREE = tree(HELPERS / "compute_deal_stages.py")
 PURCHASE_TREE = tree(HELPERS / "buyer_purchase_stages.py")
 RECURRING_TREE = tree(HELPERS / "recurring_purchase_stages.py")
 RATE_TREE = tree(HELPERS / "rate_servicing_stages.py")
+WATCHDOG_TREE = tree(HELPERS / "rate_watchdog_stages.py")
 COMPUTE_STAGES = [node for node in classes(COMPUTE_TREE) if is_stage(node)]
 PURCHASE_STAGES = [node for node in classes(PURCHASE_TREE) if is_stage(node)]
 RECURRING_STAGES = [node for node in classes(RECURRING_TREE) if is_stage(node)]
 RATE_STAGES = [node for node in classes(RATE_TREE) if is_stage(node)]
-SHARED = [*COMPUTE_STAGES, *PURCHASE_STAGES, *RECURRING_STAGES, *RATE_STAGES]
+WATCHDOG_STAGES = [node for node in classes(WATCHDOG_TREE) if is_stage(node)]
+SHARED = [*COMPUTE_STAGES, *PURCHASE_STAGES, *RECURRING_STAGES, *RATE_STAGES, *WATCHDOG_STAGES]
 SHARED_NAMES = {node.name for node in SHARED}
 #: Domain-own stages defined outside a scenario module, which a scenario
 #: subclasses with an empty body; read from their own source for the handoff.
@@ -66,13 +70,15 @@ DOMAIN_STAGES = [
 #: The domain's identity and the other fields a scenario's state is built
 #: with, which a stage may read without any stage writing them.
 DOMAIN_DEAL_FIELDS = fields(class_named(tree(HELPERS / "domain_deal.py"), "DomainDealState"))
-#: Every field a recurring purchase's or a row's state declares, through its bases.
+#: Every field a recurring purchase's, a row's or a watchdog module's state
+#: declares, through its bases.
 STATE_FIELDS = (
     DOMAIN_DEAL_FIELDS
     | fields(class_named(COMPUTE_TREE, "ComputeDealState"))
     | fields(class_named(PURCHASE_TREE, "PurchaseState"))
     | fields(class_named(RECURRING_TREE, "RecurringPurchaseState"))
     | fields(class_named(RATE_TREE, "RateServicingState"))
+    | fields(class_named(WATCHDOG_TREE, "RateWatchdogState"))
 )
 
 #: The canonical deal's readiness, a mock lane's mode check among them.
@@ -142,6 +148,27 @@ MAXIMUM_TERM_ORDER = [
     *READINESS, *PURCHASE, *DELIVERY, RESERVATION, "MaximumTerm07_TermEnds", *TEARDOWN,
     "MaximumTerm08_NotFundsRunningOut",
 ]
+#: The watchdog's cases on one deal, delivered while the in-process ``buy``
+#: waits at the harness's gate: monitored from available and into the first
+#: period, killed and stale, resumed, then, inside the teardown gate, the access
+#: lost, and the teardown. No instant passes the part's first reservation, and
+#: the purchase command ends only at the watchdog's stop, so the module declares
+#: neither the reservation nor the purchase command's end and accepted money.
+WATCHDOG_ORDER = [
+    *READINESS, *PURCHASE,
+    "Stage09a_FulfillmentConvergesToActive",
+    "Recurring05_DeliveryRecoveredAtTheStart",
+    "Stage09b_SettlementReadyAndCredentials",
+    "Stage09c_LeaseRecorded",
+    "Recurring06_RateStartedAfterActivation",
+    "Watchdog01_MonitoredFromAvailable",
+    "Watchdog02_IntoTheFirstPeriod",
+    "Watchdog03_KilledCommandGoesStale",
+    "Watchdog04_ResumedRunMonitored",
+    "Stage09c2_ArmTeardownGate",
+    "Watchdog05_AccessLostStopsOnce",
+    *TEARDOWN,
+]
 #: Each row stage that sets lane time past the part's first reservation, which
 #: the reservation must precede in its module.
 SETS_PAST_THE_FIRST_RESERVATION = ("Exhaustion07_FundsRunOut", "MaximumTerm07_TermEnds")
@@ -158,11 +185,16 @@ ORDERS = {
             ("test_maximum_term.py", MAXIMUM_TERM_ORDER),
         )
     },
+    **{
+        SCENARIOS / domain / "rate_watchdog" / "test_rate_watchdog.py": WATCHDOG_ORDER
+        for domain in ("vms", "bare_metal")
+    },
 }
 
 
 def _label(path: Path) -> str:
-    domain = path.parent.parent.name if path.parent.name == "rate_servicing" else path.parent.name
+    nested = path.parent.name in ("rate_servicing", "rate_watchdog")
+    domain = path.parent.parent.name if nested else path.parent.name
     return f"{domain}/{path.stem}"
 
 
@@ -204,9 +236,10 @@ def handoff_faults(scenario: Path) -> list[str]:
     return faults
 
 
-def test_the_recurring_and_rate_stages_are_not_collected_where_they_are_defined():
-    assert RECURRING_STAGES and RATE_STAGES
-    collected = [node.name for node in classes(RECURRING_TREE) + classes(RATE_TREE)
+def test_the_recurring_rate_and_watchdog_stages_are_not_collected_where_they_are_defined():
+    assert RECURRING_STAGES and RATE_STAGES and WATCHDOG_STAGES
+    collected = [node.name
+                 for node in classes(RECURRING_TREE) + classes(RATE_TREE) + classes(WATCHDOG_TREE)
                  if node.name.startswith("Test")]
     assert collected == [], collected
 
@@ -214,12 +247,13 @@ def test_the_recurring_and_rate_stages_are_not_collected_where_they_are_defined(
 def test_the_recurring_state_extends_the_purchase_state():
     assert "PurchaseState" in base_names(class_named(RECURRING_TREE, "RecurringPurchaseState"))
     assert "RecurringPurchaseState" in base_names(class_named(RATE_TREE, "RateServicingState"))
+    assert "RecurringPurchaseState" in base_names(class_named(WATCHDOG_TREE, "RateWatchdogState"))
 
 
-def test_every_recurring_and_rate_stage_is_in_an_order():
+def test_every_recurring_rate_and_watchdog_stage_is_in_an_order():
     """A stage no order names is one no module runs."""
     ordered = {name for order in ORDERS.values() for name in order}
-    assert {node.name for node in RECURRING_STAGES + RATE_STAGES} <= ordered
+    assert {node.name for node in RECURRING_STAGES + RATE_STAGES + WATCHDOG_STAGES} <= ordered
 
 
 @pytest.mark.parametrize("scenario", ORDERS, ids=_label)

@@ -52,7 +52,6 @@ reads of it. Each row is lane-double evidence.
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from dataclasses import dataclass
@@ -63,10 +62,10 @@ from market_deal_lifecycle_buyer import FUNDING_STOP
 from market_deal_lifecycle_client import SyncSellerLifecycleClient
 
 from tests.e2e.roles.helpers.compute_deal import advance_storefront, assert_lease_watchdog_held
-from tests.e2e.roles.helpers.domain_deal import assert_market_run_succeeded, require_state
+from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.lane_doubles import payments_controls
 from tests.e2e.roles.helpers.lane_time import LaneTime
-from tests.e2e.roles.helpers.payments import payment_flag, payment_setting
+from tests.e2e.roles.helpers.payments import payment_setting
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     ASSET,
     PERIOD_GROSS,
@@ -74,6 +73,8 @@ from tests.e2e.roles.helpers.recurring_purchase_stages import (
     RecurringPurchaseDriver,
     RecurringPurchaseState,
     begin_teardown,
+    buyer_read,
+    lane_double_run,
     payer_available,
     reach_lane_instant,
     transaction_snapshot,
@@ -140,18 +141,10 @@ def _recorded_end_with_no_filing(deal_driver: RecurringPurchaseDriver,
 def _require_lane_double(lane_time: LaneTime | None, what: str) -> None:
     """A blocked skip unless the run is a Compose lane's: injected lane time and
     the lane's own payments double, whose controls ``what`` calls."""
-    if lane_time is None or not lane_time.injected or not payment_flag("LANE_OWNED"):
+    if not lane_double_run(lane_time):
         pytest.skip(f"blocked: {what} is the lane's payments double's control, which only "
                     "a Compose lane's injected run with its own payments target reaches "
                     "(PAYMENTS.LANE_OWNED)")
-
-
-def _buyer_read(purchase_cli: Any, deal_driver: RecurringPurchaseDriver,
-                deal_state: RateServicingState) -> dict[str, Any]:
-    """The buyer's own read of its run's deal, as its ``delivery`` command prints it."""
-    run = purchase_cli.run(deal_driver.read_arguments(deal_state.purchase_run.run_id))
-    assert_market_run_succeeded(run, command="the buyer's delivery read")
-    return json.loads(run.stdout().strip().splitlines()[-1])
 
 
 # ===========================================================================
@@ -301,7 +294,7 @@ class Exhaustion08_BuyerToldANewDealIsNeeded:
         """
         require_state(deal_state, "funded_boundary", "purchase_run", "payer_account",
                       "_teardown_job_completed")
-        read = _buyer_read(purchase_cli, deal_driver, deal_state)
+        read = buyer_read(purchase_cli, deal_driver, deal_state)
         assert read.get("funding_stop") == FUNDING_STOP, read
         assert payer_available(payments_config, deal_state.payer_account).get(ASSET, 0) == 0
         deal_state._payer_charged = True
@@ -477,7 +470,7 @@ class MaximumTerm08_NotFundsRunningOut:
         """The buyer's read classifies the stop at the Agreement's end as the
         term end, so it says nothing of funds running out."""
         require_state(deal_state, "_deal_ended", "purchase_run", "_teardown_job_completed")
-        read = _buyer_read(purchase_cli, deal_driver, deal_state)
+        read = buyer_read(purchase_cli, deal_driver, deal_state)
         assert read.get("funding_stop") is None, read
         deal_state._payer_charged = True
         log.info("[m08] The buyer's read of Agreement %s names no funding stop",

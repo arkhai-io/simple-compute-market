@@ -1,8 +1,9 @@
-"""VM's own stages of a rate servicing row, which each row module subclasses.
+"""VM's own stages of a delivered rate deal's module, which each rate servicing
+row and the watchdog cases' module subclass.
 
 The listing stage and the capacity-event step are the VM recurring purchase's
-(``test_vm_recurring_purchase.py``), over the row's own resource and settlement,
-which its driver states.
+(``test_vm_recurring_purchase.py``), over the module's own resource and
+settlement, which its driver states.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import logging
 
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.helpers.rate_servicing_stages import RateServicingState
+from tests.e2e.roles.helpers.recurring_purchase_stages import RecurringPurchaseState
 from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_source_for,
     step_listing_reconciliation,
@@ -24,9 +25,9 @@ log = logging.getLogger(__name__)
 class VmRateListingCreated:
     def test_03_the_rows_listing_is_created_and_published(
         self, storefront_seller_client, storefront_admin_client, registry_client,
-        deal_driver: VmRecurringPurchaseDriver, deal_state: RateServicingState,
+        deal_driver: VmRecurringPurchaseDriver, deal_state: RecurringPurchaseState,
     ):
-        """The seller lists the row's resource with its one recurring payments
+        """The seller lists the module's resource with its one recurring payments
         settlement; creating it open publishes it to the registry, which the
         lane's servicing declaration lets publication do."""
         require_state(deal_state, "_registry_reachable", "_supply_seeded")
@@ -50,10 +51,10 @@ class VmRateListingCreated:
 
 class VmRateCapacityEventCycle:
     def test_09a2_capacity_events_dry_run_then_advance(
-        self, storefront_admin_client, deal_state: RateServicingState,
+        self, storefront_admin_client, deal_state: RecurringPurchaseState,
     ):
         """Step the held capacity-event loop, which closes the listing the
-        row's reservation leaves unsatisfiable (``step_listing_reconciliation``)."""
+        deal's reservation leaves unsatisfiable (``step_listing_reconciliation``)."""
         require_state(deal_state, "seller_listing_id", "provisioning_result_injected")
         pending, applied = step_listing_reconciliation(storefront_admin_client)
         deal_state._listing_reconciled = True

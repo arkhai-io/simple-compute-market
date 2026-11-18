@@ -1,8 +1,9 @@
-"""Bare metal's own stage of a rate servicing row, which each row module subclasses.
+"""Bare metal's own stage of a delivered rate deal's module, which each rate
+servicing row and the watchdog cases' module subclass.
 
 The publication stage is the bare-metal recurring purchase's
-(``test_bare_metal_recurring_purchase.py``), over the row's own machine and the
-pool override stating its one recurring option, which its driver seeds.
+(``test_bare_metal_recurring_purchase.py``), over the module's own machine and
+the pool override stating its one recurring option, which its driver seeds.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import logging
 
 from tests.e2e.roles.helpers.compute_deal import advance_storefront, dry_run_storefront
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.helpers.rate_servicing_stages import RateServicingState
+from tests.e2e.roles.helpers.recurring_purchase_stages import RecurringPurchaseState
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import WHOLE_HOST_CAPACITY
 from tests.e2e.roles.scenarios.bare_metal.purchase_driver import BareMetalRecurringPurchaseDriver
 
@@ -23,9 +24,9 @@ log = logging.getLogger(__name__)
 class BareMetalRateListingPublished:
     def test_03_one_publication_pass_publishes_the_rows_listing(
         self, storefront_admin_client, deal_driver: BareMetalRecurringPurchaseDriver,
-        deal_state: RateServicingState,
+        deal_state: RecurringPurchaseState,
     ):
-        """The dry run would publish the row's machine, and one pass publishes
+        """The dry run would publish the module's machine, and one pass publishes
         it, which the lane's servicing declaration lets publication do for its
         recurring option."""
         require_state(deal_state, "_supply_seeded")

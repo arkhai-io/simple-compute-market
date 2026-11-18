@@ -86,6 +86,7 @@ from tests.e2e.roles.helpers.lane_time import LaneTime, wait_until
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_client,
     dispute_window_seconds,
+    payment_flag,
     payment_setting,
 )
 
@@ -233,6 +234,21 @@ def payer_available(payments_config: Any, payer: str) -> dict[str, int]:
     """The payer's own available balance by asset, read with its token."""
     with buyer_payments_client(payments_config, payer) as client:
         return available_balances(client.get_balance(payer))
+
+
+def buyer_read(purchase_cli: Any, deal_driver: RecurringPurchaseDriver,
+               deal_state: RecurringPurchaseState) -> dict[str, Any]:
+    """The buyer's own read of its run's deal, as its ``delivery`` command prints it."""
+    run = purchase_cli.run(deal_driver.read_arguments(deal_state.purchase_run.run_id))
+    assert_market_run_succeeded(run, command="the buyer's delivery read")
+    return json.loads(run.stdout().strip().splitlines()[-1])
+
+
+def lane_double_run(lane_time: LaneTime | None) -> bool:
+    """Whether the run is a Compose lane's: injected lane time and the lane's own
+    payments double (``PAYMENTS.LANE_OWNED``), whose controls only such a run
+    reaches."""
+    return lane_time is not None and lane_time.injected and bool(payment_flag("LANE_OWNED"))
 
 
 def reach_lane_instant(lane_time: LaneTime | None, instant: int, *,

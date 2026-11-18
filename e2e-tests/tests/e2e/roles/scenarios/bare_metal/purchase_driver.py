@@ -11,11 +11,13 @@ negotiation. ``BareMetalPurchaseDriver`` is the lane's, over
 ``BareMetalComputeDealDriver``: a storefront pool override offering the lane's
 whole host in ``arkhai.payments.v1`` alone. ``BareMetalRecurringPurchaseDriver``
 is the lane's recurring purchase, whose pool override's one settlement is a
-recurring option, on-demand or spot.
+recurring option, on-demand or spot, and ``BareMetalRateWatchdogDriver`` that
+purchase opting into the buyer's watchdog.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,7 @@ from tests.e2e.roles.helpers.payments import (
     payment_config_toml,
     payment_setting,
 )
+from tests.e2e.roles.helpers.rate_watchdog_stages import WATCHDOG_OPT_IN
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     check_recurring_option,
     recurring_settlement,
@@ -64,13 +67,14 @@ PAYMENT_TIMEOUT_SECONDS = 300
 
 
 def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
-                            payer: str | None = None) -> BuyerCli:
+                            payer: str | None = None, lane_time_file: bool = True) -> BuyerCli:
     """A profiled Ed25519 buyer with no wallet (``PAYMENTS``'s buyer), under
     ``base``, buying through Arkhai payments from ``payer``, the run's buyer
     account unless named, with its dispute credential for the run's mediation
     target when the run names one, which its teardown files with. Each profile
     keeps its own run logs, so a purchase's compensation finds that purchase
-    alone."""
+    alone. A buyer run in the harness's process names no lane time file
+    (``create_profiled_buyer_cli``)."""
     mediation = mediation_if_configured()
     payer = payer or str(payment_setting("BUYER_ACCOUNT"))
     url = lane_setting("registry_url")
@@ -103,6 +107,7 @@ def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
             **buyer_mediation_environment(mediation),
         },
         toml_sections=sections,
+        lane_time_file=lane_time_file,
     )
 
 
@@ -344,3 +349,37 @@ class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         return LifecycleRead.model_validate(self.fulfillment.delivery(negotiation_id))
+
+
+#: How often the watched purchase's ``buy`` reads its deal while it waits for it.
+WATCH_POLL_SECONDS = 5
+
+
+def _ssh_endpoint(access: Mapping[str, Any]) -> tuple[str, int]:
+    return str(access["host"]), int(access["port"])
+
+
+@dataclass(kw_only=True)
+class BareMetalRateWatchdogDriver(BareMetalRecurringPurchaseDriver):
+    """Bare metal's ``RateWatchdogDriver``: the lane's recurring purchase, its
+    ``market bare-metal buy`` opting into the watchdog, whose probe bare metal
+    builds from the access its caller read from the storefront."""
+
+    def _watch_arguments(self) -> list[str]:
+        return ["--delivery-timeout-seconds", str(DELIVERY_DEADLINE_SECONDS),
+                "--poll-interval", str(WATCH_POLL_SECONDS)]
+
+    def buy_arguments(self, listing_id: str, option_id: str) -> list[str]:
+        return [*super().buy_arguments(listing_id, option_id), *WATCHDOG_OPT_IN,
+                *self._watch_arguments()]
+
+    def resume_arguments(self, run_id: str) -> list[str]:
+        return ["bare-metal", "buy", "--from", run_id, "--config", self.config_path,
+                *self._watch_arguments()]
+
+    def disclosed_endpoint(self, negotiation_id: str) -> tuple[str, int]:
+        # The purchase profile's own read of the deal's live access.
+        return _ssh_endpoint(self.fulfillment.access(negotiation_id))
+
+    def probed_endpoint(self, built_for: Any) -> tuple[str, int]:
+        return _ssh_endpoint(built_for)

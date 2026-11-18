@@ -11,12 +11,14 @@ records as it ends. ``VmPurchaseDriver`` is the lane's, over
 ``arkhai.payments.v1`` settlement. The lease view is the canonical deal's,
 which finds a VM hold by its negotiation whatever the settlement mechanism.
 ``VmRecurringPurchaseDriver`` is the lane's recurring purchase, whose listing's
-one settlement is a recurring option, on-demand or spot.
+one settlement is a recurring option, on-demand or spot, and
+``VmRateWatchdogDriver`` that purchase opting into the buyer's watchdog.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,7 @@ from tests.e2e.roles.helpers.payments import (
     payment_config_toml,
     payment_setting,
 )
+from tests.e2e.roles.helpers.rate_watchdog_stages import WATCHDOG_OPT_IN
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     check_recurring_option,
     recurring_settlement,
@@ -64,12 +67,13 @@ SETTLEMENT_POLL_SECONDS = 1.0
 
 
 def vm_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
-                    payer: str | None = None) -> BuyerCli:
+                    payer: str | None = None, lane_time_file: bool = True) -> BuyerCli:
     """The run's VM buyer (``BUYER``), profiled under ``base`` with no wallet,
     buying through Arkhai payments alone from ``payer``, the run's buyer account
     unless named, with its dispute credential for the run's mediation target
     when the run names one. Each profile keeps its own run logs, so a
-    purchase's compensation finds that purchase alone."""
+    purchase's compensation finds that purchase alone. A buyer run in the
+    harness's process names no lane time file (``create_profiled_buyer_cli``)."""
     mediation = mediation_if_configured()
     payer = payer or str(payment_setting("BUYER_ACCOUNT"))
     registry_url = str(settings.REGISTRY.API_URL or "").rstrip("/")
@@ -110,6 +114,7 @@ def vm_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
             **buyer_mediation_environment(mediation),
         },
         toml_sections=sections,
+        lane_time_file=lane_time_file,
     )
 
 
@@ -293,3 +298,37 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
             ) as peer:
                 return await peer.read(negotiation_id)
         return asyncio.run(read())
+
+
+def _ssh_endpoint(connection_details: Any) -> tuple[str, int]:
+    """The SSH endpoint VM connection details name, given as their JSON or decoded."""
+    details = (json.loads(connection_details) if isinstance(connection_details, str)
+               else dict(connection_details or {}))
+    return str(details["host"]), int(details["port"])
+
+
+@dataclass(kw_only=True)
+class VmRateWatchdogDriver(VmRecurringPurchaseDriver):
+    """VM's ``RateWatchdogDriver``: the lane's recurring purchase, its ``market
+    buy`` opting into the watchdog, whose probe VM builds from its delivery's
+    connection details."""
+
+    def buy_arguments(self, listing_id: str, option_id: str) -> list[str]:
+        return [*super().buy_arguments(listing_id, option_id), *WATCHDOG_OPT_IN]
+
+    def resume_arguments(self, run_id: str) -> list[str]:
+        return [
+            "buy", "--from", run_id,
+            "--poll-interval", str(SETTLEMENT_POLL_SECONDS),
+            "--settlement-timeout", str(max(SETTLEMENT_TIMEOUT_SECONDS, delivery_deadline_seconds())),
+        ]
+
+    def disclosed_endpoint(self, negotiation_id: str) -> tuple[str, int]:
+        # The connection details the settlement status discloses to the
+        # purchase's buyer, which this storefront client signs as; the typed
+        # status keeps them among the fields it does not model.
+        status = self.storefront_client.get_settle_status(negotiation_id)
+        return _ssh_endpoint(status.extra.get("connection_details"))
+
+    def probed_endpoint(self, built_for: Any) -> tuple[str, int]:
+        return _ssh_endpoint(built_for)
