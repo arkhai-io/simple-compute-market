@@ -207,9 +207,13 @@ class ListingRequest:
             "demands": self.demands,
             "max_duration_seconds": self.max_duration_seconds,
             "storefront_url": self.storefront_url,
-            "title": self.title,
-            "description": self.description,
-            "metadata": self.metadata,
+            **({"title": self.title} if self.title is not None else {}),
+            **(
+                {"description": self.description}
+                if self.description is not None
+                else {}
+            ),
+            **({"metadata": self.metadata} if self.metadata is not None else {}),
         }
 
 

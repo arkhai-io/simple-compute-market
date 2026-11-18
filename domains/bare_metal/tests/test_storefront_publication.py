@@ -530,4 +530,7 @@ def test_listing_terms_reads_only_term_fields():
         "settlement_options": None,
         "demands": None,
         "max_duration_seconds": 5,
+        "title": None,
+        "description": None,
+        "metadata": None,
     }

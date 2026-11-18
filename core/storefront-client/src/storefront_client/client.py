@@ -1321,9 +1321,9 @@ class StorefrontClient(_StorefrontClientBase):
             "settlement_config": settlement_config,
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
-            "title": title,
-            "description": description,
-            "metadata": metadata,
+            **({"title": title} if title is not None else {}),
+            **({"description": description} if description is not None else {}),
+            **({"metadata": metadata} if metadata is not None else {}),
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
@@ -2571,9 +2571,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "settlement_config": settlement_config,
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
-            "title": title,
-            "description": description,
-            "metadata": metadata,
+            **({"title": title} if title is not None else {}),
+            **({"description": description} if description is not None else {}),
+            **({"metadata": metadata} if metadata is not None else {}),
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
