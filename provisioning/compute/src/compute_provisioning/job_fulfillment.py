@@ -21,6 +21,12 @@ What the provider owns, the same for every domain:
   contract whose identity is the reservation and the operation, so a retried
   dispatch finds the job it already submitted. A create needs its host enabled;
   a teardown does not.
+- **Teardown reruns.** A teardown is dispatched as the reservation's latest
+  teardown job, adopted as it is, unless that job failed without its execution
+  starting and the rerun policy has a rerun ready; then the same prepared
+  teardown is submitted again under the next rerun's identity
+  (``teardown_rerun``). A dispatch interrupted after submitting finds that
+  rerun as the latest job and adopts it.
 - **Status.** One table over ``JobStatus``. A create job that succeeded is a
   successful create only if its result is a ``CreateJobResult`` carrying valid
   ``DeliveryEvidence``; otherwise the create has failed. The result's detail is
@@ -39,6 +45,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
+import injected_time
 from compute_provisioning_contracts import (
     ACCESS_DELIVERY_KIND,
     ACCESS_DELIVERY_SCHEMA_VERSION,
@@ -70,7 +77,9 @@ from sqlalchemy.orm import Session
 
 from compute_provisioning.jobs.action_request import JobActionRequest
 from compute_provisioning.jobs.db import JobStatus
+from compute_provisioning.jobs.engine import BoundJob
 from compute_provisioning.jobs.submission import JobSubmissionService
+from compute_provisioning.teardown_rerun import RerunReady, TeardownRerunPolicy, teardown_rerun
 
 #: The kind and schema version of a prepared job-backed operation.
 JOB_OPERATION_KIND = "compute.job-fulfillment.operation"
@@ -149,6 +158,10 @@ class JobReader(Protocol):
 
     def get_credentials(self, job_id: str) -> JobCredentialsResponse: ...
 
+    def bound_jobs(
+        self, capacity_reservation_id: str, action_kind: str
+    ) -> tuple[BoundJob, ...]: ...
+
 
 class JobFulfillmentMetadata(BaseModel):
     """What a job-backed fulfillment records about its jobs."""
@@ -180,18 +193,26 @@ class PreparedJobOperation(BaseModel):
 
 
 def job_contract(
-    capacity_reservation_id: str, operation: Operation, offering_mode: str
+    capacity_reservation_id: str,
+    operation: Operation,
+    offering_mode: str,
+    *,
+    rerun: int | None = None,
 ) -> JobActionRequest:
     """The contract a fulfillment's job is submitted under.
 
     Its identity is the reservation and the operation, the same for every
-    domain, so one fulfillment's create, or its teardown, is one job.
+    domain, so one fulfillment's create is one job, and so is its teardown —
+    unless that teardown's execution never started, when rerun *n* is a job of
+    its own under ``"{reservation}:teardown:rerun-{n}"``. Every dispatch of one
+    rerun names one job, as every dispatch of the first teardown does.
     """
+    key = f"{capacity_reservation_id}:{operation}"
     return JobActionRequest(
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=offering_mode,
         action_kind=operation,
-        idempotency_key=f"{capacity_reservation_id}:{operation}",
+        idempotency_key=key if rerun is None else f"{key}:rerun-{rerun}",
     )
 
 
@@ -311,10 +332,14 @@ class JobFulfillmentProvider(FulfillmentProvider):
         plan: JobFulfillmentPlan,
         submission: JobSubmissionService,
         jobs: JobReader,
+        rerun_policy: TeardownRerunPolicy | None = None,
     ) -> None:
         self._plan = plan
         self._submission = submission
         self._jobs = jobs
+        # ``None`` runs no teardown reruns: every dispatch submits, or finds,
+        # the reservation's one teardown job.
+        self._rerun_policy = rerun_policy
 
     # Create.
 
@@ -429,14 +454,14 @@ class JobFulfillmentProvider(FulfillmentProvider):
         if operation.create_job_id is None:
             raise ProviderConfigInvalidError("a prepared teardown names the create it undoes")
         try:
-            response = await self._submit(operation, require_enabled_host=False)
+            job_id = await self._teardown_job(operation)
         except Exception as exc:
             raise FulfillmentTeardownFailedError(str(exc)) from exc
         return FulfillmentResult(
             JobFulfillmentMetadata(
                 create_job_id=operation.create_job_id,
-                teardown_job_id=response.job_id,
-                current_job_id=response.job_id,
+                teardown_job_id=job_id,
+                current_job_id=job_id,
                 operation="teardown",
                 host_id=operation.host_id,
                 executor_target=operation.executor_target,
@@ -507,7 +532,29 @@ class JobFulfillmentProvider(FulfillmentProvider):
             payload=delivery.model_dump(mode="json"),
         )
 
-    async def _submit(self, operation: PreparedJobOperation, *, require_enabled_host: bool):
+    async def _teardown_job(self, operation: PreparedJobOperation) -> str:
+        """The teardown job this dispatch names: the reservation's latest,
+        adopted, or a rerun of the prepared teardown when one is ready."""
+        if self._rerun_policy is None:
+            return (await self._submit(operation, require_enabled_host=False)).job_id
+        jobs = self._jobs.bound_jobs(operation.capacity_reservation_id, "teardown")
+        if not jobs:
+            return (await self._submit(operation, require_enabled_host=False)).job_id
+        outcome = teardown_rerun(jobs, self._rerun_policy, injected_time.now_datetime())
+        if isinstance(outcome, RerunReady):
+            submitted = await self._submit(
+                operation, require_enabled_host=False, rerun=outcome.rerun
+            )
+            return submitted.job_id
+        return jobs[-1].job_id
+
+    async def _submit(
+        self,
+        operation: PreparedJobOperation,
+        *,
+        require_enabled_host: bool,
+        rerun: int | None = None,
+    ):
         return await self._submission.submit(
             offering_mode=operation.offering_mode,
             action=operation.action,
@@ -517,6 +564,7 @@ class JobFulfillmentProvider(FulfillmentProvider):
                 operation.capacity_reservation_id,
                 operation.operation,
                 operation.offering_mode,
+                rerun=rerun,
             ),
             require_enabled_host=require_enabled_host,
         )

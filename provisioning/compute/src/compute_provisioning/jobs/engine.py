@@ -32,7 +32,8 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import injected_time
@@ -78,6 +79,39 @@ def _first_start():
     return func.coalesce(
         JobRecord.execution_started_at, literal(_utcnow(), DateTime(timezone=True))
     )
+
+
+@dataclass(frozen=True)
+class BoundJob:
+    """One job bound to a reservation under a contract action, as the job
+    authority's own record answers for it. Not a wire view."""
+
+    job_id: str
+    status: str
+    #: The job failed, was not cancelled, and records ``finished_at`` but
+    #: neither a start nor a handle, so its execution never started. A job
+    #: with no ``finished_at`` is never so classified: no start was recorded
+    #: for it before it could act on its host.
+    never_started: bool
+    #: When it reached a terminal status, in UTC; ``None`` while it runs, and
+    #: for a job whose finish was never recorded.
+    finished_at: datetime | None
+
+
+def _never_started(job: JobRecord) -> bool:
+    return (
+        job.status == JobStatus.failed.value
+        and job.execution_started_at is None
+        and not job.execution_handle
+        and job.finished_at is not None
+    )
+
+
+def _utc(instant: datetime | None) -> datetime | None:
+    """A stored instant as an aware UTC datetime; SQLite returns it naive."""
+    if instant is None or instant.tzinfo is not None:
+        return instant
+    return instant.replace(tzinfo=timezone.utc)
 
 
 class JobNotRunningError(RuntimeError):
@@ -275,6 +309,42 @@ class JobEngine:
                 total=total,
                 offset=offset,
                 limit=limit,
+            )
+
+    def bound_jobs(
+        self, capacity_reservation_id: str, action_kind: str
+    ) -> tuple[BoundJob, ...]:
+        """Every job bound to a reservation under ``action_kind``, oldest first.
+
+        Unpaginated, unlike the listing, because a caller deciding from them
+        needs them all, and only a reservation's own jobs under one action are
+        read. Jobs are ordered by creation instant; two created in one instant
+        are ordered by their idempotency key, shorter first, so keys numbered
+        in sequence under a common prefix (``…:teardown``, ``…:teardown:rerun-1``,
+        ``…:teardown:rerun-10``) keep their order.
+        """
+        with self._session_factory() as db:
+            jobs = (
+                db.query(JobRecord)
+                .filter(
+                    JobRecord.capacity_reservation_id == capacity_reservation_id,
+                    JobRecord.action_kind == action_kind,
+                )
+                .order_by(
+                    JobRecord.created_at.asc(),
+                    func.length(JobRecord.idempotency_key).asc(),
+                    JobRecord.idempotency_key.asc(),
+                )
+                .all()
+            )
+            return tuple(
+                BoundJob(
+                    job_id=job.id,
+                    status=job.status,
+                    never_started=_never_started(job),
+                    finished_at=_utc(job.finished_at),
+                )
+                for job in jobs
             )
 
     def get_job(self, job_id: str) -> JobStatusResponse:
@@ -705,4 +775,10 @@ def _repeat(existing: JobRecord, params: dict[str, Any], identity: str) -> JobSu
         )
     return JobSubmitResponse(job_id=existing.id, status=existing.status)
 
-__all__ = ["HostLookup", "JobEngine", "JobIdentityConflictError", "JobNotRunningError"]
+__all__ = [
+    "BoundJob",
+    "HostLookup",
+    "JobEngine",
+    "JobIdentityConflictError",
+    "JobNotRunningError",
+]

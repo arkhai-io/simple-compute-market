@@ -208,14 +208,23 @@ teardown have separate retry ownership", and the status rules of "An undelivered
 lease is released by what its fulfillment proves"). Touches `provisioning/compute`
 only; depends on section 1.
 
-- [ ] 2.1 In `provisioning/compute/src/compute_provisioning/jobs/engine.py`, add the
+- [x] 2.1 In `provisioning/compute/src/compute_provisioning/jobs/engine.py`, add the
   engine-internal teardown-job read: unpaginated, the reservation's jobs under the
   `teardown` action kind in creation order, each as a compute-owned record carrying
   its status, whether its execution is recorded as never started (D4: `failed`, not
   `cancelled`, no `execution_started_at`, no handle, and a `finished_at`), its
   `finished_at`, and its order. It is not on the wire and not on the paginated
   listing. Verify with 2.6. (D5, 11 F5.)
-- [ ] 2.2 Add a module in `compute_provisioning` beside `release.py` (it is imported
+  Done: `JobEngine.bound_jobs(capacity_reservation_id, action_kind)` returning
+  `BoundJob(job_id, status, never_started, finished_at)` records, oldest first
+  (the order is the tuple's). Generic in the action kind, so the engine names no
+  contract action; callers pass `"teardown"`. Ties on `created_at` (the source
+  ticks in seconds) are broken by the idempotency key, shorter first, so
+  `…:teardown:rerun-10` sorts after `…:rerun-9` (2.6's case inserts `rerun-10`,
+  `rerun-9`, `rerun-2` and the first under one held instant, which alphabetical
+  order would misread). `finished_at` is returned aware UTC (SQLite stores it
+  naive).
+- [x] 2.2 Add a module in `compute_provisioning` beside `release.py` (it is imported
   by both `job_fulfillment.py` and `release.py`, which already imports
   `job_fulfillment`), holding the rerun policy — `teardown_rerun_limit`, refusing a
   negative value with an error naming the setting, and the job retry policy's
@@ -224,7 +233,17 @@ only; depends on section 1.
   `waiting(until)`, `ready(n)`, or `spent(n)` from the teardown-job records and the
   current instant. Export it from `compute_provisioning/__init__.py`. Verify with
   2.5. (D5, D7.)
-- [ ] 2.3 In `compute_provisioning/job_fulfillment.py`, `JobReader` gains the
+  Done: `compute_provisioning/teardown_rerun.py` — `TeardownRerunPolicy`
+  (exported from the package), `teardown_rerun(jobs, policy, now)` answering
+  `NotRerunnable(reason, reruns_spent)`, `RerunWaiting(rerun, until)`,
+  `RerunReady(rerun)` or `RerunsSpent(reruns_spent)`, plus `rerun_pending` and
+  `never_started_account` (the operator's sentence for a spent bound or disabled
+  reruns). Two outcomes the plan's list left implicit: `NotRerunnable`'s
+  `no_teardown_job`, and `LatestJobUnsettled(status)` for a latest job queued,
+  running or succeeded, which `rerun_pending` counts as pending — the teardown
+  is still to be observed, so a lease waiting on it keeps waiting, as D3 has the
+  port report failed only when nothing is pending. Dispatch adopts that job.
+- [x] 2.3 In `compute_provisioning/job_fulfillment.py`, `JobReader` gains the
   teardown-job read, and `JobFulfillmentProvider` takes the rerun policy.
   `dispatch_teardown` asks the predicate: on `ready(n)` it submits the prepared
   teardown's parameters under `JobActionRequest` identity
@@ -235,19 +254,36 @@ only; depends on section 1.
   with 2.6. (D5; requirement scenarios "A teardown fails before its playbook
   starts", "Dispatch is repeated after a rerun was submitted", "A compensating
   teardown fails before its playbook starts".)
-- [ ] 2.4 In `compute_provisioning/release.py`, `FulfillmentReleaseStatusPort` takes
+  Done. Deviation: the provider's `rerun_policy` keyword defaults to `None`
+  (no reruns: every dispatch submits, or finds, the one `…:teardown` job, as
+  before), and so do the status port's `rerun_policy` and `jobs`. Required
+  arguments would break the VM and bare-metal runtimes and the service
+  container, which compose them only in section 3, and this commit must pass
+  every suite. Section 3 composes both and makes the arguments required (see
+  the section notes). `job_contract` gains `rerun=`.
+- [x] 2.4 In `compute_provisioning/release.py`, `FulfillmentReleaseStatusPort` takes
   the rerun policy and the teardown-job read: a `teardown_failed` aggregate whose
   predicate answers `waiting` or `ready` reports `TEARING_DOWN`; `spent` and
   `not_rerunnable` report `FAILED` with reason `teardown_failed`, the message saying,
   for a never-started teardown, that its execution never started and how many reruns
   were spent. `compensable` is unchanged. Update the module docstring. Verify with
   2.6. (D3, D5, D8; "Lease release delegates to durable fulfillment teardown".)
-- [ ] 2.5 Unit (`provisioning/compute/tests/unit/`, a module for the predicate):
+  Done: the port takes `rerun_policy` and `jobs` (a `BoundJobReader`, the
+  engine), reads the predicate only for `teardown_failed`, and appends
+  `never_started_account` to the failure message for a spent bound or disabled
+  reruns.
+- [x] 2.5 Unit (`provisioning/compute/tests/unit/`, a module for the predicate):
   one case per outcome — latest job started; cancelled; finished before starts were
   recorded (no `finished_at`, with and without a handle); reruns disabled; waiting
   before the delay; ready at the delay with the right *n*; spent at the limit — and
   the policy refusing a negative limit.
-- [ ] 2.6 Library integration (`provisioning/compute/tests/integration/`, beside the
+  Done: unit, `tests/unit/test_teardown_rerun.py`, 13 passed — each outcome
+  (no job, a latest job not failed, started, cancelled, finished before starts
+  were recorded, disabled, waiting, ready with its *n*, spent), the latest job
+  deciding, the spent bound's message, and the refused negative limit. "With and
+  without a handle" is the job authority's classification, not the predicate's
+  input, so it is shown at the read, in 2.6's last case.
+- [x] 2.6 Library integration (`provisioning/compute/tests/integration/`, beside the
   existing job-fulfillment and release tests): through a real job engine and a
   test executor refusing before the start, a teardown fails without starting, the
   provider's next dispatch waits until the delay passes, then submits
@@ -258,12 +294,55 @@ only; depends on section 1.
   with its message; a compensating teardown reruns and keeps `create_compensation`
   (through `kit/fulfillment`'s `begin_compensating_teardown`, as
   `kit/fulfillment/tests/integration/test_compensating_teardown.py` sets one up).
-- [ ] 2.7 Verification: `uv run pytest provisioning/compute/tests` passes, and
+  Done: library integration, `tests/integration/test_teardown_rerun.py`, 10
+  passed. One file-backed database holds the pools, jobs and fulfillment
+  tables, built by their packages' baselines and the jobs migration; a real
+  `JobEngine`, `JobFulfillmentProvider`, `FulfillmentOrchestrator` (for the
+  ordinary and compensating teardown's begin) and status port. Convergence is
+  the service's, which this package cannot import, so each test makes the
+  watchdog's moves itself through `SettlementRepository.transition` — dispatch,
+  poll (keeping a compensation's reason, as `_apply_teardown_failure` does), and
+  requeue; the full loop through the service is section 3's. "A rerun that
+  succeeds" is shown as far as the provider's status reading `succeeded` and the
+  port reading `TORN_DOWN` once the row is `torn_down`. The compensating case
+  shows the rerun submitted for a compensating teardown and dispatch leaving
+  `create_compensation` as it was; that the reason survives a failed attempt is
+  the test helper's copy of the watchdog's rule, so the real watchdog's keeping
+  of it across a rerun is section 3's to show. The last two cases show the
+  read's order of rows created in one instant, and its classification of a job
+  with no `finished_at` (handle or none) and of one recording its finish.
+- [x] 2.7 Verification: `uv run pytest provisioning/compute/tests` passes, and
   `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
   passes. End-to-end: no lane induces a teardown that fails before its playbook
   starts, so no scenario exercises a rerun; the lanes' deals exercise the unchanged
   first-teardown path. None is owed: section 3's application-integration cases are
   the deployed-composition evidence.
+  Done: `provisioning/compute` 593 passed; `pre-commit` passes (section notes).
+  End-to-end confirmed as planned: until section 3 composes the policy, the
+  lanes run with reruns off, the first-teardown path exactly.
+
+Section 2 notes (handoff):
+
+- Section 3 must compose one `TeardownRerunPolicy` into the provider (both
+  runtimes, and the service suite's `conftest.py` constructions) and into the
+  status port (with `jobs=` the job engine), then remove the `None` defaults
+  from `JobFulfillmentProvider.__init__`'s `rerun_policy` and
+  `FulfillmentReleaseStatusPort.__init__`'s `rerun_policy`/`jobs`, with the
+  provider's `if self._rerun_policy is None` branch and the port's matching one.
+  Every test constructing either then passes a policy: the compute package's
+  `tests/unit/test_job_fulfillment.py` (its fake `_Jobs` then needs
+  `bound_jobs`), `tests/integration/test_release.py`'s `_status_port`, the
+  bare-metal adapter's `test_bare_metal_fulfillment_plan.py`, and the service's
+  `conftest.py`, `test_lease_release_api.py` and `test_ledger_lease_lifecycle.py`.
+- The status port reads `teardown_rerun` only for a `teardown_failed` aggregate.
+  It reads the aggregate and the jobs in separate transactions, so a requeue and
+  rerun dispatch landing between the two can show a latest job still queued or
+  running; that reads as tearing down (`LatestJobUnsettled`), not failed.
+- Section 3 also owns showing, through the real watchdog, that a compensating
+  teardown's rerun keeps `create_compensation` across a failed attempt.
+- The provider's dispatch adopts the latest teardown job by reading it, rather
+  than resubmitting `…:teardown` to find it; the job authority's contract
+  identity still collapses concurrent dispatches of one rerun.
 
 ## 3. The composition: the rerun setting, the grace's default, and the operator's account
 
