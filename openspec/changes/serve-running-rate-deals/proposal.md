@@ -73,11 +73,13 @@ it. It takes the servicing slice of `converge-ongoing-compute-leases`.
   reserving each running rate part through a named instant, as far as its end and the
   payer's balance allow, in place of the service's scheduler, and refusing a
   transaction with no running rate part.
-- **Lane qualification in both lanes, against both doubles** (D9, D10, D18, D19): the
+- **Lane qualification in both lanes, against both doubles** (D9, D10, D18, D19, D20): the
   on-demand baseline with the buyer's stop, funds running out, spot preemption with
   notice, the maximum term ending with `returned`, and the buyer watchdog's
   delivered-deal cases with the storefront paused, each reaching its instants by
-  setting lane time. Lane compositions declare `[charged, returned]`. Each run is
+  setting lane time. The watchdog cases run the shipped `buy` in the harness's process,
+  its probe answering and its waits stepped as the harness programs them through each
+  buyer CLI's own factories, so nothing test-only ships with the CLI. Lane compositions declare `[charged, returned]`. Each run is
   labelled lane-double evidence, never live; the Compose lanes are this change's
   evidence.
 
@@ -153,9 +155,11 @@ None.
 - D15: no permanent destination — the implementation cadence orders this change's own work.
 - D16: `deal-lifecycle`'s spec ("The seller half lists deals") — the authority's first-page `404` read as no case, its unchecked credential premise and its limit; `openspec/specs/settlement-servicing/architecture.md` (its "Initial missing mediation history permits the first filing only" sentence) and `kit/arkhai-mediation/README.md` (its initial-404 paragraph).
 - D17: `test-compatibility`'s spec ("Lane double controls are typed deterministic steps", "Rate deals are qualified in both compute lanes on lane time"); `tools/payments-lane-double/README.md` (its controls and claims), `tools/lane-double-controls/README.md` (the route), `kit/arkhai-payments/README.md` (the engine's reservation method beside `advance`); `docs/development/TESTING.md`, "Private Service Dependencies" (the reservation control).
-- D18: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" (the watchdog cases with the storefront paused).
+- D18: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" (the watchdog cases with the storefront paused, its record of the stop made on the buyer's hint).
 - D19: `docs/development/TESTING.md`, "The canonical compute deal" — the rate rows and watchdog cases are Compose-lane, lane-double evidence.
+- D20: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" — the watchdog cases run the shipped `buy` in the harness's process with its probe and wait clock programmed; `e2e-tests/README.md` (the watchdog modules); `docs/guidance/engineering/test-doubles.md` for the principle below.
 - `docs/guidance/engineering/test-doubles.md`, "A double mirrors its producer" — a producer's scheduled actions, such as reserving ahead, are answers a scenario programs like its rulings and job outcomes; a double stays externally programmable, gaining no internal behaviour a scenario could program (the owner's principle, stated in this design).
+- `docs/guidance/engineering/test-doubles.md` — a CLI used by an end-to-end test can have its behavior controlled using the same principles as we apply to services. A mock layer can override its outbound IO and time. Unlike with a service though, these can be manipulated in the harness's process so that the test functionality need not be shipped with the CLI as it is with the service (the owner's principle, stated in this design, D20).
 - `docs/guidance/repository/deterministic-tests.md`, "Pause the loop, then advance it explicitly" — a local end-to-end test holds a party's time-based signals by pausing it, never by stopping it; external-topology tests handle time differently (the owner's principle, stated in this design).
 - `docs/guidance/workflow/changes.md`, "Defects found during a change" — a change taking on work another change owns names the move in its own proposal and in that change's row Notes (the owner's principle, stated in this design).
 - `docs/guidance/repository/package-versions.md`, "Compatibility is owed to what a release has shipped" — a released client or CLI is not owed compatibility with a later storefront, provided the client shipped with that storefront reads everything it serves; backwards client compatibility stays supported through the staged deprecation pattern of `docs/guidance/engineering/versioning.md`, but is not owed (the owner's principle, stated in this design).

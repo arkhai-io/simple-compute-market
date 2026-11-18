@@ -402,12 +402,11 @@ time; and mixing waits with set time.
 The four cases spot could not run — the real `buy` with the opt-in from `available`;
 access lost with the storefront paused yielding a single buyer stop; a killed command
 reading `unmonitored` once its last probe goes stale; the resumed run reading
-`monitored` — run in both lanes on the lane-time helper: the buyer reads lane time from
-its lane-time file, so staleness is reached by setting time. The mock provisioning
-discloses no endpoint a probe can reach, so the harness opens a TCP listener in its own
-container, where the buyer runs too, and a mock-provisioning rule the scenario installs
-has the deal's fulfillment result disclose it; closing it is the access lost. The
-storefront is paused for that case (D18).
+`monitored` — run in both lanes against a delivered rate deal, the buyer's `buy` run in
+the harness's process with its probe and its waits programmed by the harness (D20).
+Staleness is reached by setting lane time, which the buyer's probes are stamped with and
+its read compares against; the threshold of failed probes is reached by stepping the
+watchdog's waits. The storefront is paused for the access-lost case (D18).
 
 Rejected: application-integration tests alone, which cannot show the watchdog's stop
 landing at the payments authority from a delivered deal.
@@ -481,7 +480,11 @@ Two rounds, then closeout.
      answering as the authority does (D16); the payments engine's reservation method,
      the double's reservation control and its typed client (D17); each with its tests;
   2. on that tooling, rows 0, 6, 7 and 9 and the watchdog cases in both lanes against
-     both doubles (D9, D10), labelled lane-double evidence (D19).
+     both doubles (D9, D10, D20), labelled lane-double evidence (D19).
+
+*Settled at the return from the watchdog cases:* rows 0, 6, 7 and 9 are done; the
+watchdog cases (D10, D18, D20) are one session, completing round 2's second; then
+round 2's implementation review and validation over all of its work; then closeout.
 
 ### D16 — An authority holding no record of the Agreement is read as no case
 
@@ -580,8 +583,12 @@ reserving anything.
 For the access-lost case (D10) the scenario pauses the storefront's loops, which holds
 every time-based signal it would emit — a term end, a teardown, a filing — so the
 watchdog's one payer stop lands at the payments double with nothing from the storefront
-between; stepping `deal-servicing` then shows the storefront recording the buyer's
-entitled stop and tearing down. A local end-to-end test holds a party's time-based
+between: the transaction's events there are the storefront's `start`, then the payer's
+stop. The watchdog's stop is the buyer's ordinary stop and hint, and the storefront acts
+on the hint through its API whether or not its loops are paused: it records the payer's
+end, with no filing, and in bare metal also carries out the physical end, as the
+recurring purchase shows (`Recurring08`). Stepping `deal-servicing` then shows the
+teardown begun. A local end-to-end test holds a party's time-based
 signals this way; an external-topology test handles time differently. That an
 unreachable storefront does not hold the stop back is proven at library integration,
 where each compute buyer runs its watchdog against a storefront refusing connections
@@ -603,11 +610,77 @@ labelled lane-double evidence, and closeout runs the end-to-end pipeline over th
 Nothing in this change waits on another topology; a run elsewhere is recorded with its
 own label, as further evidence, and gates nothing. The rows use only the lane-time
 helper, the doubles' controls and the loop controls, so they carry over to any topology
-offering those.
+offering those; the watchdog cases also need both buyers installed in the harness's
+process (D20), as `e2e-tests/pyproject.toml` declares.
 
 Rejected: gating a section on a topology no change owns, which gives this change a
 prerequisite outside its domain and a second acceptance boundary, and whose wall-time
 Helm release cannot reach the doubles' controls or set lane time; and requiring both.
+
+### D20 — The watchdog's buyer runs in the harness's process, its probe and clock programmed
+
+Lane provisioning is mocked, so the endpoint a lane deal discloses reaches no machine,
+and the watchdog starts its probes on a monotonic clock (`deal-lifecycle`, "The buyer's
+watchdog bounds detection only while it runs"), so neither a probe's answer nor the
+threshold of failed probes can be reached through the services' controls or lane time.
+The buyer is controlled as a service is: a mock layer the harness programs overrides its
+outbound IO and its time. Unlike a service's, that layer is applied in the harness's
+process, so nothing test-only ships with the CLI.
+
+Each case runs the shipped `buy`, its resume `buy --from` and the buyer's read in the
+harness's process, through the command's own entry (Typer's `CliRunner` in a worker
+thread, as `domains/vms/storefront/tests/integration/test_watchdog_buy.py` does); both
+buyers are installed in the harness's environment (`e2e-tests/pyproject.toml`). The
+harness replaces each buyer CLI's two composition factories, VM's in
+`domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py` and bare metal's in
+`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`:
+
+- `watchdog_probe`: a probe answering as the harness programs it, reachable or not, with
+  no network call. It records the endpoint the deal disclosed, so each case checks the
+  probe was built for the deal's own access. Each fake matches its domain's signature.
+- `wait_clock`: a `WaitClock` whose `now` is lane time and whose sleep, once the
+  watchdog runs, is a gate the harness steps one interval at a time; an interrupt
+  delivered at the gate is the killed command. Bare metal's clock also paces `buy`'s
+  commit and availability waits, which pass until the watchdog runs.
+
+On one deal the cases run in order: `buy` from `available` and a passing probe, the read
+`monitored`; the interrupt, lane time set past the last probe's staleness bound, the
+read `unmonitored`; `buy --from` and a passing probe, the read `monitored`; then, with
+the storefront's loops paused (D18), the probe answering unreachable for the threshold
+of stepped intervals, one payer stop accepted at the payments double, and `buy` exiting
+`stopped`. The reverse order cannot run on one deal: once the stop is journaled, the
+read shows `stopped`. The command's process entrypoint is not exercised by these cases;
+every other lane scenario runs `market` as a subprocess, and
+`e2e-tests/tests/e2e/roles/buyer_cli.py` names the in-process watchdog cases as the
+exception and why.
+
+Rejected:
+
+- a mock-provisioning rule disclosing a harness listener, which no rule can do: a rule's
+  `result_stdout` is verbatim, both codecs build a direct endpoint's host from the
+  registered host's tenant route, bare metal its port too, and VM's yields no evidence
+  unless the output names the guest derived from the reservation settle creates;
+- a harness-owned loopback listener disclosed through each module's executor-host
+  registration (`public_host`, `public_port`), with a bounded real-time wait for the
+  probes, which keeps a buyer the harness cannot pause or step;
+- the mock and both codecs taking the endpoint from a rule's output, a production change
+  for a test fixture that undoes the host registry's ownership of the tenant route;
+- caging the buyer process's network, which needs privileges the harness's container
+  does not have;
+- a mock layer the shipped CLI reads from a file the harness manages, which ships test
+  functionality with the CLI and is needed only for a buyer that cannot run in the
+  harness's process;
+- calling `watch_deal` directly, which each buyer's library-integration test already
+  does (`test_watchdog_rate_stop.py`) and which skips the shipped command's opt-in,
+  journal and resume;
+- a pause-and-step control API in `buy`, against the requirement's "no buyer daemon";
+- the watchdog's schedule following lane time under injected time, a change to the
+  `deal-lifecycle` requirement and to shipped buyer code;
+- network-layer fault injection, such as a service mesh, in this repository's end-to-end
+  layer; how infrastructure topologies apply that kind of control is their own guidance,
+  decoupled from these tests;
+- a new injection point in each CLI: the two factories are already its composition seam,
+  and replacing them, as the precedent test does, ships nothing.
 
 ## Open Questions
 

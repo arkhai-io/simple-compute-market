@@ -128,16 +128,18 @@ Each compute lane MUST run, each on its own deal, under the shipped presets with
 - **THEN** the rate part ends with `returned`, the storefront classifies the end as the term end, not exhaustion, and tears the deal down
 
 ### Requirement: The buyer's watchdog is qualified against a delivered deal
-Each compute lane MUST run the buyer's watchdog against a delivered rate deal on lane time: the shipped `buy` with the opt-in monitoring from `available`; the disclosed endpoint ceasing to accept connections while the storefront's loops are paused, which yields one buyer stop; a killed command whose read shows `unmonitored` once lane time passes its last probe's staleness bound; and the resumed run whose read shows `monitored`. The disclosed endpoint MUST be a listener the harness opens and closes, which the deal's mock fulfillment result discloses through a rule the scenario installs. Each case MUST be labelled lane-double evidence.
+Each compute lane MUST run the buyer's watchdog against a delivered rate deal: the shipped `buy` with the opt-in monitoring from `available`; a killed command whose read shows `unmonitored` once lane time passes its last probe's staleness bound; the resumed run whose read shows `monitored`; and the disclosed endpoint ceasing to accept connections while the storefront's loops are paused, which yields one buyer stop. The shipped `buy`, its resume and the buyer's read MUST run in the harness's process, the deal's probe answering and the watchdog's waits stepped as the harness programs them through each buyer CLI's own probe and wait-clock factories, so that no probe leaves the harness, no case waits on real time, and nothing test-only ships with the CLI. Staleness MUST be reached by setting lane time. Each case MUST be labelled lane-double evidence.
+
+#### Scenario: A watched purchase is monitored, goes stale when killed, and resumes
+- **GIVEN** a delivered rate deal whose `buy` runs in the harness's process with the watchdog opted in from `available`, its probe programmed to answer reachable
+- **WHEN** the harness steps one probe interval
+- **THEN** the buyer's read shows `monitored`, and the probe was built for the endpoint the deal disclosed
+- **AND** after the harness interrupts the command and sets lane time past one interval, the probe timeout and the grace after its last probe, the read shows `unmonitored`
+- **AND** after the buyer resumes the run and the harness steps one probe interval, the read shows `monitored`
 
 #### Scenario: Access is lost while the storefront is paused
-- **GIVEN** a delivered rate deal whose `buy` runs with the watchdog opted in
-- **WHEN** the storefront's loops are paused and the disclosed endpoint stops accepting connections for the threshold of probes
-- **THEN** the watchdog sends one payer stop, which the payments double accepts, and exits, with nothing from the storefront between
-- **AND** once the scenario steps `deal-servicing`, the storefront records the buyer's entitled stop and tears the deal down
-
-#### Scenario: A killed command goes stale and resumes
-- **GIVEN** a delivered rate deal whose opted-in `buy` command was killed after a passing probe
-- **WHEN** the scenario sets lane time past one interval, the probe timeout and the grace after that probe, and the buyer reads the deal
-- **THEN** the read shows `unmonitored`
-- **AND** after the buyer resumes the run and it records a probe, the read shows `monitored`
+- **GIVEN** the resumed run of a delivered rate deal, and the storefront's loops paused
+- **WHEN** the probe answers unreachable for the threshold of stepped intervals
+- **THEN** the watchdog sends one payer stop and hint, which the payments double accepts, and the command exits with the outcome `stopped`
+- **AND** the payments double's events for the transaction are the storefront's `start` and then the payer's stop, with nothing from the storefront between
+- **AND** the storefront records the buyer's stop with no filing, and once the scenario steps `deal-servicing` the deal's teardown has begun
