@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Protocol
 
+import injected_time
 from market_core.schemas import (
     AgreedPrice, SettlementOption, settlement_option_lifecycle, settlement_option_schema,
 )
@@ -294,7 +295,7 @@ class ClausePublication:
     dispute_interfaces: frozenset[str]
     compute: bool
     default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
-    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+    clock: Callable[[], datetime] = field(default=injected_time.now_datetime)
 
     def publish(
         self,

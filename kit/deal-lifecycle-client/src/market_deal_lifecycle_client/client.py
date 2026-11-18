@@ -5,11 +5,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
-import time
 import uuid
 from urllib.parse import quote
 
 import httpx
+import injected_time
 from market_deal_lifecycle_contracts.models import (
     CommitMessage, EndDeliveryAcknowledgement, EndDeliveryMessage, HintMessage, LifecycleRead,
     SignedEndDeliveryReceipt, SubmitResponse,
@@ -126,7 +126,7 @@ class LifecycleClient:
         self._requests[request_id] = context
         request = sign_request(signer=self._signer, envelope=RequestEnvelope(
             role="buyer", principal=self._signer.identity, method=method, operation=operation,
-            resource=negotiation_id, request_id=request_id, timestamp=int(time.time()), body_hash=digest,
+            resource=negotiation_id, request_id=request_id, timestamp=injected_time.now(), body_hash=digest,
         ))
         headers = {
             "Accept": "application/json", "X-Market-Signature-Version": request.protocol,
@@ -159,8 +159,9 @@ class LifecycleClient:
             )
         except (KeyError, ValueError, TypeError) as exc:
             raise LifecycleClientError("unreadable lifecycle response authentication", status_code=response.status_code) from exc
+        reference = injected_time.now()
         verified = verify_response(
-            authenticated, body=payload, now=int(time.time()), max_skew=self._skew,
+            authenticated, body=payload, now=reference, max_skew=self._skew,
             expected_role="seller", expected_principals=self._publishers, expected_method=method,
             expected_operation=operation, expected_resource=negotiation_id, expected_request_id=request_id,
             capture=self._capture, raw_body=response.content, headers=response.headers,
@@ -168,7 +169,7 @@ class LifecycleClient:
         if not verified.verified:
             raise LifecycleClientError(f"lifecycle response authentication failed: {verified.code.value}", status_code=response.status_code)
         capture_envelope(self._capture, envelope=request, raw_body=content or b"", headers=headers,
-                         verified_at=int(time.time()), expected_principals=TrustedIdentitySet(identities=(request.principal,)))
+                         verified_at=reference, expected_principals=TrustedIdentitySet(identities=(request.principal,)))
         if operation == "lifecycle_peer" and isinstance(body, dict) and body.get("kind") == "end_delivery" and not response.is_error:
             self._responses[request_id] = SignedEndDeliveryReceipt(
                 request=request, request_body=base64.b64encode(content or b""),

@@ -72,7 +72,6 @@ PROVISIONING_MODE_NAMES = {
     "PROVISIONING_MODE",
 }
 
-
 def _compose() -> list[str]:
     binary = os.environ.get("E2E_COMPOSE_BINARY")
     command = [binary] if binary else ["docker", "compose"]
@@ -175,10 +174,26 @@ def test_vm_provisioning_takes_its_site_profile_then_the_run_mode(
     for name, site in (("provisioning", "vms-bob-site"), ("alice-provisioning", "vms-alice-site")):
         environment = services[name]["environment"]
         assert environment["CONFIG_DIRECTORY"] == "/app/config"
-        assert environment["ACTIVE_PROFILES"] == f"docker,{site},{last}"
+        # The lane's injected time is its own profile, between the site's and
+        # the run's mode; the full local stack never loads it.
+        lane = "lane-time," if stack == "vm" else ""
+        assert environment["ACTIVE_PROFILES"] == f"docker,{site},{lane}{last}"
+        assert ("/app/config/config-lane-time.yml" in _mounts(services[name])) == bool(lane)
         assert not {key for key in environment if key.startswith("PROVISIONING_")} - {
             "PROVISIONING_DATABASE_URL", "PROVISIONING_STOREFRONT_URL",
         }, name
+
+
+def test_the_full_local_stack_runs_wall_time() -> None:
+    """Only the lanes inject time: the full local stack loads no lane profile,
+    mounts no lane configuration, and states no injected source."""
+    for name, service in _render("full")["services"].items():
+        environment = service.get("environment") or {}
+        assert "injected" not in environment.values(), name
+        assert "lane-time" not in environment.get("ACTIVE_PROFILES", ""), name
+        assert "payments-lane" not in environment.get("ACTIVE_PROFILES", ""), name
+        assert not [source for source in _mounts(service).values()
+                    if source.endswith((".lane.toml", "config-lane-time.yml"))], name
 
 
 @pytest.mark.parametrize("stack", sorted(STACKS))

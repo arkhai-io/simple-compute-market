@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from datetime import datetime
 
+import injected_time
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentSettlementData
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import PaymentSelector
@@ -79,5 +79,5 @@ def admit_delivery(conn, negotiation_id, phase):
     register_delivery(conn, negotiation_id)
     end = EndSession(conn)
     record = end.read(negotiation_id)
-    return end.admit(negotiation_id, phase, record.revision, now=int(time.time())).status == "admitted"
+    return end.admit(negotiation_id, phase, record.revision, now=injected_time.now()).status == "admitted"
 

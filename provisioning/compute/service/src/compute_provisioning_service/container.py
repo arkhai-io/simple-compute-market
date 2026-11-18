@@ -29,6 +29,7 @@ from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.relays import (
     DEFAULT_GRANT_EXPIRY_GRACE,
     DEFAULT_PORT_REUSE_MARGIN,
+    RelayDeliverableHosts,
     RelayExecutionResolver,
     RelayPortAllocator,
     RelayReconciliationSchedule,
@@ -435,20 +436,26 @@ class Container(containers.DeclarativeContainer):
 
     connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
 
-    # Declared ahead of the ledger and the scheduling unit of work: both read
-    # its report of the hosts taking new delivery, the same object, in the
-    # session that decides.
     host_authority = providers.Singleton(
         _make_host_authority,
         session_factory=session_factory,
         codecs=connection_codecs,
     )
 
+    # Declared ahead of the ledger and the scheduling unit of work: both read
+    # this report of the hosts taking new delivery, the same object, in the
+    # session that decides. It is the host authority's, less the hosts of every
+    # pool on a disabled relay, so a relay's drain keeps new deliveries off it.
+    deliverable_hosts = providers.Singleton(
+        RelayDeliverableHosts,
+        hosts=host_authority,
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
         host_requirement=host_requirement,
-        deliverable_hosts=host_authority,
+        deliverable_hosts=deliverable_hosts,
         # "gpu_count" is this domain's alias for the generic "units" claim
         # key and the dimension its legacy scalar mirrors — kept explicit here
         # rather than hardcoded in kit/site so the ledger stays domain-neutral.
@@ -606,7 +613,7 @@ class Container(containers.DeclarativeContainer):
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
         repository=settlement_repository,
-        deliverable_hosts=host_authority,
+        deliverable_hosts=deliverable_hosts,
     )
 
     physical_settlement_scheduler = providers.Singleton(

@@ -1,25 +1,29 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.25.0"
+version = "0.26.0"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-compute-provisioning-contracts>=0.14.0",
+    # The relay response reporting active_lease_count and drained.
+    "arkhai-compute-provisioning-contracts>=0.15.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "arkhai-core>=0.4.0",
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-config",
     # These minimums are the first versions exporting each package's table
     # baseline, which the migration chain composes.
     "arkhai-kit-site>=0.14.0",
     "arkhai-kit-resource-pools>=0.10.0",
     "arkhai-kit-fulfillment>=0.8.0",
-    "arkhai-compute-provisioning>=0.27.0",
+    # The relay drain: a disabled relay leases no new port and its leased
+    # jobs run.
+    "arkhai-compute-provisioning>=0.28.0",
     # The engine the chain runs on, over the service's SQLAlchemy engine.
     "arkhai-kit-schema-migrations[sqlalchemy]>=0.1.0",
     "arkhai-compute-provisioning-ansible>=0.8.0",
-    "arkhai-core-storefront-client==0.29.0",
-    "arkhai-kit-identity==0.4.0",
+    "arkhai-core-storefront-client==0.30.0",
+    "arkhai-kit-identity==0.5.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",

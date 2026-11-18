@@ -8,7 +8,7 @@ The definition documents the provisioning service is given, as this repository's
 instance of
 [`definition-documents.md`](../../../docs/guidance/engineering/definition-documents.md):
 their settings, the order startup imports them in, how each kind applies the method,
-and the relays' secrets. The pool document's own rules are
+and the relays' secrets; and the service's time source. The pool document's own rules are
 [`resource-pool-management`'s](../resource-pool-management/configuration.md#pool-definitions).
 
 ## Definition documents
@@ -67,10 +67,12 @@ Each kind's import reconciles as
 [`definition-documents.md`, "Reconciliation follows the document, not the process"](../../../docs/guidance/engineering/definition-documents.md#reconciliation-follows-the-document-not-the-process)
 says.
 
-A relay absent from the document is **retained**. Disabling one would break
-every pool referencing it and every live tunnel on it, which is a far worse
-outcome than a stale row and is not what an operator editing an unrelated entry
-is asking for. A relay established from a document and then administered through
+A relay absent from the document is **retained**. Disabling one drains it:
+every pool referencing it stops taking new delivery until it is enabled again,
+while the deliveries already leased on it run to their end. That is an
+operator's explicit decision, made through the relay's `enabled` entry or the
+API, not what an operator editing an unrelated entry is asking for, and a stale
+row costs far less. A relay established from a document and then administered through
 the API is one relay, not two.
 
 A capacity declaration absent from the document is **retained**, as a relay is.
@@ -144,3 +146,17 @@ with a negative grace or a reuse margin that is not positive. Keep the relay
 and provisioning clocks synchronized with skew well below the reuse margin; the
 relay plugin checks expiry against its own clock with no leeway. These values
 are service settings, not pool fields or buyer inputs.
+
+## The service's time source
+
+The provisioning service reads `time.source` from its profile, `"wall"` when unset
+or `"injected"`; any other value refuses startup, naming the setting and the value.
+Under `"injected"` it starts frozen at the wall instant it started, logs that at
+startup, and mounts `POST /api/v1/system/time` behind its signed administrator
+authentication; its system status carries the time section in either mode. The
+lease watchdog, lease termination, the job engine and the site it hosts read that
+source. A service whose relays admit real proxies runs on wall time: the relay
+plugin checks a grant's expiry on its own clock, which no lane time moves. No
+packaged profile or chart default sets it; only the lanes' `lane-time` profile,
+`dev-env/provisioning/config-lane-time.yml`, layered through `ACTIVE_PROFILES`, does
+([injected time](../injected-time/architecture.md)).

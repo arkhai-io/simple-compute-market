@@ -52,9 +52,8 @@ return to the market while its guest may still run.
 from __future__ import annotations
 
 import logging
-import time
-from datetime import datetime, timezone
 
+import injected_time
 import pytest
 from market_alkahest.plans import ALKAHEST_MECHANISM
 
@@ -559,7 +558,7 @@ class TestStage09g_SecondDealAccepted:
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "open", "the first guest left no sellable second shape"
         option, escrow = alkahest_opening(registry_client.get_listing(deal_state.seller_listing_id))
-        deal_state._second_escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+        deal_state._second_escrow_expiration_unix = injected_time.now() + ESCROW_TTL_SECONDS
         opened = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
             initial_amount=BUYER_INITIAL_PRICE,
@@ -657,7 +656,7 @@ class TestStage09l_SecondLeaseCutShort:
         require_state(deal_state, "second_fulfillment_id", "second_create_job_id", "_second_create_preserved_session")
         deal_driver.assert_management_connected()
         reservation, _state = deal_driver.reservation_of(deal_state.second_fulfillment_id)
-        end = datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+        end = injected_time.now_datetime() - E2E_LEASE_EXPIRY_BACKDATE
         assert deal_driver.site_capacity.truncate_lease(reservation, end.isoformat().replace("+00:00", "Z")) is not None
         provisioning_client.check_leases()
         lease = provisioning_client.get_lease(reservation)

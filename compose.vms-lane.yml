@@ -15,6 +15,13 @@
 # directory of every `-f` file, and every value is a public development value
 # that must never be used on a public network; see dev-env/identities/README.md,
 # "The payments lane double".
+#
+# Every party of the lane runs injected time, set by the lane-time fixture
+# (e2e-tests/config/config-vms-lane.yml names them), from configuration only the
+# lanes load: the registries' lane profile (dev-env/registry/config-payments-lane.env),
+# the provisioning services' lane profile (dev-env/provisioning/config-lane-time.yml)
+# and each storefront's lane configuration, so the full local stack stays on
+# wall time.
 services:
   # Bob publishes to both registries, and a listing offers only the dispute
   # authorities every one of its destinations recommends, so both layer the
@@ -25,6 +32,21 @@ services:
   registry-b:
     environment:
       - ACTIVE_PROFILES=registry-b,payments-lane
+  provisioning:
+    environment:
+      - ACTIVE_PROFILES=docker,vms-bob-site,lane-time,${PROVISIONING_MODE:-mock}
+    volumes:
+      - ./dev-env/provisioning/config-lane-time.yml:/app/config/config-lane-time.yml:ro
+  alice-provisioning:
+    environment:
+      - ACTIVE_PROFILES=docker,vms-alice-site,lane-time,${PROVISIONING_MODE:-mock}
+    volumes:
+      - ./dev-env/provisioning/config-lane-time.yml:/app/config/config-lane-time.yml:ro
+  alice-storefront:
+    volumes:
+      # Alice's configuration with the lane's time, in place of the full
+      # stack's.
+      - ./domains/vms/storefront/storefront.alice.lane.toml:/etc/arkhai/storefront.toml:ro
   bob-storefront:
     depends_on:
       payments-double:

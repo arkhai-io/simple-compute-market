@@ -89,6 +89,8 @@ listing_shape:
             # Datacenter — Blackwell
             - B200
             - B100
+            # Grace Blackwell — DGX Spark
+            - GB10
             # Datacenter — Hopper
             - H200
             - H100

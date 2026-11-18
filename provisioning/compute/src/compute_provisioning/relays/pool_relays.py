@@ -150,7 +150,9 @@ def check_relay_usable(relay_id: str, fields: Mapping[str, Any]) -> None:
     """Refuse a relay a delivery cannot use, naming the relay and what it lacks.
 
     ``fields`` is the pool's execution read, which ``relay_execution_fields``
-    filled. A disabled relay contributes none, so it lacks everything. A relay
+    filled. A disabled relay contributes none, so it lacks everything: it is
+    draining, and takes no new delivery. The allocator refuses it again under
+    the relay row's lock, since this read takes none. A relay
     with no active grant key is refused as one with no token is: every proxy
     carries a grant signed with that key, and a relay enforcing admission
     refuses a proxy without one. Answerable from configuration, so it runs in
@@ -160,10 +162,10 @@ def check_relay_usable(relay_id: str, fields: Mapping[str, Any]) -> None:
     if missing:
         raise ProviderConfigInvalidError(
             f"pool references relay {relay_id!r}, but the relay is unusable: "
-            f"no {', no '.join(missing)}. A relay that is disabled, has no "
-            "allocation window, or has no token or active grant key cannot carry "
-            "a tunnel, and a delivery made through it would have no external "
-            "route."
+            f"no {', no '.join(missing)}. A disabled relay is draining and takes "
+            "no new delivery; a relay with no allocation window, or no token or "
+            "active grant key, cannot carry a tunnel, and a delivery made "
+            "through it would have no external route."
         )
 
 

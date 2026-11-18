@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
+import injected_time
 from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontListingBinding,
@@ -138,7 +138,7 @@ def prepare_api_credit_listing_binding(
             source_identity={"listing_id": listing_id},
         ),
         source_envelope=source,
-        last_reconciled_at=datetime.now(UTC).isoformat(),
+        last_reconciled_at=injected_time.now_datetime().isoformat(),
         capacity_backing=pool.declaration.backing.label,
     )
 

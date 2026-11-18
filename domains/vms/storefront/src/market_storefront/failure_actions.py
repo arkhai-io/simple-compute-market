@@ -5,11 +5,11 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+import injected_time
 from market_core.schemas import settlement_option_schema
 from core_storefront.stage_log import stage_event
 from market_alkahest.alkahest import get_escrow_codec_for
@@ -316,7 +316,7 @@ async def _end_failed_delivery(db, ctx, capacity):
     if not thread or not _accepted_mechanism(thread):
         return None
     negotiation_id = thread["negotiation_id"]
-    now = int(time.time())
+    now = injected_time.now()
     with transaction(db.db_path) as conn, atomic(conn):
         committed = conn.execute(
             "SELECT 1 FROM vm_settlement_evidence WHERE negotiation_id=? AND status IN ('verified','refunding','refunded')",
@@ -363,7 +363,7 @@ async def _end_failed_delivery(db, ctx, capacity):
             )
     lifecycle = getattr(_container.resolved_settlement_composition, "lifecycle", None)
     service = lifecycle.end if lifecycle is not None and lifecycle.db is db else EndService(
-        db.db_path, VmPhysicalEnd(db, capacity=capacity), clock=lambda: int(time.time()),
+        db.db_path, VmPhysicalEnd(db, capacity=capacity), clock=injected_time.now,
     )
     await service.drive_physical(negotiation_id)
     with transaction(db.db_path) as conn:

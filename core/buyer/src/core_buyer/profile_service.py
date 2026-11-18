@@ -7,9 +7,10 @@ import tomllib
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+import injected_time
 from market_config.config_loader import get_dotted, load_user_config
 
 from market_identity import (
@@ -329,7 +330,7 @@ class BuyerProfileService:
                 replacement_reference,
                 replacement_scheme,
             )
-            now = datetime.now(timezone.utc)
+            now = injected_time.now_datetime()
             intent = RotationIntent(
                 current=current_signer.identity,
                 replacement=replacement_signer.identity,
@@ -337,7 +338,7 @@ class BuyerProfileService:
                 authority=PROFILE_ROTATION_AUTHORITY,
                 nonce=uuid.uuid4().hex,
                 overlap_seconds=overlap_seconds,
-                expires_at=int((now + timedelta(minutes=5)).timestamp()),
+                expires_at=int(now.timestamp()) + 300,
             )
             candidate = rotate_profile(
                 current,

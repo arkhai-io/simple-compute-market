@@ -429,7 +429,9 @@ class AnsibleRunner:
         stderr_lines: list[str] = []
 
         async def _stream() -> None:
-            last_callback = time.time()
+            # The log flush interval is a duration of this wait, on the
+            # monotonic clock.
+            last_callback = time.monotonic()
             while True:
                 if run.process.poll() is not None:
                     if run.process.stdout:
@@ -484,7 +486,7 @@ class AnsibleRunner:
                     except Exception:
                         pass
 
-                now = time.time()
+                now = time.monotonic()
                 if log_callback and (now - last_callback) >= 2.0:
                     try:
                         await asyncio.to_thread(

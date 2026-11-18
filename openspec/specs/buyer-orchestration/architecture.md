@@ -217,14 +217,15 @@ notice come after that, and billing runs until the stop lands. The bound holds
 because each probe starts on schedule: a probe and the loop's check that the deal has
 ended run side by side, each cut off at the probe timeout, the probe timeout never
 exceeds the interval (an opt-in with a shorter interval shortens the default timeout
-to it), and the schedule runs on a monotonic clock, so a wall-clock step cannot
-postpone a probe. The defaults are conservative — a 60-second interval, five probes
+to it), and the schedule runs on a monotonic clock, so neither a wall-clock step nor
+injected time held still can postpone a probe. The defaults are conservative — a 60-second interval, five probes
 and a 10-second timeout — because a transient outage must persist before an
 irreversible stop. The watchdog sends nothing the buyer could not send by hand and
 asks nothing new of the authority.
 
 **The status rests on the last probe.** Every probe, passed or failed, records its
-wall-clock instant per deal beside the opt-in. The buyer's deal read — `market
+instant per deal beside the opt-in, read from the buyer's process time source (see
+"The buyer's time" below). The buyer's deal read — `market
 delivery` in VM and `market bare-metal delivery` in bare metal, registered from the
 buyer half beside `end` — shows `monitored` while `now − last probe ≤ interval + probe
 timeout` plus a small fixed grace, `stopped` once the watchdog has journaled its stop,
@@ -233,9 +234,9 @@ hung loop reads as unmonitored, never as protected; the opt-in alone says only t
 the buyer asked for a monitor. The status is the buyer's knowledge of its own process:
 the buyer half computes it when it composes the read and the CLI displays it beside
 the lifecycle read; no lifecycle wire model carries it and the storefront neither sees
-nor reports it. The freshness rule compares a kept instant with the reader's wall
-clock, which a backward step makes look fresher by the step, an accepted limitation
-since the reader is another process.
+nor reports it. The freshness rule compares a kept instant with the reader's time
+source, wall time in production, which a backward step makes look fresher by the
+step, an accepted limitation since the reader is another process.
 
 A stop the authority refuses is final under its operation key and leaves the deal
 billing: the watchdog exits with a `rejected` outcome, never `stopped`, names
@@ -250,6 +251,27 @@ delivered-deal cases — the real `buy` probing from `available`, access lost wi
 storefront stopped yielding a single buyer stop, a killed command reading
 `unmonitored` once its last probe goes stale, and a resumed run reading `monitored` —
 run once rate servicing delivers rate deals.
+
+## The buyer's time
+
+The buyer reads the time of the world — every instant it signs, records or compares,
+the watchdog's probe stamps and staleness among them — from one process time source,
+installed at startup from its configuration's `[time]` table
+(`core_buyer.time_source`): `source = "wall"` by default, or `"injected"` with
+`file` naming a time file holding `{"now": <Unix seconds>}`
+([injected time](../injected-time/architecture.md#one-source-per-process)). The
+buyer is a command started afresh for each step, with no API through which a test
+could set its time, so under injected time it reads the file on every read, and a
+running command, such as `buy --watchdog`, sees a later instant at its next read.
+The file is read by the time component's one rule; a buyer configured for injected
+time with no `file`, or whose file cannot be read or holds an invalid value, refuses
+to start naming it, and a later read that fails fails the command, never falling
+back to wall time. A fixed offset in the configuration per invocation was rejected,
+since a command running across an advance would not see it, and so was asking a
+service for the time, which in production would make a seller the buyer's clock. In
+the lanes the harness generates the buyer's configuration with the `[time]` table
+and writes the file with every lane-time set
+([lane time](../test-compatibility/architecture.md#lane-time-and-the-doubles-controls)).
 
 ## Current limits
 

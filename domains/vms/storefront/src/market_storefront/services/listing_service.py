@@ -13,7 +13,6 @@ import uuid
 from dataclasses import dataclass
 from functools import partial
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from datetime import datetime
 from typing import Any
 
 from core_storefront.domain_registry import (
@@ -30,6 +29,7 @@ from core_storefront.models.listing_models import (
     RefundRequest,
 )
 from core_storefront.publication_runner import NoSettlementOption
+from core_storefront.sqlite_client import store_timestamp
 from core_storefront.stage_log import stage_event
 from market_core.schemas import settlement_option_schema
 from arkhai_vms_listings.models import Listing
@@ -773,7 +773,7 @@ class ListingService:
         binding = derived.binding
         canonical_clauses = derived.clauses
 
-        now_iso = datetime.now().isoformat()
+        now_iso = store_timestamp()
         try:
             await self._db.upsert_listing_with_binding(
                 binding=binding,
@@ -974,7 +974,7 @@ class ListingService:
         await self._db.update_listing(
             listing_id=listing_id,
             status="refunded",
-            updated_at=datetime.now().isoformat(),
+            updated_at=store_timestamp(),
         )
         stage_event(
             "post_settlement",
@@ -1076,7 +1076,7 @@ class ListingService:
             listing_id=listing_id,
             status="closed",
             closed_by="reconciliation",
-            updated_at=datetime.now().isoformat(),
+            updated_at=store_timestamp(),
         )
         stage_event(
             "post_settlement",
@@ -1167,7 +1167,7 @@ class ListingService:
         await self._db.update_listing(
             listing_id=listing_id,
             status="reclaimed",
-            updated_at=datetime.now().isoformat(),
+            updated_at=store_timestamp(),
         )
         stage_event(
             "post_settlement",

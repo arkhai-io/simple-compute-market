@@ -24,9 +24,9 @@ import json
 import re
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 from compute_provisioning_ansible import MockPlaybook
 from vm_provisioning_operator.models import LIBVIRTD_UNIT, RELAY_CLIENT_UNIT
 
@@ -49,7 +49,7 @@ def vm_mock_output(playbook: MockPlaybook) -> str:
     guest = params.vm_target or params.executor_target or ""
     host = playbook.host
     tenant_host = (host.public_host or host.ssh_host) if host is not None else playbook.limit
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = injected_time.now_datetime().strftime("%Y-%m-%dT%H:%M:%SZ")
     if params.vm_action == "create":
         fact = _create_fact(guest, tenant_host, timestamp, provided_key=params.ssh_pubkey)
     elif params.vm_action == "diagnose":

@@ -49,3 +49,15 @@ packaged in the registry image, but each process loads exactly one. Identity,
 credential Secret, descriptor, `secretProfile`, Service, and PVC values are
 instance-local. `global.registryIdentity` configures
 the compute storefront's trust pin and does not constrain the alias signer.
+
+## The registry's time source
+
+The registry reads `TIME_SOURCE`, `"wall"` when unset or `"injected"`; any other
+value refuses startup, naming the setting and the value. Under `"injected"` it
+starts frozen at the wall instant it started, logs that at startup, and mounts
+`POST /admin/time` beside `/admin/api-keys`, behind the same administrator bearer
+key, `REGISTRY_ADMIN_API_KEY`; `GET /admin/status`, behind that key too, reports
+the time section in either mode. Publisher authentication and listing decisions
+read that source. No chart default, production Compose stack or example env file
+sets it; only the lanes' registry profile, `dev-env/registry/config-payments-lane.env`,
+does ([injected time](../injected-time/architecture.md)).

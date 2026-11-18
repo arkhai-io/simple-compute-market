@@ -45,6 +45,7 @@ import pytest
 from market_alkahest.dev_chain import anvil_address_book_path
 
 from e2e_harness.settings import settings
+from tests.e2e.roles.helpers.lane_time import buyer_time_file, lane_time_settings
 
 log = logging.getLogger(__name__)
 
@@ -380,6 +381,15 @@ def _toml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _time_section(time_file: str | None) -> list[str]:
+    """The buyer's ``[time]`` table: injected, read from the lane-time file the
+    harness writes, in an injected run; nothing otherwise, so the buyer keeps wall
+    time."""
+    if time_file is None:
+        return []
+    return ["[time]", 'source = "injected"', f"file = {_toml_quote(time_file)}", ""]
+
+
 def _registry_authority_sections(
     registry_urls: tuple[str, ...],
     authorities: Mapping[str, Mapping[str, Any]] | None,
@@ -497,6 +507,7 @@ def create_profiled_buyer_cli(
         "urls = [" + ", ".join(_toml_quote(url) for url in registry_urls) + "]",
         "",
         *_registry_authority_sections(registry_urls, registry_authorities),
+        *_time_section(buyer_time_file(lane_time_settings(settings))),
         *tuple(toml_sections),
     ]
     config_path = config_dir / "buyer.toml"

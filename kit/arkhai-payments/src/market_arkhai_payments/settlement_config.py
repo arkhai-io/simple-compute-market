@@ -68,6 +68,22 @@ class ArkhaiPaymentsConfigurationError(RuntimeError):
     """Trusted payments configuration cannot construct an authenticated client."""
 
 
+def payments_livemode(settlement: Mapping[str, Any]) -> bool:
+    """Whether a ``[Settlement]`` table's payments section states ``livemode = true``.
+
+    Read from the raw table, keys in any case, without validating the section,
+    so a role can say whether it is configured for live receipts whatever else
+    its section holds.
+    """
+    folded = {str(key).lower(): value for key, value in settlement.items()}
+    section = folded.get(ARKHAI_PAYMENTS_CONFIG_KEY)
+    if not isinstance(section, Mapping):
+        return False
+    return {str(key).lower(): value for key, value in section.items()}.get(
+        "livemode"
+    ) is True
+
+
 class ArkhaiPaymentsConfig(BaseModel):
     """Trusted payments-service policy for one buyer or seller role."""
 

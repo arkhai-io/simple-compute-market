@@ -30,6 +30,7 @@ import sqlite3
 import time
 from typing import TYPE_CHECKING, Literal
 
+import injected_time
 from market_deal_lifecycle_contracts.models import Accepted, EvidenceItem, Rejected
 from market_identity import canonical_json
 
@@ -217,11 +218,12 @@ class WatchdogOutcome:
 class WaitClock:
     """The clock a buyer command's waits and probe instants run on.
 
-    ``now`` stamps probes in Unix seconds; ``monotonic`` and ``sleep`` pace the
-    waits, so a test drives them in fake time.
+    ``now`` stamps probes in Unix seconds from the process time source;
+    ``monotonic`` and ``sleep`` pace the waits, which a held or moved source
+    must neither stop nor cut short, so a test drives them in fake time.
     """
 
-    now: Callable[[], int] = lambda: int(time.time())
+    now: Callable[[], int] = injected_time.now
     monotonic: Callable[[], float] = time.monotonic
     sleep: Callable[[float], Awaitable[object]] = asyncio.sleep
 
@@ -323,7 +325,7 @@ async def _probe_once(probe: Probe, seconds: int) -> tuple[bool, str]:
 
 async def watch_deal(
     lifecycle: BuyerLifecycle, negotiation_id: str, *, journal: WatchdogJournal, probe: Probe | None,
-    clock: Callable[[], int] = lambda: int(time.time()),
+    clock: Callable[[], int] = injected_time.now,
     monotonic: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
     ended: Callable[[], Awaitable[bool]] | None = None,
@@ -334,9 +336,10 @@ async def watch_deal(
     start, and each probe, with the ended-check run beside it, is cut off at the
     probe timeout, so the detection bound and the status's freshness window both
     hold while the loop runs. The schedule runs on ``monotonic``, so a step of
-    the wall clock cannot postpone a probe; ``clock`` only stamps the instants
-    kept. The stop is the buyer's ordinary entitled stop and hint
-    (``BuyerLifecycle.end`` for a rate deal), sent after the decision and its
+    the process time source, or holding it, cannot postpone or hurry a probe;
+    ``clock``, the process time source unless a caller gives another, only
+    stamps the instants kept. The stop is the buyer's ordinary entitled stop and
+    hint (``BuyerLifecycle.end`` for a rate deal), sent after the decision and its
     probe evidence are journaled, and retried until the authority answers it
     definitively: accepted, the outcome is ``stopped``; refused, ``rejected``,
     and the loop sends nothing more. A loop restarted after that decision sends

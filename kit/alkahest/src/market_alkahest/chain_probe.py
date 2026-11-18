@@ -49,8 +49,10 @@ import urllib.error
 import urllib.request
 from collections.abc import Awaitable, Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
+
+import injected_time
 
 from .alkahest import (
     _sdk_addresses_for_chain,
@@ -226,7 +228,7 @@ class AlkahestChainProbe:
         required_addresses: Callable[[ProbedChain], Mapping[str, str]] = (
             required_contract_addresses
         ),
-        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        clock: Callable[[], datetime] = injected_time.now_datetime,
         wait_for_construction: Callable[
             [asyncio.Future[Any], float], Awaitable[None]
         ] = _wait_bounded,

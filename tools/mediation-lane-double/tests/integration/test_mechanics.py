@@ -224,11 +224,11 @@ def test_a_case_with_nothing_held_is_dismissed() -> None:
     assert (closed["reason"], closed["dismissal_reason"]) == ("dismissed", "nothing_held")
 
 
-def test_a_clock_advance_past_a_once_hold_reports_the_part_paid_out() -> None:
+def test_time_set_past_a_once_hold_reports_the_part_paid_out() -> None:
     lane = Lane()
     transaction = lane.approve()
     controls = lane.controls()
-    controls.advance_clock(8 * DAY)
+    controls.set_time(T0 + 8 * DAY)
 
     answer = _answer(lane, "buyer", transaction, cause="payer")
 

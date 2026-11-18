@@ -16,7 +16,8 @@ whose settlement placement finds no capacity.
 from __future__ import annotations
 
 import logging
-import time
+
+import injected_time
 
 from tests.e2e.roles.helpers.compute_deal import advance_storefront
 from tests.e2e.roles.helpers.compute_deal_stages import (
@@ -132,7 +133,7 @@ class BareMetalSettlementFindsNoCapacity:
         advance_storefront(storefront_admin_client, "publication")
         assert registry_client.get_listing(listing_id).status == "open"
 
-        expiration = int(time.time()) + ESCROW_TTL_SECONDS
+        expiration = injected_time.now() + ESCROW_TTL_SECONDS
         _option, escrow = alkahest_opening(registry_client.get_listing(listing_id))
         opened = storefront_client.negotiate_new(
             listing_id=listing_id, initial_amount=BUYER_INITIAL_PRICE,

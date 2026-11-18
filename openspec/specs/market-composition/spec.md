@@ -1283,6 +1283,25 @@ MUST remain distinguishable from a running loop whose last cycle failed.
 - **WHEN** a payee reads its balance just before a once part's hold matures, and again just after, with no other operation on the transaction between
 - **THEN** the first read lists the part as held, and the second lists nothing held for it and includes the payee's earnings, net of fee, in `available`
 
+### Requirement: Storefront time is configured and set through one kit route service
+
+Every storefront MUST install its process time source from `[Time] source`, `"wall"` by default or `"injected"`. Under injected time, every storefront MUST bind one framework-free route service from the storefront kit at `POST /api/v1/admin/time`, behind its administrator authentication, taking `{"now": <Unix seconds>}` and answering `{"source": "injected", "now": <Unix seconds>}`, refusing an earlier instant with `409 time_moves_forward` and an invalid body with `422 invalid_time`. Every storefront's signed system status, `GET /api/v1/system/status`, MUST carry the time section. The canonical storefront client MUST offer the setting call and read the time section through its system status read for every domain.
+
+#### Scenario: A lane sets a storefront's time
+
+- **WHEN** an administrator sets an injected storefront to 1794822300
+- **THEN** it answers source `injected` and now 1794822300, and its servicing, admission and signed responses read 1794822300
+
+#### Scenario: Both compute storefronts bind one route
+
+- **WHEN** the harness sets time on the VM and the bare-metal storefront through the canonical client
+- **THEN** both answer at the same path with the same shape
+
+#### Scenario: A wall-time storefront
+
+- **WHEN** a storefront runs with `[Time] source` unset
+- **THEN** its status reports source `wall` and it mounts no time-setting route
+
 ## Evidence
 
 - Layer, scope, and kind rules over every project: `make check-architecture`, `docs/development/ARCHITECTURE.toml`, `scripts/architecture.py`, and `scripts/tests/test_architecture.py`; VM concept-module and contract-construction guardrails: `domains/vms/storefront/tests/unit/test_architecture_imports.py`.

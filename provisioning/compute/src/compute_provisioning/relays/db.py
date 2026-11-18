@@ -85,6 +85,9 @@ class Relay(Base):
     staged_grant_key_encrypted = Column(String, nullable=True)
     staged_grant_key_id = Column(String, nullable=True)
     staged_grant_key_public = Column(String, nullable=True)
+    # False drains the relay: its pools' hosts take no new delivery, no port on
+    # it is leased to a new delivery, and every delivery already holding a
+    # lease runs to its end.
     enabled = Column(Boolean, nullable=False, default=True, server_default=sa_true())
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())

@@ -10,6 +10,7 @@ needs a migration there.
 
 from __future__ import annotations
 
+import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, String, func
 from sqlalchemy.orm import declarative_base
 
@@ -53,7 +54,18 @@ class ResourcePool(Base):
     provider = Column(String, nullable=False)
     enabled = Column(Boolean, nullable=False, default=True)
     policy_tags = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Both are returned on a pool's view, so they are the process source's
+    # instants rather than the database's clock.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        onupdate=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
     )

@@ -21,10 +21,12 @@ Falls back to checkpoints shipped under
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+import injected_time
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
@@ -154,14 +156,13 @@ class TorchArkhaiStrategy:
             import torch
         except ImportError:
             return None
-        import time as _time
 
         from arkhai_vms_negotiation.rl.arkhai_common import obs_dim, MAX_GPU
 
         obs = torch.zeros((1, obs_dim(node_types)), dtype=torch.float32)
 
-        # 0: time of day
-        obs[0, 0] = (_time.localtime().tm_hour % 24) / 24.0
+        # 0: time of day, the local hour of the process time source's instant
+        obs[0, 0] = (time.localtime(injected_time.now()).tm_hour % 24) / 24.0
 
         # 1..(1 + 2N): cluster GPU totals/frees per slot — zeroed (no
         # portfolio context in the asymmetric flow).

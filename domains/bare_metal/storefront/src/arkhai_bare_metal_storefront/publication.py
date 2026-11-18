@@ -39,9 +39,9 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime, timezone
 from typing import Any, TypeVar
 
+import injected_time
 from arkhai_bare_metal import (
     BACKING_CHANGED,
     BARE_METAL_OFFERING_MODE,
@@ -744,7 +744,7 @@ class BareMetalPublicationCycle:
             # Nothing is recorded or published, so the listing has no identity.
             return {"listing_id": None, "status": "dry_run"}
         listing_id = uuid.uuid4().hex
-        now = datetime.now(timezone.utc).isoformat()
+        now = injected_time.now_datetime().isoformat()
         # Recorded locally, with its binding, before any registry is told: a
         # registry must never hold a listing the storefront has no record of.
         await self._db.upsert_bare_metal_listing(

@@ -1,10 +1,13 @@
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+import injected_time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from market_identity import Identity, create_signer
+from core_registry.api.admin_routes import make_time_router
 from core_registry.api.routes import router
 from core_registry.api.publisher_auth import (
     complete_authenticated_error,
@@ -23,6 +26,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# The process's time source, installed before the application is built and
+# before anything reads the time: `TIME_SOURCE`, "wall" unless set "injected";
+# any other value refuses startup naming the setting and the value.
+injected_time.install(
+    injected_time.source_for(
+        injected_time.WALL if settings.time_source is None else settings.time_source,
+        setting="TIME_SOURCE",
+    )
+)
+
+
+def announce_time_source(source: injected_time.TimeSource) -> None:
+    """Log an injected source at startup; a wall-time registry logs nothing here."""
+    if source.name == injected_time.INJECTED:
+        logger.info(
+            '[STARTUP] TIME_SOURCE is "injected": time is held at %s until set '
+            "through POST /admin/time",
+            source.now(),
+        )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,6 +56,7 @@ async def lifespan(app: FastAPI):
     no background indexer or chain probe.
     """
     logger.info("Starting listing registry service...")
+    announce_time_source(injected_time.installed())
 
     # Before anything opens the database: the application issues no DDL, and
     # serves only a database `registry-migrate` brought to its script head.
@@ -159,6 +183,12 @@ app.add_middleware(
 
 # Register routes
 app.include_router(router)
+
+# The time-setting route, mounted only while the source installed above is
+# injected: a wall-time registry serves no such route, and its time is changed
+# only by reconfiguring and restarting it.
+if injected_time.TimeRouteService(injected_time.installed()).settable:
+    app.include_router(make_time_router())
 
 
 def _custom_openapi():

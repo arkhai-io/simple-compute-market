@@ -22,18 +22,18 @@ GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)
 GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
-IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
 .PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-workflow-credentials check-market-binary check-release-versions check-release-record check-uv-setup check-locks check-uv-version check-python-version check-build-requirements check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
+.PHONY: test-injected-time dist-injected-time
 .PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
 .PHONY: dist-arkhai-core-registry dist-release-set dist-apicredits-sample-app
 .PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-time-reads check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -51,15 +51,15 @@ dist-release: ## Build the wheel set a release carries.
 
 # Every internal wheel but the lane doubles' control contract and the API-credit
 # sample app.
-dist-release-set:dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
+dist-release-set:dist-injected-time dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
 
 # The release set and the two wheels only tests depend on, which the lanes'
 # images install from .dist: the lane doubles' control contract, for the e2e
-# runner image and both lane doubles' images, and the API-credit sample app, for
-# its image in the API-credit lane.
+# runner image, both lane doubles' images and the sample app's, and the
+# API-credit sample app, for its image in the API-credit lane.
 dist: dist-release-set dist-lane-double-controls dist-apicredits-sample-app
 
-dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls dist-apicredits-sample-app ## Build repository-owned Python wheels without fetching separately released artifacts.
+dist-ci: dist-injected-time dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls dist-apicredits-sample-app ## Build repository-owned Python wheels without fetching separately released artifacts.
 
 dist-domains: dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-storefront-client dist-registry-client dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel the release set carries through the domain aggregate
 	cd domains && $(MAKE) dist-release DIST_DIR=$(DIST_DIR)
@@ -123,11 +123,11 @@ dist-arkhai-core-registry: dist-registry-client ## Build arkhai-core-registry wh
 
 dist-registry: dist-registry-client ## Compatibility alias for dist-registry-client.
 
-dist-identity: ## Build the exact identity-kit release wheel into .dist/
+dist-identity: ## Build arkhai-kit-identity wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd kit/identity && uv build --wheel --out-dir $(DIST_DIR)
-	@test -f $(IDENTITY_WHEEL) || \
-		(echo "ERROR: expected exact identity wheel $(IDENTITY_WHEEL)" && exit 1)
+	cd kit/identity && $(MAKE) build DIST_DIR=$(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_kit_identity-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-identity produced a platform-specific wheel" && exit 1)
 
 dist-core: ## Build arkhai-core wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -165,6 +165,12 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_config-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-config produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-injected-time: ## Build the standalone time component's wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd tools/injected-time && $(MAKE) build DIST_DIR=$(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_injected_time-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-injected-time produced a platform-specific wheel" && exit 1)
+
 dist-lane-double-controls: ## Build the lane doubles' control-contract wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd tools/lane-double-controls && $(MAKE) build DIST_DIR=$(DIST_DIR)
@@ -185,7 +191,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-lane-double-controls test-payments-lane-double test-mediation-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-injected-time test-lane-double-controls test-payments-lane-double test-mediation-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-domains:
 	$(MAKE) -C domains test
@@ -227,6 +233,11 @@ test-frp-grant-admission-frp: ## Run the frps admission plugin against the real 
 
 test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests with its runtime dependencies at their declared floors
 	$(MAKE) -C tools/frp-grant-admission test-floor
+
+# The standalone time component under tools/: its type check, then its unit tests,
+# the structure test holding its standard-library-only boundary among them.
+test-injected-time:
+	$(MAKE) -C tools/injected-time test
 
 # The lane doubles' control contract under tools/: the committed lane CA and leaves,
 # its type check, then its unit and integration suite.
@@ -637,6 +648,14 @@ load-candidate: _require-ar-project ## Load HEAD as a release candidate: store e
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@python3 scripts/check_comment_hygiene.py
 
+# check-time-reads — one time source per process
+# (docs/guidance/engineering/implementation.md, "One time source per process"):
+# no direct wall-clock read in production source or the lane doubles. The forms
+# it refuses and its scope are scripts/check_time_reads.py's. check-packaging
+# runs it.
+check-time-reads: ## Fail on a direct wall-clock read (time.time, datetime.now, …) in production source or the lane doubles, naming each file and line
+	@python3 scripts/check_time_reads.py
+
 # ---------------------------------------------------------------------------
 # check-doc-citations — citations resolve (docs/guidance/engineering/documentation.md),
 # here every openspec/, docs/, tools/, scripts/, e2e-tests/, and .agents/ path
@@ -690,7 +709,7 @@ check-uv-version: ## Fail if the installed uv is older than the minimum that wri
 	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-build-requirements check-project-layout check-architecture check-release-components
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-build-requirements check-project-layout check-architecture check-release-components check-time-reads
 
 # Every rule of scripts/check_release_components.py; check-workflow-credentials
 # and check-market-binary each run one of them alone.

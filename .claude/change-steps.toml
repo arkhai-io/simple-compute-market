@@ -38,6 +38,9 @@ allow = [
   "Bash(scripts/change-workflow log*)", "Bash(scripts/change-workflow config *)",
   "Bash(scripts/change-workflow record*)",
   "Bash(scripts/change-workflow check round-view)", "Bash(scripts/change-workflow check index)",
+  # The task-list check only reads, and any step that edits tasks.md may run it,
+  # with the change named or not.
+  "Bash(scripts/change-workflow check tasks*)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
   "Bash(openspec show *)", "Bash(openspec status*)",
   "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
@@ -131,7 +134,6 @@ skill = "change-plan"
 resume_from = "design"
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
-  "Bash(scripts/change-workflow check tasks *)",
   "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
   "Bash(make check-*)",
   "Bash(make helm-values-schema)",

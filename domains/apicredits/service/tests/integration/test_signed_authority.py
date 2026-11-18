@@ -25,12 +25,15 @@ import sys
 import time
 import uuid
 from base64 import urlsafe_b64encode
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
 import httpx
+import injected_time
 import pytest
 import pytest_asyncio
+from injected_time import InjectedTime
 from arkhai_apicredits.settlement.credits_client import (
     CreditsServiceAuthenticationError,
     CreditsServiceError,
@@ -616,6 +619,74 @@ async def test_the_canonical_clients_transact_against_this_service(signed_app):
         key_id=issued.key_id, amount=2, idempotency_key="i-1"
     )
     assert again.balance == 3, again
+
+
+#: The instant the injected-time test's source starts at.
+_INJECTED_AT = 1794821400
+
+
+@pytest.fixture
+def injected_source(signed_app) -> Iterator[InjectedTime]:
+    """The process time source, injected at ``_INJECTED_AT``. Every party in
+    this process — the service, its hosted ledger and the canonical clients —
+    reads it, so no hop is judged against the wall clock. Installed once the
+    service is composed, since its composition installs the source its
+    configuration names."""
+    before = injected_time.installed()
+    installed = InjectedTime(start=_INJECTED_AT)
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
+
+
+def _stored_times(tmp_path: Path, query: str, *args: Any) -> list[datetime]:
+    """Stored times as the UTC instants they denote: SQLite returns them as
+    written, with no zone."""
+    with sqlite3.connect(tmp_path / "credits.db") as db:
+        rows = db.execute(query, args).fetchall()
+    return [
+        datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+        for row in rows
+        for value in row
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_grant_and_its_spending_hold_the_injected_instant(
+    injected_source, signed_app, tmp_path
+):
+    """Issued at the injected instant and spent a minute later, every time the
+    service stores is the source's, never the wall clock's or the database's."""
+    await _seed_quota(signed_app)
+    issued = await _seller_client(signed_app).submit_credit_issuance(
+        _issuance_request("neg-injected")
+    )
+    at = datetime.fromtimestamp(_INJECTED_AT, timezone.utc)
+    assert _stored_times(
+        tmp_path, "SELECT granted_at FROM credit_grants WHERE key_id = ?", issued.key_id
+    ) == [at]
+    assert _stored_times(
+        tmp_path,
+        "SELECT created_at, updated_at FROM api_keys WHERE key_id = ?",
+        issued.key_id,
+    ) == [at, at]
+
+    injected_source.set(_INJECTED_AT + 60)
+    spent = await _gated_client(signed_app).consume(
+        key_id=issued.key_id, amount=1, idempotency_key="injected-1"
+    )
+    assert spent.ok is True, spent
+    later = datetime.fromtimestamp(_INJECTED_AT + 60, timezone.utc)
+    assert _stored_times(
+        tmp_path,
+        "SELECT occurred_at FROM consumption_events WHERE key_id = ?",
+        issued.key_id,
+    ) == [later]
+    assert _stored_times(
+        tmp_path,
+        "SELECT created_at, updated_at FROM api_keys WHERE key_id = ?",
+        issued.key_id,
+    ) == [at, later]
 
 
 @pytest.mark.asyncio

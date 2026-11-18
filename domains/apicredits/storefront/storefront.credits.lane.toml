@@ -175,3 +175,8 @@ chain           = "anvil"
 base_url        = "http://sample-app:8085"
 openapi_url     = "http://sample-app:8085/openapi.json"
 description     = "Prepaid weather-API credits"
+
+# Every party of the lane runs one injected time, which the lane-time fixture
+# sets.
+[Time]
+source = "injected"

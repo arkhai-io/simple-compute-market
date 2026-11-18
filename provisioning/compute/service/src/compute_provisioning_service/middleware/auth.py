@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
+import injected_time
 from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
@@ -110,7 +110,7 @@ class SqlAlchemyProvisioningReplayStore:
         """Atomically resume one exact request after its dispatch lease expires."""
 
         principal = reservation.identity.principal
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         with self._session_factory() as session:
             updated = (
                 session.query(ProvisioningReplayReservation)
@@ -181,11 +181,11 @@ class SqlAlchemyProvisioningReplayStore:
             row.response_body_empty = response_body is EMPTY_BODY
             row.response_body = None if response_body is EMPTY_BODY else response_body
             row.response_media_type = response_media_type
-            row.completed_at = datetime.now(timezone.utc)
+            row.completed_at = injected_time.now_datetime()
             session.commit()
 
     def _lease_expiry(self) -> datetime:
-        return datetime.now(timezone.utc) + timedelta(
+        return injected_time.now_datetime() + timedelta(
             seconds=self._dispatch_lease_seconds
         )
 
@@ -215,6 +215,7 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         principal_authority_provider: Callable[[], Any],
         route_table: ProvisioningRouteTable,
         max_timestamp_skew: int = 300,
+        time_setting_operation: str | None = None,
     ) -> None:
         super().__init__(app)
         # The assembled table of every contributed route; a route outside it
@@ -226,6 +227,11 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         self._replay_store_provider = replay_store_provider
         self._principal_authority_provider = principal_authority_provider
         self._max_timestamp_skew = max_timestamp_skew
+        # The time-setting operation: while the process source is injected, the
+        # only source a time can be set on, its requests are verified without
+        # their timestamp's freshness; every other operation's, and its own
+        # under wall time, with it.
+        self._time_setting_operation = time_setting_operation
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in EXCLUDED_PATHS:
@@ -291,7 +297,7 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         verification = verify_request(
             authenticated,
             body=body,
-            now=int(time.time()),
+            now=injected_time.now(),
             max_skew=self._max_timestamp_skew,
             expected_role=authenticated.role,
             expected_method=request.method,
@@ -299,6 +305,11 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
             expected_resource=resource,
             expected_principals=expected_principals,
             existing_replay=existing,
+            time_setting_operation=(
+                self._time_setting_operation
+                if injected_time.TimeRouteService(injected_time.installed()).settable
+                else None
+            ),
         )
         if not verification.verified or verification.reservation is None:
             # Same reasoning as `market_site.auth`: the `detail` withholds
@@ -603,7 +614,7 @@ def _signed_response_headers(
             operation=operation,
             resource=resource,
             request_id=request_id,
-            timestamp=int(time.time()),
+            timestamp=injected_time.now(),
             status=status_code,
             body_hash=canonical_body_hash(body),
         ),

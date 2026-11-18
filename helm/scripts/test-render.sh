@@ -157,7 +157,7 @@ DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/
 # its Deployment holds the signer Secret, the mounts and the resolver variables.
 DEFAULT_REGISTRY="$(extract_section "$DEFAULT_RENDERED" 'registry/templates/configmap\.yaml')"
 DEFAULT_PROVISIONING_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'provisioning/templates/configmap\.yaml')"
-DEFAULT_TEST_CONFIG="$(extract_section "$DEFAULT_RENDERED" 'templates/tests/test-config\.yaml')"
+DEFAULT_HELM_PROFILE="$(extract_section "$DEFAULT_RENDERED" 'templates/tests/helm-profile\.yaml')"
 TWO_REGISTRIES_COMPUTE="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/configmap\.yaml')"
 TWO_REGISTRIES_COMPUTE_DEPLOYMENT="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/deployment\.yaml')"
 TWO_REGISTRIES_CREDITS="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/api-credits-registry/templates/configmap\.yaml')"
@@ -217,7 +217,7 @@ expect_present "$PAYMENTS_REGISTRY" 'https://dispute.example' "registry retains 
 expect_present "$DEFAULT_REGISTRY" "^ +REGISTRY_FILTER_SPEC_PATH='/app/filter-spec\.yaml'$" "default registry selects the compute filter specification"
 expect_absent "$DEFAULT_RENDERED" 'api-credits-registry' "default render omits the API-credits registry"
 expect_present "$DEFAULT_PROVISIONING_CONFIGMAP" '"identifier": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"' "provisioning keeps EIP-191 identifiers as strings"
-expect_present "$DEFAULT_TEST_CONFIG" '"identifier": "0x90f79bf6eb2c4f870365e785982e1f101e93b906"' "smoke-test profile keeps EIP-191 identifiers as strings"
+expect_present "$DEFAULT_HELM_PROFILE" '"identifier": "0x90f79bf6eb2c4f870365e785982e1f101e93b906"' "helm profile keeps EIP-191 identifiers as strings"
 
 expect_present "$CHART_DIR/../core/registry/src/core_registry/filter-spec.yaml" 'id: +compute\.market' "compute filter specification declares compute.market"
 expect_present "$CHART_DIR/../domains/apicredits/registry/filter-spec.yaml" 'id: +api_credits' "API-credits filter specification declares api_credits"

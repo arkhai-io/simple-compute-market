@@ -39,7 +39,7 @@ the code imports carries its language's tag.
 | `diagrams` | topic | Diagrams, their sources, and what holds them to what they draw |
 | `dependencies` | topic | Imports and declared dependencies, and where a package belongs |
 | `testing` | topic | Test levels, the coverage between them, seams, doubles, and determinism |
-| `implementation` | topic | How production code is written: guards, libraries, composition and class hierarchies, service layering, authority between parties, operator controls |
+| `implementation` | topic | How production code is written: guards, libraries, composition and class hierarchies, service layering, authority between parties, the time a process reads, operator controls |
 | `repository-content` | topic | What may enter a repository, private or public |
 | `terms` | topic | Vocabulary: one name per concept, one home per term |
 | `persistence` | topic | Stored representations, schema changes, migrations, and cutovers |

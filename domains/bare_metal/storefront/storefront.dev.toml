@@ -159,3 +159,8 @@ default_max_duration_seconds = 86400
 # listed rate where the default chain would exit, so the lane's deal negotiates
 # an open thread.
 policies = ["escrow_shape_guard", "bisection"]
+
+# Every party of the lane runs one injected time, which the lane-time fixture
+# sets; only the bare-metal lane mounts this file.
+[Time]
+source = "injected"

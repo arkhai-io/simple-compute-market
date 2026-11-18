@@ -281,8 +281,8 @@ class Fake:
 def _hooks(*pods: str) -> str:
     """A release's hooks as `helm get hooks` prints them: a test ConfigMap, then a
     test pod per name, each with a container whose own name ends like a pod's."""
-    documents = ["---\n# Source: arkhai/templates/tests/test-config.yaml\napiVersion: v1\n"
-                 "kind: ConfigMap\nmetadata:\n  name: arkhai-test-config-payments-check\n"]
+    documents = ["---\n# Source: arkhai/templates/tests/helm-profile.yaml\napiVersion: v1\n"
+                 "kind: ConfigMap\nmetadata:\n  name: arkhai-helm-profile-payments-check\n"]
     documents += [f"---\n# Source: tests/{pod}.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n"
                   f"  name: {pod}\nspec:\n  containers:\n    - name: x-payments-check\n"
                   for pod in pods]

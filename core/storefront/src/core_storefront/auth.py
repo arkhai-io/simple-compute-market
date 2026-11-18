@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from market_identity import EnvelopeCapture, capture_envelope
 
-import time
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     REQUEST_PROTOCOL,
@@ -30,6 +30,11 @@ from market_identity import (
 
 DEFAULT_MAX_TIMESTAMP_SKEW = 300
 DEFAULT_REPLAY_LEASE_SECONDS = 300
+
+#: The signed operation of the storefronts' time-setting request,
+#: ``POST /api/v1/admin/time``, and the resource it binds.
+ADMIN_TIME_OPERATION = "admin_time"
+ADMIN_TIME_RESOURCE = "time"
 
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
 IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
@@ -98,6 +103,18 @@ class ReplayStore(Protocol):
     ) -> ReplayClaim:
         """Atomically reserve, recover, or classify one verified request."""
 
+
+
+def admin_time_setting_operation() -> str | None:
+    """The administrator operation exempt from request freshness in this process.
+
+    Time can be set only on an injected source, so ``admin_time`` is exempt only
+    while the process source is injected; under wall time no operation is, and
+    every administrator request keeps its freshness check.
+    """
+    if injected_time.TimeRouteService(injected_time.installed()).settable:
+        return ADMIN_TIME_OPERATION
+    return None
 
 
 def _required_header(headers: Mapping[str, str], name: str) -> str:
@@ -170,13 +187,17 @@ async def authenticate_request(
     replay_lease_seconds: int = DEFAULT_REPLAY_LEASE_SECONDS,
     capture: EnvelopeCapture | None = None,
     raw_body: bytes | None = None,
+    time_setting_operation: str | None = None,
 ) -> AuthenticatedPrincipal:
     """Verify an exact role/principal binding and reserve replay before dispatch.
 
     Authorities must supply either one expected principal or the complete active
     principal set for a rotating subject. An exact retry is authenticated but has
     ``dispatch_allowed == False`` so a route can return its recorded outcome
-    without executing the mutation again.
+    without executing the mutation again. ``time_setting_operation``, when the
+    request is for that operation, verifies it without its timestamp's freshness
+    (``market_identity.verify_request``); an administrator surface passes
+    ``admin_time_setting_operation()``.
     """
 
     if (expected_principal is None) == (allowed_principals is None):
@@ -208,13 +229,14 @@ async def authenticate_request(
     signature_result = verify_request(
         envelope,
         body=body,
-        now=int(time.time()) if now is None else now,
+        now=injected_time.now() if now is None else now,
         max_skew=max_timestamp_skew,
         expected_role=expected_role,
         expected_method=method,
         expected_operation=operation,
         expected_resource=resource,
         expected_principals=expected_principals,
+        time_setting_operation=time_setting_operation,
     )
     if not signature_result.verified or signature_result.reservation is None:
         raise _verification_error(signature_result.code)
@@ -231,7 +253,7 @@ async def authenticate_request(
         )
     claim = await replay_store.claim_replay(
         reservation,
-        now=int(time.time()) if now is None else now,
+        now=injected_time.now() if now is None else now,
         lease_seconds=replay_lease_seconds,
     )
     if claim.state == "changed":
@@ -240,7 +262,7 @@ async def authenticate_request(
             status_code=409,
         )
     capture_envelope(capture, envelope=envelope, raw_body=raw_body, headers=headers,
-                     verified_at=int(time.time()) if now is None else now,
+                     verified_at=injected_time.now() if now is None else now,
                      expected_principals=expected_principals)
     exact_retry = claim.state in {"pending", "completed"}
     recorded_outcome = claim.recorded_outcome
@@ -278,7 +300,7 @@ def signed_response_headers(
         operation=operation,
         resource=resource,
         request_id=request_id,
-        timestamp=int(time.time()) if timestamp is None else timestamp,
+        timestamp=injected_time.now() if timestamp is None else timestamp,
         status=status,
         body_hash=canonical_body_hash(body),
     )
@@ -334,7 +356,7 @@ def verify_authenticated_response(
     result = verify_response(
         envelope,
         body=body,
-        now=int(time.time()) if now is None else now,
+        now=injected_time.now() if now is None else now,
         max_skew=max_timestamp_skew,
         expected_role=expected_role,
         expected_principals=expected_principals,

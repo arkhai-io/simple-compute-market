@@ -35,11 +35,12 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.27.0"
+version = "0.28.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
@@ -62,8 +63,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.13.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.15.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.6.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
@@ -86,7 +88,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -94,7 +96,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -106,6 +108,14 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_core-0.6.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-injected-time"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_injected_time-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -174,6 +184,7 @@ version = "0.8.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
@@ -188,9 +199,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "cryptography" },
     { name = "eth-account" },
     { name = "keyring" },
@@ -198,14 +210,15 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.10.0"
+version = "0.10.1"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "pydantic" },
@@ -213,7 +226,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.10.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -243,6 +256,7 @@ version = "0.8.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-schema-migrations" },
@@ -257,6 +271,7 @@ name = "arkhai-kit-site"
 version = "0.14.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },

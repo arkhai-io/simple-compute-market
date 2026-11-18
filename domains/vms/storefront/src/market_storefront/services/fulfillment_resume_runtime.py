@@ -15,10 +15,11 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from functools import partial
 from typing import Any
 
+import injected_time
 from market_core.schemas import settlement_option_schema
 
 from market_storefront import container as _container
@@ -65,7 +66,7 @@ async def resume_incomplete_fulfillments_once(
             negotiation_id=negotiation_id,
             owner=worker,
             lease_until=(
-                datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+                injected_time.now_datetime() + timedelta(seconds=lease_seconds)
             ).isoformat(),
         )
         if not claimed:

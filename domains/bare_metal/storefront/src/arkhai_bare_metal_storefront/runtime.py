@@ -7,9 +7,10 @@ import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
+import injected_time
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
@@ -25,7 +26,7 @@ from market_alkahest import (
     json_rpc_call,
     wallet_account_address,
 )
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, payments_livemode
 from market_capacity_publication import (
     RESOURCE_POOL,
     SiteDerivationLog,
@@ -131,14 +132,6 @@ def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
     stage_event("claims", event, **fields)
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _unix_now() -> int:
-    return int(datetime.now(timezone.utc).timestamp())
-
-
 def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchdogPolicy:
     """The negotiation watchdog's timeout and sweep interval, as configured."""
     return NegotiationWatchdogPolicy(
@@ -223,12 +216,12 @@ class BareMetalStorefrontRuntime:
     )
     #: The time a confirmation's age is measured at.
     source_confirmation_clock: Callable[[], datetime] = field(
-        default=_utc_now, repr=False, compare=False
+        default=injected_time.now_datetime, repr=False, compare=False
     )
     #: The Unix-second clock deal servicing reads: end service's admission, the
     #: payment watch's observation instants and the delivery path's steps.
     lifecycle_clock: Callable[[], int] = field(
-        default=_unix_now, repr=False, compare=False
+        default=injected_time.now, repr=False, compare=False
     )
     #: The live Alkahest client map, which ``alkahest_chain_probe`` updates in
     #: place as it rebuilds a client; every consumer holds this one map.
@@ -261,6 +254,9 @@ class BareMetalStorefrontRuntime:
     #: relative limit.
     default_max_duration_seconds: int | None = None
     default_available_until_utc: str | None = None
+    #: Whether ``[Settlement.arkhai_payments]`` declares ``livemode = true``,
+    #: which startup warns of beside an injected time source.
+    payments_livemode: bool = False
     # Composes one publication cycle for the publication loop's timer and step;
     # None composes it from this runtime through ``compose_publication_cycle``.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
@@ -997,6 +993,7 @@ def build_runtime_from_configuration(
         publication_clauses_by_model=publication_clauses_by_model,
         default_max_duration_seconds=active.pricing.default_max_duration_seconds,
         default_available_until_utc=active.pricing.default_available_until_utc,
+        payments_livemode=payments_livemode(settlement_config),
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,

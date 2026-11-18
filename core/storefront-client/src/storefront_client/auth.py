@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from market_identity import EnvelopeCapture, capture_envelope
 
-import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     RESPONSE_PROTOCOL,
@@ -99,7 +99,7 @@ def build_authenticated_request(
     if not isinstance(signer.identity, Identity):
         raise TypeError("signer.identity must be a market_identity.Identity")
     normalized_request_id = uuid.uuid4().hex if request_id is None else request_id
-    normalized_timestamp = int(time.time()) if timestamp is None else timestamp
+    normalized_timestamp = injected_time.now() if timestamp is None else timestamp
     content = None if body is EMPTY_BODY else canonical_json(body)
     authenticated = sign_request(
         signer=signer,
@@ -196,10 +196,11 @@ def verify_authenticated_response(
         raise StorefrontAuthenticationError(
             f"HTTP {status}: unreadable marketplace response authentication"
         ) from exc
+    reference = injected_time.now() if now is None else now
     result = verify_response(
         authenticated,
         body=body,
-        now=int(time.time()) if now is None else now,
+        now=reference,
         max_skew=max_skew,
         expected_role="seller",
         expected_principals=expected_publishers,
@@ -216,7 +217,7 @@ def verify_authenticated_response(
             f"marketplace response authentication failed: {result.code.value}"
         )
     capture_envelope(capture, envelope=request.envelope, raw_body=request.content or b"",
-                     headers=request.headers, verified_at=int(time.time()) if now is None else now,
+                     headers=request.headers, verified_at=reference,
                      expected_principals=TrustedIdentitySet(identities=(request.envelope.principal,)))
 
 

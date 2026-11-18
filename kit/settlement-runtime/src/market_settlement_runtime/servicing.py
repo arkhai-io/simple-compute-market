@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+import injected_time
 
 from .models import SettlementObligationRecord
 from .ports import SettlementServicingRepository
@@ -54,7 +55,7 @@ class SettlementServicingWorker:
         self._on_ready = on_ready
 
     async def run_once(self, limit: int = 50) -> int:
-        now = time.time()
+        now = float(injected_time.now())
         rows = await self._repository.list_due_settlement_obligations(
             now_unix=now,
             limit=limit,
@@ -78,7 +79,9 @@ class SettlementServicingWorker:
         it starts anything.
         """
 
-        await self._service_record(await self._reload(obligation_ref), time.time())
+        await self._service_record(
+            await self._reload(obligation_ref), float(injected_time.now())
+        )
 
     async def _service_record(
         self, record: SettlementObligationRecord, now: float

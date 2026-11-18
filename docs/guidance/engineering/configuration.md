@@ -6,7 +6,8 @@ tags: [engineering, configuration]
 
 How a service reads its own settings and how a deployment supplies them: the layers
 a configuration resolves through, where secrets and trust travel, how a setting is
-named and retired, and where a stack's configuration lives. The Python form, with
+named and retired, how a test control the production image carries stays off, and
+where a stack's configuration lives. The Python form, with
 Dynaconf, is [Configuration in Python](configuration-python.md); a cluster's and a
 chart's forms are [Kubernetes](kubernetes.md) and [Helm](helm.md). A document
 describing resources a service holds is a [definition document](definition-documents.md).
@@ -95,6 +96,24 @@ meant to replace: the service's first startup step refuses a configuration stati
 the retired name in any layer, environment included, naming its replacement. A
 setting retired because the service stopped needing it is not refused, since ignoring
 it changes nothing the service does.
+
+## A test control the production image carries is off by default
+
+A test control that must live in the production image — because the test runs the
+images a release ships, not a test build — is a setting that defaults to off. The
+production configuration omits it, so a deployment that never names it never turns
+it on, and committed configuration outside the test stacks never sets it, which a
+static check over every committed configuration a deployment outside the test
+stacks would load holds. A service does not refuse the control in production: no service can
+reliably recognise production, and a refusal tied to one other setting protects
+only the services that carry that setting while suggesting every service is
+protected. Instead a service with the control on says so — at startup, and on its
+status surface — and warns where another setting it reads states that it is live.
+
+A service whose clock a test can set, for example, reads `time.source = "wall"` by
+default; a test stack sets `"injected"`, the service logs that and reports its
+instant on its status, and it warns beside a payment section configured for live
+payments.
 
 ## A stack's configuration lives in committed files
 

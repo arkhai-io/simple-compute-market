@@ -621,6 +621,44 @@ How the VM and bare-metal storefront charts render an agent's configuration is
   which restores that release's own values, then correct the values before
   upgrading again.
 
+## Injected time
+
+Every service reads the time from one source its configuration names: wall time,
+the default, or injected time, an instant its administrator sets. A production
+deployment never sets injected time; leave each service's time-source setting
+unset ([`DEPLOYMENT_AND_CONFIG.md`, "The time source"](development/DEPLOYMENT_AND_CONFIG.md#the-time-source)
+names each one). Nothing refuses it, because no service can tell it runs in
+production, so check instead:
+
+- **The status says which time a service runs on.** Each service's status carries a
+  time section: `{"source": "wall"}`, or `{"source": "injected", "now": <Unix
+  seconds>}`. Read it on the storefronts' and the provisioning service's signed
+  `GET /api/v1/system/status`, the API-credits service's
+  `GET /api/v1/system/status` as `admin`, and the registry's `GET /admin/status`
+  with its administrator key.
+- **A service with injected time says so at startup.** It logs that its time is
+  injected and the instant it starts at; beside an Arkhai payments section with
+  `livemode = true` it also logs a warning. Either line in a production log means
+  the configuration is wrong: unset the setting and restart.
+- **The setting routes exist only under injected time.** On an instance configured
+  for it, an administrator moves its time forward with `POST /api/v1/admin/time`
+  on a storefront, `POST /api/v1/system/time` on the provisioning service and the
+  API-credits service, or `POST /admin/time` on the registry, each taking
+  `{"now": <Unix seconds>}` behind the service's administrator authentication. An
+  earlier instant is refused `409 time_moves_forward` and an invalid body
+  `422 invalid_time`, with nothing changed. A wall-time instance has no such route.
+
+A live service's time is never changed, not even to diagnose or recover: its time
+is a claim it signs and exchanges, and moving it would date its records and
+evidence falsely, break every signed exchange with counterparties on real time,
+and stop none of the payment or dispute authorities' deadlines. Switching a
+service's source is a reconfiguration and restart. To diagnose or recover a
+deployment, pause its loops and use the explicit operator actions — ending a deal,
+terminating or force-releasing a lease, stepping one loop cycle. To reproduce an
+incident at a chosen instant, restore its databases into a local or lane stack
+configured for injected time and set that stack's time there
+([injected time, "No live change"](../openspec/specs/injected-time/architecture.md#no-live-change)).
+
 ## Upgrading a deployment
 
 Every stateful service — compute provisioning, the VM, bare-metal and API-credit

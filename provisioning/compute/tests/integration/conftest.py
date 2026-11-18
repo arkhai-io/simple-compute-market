@@ -10,7 +10,11 @@ this one.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import injected_time
 import pytest
+from injected_time import InjectedTime
 from market_resource_pools.db import Base as PoolsBase
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -37,3 +41,14 @@ def relay_engine(tmp_path):
 @pytest.fixture
 def session_factory(relay_engine):
     return sessionmaker(bind=relay_engine)
+
+
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, injected at the wall instant it is installed;
+    a test sets it forward to order events by the second."""
+    before = injected_time.installed()
+    installed = InjectedTime()
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)

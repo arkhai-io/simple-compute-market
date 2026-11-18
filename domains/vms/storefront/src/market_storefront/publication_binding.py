@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
+import injected_time
 from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
@@ -91,7 +91,7 @@ def prepare_vm_listing_binding(
             source_identity=source,
         ),
         source_envelope_json=canonical_source_envelope(source),
-        last_reconciled_at=datetime.now(UTC).isoformat(),
+        last_reconciled_at=injected_time.now_datetime().isoformat(),
         capacity_backing=backing.label,
         pool_id=str(pool_id) if pool_id is not None else None,
         physical_resource_id=(

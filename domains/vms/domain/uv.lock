@@ -61,6 +61,7 @@ version = "0.13.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
@@ -75,6 +76,7 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools-contracts" },
@@ -86,6 +88,14 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_core_storefront-0.18.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-injected-time"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+wheels = [
+    { path = "arkhai_injected_time-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -161,9 +171,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "cryptography" },
     { name = "eth-account" },
     { name = "keyring" },
@@ -171,7 +182,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -201,6 +212,7 @@ version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-schema-migrations" },

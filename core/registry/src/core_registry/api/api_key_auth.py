@@ -20,9 +20,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timezone
 from typing import Literal
 
+import injected_time
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -52,7 +52,7 @@ def mint_api_key(db: Session, *, name: str, scope: Scope = "read") -> tuple[str,
         name=name,
         key_hash=_hash_key(raw),
         scope=scope,
-        created_at=datetime.now(timezone.utc),
+        created_at=injected_time.now_datetime(),
     )
     db.add(row)
     db.commit()
@@ -68,7 +68,7 @@ def revoke_api_key(db: Session, *, key_id: int) -> bool:
     if row is None:
         return False
     if row.revoked_at is None:
-        row.revoked_at = datetime.now(timezone.utc)
+        row.revoked_at = injected_time.now_datetime()
         db.commit()
         logger.info("[API_KEY] revoked key id=%s name=%s", row.id, row.name)
     return True

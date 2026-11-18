@@ -1,0 +1,8 @@
+# Provisioning profile every end-to-end lane layers over its sites' own, before
+# the run's mode: ACTIVE_PROFILES=docker,<site>,lane-time,<mode>. The full local
+# stack never loads it, so its provisioning services stay on wall time.
+#
+# Every party of a lane runs one injected time, which the lane-time fixture sets
+# through the service's administrator time route.
+time:
+  source: injected
