@@ -53,9 +53,8 @@ services:
   # quota ledger. Every caller signs, so it holds no admin key.
   inference-service:
     image: arkhai:inference-service
-    # The migration command runs before the application, which refuses a
-    # database it has not migrated.
-    command: ["sh", "-c", "inference-service-migrate && exec uvicorn inference_service.main:app --host 0.0.0.0 --port $$INFERENCE_PORT"]
+    # The image's command migrates the database, then serves on the image's
+    # INFERENCE_PORT; the application refuses a database it has not migrated.
     ports:
       - "8106:8086"
     environment:
@@ -148,9 +147,8 @@ services:
   inference-storefront:
     image: arkhai:inference-storefront
     platform: linux/amd64
-    # The migration command runs before the storefront, which refuses a
-    # database it has not migrated.
-    command: ["sh", "-c", "inference-storefront-migrate && exec inference-storefront serve --host 0.0.0.0 --port $$PORT"]
+    # The image's command migrates the database, then serves on the image's
+    # PORT; the storefront refuses a database it has not migrated.
     depends_on:
       anvil:
         condition: service_healthy

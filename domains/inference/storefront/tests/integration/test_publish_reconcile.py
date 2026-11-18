@@ -7,7 +7,7 @@ from storefront_client.client import StorefrontClientError
 
 from inference_storefront import container
 from tests.cards import model_card
-from tests.integration.conftest import ESCROW, SITE, running
+from tests.integration.conftest import ESCROW, SELLER_SIGNER, SITE, running
 
 
 def _publish_request(**card_fields):
@@ -72,3 +72,22 @@ async def test_a_sold_out_listing_closes_and_reopens_when_its_quota_is_replenish
     assert replenished.status == "open"
     # The reopen's last word to the registry reopens the listing.
     assert registries.published[-1].updates == {"status": "open"}
+
+
+async def test_the_sweep_closes_an_unheld_inference_listing_and_leaves_an_api_credit_one(
+    storefront, quota_site, registries, monkeypatch
+):
+    """The registry is read under the storefront's own identity, which another
+    storefront may publish under too: only this one's offering mode is swept."""
+    async with running(monkeypatch) as clients:
+        created = await clients.seller.publish_from_quota(_publish_request())
+        registries.plant(created.listing_id, "inference")
+        registries.plant("inference-unheld", "inference")
+        registries.plant("credits-1", "api_credits")
+
+        await container.QUOTA_PUBLICATION.retire_unheld(container.resolved_sqlite_client)
+        held = await clients.public.get_listing(created.listing_id)
+
+    assert [item.id for item in registries.open] == [created.listing_id, "credits-1"]
+    assert registries.publisher_reads == [SELLER_SIGNER.identity]
+    assert held.status == "open"

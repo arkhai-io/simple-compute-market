@@ -44,6 +44,10 @@ dev = [
     "packaging>=24",
     "pydantic>=2",
     "arkhai-api-contracts>=0.5.0",
+    # The schema snapshot the store-open tests compare, and the registry
+    # client's listing models the publication tests plant. Test-only.
+    "arkhai-kit-schema-migrations>=0.1.0",
+    "arkhai-core-registry-client>=0.12.1",
 ]
 
 [tool.uv]

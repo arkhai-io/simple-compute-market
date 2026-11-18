@@ -1,13 +1,15 @@
-"""Reconciliation reads every listing, and neither publishes nor repairs one a guard refuses, against the storefront's real persistence."""
+"""Reconciliation reads every listing, neither publishes nor repairs one a guard refuses, and closes at a registry the listings the storefront does not hold, against the storefront's real persistence."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 
 import pytest
+from core_storefront.multi_registry_client import RegistryListings
 from core_storefront.sqlite_client import SQLiteClient
 from market_resource_pools import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED
+from registry_client.models import ListingSummary
 
 from arkhai_api_selling.migrations import migrate_storefront_database
 from arkhai_api_selling.publication import (
@@ -314,3 +316,53 @@ async def test_a_refused_listing_another_pass_repaired_meanwhile_is_not_reported
     assert set(result["repaired"]) == {"L-000", "L-002"}
     assert result["unrepaired"] == ()
     assert ("publish", _B, "L-000") not in registries.sent
+
+
+class _SweptRegistry:
+    """One registry holding the open listings a test planted; a close removes one."""
+
+    urls = (_A,)
+
+    def __init__(self) -> None:
+        self.open: list[ListingSummary] = []
+        self.closes: list[str] = []
+        self.publisher_reads: list = []
+
+    def plant(self, listing_id: str, offering_mode: str) -> None:
+        self.open.append(
+            ListingSummary(
+                id=listing_id, status="open", listing_resource={"offering_mode": offering_mode}
+            )
+        )
+
+    async def __aenter__(self) -> "_SweptRegistry":
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    async def list_publisher_listings_per_registry(self, principal) -> list[RegistryListings]:
+        self.publisher_reads.append(principal)
+        return [RegistryListings(_A, tuple(self.open))]
+
+    async def update_listing_per_registry(self, *, listing_id, payloads) -> list[dict]:
+        assert {request.to_dict()["status"] for request in payloads.values()} == {"closed"}
+        self.closes.append(listing_id)
+        self.open = [item for item in self.open if item.id != listing_id]
+        return [{"registry_url": url, "success": True} for url in payloads]
+
+
+async def test_the_sweep_closes_only_unheld_listings_of_the_bundles_offering_mode(tmp_path):
+    client = await _storefront(tmp_path)
+    registry = _SweptRegistry()
+    registry.plant("L-unheld", EXAMPLE.offering_mode)
+    registry.plant("L-000", EXAMPLE.offering_mode)
+    registry.plant("other-1", "other")
+
+    sweep = await _publishing_to(registry).retire_unheld(client)
+
+    assert registry.closes == ["L-unheld"]
+    assert [item.id for item in registry.open] == ["L-000", "other-1"]
+    assert registry.publisher_reads == [CLAIMANT]
+    assert [(close.listing_id, close.registry_url) for close in sweep.closes] == [("L-unheld", _A)]
+    assert (await client.load_listing(listing_id="L-000"))["status"] == "open"

@@ -258,7 +258,11 @@ API-credit registry of its own for the schema-filter scenario, under the
 pointed at its address on the lane's network, and reusing `registry-a.eip191`
 and `api-credits-registry.ed25519` as the API-credit lane does; the full local
 stack has VM's and API credits' and never layers it. Inference settles through
-Alkahest alone, so the lane runs no payments double.
+Alkahest alone, so no scenario pays through the payments double; the lane runs
+both lane doubles, as every lane does, and its three registries layer the
+`payments-lane` profile so they recommend the mediation double as the dispute
+authority.
+
 ## The payments lane double
 
 Each lane runs the payments and mediation lane doubles

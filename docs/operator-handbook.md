@@ -592,8 +592,9 @@ registry changes no key it already holds.
 
 ## Upgrading a deployment
 
-Every stateful service — compute provisioning, the VM, bare-metal and API-credit
-storefronts, the API-credit service, and the registry — migrates its database
+Every stateful service — compute provisioning, the VM, bare-metal, API-credit
+and inference storefronts, the API-credit and inference services, and the
+registry — migrates its database
 through its own command before its application starts, and its application
 refuses a database its command has not migrated
 (["Migrations at startup"](development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)

@@ -20,6 +20,8 @@ from market_config.config_loader import set_user_config_path
 from market_identity import Signer, TrustedIdentitySet
 from storefront_client import StorefrontClientError, SyncStorefrontClient
 
+from inference_storefront.model_card import PublishFromQuotaRequest
+
 app = typer.Typer(no_args_is_help=True)
 
 _STOREFRONT_URL_HELP = (
@@ -160,7 +162,7 @@ def publish_cmd(
     """
     # Imported only once ``--config`` has run, as in ``serve``.
     import inference_storefront.container as _container
-    from inference_storefront.model_card import PublishFromQuotaRequest
+    # Resolves the settings on import, so it waits for ``--config`` too.
     from inference_storefront.utils.config import (
         CHAINS,
         chain_address_books,
@@ -235,7 +237,6 @@ def listings_cmd(
 ) -> None:
     """List the running storefront's local listings."""
     # Imported only once ``--config`` has run, as in ``publish``.
-    from inference_storefront.model_card import PublishFromQuotaRequest
     from inference_storefront.utils.config import resolve_identity_config
 
     seller = resolve_identity_config().principal

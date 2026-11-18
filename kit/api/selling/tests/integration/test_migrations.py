@@ -7,6 +7,7 @@ under a neutral table prefix; no application is started.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 
 import pytest
 from market_schema_migrations import CheckState, MigrationRefused
@@ -19,7 +20,7 @@ from arkhai_api_selling.migrations import (
     migrate_storefront_database,
     require_compatible_storefront_database,
 )
-from tests.bundles import example_chain
+from tests.bundles import EXAMPLE, example_chain
 
 CHAIN = example_chain()
 
@@ -69,6 +70,23 @@ def test_the_startup_check_refuses_no_database_naming_the_command_and_creates_no
 
     assert f"`{CHAIN.command}`" in str(refused.value)
     assert not path.parent.exists()
+
+
+def test_a_database_built_under_another_prefix_and_baseline_is_refused(tmp_path):
+    path = tmp_path / "storefront.db"
+    migrate_storefront_database(CHAIN, path)
+    other = example_chain(
+        replace(EXAMPLE, table_prefix="other"), baseline_id="v0_3_0_baseline_other_storefront"
+    )
+    before = path.read_bytes()
+
+    assert not check_storefront_database(other, path).compatible
+    with pytest.raises(IncompatibleStorefrontDatabase) as refused:
+        require_compatible_storefront_database(other, path)
+
+    assert f"`{other.command}`" in str(refused.value)
+    assert path.read_bytes() == before
+    assert check_storefront_database(CHAIN, path).compatible
 
 
 def _run(path, *arguments: str, **settings: str) -> int:

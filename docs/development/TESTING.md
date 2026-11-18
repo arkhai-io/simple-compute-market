@@ -1719,9 +1719,10 @@ target runs the runner under `ACTIVE_PROFILES=docker,payments-lane,<lane>-lane`
 (`RUNNER_PROFILES` in `e2e-tests/Makefile`): `config-payments-lane.yml` holds the
 double's target, receipt identity, fee policy, CA bundle path, accounts and the
 buyer's credentials, and `config-<lane>-lane.yml` only what differs by lane — the
-seller's marketplace credential, and in the bare-metal lane its price and
-dispute window — Dynaconf merging the
-`payments` section key by key. Unset, the runner runs under `docker` alone and
+seller's marketplace credential, in the bare-metal lane its price and
+dispute window, and in the inference lane, which has no payment scenario, the
+compute and API-credit registries and the stream pause its overlay declares —
+Dynaconf merging each section key by key. Unset, the runner runs under `docker` alone and
 has no payments target. The runner's environment carries no payments value; the
 lane CA reaches it as one mount. Tests hold every value a lane profile restates
 to the fixture or identity file it comes from. Once the stack is up, each lane

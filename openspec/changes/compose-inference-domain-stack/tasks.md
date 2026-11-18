@@ -380,6 +380,14 @@ and F2; api-family delta "The issuance subject may carry accepted terms" and
       image migrated, because `credit_grants` is unchanged; record its run at
       closeout. `e2e_inference_deal` exercises the pinned charge and the scope
       refusal.
+      *Superseded (design D20, on merging `dev`; 23 F2):*
+      `e2e_credits_service_rollback` and the `arkhai:apicredits-service-prekit`
+      image are removed with the requirement they proved, so no run of either
+      is owed at closeout. The previous image against a migrated database is
+      now a refusal: `kit/api/authority/tests/integration/test_migrations.py`
+      proves a behind database and an ahead one are refused unchanged, and
+      the migrate command creates `grant_terms` through the appended
+      `20261109_001_grant_terms` migration.
       *Note:* versions: `arkhai-api-contracts` 0.5.0, `arkhai-api-authority`
       0.2.0, `arkhai-api-gate` 0.2.0 (3.1's client), `arkhai-apicredits-service`
       0.9.0, with floors raised where the new fields are imported; `make lock`
@@ -2167,6 +2175,54 @@ model's listing is now published before step (a), which shows it absent from
 the filtered list and present in the unfiltered one, and step (f) buys it.
 Evidence: `e2e_inference_deal` passed against a fresh inference lane.
 
+*Fix (implementation review 23 F1–F7), outside the plan's sections:* the round
+read the code since review 22 — the storefront catch-up (D19) and the merge of
+`dev` (D20).
+- F1: each family storefront root passes its own family baseline migration ID
+  to `storefront_chain` (`baseline_id`, required): API credits
+  `v0_3_0_baseline_apicredits_storefront`, inference
+  `v0_3_0_baseline_inference_storefront`.
+- F2: the api-family delta's rollback scenario replaced, a `deployment-state`
+  delta naming the inference services added, D20 recorded, D10, D15 and
+  review 03 F3's entries corrected, the proposal's impact and task 2.9's
+  evidence note amended.
+- F3: `domains/inference/storefront/tests/integration/test_store_open.py`.
+- F4: the sweep proven in the library and for inference; D20 records that
+  inference keeps it.
+- F5: the flagged local imports given reasons or moved to module level.
+- F6: the lane's statements corrected, and the lane's runner profile
+  `e2e-tests/config/config-inference-lane.yml` added.
+- F7: the inference stack leaves each image's migrate-then-serve command in
+  place.
+
+Evidence, at the fix commit's tree, on an arm64 macOS host:
+- Library integration: `kit/api/selling` (`make -C kit test-api`, passed), with
+  `test_a_database_built_under_another_prefix_and_baseline_is_refused` and
+  `test_the_sweep_closes_only_unheld_listings_of_the_bundles_offering_mode`.
+- Application integration: `make -C domains test-inference` and
+  `make -C domains test-apicredits`, passed, with the inference storefront's
+  `test_store_open.py` and
+  `test_the_sweep_closes_an_unheld_inference_listing_and_leaves_an_api_credit_one`.
+- Unit: `make -C e2e-tests test-unit`, 905 passed, 1 skipped;
+  `make test-release-tooling`, 2939 passed, 1 failed
+  (`scripts/tests/test_change_clone.py::test_the_bootstrap_failed`, "No child
+  processes", which fails on this host before these fixes too).
+- End to end: `e2e_inference_deal` passed against the lane's stack with both
+  doubles, under `docker,payments-lane,inference-lane`, each image running its
+  migrate command before serving. A local run, not the pipeline.
+- `make check-packaging` and `make check-comment-hygiene` passed;
+  `make check-decision-destinations` passes for this change.
+- `scripts/check_local_imports.py` still reports lines in files this round did
+  not touch, and `check-history-wording` and `check-version-bumps` still fail
+  against `dev`; none is in this round's diff, and closeout parts 1 and 2 own
+  them.
+- A fresh-context check of the diff found seven points, all fixed: two
+  undeclared test-only distributions, the lane profile's identities held by no
+  test, two further local imports in an edited test file, two documents saying
+  the stack states the inference migrate command, a test name claiming a
+  removed assertion, a README heading cited by the wrong name, and an evidence
+  line citing a floor fixture the inference storefront does not have.
+
 ## 12. Closeout
 
 The eleven parts of `openspec/README.md`'s "Plan closeout requirements", in
@@ -2209,8 +2265,8 @@ part that would need a code edit returns the change to implementation.
       row owned by this change.
 - [ ] 12.8 **End-to-end pipeline.** Record the pipeline run — the `e2e-inference`
       job (`e2e_inference_deal`) and the `e2e-apicredits` job
-      (`e2e_credits_deal`, `e2e_credits_service_rollback`, the family's
-      unchanged bytes and the authority's upgrade-and-rollback path) — its
+      (`e2e_credits_deal`, the family's unchanged bytes over databases the
+      migrate commands built; design D20) — its
       result, and the scenarios that exercise this change. If it cannot run
       for a cause unrelated to the change, record the blocker naming the cause
       and the change that owns it, and treat the validations it gates as
@@ -2227,8 +2283,8 @@ part that would need a code edit returns the change to implementation.
       "Local development" under "Deployment topology" — the third registry
       schema and the inference roles); `docs/development/DEPLOYMENT_AND_CONFIG.md`
       ("Per-domain stack composition" — the inference files, overlays, and the
-      `vllm` profile; "Migrations at startup" — the `grant_terms` step and the
-      previous image's rollback); `dev-env/identities/README.md` (a new
+      `vllm` profile; "Migrations at startup" — the `grant_terms` migration and
+      the refusal of a migrated database by an image without it); `dev-env/identities/README.md` (a new
       section "The inference lane" and its rows in the stack table); then
       complete the design-promotion record last. No new capability companion
       is created, so `openspec/specs/README.md` gains no row; confirm its
@@ -2264,7 +2320,7 @@ part that would need a code edit returns the change to implementation.
 | D13 — the withdrawn modules are recovered, not rewritten | `design.md` only; the resulting behaviour promotes under D3, D7, and D8 |
 | D14 — the gateway signs as the service role | the `inference` capability's `architecture.md` — "Role composition over the family kit" |
 | D14 (implementation) — the inference service has no shared-secret gate and refuses to start without its site identity | the `inference` capability's `spec.md` — "Bearer credential is delivery, not identity or payment authority" (scenario "The authority has no site identity"); its `architecture.md` — "Role composition over the family kit" |
-| D15 — the authority's database starts on the family chain | the `api-family` capability's `architecture.md` — "Current limits" (the existing migration-chain bullet, now true of a second domain) |
+| D15 — the authority's database is built by the family chain | the `api-family` capability's `architecture.md` — "Current limits" (the existing migration-chain bullet, now true of a second domain) |
 | D16 — verification seams and the measurable image | the `inference` capability's `spec.md` — "The gateway and buyer carry verification seams for a later proof"; its `architecture.md` — "Verification seams"; the `api-family` capability's `architecture.md` — "The gateway" |
 | D17 — the three-party constraint on settlement composition | the `inference` capability's `spec.md` — "Alkahest is the only inference settlement mechanism" (the unmodified obligation list); its `architecture.md` — "Current limits" |
 | D18 — implementation cadence | `design.md` only; the section order above is its record |
@@ -2274,9 +2330,10 @@ part that would need a code edit returns the change to implementation.
 | review 02 F2 (with review 03 F2 and review 04 F3) — the proof hook binds to the accepted attestation through the terms digest | the `inference` capability's `architecture.md` — "Verification seams" |
 | review 02 F3 — the family gateway consumes a domain-neutral offering the domain executable projects | the `api-family` capability's `spec.md` — "A gateway in front of a model server is one family library"; its `architecture.md` — "The gateway" |
 | review 03 F1 — a key is enforced against the gateway's offering scope at verify and consume | the `api-family` capability's `spec.md` — "A key is scoped to its first grant" |
-| review 03 F3 (amended by review 04 F1 and F2) — accepted terms persist as payload, digest, and charge in `grant_terms`, omitted from the wire when unset, rollback-safe | the `api-family` capability's `spec.md` — "The issuance subject may carry accepted terms"; its `architecture.md` — "Current limits"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" |
+| review 03 F3 (amended by review 04 F1 and F2) — accepted terms persist as payload, digest, and charge in `grant_terms`, omitted from the wire when unset, created by a migration appended to the authority chain (design D20) | the `api-family` capability's `spec.md` — "The issuance subject may carry accepted terms"; its `architecture.md` — "Current limits"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" |
 | plan review 06 F1 — the gateway discovers the listing it fronts by resource and served model, retrying until published | the `inference` capability's `spec.md` — "The gateway admits only paid requests for listed models"; its `architecture.md` — "Role composition over the family kit" |
 | plan review 06 F3 — the request charge is positive and ledger-bounded | the `inference` capability's `spec.md` — "Only request-priced rate cards are publishable without metered consumption"; the `api-family` capability's `spec.md` — "The issuance subject may carry accepted terms" |
 | review 01 F2 — a top-up is admitted after the gate's verification TTL | the `inference` capability's `spec.md` — "The gateway admits only paid requests for listed models"; its `architecture.md` — "Current limits" |
 | D19 — the storefront starts without its dependencies, refuses what waiting cannot repair, reaches chains through the probe, and names the seller by its key's account | the `inference` capability's `architecture.md` — "Role composition over the family kit" |
+| D20 — the family's four stateful services migrate through packaged commands and only check at startup; no rollback over a migrated database; every lane layers the doubles and the inference lane's runner has its own profile; each family storefront names its own baseline ID; the sweep is kept for inference under one seller identity per storefront | the `deployment-state` capability's `spec.md` — "Service-owned migration history"; its `architecture.md` — "Migration and initialization boundary"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup"; `docs/operator-handbook.md` — "Upgrading a deployment"; the `api-family` capability's `spec.md` — "The issuance subject may carry accepted terms"; its `architecture.md` — "Current limits"; `docs/development/TESTING.md` and the `test-compatibility` capability's `spec.md` — the lane profiles; `dev-env/identities/README.md` — "The inference stack"; the `inference` capability's `architecture.md` — "Current limits" |
 | Roadmap and index currency (closeout parts 5 and 6) | `docs/development/ROADMAP.md` — Goal 9 current state and gap table; `openspec/changes/README.md` — this change's row and the Goal 9 campaign graph |

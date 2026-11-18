@@ -77,6 +77,7 @@ EXAMPLE = SellingContributions(
 #: The family's chain under the example bundle's prefix.
 CHAIN = storefront_chain(
     EXAMPLE.table_prefix,
+    baseline_id="v0_3_0_baseline_example_storefront",
     service="the example storefront",
     command="example-storefront-migrate",
 )

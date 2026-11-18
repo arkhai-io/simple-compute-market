@@ -25,6 +25,7 @@ from core_storefront.multi_registry_client import RegistryListings
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_config.config_loader import ChainConfig
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from registry_client.models import ListingSummary
 from storefront_client import StorefrontClient
 
 from inference_storefront import container, server
@@ -112,12 +113,22 @@ class QuotaSite:
 
 
 class Registries:
-    """The registries a publication pass sends to, recording each listing it publishes."""
+    """The registries a publication pass sends to, recording each listing it
+    publishes and holding the open listings a test planted."""
 
     urls = ("http://registry.test",)
 
     def __init__(self) -> None:
         self.published: list[Any] = []
+        self.open: list[ListingSummary] = []
+        self.publisher_reads: list[Any] = []
+
+    def plant(self, listing_id: str, offering_mode: str) -> None:
+        self.open.append(
+            ListingSummary(
+                id=listing_id, status="open", listing_resource={"offering_mode": offering_mode}
+            )
+        )
 
     async def __aenter__(self) -> "Registries":
         return self
@@ -135,14 +146,16 @@ class Registries:
         self.published.extend(payloads.values())
         return self._results(payloads)
 
-    async def list_publisher_listings_per_registry(self, _principal: Any) -> list[RegistryListings]:
-        """Each registry holds no listing the storefront does not."""
-        return [RegistryListings(url, ()) for url in self.urls]
+    async def list_publisher_listings_per_registry(self, principal: Any) -> list[RegistryListings]:
+        self.publisher_reads.append(principal)
+        return [RegistryListings(url, tuple(self.open)) for url in self.urls]
 
     async def update_listing_per_registry(
         self, *, listing_id: str, payloads: dict[str, Any]
     ) -> list[dict[str, Any]]:
         self.published.extend(payloads.values())
+        if any(request.updates.get("status") == "closed" for request in payloads.values()):
+            self.open = [item for item in self.open if item.id != listing_id]
         return self._results(payloads)
 
 

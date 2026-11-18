@@ -1,10 +1,9 @@
 """The storefront's migration chain and its command, ``inference-storefront-migrate [--check]``.
 
-The chain is the family selling library's under this storefront's table prefix,
-named for this storefront. The command loads the layered settings alone, so it
-runs without the storefront's chains or identity; Compose runs it before
-``serve`` in the storefront's container, and ``make migrate`` runs it for local
-development.
+The chain is the family selling library's under this storefront's table prefix
+and baseline identifier, named for this storefront. The command loads the layered settings alone, so it
+runs without the storefront's chains or identity; the image's command runs it
+before ``serve``, and ``make migrate`` runs it for local development.
 """
 
 from __future__ import annotations
@@ -19,8 +18,12 @@ from inference_storefront.settings_source import settings_source
 TABLE_PREFIX = "inference"
 """Names this storefront's family tables; its selling bundle carries the same."""
 
+BASELINE_ID = "v0_3_0_baseline_inference_storefront"
+"""Identifies the family baseline in this storefront's databases; permanent."""
+
 CHAIN = storefront_chain(
     TABLE_PREFIX,
+    baseline_id=BASELINE_ID,
     service="the inference storefront",
     command="inference-storefront-migrate",
 )

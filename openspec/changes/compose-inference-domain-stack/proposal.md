@@ -146,10 +146,21 @@ only request-priced rate cards are publishable until then.
   credits' bytes are unchanged and the pins prove it. Database: one new
   inference service database, and a migration creating a `grant_terms` table
   in every API-family authority's database, with `credit_grants` unchanged.
+  Both inference databases and both API-credit databases are built by the
+  family libraries' migration chains through packaged commands
+  (`inference-service-migrate`, `inference-storefront-migrate`,
+  `apicredits-service-migrate`, `apicredits-storefront-migrate`), run before
+  each application, which only checks its database; the chains name no floor,
+  and each family storefront names its own baseline migration ID.
   Deployment: new images and one more registry instance in the development
-  stack; an API-family authority upgrades by image, and because the grant
-  table it checks is unchanged, the previous image starts against the
-  migrated database without a down-migration.
+  stack; an API-family authority upgrades by running its migrate command
+  before the new image's application, and an image whose chain lacks a
+  recorded migration refuses that database as ahead, so recovery is the
+  pre-upgrade backup or rolling forward, not the previous image. Removed: the
+  API-credits upgrade and rollback end-to-end scenario
+  (`e2e_credits_service_rollback`), its pre-kit image, and the requirement
+  they proved. Every end-to-end lane, the inference lane included, layers the
+  payments and mediation lane doubles.
 
 ## Permanent documentation impact
 
@@ -163,23 +174,67 @@ only request-priced rate cards are publishable until then.
 
 ### Knowledge to promote
 
+- D1: the issuance projection names the served model and delivers the gateway
+  URL — the `inference` capability's `spec.md`; the `api-family` capability's `architecture.md` contribution table, inference
+  column.
+- D2: the gateway is a family library composed by a domain executable —
+  the `api-family` capability's `spec.md` and `architecture.md`; `docs/development/ARCHITECTURE.md`
+  runtime service map.
+- D3: the public result carries the contract's materialization, built from the
+  extension's inputs, which include the delivery's settlement context —
+  the `inference` capability's `spec.md` and `architecture.md`; the `api-family` capability's `spec.md`.
+- D4: retry charges and the metering seam — the `inference` capability's `architecture.md`, "Current
+  limits".
+- D5: the stub model server is a test image; the `vllm` profile —
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`; the `deployment-state`
+  capability's `spec.md`.
+- D6: contribution values — the `inference` capability's `spec.md`.
+- D7: the publish request carries the model card — the `inference` capability's `spec.md`.
+- D8: the request-priced guard — the `inference` capability's `spec.md`.
+- D9: the Alkahest-only refusal — the `inference` capability's `spec.md`.
+- D10: Compose files and identities — the `deployment-state` capability's
+  `spec.md`; `dev-env/identities/README.md`.
+- D11: the scenario's own lane — the `test-compatibility` capability's
+  `spec.md`.
+- D12: the buyer plugin's contributions — the `inference` capability's `spec.md`.
+- D13: no permanent destination — it records how the modules were obtained;
+  the resulting behaviour promotes under D3, D7, and D8.
+- D14: the gateway signs as the service role, and the service has no
+  shared-secret gate — the `inference` capability's `spec.md` and `architecture.md`.
+- D15: the authority's database is built by the family chain — the `api-family` capability's
+  `architecture.md`, "Current limits".
+- D16: verification seams and the measurable image — the `inference` capability's `architecture.md`;
+  the `api-family` capability's `architecture.md`.
+- D17: the three-party constraint on settlement composition — the `inference` capability's
+  `architecture.md`.
+- D18: no permanent destination — the implementation cadence is the order of
+  `tasks.md`'s sections.
+- D19: the storefront starts without its dependencies — the `inference` capability's
+  `architecture.md`.
+- D20: the migration policy for the family's four stateful services — the
+  `deployment-state` capability's `spec.md`, "Service-owned migration
+  history", its `architecture.md`, "Migration and initialization boundary",
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup", and
+  `docs/operator-handbook.md`, "Upgrading a deployment"; the terms table's
+  migration and its refusal by an image without it — the `api-family` capability's `spec.md`, "The
+  issuance subject may carry accepted terms"; the lane doubles and the
+  inference lane's runner profile — `docs/development/TESTING.md`, the
+  `test-compatibility` capability's `spec.md`, and
+  `dev-env/identities/README.md`, "The inference stack"; a baseline ID per
+  family storefront — the `api-family` capability's `architecture.md`, "Current limits"; the sweep kept
+  for inference and its one-identity assumption — the `inference` capability's `architecture.md`,
+  "Current limits".
+
+Decisions the design records under a review finding's heading:
+
 | Decision | Permanent destination |
 |---|---|
-| The issuance projection names the served model and delivers the gateway URL (D1) | the `inference` capability's `spec.md`; the `api-family` capability's `architecture.md` contribution table, inference column |
-| The gateway is a family library composed by a domain executable (D2) | the `api-family` capability's `spec.md` and `architecture.md`; `docs/development/ARCHITECTURE.md` runtime service map |
-| The public result carries the contract's materialization, built from the extension's inputs, which include the delivery's settlement context (D3) | the `inference` capability's `spec.md` and `architecture.md`; the `api-family` capability's `spec.md` |
-| Retry charges and the metering seam (D4) | the `inference` capability's `architecture.md` — "Current limits" |
-| The stub model server is a test image; the `vllm` profile (D5) | `docs/development/DEPLOYMENT_AND_CONFIG.md`; the `deployment-state` capability's `spec.md` |
-| Contribution values, publish request, guard, Alkahest-only refusal (D6–D9, D12) | the `inference` capability's `spec.md` |
-| Compose files, identities, lane (D10, D11) | the `deployment-state` and `test-compatibility` capabilities' `spec.md`; `dev-env/identities/README.md` |
-| Verification seams and the measurable image (D16) | the `inference` capability's `architecture.md`; the `api-family` capability's `architecture.md` |
-| The three-party constraint on settlement composition (D17) | the `inference` capability's `architecture.md` |
 | A key is scoped to its first grant's service, resource, and accepted terms (F4, review 02 F1) | the `api-family` capability's `spec.md` |
 | The issuance subject carries the accepted terms digest and request charge; the gateway charges the key's verified charge (F1) | the `inference` capability's `spec.md`; the `api-family` capability's `spec.md` and `architecture.md` contribution table |
 | The family gateway consumes a domain-neutral offering the domain executable projects (review 02 F3) | the `api-family` capability's `spec.md` and `architecture.md` |
 | The proof hook binds to the accepted attestation through the terms digest (review 02 F2, review 03 F2) | the `inference` capability's `architecture.md` |
 | A key is enforced against the gateway's offering scope at verify and consume (review 03 F1) | the `api-family` capability's `spec.md` |
-| Accepted terms persist as a payload, digest, and charge in a `grant_terms` table beside the grant, omitted from the wire when unset, rollback-safe (review 03 F3, review 04 F1–F2) | the `api-family` capability's `spec.md` and `architecture.md` — "Current limits"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Accepted terms persist as a payload, digest, and charge in a `grant_terms` table beside the grant, omitted from the wire when unset, created by a migration appended to the authority chain (review 03 F3, review 04 F1–F2, D20) | the `api-family` capability's `spec.md` and `architecture.md` — "Current limits"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Verification precedes the charge; the gate's separable verify step (F3) | the `api-family` capability's `spec.md` and `architecture.md` |
 | The gateway discovers the listing it fronts by resource and served model, retrying until published (plan review 06 F1) | the `inference` capability's `spec.md` and `architecture.md` |
 | The request charge is positive and ledger-bounded; the guard refuses zero (plan review 06 F3) | the `inference` capability's `spec.md`; the `api-family` capability's `spec.md` |

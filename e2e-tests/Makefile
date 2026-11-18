@@ -322,7 +322,7 @@ test-e2e-inference:
 	cd .. && $(MAKE) build-e2e-inference
 	cd .. && $(call e2e_up,$(E2E_INFERENCE_COMPOSE))
 	$(MAKE) test-buyer-machine NETWORK=$(E2E_INFERENCE_PROJECT)_default BUYER_MODULE="$(E2E_INFERENCE_MODULE)" \
-		RUNNER_PROFILES=docker,payments-lane
+		RUNNER_PROFILES=docker,payments-lane,inference-lane
 
 e2e-inference-down:
 	cd .. && docker compose $(E2E_INFERENCE_COMPOSE) down -v --remove-orphans

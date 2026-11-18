@@ -1313,7 +1313,9 @@ storefront's without `entrypoint.sh`, which only starts ZeroTier — and is the
 only init container a chart renders for a service (see "Kubernetes: ConfigMap
 and Secret mounting"). Under Compose the service's command is
 `sh -c "<service>-migrate && exec <service command>"`, so the application starts
-only once the migration succeeds; the VM storefront runs it through
+only once the migration succeeds — stated by the stack, or, for the inference
+service and storefront, by the image's own command, which the stack leaves
+in place; the VM storefront runs it through
 `./entrypoint.sh`, and the bare-metal storefront, whose image's entrypoint is its
 CLI, states it as its `entrypoint`. The registry chart's application container
 states its own `uvicorn` command, since the image's command migrates first for

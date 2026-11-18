@@ -159,10 +159,16 @@ def accepted_agreement(listing_id: str) -> tuple[Agreement, bytes]:
     return agreement, agreement.model_dump_json(exclude_none=True).encode()
 
 
-def example_chain(contributions: SellingContributions = EXAMPLE):
+EXAMPLE_BASELINE_ID = "v0_3_0_baseline_example_storefront"
+
+
+def example_chain(
+    contributions: SellingContributions = EXAMPLE, *, baseline_id: str = EXAMPLE_BASELINE_ID
+):
     """The family's chain under the bundle's prefix, named for a storefront of these tests."""
     return storefront_chain(
         contributions.table_prefix,
+        baseline_id=baseline_id,
         service="the example storefront",
         command="example-storefront-migrate",
     )

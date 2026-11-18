@@ -452,13 +452,13 @@ def test_a_lane_target_names_only_its_files_and_runner_profiles(target: str) -> 
 def test_the_inference_lane_target_names_only_its_files() -> None:
     """The inference lane brings its stack up from its Compose files with no
     environment file, layers the lane doubles its registries recommend, and runs
-    the runner under the shared lane profile."""
+    the runner under the shared lane profile and its own."""
     produced = _dry_run("test-e2e-inference")
     assert produced.returncode == 0, produced.stderr
     assert "--env-file" not in produced.stdout
     assert "-f compose.payments-double.yml -f compose.inference-lane.yml" in produced.stdout
     assert ": test-buyer-machine " in produced.stdout
-    assert "RUNNER_PROFILES=docker,payments-lane" in produced.stdout
+    assert "RUNNER_PROFILES=docker,payments-lane,inference-lane" in produced.stdout
     for operation in ("down", "logs"):
         stopped = _dry_run(f"e2e-inference-{operation}")
         assert stopped.returncode == 0, stopped.stderr

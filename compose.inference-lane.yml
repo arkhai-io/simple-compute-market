@@ -16,7 +16,7 @@
 # profile, with the descriptor it advertises overridden to its address on the
 # lane's network, and reuses the committed signer credential of the registry it
 # stands in for: well-known development values that must never be used on a
-# public network; see dev-env/identities/README.md, "The inference lane".
+# public network; see dev-env/identities/README.md, "The inference stack".
 # Inference settles through Alkahest alone, so nothing pays through the payments
 # double; the lane runs both doubles so its registries recommend the mediation
 # double as the dispute authority, as every lane's do. Paths are relative to the

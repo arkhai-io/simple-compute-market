@@ -1,10 +1,13 @@
-# The payments and mediation lane doubles, for the VM, bare-metal and API-credit
-# end-to-end lanes.
+# The payments and mediation lane doubles, for every end-to-end lane: VM,
+# bare-metal, API-credit and inference.
 #
-# Layered with `-f` into each lane's compose list in e2e-tests/Makefile; each
-# lane's own overlay mounts its payment storefront's lane configuration, which
-# points at the payments double, and the lane CA that configuration trusts, and
-# makes the storefront wait for it. The full local stack never layers this file.
+# Layered with `-f` into each lane's compose list in e2e-tests/Makefile. The
+# overlay of each lane with a payment storefront mounts that storefront's lane
+# configuration, which points at the payments double, and the lane CA that
+# configuration trusts, and makes the storefront wait for it. The inference
+# lane settles through Alkahest alone and has no payment storefront; its
+# registries recommend the mediation double, as every lane's do. The full local
+# stack never layers this file.
 #
 # Each image carries its double's committed fixtures and TLS files, public
 # development values never to be used on a public network

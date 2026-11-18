@@ -235,9 +235,13 @@ first two for every gate, and each gate's own tests pin the ordering.
   `v0_3_0_baseline_apicredits_service` in every domain's database: the chain
   is one, and each domain's deployment runs it on its own database. The chain
   names no floor, so a database it did not build is refused.
-- The storefront chain's family baseline is likewise identified
-  `v0_3_0_baseline_apicredits_storefront` in every domain's database, whatever
-  the table prefix, and the chain names no floor.
+- Each family storefront names its own identifier for the storefront chain's
+  family baseline: `v0_3_0_baseline_apicredits_storefront` for API credits and
+  `v0_3_0_baseline_inference_storefront` for inference. Compatibility is the
+  exact set of recorded migration identifiers, and each storefront's baseline
+  creates tables under its own prefix, so a database one family storefront's
+  chain built is refused by the other's. The chain names no floor. The
+  authorities share one baseline identifier because their tables are identical.
 - `selling` depends on the core storefront, and `buying`, `buying-alkahest`,
   and `buying-arkhai-payments` on the core buyer, both role compositions. Each
   edge is an exception row in

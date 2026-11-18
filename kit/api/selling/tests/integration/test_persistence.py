@@ -3,21 +3,29 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 from market_resource_pools import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED
 
-from arkhai_api_selling.migrations import BASELINE_ID, baseline_tables
+from arkhai_api_selling.migrations import baseline_tables
 from arkhai_api_selling.persistence import (
     TERMS_TABLE,
     StorefrontSQLiteClient,
     refuse_unbound_listings,
+    write_credit_terms,
 )
 from arkhai_api_selling.quota_listing import QuotaPool, prepare_listing_binding
-from tests.bundles import BUYER, CLAIMANT, DOMAIN, EXAMPLE, create_tables, example_chain
+from tests.bundles import (
+    BUYER,
+    CLAIMANT,
+    DOMAIN,
+    EXAMPLE,
+    EXAMPLE_BASELINE_ID,
+    create_tables,
+    example_chain,
+)
 
 RESOURCE = {"product": "alpha", "quota": "quota-a", "offering_mode": "example"}
 
@@ -62,7 +70,7 @@ def _applied(client: StorefrontSQLiteClient) -> set[str]:
         return {str(value) for row in conn.execute("SELECT * FROM schema_migrations") for value in row}
 
 
-def test_the_tables_are_named_from_the_prefix_and_the_baseline_keeps_its_identifier(tmp_path):
+def test_the_tables_are_named_from_the_prefix(tmp_path):
     client = _client(tmp_path)
 
     tables = _tables(client)
@@ -76,8 +84,7 @@ def test_the_tables_are_named_from_the_prefix_and_the_baseline_keeps_its_identif
     assert baseline_tables("example") <= tables
     assert not any(table.startswith("api_credit") for table in tables)
     chain = example_chain()
-    assert chain.baseline_ids[-1] == BASELINE_ID
-    assert example_chain(replace(EXAMPLE, table_prefix="other")).ids == chain.ids
+    assert chain.baseline_ids[-1] == EXAMPLE_BASELINE_ID
     assert _applied(client) >= set(chain.ids)
     with sqlite3.connect(client.db_path) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(escrows)")}
@@ -155,8 +162,6 @@ def _counts(client: StorefrontSQLiteClient) -> dict[str, int]:
 
 
 async def test_an_opening_records_the_thread_its_message_its_binding_and_its_terms_together(tmp_path):
-    from arkhai_api_selling.persistence import write_credit_terms
-
     client = _client(tmp_path)
     await _bound_listing(client)
     thread, message = _opening()

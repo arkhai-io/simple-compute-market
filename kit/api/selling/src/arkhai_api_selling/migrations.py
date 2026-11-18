@@ -4,7 +4,11 @@ The chain composes core storefront's baseline, the settlement runtime's, and
 the family's own, in that order, followed by core storefront's later
 migrations. The family's tables are named from the domain's table prefix, a
 constant of the composing storefront and not a setting, so one storefront's
-database migrates to one schema under any configuration. The chain names no floor: no
+database migrates to one schema under any configuration. The composing
+storefront also names the family baseline's identifier: compatibility is the
+exact set of recorded identifiers, so two storefronts whose prefixes differ
+must record different ones for each to refuse the other's database. The chain
+names no floor: no
 database from before its baseline is supported, so the migration command
 refuses every non-empty database it did not build. A later change to the
 family's tables is a migration appended to :data:`MIGRATIONS`, never an edit to
@@ -31,9 +35,6 @@ from market_schema_migrations import (
 from market_settlement_runtime import migrations as settlement_migrations
 
 from arkhai_api_selling.contributions import family_table
-
-BASELINE_ID = "v0_3_0_baseline_apicredits_storefront"
-"""The family baseline's identifier, the same whatever the table prefix."""
 
 #: The purchase terms recorded for each thread: quantity and key target. The
 #: terms are the vocabulary's shape, the same for every domain, so the table
@@ -127,16 +128,22 @@ def baseline_tables(table_prefix: str) -> frozenset[str]:
     )
 
 
-def storefront_baseline(table_prefix: str) -> Migration[sqlite3.Connection]:
+def storefront_baseline(
+    table_prefix: str, *, baseline_id: str
+) -> Migration[sqlite3.Connection]:
     """The family's tables under ``table_prefix``: accepted purchase terms,
-    settlement evidence, issuance progress and evidence, and private results."""
+    settlement evidence, issuance progress and evidence, and private results.
+
+    ``baseline_id`` is the storefront's own and permanent once a database
+    records it.
+    """
     ddl = _baseline_ddl(table_prefix)
 
     def _create(connection: sqlite3.Connection) -> None:
         for statement in ddl:
             connection.execute(statement)
 
-    return Migration(BASELINE_ID, _create)
+    return Migration(baseline_id, _create)
 
 
 MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = ()
@@ -144,13 +151,16 @@ MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = ()
 
 
 def storefront_chain(
-    table_prefix: str, *, service: str, command: str
+    table_prefix: str, *, baseline_id: str, service: str, command: str
 ) -> Chain[sqlite3.Connection]:
     """The chain a storefront whose bundle names ``table_prefix`` migrates and
     checks, named for that storefront and its migration command in every refusal.
 
-    It takes the prefix alone, so a migration command builds it without
-    composing the storefront's bundle or resolving its settings.
+    ``baseline_id`` identifies the family baseline in this storefront's
+    databases; a storefront with another prefix names another, so neither
+    reads the other's database as compatible. The chain takes constants alone,
+    so a migration command builds it without composing the storefront's bundle
+    or resolving its settings.
     """
     return Chain(
         service=service,
@@ -158,7 +168,7 @@ def storefront_chain(
         baselines=(
             core_migrations.BASELINE,
             settlement_migrations.BASELINE,
-            storefront_baseline(table_prefix),
+            storefront_baseline(table_prefix, baseline_id=baseline_id),
         ),
         migrations=(*core_migrations.MIGRATIONS, *MIGRATIONS),
     )
@@ -213,7 +223,6 @@ def require_compatible_storefront_database(
 
 
 __all__ = [
-    "BASELINE_ID",
     "MIGRATIONS",
     "TERMS_TABLE",
     "IncompatibleStorefrontDatabase",

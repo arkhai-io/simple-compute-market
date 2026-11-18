@@ -339,7 +339,8 @@ def test_the_api_credit_lane_listing_pays_the_double_seller_account():
 
 
 # Each lane's runner profile, the identity file its storefront signs with, and
-# what only that lane's payment scenario reads.
+# what only that lane's payment scenario reads. The inference lane has no
+# payment scenario; its profile is checked on its own below.
 _RUNNER_LANES = {
     "vms-lane": ("bob.identity.env", set()),
     "apicredits-lane": ("api-credits.identity.env", set()),
@@ -375,6 +376,44 @@ def test_a_lane_runner_loads_a_complete_payments_section(lane):
         if line and not line.startswith("#")
     )["ARKHAI_IDENTITY_CREDENTIAL"]
     assert payments["SELLER_MARKETPLACE_CREDENTIAL"] == credential
+
+
+def test_the_inference_lane_profile_adds_only_inference_settings():
+    """The inference lane's profile states what its overlay alone declares and
+    no payments setting, and the runner merges it into the `inference` section."""
+    config = _REPO_ROOT / "e2e-tests/config"
+    profile = yaml.safe_load((config / "config-inference-lane.yml").read_text(encoding="utf-8"))
+    assert set(profile) == {"inference"}
+    assert _runner_payments("docker,payments-lane,inference-lane") == _runner_payments(
+        "docker,payments-lane"
+    )
+    loaded = settings_module._load_bootstrap({
+        "CONFIG_DIRECTORY": str(config), "ACTIVE_PROFILES": "docker,payments-lane,inference-lane",
+    }).settings["INFERENCE"]
+    resolved = {str(key).lower(): value for key, value in loaded.items()}
+    assert profile["inference"].items() <= resolved.items()
+    assert resolved["registry_url"] and resolved["gateway_url"]
+    overlay = (_REPO_ROOT / "compose.inference-lane.yml").read_text(encoding="utf-8")
+    delay = profile["inference"]["stub_chunk_delay_seconds"]
+    assert f"MODEL_STUB_CHUNK_DELAY_SECONDS={delay}\n" in overlay
+    for prefix, registry in (
+        ("compute_registry", "compute-registry"),
+        ("api_credits_registry", "api-credits-registry"),
+    ):
+        committed = dict(
+            line.split("=", 1)
+            for line in (_REPO_ROOT / f"dev-env/registry/config-{registry}.env")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.startswith("REGISTRY_AUTHORITY_")
+        )
+        assert profile["inference"][f"{prefix}_authority_id"] == committed["REGISTRY_AUTHORITY_ID"]
+        assert profile["inference"][f"{prefix}_scheme"] == committed["REGISTRY_AUTHORITY_SCHEME"]
+        assert (
+            profile["inference"][f"{prefix}_identifier"]
+            == committed["REGISTRY_AUTHORITY_IDENTIFIER"]
+        )
+        assert profile["inference"][f"{prefix}_url"] == f"http://{registry}:8080"
 
 
 def test_a_runner_without_the_lane_profiles_has_no_payments_target():

@@ -180,13 +180,26 @@ are byte-identical to their form before the fields existed.
 - **THEN** the digest, the evidence, and the verify response match the
   recorded pins byte for byte
 
-#### Scenario: The authority is upgraded and rolled back
+#### Scenario: The migrate command creates the terms table
 
-- **WHEN** the new authority image starts against a database its previous
-  image wrote, and the previous image is later started against the result
-- **THEN** the migration creates the terms table, existing grants read as
-  unpinned, and the previous image starts and serves, since the grant table
-  it checks is unchanged
+- **WHEN** an authority's migrate command runs against a database its chain
+  built before the terms table's migration was appended
+- **THEN** the appended migration creates the terms table and is recorded, the
+  grant table's columns are unchanged, and existing grants read as unpinned
+
+#### Scenario: The application start only checks
+
+- **WHEN** an authority application starts against a database that lacks the
+  terms table's migration
+- **THEN** it issues no DDL and refuses the database as behind, naming its
+  migrate command and the pending migration
+
+#### Scenario: An image without the terms migration meets a migrated database
+
+- **WHEN** an authority image whose chain lacks the terms table's migration is
+  started, or its migrate command run, against a database recording it
+- **THEN** the database is refused as ahead, naming the unknown migration, and
+  nothing is applied
 
 #### Scenario: Metering reads the accepted card
 

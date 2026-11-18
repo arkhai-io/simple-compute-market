@@ -96,30 +96,20 @@ api_credits:
   compute_registry_scheme:       "eip191"
   compute_registry_identifier:   "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
 
-# The inference end-to-end lane (`make test-e2e-inference`): the inference
-# registry, service, gateway, model stub, and storefront on their own dev
-# chain, beside the lane's own compute and API-credit registries. Every value is
-# a committed development value, never to be used on a public network; see
-# dev-env/identities/README.md, "The inference stack".
+# The inference stack: the inference registry, service, gateway, model stub,
+# and storefront on their own dev chain. Every value is a committed development
+# value, never to be used on a public network; see
+# dev-env/identities/README.md, "The inference stack". What only the inference
+# end-to-end lane's overlay declares is in config-inference-lane.yml.
 inference:
   registry_url:      "http://inference-registry:8080"
   service_url:       "http://inference-service:8086"
   storefront_url:    "http://inference-storefront:8000"
   gateway_url:       "http://inference-gateway:8090"
   served_model_name: "stub-instruct"
-  # The model stub's pause between streamed chunks, set by compose.inference-lane.yml.
-  stub_chunk_delay_seconds: "0.3"
   registry_authority_id: "inference-registry"
   registry_scheme:       "ed25519"
   registry_identifier:   "QpkX0mKYYK2PMdhAweeYEpDGzdX_htGTGmZq-L0e9r8"
-  compute_registry_url:          "http://compute-registry:8080"
-  compute_registry_authority_id: "compute-registry"
-  compute_registry_scheme:       "eip191"
-  compute_registry_identifier:   "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
-  api_credits_registry_url:          "http://api-credits-registry:8080"
-  api_credits_registry_authority_id: "api-credits-registry"
-  api_credits_registry_scheme:       "ed25519"
-  api_credits_registry_identifier:   "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
   # The inference service's own principal, pinned when the scenario registers
   # a second quota with it.
   service_authority_identifier: "nS5GC-Q7uZtXKg2sep2iHsmiDYQEx6KdmME6c4-ah6A"

@@ -1,7 +1,7 @@
 """The service's migration chain and its command, ``inference-service-migrate [--check]``.
 
 The chain is the family authority's, named for this service. The command loads
-the layered settings alone; Compose runs it before the application, and
+the layered settings alone; the image's command runs it before the application, and
 ``make migrate`` runs it for local development outside Docker.
 """
 

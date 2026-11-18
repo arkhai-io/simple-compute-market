@@ -17,6 +17,7 @@ import pytest
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from market_core import SettlementEvidence, SettlementStageTable
+from market_core.schemas import Agreement
 from market_identity import Ed25519Signer
 
 from arkhai_api.issuance import IssuanceRequest, issuance_result_model
@@ -45,7 +46,9 @@ from apicredits_storefront import container, server
 from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.container import storefront_sqlite_client
 from arkhai_api_selling.migrations import migrate_storefront_database
+from arkhai_api_selling.quota_listing import domain_listing
 from apicredits_storefront.migrate import CHAIN
+from apicredits_storefront.services import fulfillment_service
 from apicredits_storefront.utils import config as config_module
 from tests._settings_overrides import replaced_setting
 from tests.integration.credit_negotiation import FakeCapacity
@@ -178,8 +181,6 @@ def test_the_api_credit_projection_names_its_service_quota_and_endpoint():
 
 
 async def test_fulfillment_service_rejects_invalid_domain_listing():
-    from apicredits_storefront.services import fulfillment_service
-
     class _NoIssuance:
         async def submit_issuance(self, _request):
             raise AssertionError("issuance should not be called")
@@ -656,7 +657,6 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
 
 async def test_an_agreement_naming_another_listing_than_its_thread_is_refused(settled_db, monkeypatch):
     db, neg_id = settled_db
-    from market_core.schemas import Agreement
 
     async def verify(**_kwargs):
         return 0
@@ -860,7 +860,6 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
 def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
     """A stored row carries bookkeeping columns the domain listing forbids; the
     selling library narrows it to the listing schema, and the raw row stays refused."""
-    from arkhai_api_selling.quota_listing import domain_listing
     from arkhai_apicredits.domain_runtime import _normalize_listing
     from arkhai_apicredits.schema import ApiCreditsListing
     from pydantic import ValidationError

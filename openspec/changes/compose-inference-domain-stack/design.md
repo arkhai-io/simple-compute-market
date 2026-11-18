@@ -238,8 +238,8 @@ registry loads `dev-env/registry/config-inference-registry.env` by
 `dev-env/identities/inference.storefront.secrets.toml`; and the lane's compute
 and API-credit registries run the committed `compute-registry` and
 `api-credits-registry` profiles with their descriptors pointed at the lane
-network. The lane runs no payments double, since inference settles through
-Alkahest alone. Promotion of this to the testing and identity documents is
+network. The lane layers the payments and mediation lane doubles, as every
+lane does (D20), though inference settles through Alkahest alone. Promotion of this to the testing and identity documents is
 already in `dev-env/identities/README.md`; `docs/development/TESTING.md`'s lane
 list still needs the inference lane at closeout.
 
@@ -298,9 +298,14 @@ which the bearer-credential requirement cannot admit (implementation, section 6)
 
 ### D15. The authority's database starts on the family chain
 
-The inference database runs the family's migration chain from its first,
-API-credits-named step, on its own database. This is the family's recorded
-limit and costs nothing here.
+The inference service's database is built by the family authority chain, on
+its own database, through `inference-service-migrate` (D20). The chain is one
+for every domain: its authority baseline is identified
+`v0_3_0_baseline_apicredits_service` in the inference database too, followed
+by the site ledger's migrations and `20261109_001_grant_terms`, and it names
+no floor. The two authorities' tables are identical by design, so the
+API-credits name in the baseline's identifier is the family's recorded limit
+and costs nothing here.
 
 ### D16. Forward compatibility with privacy proofs
 
@@ -388,6 +393,71 @@ dependencies" governs its startup. Four outcomes of implementation reviews 08,
 
 No dispute policy is composed: inference settles through Alkahest alone, and
 nothing on that path reads one.
+
+### D20. Migrations, lane doubles, and the sweep follow `dev`
+
+*Added 2026-11-18, recording the decisions taken on merging `dev` on
+2026-11-11 (implementation review 23 F1, F2, F4).* The merge brought the
+repository's migration policy, every lane's doubles, and the family selling
+library's sweep onto this change's services. The owner decided each as
+follows; where an earlier entry said otherwise, this one supersedes it.
+
+- **Migration policy.** The deployment-state requirement "Service-owned
+  migration history" governs the four API-family stateful services. Each
+  migrates through a packaged command in a deployment phase before its
+  application starts: `apicredits-service-migrate`, `inference-service-migrate`,
+  `apicredits-storefront-migrate`, and `inference-storefront-migrate`. The
+  application only checks its database, issues no DDL, and refuses an
+  incompatible one. The family libraries own the chains, `kit/api/authority`
+  the services' and `kit/api/selling` the storefronts', and each root composes
+  its chain behind its own command. Neither chain names a floor, so a database
+  a chain did not build is refused, and an image whose chain lacks a recorded
+  migration refuses that database as ahead. This replaces the in-process
+  migration at startup that D15 and review 03 F3 assumed.
+- **No rollback over a migrated database.** The API-credits upgrade and
+  rollback end-to-end scenario (`e2e_credits_service_rollback`), its pre-kit
+  image, and the requirement they proved are removed: under the policy the
+  previous image against a migrated database is a refusal, not a supported
+  path. The guarantee that replaces it is the refusal itself — a release
+  either starts on a database its chain built or does not start — with
+  recovery by the pre-upgrade backup or by rolling forward, proven at the
+  library level by `kit/api/authority/tests/integration/test_migrations.py`
+  (a behind database and an ahead one are refused unchanged) and stated in
+  the api-family delta's scenarios for the terms table.
+- **Lane doubles.** Every end-to-end lane layers
+  `compose.payments-double.yml`, the inference lane included, and the
+  inference lane's registries layer the `payments-lane` profile so they
+  recommend the mediation double. Inference still settles through Alkahest
+  alone (D9). The lane's runner takes a profile of its own,
+  `docker,payments-lane,inference-lane`, as the lane-profile requirement
+  states for every lane. This supersedes D10's amendment of 2026-11-09.
+- **A baseline ID per family storefront.** Each family storefront root names
+  its own family baseline migration ID: API credits
+  `v0_3_0_baseline_apicredits_storefront`, inference
+  `v0_3_0_baseline_inference_storefront`. Compatibility is the exact set of
+  recorded IDs, and the two chains create differently prefixed tables, so one
+  shared ID let either storefront accept the other's database and fail at its
+  first write; with its own ID each refuses the other's. The two authority
+  services keep one chain and one baseline ID (D15), because their tables are
+  identical.
+- **The sweep is kept for inference.** After each reconcile the family selling
+  library closes, at each registry, the open listings of the storefront's own
+  offering mode published under its own identity that it does not hold open.
+  The inference storefront keeps it. It assumes one seller identity per
+  storefront: two inference storefronts sharing an identity and a registry
+  would close each other's listings. A listing of another offering mode under
+  the same identity is left alone.
+
+Rejected: one storefront baseline ID with a startup check that the bundle's
+tables exist, which leaves `--check` and the migrate command reporting the
+other family storefront's database compatible. Rejected: one ID with the
+consequence recorded as a limit, which leaves a migration ID naming two
+schemas. Rejected: a floor that adopts an API-credit database from before the
+baseline, as the compute services adopt theirs, which would keep rollback but
+departs from the policy `dev` states for API credits, where no deployment
+holds such a database. Rejected: a sweep each domain opts into, with inference
+left out, which would leave a listing the storefront no longer holds on sale
+at a registry.
 
 ### F4 (design review 01). A key is scoped to its first grant
 
@@ -487,9 +557,11 @@ gateway to compare.
 
 - **A separate table.** A migration step creates `grant_terms`: the grant's
   id, the accepted terms as canonical JSON, their digest, and the request
-  charge. `credit_grants` is unchanged, so the previous image's exact column
-  check still passes and rollback is the previous image against the same
-  file, with no down-migration. No key column: a key's pinned values are its
+  charge. `credit_grants` is unchanged. The step is appended to the family
+  authority chain as `20261109_001_grant_terms` and applied by the migrate
+  command; an image whose chain lacks it refuses the migrated database as
+  ahead, so recovery from an upgrade is the pre-upgrade backup or rolling
+  forward, never the previous image against the same file (D20). No key column: a key's pinned values are its
   first grant's row. A grant with no row is unpinned, so a key whose first
   grant is unpinned accepts only unpinned top-ups and is charged the
   offering's default, which is today's API-credits behaviour; inference has
@@ -499,8 +571,10 @@ gateway to compare.
   grant's accepted card, which a digest cannot recover; the digest is the
   integrity check the authority verifies on write and returns with the
   payload.
-- **Validation ordering.** The drift check on `credit_grants` is untouched;
-  the migration that creates `grant_terms` runs in the chain as any step does.
+- **Validation ordering.** The application checks the database's recorded
+  migrations against its chain and issues no DDL; the migration that creates
+  `grant_terms` runs in the chain as any step does, through the migrate
+  command.
 - **Wire bytes.** The subject's terms, digest, and request charge, where they
   appear in the issuance request digest, the signed evidence, and the verify
   and consume exchanges, are omitted when unset, never serialised as `null`;
