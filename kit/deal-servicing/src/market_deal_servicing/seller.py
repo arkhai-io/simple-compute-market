@@ -190,10 +190,11 @@ class SellerServicing:
         self, deal: SellerDeal, watch: DealWatch, current: list[AuthorityView] | None = None,
     ) -> tuple[AuthorityView, bool]:
         """The deal's authority view, and whether it names a dispute authority
-        of which no verified view is saved.
+        of which no view is saved.
 
         A view is saved only from an accepted read, so with none the dispute
-        authority's cases are unknown, not empty. Both are read in one
+        authority's cases are unknown, not empty; what an accepted read assures
+        is its adapter's to state. The view and that answer are read in one
         transaction, so a view saved meanwhile cannot leave them disagreeing.
         """
         with transaction(self.path) as conn:
@@ -262,13 +263,12 @@ class SellerServicing:
 
         A deal is open until the seller list's rule would call it ended: a
         recorded end, its resource proven released, nothing outstanding at
-        either authority as last observed (``_outstanding``). With no adapter
+        either authority in its saved views (``_outstanding``). With no adapter
         nothing observes its payment again, so a released deal whose part last
         showed no stop stays reported until the adapter is restored; one whose
-        dispute authority was never observed stays reported until a read of
-        that authority is saved. Every
-        registered deal is read, committed or not, since an uncommitted one
-        still holds capacity a storefront must end.
+        dispute authority has no saved view stays reported until one is saved.
+        Every registered deal is read, committed or not, since an uncommitted
+        one still holds capacity a storefront must end.
         """
         found: builtins.list[tuple[str, str]] = []
         continuation: str | None = None
@@ -382,17 +382,17 @@ class SellerServicing:
         A recorded end is physical and local; the deal is ended only once its
         resource is proven released, the payment authority shows every part
         stopped or past its end, so nothing more can bill, and the dispute
-        authority holds no open case, so nothing more can be ruled. A case
-        opened later makes it ending again.
+        authority's saved view shows no open case. An open case read later
+        makes it ending again.
 
         A deal that is not once-only bills through rate parts, and the payment
         authority's view of it lists every one, started or not; a view listing
         none, or no view yet saved, verifies no stop, so its payment is still
         running. A once-only deal has no rate part to stop.
 
-        A deal naming a dispute authority of which no verified view is saved
-        (``dispute_unobserved``) has no case verified closed, so it is not ended
-        until one read of that authority is saved.
+        A deal naming a dispute authority of which no view is saved
+        (``dispute_unobserved``) has no case known closed, so it is not ended
+        until a view of that authority is saved.
         """
         now = self.clock()
         ending: builtins.list[EndingCode] = []

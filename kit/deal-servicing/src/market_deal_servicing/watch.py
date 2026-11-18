@@ -158,7 +158,7 @@ class DealWatch:
     def _observe(
         self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None,
     ) -> list[PaymentEvent | DisputeEvent]:
-        """Journal what one verified view shows; ``observed_at`` is a payment read's instant."""
+        """Journal what one accepted view shows; ``observed_at`` is a payment read's instant."""
         if not isinstance(view.outcome, Accepted):
             return []
         events: list[PaymentEvent | DisputeEvent] = []

@@ -1885,6 +1885,26 @@ Section 9A handoff:
 - `openspec/specs/settlement-servicing/architecture.md`'s "Initial missing mediation
   history permits the first filing only" is false now and stays for 12.9's D16 entry.
 
+Pre-closeout fix (88 F1): since D16, a saved dispute view can come from the mediation
+adapter's unverified initial-`404` read, so `seller.py`'s `_observed` and `_outstanding`
+docstrings no longer call a saved view "verified" or say the authority "holds no open
+case": they say "saved" and "accepted read", state the no-case condition as what the
+saved view shows, and leave what an accepted read assures to its adapter, naming no
+adapter's premise in the neutral kit. The fresh-context check's wording fixes went in
+with it: `unserviceable()`'s docstring says "saved views" for "observed", and, outside
+the plan, `watch.py`'s `_observe` docstring says "accepted view" for "verified view"
+(it predates the change; the watch journals any accepted view). Docstrings only; the kit
+is already at an unreleased 0.4.0, so no version step. Evidence: `make -C
+kit/deal-servicing test` (library integration and unit, mypy): 135 passed. `run
+test-before` not run: no test changed. `scripts/change-workflow run pre-commit
+serve-running-rate-deals`: "after-functional-change at 8df52d8fe: passed, exit 0" (no
+lock moved), "pre-commit-functional at 8df52d8fe: passed, exit 0" (every package's
+suite, among them VM storefront unit 1199 passed, 1 skipped, integration 634; bare
+metal 676), "pre-commit at 8df52d8fe: passed, exit 0". Fresh-context check: no blocking issue; fixed
+its clarity points (the `_observed` "Both" antecedent, "an open case read later", "no
+case known closed", "until a view … is saved") and the two wording points above;
+nothing declined.
+
 ## 9B. The scenario programs the payments double's further reservation
 
 Delivers the payments double's reservation control and its typed client, so a lane row
