@@ -203,6 +203,10 @@ class Listing(Base):
         onupdate=datetime.utcnow,
     )
 
+    title = Column(String(200), nullable=True)
+    description = Column(Text, nullable=True)
+    listing_metadata = Column(JSON(none_as_null=True), nullable=True)
+
     publisher = relationship("Publisher", back_populates="listings")
 
     __table_args__ = (

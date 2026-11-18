@@ -8,13 +8,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
 from market_identity import Identity
+from market_core.listing_details import supplied_listing_details
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from core_registry.api.api_key_auth import require_read_access, require_write_access
 from core_registry.api.filter_eval import FilterParamError, build_criteria, evaluate_all
 from core_registry.api.filter_spec import compute_etag, get_loaded_spec
-from core_registry.api.validate_routes import reject_retired_listing_shape
+from core_registry.api.validate_routes import listing_detail_errors, reject_retired_listing_shape
 from core_registry.api.publisher_auth import (
     authenticate_publisher_request,
     cached_response,
@@ -56,6 +57,11 @@ async def publish_listing(
     )
     require_write_access(request, db)
     reject_retired_listing_shape(body)
+    if errors := listing_detail_errors(body):
+        raise HTTPException(status_code=422, detail=errors)
+    details = supplied_listing_details(body)
+    if "metadata" in details:
+        details["listing_metadata"] = details.pop("metadata")
     signer = registry_authority_signer(request)
     replay = cached_response(authenticated, signer=signer)
     if replay is not None:
@@ -84,6 +90,7 @@ async def publish_listing(
             "demands": body.get("demands"),
             "max_duration_seconds": body.get("max_duration_seconds"),
             "oracle_address": body.get("oracle_address"),
+            **details,
         }
         for field, value in update_fields.items():
             if value is not None:
@@ -103,6 +110,7 @@ async def publish_listing(
             max_duration_seconds=body.get("max_duration_seconds"),
             oracle_address=body.get("oracle_address"),
             status=validate_order_status(body.get("status", "open")),
+            **details,
         )
         db.add(listing)
     db.flush()

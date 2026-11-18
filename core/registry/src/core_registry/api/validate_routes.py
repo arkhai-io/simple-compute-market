@@ -20,6 +20,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
+from market_core.listing_details import ListingDetails
+from pydantic import ValidationError as ModelValidationError
 
 from core_registry.api.filter_spec import get_loaded_spec
 from core_registry.api.validate_model import ValidatePublishRequest, ValidatePublishResponse
@@ -94,6 +96,17 @@ def reject_retired_listing_shape(body: Any) -> None:
                 ),
             },
         )
+
+
+def listing_detail_errors(body: dict[str, Any]) -> list[str]:
+    try:
+        ListingDetails.model_validate(body)
+    except ModelValidationError as exc:
+        return [
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors(include_url=False)
+        ]
+    return []
 
 
 def _forbidden_properties(schema: dict[str, Any]) -> list[str]:
@@ -173,10 +186,15 @@ async def validate_publish(
         "max_duration_seconds": body.max_duration_seconds,
     }
 
-    errors = [
+    details = {
+        field: value
+        for field in ListingDetails.model_fields
+        if (value := getattr(body, field)) is not None
+    }
+    errors = listing_detail_errors(details) + [
         f"{_format_path(err)}: {err.message}"
         for err in sorted(
-            _validator().iter_errors(candidate), key=lambda e: list(e.absolute_path)
+            _validator().iter_errors({**candidate, **details}), key=lambda e: list(e.absolute_path)
         )
     ]
 

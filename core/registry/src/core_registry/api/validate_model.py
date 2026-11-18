@@ -16,6 +16,9 @@ class ValidatePublishRequest(BaseModel):
     """
 
     listing_id: str = Field(description="Listing ID to validate")
+    title: Any = None
+    description: Any = None
+    metadata: Any = None
     storefront_url: str = Field(
         default="",
         description="Publisher's storefront URL. Required by listing_shape v4+.",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from market_core.listing_details import supplied_listing_details
+
 import json
 import logging
 from datetime import datetime
@@ -235,6 +237,11 @@ def order_to_dict(listing: Listing) -> dict[str, Any]:
     publisher = listing.publisher
     owners = active_identities(publisher) if publisher is not None else None
     return {
+        **supplied_listing_details({
+            "title": listing.title,
+            "description": listing.description,
+            "metadata": listing.listing_metadata,
+        }),
         "listing_id": listing.listing_id,
         "publisher_id": listing.publisher_id,
         "publisher_principals": (
