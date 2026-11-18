@@ -3,8 +3,8 @@
 ## Purpose
 
 Define how this repository runs the change workflow (`change-workflow`): how it
-provides each role the workflow asks of an adopting repository; the parts its
-validation has — local, Helm, the end-to-end pipeline, and CI — and what each
+provides each role the workflow asks of an adopting repository; the evidence kinds
+its validation has — local, Helm, the end-to-end pipeline, and CI — and what each
 builds and compares; the isolation of each change's Helm validation in a namespace
 of its own, under its change's image tag, and the memory those namespaces share;
 and its workflow values — its protected branches, the pre-push check its guarded
@@ -35,7 +35,7 @@ appear in that statement or in the configuration; the workflow's skills name non
 
 ### Requirement: MCW-v3tf Validation builds the packages it tests from the commit
 
-Each part of this repository's validation that builds MUST build the internal
+Each evidence kind of this repository's validation that builds MUST build the internal
 packages it tests from the commit under validation, never from wheels another branch
 left in the shared wheelhouse.
 
@@ -87,8 +87,8 @@ the owner.
 
 - **WHEN** the run validation dispatched is cancelled by a newer dispatch on the same
   branch
-- **THEN** the part produced no evidence for an environmental reason, which goes to
-  the owner with its remedy, and the part is rerun on the owner's word
+- **THEN** the kind has no evidence for an environmental reason, which goes to the
+  owner with its remedy, and the kind is gathered again on the owner's word
 
 ### Requirement: MCW-7hr1 An owed job is judged from the commit's own run
 
@@ -174,15 +174,15 @@ Helm, never as passed.
 
 #### Scenario: A deploy fails on volumes left by an earlier install
 
-- **WHEN** the Helm part finds a release volume that survived the uninstall, or a
+- **WHEN** the Helm kind finds a release volume that survived the uninstall, or a
   deploy fails on persistent state another commit wrote
-- **THEN** validation tells the owner the evidence and the remedy, reruns the part
+- **THEN** validation tells the owner the evidence and the remedy, gathers the kind
   as a new attempt once the owner has acted or named the action, and the failure is
   not a triage finding
 
 ### Requirement: MCW-fnuh Each Helm validation deploys into its change's namespace under its change's tag
 
-Validation's Helm part MUST deploy into a namespace of its change's own, derived
+Validation's Helm kind MUST deploy into a namespace of its change's own, derived
 from the change's name, and MUST NOT install, upgrade, remove, or scale a release or
 volume in any other namespace. The images it deploys MUST carry a tag fixed per
 change, so that two changes' builds never write one tag; it MUST NOT tag them by
@@ -190,14 +190,14 @@ commit.
 
 #### Scenario: Two changes are validated at once
 
-- **WHEN** two changes' Helm parts run at the same time on one cluster
+- **WHEN** two changes' Helm kinds are gathered at the same time on one cluster
 - **THEN** each builds its own images under its own tags, deploys into its own
   namespace, and runs its scenarios against its own release, and neither removes,
   replaces, or reaches the other's
 
 ### Requirement: MCW-a0hu A Helm deployment starts from removed volumes and recreated Secrets
 
-Before deploying, the Helm part MUST remove every volume the change's previous
+Before deploying, the Helm kind MUST remove every volume the change's previous
 deployment wrote, including the volumes created for its tests out of band, and MUST
 create the namespace's out-of-band Secrets. It SHOULD upgrade the release in place
 from zero replicas, and MAY uninstall and install it when the upgrade is refused,
@@ -218,7 +218,7 @@ saying so.
 
 ### Requirement: MCW-notv The Helm scenarios run in the namespace, which is kept and scaled down
 
-The Helm part's scenarios MUST run inside the namespace and MUST NOT depend on a
+The Helm kind's scenarios MUST run inside the namespace and MUST NOT depend on a
 local port. After the scenarios it MUST keep every pod's log and the namespace's
 events with the attempt's evidence, and MUST scale the namespace's workloads to
 zero.
@@ -240,14 +240,14 @@ warn and go on.
 #### Scenario: Usage cannot be measured
 
 - **WHEN** the cluster has no metrics source
-- **THEN** the preflight warns that no memory figure will be recorded, and the part
+- **THEN** the preflight warns that no memory figure will be recorded, and the kind
   goes on
 
 #### Scenario: No memory figure is recorded yet
 
 - **WHEN** a validation's preflight runs before any archive cleanup has recorded
   the memory a release needs
-- **THEN** it warns that the check was skipped, and the part goes on
+- **THEN** it warns that the check was skipped, and the kind goes on
 
 ### Requirement: MCW-epkd A pod failing for memory is classified from the evidence
 
@@ -505,7 +505,7 @@ runs MCW-zk52 and MCW-7hr1 tie to the commit under validation and whose baseline
 MCW-2lzw chooses by its ancestry, under `.snapshot/evidence/{commit}/`, `ci`'s per
 owed workflow; each attempt is a directory named by its UTC start time.
 
-#### Scenario: Validation runs this repository's parts
+#### Scenario: Validation runs this repository's kinds
 
 - **WHEN** validation of a commit runs in this repository with no kind waived, a
   complete section owing `(ci tests.yml)`, and no evidence present for its tree or
@@ -539,12 +539,15 @@ public-content checks under Git's hook contract, and which both the configuratio
 
 ## Evidence
 
-- This repository's hooks, validation parts, protected branches, inert paths,
-  models, and documents to load: `.agents/workflow.toml`.
+- This repository's hooks, evidence kinds, protected branches, inert paths, models,
+  and documents to load: `.agents/workflow.toml`; each kind's guide:
+  `.agents/evidence/`.
 - How this repository provides each role the configuration does not hold, and meets
   each of the engine's own assumptions: `README.md`, held complete, with the
-  configuration's commands, for the targets and paths the skills, step table, and
-  make fragment name by `scripts/tests/test_change_workflow_assumptions.py`;
+  configuration's commands, for the targets and paths the step table and make
+  fragment name by `scripts/tests/test_change_workflow_assumptions.py`, which holds
+  the skills to naming none but the README's table of exemptions, each owned by an
+  open change (CW-n8tr);
   rationale and current limits: `README.md`; the requirements' organization:
   `index.md`.
 - Validation: `make validate-local`, `make validate-helm`, and `make validate-ci`
@@ -557,7 +560,7 @@ public-content checks under Git's hook contract, and which both the configuratio
   targets; manual access: `make -C helm forward` and `make -C helm resume`;
   teardown: `make -C helm teardown`; the memory one release needs:
   `helm/validation-capacity.toml`, written by `make record-capacity`; two clones'
-  Helm parts at once: `make validate-parallel` (`scripts/validate_parallel.py`).
+  Helm kinds at once: `make validate-parallel` (`scripts/validate_parallel.py`).
 - The pre-push checks: `make pre-push`, running `scripts/check_public_content.py
   --pre-push` and `scripts/check_secrets.py --pre-push`, which the configuration's
   `pre-push` and `scripts/hooks/pre-push` both run.

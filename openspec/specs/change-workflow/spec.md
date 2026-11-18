@@ -45,8 +45,19 @@ same change.
   the owner's notes, or the orchestrating session's observations — and the triage
   file beside it once it is triaged.
 - **Waiver.** The owner's decision to let a change pass a guard the owner may waive,
-  or to leave a part of validation unrun; a step may recommend one only on a written
+  or to leave an evidence kind unassessed; a step may recommend one only on a written
   criterion, and only the owner takes it.
+- **Evidence kind.** One kind of evidence validation assesses, such as a local suite
+  or an end-to-end pipeline run, declared in the repository's configuration with its
+  requirement, its pattern keyed by a Git tree or a commit, and its commands
+  (CW-g4oz). Plain "kind" in a review's context is the review's kind, not this.
+- **Guide.** The prose that tells an agent how to read one evidence kind's evidence,
+  named by its configuration entry and restating none of the entry's fields
+  (CW-k7gd).
+- **Step hook.** A repository's `before-<step>` or `after-<step>` hook, run around a
+  step's session (CW-h3ks).
+- **Inputs directory.** A run's directory under its change's records, where the engine
+  writes `status.md` and keeps each hook's output for the session to read (CW-i9np).
 - **Default acceptance.** A review finding the default rule admits (CW-d5ac),
   accepted without the owner's stated disposition and reported in the triage's table.
 - **Revisit.** The owner's correction of a default acceptance, or of the advancing
@@ -806,9 +817,9 @@ after any step, or if `HEAD` is no longer the validated commit after any step, a
 MUST then collect no further evidence, though it MAY still stop what it started. It
 MUST NOT regenerate lockfiles or any other tracked file, `tasks.md` included.
 
-#### Scenario: A part leaves the worktree dirty
+#### Scenario: A kind leaves the worktree dirty
 
-- **WHEN** a validation part leaves an uncommitted change in the worktree
+- **WHEN** an evidence kind's command leaves an uncommitted change in the worktree
 - **THEN** validation fails, collects no further evidence, and still stops what it
   started
 
@@ -831,7 +842,7 @@ but those the owner waived (CW-e7lm), and each kind's evidence MUST describe the
 or commit under validation, as its pattern keys it (CW-t3ev), never another tree's or
 commit's build, run, or state, whoever wrote it (CW-p4rs).
 
-#### Scenario: A part finds only another commit's evidence
+#### Scenario: A kind finds only another commit's evidence
 
 - **WHEN** evidence of a kind exists only for an earlier commit's tree
 - **THEN** it is not evidence of the validated commit, and the kind is missing
@@ -854,13 +865,13 @@ the condition does not hold over the commits since the last validation that asse
 that kind, or when the commits since the last validation that ran it — or since the
 latest validation, when none ran it — include a merge (CW-g6th).
 
-#### Scenario: A part produces no evidence for an environmental reason
+#### Scenario: A kind has no evidence for an environmental reason
 
 - **WHEN** no failure is caused by the commit, and one kind has no evidence because
   its environment was unavailable
 - **THEN** the result is `inconclusive`, neither `passed` nor `failed`
 
-#### Scenario: Parts are waived for the rest of the change
+#### Scenario: Kinds are waived for the rest of the change
 
 - **WHEN** the change's log holds the owner's decision waiving the Helm and pipeline
   kinds on a condition that holds over the commits since those kinds were last
@@ -884,7 +895,7 @@ latest validation, when none ran it — include a merge (CW-g6th).
 ### Requirement: CW-a1nz An environmental failure goes to the owner with its remedy
 
 A failure diagnosed as environmental MUST be put to the repository owner with its
-remedy before the record is written, and its part rerun on the owner's word; every
+remedy before the record is written, and its kind gathered again on the owner's word; every
 attempt's evidence MUST be kept.
 
 #### Scenario: Validation needs an environmental remedy
@@ -944,7 +955,7 @@ be recorded in the intervention ledger.
 ### Requirement: CW-xg4v A validation failure is a finding, and missing evidence is not
 
 Each validation failure caused by the commit, or of unknown cause, MUST be presented
-as a finding, with its diagnosis checked against the logs; an `inconclusive` part
+as a finding, with its diagnosis checked against the logs; an `inconclusive` kind
 MUST be read as missing evidence, never as a finding.
 
 #### Scenario: Validation fails beside an implementation review
@@ -2723,7 +2734,7 @@ the same list again. A tracked file a cleanup writes MUST be committed on its ow
 - **THEN** the engine runs that kind's cleanup first, and the session reports what it
   removed
 
-#### Scenario: A part's cleanup finds nothing
+#### Scenario: A kind's cleanup finds nothing
 
 - **WHEN** the engine runs a kind's cleanup for a change that kind never validated
 - **THEN** the cleanup succeeds, removing nothing
@@ -2942,8 +2953,8 @@ MUST govern the reviews it names.
 ### Requirement: CW-q3dm Waivers are recommended and the owner's to take
 
 A step that meets a guard the owner may waive MAY recommend a waiver only when a
-written criterion holds — the commits differ from validated ones only in paths no part
-of validation exercises; a failure is a known environmental one diagnosed in an earlier
+written criterion holds — the commits differ from validated ones only in paths no
+evidence kind exercises; a failure is a known environmental one diagnosed in an earlier
 validation record of the change; a review and a validation name commits that differ
 only in records or documentation; or a decision made after a return to design is
 confined to one requirement's wording or a choice the design review weighed — and the
@@ -3094,7 +3105,7 @@ be read as absent. `check config` MUST run the same check alone.
 
 ### Requirement: CW-t5hz A missing required field refuses only the steps that need it
 
-A required field — `hooks.pre-commit-functional`, at least one validation part,
+A required field — `hooks.pre-commit-functional`, at least one evidence kind,
 `repository.protected-branches`, and the models of each step run unattended and of
 the orchestrating session — MUST, when absent, make the engine refuse a step that
 needs it before launching it, naming the field. An explicit empty value MUST count
@@ -3218,7 +3229,7 @@ records and the archive's own writes are exempt, where a requirement exempts the
 Before a commit changing any path outside the inert paths, a step MUST run
 `after-functional-change`, then `pre-commit-functional`, then `pre-commit`; before
 any other commit, `pre-commit` alone. Only implementation, triage, and the merge make
-functional commits. A tracked file a validation part's cleanup writes is the
+functional commits. A tracked file an evidence kind's cleanup writes is the
 repository's own record, made by its declared command, which answers for it:
 archive cleanup MUST commit it on its own, without the hooks (CW-ikmm).
 
@@ -3280,7 +3291,7 @@ other kind declared before it, and a started kind's `after` naming a `run` kind.
 - **THEN** `evidence` lists the `ci` kind twice, as `ci ci.yml` and `ci docker.yml`,
   and the gathering starts and collects each by that name
 
-#### Scenario: A long part is declared before a dispatched one
+#### Scenario: A long kind is declared before a dispatched one
 
 - **WHEN** the configuration declares `local`, a `run` kind, before `pipeline`, a
   `start` and `collect` kind, and neither names an `after`
@@ -3298,7 +3309,7 @@ other kind declared before it, and a started kind's `after` naming a `run` kind.
 - **WHEN** `local` declares `after = "helm"` and `helm` is declared below it
 - **THEN** every reader of the configuration refuses, naming `local`'s `after`
 
-#### Scenario: A repository has no Helm part
+#### Scenario: A repository has no Helm kind
 
 - **WHEN** a repository declares only a `local` kind
 - **THEN** validation assesses that kind alone, and its record names no other
@@ -3348,7 +3359,7 @@ MUST NOT be recorded; a clone's bootstrap MUST be recorded in its bootstrap stat
 - **THEN** the run's log line lists `pre-push` with its resolved command and exit
   status 1
 
-#### Scenario: Validation's Helm part fails
+#### Scenario: Validation's Helm kind fails
 
 - **WHEN** the gathering's `helm` kind exits 2
 - **THEN** the run's log line lists that kind with its resolved command and exit
@@ -3685,7 +3696,7 @@ network. An archive cleanup line with no `landing` MUST be read as checked.
 
 Archive cleanup run on a change whose index row already says `archived` MUST NOT
 release dependents, edit the row, or draft the pull request again. It MUST run the
-cleanup of every validation part, commit any tracked file that cleanup wrote, push,
+cleanup of every evidence kind, commit any tracked file that cleanup wrote, push,
 and copy the history, and MUST record what the cleanup reported by appending to the
 pull request's drafts.
 
@@ -3960,11 +3971,12 @@ Planning that settled a design question itself MUST recommend a waiver of anothe
 design review when a criterion of CW-q3dm holds, and the merge after the archive MUST
 NOT
 recommend waiving its validation after reconciling the change's own code. Validation
-MUST take a standing waiver of its parts only from the owner's decision in the
-workflow log, never from an instruction in its invocation. That decision MUST name the
-parts it waives, validation's plan MUST mark each waived part with the decision, and
-the engine MUST refuse to run or start a waived part unless validation states why the
-waiver's condition no longer holds. A standing waiver given as
+MUST take a standing waiver of its evidence kinds only from the owner's decision in
+the workflow log, never from an instruction in its invocation. That decision MUST
+name the kinds it waives; `evidence` MUST report each waived kind with the decision
+(CW-e2vd), the gathering MUST skip it unless a merge lapses the waiver, and `gather
+--kind` MUST refuse it without `--lapsed` (CW-g6th), and the validation record MUST say why the waiver's condition no
+longer holds when a waived kind is gathered (CW-e7lm). A standing waiver given as
 a triage's disposition MUST be that triage's ledger line, and one given outside a
 triage with no step's recommendation MUST stay in the workflow log alone. Archive
 cleanup MUST record the owner's waiver of its validation of a correction as a ledger
@@ -3972,17 +3984,16 @@ line under the closeout review's record, its finding `validated`.
 
 #### Scenario: A waiver given in a validation's invocation
 
-- **WHEN** validation is started with an argument asking it to skip a part
-- **THEN** it runs the part unless the change's workflow log holds the owner's
+- **WHEN** validation is started with an argument asking it to skip a kind
+- **THEN** it assesses the kind unless the change's workflow log holds the owner's
   decision waiving it
 
 #### Scenario: Validation passes over a standing waiver
 
-- **WHEN** the owner's decision in the workflow log waives the Helm part, and
-  validation starts that part without judging the waiver
-- **THEN** the engine refuses the run, naming the decision, and runs the part only
-  when validation gives the reason the waiver's condition lapsed, which the run's
-  record keeps
+- **WHEN** the owner's decision in the workflow log waives the Helm kind, and
+  validation runs `gather --kind helm` without judging the waiver
+- **THEN** the engine refuses, naming the decision, and gathers the kind only with
+  `--lapsed`, the validation record saying why the waiver's condition lapsed
 
 ### Requirement: CW-d1nj A repository injects into the workflow through its configuration and its guides
 
@@ -4310,11 +4321,18 @@ directs.
   of change names on the workflow targets: `scripts/completions/make-change.bash`.
 - The repository's configuration, its check, and its resolution:
   `.agents/workflow.toml`, read by `scripts/change_workflow/config.py`
-  (`scripts/change-workflow config`, `config load`, `config parts`, `check config`);
-  the hooks and validation's parts: `scripts/change-workflow run`, `check change`, and
-  `openspec` (`scripts/change_workflow/hooks.py`), the hook table in
+  (`scripts/change-workflow config`, `config load`, `check config`); the hooks:
+  `scripts/change-workflow run`, `check change`, and `openspec`
+  (`scripts/change_workflow/hooks.py`), the hook table in
   `scripts/change_workflow/graph.py`, and each session's invocations in
   `scripts/change_workflow/running.py`.
+- Validation's evidence kinds: which evidence a commit has, `scripts/change-workflow
+  evidence` (`scripts/change_workflow/evidence.py`); gathering what is missing, or a
+  new attempt of one kind, `scripts/change-workflow gather`
+  (`scripts/change_workflow/gather.py`); each kind's guide, named by its configuration
+  entry.
+- The step hooks around a session and its inputs directory: `scripts/change-workflow
+  run before|after <step> <change>` (`scripts/change_workflow/around.py`).
 - A change's closing checks: `scripts/change-workflow run pre-commit`, which `make
   check-change` runs, the repository's own being `make check-repository`
   (`scripts/check_change.py`); its task list's sections: `make check-tasks`
@@ -4335,7 +4353,7 @@ directs.
   the command's subcommands and exit statuses: `test_change_workflow_cli.py` and
   `test_change_workflow_command.py`; the roles and assumptions an adopting
   repository's statement must cover: `test_change_workflow_assumptions.py`.
-- This repository's validation parts, its Helm validation namespace, and its
+- This repository's evidence kinds, its Helm validation namespace, and its
   capacity record: `market-change-workflow`'s Evidence.
 
 The skills are instructions to an agent; that a session follows them is shown by the

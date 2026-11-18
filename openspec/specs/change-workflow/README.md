@@ -2362,7 +2362,9 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
 - The diagrams of the engine's parts and of a step run's life draw neither the
   evidence modules nor the actions and hooks around a step, and the engine's parts
   still label the configuration's validation entries as parts; redrawing them in
-  draw.io is unowned.
+  draw.io is
+  [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md),
+  which redraws the engine's boundary.
 - The engine's hook table holds an unattended step to the hooks it may run, but the
   marker naming the step is the step's own environment, which it could forge; making
   that impossible needs credentials the step does not hold, which
