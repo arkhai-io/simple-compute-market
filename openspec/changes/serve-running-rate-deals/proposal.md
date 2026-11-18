@@ -78,8 +78,11 @@ it. It takes the servicing slice of `converge-ongoing-compute-leases`.
   notice, the maximum term ending with `returned`, and the buyer watchdog's
   delivered-deal cases with the storefront paused, each reaching its instants by
   setting lane time. The watchdog cases run the shipped `buy` in the harness's process,
-  its probe answering and its waits stepped as the harness programs them through each
-  buyer CLI's own factories, so nothing test-only ships with the CLI. Lane compositions declare `[charged, returned]`. Each run is
+  its probe answering and every wait it makes stepped as the harness programs them through
+  each buyer CLI's own factories, so nothing test-only ships with the CLI. For that the VM
+  buyer runs its commit and settlement waits on the clock its `wait_clock` factory gives,
+  and bare metal's `watchdog_probe` takes the access the storefront disclosed, as VM's
+  takes its delivery's connection details. Lane compositions declare `[charged, returned]`. Each run is
   labelled lane-double evidence, never live; the Compose lanes are this change's
   evidence.
 
@@ -119,6 +122,7 @@ None.
 - Configuration: interval keys for `deal-servicing` and `delivery-recovery`, defaulting to today's intervals; released keys keep their meaning.
 - Operations: loop names change in both storefronts; lane stages and operator documentation follow.
 - Buyer behaviour: the default buyer's refusals are unchanged; a deal nobody filed on reads with an accepted dispute outcome.
+- Buyer CLIs: VM's `buy` runs its commit and settlement waits on its `wait_clock` factory's clock rather than the process's monotonic clock and `asyncio.sleep`; bare metal's `watchdog_probe` factory takes the disclosed access from its callers rather than reading it itself (D20). Neither changes what a buyer sees.
 - Packages beyond the compute family: `kit/arkhai-mediation`'s read of an Agreement with no record and its fake (D16); `kit/arkhai-payments`' engine reservation method, `tools/payments-lane-double`'s reservation control and second payer, and `tools/lane-double-controls`' route and client (D17). `kit/arkhai-mediation` takes 0.3.1 and the two lane tools a patch step each; `kit/arkhai-payments` is already one step past the development branch. No released version is changed.
 
 ## Dependencies and Related Changes
@@ -127,7 +131,7 @@ None.
 - `switch-on-hosted-per-period-vm` follows it.
 - Builds on `spot-deals-through-arkhai-payments` (archived): the refusal it lifts (D12–D14), the payments transaction adapter (D11), rate `authorize` (D4), the seller's notice and `deals preempt` (D6) and the buyer's `end` and watchdog (D6a).
 - Work taken from `converge-ongoing-compute-leases` (task numbers in its `tasks.md`): 1.3 and 3.1 (rate servicing in both compositions, which the code already binds but for VM's stage), 2.1 (the physical fact and the simple financial fact *ended* reads), 2.2's per-deal step order as a helper (not the whole-page loop), 2.3 (stop-cause classification in both domains, without timers), 2.4 (reduced to *ended* and *ending* with its codes), 2.5 (stop to teardown, authority outage and restart in both domains, without timers or the runner), 3.5 (startup coherence and withdrawal, as a report), 4.1 (matrix rows 0, 6, 7 and 9 in both lanes, without setup parts or timer variants), 4.3 (evidence labels); the loop-journal allowance in its `settlement-servicing` delta; and the two items its campaign-index row carries from spot: the refused deal's next commit, and the watchdog's delivered-deal cases. Also taken, and named in convergence's row Notes: respondent discovery, which its D3 listed as a composition-supplied step, and the four-loop layout its single loop will run beside.
-- Closes the campaign index's unowned row "`VmSettlementComposition` builds no payments seller stage" (D11).
+- Closes the campaign index's unowned rows "`VmSettlementComposition` builds no payments seller stage" (D11) and "The VM buyer's settlement wait has no clock seam" (D20).
 
 ## Permanent documentation impact
 
@@ -157,9 +161,9 @@ None.
 - D17: `test-compatibility`'s spec ("Lane double controls are typed deterministic steps", "Rate deals are qualified in both compute lanes on lane time"); `tools/payments-lane-double/README.md` (its controls and claims), `tools/lane-double-controls/README.md` (the route), `kit/arkhai-payments/README.md` (the engine's reservation method beside `advance`); `docs/development/TESTING.md`, "Private Service Dependencies" (the reservation control).
 - D18: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" (the watchdog cases with the storefront paused, its record of the stop made on the buyer's hint).
 - D19: `docs/development/TESTING.md`, "The canonical compute deal" — the rate rows and watchdog cases are Compose-lane, lane-double evidence.
-- D20: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" — the watchdog cases run the shipped `buy` in the harness's process with its probe and wait clock programmed; `e2e-tests/README.md` (the watchdog modules); `docs/guidance/engineering/test-doubles.md` for the principle below.
+- D20: `test-compatibility`'s spec ("The buyer's watchdog is qualified against a delivered deal"); `docs/development/TESTING.md`, "The canonical compute deal" — the watchdog cases run the shipped `buy` in the harness's process with its probe and wait clock programmed; `e2e-tests/README.md` (the watchdog modules); `openspec/specs/buyer-orchestration/architecture.md`, "The buyer's watchdog" (VM's commit and settlement waits on the command's wait clock; bare metal's probe built from the access its caller read); `docs/guidance/engineering/system-tests.md` for the principle below.
 - `docs/guidance/engineering/test-doubles.md`, "A double mirrors its producer" — a producer's scheduled actions, such as reserving ahead, are answers a scenario programs like its rulings and job outcomes; a double stays externally programmable, gaining no internal behaviour a scenario could program (the owner's principle, stated in this design).
-- `docs/guidance/engineering/test-doubles.md` — a CLI used by an end-to-end test can have its behavior controlled using the same principles as we apply to services. A mock layer can override its outbound IO and time. Unlike with a service though, these can be manipulated in the harness's process so that the test functionality need not be shipped with the CLI as it is with the service (the owner's principle, stated in this design, D20).
+- `docs/guidance/engineering/system-tests.md`, "A system test reaches services only through their interfaces", as a qualification of that rule (75 F4) — a CLI used by an end-to-end test can have its behavior controlled using the same principles as we apply to services. A mock layer can override its outbound IO and time. Unlike with a service though, these can be manipulated in the harness's process so that the test functionality need not be shipped with the CLI as it is with the service (the owner's principle, stated in this design, D20).
 - `docs/guidance/repository/deterministic-tests.md`, "Pause the loop, then advance it explicitly" — a local end-to-end test holds a party's time-based signals by pausing it, never by stopping it; external-topology tests handle time differently (the owner's principle, stated in this design).
 - `docs/guidance/workflow/changes.md`, "Defects found during a change" — a change taking on work another change owns names the move in its own proposal and in that change's row Notes (the owner's principle, stated in this design).
 - `docs/guidance/repository/package-versions.md`, "Compatibility is owed to what a release has shipped" — a released client or CLI is not owed compatibility with a later storefront, provided the client shipped with that storefront reads everything it serves; backwards client compatibility stays supported through the staged deprecation pattern of `docs/guidance/engineering/versioning.md`, but is not owed (the owner's principle, stated in this design).

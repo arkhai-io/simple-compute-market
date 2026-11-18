@@ -128,12 +128,12 @@ Each compute lane MUST run, each on its own deal, under the shipped presets with
 - **THEN** the rate part ends with `returned`, the storefront classifies the end as the term end, not exhaustion, and tears the deal down
 
 ### Requirement: The buyer's watchdog is qualified against a delivered deal
-Each compute lane MUST run the buyer's watchdog against a delivered rate deal: the shipped `buy` with the opt-in monitoring from `available`; a killed command whose read shows `unmonitored` once lane time passes its last probe's staleness bound; the resumed run whose read shows `monitored`; and the disclosed endpoint ceasing to accept connections while the storefront's loops are paused, which yields one buyer stop. The shipped `buy`, its resume and the buyer's read MUST run in the harness's process, the deal's probe answering and the watchdog's waits stepped as the harness programs them through each buyer CLI's own probe and wait-clock factories, so that no probe leaves the harness, no case waits on real time, and nothing test-only ships with the CLI. Staleness MUST be reached by setting lane time. Each case MUST be labelled lane-double evidence.
+Each compute lane MUST run the buyer's watchdog against a delivered rate deal: the shipped `buy` with the opt-in monitoring from `available`; a killed command whose read shows `unmonitored` once lane time passes its last probe's staleness bound; the resumed run whose read shows `monitored`; and the disclosed endpoint ceasing to accept connections while the storefront's loops are paused, which yields one buyer stop. The shipped `buy`, its resume and the buyer's read MUST run in the harness's process, the deal's probe answering and every wait `buy` makes — its commit, its wait for the deal to become available and the watchdog's — stepped as the harness programs them through each buyer CLI's own probe and wait-clock factories, so that no probe leaves the harness, no case waits on real time, and nothing test-only ships with the CLI. Staleness MUST be reached by setting lane time. Each case MUST be labelled lane-double evidence.
 
 #### Scenario: A watched purchase is monitored, goes stale when killed, and resumes
-- **GIVEN** a delivered rate deal whose `buy` runs in the harness's process with the watchdog opted in from `available`, its probe programmed to answer reachable
-- **WHEN** the harness steps one probe interval
-- **THEN** the buyer's read shows `monitored`, and the probe was built for the endpoint the deal disclosed
+- **GIVEN** a rate deal whose `buy` runs in the harness's process with the watchdog opted in, waiting at the harness's gate for the deal to become available, its probe programmed to answer reachable
+- **WHEN** the scenario sets lane time to the Agreement's start and steps delivery recovery, and the harness releases `buy`'s wait and steps one probe interval
+- **THEN** the same command enters its watchdog, the buyer's read shows `monitored`, and the probe was built for the endpoint the deal disclosed
 - **AND** after the harness interrupts the command and sets lane time past one interval, the probe timeout and the grace after its last probe, the read shows `unmonitored`
 - **AND** after the buyer resumes the run and the harness steps one probe interval, the read shows `monitored`
 

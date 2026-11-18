@@ -2454,7 +2454,7 @@ campaign index currency.
       implementation.
 - [ ] 12.2 Import placement: confirm every import this change added is at module level, or
       return the change to implementation.
-- [ ] 12.3 Documentation compliance: re-check D1–D19 against
+- [ ] 12.3 Documentation compliance: re-check D1–D20 against
       `docs/guidance/workflow/openspec-documentation.md` and `openspec/README.md`,
       "Documentation placement", and that every permanent document written describes the
       current state.
@@ -2468,7 +2468,8 @@ campaign index currency.
       still differ"; name the edit in the design-promotion record.
 - [ ] 12.6 Campaign index currency: update this change's row in
       `openspec/changes/README.md`; remove the unowned row "`VmSettlementComposition`
-      builds no payments seller stage" (D11); run `make check-change-index`.
+      builds no payments seller stage" (D11) and "The VM buyer's settlement wait has no
+      clock seam" (D20, 75 F1); run `make check-change-index`.
 - [ ] 12.7 Packaging: run `make check-packaging`, then `make check-architecture-change
       CHANGE=serve-running-rate-deals`; resolve every failure or owned exception.
 - [ ] 12.8 End-to-end pipeline: dispatch `make run-e2e` at the closeout's code and collect
@@ -2567,6 +2568,14 @@ campaign index currency.
         watchdog cases with the storefront paused; the rate rows and watchdog cases as
         Compose-lane, lane-double evidence), beside the `test-compatibility` spec by the
         archive.
+      - D20 (75 F5): the `test-compatibility` spec, by the archive;
+        `docs/development/TESTING.md`, "The canonical compute deal" (the watchdog cases
+        running the shipped `buy` in the harness's process, its probe and every wait it
+        makes programmed); `e2e-tests/README.md` (the watchdog modules);
+        `e2e-tests/tests/e2e/roles/buyer_cli.py` (its note naming the in-process watchdog
+        cases as the exception and why); `openspec/specs/buyer-orchestration/architecture.md`,
+        "The buyer's watchdog" (VM's commit and settlement waits on the command's wait
+        clock; bare metal's probe built from the access its caller read).
       - The owner's principles: `docs/guidance/workflow/changes.md`, "Defects found during
         a change" (a change taking on another change's work names the move in its proposal
         and that change's row Notes); `docs/guidance/repository/package-versions.md`,
@@ -2578,12 +2587,17 @@ campaign index currency.
         program); `docs/guidance/repository/deterministic-tests.md`, "Pause the loop, then
         advance it explicitly" (a local end-to-end test holds a party's time-based signals
         by pausing it, never by stopping it; external-topology tests handle time
-        differently).
+        differently); `docs/guidance/engineering/system-tests.md`, "A system test reaches
+        services only through their interfaces", as a qualification of that rule (a CLI
+        used by an end-to-end test is controlled by the principles applied to services, a
+        mock layer overriding its outbound IO and time, applied in the harness's process
+        so no test functionality ships with the CLI; D20, 75 F4).
       Run `make check-spec-index CHANGE=serve-running-rate-deals`; no touched capability
       has an `index.md`, and `openspec/specs/README.md` needs no row.
-- [ ] 12.10 Guidance placement: read the four guidance paragraphs promoted in 12.9 against
-      the layer test — `test-doubles.md`'s in the engineering layer, the other three in
-      the repository's and the workflow's — then run `make check-guidance`.
+- [ ] 12.10 Guidance placement: read the five guidance paragraphs promoted in 12.9 against
+      the layer test — `test-doubles.md`'s and `system-tests.md`'s in the engineering
+      layer, the other three in the repository's and the workflow's — then run
+      `make check-guidance`.
 - [ ] 12.11 Documentation citations: run `make check-doc-citations
       CHANGE=serve-running-rate-deals` and resolve every match, then
       `scripts/change-workflow openspec validate serve-running-rate-deals --strict`.

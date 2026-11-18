@@ -637,14 +637,35 @@ harness replaces each buyer CLI's two composition factories, VM's in
 
 - `watchdog_probe`: a probe answering as the harness programs it, reachable or not, with
   no network call. It records the endpoint the deal disclosed, so each case checks the
-  probe was built for the deal's own access. Each fake matches its domain's signature.
-- `wait_clock`: a `WaitClock` whose `now` is lane time and whose sleep, once the
-  watchdog runs, is a gate the harness steps one interval at a time; an interrupt
-  delivered at the gate is the killed command. Bare metal's clock also paces `buy`'s
-  commit and availability waits, which pass until the watchdog runs.
+  probe was built for the deal's own access. Each fake matches its domain's signature,
+  and in both domains that signature carries the disclosed endpoint: VM's factory takes
+  its delivery's connection details, and bare metal's takes the access its callers,
+  `buy`'s delivery-and-watch step and its resume, read from the storefront before
+  building the probe, where today the factory reads it itself. The harness therefore
+  replaces only the probe's outbound connection; the buyer's own read of the access runs
+  in the lane.
+- `wait_clock`: a `WaitClock` whose `now` is lane time and whose sleep is a gate the
+  harness steps one interval at a time, its `monotonic` advancing by each interval
+  stepped. It paces every wait `buy` makes, not only the watchdog's: bare metal's commit
+  and availability waits already run on it, and VM's commit loop and settlement wait run
+  on it too, where today they read the process's monotonic clock and `asyncio.sleep`
+  (the settlement wait is given the clock's `sleep` and `monotonic`). A fresh `buy`
+  waiting for its deal is parked at the gate while the scenario sets lane time to the
+  Agreement's start and steps `delivery-recovery`; the harness then releases the wait,
+  the poll sees the deal available, and the same command enters its watchdog. An
+  interrupt delivered at the gate is the killed command.
 
-On one deal the cases run in order: `buy` from `available` and a passing probe, the read
-`monitored`; the interrupt, lane time set past the last probe's staleness bound, the
+The in-process buyer shares the harness's process, so the harness keeps that shared
+state coherent. Its buyer configuration states no `[time]` table, so the `market`
+callback installs no source and the buyer reads the harness's installed lane-time source,
+as its clock's `now` does. Each watchdog module scopes the buyer's environment (its
+`XDG_*`, `HOME` and credential variables) with pytest's `monkeypatch`, undone when the
+module ends. A read runs only while `buy` is parked at the gate, so `CliRunner`'s
+process-wide stream swaps nest and neither command's output reaches the other's capture.
+
+On one deal the cases run in order: `buy` waiting for delivery at the gate, the deal
+delivered and the wait released, the watchdog started from `available` and a passing
+probe, the read `monitored`; the interrupt, lane time set past the last probe's staleness bound, the
 read `unmonitored`; `buy --from` and a passing probe, the read `monitored`; then, with
 the storefront's loops paused (D18), the probe answering unreachable for the threshold
 of stepped intervals, one payer stop accepted at the payments double, and `buy` exiting
@@ -681,6 +702,25 @@ Rejected:
   decoupled from these tests;
 - a new injection point in each CLI: the two factories are already its composition seam,
   and replacing them, as the precedent test does, ships nothing.
+
+*Settled at the design review's triage (75 F1, F2, F3).* Every wait of `buy` runs on the
+command's `wait_clock`, VM's commit and settlement waits included, which closes the
+campaign index's unowned row "The VM buyer's settlement wait has no clock seam" and makes
+the two buyers' waits alike; and bare metal's `watchdog_probe` takes the disclosed
+access, as VM's takes its connection details. Both are small changes to shipped buyer
+code: neither adds a factory or changes what a buyer sees, and each is proven at the
+buyer's own application integration (VM's fresh `buy` waiting for delivery on an injected
+clock; bare metal's probe built from the access its caller read) beside the lane. The
+in-process buyer's shared-state rules are 75 F3's. Rejected with them: the fresh `buy`
+running out of its wait and `buy --from` starting the watchdog, as VM's application test
+does, which needs no production change but leaves the lane never showing a fresh `buy`
+enter its watchdog; a bounded real-time wait before the watchdog, which `system-tests.md`,
+"A scenario is a sequence of state changes", rules out; narrowing bare metal's check to
+the probe's run with the access read in a separate assertion, which never runs bare
+metal's own read of the access; patching `tcp_reachable` at each CLI's imported name,
+which `test-seams.md` rules out beside a seam; and the harness restoring its own time
+source after each in-process command, a step to forget that leaves the buyer's file
+source installed while `buy` is parked.
 
 ## Open Questions
 
