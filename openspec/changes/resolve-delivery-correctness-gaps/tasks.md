@@ -625,13 +625,23 @@ allocation for one owner receives that owner's lease"). Touches
 tests; depends on section 1, which owns `arkhai-compute-provisioning`'s bump, so
 this section bumps nothing and refreshes no lock for it.
 
-- [ ] 5.1 In `relays/allocator.py`, `allocate_in_session` reads the owner's active
+- [x] 5.1 In `relays/allocator.py`, `allocate_in_session` reads the owner's active
   lease after `db.get(Relay, …, with_for_update=True, populate_existing=True)` and
   before refusing a missing or disabled relay, returning it when held; in the claim
   loop, on `IntegrityError` it reads the owner's active lease again and returns it
   when one exists, moving to the next port only otherwise. Restate the docstring
   and the index comment in `relays/db.py` to the rule. Verify with 5.2.
-- [ ] 5.2 Library integration
+  Done: the owner read is one method, `_owner_lease`, called after the relay's
+  locked read and again in the claim loop's `IntegrityError` branch, and by
+  `find_active_lease`, whose copy of the query it replaces. It is a method of
+  the allocator so that 5.2's test-only subclass can stand for a read taken
+  before another claim committed, the simulation D2 names. The docstring
+  states that the relay's lock serializes allocations on one relay and the
+  constraints decide the rest, why the two constraints are told apart by the
+  read, and that a relay that does not exist is refused with the same
+  `RelayWindowExhaustedError`; the `uq_relay_port_leases_active_owner` comment
+  states what the allocator does on its failure.
+- [x] 5.2 Library integration
   (`provisioning/compute/tests/integration/test_relay_port_allocator.py`): the
   statement order rendered for the PostgreSQL dialect shows the owner read after the
   relay's `FOR UPDATE`, as `test_the_relay_is_read_for_update_before_a_port_is_claimed`
@@ -641,10 +651,53 @@ this section bumps nothing and refreshes no lock for it.
   exhaustion only when the window is full; an owner holding a lease on a disabled
   relay receives it and no `RelayDisabledError` (the existing drain scenario, kept
   passing).
-- [ ] 5.3 Verification: `uv run pytest provisioning/compute/tests` passes, and
+  Done: library integration, 37 passed (the module). Two new, in
+  `TestAConcurrentAllocationForOneOwner`: the owner read, matched by its
+  `owner_id =` predicate as rendered for PostgreSQL, comes after `relays … FOR
+  UPDATE`; with the owner's lease committed on relay B and a first owner read
+  made to miss, an allocation on relay A's two-port window returns that lease,
+  claims nothing on A, and raises no exhaustion (its claim fails the
+  one-active-lease index, so without the second read it would run the window to
+  `RelayWindowExhaustedError`). The existing
+  `test_a_stale_port_read_retries_without_rolling_back_the_caller` now runs on a
+  two-port window: its stale scan naming another owner's port moves to the
+  next free one, and only the window full then refuses. The drain scenario,
+  `test_an_owner_holding_a_lease_receives_it_again`, passes unchanged. Not
+  shown: a real interleaving on PostgreSQL (design, Open Questions); the
+  subclass simulates the missed read in one session, since every caller holds
+  SQLite's writer slot and so serializes the claims. The module's schema,
+  the active-owner index the second test relies on included, is built from the
+  ORM metadata by `tests/integration/conftest.py`, not the relays' migration
+  chain (which creates the same index): the unowned gap section 4 recorded.
+- [x] 5.3 Verification: `uv run pytest provisioning/compute/tests` passes, and
   `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
   passes. End-to-end: no lane runs a relay-backed pool, so no scenario exercises
   allocation; none is owed.
+  Done: `make -C provisioning/compute test` 596 passed before the fresh-context
+  fixes (a third new test then folded into an existing one; the module 37
+  after); `pre-commit` passed over the fixed tree, every suite with it
+  (`after-functional-change`, `pre-commit-functional` and `pre-commit` at
+  `7bd6ff327`). End-to-end confirmed as planned: no lane runs a relay-backed pool
+  (`e2e_vm_real_provisioning` and `e2e_bare_metal_real_provisioning` exercise
+  relayed delivery and run in no lane); none is owed.
+
+Section 5 notes (handoff):
+
+- No package bump: `arkhai-compute-provisioning` is at 0.29.0 from section 1,
+  and the change bumps it once (D10); no lock moves.
+- The reordering changes no outcome for an owner already holding a lease: it
+  is returned before the relay's absence or disablement is judged, as the
+  earlier unlocked read returned it.
+- For triage or closeout: the delta's "A concurrent allocation for one owner
+  receives that owner's lease" says `RelayWindowExhaustedError` MUST be raised
+  only when every port in the window is held or quarantined, while the
+  allocator also raises it for a relay that does not exist
+  (`test_allocating_against_an_absent_relay_fails`). The section changes no
+  specification; the wording is the round's to settle.
+- The fresh-context check's findings were taken: the docstring's race
+  sentence and the missing-relay case, a test docstring's "Today's", a third
+  new test that repeated the stale-scan test (folded into it), the conftest's
+  metadata schema (recorded above), and three evidence claims.
 
 ## 6. A relayed delivery's relay is its declaration's pool's
 

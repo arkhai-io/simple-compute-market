@@ -182,35 +182,33 @@ class RelayPortAllocator:
         forward turns a slow leak into an outage sooner. A port still in its
         quarantine is not free.
 
-        The unique constraint is the arbiter, not the read that precedes it.
-        Two allocations racing on one relay both see the same free port; the
-        second flush fails and retries against a set that now excludes it.
-        Savepoints contain a uniqueness conflict without rolling back the
-        caller's other writes. The caller owns the outer write transaction and
-        its commit; fulfillment acceptance reserves SQLite's writer slot before
-        calling this method.
+        The relay's lock serializes allocations on one relay, and the unique
+        constraints decide what that lock does not cover: a port scan that is
+        stale, and a claim for the same owner on another relay. Savepoints
+        contain a uniqueness conflict without rolling back the caller's other
+        writes. The caller owns the outer write transaction and its commit;
+        fulfillment acceptance reserves SQLite's writer slot before calling
+        this method.
+
+        Idempotent for one owner, so retrying dispatch never orphans a port:
+        an owner already holding an active lease receives it. The owner is read
+        after the relay's lock, so an allocation that waited on that lock sees
+        a lease committed for the same owner meanwhile. A claim that fails a
+        uniqueness constraint reads the owner again before trying another
+        port, because the failure may be the one-active-lease-per-owner index
+        rather than the port's: a concurrent claim for the owner on another
+        relay, which this relay's lock does not serialize, committed its
+        lease. That read, not a constraint name, which SQLite and PostgreSQL
+        report differently, tells the two apart, so for a relay that exists
+        ``RelayWindowExhaustedError`` means every port in its window is held or
+        quarantined. A relay that does not exist is refused with the same
+        error, since no port can be leased on it.
 
         A new owner is refused on a disabled relay with ``RelayDisabledError``.
         An owner already holding a lease receives it whether or not the relay
         is disabled, since it is the same lease, and its delivery is among the
         work a drain lets finish.
         """
-        # Idempotent for one owner: retrying dispatch must not orphan a port.
-        existing = (
-            db.query(RelayPortLease)
-            .filter(
-                RelayPortLease.owner_kind == owner_kind,
-                RelayPortLease.owner_id == owner_id,
-                RelayPortLease.released_at.is_(None),
-            )
-            .one_or_none()
-        )
-        if existing is not None:
-            return PortLease(
-                id=existing.id,
-                relay_id=existing.relay_id,
-                remote_port=existing.remote_port,
-            )
         # Locked, so a disable cannot commit between this read and the claim's
         # commit: on PostgreSQL the disable waits for this transaction, and a
         # disable already committed is seen here. An unlocked read could see
@@ -221,6 +219,9 @@ class RelayPortAllocator:
         # the lock; there the caller holds the database's one writer slot, so
         # the disable's write waits all the same.
         relay = db.get(Relay, relay_id, with_for_update=True, populate_existing=True)
+        held = self._owner_lease(db, owner_kind=owner_kind, owner_id=owner_id)
+        if held is not None:
+            return held
         if relay is None:
             raise RelayWindowExhaustedError(
                 f"relay '{relay_id}' does not exist, so no port can be leased on it"
@@ -252,9 +253,29 @@ class RelayPortAllocator:
                     )
                     db.flush()
             except IntegrityError:
+                held = self._owner_lease(db, owner_kind=owner_kind, owner_id=owner_id)
+                if held is not None:
+                    return held
                 continue
             return PortLease(id=lease.id, relay_id=relay_id, remote_port=port)
         raise self._exhausted(relay)
+
+    def _owner_lease(
+        self, db: Session, *, owner_kind: str, owner_id: str
+    ) -> PortLease | None:
+        """The active lease the owner holds, read in the caller's transaction."""
+        row = (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.owner_kind == owner_kind,
+                RelayPortLease.owner_id == owner_id,
+                RelayPortLease.released_at.is_(None),
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return PortLease(id=row.id, relay_id=row.relay_id, remote_port=row.remote_port)
 
     @staticmethod
     def _claim(
@@ -352,20 +373,7 @@ class RelayPortAllocator:
         describes it.
         """
         with self._session_factory() as db:
-            row = (
-                db.query(RelayPortLease)
-                .filter(
-                    RelayPortLease.owner_kind == owner_kind,
-                    RelayPortLease.owner_id == owner_id,
-                    RelayPortLease.released_at.is_(None),
-                )
-                .one_or_none()
-            )
-            if row is None:
-                return None
-            return PortLease(
-                id=row.id, relay_id=row.relay_id, remote_port=row.remote_port
-            )
+            return self._owner_lease(db, owner_kind=owner_kind, owner_id=owner_id)
 
     def release(self, *, owner_kind: str, owner_id: str) -> int:
         """Release every lease held by one owner. Returns how many were released.
