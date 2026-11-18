@@ -6,13 +6,12 @@ not parsed JSON, so exporting evidence never reconstructs signed bytes.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Literal
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Annotated, Literal
 
 from market_identity import AuthenticatedRequest, AuthenticatedResponse, Identity
-from pydantic import (
-    Base64Bytes, BaseModel, ConfigDict, Field, JsonValue, SerializerFunctionWrapHandler, model_serializer,
-    model_validator,
-)
+from pydantic import Base64Bytes, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 Reference = Annotated[str, Field(min_length=1)]
 Instant = Annotated[int, Field(strict=True, ge=0)]
@@ -21,32 +20,21 @@ CommandKind = Literal["start", "stop", "notice", "reverse", "dispute", "delivery
 PaymentEventKind = Literal["start", "stop", "stop_request", "collect", "reverse", "award", "return", "extend", "lift"]
 DisputeEventKind = Literal["filed", "appended", "ruled", "closed"]
 LifecycleState = Literal["unstarted", "running", "ending", "ended", "repair_required"]
+# Why a deal with a recorded end is still ending rather than ended.
+EndingCode = Literal["release_pending", "payment_running", "case_open", "case_unobserved"]
+
+#: Each ending code's text. Every reader renders these words, so a code added
+#: to ``EndingCode`` arrives with its text and no client interprets codes itself.
+ENDING_TEXT: Mapping[EndingCode, str] = MappingProxyType({
+    "release_pending": "The resource is not yet proven released.",
+    "payment_running": "A payment part has no verified stop or end at the payment authority.",
+    "case_open": "A case is open at the dispute authority.",
+    "case_unobserved": "The dispute authority has not yet been observed, so no case is verified closed.",
+})
 
 
 class WireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class ReleasedReadShape(WireModel):
-    """A read model whose fields added since release 0.1.0 are omitted at their defaults.
-
-    Release 0.1.0's models forbid unknown fields, and its clients validate a
-    seller's lifecycle read and list with them. A once-only deal carries no
-    rate observation and no stop treatment, so leaving those fields out of the
-    dump keeps its read valid for those clients, while a reader of this version
-    restores the omitted defaults.
-    """
-
-    _omitted_at_default: ClassVar[frozenset[str]] = frozenset()
-
-    @model_serializer(mode="wrap")
-    def _released_shape(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        data = handler(self)
-        for name in self._omitted_at_default:
-            if name in data and getattr(self, name) == type(self).model_fields[name].get_default(
-                    call_default_factory=True):
-                del data[name]
-        return dict(data)
 
 
 class LifecycleCommand(WireModel):
@@ -67,9 +55,7 @@ class EvidenceItem(WireModel):
     context: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-class PaymentEvent(ReleasedReadShape):
-    _omitted_at_default = frozenset({"settles_through"})
-
+class PaymentEvent(WireModel):
     negotiation_id: Reference
     commitment_ref: Reference
     part: Reference
@@ -244,9 +230,7 @@ class PaymentPartObservation(WireModel):
     evidence_ref: Reference
 
 
-class AuthorityView(ReleasedReadShape):
-    _omitted_at_default = frozenset({"parts"})
-
+class AuthorityView(WireModel):
     outcome: LifecycleOutcome
     # None means the adapter cannot supply a complete payout observation.
     # Completed parts use their first verified completion observation, not a forecast.
@@ -307,20 +291,33 @@ class LifecycleRead(WireModel):
     filings: list[FilingProgress] = Field(default_factory=list)
 
 
-class DealSummary(ReleasedReadShape):
-    _omitted_at_default = frozenset({"parts"})
-
+class DealSummary(WireModel):
     negotiation_id: Reference
     commitment_ref: Reference
     domain: Reference
     mechanism: Reference
     entitlements: dict[str, JsonValue]
     state: LifecycleState
+    # Each condition still outstanding while the deal is ending.
+    ending: list[EndingCode] = Field(default_factory=list)
     deadline: Instant | None = None
     parts: list[PaymentPartObservation] = Field(default_factory=list)
     has_open_extension: bool
     open_cases: list[Reference]
     filings: list[FilingProgress] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ending_only_while_ending(self) -> DealSummary:
+        if self.ending and self.state != "ending":
+            raise ValueError("ending codes are listed only while the deal is ending")
+        if len(set(self.ending)) != len(self.ending):
+            raise ValueError("an ending code is listed once")
+        return self
+
+    @property
+    def ending_reasons(self) -> list[tuple[EndingCode, str]]:
+        """Each outstanding code with the text every reader renders for it."""
+        return [(code, ENDING_TEXT[code]) for code in self.ending]
 
 
 class DealPage(WireModel):

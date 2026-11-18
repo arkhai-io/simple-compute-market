@@ -7,8 +7,10 @@ import hashlib
 import json
 import logging
 import sqlite3
+from datetime import datetime
 
 from arkhai_compute.end_classification import (
+    classify_payment_stop,
     payment_actor,
     resolve_site_corrections as pending_site_corrections,
     site_classification as classify_journal,
@@ -24,11 +26,11 @@ from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import DeliveryEndIntent, DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
 from market_deal_lifecycle.claims import DeliveryEndClaims
 from market_deal_lifecycle.delivery import DeliveryEvidence
-from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, ListDealsRequest, Pending, Rejected, SubmitResponse, Unknown
+from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending, Rejected, SubmitResponse, Unknown
 from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, EndService, EndSession,
-    FinalRequest, LifecycleRouteBinding, LifecycleRouteServices, RespondentPoller,
-    PhysicalResult, SellerDeal, SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
+    FinalRequest, LifecycleRouteBinding, LifecycleRouteServices,
+    PhysicalResult, SellerServicing, SellerSession, ServicingCycle, SQLiteEvidenceStore, VerifiedSiteEnd,
     seller_retention,
 )
 from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
@@ -42,6 +44,13 @@ from .settlement_stages import SettlementRequestError
 
 logger = logging.getLogger(__name__)
 
+#: The configuration that composes the payments seller stage, without which an
+#: accepted payments deal, once-only or rate, cannot be serviced.
+PAYMENTS_SERVICING_FIELDS = "[Settlement].arkhai_payments service_url and service_identity"
+
+#: The servicing loop whose page position the kit keeps.
+SERVICING_LOOP = "deal-servicing"
+
 
 class BareMetalLifecycle:
     def __init__(self, runtime):
@@ -53,16 +62,20 @@ class BareMetalLifecycle:
         self.clients = {}
         self.end = EndService(self.path, self, clock=self.clock)
         # An Alkahest deal authorizes delivery through its once-only adapter,
-        # since a mechanism with no adapter is never allowed.
+        # since a mechanism with no adapter is never allowed. A payments deal
+        # has one only while the composition builds its payments stage.
+        composition = runtime.settlement_composition
+        payments = composition is not None and composition.arkhai_payments_stage() is not None
         self.seller = SellerServicing(
             self.path,
             payments=PaymentAdapterTable([
-                (PaymentSelector("arkhai.payments.v1"), self.payment),
+                *([(PaymentSelector("arkhai.payments.v1"), self.payment)] if payments else []),
                 (PaymentSelector(ALKAHEST_MECHANISM_ID), self.alkahest_adapter),
             ]),
-            disputes=DisputeAdapterTable([(INTERFACE, self.dispute)]),
+            disputes=DisputeAdapterTable([(INTERFACE, self.dispute_adapter)]),
             credential_available=self.credential_available,
             watch_factory=self.watch, clock=self.clock,
+            missing_adapters={} if payments else {"arkhai.payments.v1": PAYMENTS_SERVICING_FIELDS},
         )
         self.ingress = DeliveryIngress(
             self.path, clock=self.clock, verify_site=self.verify_site,
@@ -170,7 +183,8 @@ class BareMetalLifecycle:
             )
         return self.clients[key]
 
-    def dispute(self, binding):
+    def dispute_adapter(self, binding):
+        """The deal's dispute adapter over its accepted Agreement."""
         client = None
         if self.credential_available(binding.authority):
             credential = self.runtime.settlement_composition.disputes.config.credential_for(binding.authority)
@@ -202,10 +216,17 @@ class BareMetalLifecycle:
                 authority_account=deal.dispute.account if deal.dispute else None, authority=authority,
             )
 
+        start = int(datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00")).timestamp())
+        term_end = start + agreement.duration_seconds
+
+        def classify(event):
+            kind = classify_payment_stop(event, entitlements=deal.entitlements, term_end=term_end)
+            return Classification(kind=kind, evidence_refs=[event.authority_record_ref]) if kind else None
+
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
-            seller_account=account, actor=actor, clock=self.clock,
+            seller_account=account, actor=actor, clock=self.clock, classify_payment_end=classify,
             observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 
@@ -304,38 +325,6 @@ class BareMetalLifecycle:
             actor=event.caller or report.signer, cause=event.cause, controlling_source_ref=controlling,
         )
 
-    async def recover_delivery(self, deal):
-        """Drive a started delivery that has not finished, through the fulfillment hook.
-
-        A deal waiting for its Agreement start, one whose fulfillment is still
-        settling, and one available whose result is not yet recorded are each
-        driven again; the path rechecks admission, so an end recorded meanwhile
-        stops it. A delivery not yet started is started by its settlement: the
-        payment reconciliation loop or the servicing worker.
-        """
-        row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(
-            negotiation_id=deal.negotiation_id,
-        )
-        if row is None or row.get("state") == "released":
-            return
-        record = await in_transaction(
-            self.path, lambda conn: EndSession(conn).read(deal.negotiation_id),
-        )
-        if record.progress not in ("unstarted", "active"):
-            return
-        if record.available_at is not None:
-            result = await self.runtime.db.load_bare_metal_result(
-                negotiation_id=deal.negotiation_id,
-            )
-            receipt = await self.runtime.db.load_bare_metal_receipt(
-                negotiation_id=deal.negotiation_id,
-            )
-            if result is not None and receipt is not None:
-                return
-        await self.runtime.fulfillment_service().deliver(
-            negotiation_id=deal.negotiation_id, buyer_principal=deal.buyer,
-        )
-
     async def recover_site(self, negotiation_id):
         row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
         if row is None or not row.get("capacity_reservation_id"):
@@ -411,36 +400,6 @@ class BareMetalLifecycle:
                 ),
             )
 
-    def committed(self, negotiation_id):
-        """Whether the deal's commitment is verified, so its payment authority can be read."""
-        with transaction(self.path) as conn:
-            return EndSession(conn).read(negotiation_id).committed_at is not None
-
-    def reconcile_local(self, negotiation_id):
-        now = self.clock()
-        with transaction(self.path) as conn:
-            session = EndSession(conn)
-            record = session.read(negotiation_id)
-            if record.committed_at is None:
-                return False
-            # Admission establishes a missed delivery deadline before a later
-            # terms expiry can incorrectly turn non-delivery into a lawful end.
-            # While it holds that deadline for a payment observation, the terms
-            # expiry waits too: at a deadline capped at the term end, it would
-            # otherwise be selected in the deadline's place.
-            admission = session.admit(negotiation_id, record.phase, record.revision, now=now)
-            if admission.status == "awaiting_observation":
-                return True
-            if now >= record.term_end and not any(
-                request.source_ref == "term-end" for request in session.requests(negotiation_id)
-            ):
-                session.record_end(FinalRequest(
-                    negotiation_id=negotiation_id, source_ref="term-end", ended_at=record.term_end,
-                    observed_at=now, actor=record.seller, cause="terms", source="agreement",
-                    evidence_refs=[record.commitment_ref],
-                ), now=now, classification=Classification(kind="terms", evidence_refs=[record.commitment_ref]))
-        return True
-
     async def peer(self, message):
         if isinstance(message, CommitMessage):
             deal = self.seller._deal(message.negotiation_id)
@@ -471,84 +430,28 @@ class BareMetalLifecycle:
             administrators=self.runtime.admin_principals, peer=self.peer, ingress=self.ingress, end=self.end,
         )
 
-    async def cycle(self):
-        # One bounded page per cycle, with durable rotation even if one peer is
-        # unavailable. A bad deal must not starve physical recovery of the rest.
-        def page(conn):
-            row = conn.execute("SELECT continuation FROM bare_metal_lifecycle_cursor WHERE id=1").fetchone()
-            return SellerSession(conn).page(
-                ListDealsRequest(limit=100, continuation=row[0] if row else None),
-                committed_only=False,
-            )
-        deals, continuation = await in_transaction(self.path, page)
-        authorities = {}
-        for deal in deals:
-            if deal.dispute and self.credential_available(deal.dispute):
-                authorities.setdefault(deal.dispute.model_dump_json(), deal)
-        for deal in authorities.values():
-            try:
-                adapter = self.dispute(deal.dispute_binding)
+    def servicing(self):
+        """The kit's servicing order over this lifecycle.
 
-                def resolve(case):
-                    with transaction(self.path) as conn:
-                        rows = conn.execute(
-                            "SELECT deal FROM servicing_seller_deals WHERE json_extract(deal, '$.commitment_ref')=?",
-                            (case.commitment_ref,),
-                        ).fetchall()
-                    for row in rows:
-                        candidate = SellerDeal.model_validate_json(row[0])
-                        if candidate.dispute == deal.dispute:
-                            resolved = self.dispute(candidate.dispute_binding)
-                            if resolved.agreement_digest == case.agreement_ref:
-                                return candidate.negotiation_id, resolved
-                    return None
+        The lifecycle is its own respondent port. Its recovery step reads the
+        site's lease; its site-report correction applies the compute family's
+        site classifier. Unfinished deliveries are re-driven by the family's
+        re-drive routine, never by this cycle.
+        """
+        return ServicingCycle(
+            self.path, domain="bare-metal", loop=SERVICING_LOOP, seller=self.seller, end=self.end,
+            respondents=self, signer=self.runtime.marketplace_signer, clock=lambda: self.clock(),
+            recovery=[
+                ("site-report recovery", lambda deal: self.recover_site(deal.negotiation_id)),
+            ],
+            resolve_site_corrections=lambda session, negotiation_id, now: self.resolve_site_corrections(
+                session, negotiation_id, now=now,
+            ),
+        )
 
-                await RespondentPoller(
-                    self.path, authority=deal.dispute, account=self.payment(deal).data.mandate.to.root,
-                    read=adapter.respondent, resolve=resolve, signer=self.runtime.marketplace_signer,
-                    clock=self.clock,
-                ).poll()
-            except Exception:
-                logger.exception("bare-metal respondent recovery failed")
-        for deal in deals:
-            # The payment authority is read before delivery is driven or a missed
-            # deadline admitted, so a buyer stop it recorded while the storefront
-            # was down is the deal's end rather than seller non-delivery.
-            # Admission waits for that read itself, so a failed one delays the
-            # deadline to a later cycle.
-            try:
-                if await asyncio.to_thread(self.committed, deal.negotiation_id):
-                    await self.seller.read(deal.negotiation_id)
-            except Exception:
-                logger.exception("bare-metal authority read failed for %s", deal.negotiation_id)
-            try:
-                await self.recover_delivery(deal)
-            except Exception:
-                logger.exception("bare-metal delivery recovery failed for %s", deal.negotiation_id)
-            # Physical work is independent of authority availability and payment
-            # publication. Always attempt it, including an uncommitted surrender.
-            try:
-                await self.recover_site(deal.negotiation_id)
-            except Exception:
-                logger.exception("bare-metal site recovery failed for %s", deal.negotiation_id)
-            try:
-                await self.end.drive_physical(deal.negotiation_id)
-                if await asyncio.to_thread(self.reconcile_local, deal.negotiation_id):
-                    await in_transaction(self.path, lambda conn: self.resolve_site_corrections(
-                        EndSession(conn), deal.negotiation_id, now=self.clock(),
-                    ))
-                    await self.seller.dispatch_filings(deal.negotiation_id)
-            except Exception:
-                logger.exception("bare-metal lifecycle recovery failed for %s", deal.negotiation_id)
-            finally:
-                try:
-                    await self.end.drive_physical(deal.negotiation_id)
-                except Exception:
-                    logger.exception("bare-metal physical recovery failed for %s", deal.negotiation_id)
-        await in_transaction(self.path, lambda conn: conn.execute(
-            "INSERT OR REPLACE INTO bare_metal_lifecycle_cursor VALUES (1,?)", (continuation,),
-        ).close())
-        return len(deals)
+    async def cycle(self, *, limit=100):
+        """Service one page of deals in the kit's order; the page's size."""
+        return await self.servicing().cycle(limit=limit)
 
     async def close(self):
         for client in self.clients.values():

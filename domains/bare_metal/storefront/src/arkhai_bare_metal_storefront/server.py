@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable, Iterable
 from importlib import import_module
@@ -70,6 +71,11 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
     )
     seed_service_peer_trust(runtime)
     set_stage_event_db_path(runtime.db.db_path)
+    # The storefront starts regardless, so one mechanism's missing
+    # configuration does not stop its other business; status reports the same
+    # deals, each lists repair required, and its read names the configuration.
+    for negotiation_id, reason in await asyncio.to_thread(runtime.lifecycle.seller.unserviceable):
+        logger.warning("[STARTUP] Deal %s cannot be serviced: %s", negotiation_id, reason)
     if runtime.settlement_runtime is not None:
         await backfill_escrow_obligation_records(
             sqlite_client=runtime.db,

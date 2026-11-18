@@ -25,6 +25,8 @@ from lane_double_controls.models import (
     ControlErrorBody,
     Funded,
     Funding,
+    Reservation,
+    Reserved,
     Rule,
     RuleList,
     RuleView,
@@ -96,6 +98,12 @@ class ControlClient:
 
     def rotate_signer(self) -> SignerIdentity:
         return self._call(routes.SIGNER_ROTATE, SignerIdentity)
+
+    def reserve(self, transaction: str, through: int) -> Reserved:
+        """Reserve ``transaction``'s running rate parts' further periods through
+        ``through``, Unix seconds; refused ``no_running_rate_part`` when none runs."""
+        return self._call(routes.RESERVE, Reserved, body=Reservation(through=through),
+                          transaction=transaction)
 
     def cases(self, transaction: str) -> CaseList:
         return self._call(routes.CASE_LIST, CaseList, params={"transaction": transaction})

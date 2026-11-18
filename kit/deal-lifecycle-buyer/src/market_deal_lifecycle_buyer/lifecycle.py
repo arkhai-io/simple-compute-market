@@ -16,7 +16,7 @@ from market_deal_lifecycle.evidence import EvidenceStore
 from market_deal_lifecycle.operations import OperationStore
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CommitMessage, EndDeliveryAcknowledgement, SignedEndDeliveryReceipt, EvidenceItem, HintMessage, LifecycleCommand,
-    LifecycleOutcome, LifecycleRead, Rejected, SubmitResponse, Unknown,
+    LifecycleOutcome, LifecycleRead, PaymentEvent, Rejected, SubmitResponse, Unknown,
 )
 from market_identity import Identity, canonical_json
 
@@ -57,6 +57,15 @@ class BuyerDeal:
 
 
 HintObserver = Callable[[HintMessage, LifecycleOutcome], Awaitable[None]]
+#: A domain's classification of a payment final stop, ``None`` while pending;
+#: ``exhaustion`` is funds running out. The kit interprets no mechanism's causes.
+PaymentStopClassifier = Callable[[PaymentEvent], str | None]
+
+#: What the buyer is told when a rate part's final stop is funds running out.
+FUNDING_STOP = (
+    "The deal stopped because its balance could not reserve the next period; "
+    "a top-up cannot revive it, and a new deal is needed."
+)
 
 
 class BuyerLifecycle:
@@ -67,6 +76,7 @@ class BuyerLifecycle:
         end_journal: BuyerEndJournal | None = None, evidence: EvidenceStore | None = None,
         watchdog: WatchdogJournal | None = None,
         clock: Callable[[], int] = injected_time.now,
+        classify_payment_stop: PaymentStopClassifier | None = None,
     ) -> None:
         self._resolve = deal
         self.payments = payments
@@ -78,6 +88,15 @@ class BuyerLifecycle:
         self.evidence = evidence
         self.watchdog = watchdog
         self.clock = clock
+        self.classify_payment_stop = classify_payment_stop
+
+    def funding_stopped(self, view: AuthorityView) -> bool:
+        """Whether a part's final stop in ``view`` is funds running out, as the
+        domain's classifier reads it; with no classifier, never."""
+        classify = self.classify_payment_stop
+        return classify is not None and any(
+            part.final_stop is not None and classify(part.final_stop) == "exhaustion" for part in view.parts
+        )
 
     def _deal(self, negotiation_id: str) -> BuyerDeal:
         deal = self._resolve(negotiation_id)
@@ -180,12 +199,17 @@ class BuyerLifecycle:
         )
 
     async def buyer_read(self, negotiation_id: str) -> dict:
-        """The buyer's read of the deal: its lifecycle read and the watchdog's status.
+        """The buyer's read of the deal: its lifecycle read, the watchdog's status,
+        and, when a rate part stopped because funds ran out, why the stop is final.
 
-        The status is the buyer's knowledge of its own monitor, composed here and
-        never a field of ``LifecycleRead`` or any lifecycle wire model, so the
-        storefront neither sees nor reports it.
+        Both are the buyer's own knowledge, composed here and never a field of
+        ``LifecycleRead`` or any lifecycle wire model, so the storefront neither
+        sees nor reports them; the funding stop is read from the payment
+        authority's record in the read, not from the seller.
         """
         read = await self.read(negotiation_id)
         state = self.watchdog.state(negotiation_id) if self.watchdog is not None else None
-        return {**read.model_dump(mode="json"), "watchdog": watchdog_view(state, self.clock())}
+        return {
+            **read.model_dump(mode="json"), "watchdog": watchdog_view(state, self.clock()),
+            "funding_stop": FUNDING_STOP if self.funding_stopped(read.authority) else None,
+        }

@@ -169,23 +169,93 @@ re-drive and seller refund between the shared stages.
 
 Each compute lane also runs one recurring purchase, VM's
 `e2e_vm_recurring_purchase` and bare metal's `e2e_bare_metal_recurring_purchase`,
-as lane-double evidence. A default buyer buys a recurring on-demand option
-through the shipped `buy` and approves its one-rate-part mandate; the lane's
-storefront configuration alone declares rate servicing for `charged` and
-`returned`, and end service, which services no rate deal, refuses the commit.
-The modules run the purchase stages through the buy, then those of
-`e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`: the approved
-mandate and the payer's reservation, the refused commit with nothing reserved at
-the site by delivery or started at the payments double (an acceptance hold the
-domain placed at negotiation lapses at its TTL), the per-period price, setup charge,
+as lane-double evidence, and delivers it. A default buyer buys a recurring
+on-demand option through the shipped `buy` and approves its one-rate-part
+mandate; the lane's storefront configuration alone declares rate servicing for
+`charged` and `returned`. The modules run the purchase stages through the buy,
+the canonical deal's delivery and teardown stages with their mock gates, and
+those of `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`,
+reaching every instant by setting lane time: the approved mandate and the payer's
+reservation; a `delivery-recovery` step once lane time holds the Agreement's
+start; the site's activation of the lease, then the payments double's record of
+the rate part's start, no earlier than that activation, and the deal available,
+active in the storefront's lifecycle read; the per-period price, setup charge,
 initial reserve and maximum end the buy's stderr shows (that the buyer prints
 them before its settlement stage approves is each buyer's own test, not the
-lane's), the
-buyer's own `end`, whose payer's stop the storefront records as the deal's end
-with no filing, and the payer's balance restored. Nothing is delivered, so
-neither waits for the delivery deadline.
-`e2e-tests/tests/unit/test_recurring_purchase_stages.py` holds both modules to
-that order.
+lane's); then, with lane time a minute into the first period, the buyer's own
+`end`, whose payer's stop charges the started period and which the storefront
+records as the deal's end with no filing; the teardown, once a `deal-servicing`
+step has carried that end out at the site; the payer's balance down by exactly
+one period's price; and the seller's list showing the deal `ended`. Neither
+waits for the delivery deadline.
+
+Each compute lane runs the rate rows on lane time, each on a deal of its own,
+under a shipped preset with a default buyer and the lane's `charged` and
+`returned` declaration. The recurring purchase is the on-demand baseline, ended
+by the buyer's stop. VM's `e2e_vm_rate_servicing` and bare metal's
+`e2e_bare_metal_rate_servicing`, three modules each under
+`e2e-tests/tests/e2e/roles/scenarios/<domain>/rate_servicing/`, share its stages
+through the accepted money and end their deals the other three ways
+(`e2e-tests/tests/e2e/roles/helpers/rate_servicing_stages.py`): funds running
+out, where a payer funded one period beyond the rate part's first reservation is
+stopped with cause `terms` at the funded boundary the payments double reports,
+and the buyer's `delivery` read says a top-up cannot revive the deal; a spot
+seller's preemption, the seller's notice held at the double as a pending stop
+until the request's time plus the Agreement's seller notice, when the seller's
+stop takes effect and the unstarted period is returned; and the maximum term,
+where the rate part ends at the Agreement's end with `returned` and the buyer's
+read names no funding stop. Each row reaches its instants by setting lane time
+through the shared lane-time helper, [lane time](#lane-time)'s `LaneTime` — the
+baseline the Agreement's start and its stop, funds running out the funded
+boundary, the preemption the notice's effect, the maximum term the Agreement's
+end — then steps the loop that acts, `delivery-recovery` at the start and
+`deal-servicing` at an end, and observes the end the storefront recorded, with
+no filing, and its teardown. The
+payments service's scheduler keeps a started rate part reserved ahead; the
+payments double reserves further only when its reservation control is called
+([Private Service Dependencies](#private-service-dependencies)), so a row setting
+lane time past its deal's first reservation — funds running out and the maximum
+term — first reserves the part through the Agreement's end, in a stage of its
+own that only the rows declare.
+
+Each compute lane also runs the buyer watchdog's delivered-deal cases, VM's
+`e2e_vm_rate_watchdog` and bare metal's `e2e_bare_metal_rate_watchdog`, one
+module each under `e2e-tests/tests/e2e/roles/scenarios/<domain>/rate_watchdog/`,
+on one delivered rate deal that shares the recurring purchase's stages through
+the rate part's start (`e2e-tests/tests/e2e/roles/helpers/rate_watchdog_stages.py`).
+The cases run in the one order a deal allows, since once the watchdog journals
+its stop the buyer's read shows `stopped`. The buyer's `buy --watchdog` waits for
+delivery parked at its wait clock's gate while delivery is stepped; released, the
+same command finds the deal available and enters its watchdog, its probe built
+for the endpoint the storefront disclosed, and the buyer's read shows
+`monitored`. An interrupt at the gate ends the command, and once lane time passes
+its last probe's staleness bound the read shows `unmonitored`, with no stop sent.
+`buy --from` resumes the run, and the read shows `monitored`. Then, with the
+storefront's loops paused, the probe answers unreachable for the threshold of
+stepped intervals, the watchdog sends one payer stop, which the payments double
+accepts, its events for the transaction the storefront's `start` and that stop
+with nothing between, and `buy` exits `stopped`. The storefront acts on the
+buyer's hint through its API while its loops are paused, recording the payer's
+end with no filing, and a `deal-servicing` step shows the teardown begun. These
+cases run the shipped
+`buy`, its resume and the buyer's read in the harness's process, through the
+`market` app's own entry under Typer's `CliRunner`
+(`e2e-tests/tests/e2e/roles/helpers/in_process_buyer.py`), where every other
+scenario runs `market` as a subprocess: mock provisioning's endpoint reaches no
+machine, and the watchdog paces its probes on a monotonic clock no lane control
+moves. So the harness replaces each buyer CLI's `watchdog_probe` factory with a
+probe it programs, reachable or not, and its `wait_clock` factory with a clock
+whose `now` is lane time and whose sleeps park at a gate a stage releases one
+interval at a time, which paces every wait `buy` makes. The factories are
+replaced in the harness's process, so nothing test-only ships with the CLI.
+
+The rate rows and the watchdog cases are Compose-lane evidence against the lane
+doubles, labelled lane-double evidence, never live evidence: they set injected
+lane time and call the payments double's controls, so off a Compose lane's
+injected lane time and doubles they are blocked skips.
+`e2e-tests/tests/unit/test_recurring_purchase_stages.py` holds the recurring
+purchases, the rate rows and the watchdog modules to their stage orders, and a
+row setting lane time past its part's first reservation to reserving first.
 
 Settlement by introduction is defined once the same way, in
 `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`: disclosure of the
@@ -231,8 +301,9 @@ project of its own:
   and provisioning authorities, the two VM registries, and the dev chain. After
   the canonical deal and a buyer's surrender, its typed-client deal runs two
   deals on the freed capacity: one whose Agreement starts later, committed at
-  settlement and dispatched only by a resume-pass step once its start is
-  reached, and one whose lapsed hold leaves its settlement placement no
+  settlement and dispatched only by a step of the storefront's
+  `delivery-recovery` loop once its start is reached, and one whose lapsed hold
+  leaves its settlement placement no
   capacity, which ends as the seller's failure with nothing dispatched.
 - **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site
   trusting the bare-metal storefront, a bare-metal registry, and the dev chain.
@@ -447,7 +518,9 @@ section among them. Lane time only moves forward and is never reset: a module
 continues from the instant the one before left, and a set earlier than the
 harness's instant fails naming both instants. The buyer, started afresh for each
 stage, reads its time from that file on every read, as the `[time]` table of the
-configuration the harness generates for it names.
+configuration the harness generates for it names; the watchdog cases' buyer, run
+in the harness's process, has no `[time]` table and reads the harness's own
+source.
 
 A run is on injected or wall time throughout, and the session reads the status of
 every party its profile names and fails naming one on the other. The local Helm
@@ -708,6 +781,18 @@ installs its rules through the `lane_double_rules` fixture
 them and fails naming any rule a case still waited on. A control no scenario
 exercises is proven by its double's own suite through the typed client.
 
+The payments double also serves a reservation control,
+`POST /test/transactions/{id}/reserve` with `{"through": <Unix seconds>}`. The
+double runs no scheduler of its own, so the further reservation the payments
+service's scheduler would make is one a scenario programs: the control reserves
+each of the transaction's running rate parts — started and not stopped — through
+that instant, as far as the part's end and the payer's balance allow, and
+answers each part's `reserved_through`, the funded boundary its signed snapshot
+then reports. A transaction with no started, unstopped rate part is refused
+`409 no_running_rate_part` and nothing changes, so a reservation stage run too
+early or against the wrong deal fails where it runs. The rate rows call it, and
+the payments double's suite proves it through the typed client.
+
 **The lanes' payments target.** Every end-to-end lane runs the payments double,
 `tools/payments-lane-double`: an HTTPS service at `https://payments-double:8443`
 over the payments kit's `PaymentsAuthority` engine, mirroring the payments
@@ -747,8 +832,9 @@ unready lane-owned target and reports a blocked skip for an unready external
 one, as the payments helper does. The harness writes the buyer's
 `[[DisputeCredential]]`, with its `api_key_env` and `ca_bundle_path`, and hands
 the buyer's token to each `market` process under that variable, never into the
-runner's environment. Bob's storefront holds his dispute credential, with the
-lane CA as its `ca_bundle_path`, in his secret overlay. The lanes run no
+runner's environment. Each compute lane's storefront, Bob's and bare metal's,
+holds the seller's dispute credential, with the lane CA as its
+`ca_bundle_path`, in its secret overlay. The lanes run no
 `check-mediation`: the VM payment scenario's case stages and the VM dispute
 scenarios prove the storefront's mediation access, and the local release's Helm
 test runs the check ([`chart-render-tests.md`](../guidance/repository/chart-render-tests.md#where-they-live-and-how-they-run)).

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from core_buyer import BuyResult
@@ -13,6 +12,7 @@ from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentApproval
 from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
 from market_core.schemas import AgreedPrice, Agreement
+from market_deal_lifecycle_buyer import WaitClock
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
 from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
 
@@ -77,7 +77,14 @@ def settle_payment(
     timeout,
     interval,
     on_event,
+    clock: WaitClock = WaitClock(),
 ):
+    """Approve the mandate, commit it to the seller, and wait for its delivery.
+
+    The commit's retries and the settlement wait run on ``clock``, the
+    command's wait clock, and ``timeout`` bounds both together on its
+    ``monotonic``, so the clock that paces the watchdog paces them too.
+    """
     raw = (
         base64.b64decode(agreement_bytes, validate=True)
         if isinstance(agreement_bytes, str)
@@ -100,7 +107,7 @@ def settle_payment(
         "payment_approved",
         {"transaction_id": transaction, "negotiation_id": negotiation_id},
     )
-    deadline = time.monotonic() + timeout
+    deadline = clock.monotonic() + timeout
 
     async def commit():
         # ``timeout`` bounds the whole wait; each request keeps the lifecycle
@@ -119,10 +126,10 @@ def settle_payment(
                     return
                 if not isinstance(outcome, Pending):
                     raise RuntimeError("seller commit: " + outcome.model_dump_json())
-                remaining = deadline - time.monotonic()
+                remaining = deadline - clock.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("seller is still waiting for the payment receipt")
-                await asyncio.sleep(min(interval, remaining))
+                await clock.sleep(min(interval, remaining))
 
     run_sync(commit)
     submitted = {"status": "committed", "negotiation_id": negotiation_id, "settlement_ref": transaction}
@@ -133,16 +140,31 @@ def settle_payment(
         principal=principal,
         signer=signer,
         resolve_seller_principals=resolve_seller_principals,
-        total_timeout=max(0, deadline - time.monotonic()),
+        total_timeout=max(0, deadline - clock.monotonic()),
         poll_interval=interval,
         on_poll=lambda attempt, body: on_event(
             "settlement_poll", {"attempt": attempt, "body": body}
         ),
+        sleep=sync_sleep(clock),
+        monotonic=clock.monotonic,
     )
 
 
+def sync_sleep(clock: WaitClock) -> Callable[[float], None]:
+    """``clock``'s asynchronous sleep, for a synchronous wait to pause on."""
+
+    def sleep(seconds: float) -> None:
+        async def pause() -> None:
+            await clock.sleep(seconds)
+
+        run_sync(pause)
+
+    return sleep
+
+
 def make_payment_settle_hook(
-    *, config, policy, timeout, interval, confirm_settlement=None
+    *, config, policy, timeout, interval, confirm_settlement=None,
+    clock: WaitClock = WaitClock(),
 ):
     def settle(negotiation, on_event):
         match, outcome = negotiation.match, negotiation.outcome
@@ -178,6 +200,7 @@ def make_payment_settle_hook(
                 timeout=timeout,
                 interval=interval,
                 on_event=on_event,
+                clock=clock,
             )
         except TimeoutError as exc:
             # A wait that runs out, the approval's poll, the commit's or the
@@ -210,4 +233,4 @@ def make_payment_settle_hook(
     return settle
 
 
-__all__ = ["payment_buyer", "settle_payment"]
+__all__ = ["payment_buyer", "settle_payment", "sync_sleep"]

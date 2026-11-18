@@ -1006,9 +1006,9 @@ class StorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
 
         Run one cycle of a paused loop and return what that cycle reports.
-        `loop` is the loop's route name -- `settlement-servicing`,
-        `fulfillment-resume`, `site-projections`, `capacity-events`,
-        `publication`. The route
+        `loop` is the loop's route name -- `deal-servicing`,
+        `delivery-recovery`, `payment-reconciliation`, `settlement-servicing`,
+        `site-projections`, `capacity-events`, `publication`. The route
         calls the operation the timer was already invoking, so a caller
         advances production behaviour rather than a test-only path.
 
@@ -2282,9 +2282,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
 
         Run one cycle of a paused loop and return what that cycle reports.
-        `loop` is the loop's route name -- `settlement-servicing`,
-        `fulfillment-resume`, `site-projections`, `capacity-events`,
-        `publication`. The route
+        `loop` is the loop's route name -- `deal-servicing`,
+        `delivery-recovery`, `payment-reconciliation`, `settlement-servicing`,
+        `site-projections`, `capacity-events`, `publication`. The route
         calls the operation the timer was already invoking, so a caller
         advances production behaviour rather than a test-only path.
 

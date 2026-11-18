@@ -931,10 +931,20 @@ authorization) composed in when the mandate has a time-rate part, whose
 `partialPeriod` terms let the payment authority price the period in progress
 ([settlement servicing, "Charge-first payment settlement"](../../openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement)).
 Every monetary rate operation is recorded through the caller's operation store before
-it is sent. A servicing declaration enables recurring offers but not their execution:
-end service refuses to commit a rate deal while it services none, the one place
-delivery fails closed before rate servicing
-([deal-lifecycle, "One end instant, transactional admission"](../../openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission)).
+it is sent. Both compute storefronts deliver and service a rate deal as they do a
+once-only one: end service asks the deal's payment adapter for every delivery phase,
+whatever its parts. A rate adapter reads a fresh signed snapshot each time, so its
+answer can change while the deal's admission revision stands still; the first `allow`
+or `refuse` journaled for a phase at a revision stands, and a changed one is returned pending and
+journals nothing, so it can only hold a phase back until the watch records an end and
+the revision moves. Every payment stop the watch records is classified by the compute
+family's `classify_payment_stop` in `arkhai_compute.end_classification`, which both
+storefronts' watches pass: an entitled party's stop is an entitled stop, the dispute
+authority's is a ruling, and a `terms` stop is the term end when it takes effect at or
+after the Agreement's end and exhaustion before it. The servicing declaration decides
+which rate options are offered and accepted, not whether a materialized deal is
+serviced
+([storefront publication, "The servicing declaration and its three doors"](../../openspec/specs/storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors)).
 Shared lifecycle servicing retains independent payment/dispute
 cursors, current refresh outcomes and exact signed records. End service journals
 the earliest attributed request plus required filing/classification atomically and
@@ -1167,6 +1177,17 @@ The compute provisioner runs three independent timer-driven workers, composed on
 Long-running lifecycle workers follow [`implementation.md`, "Operator lifecycle controls"](../guidance/engineering/implementation.md#operator-lifecycle-controls).
 
 Each storefront process holds its timer loops with one loop controller from `kit/storefront`. Every loop registers with it, bound to the step that runs one cycle, in one of two forms: a timer loop, whose timer the controller runs over that step, or a fan-out, whose task a composed kit runtime owns and which runs independent cycles in declared children, as the per-site capacity-event pollers are; a fan-out's children are declared when it registers, so status lists them before their first cycle. Starting the registered loops is the only way a loop's task starts. The controller's `run_cycle` is the one place a cycle runs: it holds that loop's lock, so a timer cycle and an operator's step never run together, and records each cycle's outcome — when it finished, whether it completed, and for a failure its stage and error, an error's message only when it is one of the storefront's own disclosed errors. A fan-out serializes each child's cycle under the child's own lock instead and records it through a recorder the controller issues to declared children only. System status reports each loop's state and last outcome as `lifecycle`. The pause route holds every loop at a cycle boundary without cancelling it and each `run-cycle` route runs exactly the operation the loop's timer runs. A loop gates on entry and immediately before its work, and waits between cycles through the controller, which returns on a pause request, so a pause is observed within its bounded wait whatever the interval; a loop's reported state comes from what it has acknowledged at its gate. Kits below `kit/storefront` take the gate and wait as injected callables. Each storefront binds the controller's framework-free route service behind its own administrator authentication.
+
+Both compute storefronts register the same four servicing loops under the same names, each running one job:
+
+| Loop | Job |
+|---|---|
+| `deal-servicing` | One page of the kit servicing cycle, `ServicingCycle` in `kit/deal-servicing`: respondent discovery once per dispute authority on the page, then each deal's steps in one fixed order — the authorities read, the domain's recovery steps, the physical end, local reconciliation, site-report correction, filing dispatch, and the physical end again — each in its own error handler, so a failed step skips none after it. The page position is kit-owned state, so a restarted storefront resumes from it |
+| `delivery-recovery` | The re-drive of unfinished deliveries through one routine, `recover_deliveries` in `domains/compute/delivery`, over each domain's listing of unfinished deliveries, its own serialization, and its settlement stage's re-check of the deal's evidence |
+| `payment-reconciliation` | The advance of accepted payment deals their buyer has not settled |
+| `settlement-servicing` | The settlement worker alone |
+
+An operator who holds every loop and steps `deal-servicing` therefore runs one servicing cycle and re-drives no delivery. Each loop's interval is its own configuration key ([storefront publication configuration, "The settlement servicing interval"](../../openspec/specs/storefront-publication/configuration.md#the-settlement-servicing-interval)). See [market composition](../../openspec/specs/market-composition/spec.md), "Both compute storefronts run one loop layout".
 
 Beside the loop controller, `kit/storefront` owns the trading pause, which refuses new negotiations and leaves the loops running. The negotiation runtime reads it, and system status reports it. Each storefront binds the pause's framework-free route service at its admin pause and resume routes. The two pauses are separate, and both are process-local: a restarted storefront trades and runs its loops again, which suits an operator who is actively correcting an issue. See [market composition](../../openspec/specs/market-composition/spec.md).
 

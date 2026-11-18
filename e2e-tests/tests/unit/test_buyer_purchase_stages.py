@@ -3,8 +3,9 @@
 Read from source rather than collected, so a scenario module is checked without
 its lane's settings or services. Each scenario buying through the shipped buyer
 and delivered is one row of ``PURCHASES``; a scenario that buys this way adds its
-row. A recurring purchase, which runs the purchase stages only through the buy,
-since its commit is refused, is a row of ``test_recurring_purchase_stages.py``.
+row. A recurring purchase, which interleaves the purchase stages with its rate
+part's own and ends by the buyer's stop, is a row of
+``test_recurring_purchase_stages.py``.
 
 A purchase declares the shared stages it runs — the purchase stages of
 ``buyer_purchase_stages.py`` and the canonical deal's stages it shares from

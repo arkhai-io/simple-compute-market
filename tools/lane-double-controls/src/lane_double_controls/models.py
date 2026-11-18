@@ -1,8 +1,9 @@
 """The wire models of the lane doubles' controls.
 
 A scenario programs a double through when→then rules and moves it through a few
-direct controls: its injected time, funding and signer rotation at payments, and
-an operator's decision or close at mediation. The API-credits lane's sample app
+direct controls: its injected time, funding, signer rotation and a rate part's
+further reservation at payments, and an operator's decision or close at
+mediation. The API-credits lane's sample app
 serves the time control and the status alone. Every refusal a control gives has
 one body, ``{"code", "message"}``, and is raised and carried as one error,
 ``ControlError``, on both sides of the wire.
@@ -72,6 +73,10 @@ ControlCode = Literal[
     # exactly {"now": <instant>}, and an instant earlier than the party's.
     "invalid_time",
     "time_moves_forward",
+    # The payments double's reservation control's refusals: a transaction it
+    # does not hold, and one with no started, unstopped rate part to reserve.
+    "transaction_not_found",
+    "no_running_rate_part",
 ]
 
 # A rule id sits in a control route's path, so it is restricted to characters
@@ -261,6 +266,42 @@ class Funded(_Model):
     amount: str
 
 
+#: An instant on the wire, Unix seconds: strict, so a string, a float or a boolean
+#: is never taken for one, then held to the time component's range.
+Instant = Annotated[int, Field(strict=True), AfterValidator(check_instant)]
+
+
+class Reservation(_Model):
+    """Reserve a transaction's running rate parts' further periods through ``through``.
+
+    The payments service's scheduler decides when a started rate part is
+    reserved further; at the double a scenario programs that decision.
+    """
+
+    through: Instant
+
+
+class ReservedPart(_Model):
+    """One running rate part a reservation reached: the instant it is then
+    reserved through, as the signed snapshot reports it, and the periods added,
+    which the part's end and the payer's balance may hold to zero."""
+
+    part: Annotated[int, Field(strict=True, ge=0)]
+    reserved_through: Instant
+    periods_added: Annotated[int, Field(strict=True, ge=0)]
+
+
+class Reserved(_Model):
+    """A reservation's answer: every running rate part of ``transaction``.
+
+    A transaction with no running rate part is refused, never answered with no
+    parts, so a reservation that reached nothing cannot read as one that did.
+    """
+
+    transaction: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    parts: Annotated[list[ReservedPart], Field(min_length=1)]
+
+
 class SignerIdentity(_Model):
     """The identity the payments double signs receipts and snapshots with."""
 
@@ -317,6 +358,9 @@ __all__ = [
     "Funding",
     "MATCH_KEYS",
     "Refusal",
+    "Reservation",
+    "Reserved",
+    "ReservedPart",
     "Rule",
     "RuleList",
     "RuleView",

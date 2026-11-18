@@ -16,9 +16,9 @@ Agreement, mechanism or established reference conflicts.
 and physical identities, phase checkpoints, the site's activation instant,
 expiring claims and connection details. Before physical effects, the exact
 request/target is persisted in `vm.storefront.fulfillment-context` version 1.
-Foreground and periodic recovery coordinate through the same durable claim, not
-process-local locks. A payment creates no escrow or obligation; genuine Alkahest
-rows and servicing remain separate.
+Foreground settle and the `delivery-recovery` loop coordinate through the same
+durable claim, not process-local locks. A payment creates no escrow or obligation;
+genuine Alkahest rows and servicing remain separate.
 
 The row is the compute delivery path's progress port for VM
 ([compute delivery](../compute-delivery/architecture.md)). VM's delivery-port
@@ -36,12 +36,16 @@ provider reported active; "activate" names only the site's transition.
 
 The planner reads verified normalized provision terms, lease timing, funding
 expiry and any stage-supplied lease bytes/condition anchor. It does not decode a
-receipt or choose behavior from a mechanism ID. The fulfillment hook, the
-periodic resume pass and the Alkahest servicing continuation each drive the path;
-recovery resolves the exact accepted Agreement through the seller table and
-revalidates source evidence first. The hook keeps driving a dispatched deal while
+receipt or choose behavior from a mechanism ID. The fulfillment hook, from payment
+settle and the Alkahest settlement job, and the `delivery-recovery` loop each drive
+the path. The loop runs the compute family's re-drive
+([compute delivery, "Dispatch and recovery"](../compute-delivery/architecture.md#dispatch-and-recovery))
+over VM's incomplete deliveries: it claims each under the durable claim, resolves the
+exact accepted Agreement's stage through the seller table and revalidates source
+evidence through it first. The hook keeps driving a dispatched deal while
 provisioning settles, up to the configured provisioning timeout, after which the
-resume pass carries it. It records `ready` on convergence and `ended` on an end,
+`delivery-recovery` loop carries it. The hook and the re-drive both drive through
+`drive_vm_delivery`, which records `ready` on convergence and `ended` on an end,
 emits the `provision` stage events (`reserved`, `job_submitted`, `fulfilled`,
 `failed`) once each as the records first show them, and runs the seller's failure
 policy once for an end the path itself recorded. The selected continuation owns
@@ -85,12 +89,14 @@ and that was made after release was proven, writes the durable
 an empty read keeps polling. Recovery checks that marker after restart to retire
 polling without dropping an unseen report or polling every released deal forever.
 
-VM caches respondent pollers by accepted authority/account; bare metal constructs
-them per cycle, both retaining database cursors/answers. Bare metal explicitly
-records term-end requests; VM observes missed availability deadlines and otherwise
-relies on site expiry/report recovery. These are current composition differences,
-not separate domain requirements. See
-[lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
+Respondent discovery and the term end are the kit servicing cycle's, alike in both
+compute domains. The cycle discovers counterparty cases once per dispute authority
+on its page, building one respondent poller per authority each cycle over the
+durable cursor kept for that authority, and retains its answers in the database. Its
+local reconciliation first admits a missed delivery deadline, then, once admission
+allows it, records the deal's own term-end final request at the Agreement's end,
+classified `terms`; for a rate deal the payment authority's `terms` stop at the same
+instant sorts first.
 
 ## Explicit database reset
 

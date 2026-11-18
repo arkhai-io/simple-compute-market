@@ -49,6 +49,12 @@ negotiation_watchdog_interval = 60
 # are checked for collectable conditions / retried collections. The earlier
 # name, claims_sweep_interval, refuses startup naming this key.
 settlement_servicing_interval_seconds = 30
+# The kit's servicing cycle (deal-servicing) runs at
+# settlement_servicing_interval_seconds, and the delivery re-drive
+# (delivery-recovery) and payment reconciliation at
+# fulfillment_resume_sweep_interval (30 unless stated), unless
+# deal_servicing_interval_seconds or delivery_recovery_interval_seconds states
+# that loop's own.
 # Advertised buyer-heartbeat cadence (seconds) echoed by the deals
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60

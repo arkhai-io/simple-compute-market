@@ -108,6 +108,11 @@ def test_the_shared_runner_profile_restates_the_double_fixtures() -> None:
     assert payments["buyer_account"] == directory.role("buyer").account
     assert payments["seller_account"] == directory.role("seller").account
     assert payments["buyer_api_key"] == directory.role("buyer").token
+    # The second payer, funded with nothing at start, which a scenario funds.
+    rate_payer = directory.role("rate_payer")
+    assert (payments["rate_payer_account"], payments["rate_payer_api_key"]) == (
+        rate_payer.account, rate_payer.token)
+    assert rate_payer.funding == 0
     # The variable the harness hands the key over under, never one the runner's
     # own settings loader reads.
     assert not payments["api_key_env"].startswith("ARKHAI_")

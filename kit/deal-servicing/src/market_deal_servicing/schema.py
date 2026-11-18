@@ -101,6 +101,16 @@ PAYMENT_OBSERVATIONS_SCHEMA: tuple[str, ...] = (
 )
 
 
+#: Each servicing loop's page position: the continuation of the next page its
+#: cycle services, or ``NULL`` to start from the first deal, written by
+#: ``ServicingCycle`` once a page is serviced.
+PAGE_POSITION_SCHEMA: tuple[str, ...] = (
+    """CREATE TABLE servicing_page_position (
+        loop TEXT PRIMARY KEY, continuation TEXT
+    )""",
+)
+
+
 def create_schema(conn: sqlite3.Connection) -> None:
     """Apply :data:`SERVICING_SCHEMA` inside the caller's transaction, committing nothing.
 
@@ -119,4 +129,15 @@ def create_payment_observations(conn: sqlite3.Connection) -> None:
     """
 
     for statement in PAYMENT_OBSERVATIONS_SCHEMA:
+        conn.execute(statement)
+
+
+def create_page_position(conn: sqlite3.Connection) -> None:
+    """Apply :data:`PAGE_POSITION_SCHEMA` inside the caller's transaction.
+
+    The body of a storefront migration after the one applying
+    :data:`SERVICING_SCHEMA`; it fails on a database that already holds the table.
+    """
+
+    for statement in PAGE_POSITION_SCHEMA:
         conn.execute(statement)

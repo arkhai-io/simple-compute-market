@@ -191,14 +191,15 @@ async def main(*, end_before_delivery=False):
             negotiation_id="payment-demo", terminal_state="success"
         )
         coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
-        lifecycle = VmDealLifecycle(db, seller, coordinator, RegistryDisputePolicy.from_document({}))
-        coordinator.lifecycle = lifecycle
 
         class Physical:
             async def apply_end(self, *_args, **_kwargs):
                 return PhysicalResult(progress="released" if not deliveries else "tearing_down", done=not deliveries)
 
-        lifecycle.end.physical = Physical()
+        lifecycle = VmDealLifecycle(
+            db, seller, coordinator, RegistryDisputePolicy.from_document({}), physical=Physical(),
+        )
+        coordinator.lifecycle = lifecycle
         container.resolved_sqlite_client = db
         container.resolved_marketplace_signer = seller
         container.resolved_settlement_composition = SimpleNamespace(

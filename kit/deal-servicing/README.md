@@ -57,7 +57,11 @@ remains the domain's assertion, never inferred from an end intent.
 transaction, then checks `expected_revision` and admission in a worker thread.
 Its optional `apply(session, authorization)` callback performs the protected local
 write in that same transaction and must not perform I/O. An adapter allow cannot
-override a stale revision or end. `begin_billing` owns the immutable billing key/evidence before I/O. Unknown
+override a stale revision or end. It asks the payment adapter for every deal, and
+the first allow or refuse journaled for a phase at a revision stands: an answer of
+another status at that revision returns `pending`, naming the change, and journals
+nothing, so a changed answer only holds the phase back until the revision moves.
+`begin_billing` owns the immutable billing key/evidence before I/O. Unknown
 results remain pending for same-key adapter resolution and block disclosure;
 a validated once-only adapter can return an accepted no-op. Delivery retains
 only the returned intent reference.
@@ -82,7 +86,9 @@ Authorities without respondent discovery use a stable evidence append. Never-att
 uncertain attempts replay the original key first so an earlier acknowledgement
 survives a closed-case race. Payment-stop classification is an injected,
 evidence/entitlement-based hook: without it the correction remains pending,
-never inferred lawful from event kind. A complete retention projection can also
+never inferred lawful from event kind. A stop recorded pending is resolved, once,
+through `resolve_correction` when a later read finds the hook classifying it; its
+recorded end never changes. A complete retention projection can also
 be injected with `seller_retention(path, negotiation_id, clock=...)`; a failed
 authority read never supplies a new pruning observation. The payment adapter's
 optional `AuthorityView.payouts` maps every part to a verified completion observation
@@ -108,12 +114,25 @@ For an immutable binding read while ingress owns a write transaction, use
 `SellerSession(conn)` on a separate read connection: a session issues no DDL, so
 it opens no competing writer.
 
-`list` returns bounded keyset pages from durable watched views. `read` refreshes
-both records and returns physical progress even without a payment adapter. A
+`list` returns bounded keyset pages from durable watched views. A deal with a
+recorded end is `ended` only once its resource is proven released, every payment
+part in its watched view has a final stop or an end at or before now, and no case
+is open in a saved view of its dispute authority; until then it is `ending`, and
+`ending` names each outstanding condition (`release_pending`, `payment_running`,
+`case_open`, `case_unobserved` while no view of the dispute authority it names is
+saved). `read` refreshes both records and returns physical progress even without
+a payment adapter. A
 missing dispute credential or unresolved local respondent case marks repair
-required. `RespondentPoller.repairs()` exposes bounded skipped-case diagnostics;
-temporarily unresolvable local Agreements do not block later account-wide cases
-and retry independently of the listing cursor in a rotating arrival-order queue.
+required, and so does a deal of a mechanism named in `missing_adapters`, the
+mechanisms a storefront installs whose configuration composed no adapter: its
+reason names the configuration that would, and `unserviceable()` lists every
+such deal still open, for the storefront's startup report. `RespondentPoller` lists
+one dispute authority's cases under the seller's credential there, its cursor
+record derived from the authority alone; it holds nothing beyond its tables and its
+inputs, so a servicing cycle builds it afresh. `RespondentPoller.repairs()` exposes
+bounded skipped-case diagnostics; temporarily unresolvable local Agreements do not
+block later authority-wide cases and retry independently of the listing cursor in a
+rotating arrival-order queue, and a resolved case clears its repair under any record.
 Cases with no local registered commitment are skipped rather than retained as
 repair rows. A payer claim matches only when its buyer request is the selected
 end; a superseded surrender receives contesting end evidence. Once-only
@@ -145,6 +164,30 @@ derived from the request by `interrupt_operation_key` when the caller sends none
 so a same-key retry changing either is refused by the evidence store. A failure journals its end before
 running the filing and the caller's physical drive side by side. A dry run
 classifies and records nothing.
+
+## Servicing cycle
+
+`ServicingCycle` is the one order in which a storefront's servicing loop services
+its deals, a page per `cycle()`. The domain contributes only its steps — its named
+recovery steps and its site-report correction, which applies its site-report
+classifier to one deal's pending site reports in the caller's transaction — and a
+`RespondentPort`: `credential_available(authority)` and `dispute_adapter(binding)`.
+The cycle takes the seller half, end service, the signer and the clock beside them.
+
+Each cycle first runs respondent discovery once per dispute authority on the page,
+whichever deal comes first, building a `RespondentPoller` over an
+`AgreementRespondent` adapter and resolving each listed case to its local deal
+itself: a case whose Agreement digest differs from the deal's adapter raises into
+the poller's repairs. A deal with no authority, or whose authority's credential is
+unusable, is left out, and one authority's failure skips no other. Then, for each
+deal: the authorities read (committed deals only, dispatching no filing), the
+recovery steps, the physical end, local reconciliation, site-report correction,
+filing dispatch, and the physical end again. Every step runs in its own error
+handler, logged with the domain, the step and the deal. Local reconciliation
+admits a missed delivery deadline and, once admission allows, records the deal's
+`term-end` final request at the Agreement's end, classified `terms`. Every
+registered deal is paged, committed or not, and the position is kept per loop in
+`servicing_page_position` once each page is serviced.
 
 ## Delivery ingress
 
@@ -188,7 +231,9 @@ already present, since a storefront database built while sessions created these
 tables may hold some of them. A table added since is its own set, applied by an
 ordinary migration later in the chain that tolerates nothing:
 `PAYMENT_OBSERVATIONS_SCHEMA`, the instant of each deal's latest successful
-payment observation, with `create_payment_observations(connection)` as its body.
+payment observation, with `create_payment_observations(connection)` as its body,
+and `PAGE_POSITION_SCHEMA`, each servicing loop's page position, with
+`create_page_position(connection)` as its body.
 
 ## First use
 

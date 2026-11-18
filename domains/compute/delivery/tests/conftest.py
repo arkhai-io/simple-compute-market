@@ -429,8 +429,8 @@ class Rig:
                  delivery_deadline_seconds: int | None = None, once_only: bool = True) -> None:
         """Register the deal's delivery record and its seller projection, as a domain does.
 
-        ``once_only=False`` registers a deal with a rate part, which end
-        service refuses to commit.
+        ``once_only=False`` registers a deal whose seller projection is not
+        once-only, as a rate deal's is.
         """
         with transaction(self.path) as conn:
             EndSession(conn).register(DeliveryRecord(

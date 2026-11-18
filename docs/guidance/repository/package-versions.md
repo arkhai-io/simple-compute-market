@@ -37,6 +37,14 @@ configuration key or a hint it reads — is judged under the rules above, so a k
 release accepted keeps the meaning it had, or loses it only with the bump an
 incompatible change takes.
 
+A released client or CLI is not owed compatibility with a later storefront, provided
+the client shipped with that storefront reads everything it serves: buyers and
+sellers upgrade their clients and CLIs with the storefront, so a storefront's new
+wire form takes the incompatible bump on its contracts and ships its readers beside
+it. Backwards client compatibility stays available, through the staged pattern of
+[`versioning.md`, "A field may be renamed or retired in stages"](../engineering/versioning.md#a-field-may-be-renamed-or-retired-in-stages),
+where a change chooses it, but is not owed.
+
 Migration and backwards compatibility are engineered only for what has been deployed,
 as
 [`versioning.md`, "Compatibility is owed to what has been deployed"](../engineering/versioning.md#compatibility-is-owed-to-what-has-been-deployed)

@@ -32,6 +32,7 @@ from market_settlement_runtime.rate_servicing import (
     RateServicing,
     RateServicingDeclaration,
 )
+from market_site_client import SiteCapacityClientError
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from pytest import MonkeyPatch
 from storefront_client import StorefrontClient
@@ -40,6 +41,7 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     build_bare_metal_settlement_registry,
 )
 from loopback import serving
+from test_http_settlement import _CapacityClient, _ProvisioningClient
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _admin_client, _app, _derivation_runtime
 from test_publication_cycle import Site, member, pool
 
@@ -116,30 +118,57 @@ def payment_clauses(*, delivery_deadline_seconds: int | None = None) -> list[dic
     ]
 
 
-def _settlement_root(alkahest: Mapping[str, Any]) -> dict[str, Any]:
+def _settlement_root(alkahest: Mapping[str, Any], *, payments: bool = True) -> dict[str, Any]:
+    """The settlement root; without ``payments`` it configures Alkahest alone,
+    so the composition builds no payments stage."""
     return {
         "schema_version": 1,
-        "priority": ["alkahest.v1", MECHANISM],
+        "priority": ["alkahest.v1", MECHANISM] if payments else ["alkahest.v1"],
         "alkahest": dict(alkahest),
-        "arkhai_payments": {
+        **({"arkhai_payments": {
             "enabled": True,
             "service_url": "http://127.0.0.1:9",
             "service_identity": PAYMENTS_SERVICE.identity.model_dump(mode="json"),
             "fee_bps": 250,
             "development_auth": True,
-        },
+        }} if payments else {}),
     }
 
 
-class _OneSite:
-    """The capacity client over the world's one site."""
+class WorldSite(_CapacityClient):
+    """The capacity client over the world's one site.
+
+    It serves the site's projection to the pool overrides, and places, commits
+    and activates a deal's reservation at that site; while ``unreachable`` a
+    reserve fails before its effect, as an unreachable site's does.
+    """
 
     def __init__(self, site: Site) -> None:
+        super().__init__()
         self._site = site
+        self.unreachable = False
 
     def site(self, site_id: str) -> Site:
         assert site_id == SITE
         return self._site
+
+    async def reserve(self, **request: Any) -> dict[str, Any]:
+        if self.unreachable:
+            raise SiteCapacityClientError("site unreachable")
+        return await super().reserve(**request)
+
+
+class WorldProvisioning(_ProvisioningClient):
+    """Provisioning at the world's site: it schedules the machine the pool's one
+    member publishes, in that pool, and reports its fulfillment active with an
+    SSH endpoint."""
+
+    def __init__(self) -> None:
+        super().__init__(scheduled_host_id="machine-r1", scheduled_physical_host_id="physical-r1")
+
+    async def schedule_resource(self, request: Any) -> Any:
+        scheduled = await super().schedule_resource(request)
+        return scheduled.model_copy(update={"pool_id": POOL_ID})
 
 
 @dataclass
@@ -154,8 +183,17 @@ class RecurringWorld:
     declarations: dict[str, RateServicingDeclaration]
     #: The buyer's typed client of the app's lifecycle routes.
     buyer_lifecycle: LifecycleClient
+    #: The site's capacity, where a deal's reservation is placed and activated.
+    capacity: WorldSite
+    #: The provisioning service's fulfillment surface at the site.
+    provisioning: WorldProvisioning
     #: The app's loopback base URL when it is served, for a buyer's own commands.
     url: str | None = None
+    #: The runtime the app composes, whose site trust a test seeds before a
+    #: site calls the app, and whose lifecycle clock it reads.
+    runtime: Any = None
+    #: The app, for a caller the world builds no client for, such as a site.
+    app: Any = None
 
     def declare(self, treatments: frozenset[str] | None, *, setup: bool = False) -> None:
         """Declare ``treatments`` for payments, or withdraw its declaration."""
@@ -184,6 +222,7 @@ async def recurring_world(
     payments: FakePaymentsClient | None = None,
     clock: Callable[[], int] | None = None,
     serve: bool = False,
+    payments_section: bool = True,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -201,7 +240,14 @@ async def recurring_world(
     payments service outlives a storefront restart. ``clock`` is the runtime's
     lifecycle clock, wall time unless given. ``serve`` runs the app on a
     loopback port, its lifespan uvicorn's, so a buyer's own commands reach it
-    over HTTP; the world's clients then use that port too.
+    over HTTP; the world's clients then use that port too. Without
+    ``payments_section`` the settlement configures no payments section and
+    publishes no payment clause, as a storefront whose payments section was
+    removed restarts. A settled deal is
+    delivered through the real delivery path: the world's site places,
+    commits and activates its reservation, and provisioning reports its
+    fulfillment active, so billing starts at the payments engine and the deal
+    becomes available.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -210,11 +256,17 @@ async def recurring_world(
             "available_until_utc": AVAILABLE_UNTIL,
         },
     }}))
+    capacity = WorldSite(site)
+    provisioning = WorldProvisioning()
     with MonkeyPatch.context() as patches:
-        runtime = _derivation_runtime(tmp_path, patches, {SITE: site}, capacity_client=_OneSite(site))
+        runtime = _derivation_runtime(
+            tmp_path, patches, {SITE: site}, capacity_client=capacity, fulfillment_client=provisioning,
+        )
         configured = runtime.settlement_composition
         registry = build_bare_metal_settlement_registry()
-        root = _settlement_root(configured.config.mechanisms["alkahest"].model_dump(mode="json"))
+        root = _settlement_root(
+            configured.config.mechanisms["alkahest"].model_dump(mode="json"), payments=payments_section,
+        )
         composition = dataclasses.replace(
             configured,
             registry=registry,
@@ -233,7 +285,7 @@ async def recurring_world(
         )
         clauses = [
             *(clause.model_dump(mode="json", exclude_none=True) for clause in runtime.publication_clauses),
-            *payment_clauses(delivery_deadline_seconds=clause_deadline),
+            *(payment_clauses(delivery_deadline_seconds=clause_deadline) if payments_section else []),
         ]
         runtime = dataclasses.replace(
             runtime,
@@ -252,7 +304,10 @@ async def recurring_world(
                 ) as admin, StorefrontClient(
                     url, signer=BUYER_SIGNER, caller_role="buyer", expected_publishers=publisher,
                 ) as buyer, LifecycleClient(url, BUYER_SIGNER, publisher) as buyer_lifecycle:
-                    world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle, url)
+                    world = RecurringWorld(
+                        admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning, url,
+                        runtime=runtime, app=app,
+                    )
                     world.declare(treatments)
                     yield world
             return
@@ -267,6 +322,9 @@ async def recurring_world(
                 "http://seller", BUYER_SIGNER, publisher,
                 transport=httpx.ASGITransport(app=app),
             ) as buyer_lifecycle:
-                world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle)
+                world = RecurringWorld(
+                    admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning,
+                    runtime=runtime, app=app,
+                )
                 world.declare(treatments)
                 yield world

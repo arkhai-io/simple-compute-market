@@ -547,12 +547,13 @@ class TestBuyFrom:
         [
             (["--allow-no-penalty", "--allow-charged-term-end"],
              ["--allow-no-penalty", "--allow-charged-term-end"]),
+            (["--allow-charged-preemption"], ["--allow-charged-preemption"]),
             (["--allow-unprotected-terms"], [
                 "--allow-no-delivery-deadline", "--allow-no-penalty",
                 "--allow-charged-preemption", "--allow-charged-term-end",
             ]),
         ],
-        ids=["two-waivers", "the-shorthand"],
+        ids=["two-waivers", "charged-preemption", "the-shorthand"],
     )
     def test_buy_fresh_records_and_names_each_waiver_and_a_duration_in_seconds(
         self, runner, monkeypatch, flags, recorded,
@@ -868,11 +869,14 @@ class TestBuyWatchdog:
 
     def test_a_resume_re_enters_the_watchdog_and_a_resume_refuses_the_flag(self, runner, monkeypatch):
         run_id = _seed_agreed_negotiation("http://seller:8001", "L-1")
-        _settled(monkeypatch, lambda **kw: {"status": "ready", "negotiation_id": "neg-1",
-                                            "connection_details": _DETAILS})
+        settled_with = {}
+        _settled(monkeypatch, lambda **kw: settled_with.update(kw) or {
+            "status": "ready", "negotiation_id": "neg-1", "connection_details": _DETAILS,
+        })
         journal = _Journal()
         journal.opt_in("neg-1", _IMMEDIATE)
-        lifecycle, opened, probed = _watchdog_seams(monkeypatch, journal)
+        clock = _Clock()
+        lifecycle, opened, probed = _watchdog_seams(monkeypatch, journal, clock)
 
         refused = runner.invoke(app, ["buy", "--from", run_id, "--watchdog"])
         assert refused.exit_code == 2 and opened == []
@@ -881,6 +885,8 @@ class TestBuyWatchdog:
 
         assert result.exit_code == 0, result.output
         assert opened == [run_id] and probed == [_DETAILS]
+        # The resumed settlement runs on the command's wait clock.
+        assert settled_with["clock"].sleep == clock.sleep
         lifecycle.end.assert_awaited_once_with("neg-1")
         assert journal.state("neg-1").stop is not None
         assert "at most 2 seconds" in " ".join(result.output.split())

@@ -187,10 +187,12 @@ an option naming an undeclared treatment or an undeclared setup charge, a cached
 selection of one is refused before acceptance, and materialization refuses it with
 `settlement_option_withdrawn_refetch`, so its mandate is never derived. Withdrawing a
 treatment therefore stops new offers and the materialization of a deal accepted under
-it; a deal already materialized keeps being serviced. A declaration enables recurring
-offers, not their execution: end service refuses to commit a rate deal while the
-storefront services none
-([`deal-lifecycle` architecture, "One end instant, transactional admission"](../deal-lifecycle/architecture.md#one-end-instant-transactional-admission)).
+it; a deal already materialized keeps being serviced. The declaration governs offers
+and acceptances only: a rate deal it admitted is delivered and serviced by the
+storefront's payments seller stage, as a once-only deal is, and a storefront whose
+payments section lacks its servicing fields while it holds open payment deals starts
+and reports them repair required
+([storefront publication, "The servicing declaration and its three doors"](../storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors)).
 Declaring any treatment also presupposes that the payment authority executes the
 dispute authority's `chosen` stop, which hosted qualification has not yet shown. A buyer's root refuses `rate_servicing`, and a
 table naming no installed mechanism, an unknown key or an unknown treatment fails

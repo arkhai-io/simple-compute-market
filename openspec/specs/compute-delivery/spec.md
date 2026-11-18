@@ -25,7 +25,7 @@ The VM and bare-metal storefronts MUST deliver through the compute-family librar
 
 The library MUST expose `drive(negotiation_id)`, returning one of `waiting(wake_at)`, `pending`, `repair_required(reason)`, `available`, `converged` or `ended`. Each call MUST reconcile the deal's recorded state before acting and MUST be safe to repeat. A fulfillment hook MUST map `available` and `converged` to fulfilled, `waiting`, `pending` and `repair_required` to deferred, and `ended` to failed only once the end hand-off is durable.
 
-`drive` MUST fail closed on state it cannot read. A deal with no servicing delivery record or no verified settlement evidence MUST be `repair_required(no_accepted_deal)` with nothing written. An accepted deal with no progress row is a first drive, whose row MUST be created under admission for `reserve`. An unknown stored step, a malformed or conflicting recorded identity, a port result of the wrong kind or an empty fulfillment result MUST be `repair_required` and MUST NOT lead to a reserve, dispatch, activation or availability on the deal. The reason MUST be one of `no_accepted_deal`, `timing_invalid`, `progress_unreadable`, `domain_result_invalid`, `activation_unexplained`, `site_unanswered` or `rate_servicing_unavailable`. Every `repair_required` and `ended` outcome MUST carry the deal's recorded reservation and fulfillment identities and the reference of the authority evidence it rests on.
+`drive` MUST fail closed on state it cannot read. A deal with no servicing delivery record or no verified settlement evidence MUST be `repair_required(no_accepted_deal)` with nothing written. An accepted deal with no progress row is a first drive, whose row MUST be created under admission for `reserve`. An unknown stored step, a malformed or conflicting recorded identity, a port result of the wrong kind or an empty fulfillment result MUST be `repair_required` and MUST NOT lead to a reserve, dispatch, activation or availability on the deal. The reason MUST be one of `no_accepted_deal`, `timing_invalid`, `progress_unreadable`, `domain_result_invalid`, `activation_unexplained` or `site_unanswered`. Every `repair_required` and `ended` outcome MUST carry the deal's recorded reservation and fulfillment identities and the reference of the authority evidence it rests on.
 
 #### Scenario: A domain worker resumes a deal
 
@@ -81,25 +81,6 @@ Capacity MAY be committed at settlement before the Agreement start. Dispatch, ac
 
 - **WHEN** the buyer's end is recorded at 11:00 for a deal waiting for a 12:00 start
 - **THEN** at 12:00 admission refuses and nothing is dispatched
-
-### Requirement: Protected steps are authorized and admitted
-
-Before commit, dispatch, billing start and disclosure the path MUST call end service's `authorize_delivery` for that phase, and before activation it MUST pass end service's admission for `activate`. A pending or unknown outcome MUST leave the deal pending and resolve the same attempt; a financial allow MUST NOT override a due local end; a mechanism with no adapter MUST NOT be allowed. A refusal carrying end service's `rate_servicing_unavailable` code, when no end is due, MUST be `repair_required(rate_servicing_unavailable)` with nothing reserved; any other refusal when no end is due MUST be `repair_required(no_accepted_deal)`.
-
-#### Scenario: An end wins before dispatch
-
-- **WHEN** an end is recorded after the dispatch authorization was read but before dispatch
-- **THEN** the stale admission fails, nothing is dispatched, and the deal goes to the end hand-off
-
-#### Scenario: An authorization outcome is unknown
-
-- **WHEN** the payment adapter cannot establish its authorization outcome
-- **THEN** the deal stays pending and the next drive resolves the same authorization
-
-#### Scenario: End service refuses a rate deal at commit
-
-- **WHEN** end service refuses a deal's commit with the code `rate_servicing_unavailable`
-- **THEN** `drive` returns `repair_required(rate_servicing_unavailable)`, no capacity is reserved, and the next drive asks again
 
 ### Requirement: Activation precedes billing start and availability
 
@@ -265,3 +246,37 @@ The VM and bare-metal storefronts MUST each serve `POST /api/v1/admin/deals/{neg
 
 - **WHEN** a rate interruption omits its kind, or an unentitled deal is preempted
 - **THEN** either storefront's route answers 409 and records nothing
+
+### Requirement: Protected delivery steps are authorized and admitted
+
+Before commit, dispatch, billing start and disclosure the path MUST call end service's `authorize_delivery` for that phase, and before activation it MUST pass end service's admission for `activate`. A pending or unknown outcome MUST leave the deal pending and resolve the same attempt; a financial allow MUST NOT override a due local end; a mechanism with no adapter MUST NOT be allowed. Any refusal when no end is due MUST be `repair_required(no_accepted_deal)`.
+
+#### Scenario: An end wins before dispatch
+
+- **WHEN** an end is recorded after the dispatch authorization was read but before dispatch
+- **THEN** the stale admission fails, nothing is dispatched, and the deal goes to the end hand-off
+
+#### Scenario: An authorization outcome is unknown
+
+- **WHEN** the payment adapter cannot establish its authorization outcome
+- **THEN** the deal stays pending and the next drive resolves the same authorization
+
+#### Scenario: A rate deal's changed answer leaves it pending
+
+- **WHEN** end service answers `pending` because the payment authority's answer to an already journaled phase changed at the same revision
+- **THEN** `drive` returns pending with nothing further done, and a later drive asks again
+
+### Requirement: Unfinished deliveries are re-driven by one routine
+
+The compute delivery package MUST provide one routine that re-drives unfinished deliveries, and each compute storefront's `delivery-recovery` loop MUST run it over its domain's ports: the domain lists its unfinished deliveries, claims each one under its own serialization, and has the deal's settlement stage re-check its evidence before the routine drives it. A deal the domain cannot claim, or whose evidence does not re-check, MUST NOT be driven in that pass.
+
+#### Scenario: A delivery waiting for its start is re-driven
+
+- **GIVEN** a VM deal and a bare-metal deal each committed and waiting for their Agreement start
+- **WHEN** each storefront's `delivery-recovery` loop runs at the start
+- **THEN** each claims the deal, re-checks its settlement evidence and drives it through the delivery path
+
+#### Scenario: A deal another worker holds is skipped
+
+- **WHEN** the domain cannot claim an unfinished delivery because another worker holds it
+- **THEN** the routine does not drive it in that pass

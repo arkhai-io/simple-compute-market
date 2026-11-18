@@ -868,8 +868,10 @@ async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
     assert (hold["pool_id"], hold["reason"]) == ("pool-1", "pool_unresolvable")
     assert hold["problems"]
     assert {name: loop["state"] for name, loop in status.lifecycle.items()} == {
+        "deal_servicing": "paused",
         "delivery_recovery": "paused",
         "negotiation_watchdog": "paused",
+        "payment_reconciliation": "paused",
         "publication": "paused",
         "settlement_servicing": "paused",
         "site_projection_poller": "paused",
@@ -1048,8 +1050,10 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             paused = await admin.admin_pause_lifecycle_loops()
             assert paused["paused"] is True
             assert paused["loops"] == {
+                "deal_servicing": "paused",
                 "delivery_recovery": "paused",
                 "negotiation_watchdog": "paused",
+                "payment_reconciliation": "paused",
                 "publication": "paused",
                 "settlement_servicing": "paused",
             }
@@ -1067,8 +1071,10 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             assert resumed == {
                 "paused": False,
                 "loops": {
+                    "deal_servicing": "running",
                     "delivery_recovery": "running",
                     "negotiation_watchdog": "running",
+                    "payment_reconciliation": "running",
                     "publication": "running",
                     "settlement_servicing": "running",
                 },
@@ -1120,16 +1126,20 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
 
     assert started == [
         "alkahest_chain_probe",
+        "deal_servicing",
         "delivery_recovery",
         "negotiation_watchdog",
+        "payment_reconciliation",
         "publication",
         "settlement_servicing",
         "site_projection_poller",
     ]
     assert routes == {
         "alkahest-chain-probe": "alkahest_chain_probe",
+        "deal-servicing": "deal_servicing",
         "delivery-recovery": "delivery_recovery",
         "negotiation-watchdog": "negotiation_watchdog",
+        "payment-reconciliation": "payment_reconciliation",
         "publication": "publication",
         "settlement-servicing": "settlement_servicing",
         "site-projections": "site_projection_poller",
@@ -1138,16 +1148,21 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
     assert runtime.loops.registered_loop_names() == []
 
 
-async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_path) -> None:
+async def test_a_storefront_without_a_settlement_worker_steps_its_servicing_loop_idle(tmp_path) -> None:
+    """Both compute storefronts run the same four servicing loops whatever they
+    compose; with no settlement worker, a step of its loop sweeps nothing."""
     runtime = _runtime(str(tmp_path / "storefront.db"))
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
-        assert runtime.loops.registered_loop_names() == ["delivery_recovery", "negotiation_watchdog", "publication"]
+        assert runtime.loops.registered_loop_names() == [
+            "deal_servicing", "delivery_recovery", "negotiation_watchdog", "payment_reconciliation",
+            "publication", "settlement_servicing",
+        ]
         async with _admin_client(app) as admin:
-            with pytest.raises(StorefrontClientError) as refused:
-                await admin.admin_run_lifecycle_cycle("settlement-servicing")
-    assert refused.value.status_code == 404
+            await admin.admin_pause_lifecycle_loops()
+            stepped = await admin.admin_run_lifecycle_cycle("settlement-servicing")
+    assert stepped == {"loop": "settlement_servicing", "processed": 0}
 
 
 # A development identity; never used on any public network.

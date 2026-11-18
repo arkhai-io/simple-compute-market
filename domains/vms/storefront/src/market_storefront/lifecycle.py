@@ -59,8 +59,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 NEGOTIATION_WATCHDOG = "negotiation_watchdog"
+#: The four loops both compute storefronts run under the same names: the kit's
+#: servicing cycle, the family's delivery re-drive, the advance of accepted
+#: payment deals, and the settlement worker.
+DEAL_SERVICING = "deal_servicing"
+DELIVERY_RECOVERY = "delivery_recovery"
+PAYMENT_RECONCILIATION = "payment_reconciliation"
 SETTLEMENT_SERVICING = "settlement_servicing"
-FULFILLMENT_RESUME = "fulfillment_resume"
 CAPACITY_EVENTS_POLLER = "capacity_events_poller"
 SITE_PROJECTION_POLLER = "site_projection_poller"
 PUBLICATION = "publication"
@@ -258,9 +263,11 @@ async def reset_for_tests() -> None:
 
 __all__ = [
     "CAPACITY_EVENTS_POLLER",
+    "DEAL_SERVICING",
+    "DELIVERY_RECOVERY",
     "DISCLOSED_CYCLE_ERRORS",
-    "FULFILLMENT_RESUME",
     "NEGOTIATION_WATCHDOG",
+    "PAYMENT_RECONCILIATION",
     "PUBLICATION",
     "QUIESCENCE_TIMEOUT_SECONDS",
     "SETTLEMENT_SERVICING",

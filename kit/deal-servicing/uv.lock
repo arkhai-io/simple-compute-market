@@ -71,7 +71,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -83,12 +83,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -102,12 +102,12 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -115,12 +115,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -129,24 +129,24 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-servicing"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -170,8 +170,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.5.0" },
+    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.3.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -180,7 +180,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-core-storefront-client", specifier = ">=0.28.0" },
-    { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.1" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.8.0" },
     { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.1.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -215,7 +215,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.8.0"
+version = "0.8.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -226,7 +226,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.8.1-py3-none-any.whl" },
 ]
 
 [[package]]

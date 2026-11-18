@@ -4,7 +4,9 @@ Library integration: VM's ``buyer_lifecycle`` composes the payments adapter over
 the in-process payments engine, holding an approved rate mandate, with the
 buyer's SQLite evidence store. The storefront is unreachable and the injected
 probe fails, as when the resource is lost while the seller is down. Nothing here
-runs a delivered deal: the probe stands for the disclosed access.
+runs a delivered deal: the probe stands for the disclosed access. The same
+composition's payment-stop classifier, bound to the Agreement, is read against
+authority views built here.
 
 Every account, key and address here is a deterministic development value; none
 may be used on a public network.
@@ -21,6 +23,7 @@ from market_arkhai_payments.settlement_config import ArkhaiPaymentsConfig
 from market_core.schemas import Agreement
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_deal_lifecycle_buyer import FileEvidenceStore, WatchdogSettings, watch_deal
+from market_deal_lifecycle_contracts.models import Accepted, AuthorityView, PaymentEvent, PaymentPartObservation
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
 
@@ -113,3 +116,33 @@ def test_the_watchdog_sends_one_payer_stop_and_a_restart_sends_nothing_more(tmp_
 
     assert restarted.reason == "stopped" and restarted.progress.payment.status == "accepted"
     assert len(probes) == 3 and payments.count("submit_event") == 1
+
+
+def test_the_composition_tells_funds_running_out_from_the_term_end(tmp_path):
+    agreement, data, approval, _ = approved_rate_deal()
+    term_end = int(datetime.fromisoformat(agreement["start_utc"].replace("Z", "+00:00")).timestamp()) + (
+        agreement["duration_seconds"]
+    )
+
+    def ended(at):
+        """The authority's view of the rate part stopped under ``terms`` at ``at``."""
+        return AuthorityView(outcome=Accepted(), state="ended", parts=[PaymentPartObservation(
+            part="0", evidence_ref="snapshot", final_stop=PaymentEvent(
+                negotiation_id=agreement["negotiation_id"], commitment_ref=data.transaction_id, part="0",
+                kind="stop", actor="terms", at=at, cause="terms", sequence=2,
+                authority_record_ref=f"{data.transaction_id}:events:2",
+            ),
+        )])
+
+    async def funding_stops():
+        async with buyer_lifecycle(
+            agreement_bytes=json.dumps(agreement), settlement_data=data.to_wire(),
+            seller_url=UNREACHABLE_STOREFRONT, signer=BUYER,
+            publishers=TrustedIdentitySet(identities=(SELLER.identity,)), approval=approval,
+            store=FileEvidenceStore(tmp_path / "evidence"), timeout=2,
+        ) as lifecycle:
+            # One period before the Agreement's end the balance could not
+            # reserve the next period; at its end the deal reached its term.
+            return lifecycle.funding_stopped(ended(term_end - 900)), lifecycle.funding_stopped(ended(term_end))
+
+    assert asyncio.run(funding_stops()) == (True, False)

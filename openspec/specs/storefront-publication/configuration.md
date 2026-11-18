@@ -68,8 +68,11 @@ The typed durations — bare metal's intervals and
 timeouts (`[capacity].poll_interval`, `[capacity].publication_interval_seconds`,
 `[capacity].source_confirmation_seconds`, `negotiation_timeout_seconds`,
 `negotiation_watchdog_interval`, `settlement_servicing_interval_seconds`,
-`payment_reconciliation_interval`), VM's `[capacity].poll_interval`,
-`[capacity].source_confirmation_seconds`, `settlement_servicing_interval_seconds`, and
+`payment_reconciliation_interval`, `deal_servicing_interval_seconds`,
+`delivery_recovery_interval_seconds`), VM's `[capacity].poll_interval`,
+`[capacity].source_confirmation_seconds`, `settlement_servicing_interval_seconds`,
+`fulfillment_resume_sweep_interval`, `deal_servicing_interval_seconds`,
+`delivery_recovery_interval_seconds`, and
 contact retention's `retention_sweep_interval_seconds`, and the API-credit
 storefront's `settlement_servicing_interval_seconds`, `[capacity].poll_interval`, and
 watchdog and payment-reconciliation intervals — are positive, finite numbers of
@@ -86,13 +89,30 @@ an hour, a development value.
 
 ## The settlement servicing interval
 
-VM's and the API-credit storefront's servicing
-sweep reads `settlement_servicing_interval_seconds` (30 by default), as bare metal's
-does; a configuration still stating `claims_sweep_interval` refuses startup, naming
-its replacement. The API-credit storefront has no chart, so its startup refusal is the
-only guard there. It also refuses, by key and before its signer or database, capacity
-sites whose authorities are not valid principals and a capacity poll interval that is
-not positive seconds.
+VM's and the API-credit storefront's settlement
+servicing sweep reads `settlement_servicing_interval_seconds` (30 by default), as bare
+metal's does; a configuration still stating `claims_sweep_interval` refuses startup,
+naming its replacement. The API-credit storefront has no chart, so its startup
+refusal is the only guard there. It also refuses, by key and before its signer or
+database, capacity sites whose authorities are not valid principals and a capacity
+poll interval that is not positive seconds.
+
+In the two compute storefronts `settlement_servicing_interval_seconds` paces the
+`settlement-servicing` loop, which runs the settlement worker alone; each of the other
+three servicing loops has its own key
+([`ARCHITECTURE.md`, "Operator lifecycle controls"](../../../docs/development/ARCHITECTURE.md#operator-lifecycle-controls)):
+
+| Loop | VM | Bare metal |
+|---|---|---|
+| `deal-servicing` | `deal_servicing_interval_seconds`; unstated, `settlement_servicing_interval_seconds` | `deal_servicing_interval_seconds`; unstated, `payment_reconciliation_interval` |
+| `delivery-recovery` | `delivery_recovery_interval_seconds`; unstated, `fulfillment_resume_sweep_interval` | `delivery_recovery_interval_seconds`; unstated, `payment_reconciliation_interval` |
+| `payment-reconciliation` | `fulfillment_resume_sweep_interval` (30 by default) | `payment_reconciliation_interval` (30 by default) |
+| `settlement-servicing` | `settlement_servicing_interval_seconds` (30 by default) | `settlement_servicing_interval_seconds` (30 by default) |
+
+`deal_servicing_interval_seconds` and `delivery_recovery_interval_seconds` are
+optional: a configuration stating neither runs those loops at the keys their fallbacks
+name, so it keeps the cadence it set, and every key a release accepted keeps its
+meaning ([`package-versions.md`](../../../docs/guidance/repository/package-versions.md)).
 
 ## System status
 

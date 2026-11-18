@@ -357,11 +357,16 @@ def wait_for_settlement(
     total_timeout: float = DEFAULT_SETTLEMENT_TIMEOUT,
     on_poll: Callable[[int, dict], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
 ) -> dict[str, Any]:
-    """Poll settlement, observing public status and returning private delivery."""
+    """Poll settlement, observing public status and returning private delivery.
 
-    deadline = time.monotonic() + total_timeout
+    ``total_timeout`` is measured on ``monotonic`` and the polls are paced by
+    ``sleep``, so a caller's clock paces the whole wait.
+    """
+
+    deadline = monotonic() + total_timeout
     attempts = 0
     while True:
         attempts += 1
@@ -378,7 +383,7 @@ def wait_for_settlement(
             on_poll(attempts, {"status": status_body.get("status")})
         if status_body.get("status") in ("ready", "failed"):
             return status_body
-        if time.monotonic() >= deadline:
+        if monotonic() >= deadline:
             raise TimeoutError(
                 f"Settlement did not reach terminal status within "
                 f"{total_timeout}s (last status={status_body.get('status')!r})"
@@ -887,13 +892,16 @@ def make_escrow_settle_hook(
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
     duration_seconds: int = 0,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> SettleFn:
     """Bind the escrow helper explicitly into an applicable domain table entry.
 
     This helper is never a dispatch default. The selected entry owns acceptance
     guards and resolves its escrow prerequisites before invoking it. The buyer
     funds only the escrow ``build_escrow_terms`` derives, and where the seller
-    sent a plan, only once ``check_escrows_fund_plan`` finds them equal.
+    sent a plan, only once ``check_escrows_fund_plan`` finds them equal. The
+    settlement wait pauses on ``sleep`` and measures its timeout on
+    ``monotonic``.
     """
 
     def _hook(
@@ -919,6 +927,7 @@ def make_escrow_settle_hook(
             settlement_poll_interval=settlement_poll_interval,
             settlement_total_timeout=settlement_total_timeout,
             sleep=sleep,
+            monotonic=monotonic,
             on_event=on_event,
             attempts=negotiation.attempts,
         )
@@ -944,6 +953,7 @@ def _settle_one(
     settlement_poll_interval: float,
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
+    monotonic: Callable[[], float],
     on_event: Callable[[str, dict], None],
     attempts: list[dict[str, Any]],
 ) -> BuyResult:
@@ -1162,6 +1172,7 @@ def _settle_one(
                 "settlement_poll", {"attempt": i, "body": body}
             ),
             sleep=sleep,
+            monotonic=monotonic,
             resolve_seller_principals=resolve_seller_principals,
         )
     except TimeoutError as exc:

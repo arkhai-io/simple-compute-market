@@ -66,7 +66,7 @@ async def main():
 
             def poller():
                 return RespondentPoller(
-                    path, authority=authority, account=peer.payee, read=adapter.respondent,
+                    path, authority=authority, read=adapter.respondent,
                     resolve=lambda case: ("example", adapter), signer=seller, clock=lambda: now,
                 )
 

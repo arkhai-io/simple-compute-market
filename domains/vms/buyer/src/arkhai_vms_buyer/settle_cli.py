@@ -7,6 +7,7 @@ import base64
 import typer
 from market_core.schemas import Agreement
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from market_deal_lifecycle_buyer import WaitClock
 from rich.console import Console
 
 from .buy_orchestrator import (
@@ -37,8 +38,12 @@ def chain_address_book(chain_name: str) -> str | None:
 def run_settle_from_log(
     *, run_id: str, poll_interval: float, settlement_timeout: float,
     console: Console | None = None, identity: ResolvedBuyerIdentity | None = None,
+    clock: WaitClock = WaitClock(),
 ) -> dict:
-    """Resolve accepted support before any mechanism resources or seller effects."""
+    """Resolve accepted support before any mechanism resources or seller effects.
+
+    ``clock`` paces the resumed commit and settlement wait.
+    """
     identity = identity or common.resolve_recovery_buyer_identity(run_id)
     signer = identity.signer
     try:
@@ -59,7 +64,7 @@ def run_settle_from_log(
         resolve_policy=resolve_buyer_settlement_policy,
         resolve_address_book=chain_address_book,
         poll_interval=poll_interval, timeout=settlement_timeout,
-        console=console or Console(),
+        console=console or Console(), clock=clock,
     ))
 
 

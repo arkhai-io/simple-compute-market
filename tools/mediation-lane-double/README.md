@@ -114,8 +114,8 @@ marketplace's own verification against the producer's vectors. A rule
 may program only `reverse` effects, and a rule naming another is refused at
 install. A `stop` and a `penalty` act on rate parts — a stop schedules or applies a
 part's stop under its partial-period rule, and a penalty reverses earned amounts
-still held, across parts in mandate order — and no lane running this double runs a
-rate part, so neither is applied untested; an `award` is not executable on
+still held, across parts in mandate order — and no lane scenario files a case on a
+rate deal, so neither is applied untested; an `award` is not executable on
 `arkhai.payments.v1`, as the contract states.
 To know which party files before the app runs, so that a rule naming the filer can
 drop a filing's response, the fault classifier reads an unseen transaction's

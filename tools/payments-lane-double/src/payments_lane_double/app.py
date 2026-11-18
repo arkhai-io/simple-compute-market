@@ -7,8 +7,8 @@ since a run lives only as long as its lane.
 
 Beside the API it serves the lane doubles' control routes under ``/test/``,
 authenticated by the fixture control token: rules programming refusals and
-transport faults, the time the engine reads, funding, signer rotation and
-status. The transport-fault middleware wraps the whole app and leaves the
+transport faults, the time the engine reads, funding, signer rotation, a rate
+part's further reservation and status. The transport-fault middleware wraps the whole app and leaves the
 control and health routes alone.
 """
 
@@ -33,6 +33,8 @@ from lane_double_controls.models import (
     ControlError,
     Funded,
     Funding,
+    Reservation,
+    Reserved,
     Rule,
     SignerIdentity,
     Status,
@@ -110,6 +112,24 @@ class PaymentsDouble:
             self.engine.signer = signer
         return SignerIdentity(scheme=signer.identity.scheme.value,
                               identifier=signer.identity.identifier)
+
+    def reserve(self, transaction: str, reservation: Reservation) -> Reserved:
+        """Reserve the transaction's running rate parts through the named instant,
+        as the reservation control does: the service's scheduler decides this, so
+        the double does it only when the scenario asks."""
+
+        with self._lock:
+            if transaction not in self._mandates:
+                raise ControlError(404, "transaction_not_found",
+                                   f"the double holds no transaction {transaction}")
+            try:
+                parts = self.engine.reserve(transaction, reservation.through)
+            except PaymentsAPIError as refused:
+                if refused.code != "no_running_rate_part":
+                    raise
+                raise ControlError(409, "no_running_rate_part",
+                                   "the transaction has no started, unstopped rate part") from None
+        return Reserved.model_validate({"transaction": transaction, "parts": parts})
 
     def approve(self, account: str, request: ApprovalRequest) -> Any:
         mandate = request.mandate
@@ -345,9 +365,17 @@ def _add_controls(app: FastAPI, directory: AccountDirectory, double: PaymentsDou
     async def rotate(request: Request) -> Any:
         return double.rotate_signer().model_dump(mode="json")
 
+    async def reserve(request: Request) -> Any:
+        transaction = request.path_params["transaction"]
+        if not _TRANSACTION_ID.fullmatch(transaction):
+            raise ControlError(422, "invalid_request", "a reservation names a transaction's id")
+        reservation = await _control_body(request, Reservation)
+        return double.reserve(transaction, reservation).model_dump(mode="json")
+
     handlers: dict[controls.ControlRoute, Callable[[Request], Awaitable[Any]]] = {
         controls.RULES: install, controls.RULE_LIST: listing, controls.RULE_DELETE: delete,
         controls.STATUS: status, controls.FUNDING: fund, controls.SIGNER_ROTATE: rotate,
+        controls.RESERVE: reserve,
     }
     if time_control.settable:
         handlers[controls.TIME] = set_time

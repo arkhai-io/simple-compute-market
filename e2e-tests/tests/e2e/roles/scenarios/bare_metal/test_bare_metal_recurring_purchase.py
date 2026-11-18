@@ -1,25 +1,29 @@
-"""A whole-host recurring purchase, refused at commit, on the mock bare-metal lane.
+"""A whole-host recurring purchase, delivered, on the mock bare-metal lane.
 
 A profiled Ed25519 buyer with no wallet and a default buyer's terms buys a
 recurring on-demand option on one whole host through ``market bare-metal buy``
 in ``arkhai.payments.v1`` against the lane's payments double. The lane's
 storefront declares rate servicing for ``charged`` and ``returned``
 (``domains/bare_metal/storefront/storefront.dev.toml``), a lane fixture that lets
-it publish and accept the option; end service services no rate deal, so it
-refuses the commit. The module runs the shared purchase stages through the
-commit (``helpers/buyer_purchase_stages.py``) and the recurring purchase's
-stages (``helpers/recurring_purchase_stages.py``), with
-``BareMetalRecurringPurchaseDriver`` supplying bare metal's part, and inserts its
-own:
+it publish, accept and service the option. The module runs the shared purchase
+stages (``helpers/buyer_purchase_stages.py``), the canonical deal's delivery
+and teardown stages (``helpers/compute_deal_stages.py``) and the recurring
+purchase's stages (``helpers/recurring_purchase_stages.py``), with
+``BareMetalRecurringPurchaseDriver`` supplying bare metal's part, and inserts
+bare metal's publication close (09a2, shared with the canonical deal's
+bare-metal lanes) and its own:
 
   03  Publication:  one pass publishes the purchase's machine, offered by a
                     pool override stating the recurring option alone
 
-The buyer ends the deal by its own ``market bare-metal end``, and the scenario
-does not wait for the delivery deadline. The storefront's loops, fulfillment
+The buyer ends the deal by its own ``market bare-metal end``, and the seller's
+list shows it ended once released. Every instant is reached by setting lane
+time, never by waiting, and the scenario does not wait for the delivery
+deadline. The storefront's loops, fulfillment
 convergence and the lease watchdog are held for the module. This is lane-double
 evidence: it proves the money a buyer is shown and approves for a per-period
-Agreement and the refused commit, never rate delivery.
+Agreement, rate delivery and the buyer's end. Mock access is never evidence of
+real SSH.
 """
 
 from __future__ import annotations
@@ -40,6 +44,8 @@ from tests.e2e.roles.helpers.buyer_purchase_stages import (
     Purchase01_PayerBalanceBefore,
     Purchase02_ListingDiscovered,
     Purchase03_Bought,
+    Purchase04_PurchaseCorrelated,
+    Purchase09_PurchaseRunEnded,
 )
 from tests.e2e.roles.helpers.cleanup import run_cleanup
 from tests.e2e.roles.helpers.compute_deal import advance_storefront, dry_run_storefront
@@ -52,20 +58,33 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage00e_ProvisioningMockMode,
     Stage00f1_ExecutorHostRegistry,
     Stage00h_ProvisioningStorefrontLink,
+    Stage07a_ArmCreateGate,
+    Stage08b2_ReleaseCreateGateAndDrain,
+    Stage09a_FulfillmentConvergesToActive,
+    Stage09b_SettlementReadyAndCredentials,
+    Stage09c2_ArmTeardownGate,
+    Stage09c_LeaseRecorded,
+    Stage11a2_ReleaseTeardownGateAndDrain,
+    Stage11b_TeardownCompletion,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     Recurring04_MandateApproved,
-    Recurring05_CommitRefused,
-    Recurring06_PurchaseRunClosed,
-    Recurring07_BuyerEnds,
-    Recurring08_PayerBalanceRestored,
+    Recurring05_DeliveryRecoveredAtTheStart,
+    Recurring06_RateStartedAfterActivation,
+    Recurring07_AcceptedMoneyShown,
+    Recurring08_BuyerEnds,
+    Recurring09_PayerChargedOnePeriod,
+    Recurring10_SellerListsTheDealEnded,
     RecurringPurchaseState,
     recurring_purchase_cleanup,
 )
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import WHOLE_HOST_CAPACITY
 from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
+from tests.e2e.roles.scenarios.bare_metal.publication_stages import (
+    BareMetalPublicationClosesListing,
+)
 from tests.e2e.roles.scenarios.bare_metal.purchase_driver import (
     BareMetalRecurringPurchaseDriver,
     bare_metal_purchase_cli,
@@ -164,13 +183,25 @@ def deal_driver(
 
 @pytest.fixture(scope="module")
 def purchase_cleanup(purchase_cli, deal_driver: BareMetalRecurringPurchaseDriver,
-                     deal_state: BareMetalRecurringPurchaseState):
-    """Whatever the stages left: a purchase command still running, an approved
-    deal the stages did not end, ended by the buyer's own stop, and the pool
-    override."""
+                     deal_state: BareMetalRecurringPurchaseState, provisioning_test_client):
+    """Whatever the stages left: a held job, a purchase command still running,
+    an approved deal the stages did not end, ended by the buyer's own stop, the
+    gates' rules, a provisioning job still running, and the pool override.
+
+    The gates are opened first, since a removed rule leaves a job it holds
+    waiting.
+    """
     yield
+    rules = provisioning_test_client.bare_metal_rules
     run_cleanup([
+        ("open the purchase's mock gates", deal_driver.open_gates),
         *recurring_purchase_cleanup(purchase_cli, deal_driver, deal_state),
+        # Deleting a rule that is already gone reports it not deleted; only a
+        # real failure raises, and it is reported like any step's.
+        ("remove the access-grant mock rule", lambda: rules.delete_rule(deal_driver.create_rule_id)),
+        ("remove the access-reclaim mock rule",
+         lambda: rules.delete_rule(deal_driver.teardown_rule_id)),
+        ("drain provisioning", lambda: provisioning_test_client.drain(timeout=30)),
         ("remove the pool override", deal_driver.remove_pool_override),
     ])
 
@@ -241,7 +272,7 @@ class TestStage03_PublicationPublishesTheMachine:
 
 
 # ===========================================================================
-# The purchase, through its commit
+# The purchase
 # ===========================================================================
 
 class TestPurchase01_PayerBalanceBefore(Purchase01_PayerBalanceBefore):
@@ -252,29 +283,85 @@ class TestPurchase02_ListingDiscovered(Purchase02_ListingDiscovered):
     pass
 
 
+class TestStage07a_ArmCreateGate(Stage07a_ArmCreateGate):
+    pass
+
+
 class TestPurchase03_Bought(Purchase03_Bought):
     pass
 
 
-# ===========================================================================
-# The refused commit and the buyer's end
-# ===========================================================================
+class TestPurchase04_PurchaseCorrelated(Purchase04_PurchaseCorrelated):
+    pass
+
+
+class TestStage08b2_ReleaseCreateGateAndDrain(Stage08b2_ReleaseCreateGateAndDrain):
+    pass
+
 
 class TestRecurring04_MandateApproved(Recurring04_MandateApproved):
     pass
 
 
-class TestRecurring05_CommitRefused(Recurring05_CommitRefused):
+# ===========================================================================
+# Delivery
+# ===========================================================================
+
+class TestStage09a_FulfillmentConvergesToActive(Stage09a_FulfillmentConvergesToActive):
     pass
 
 
-class TestRecurring06_PurchaseRunClosed(Recurring06_PurchaseRunClosed):
+class TestStage09a2_PublicationClosesTheListing(BareMetalPublicationClosesListing):
     pass
 
 
-class TestRecurring07_BuyerEnds(Recurring07_BuyerEnds):
+class TestRecurring05_DeliveryRecoveredAtTheStart(Recurring05_DeliveryRecoveredAtTheStart):
     pass
 
 
-class TestRecurring08_PayerBalanceRestored(Recurring08_PayerBalanceRestored):
+class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCredentials):
+    pass
+
+
+class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestRecurring06_RateStartedAfterActivation(Recurring06_RateStartedAfterActivation):
+    pass
+
+
+class TestPurchase09_PurchaseRunEnded(Purchase09_PurchaseRunEnded):
+    pass
+
+
+class TestRecurring07_AcceptedMoneyShown(Recurring07_AcceptedMoneyShown):
+    pass
+
+
+# ===========================================================================
+# The buyer's end, teardown and release
+# ===========================================================================
+
+class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
+
+
+class TestRecurring08_BuyerEnds(Recurring08_BuyerEnds):
+    pass
+
+
+class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAndDrain):
+    pass
+
+
+class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestRecurring09_PayerChargedOnePeriod(Recurring09_PayerChargedOnePeriod):
+    pass
+
+
+class TestRecurring10_SellerListsTheDealEnded(Recurring10_SellerListsTheDealEnded):
     pass

@@ -488,12 +488,14 @@ def test_an_option_without_a_deadline_is_refused_unless_its_waiver_is_given(
         (["--allow-no-delivery-deadline"], ["--allow-no-delivery-deadline"]),
         (["--allow-no-delivery-deadline", "--allow-no-penalty"],
          ["--allow-no-delivery-deadline", "--allow-no-penalty"]),
+        (["--allow-no-delivery-deadline", "--allow-charged-preemption"],
+         ["--allow-no-delivery-deadline", "--allow-charged-preemption"]),
         (["--allow-unprotected-terms"], [
             "--allow-no-delivery-deadline", "--allow-no-penalty",
             "--allow-charged-preemption", "--allow-charged-term-end",
         ]),
     ],
-    ids=["its-own-waiver", "with-another", "the-shorthand"],
+    ids=["its-own-waiver", "with-another", "with-charged-preemption", "the-shorthand"],
 )
 def test_each_waiver_used_is_recorded_and_named_before_approval(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flags: list[str], recorded: list[str],

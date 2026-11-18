@@ -288,6 +288,44 @@ def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
     )
 
 
+def payment_reconciliation_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between the advances of accepted payment deals:
+    `fulfillment_resume_sweep_interval`, thirty unless stated, refused by key
+    unless it is positive seconds, as bare metal's
+    `payment_reconciliation_interval` is."""
+
+    active = settings if source is None else source
+    return _positive_seconds(
+        active.get("fulfillment_resume_sweep_interval", 30), key="fulfillment_resume_sweep_interval",
+    )
+
+
+def deal_servicing_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between the kit's servicing cycles: `deal_servicing_interval_seconds`,
+    refused by key unless it is positive seconds; unstated, the settlement
+    servicing interval, so a configuration stating only that key services its
+    deals at it."""
+
+    active = settings if source is None else source
+    stated = active.get("deal_servicing_interval_seconds")
+    if stated is None:
+        return settlement_servicing_interval(active)
+    return _positive_seconds(stated, key="deal_servicing_interval_seconds")
+
+
+def delivery_recovery_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between re-drives of unfinished deliveries:
+    `delivery_recovery_interval_seconds`, refused by key unless it is positive
+    seconds; unstated, `fulfillment_resume_sweep_interval`, so a configuration
+    stating only that key re-drives its deliveries at it."""
+
+    active = settings if source is None else source
+    stated = active.get("delivery_recovery_interval_seconds")
+    if stated is None:
+        return payment_reconciliation_interval(active)
+    return _positive_seconds(stated, key="delivery_recovery_interval_seconds")
+
+
 def introduction_retention_sweep_interval(seconds: Any) -> float:
     """The introduction retention sweep's interval,
     `[Settlement.contact].retention_sweep_interval_seconds`, refused by key

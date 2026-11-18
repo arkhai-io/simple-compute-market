@@ -7,7 +7,7 @@ import base64
 import builtins
 import hashlib
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
@@ -18,15 +18,15 @@ from market_deal_lifecycle.adapters import (
 )
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
-    Accepted, AuthorityView, DealPage, DealSummary, DeliveryView, EvidenceItem, LifecycleCommand, LifecycleOutcome,
-    FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Rejected, SubmitResponse,
-    Unknown,
+    Accepted, AuthorityView, DealPage, DealSummary, DeliveryView, EndingCode, EvidenceItem, LifecycleCommand,
+    LifecycleOutcome, FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Rejected,
+    SubmitResponse, Unknown,
 )
 from market_identity import Identity, canonical_json
 
 from .end import SQLiteOperationStore
 from .evidence import EvidenceSession, in_transaction, transaction
-from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, stable_ref
+from .journal import Classification, EndSession, FinalRequest, JournalIntent, PhysicalProgress, atomic, stable_ref
 from .projection import SellerDeal, read_seller_deal
 from .watch import DealWatch, WatchSession
 
@@ -148,7 +148,7 @@ class SellerServicing:
     def __init__(
         self, path: str | Path, *, payments: PaymentAdapterTable, disputes: DisputeAdapterTable,
         credential_available: Callable[[DisputeAuthority], bool], watch_factory: WatchFactory,
-        clock: Callable[[], int],
+        clock: Callable[[], int], missing_adapters: Mapping[str, str] | None = None,
     ):
         self.path = Path(path)
         self.payments = payments
@@ -156,6 +156,10 @@ class SellerServicing:
         self.credential_available = credential_available
         self.watch_factory = watch_factory
         self.clock = clock
+        # By mechanism, the configuration that would compose the adapter of a
+        # mechanism the storefront installs but whose configuration composed
+        # none; a deal of that mechanism names it in its repair reason.
+        self.missing_adapters = dict(missing_adapters or {})
         self.operations = SQLiteOperationStore(path)
 
     def _deal(self, negotiation_id: str) -> SellerDeal:
@@ -180,6 +184,19 @@ class SellerServicing:
     def _authority(
         self, deal: SellerDeal, watch: DealWatch, current: list[AuthorityView] | None = None,
     ) -> AuthorityView:
+        return self._observed(deal, watch, current)[0]
+
+    def _observed(
+        self, deal: SellerDeal, watch: DealWatch, current: list[AuthorityView] | None = None,
+    ) -> tuple[AuthorityView, bool]:
+        """The deal's authority view, and whether it names a dispute authority
+        of which no view is saved.
+
+        A view is saved only from an accepted read, so with none the dispute
+        authority's cases are unknown, not empty; what an accepted read assures
+        is its adapter's to state. The view and that answer are read in one
+        transaction, so a view saved meanwhile cannot leave them disagreeing.
+        """
         with transaction(self.path) as conn:
             session = WatchSession(conn)
             payment = session.view(deal.negotiation_id, watch.payment_record)
@@ -199,9 +216,15 @@ class SellerServicing:
             current_dispute = next(observations, None) if watch.dispute is not None else None
         rejected = next((item.outcome for item in self._filings(deal.negotiation_id)
                          if isinstance(item.outcome, Rejected)), None)
+        # A deal of a mechanism the storefront installs but whose configuration
+        # composed no adapter cannot be serviced at all, so that is its repair
+        # reason before any other.
+        unserviceable = watch.payment is None and deal.payment.mechanism in self.missing_adapters
         missing = deal.dispute is not None and not self.credential_available(deal.dispute)
-        if missing:
-            outcome: LifecycleOutcome = Rejected(reason="repair required: Agreement authority credential is missing")
+        if unserviceable:
+            outcome: LifecycleOutcome = Rejected(reason=self._unserviceable_reason(deal))
+        elif missing:
+            outcome = Rejected(reason="repair required: Agreement authority credential is missing")
         elif repair:
             outcome = Rejected(reason="repair required: respondent case: " + repair[0])
         elif rejected is not None:
@@ -216,13 +239,73 @@ class SellerServicing:
             )
         return AuthorityView(
             outcome=outcome,
-            state="repair_required" if missing or repair or rejected is not None else payment.state if payment else None,
+            state=(
+                "repair_required" if unserviceable or missing or repair or rejected is not None
+                else payment.state if payment else None
+            ),
             payouts=payment.payouts if payment else None,
             events=payment.events if payment else [], parts=payment.parts if payment else [],
             disputes=dispute.disputes if dispute else [],
             cases=dispute.cases if dispute else [], extensions=payment.extensions if payment else [],
             deadline=payment.deadline if payment else None,
+        ), watch.dispute_record is not None and dispute is None
+
+    def _unserviceable_reason(self, deal: SellerDeal) -> str:
+        mechanism = deal.payment.mechanism
+        return (
+            f"repair required: {mechanism} has no lifecycle adapter; "
+            f"configure {self.missing_adapters[mechanism]}"
         )
+
+    def unserviceable(self) -> builtins.list[tuple[str, str]]:
+        """Each open deal of a mechanism named in ``missing_adapters`` that has
+        no adapter composed, with its repair reason.
+
+        A deal is open until the seller list's rule would call it ended: a
+        recorded end, its resource proven released, nothing outstanding at
+        either authority in its saved views (``_outstanding``). With no adapter
+        nothing observes its payment again, so a released deal whose part last
+        showed no stop stays reported until the adapter is restored; one whose
+        dispute authority has no saved view stays reported until one is saved.
+        Every registered deal is read, committed or not, since an uncommitted
+        one still holds capacity a storefront must end.
+        """
+        found: builtins.list[tuple[str, str]] = []
+        continuation: str | None = None
+        while True:
+            with transaction(self.path) as conn:
+                deals, continuation = SellerSession(conn).page(
+                    ListDealsRequest(limit=100, continuation=continuation), committed_only=False,
+                )
+            for deal in deals:
+                if deal.payment.mechanism not in self.missing_adapters:
+                    continue
+                if self.payments.resolve(PaymentBinding(deal.negotiation_id, deal.payment)) is not None:
+                    continue
+                if not self._ended(deal):
+                    found.append((deal.negotiation_id, self._unserviceable_reason(deal)))
+            if continuation is None:
+                return found
+
+    def _ended(self, deal: SellerDeal) -> bool:
+        """Whether the seller list's rule calls the deal ended, from its saved views.
+
+        A deal whose views cannot be read is not shown ended, so it stays
+        reported rather than failing the report.
+        """
+        with transaction(self.path) as conn:
+            end = EndSession(conn)
+            selected = end.selected_end(deal.negotiation_id)
+            progress = end.read(deal.negotiation_id).progress
+        if selected is None:
+            return False
+        try:
+            authority, unobserved = self._observed(deal, self._watch(deal))
+        except Exception:
+            logger.exception("unserviceable deal %s: its authority views cannot be read", deal.negotiation_id)
+            return False
+        open_cases = [case.case_ref for case in authority.cases if case.state != "closed"]
+        return not self._outstanding(deal, authority, progress, open_cases, dispute_unobserved=unobserved)
 
     async def watch(self, negotiation_id: str):
         deal = await asyncio.to_thread(self._deal, negotiation_id)
@@ -263,27 +346,68 @@ class SellerServicing:
             deals, continuation = SellerSession(conn).page(request)
         summaries = []
         for deal in deals:
-            authority = self._authority(deal, self._watch(deal))
+            authority, unobserved = self._observed(deal, self._watch(deal))
             with transaction(self.path) as conn:
                 end = EndSession(conn)
                 delivery = end.read(deal.negotiation_id)
                 selected = end.selected_end(deal.negotiation_id)
+            open_cases = [case.case_ref for case in authority.cases if case.state != "closed"]
             state: LifecycleState = authority.state or "unstarted"
+            ending: list[EndingCode] = []
             if deal.once_only:
                 state = "running"
             if selected:
-                state = "ended" if delivery.progress == "released" else "ending"
+                ending = self._outstanding(
+                    deal, authority, delivery.progress, open_cases, dispute_unobserved=unobserved,
+                )
+                state = "ending" if ending else "ended"
             if authority.state == "repair_required" or delivery.progress == "repair_required":
-                state = "repair_required"
+                state, ending = "repair_required", []
             summaries.append(DealSummary(
                 negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
                 domain=deal.domain, mechanism=deal.payment.mechanism, entitlements=deal.entitlements,
-                state=state, deadline=selected.ended_at if selected else authority.deadline or delivery.term_end,
+                state=state, ending=ending,
+                deadline=selected.ended_at if selected else authority.deadline or delivery.term_end,
                 parts=authority.parts, has_open_extension=bool(authority.extensions),
-                open_cases=[case.case_ref for case in authority.cases if case.state != "closed"],
-                filings=self._filings(deal.negotiation_id),
+                open_cases=open_cases, filings=self._filings(deal.negotiation_id),
             ))
         return DealPage(deals=summaries, continuation=continuation)
+
+    def _outstanding(
+        self, deal: SellerDeal, authority: AuthorityView, progress: PhysicalProgress,
+        open_cases: builtins.list[str], *, dispute_unobserved: bool,
+    ) -> builtins.list[EndingCode]:
+        """What still keeps a deal with a recorded end from being ended.
+
+        A recorded end is physical and local; the deal is ended only once its
+        resource is proven released, the payment authority shows every part
+        stopped or past its end, so nothing more can bill, and the dispute
+        authority's saved view shows no open case. An open case read later
+        makes it ending again.
+
+        A deal that is not once-only bills through rate parts, and the payment
+        authority's view of it lists every one, started or not; a view listing
+        none, or no view yet saved, verifies no stop, so its payment is still
+        running. A once-only deal has no rate part to stop.
+
+        A deal naming a dispute authority of which no view is saved
+        (``dispute_unobserved``) has no case known closed, so it is not ended
+        until a view of that authority is saved.
+        """
+        now = self.clock()
+        ending: builtins.list[EndingCode] = []
+        if progress != "released":
+            ending.append("release_pending")
+        if (not deal.once_only and not authority.parts) or any(
+            part.final_stop is None and (part.end_at is None or part.end_at > now)
+            for part in authority.parts
+        ):
+            ending.append("payment_running")
+        if open_cases:
+            ending.append("case_open")
+        if dispute_unobserved:
+            ending.append("case_unobserved")
+        return ending
 
     async def submit(
         self, command: LifecycleCommand, *, actor: Identity, reason: str | None = None,

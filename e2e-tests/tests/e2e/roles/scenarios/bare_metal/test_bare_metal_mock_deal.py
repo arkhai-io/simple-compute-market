@@ -457,7 +457,7 @@ class TestStage12d_BuyerTeardownSentTwice:
         assert again["delivery"]["progress"] == "tearing_down", again
         for name in ("negotiation_id", "operation_key", "receipt_at", "selected_end"):
             assert again[name] == first[name], (name, first, again)
-        advance_storefront(storefront_admin_client, "delivery-recovery")
+        advance_storefront(storefront_admin_client, "deal-servicing")
         delivery = buyer_fulfillment.delivery(negotiation_id)["delivery"]
         assert delivery["progress"] == "tearing_down", delivery
         assert delivery["site_reports"], delivery

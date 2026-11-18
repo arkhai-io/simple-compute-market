@@ -36,10 +36,12 @@ from market_storefront_kit import (
 import market_storefront.container as _container
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
+    DEAL_SERVICING,
+    DELIVERY_RECOVERY,
     enter_stage,
-    FULFILLMENT_RESUME,
     INTRODUCTION_RETENTION,
     NEGOTIATION_WATCHDOG,
+    PAYMENT_RECONCILIATION,
     PUBLICATION,
     SETTLEMENT_SERVICING,
     SITE_PROJECTION_POLLER,
@@ -49,7 +51,7 @@ from market_storefront.lifecycle import (
     register_step,
 )
 from market_storefront.services.fulfillment_resume_runtime import (
-    fulfillment_resume_cycle_once,
+    resume_incomplete_fulfillments_once,
 )
 from market_storefront.services.publication_loop import (
     new_publication_wake,
@@ -62,6 +64,9 @@ from market_storefront.services.capacity_client import (
 )
 from market_storefront.utils.config import (
     configured_capacity_sites,
+    deal_servicing_interval,
+    delivery_recovery_interval,
+    payment_reconciliation_interval,
     settings,
     settlement_servicing_interval,
     site_projection_poll_interval,
@@ -112,20 +117,39 @@ async def negotiation_watchdog_step() -> Mapping[str, Any]:
     return {"loop": NEGOTIATION_WATCHDOG, "abandoned": int(abandoned)}
 
 
-async def settlement_servicing_step() -> Mapping[str, Any]:
+def _settlement_composition() -> Any:
     composition = _container.resolved_settlement_composition
     if composition is None:
         raise LifecycleRouteError(503, "settlement composition is not initialized")
-    if getattr(composition, "lifecycle", None) is not None:
-        await composition.lifecycle.cycle()
-    processed = await composition.worker.run_once()
+    return composition
+
+
+async def settlement_servicing_step() -> Mapping[str, Any]:
+    """One sweep of the settlement worker, the loop's one job."""
+    processed = await _settlement_composition().worker.run_once()
     return {"loop": SETTLEMENT_SERVICING, "processed": int(processed)}
 
 
-async def fulfillment_resume_step() -> Mapping[str, Any]:
-    """Re-drive unfinished accepted deliveries, then accepted payment deals."""
-    await fulfillment_resume_cycle_once(sqlite_client=_sqlite_client())
-    return {"loop": FULFILLMENT_RESUME}
+async def deal_servicing_step() -> Mapping[str, Any]:
+    """One page of the kit's servicing cycle over the deal lifecycle; its size."""
+    lifecycle = getattr(_settlement_composition(), "lifecycle", None)
+    processed = await lifecycle.cycle() if lifecycle is not None else 0
+    return {"loop": DEAL_SERVICING, "processed": int(processed)}
+
+
+async def delivery_recovery_step() -> Mapping[str, Any]:
+    """One pass of the family's re-drive over the unfinished deliveries."""
+    redriven = await resume_incomplete_fulfillments_once(sqlite_client=_sqlite_client())
+    return {"loop": DELIVERY_RECOVERY, "redriven": int(redriven)}
+
+
+async def payment_reconciliation_step() -> Mapping[str, Any]:
+    """Advance accepted payment deals a buyer has not settled; none without payments."""
+    coordinator = getattr(_settlement_composition(), "payments_coordinator", None)
+    if coordinator is None:
+        return {"loop": PAYMENT_RECONCILIATION, "attempted": 0, "failed": 0}
+    done = await coordinator.reconcile_once()
+    return {"loop": PAYMENT_RECONCILIATION, "attempted": done.attempted, "failed": done.failed}
 
 
 async def site_projections_step() -> Mapping[str, Any]:
@@ -230,15 +254,20 @@ async def alkahest_chain_probe_step() -> Mapping[str, Any]:
     return {"loop": ALKAHEST_CHAIN_PROBE_LOOP, **(await probe.step())}
 
 
-def _fulfillment_resume_interval() -> float:
-    return float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
+#: The four loops both compute storefronts run, by name: route and step.
+_SERVICING_LOOPS = {
+    DEAL_SERVICING: ("deal-servicing", deal_servicing_step),
+    DELIVERY_RECOVERY: ("delivery-recovery", delivery_recovery_step),
+    PAYMENT_RECONCILIATION: ("payment-reconciliation", payment_reconciliation_step),
+    SETTLEMENT_SERVICING: ("settlement-servicing", settlement_servicing_step),
+}
 
 
 def register_vm_lifecycle_steps() -> None:
     """Register every loop's step, so each lifecycle route can run one."""
     register_step(NEGOTIATION_WATCHDOG, route="negotiation-watchdog", step=negotiation_watchdog_step)
-    register_step(SETTLEMENT_SERVICING, route="settlement-servicing", step=settlement_servicing_step)
-    register_step(FULFILLMENT_RESUME, route="fulfillment-resume", step=fulfillment_resume_step)
+    for name, (route, step) in _SERVICING_LOOPS.items():
+        register_step(name, route=route, step=step)
     register_step(
         SITE_PROJECTION_POLLER, route="site-projections", step=site_projections_step
     )
@@ -304,9 +333,10 @@ def register_vm_loops(
     and the capacity-event pollers' fan-out.
 
     Intervals are read when this runs, so startup registers what the running
-    configuration states. Publication, the site-projection poller, and
-    fulfillment resume run their first cycle as soon as their timers start;
-    the watchdog, servicing, and retention sweeps run theirs one interval
+    configuration states. Publication and the site-projection poller run their
+    first cycle as soon as their timers start; the watchdog, the four servicing
+    loops (deal servicing, delivery recovery, payment reconciliation and
+    settlement servicing) and the retention sweep run theirs one interval
     later. Those sweeps change durable deals and introductions, and holding the
     first one back gives an operator who holds the loops as the storefront
     starts a whole interval to do so. The retention sweep is registered only
@@ -321,8 +351,10 @@ def register_vm_loops(
     """
     intervals = {
         NEGOTIATION_WATCHDOG: negotiation_watchdog_policy().interval_seconds,
+        DEAL_SERVICING: deal_servicing_interval(),
+        DELIVERY_RECOVERY: delivery_recovery_interval(),
+        PAYMENT_RECONCILIATION: payment_reconciliation_interval(),
         SETTLEMENT_SERVICING: settlement_servicing_interval(),
-        FULFILLMENT_RESUME: _fulfillment_resume_interval(),
         SITE_PROJECTION_POLLER: site_projection_poll_interval(),
         PUBLICATION: publication_interval_seconds(),
     }
@@ -336,19 +368,11 @@ def register_vm_loops(
         interval_seconds=intervals[NEGOTIATION_WATCHDOG],
         initial_delay_seconds=intervals[NEGOTIATION_WATCHDOG],
     )
-    register_loop(
-        SETTLEMENT_SERVICING,
-        route="settlement-servicing",
-        step=settlement_servicing_step,
-        interval_seconds=intervals[SETTLEMENT_SERVICING],
-        initial_delay_seconds=intervals[SETTLEMENT_SERVICING],
-    )
-    register_loop(
-        FULFILLMENT_RESUME,
-        route="fulfillment-resume",
-        step=fulfillment_resume_step,
-        interval_seconds=intervals[FULFILLMENT_RESUME],
-    )
+    for name, (route, step) in _SERVICING_LOOPS.items():
+        register_loop(
+            name, route=route, step=step,
+            interval_seconds=intervals[name], initial_delay_seconds=intervals[name],
+        )
     register_loop(
         SITE_PROJECTION_POLLER,
         route="site-projections",
