@@ -53,6 +53,9 @@ ARKHAI_PAYMENTS_CONFIG_KEY = "arkhai_payments"
 DEFAULT_SNAPSHOT_FRESHNESS_SECONDS = 5
 
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+# The readiness resource, and the public detail, naming the registries whose
+# recommended dispute authorities the composing storefront could not read.
+_DISPUTE_AUTHORITIES_UNREAD = "dispute_authorities_unread"
 _CAPABILITIES = ("agreement.v1", "receipt.v1")
 _CLAUSE_OPERATORS = frozenset(
     {
@@ -340,8 +343,12 @@ async def arkhai_payments_preflight(
     resources: Mapping[str, Any],
     role: SettlementRole,
 ) -> MechanismReadiness:
-    """Check trusted policy and credentials without contacting the service."""
-    del resources
+    """Check trusted policy and credentials without contacting the service.
+
+    The composing storefront may supply ``dispute_authorities_unread``: each
+    registry whose recommended dispute authorities it could not read, and when
+    that read last failed, which readiness copies into its public details.
+    """
     config = ArkhaiPaymentsConfig.model_validate(section)
     if not config.enabled:
         return MechanismReadiness(
@@ -404,6 +411,9 @@ async def arkhai_payments_preflight(
                     )
                 )
 
+    # A report, never a blocker: the options a seller's local dispute entries
+    # allow still publish while a registry's recommendations are unread.
+    unread = resources.get(_DISPUTE_AUTHORITIES_UNREAD)
     return MechanismReadiness(
         mechanism=ARKHAI_PAYMENTS_MECHANISM,
         configured=True,
@@ -413,6 +423,7 @@ async def arkhai_payments_preflight(
         capabilities=_CAPABILITIES,
         contract_version=ARKHAI_PAYMENTS_MECHANISM,
         schema_version="1",
+        public_details={_DISPUTE_AUTHORITIES_UNREAD: unread} if unread else {},
     )
 
 
@@ -702,6 +713,7 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
         negotiates_scalar_amount=True,
         project_billing=payments_billing_basis,
         present_payment=payments_payment_presentation,
+        public_detail_keys=frozenset({_DISPUTE_AUTHORITIES_UNREAD}),
     )
 
 

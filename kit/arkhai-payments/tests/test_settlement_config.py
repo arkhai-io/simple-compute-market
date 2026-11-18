@@ -24,7 +24,10 @@ from market_arkhai_payments.settlement_config import (
 from market_identity import Ed25519Signer, Eip191Signer
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_arkhai_payments.fixtures import dispute_lifecycle
-from market_settlement_runtime import SettlementPublicationClause
+from market_settlement_runtime import (
+    SettlementConfigurationRegistry,
+    SettlementPublicationClause,
+)
 
 import payment_terms
 
@@ -182,6 +185,36 @@ def test_preflight_reads_a_stated_key_and_no_variable(monkeypatch: pytest.Monkey
         _config(api_key_env=None, api_key=OVERLAY_KEY), {}, "seller"))
     assert ready.ready
     assert OVERLAY_KEY not in repr(ready)
+
+
+def test_an_unread_registry_is_a_public_detail_and_no_blocker() -> None:
+    registry = SettlementConfigurationRegistry([create_arkhai_payments_registration()])
+    config = registry.resolve(
+        {
+            "priority": [ARKHAI_PAYMENTS_MECHANISM],
+            "arkhai_payments": {
+                "enabled": True,
+                "service_url": "https://payments.example",
+                "service_identity": Ed25519Signer(bytes(range(32))).identity,
+                "fee_bps": 250,
+                "api_key": OVERLAY_KEY,
+            },
+        },
+        role="seller",
+    )
+    unread = [
+        {"registry": "https://registry.example", "last_failed_at": "2026-01-01T00:00:00+00:00"}
+    ]
+
+    # Through the registry, which refuses a public detail its registration
+    # does not allowlist.
+    (status,) = asyncio.run(registry.ordered_readiness(
+        config, role="seller", resources={"dispute_authorities_unread": unread}))
+    (without,) = asyncio.run(registry.ordered_readiness(config, role="seller", resources={}))
+
+    assert (status.ready, status.blockers) == (True, ())
+    assert status.public_details == {"dispute_authorities_unread": unread}
+    assert (without.ready, dict(without.public_details)) == (True, {})
 
 
 def test_preflight_names_both_key_forms_when_neither_is_stated() -> None:

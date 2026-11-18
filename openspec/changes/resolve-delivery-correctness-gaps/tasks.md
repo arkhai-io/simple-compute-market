@@ -928,22 +928,79 @@ Payments mechanisms' readiness, with no blocker (D6's report half;
 recommendations it could not read", its readiness clauses). Touches `kit/alkahest`
 and `kit/arkhai-payments`.
 
-- [ ] 8.1 In `kit/alkahest/src/market_alkahest/settlement_config.py`, add
+- [x] 8.1 In `kit/alkahest/src/market_alkahest/settlement_config.py`, add
   `dispute_authorities_unread` to the registration's public-detail allowlist and copy
   it from the preflight's resources into its public details, as `chain_probe` is,
   adding no blocker. In `kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`,
   the registration allowlists the key and `arkhai_payments_preflight` copies it from
   its resources. Verify with 8.2.
-- [ ] 8.2 Unit (each kit's settlement configuration tests): with
+  Done: each module names the key once (`_DISPUTE_AUTHORITIES_UNREAD`, private:
+  neither kit may import the storefront kit's constant, and nothing else needs
+  theirs), and each preflight copies a non-empty value into the enabled
+  readiness's public details and adds no blocker; each docstring names the
+  resource. Read from the code, not tested: a disabled mechanism's preflight
+  returns before it reads the resource and reports no public details, as
+  before, so the report is an enabled mechanism's.
+- [x] 8.2 Unit (each kit's settlement configuration tests): with
   `dispute_authorities_unread` in its resources, each mechanism's readiness carries
   it in its public details, stays ready with no blocker for it, and passes
   `SettlementConfigurationRegistry`'s public-detail validation; without it, the
   details are as before.
-- [ ] 8.3 Bump `kit/alkahest`'s and `kit/arkhai-payments`'s packages (minor) and
+  Done: unit, `test_an_unread_registry_is_a_public_detail_and_no_blocker` in
+  `kit/alkahest/tests/unit/test_settlement_config.py` and in
+  `kit/arkhai-payments/tests/test_settlement_config.py`, each through
+  `SettlementConfigurationRegistry.ordered_readiness` over the mechanism's real
+  registration (whose validation refuses a public detail not allowlisted): the
+  readiness is ready with no blocker and carries the value as given; without
+  the resource, Alkahest's details are the same less that key, and Arkhai
+  Payments' are empty.
+- [x] 8.3 Bump `kit/alkahest`'s and `kit/arkhai-payments`'s packages (minor) and
   refresh the locks. Verify with `make check-version-bumps` and `make check-locks`.
-- [ ] 8.4 Verification: `uv run pytest kit/alkahest/tests kit/arkhai-payments/tests`
+  Done: `arkhai-kit-alkahest` 0.13.0 → 0.14.0, `arkhai-kit-arkhai-payments`
+  0.8.0 → 0.9.0. Beyond the plan, the exact pins on Arkhai Payments move: the
+  bare-metal storefront's (already bumped in 7.4) and the bare-metal buyer's,
+  which takes a patch bump, 0.8.0 → 0.8.1. Relocked the eighteen projects
+  whose locks name any of the three (`make lock PROJECTS=…`: both kits,
+  `kit/arkhai-mediation`, `kit/deal-servicing`, `kit/storefront`, the bare-metal
+  buyer and storefront, the VM buyer and storefront, `domains/apicredits` and
+  its buyer, service and storefront, `domains/compute/delivery`,
+  `core/buyer/market-binary`, the two lane doubles, `e2e-tests`). Both checks
+  pass.
+- [x] 8.4 Verification: `uv run pytest kit/alkahest/tests kit/arkhai-payments/tests`
   passes, and `scripts/change-workflow run pre-commit
   resolve-delivery-correctness-gaps` passes. End-to-end: section 9's.
+  Done: `make -C kit/alkahest test` 466 passed and `make -C kit/arkhai-payments
+  test` 355 passed (with its typecheck, vector and model checks); `pre-commit`
+  did not pass, for an environmental cause recorded in the section's notes.
+  End-to-end: section 9's, as planned.
+
+Section 8 notes (handoff):
+
+- `pre-commit` at `e4f207b2e`, run after the machine rebooted:
+  `after-functional-change` and the closing `pre-commit` hook passed;
+  `pre-commit-functional` failed in `make test`'s `test-release-tooling` alone,
+  50 of 3201 `scripts/tests` cases, every one rendering a Compose file with
+  `docker compose config`, with no Docker daemon running (no `/var/run/docker.sock`
+  after the reboot). The section changes no Compose file or stack configuration,
+  and those cases passed in section 7's runs before the reboot. `make test`
+  stopped there, so the suites after it did not run; of those, the two lane
+  doubles' locks moved here, and `make -C tools/payments-lane-double test` (93
+  passed) and `make -C tools/mediation-lane-double test` (78 passed) were run
+  on their own. The rest (`helm test-render`, `tools/frp-grant-admission`,
+  `tools/injected-time`, `tools/lane-double-controls`) is untouched by the
+  section and unrun at this commit. Validation's full run is the evidence.
+- The fresh-context check found no breach of guidance; its two evidence
+  findings were taken (the pre-commit record, above, and 8.1's disabled
+  mechanism stated as read from the code). It also observed that
+  `kit/arkhai-payments/tests` is flat, not split into `unit/` and
+  `integration/` as `test-placement.md` asks: older than this change, and
+  left for the round's triage to record.
+
+- Section 9 raises the storefronts' lower bounds to `arkhai-kit-alkahest>=0.14.0`
+  and `arkhai-kit-arkhai-payments>=0.9.0` where they declare them (the
+  bare-metal storefront pins Arkhai Payments exactly, already moved): an older
+  mechanism ignores the resource, so the storefront's report would reach no
+  public detail.
 
 ## 9. The storefronts read again at publication and pass the unread registries on
 

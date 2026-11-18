@@ -147,7 +147,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-buyer"
-version = "0.8.0"
+version = "0.8.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -169,7 +169,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_buyer-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_buyer-0.8.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -245,7 +245,7 @@ requires-dist = [
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.13.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = "==0.8.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = "==0.9.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.12.1" },
     { name = "arkhai-kit-config", specifier = ">=0.6.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.5.0" },
@@ -435,7 +435,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.13.0"
+version = "0.14.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -449,7 +449,7 @@ dependencies = [
     { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_kit_alkahest-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.14.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -471,7 +471,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -485,7 +485,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
