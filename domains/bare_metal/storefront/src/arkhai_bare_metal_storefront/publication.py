@@ -660,6 +660,9 @@ class BareMetalPublicationCycle:
         *,
         settlement_options: list[dict[str, Any]] | None = None,
         publication_clauses: list[dict[str, Any]] | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         candidate = self._pending.pop(id(listing_resource))
         try:
@@ -672,6 +675,9 @@ class BareMetalPublicationCycle:
                     publication_clauses=publication_clauses or [],
                     demands=demands,
                     max_duration_seconds=max_duration_seconds,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
             )
         except Exception as exc:
@@ -695,6 +701,9 @@ class BareMetalPublicationCycle:
         publication_clauses: list[dict[str, Any]],
         demands: list[dict[str, Any]],
         max_duration_seconds: int | None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self._dry_run:
             # Nothing is recorded or published, so the listing has no identity.
@@ -715,6 +724,9 @@ class BareMetalPublicationCycle:
             settlement_options=settlement_options,
             publication_clauses=publication_clauses,
             demands=demands,
+            title=title,
+            description=description,
+            metadata=metadata,
             site_id=str(candidate["site_id"]),
             pool_id=str(candidate["pool_id"]),
             physical_resource_id=str(candidate["physical_resource_id"]),
@@ -736,6 +748,9 @@ class BareMetalPublicationCycle:
         *,
         settlement_options: list[dict[str, Any]] | None = None,
         publication_clauses: list[dict[str, Any]] | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         try:
             result = self._await(
@@ -747,6 +762,9 @@ class BareMetalPublicationCycle:
                     publication_clauses=publication_clauses or [],
                     demands=demands,
                     max_duration_seconds=max_duration_seconds,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
             )
         except Exception as exc:
@@ -768,6 +786,9 @@ class BareMetalPublicationCycle:
         publication_clauses: list[dict[str, Any]],
         demands: list[dict[str, Any]],
         max_duration_seconds: int | None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         existing = await self._db.load_listing_binding_by_derivation(
             derivation_key=str(candidate["derivation_key"])
@@ -788,6 +809,9 @@ class BareMetalPublicationCycle:
             "settlement_options": settlement_options,
             "demands": demands,
             "max_duration_seconds": max_duration_seconds,
+            "title": title,
+            "description": description,
+            "metadata": metadata,
         }
         binding = await bare_metal_listing_binding(self._db, listing_id)
         if binding is None:
@@ -869,6 +893,9 @@ class BareMetalPublicationCycle:
             publication_clauses=publication_clauses,
             demands=demands,
             max_duration_seconds=max_duration_seconds,
+            title=title,
+            description=description,
+            metadata=metadata,
         )
         publication = await bare_metal_publication_candidate(self._db, listing_id)
         if is_open:
@@ -905,6 +932,8 @@ def _apply_override(candidate: dict[str, Any], override: BareMetalPoolOverride) 
         ]
     if override.max_duration_seconds is not None:
         candidate["override_max_duration_seconds"] = override.max_duration_seconds
+    if override.details is not None:
+        candidate["details"] = dict(override.details)
     if override.min_duration_seconds is not None:
         candidate["listing_resource"]["min_duration_seconds"] = (
             override.min_duration_seconds

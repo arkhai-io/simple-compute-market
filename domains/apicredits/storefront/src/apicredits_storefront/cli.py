@@ -154,6 +154,12 @@ def publish_cmd(
         help="Alkahest escrow contract; resolved from the chain config when omitted.",
     ),
     description: str | None = typer.Option(None, "--description"),
+    title: str | None = typer.Option(None, "--title"),
+    metadata_json: str | None = typer.Option(
+        None,
+        "--metadata",
+        help="Seller metadata as a JSON object of string keys to scalars.",
+    ),
     openapi_url: str | None = typer.Option(None, "--openapi-url"),
     base_url: str | None = typer.Option(
         None,
@@ -227,11 +233,20 @@ def publish_cmd(
 
     signer = resolve_identity_signer()
     url = _storefront_url(storefront_url)
+    metadata: dict[str, Any] | None = None
+    if metadata_json is not None:
+        try:
+            metadata = json.loads(metadata_json)
+        except json.JSONDecodeError as exc:
+            typer.echo(f"--metadata is not valid JSON: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
     request = {
         "resource_id": resource_id,
         "service_name": service_name,
         "accepted_escrows": accepted_escrows,
         "description": description,
+        "title": title,
+        "metadata": metadata,
         "openapi_url": openapi_url,
         "base_url": base_url,
         "paused": paused,

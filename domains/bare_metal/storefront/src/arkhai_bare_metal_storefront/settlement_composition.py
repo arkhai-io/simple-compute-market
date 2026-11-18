@@ -220,6 +220,9 @@ class BareMetalStorefrontSettlementComposition:
         candidate: Mapping[str, Any],
         clauses: Sequence[SettlementPublicationClause],
         max_duration_seconds: int | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> PublicationPayload:
         """Build ready settlement publication alternatives.
 
@@ -310,6 +313,9 @@ class BareMetalStorefrontSettlementComposition:
             ),
             demands=tuple(self._release_conditions(accepted_escrows, readiness)),
             max_duration_seconds=max_duration_seconds,
+            title=title,
+            description=description,
+            metadata=metadata,
         )
 
     def _release_conditions(

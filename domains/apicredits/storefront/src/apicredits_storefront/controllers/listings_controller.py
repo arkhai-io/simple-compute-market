@@ -150,6 +150,8 @@ class ListingsController:
                 accepted_escrows=body.accepted_escrows,
                 settlement_clauses=body.settlement_clauses,
                 description=body.description,
+                title=body.title,
+                metadata=body.metadata,
                 openapi_url=body.openapi_url,
                 base_url=body.base_url,
                 paused=body.paused,

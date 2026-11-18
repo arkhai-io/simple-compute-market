@@ -34,6 +34,7 @@ from market_settlement_runtime import SettlementPublicationClause
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
+from market_core.listing_details import ListingDetails
 
 from .site_reading import resolve_bare_metal_asking_rates
 
@@ -45,6 +46,8 @@ class BareMetalPoolOverrideTerms(BaseModel):
 
     min_duration_seconds: StrictInt | None = Field(default=None, gt=0)
     max_duration_seconds: StrictInt | None = Field(default=None, gt=0)
+    #: Seller-authored details every listing of the pool publishes beside its shape.
+    details: ListingDetails | None = None
 
     @model_validator(mode="after")
     def _ordered(self) -> "BareMetalPoolOverrideTerms":
@@ -179,6 +182,7 @@ class BareMetalPoolOverride:
     min_duration_seconds: int | None = None
     max_duration_seconds: int | None = None
     asking_rates: Any = None
+    details: Mapping[str, Any] | None = None
     problems: tuple[str, ...] = ()
     term_conflicts: tuple[str, ...] = ()
 
@@ -223,6 +227,9 @@ def read_bare_metal_pool_overrides(
             min_duration_seconds=terms.min_duration_seconds,
             max_duration_seconds=terms.max_duration_seconds,
             asking_rates=item.asking_rates,
+            details=(
+                terms.details.model_dump() if terms.details is not None else None
+            ),
         )
     return overrides
 

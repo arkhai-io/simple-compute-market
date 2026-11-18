@@ -185,6 +185,8 @@ class ListingService:
         accepted_escrows: list[dict[str, Any]],
         settlement_clauses: list[dict[str, Any]] | None = None,
         description: str | None = None,
+        title: str | None = None,
+        metadata: dict[str, Any] | None = None,
         openapi_url: str | None = None,
         base_url: str | None = None,
         paused: bool = False,
@@ -358,6 +360,12 @@ class ListingService:
             storefront_url=BASE_URL_OVERRIDE,
             seller_principal=self._seller_principal,
             oracle_address=None,
+            title=title,
+            # The seller's prose describes the listing and the service it
+            # offers, so it publishes beside the envelope and inside the
+            # resource its established consumers already read.
+            description=description,
+            metadata=metadata,
             paused=paused,
         )
         stage_event(

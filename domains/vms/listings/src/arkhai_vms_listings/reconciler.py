@@ -139,7 +139,7 @@ def _member_available_units(
 VM_OFFERING_MODE = "vm"
 
 #: The VM market's override terms, flattened beside shapes and clauses.
-VM_OVERRIDE_TERMS = ("sla", "max_duration_seconds", "pricing")
+VM_OVERRIDE_TERMS = ("sla", "max_duration_seconds", "pricing", "details")
 
 #: Override terms the VM market does not read. A stored override may carry
 #: them; derivation reports them rather than holding the pool.
@@ -784,6 +784,7 @@ def _projected_pool_rows(
         "pool_id": pool_id,
         "region": region,
         "sla": sla,
+        "details": _tier("details"),
         "listing_cardinality_mode": mode,
         "offering_mode": "vm",
         "capacity_backing": declaration.backing.label,
@@ -1415,6 +1416,7 @@ def available_compute_slices(
                 },
                 "accepted_escrows": None,
                 "settlements": None,
+                "details": row.get("details"),
                 "max_duration_seconds": (
                     pricing.max_duration_seconds if pricing else None
                 ),

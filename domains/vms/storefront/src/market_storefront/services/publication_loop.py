@@ -446,6 +446,7 @@ class VmPublicationCycle:
             max_duration_seconds=normalize_max_duration_seconds(
                 pricing.get("max_duration_seconds")
             ),
+            details=candidate.get("details"),
         )
         return request, composed.rate_structure, ruled_out
 
@@ -585,6 +586,9 @@ class VmPublicationCycle:
             demands=fresh.get("demands"),
             max_duration_seconds=fresh.get("max_duration_seconds"),
             rate_structure=derived.rate_structure,
+            title=fresh.get("title"),
+            description=fresh.get("description"),
+            metadata=fresh.get("metadata"),
         )
         refreshed = await self._db.load_listing(listing_id=listing_id)
         publication = await _candidate(self._db, refreshed)

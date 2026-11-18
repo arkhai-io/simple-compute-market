@@ -261,6 +261,9 @@ TERM_LISTING_FIELDS = (
     "settlement_options",
     "demands",
     "max_duration_seconds",
+    "title",
+    "description",
+    "metadata",
 )
 
 UNCHANGED = "unchanged"
