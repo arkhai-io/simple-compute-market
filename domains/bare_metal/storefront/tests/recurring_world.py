@@ -156,6 +156,8 @@ class RecurringWorld:
     buyer_lifecycle: LifecycleClient
     #: The app's loopback base URL when it is served, for a buyer's own commands.
     url: str | None = None
+    #: The registry double the storefront publishes and reads descriptors through.
+    registries: Any = None
 
     def declare(self, treatments: frozenset[str] | None, *, setup: bool = False) -> None:
         """Declare ``treatments`` for payments, or withdraw its declaration."""
@@ -184,6 +186,7 @@ async def recurring_world(
     payments: FakePaymentsClient | None = None,
     clock: Callable[[], int] | None = None,
     serve: bool = False,
+    registry_recommendations: bool = False,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -202,6 +205,9 @@ async def recurring_world(
     lifecycle clock, wall time unless given. ``serve`` runs the app on a
     loopback port, its lifespan uvicorn's, so a buyer's own commands reach it
     over HTTP; the world's clients then use that port too.
+    ``registry_recommendations`` composes no local dispute entry and uses the
+    registry's recommendations alone, which startup reads from the world's
+    registry double.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -219,7 +225,11 @@ async def recurring_world(
             configured,
             registry=registry,
             config=registry.resolve(root, role="seller"),
-            disputes=RegistryDisputePolicy(DisputeConfig(entries=[DISPUTE_ENTRY])),
+            disputes=RegistryDisputePolicy(
+                DisputeConfig(use_registry_dispute_authorities=True)
+                if registry_recommendations
+                else DisputeConfig(entries=[DISPUTE_ENTRY])
+            ),
             # One declaration object for every door: publication, acceptance and
             # the payments stage the composition builds over it.
             rate_servicing=RateServicing(declarations),
@@ -252,7 +262,10 @@ async def recurring_world(
                 ) as admin, StorefrontClient(
                     url, signer=BUYER_SIGNER, caller_role="buyer", expected_publishers=publisher,
                 ) as buyer, LifecycleClient(url, BUYER_SIGNER, publisher) as buyer_lifecycle:
-                    world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle, url)
+                    world = RecurringWorld(
+                        admin, buyer, runtime.db, declarations, buyer_lifecycle, url,
+                        registries=runtime.registry_configuration.recording,
+                    )
                     world.declare(treatments)
                     yield world
             return
@@ -267,6 +280,9 @@ async def recurring_world(
                 "http://seller", BUYER_SIGNER, publisher,
                 transport=httpx.ASGITransport(app=app),
             ) as buyer_lifecycle:
-                world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle)
+                world = RecurringWorld(
+                    admin, buyer, runtime.db, declarations, buyer_lifecycle,
+                    registries=runtime.registry_configuration.recording,
+                )
                 world.declare(treatments)
                 yield world

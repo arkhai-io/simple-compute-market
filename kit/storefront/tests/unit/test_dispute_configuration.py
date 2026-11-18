@@ -114,7 +114,7 @@ async def test_a_reread_reads_only_the_failed_registry_and_keeps_the_other():
 
     registries.failing.clear()
     clock.instant = _START + timedelta(minutes=5)
-    await policy.reread(registries.factory)
+    await policy.reread()
 
     assert registries.selections == [[_A, _B], [_B]]
     assert _accounts(policy, _A) == ["account-a"]
@@ -129,7 +129,7 @@ async def test_a_reread_after_every_read_succeeded_reads_nothing():
     policy = _policy(_Clock())
     await policy.refresh(registries.factory)
 
-    await policy.reread(registries.factory)
+    await policy.reread()
 
     assert registries.built == 1
     assert registries.selections == [[_A, _B]]
@@ -147,7 +147,7 @@ async def test_an_unread_registry_is_reported_with_its_last_failure_until_read(c
     clock.instant = later
     caplog.clear()
     with caplog.at_level(logging.WARNING):
-        await policy.reread(registries.factory)
+        await policy.reread()
 
     assert policy.unread_registries() == (UnreadRegistry(_B, later),)
     assert policy.readiness_resources() == {
@@ -161,7 +161,7 @@ async def test_an_unread_registry_is_reported_with_its_last_failure_until_read(c
     assert not [r for r in caplog.records if NO_DISPUTE_AUTHORITIES in r.getMessage()]
 
     registries.failing.clear()
-    await policy.reread(registries.factory)
+    await policy.reread()
 
     assert policy.unread_registries() == ()
     assert policy.readiness_resources() == {}
@@ -188,7 +188,7 @@ async def test_a_seller_not_using_recommendations_reads_and_reports_nothing():
     policy = _policy(_Clock(), {"use_registry_dispute_authorities": False})
 
     await policy.refresh(registries.factory)
-    await policy.reread(registries.factory)
+    await policy.reread()
 
     assert registries.selections == []
     assert policy.unread_registries() == ()

@@ -243,7 +243,7 @@ requires-dist = [
     { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.25.0" },
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-alkahest", specifier = ">=0.13.0" },
+    { name = "arkhai-kit-alkahest", specifier = ">=0.14.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = "==0.9.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.12.1" },

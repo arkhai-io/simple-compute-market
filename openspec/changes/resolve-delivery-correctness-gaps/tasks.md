@@ -1011,7 +1011,7 @@ recommendations it could not read", its storefront scenarios). Touches
 `domains/vms/storefront`, `domains/bare_metal/storefront`, and
 `domains/apicredits/storefront`; depends on sections 7 and 8.
 
-- [ ] 9.1 In each storefront, the publication cycle's `compose` stage calls the
+- [x] 9.1 In each storefront, the publication cycle's `compose` stage calls the
   policy's re-read before composing options
   (`domains/vms/storefront/src/market_storefront/lifecycle_steps.py`'s publication
   step, and the bare-metal and API-credit storefronts' `lifecycle_steps.py`), and
@@ -1020,7 +1020,30 @@ recommendations it could not read", its storefront scenarios). Touches
   readiness is computed (`settlement_composition.py` in each), only while
   `use_registry_dispute_authorities` is true. Startup's read is unchanged; `/health`
   reads none of it. Verify with 9.2.
-- [ ] 9.2 Application integration (each storefront's tests, with a registry double
+  Done, with deviations. The re-read's places: the VM storefront's in
+  `run_publication_cycle_once` (`services/publication_loop.py`), right after
+  its `compose` stage is entered, which the publication step and timer run;
+  the bare-metal storefront's in its publication step
+  (`lifecycle_steps.py`), after `enter_stage("compose")`; a preview reads
+  nothing in either, since it changes nothing. The API-credit storefront has
+  no publication cycle: it composes a listing's options when the listing is
+  created or seeded (`ListingService.publish_from_quota`, through the
+  composition's `publication_artifacts`), so its re-read is the first act of
+  `publication_artifacts` — before composing listing options, as the
+  requirement states it, though the plan named a cycle that storefront does
+  not have; the round's triage may judge the delta's "each publication cycle"
+  wording against it. Readiness: each composition merges
+  `disputes.readiness_resources()` into the resources of every readiness it
+  computes (VM `readiness()` and `publication_artifacts`; bare metal
+  `readiness()`, which publication and status both call; API credits
+  `readiness()` and `publication_artifacts`); the policy reads registries
+  only while `use_registry_dispute_authorities` is true, so the resource is
+  empty otherwise. Amended in the kit (7.2): `refresh` keeps the client
+  factory it was given and `reread()` takes no argument, so no storefront
+  plumbs a registry client factory into its publication step; the kit is
+  unreleased at 0.12.0 in this change, so it takes no further bump.
+  Startup's read is unchanged.
+- [x] 9.2 Application integration (each storefront's tests, with a registry double
   that fails then answers): a storefront whose startup read failed, relying on
   registry recommendations alone, publishes the payments option the recommendations
   allow on the first publication cycle after the registry answers, without a
@@ -1031,11 +1054,55 @@ recommendations it could not read", its storefront scenarios). Touches
   unread, the mechanism ready ("A storefront with local authorities whose registry
   is unread"). One storefront carries the full cases; the other two carry the
   restart-free case.
-- [ ] 9.3 Bump the three storefront packages (minor) with their lower bounds on the
+  Done: application integration through each storefront's typed clients, the
+  real settlement composition and dispute policy, and a registry double
+  standing where `MultiRegistryClient` wraps the registries, whose descriptor
+  read answers `None` until a test gives a registry a real
+  `RegistryDescriptor`, recording each read's selection (the VM and bare-metal
+  storefronts' existing recording doubles gain that read; the API-credit test
+  has a double of its own). In the bare-metal and API-credit tests startup's
+  read is the app's lifespan's; the VM publication harness has no lifespan, so
+  its test calls `refresh` with the factory the server's startup hands it
+  (`_make_registry_client`) and installs the composition in the container as
+  the composition root does — the VM's lifespan read is the degraded-startup
+  test's below.
+  - VM (`tests/integration/test_registry_dispute_authorities.py`, 2 passed):
+    relying on two registries' recommendations alone, the first cycle opens no
+    listing (the pool's one clause, a payments clause, composes no option)
+    and status shows Arkhai Payments ready, no blocker, reporting both
+    registries unread; once both answer, the next
+    cycle publishes the payments option naming their authority, status drops
+    the report, and a further cycle reads no registry ("A registry was read").
+    With a local `[[Dispute]]` entry, the payments option publishes while both
+    are unread, the mechanism ready and reporting them.
+  - VM, `/health` and real startup (`test_degraded_startup.py`, extended): the
+    real app and lifespan, its registry refusing connections, answers its
+    health check (its database check `ok`, as before; no assertion reads its
+    overall status), and status shows Alkahest's `dispute_authorities_unread`
+    naming the registry beside its existing reachability blocker alone. That
+    `/health` reads nothing of the report is read from the code.
+  - Bare metal (`tests/integration/test_registry_dispute_authorities.py`, 1
+    passed): over `recurring_world`, given `registry_recommendations` (no
+    local entry), the listing publishes its Alkahest option alone while
+    unread, status reports the registry on Arkhai Payments with no blocker,
+    and the step after the registry answers adds the payments option; the
+    registry is read at startup and at both steps.
+  - API credits (`tests/integration/test_registry_dispute_authorities.py`, 1
+    passed): payments beside Alkahest, no local entry, registry discovery on: a
+    payments-clause create is refused 400 while unread, status reports the
+    registry on Arkhai Payments with no blocker, and the create after the
+    registry answers succeeds with the payments option naming its authority.
+- [x] 9.3 Bump the three storefront packages (minor) with their lower bounds on the
   packages sections 7 and 8 bumped, and refresh the locks (`domains/vms/storefront`
   resolves the PyTorch CPU index, `docs/guidance/repository/locks.md`). Verify with
   `make check-version-bumps` and `make check-locks`.
-- [ ] 9.4 Verification: `uv run pytest domains/vms/storefront/tests
+  Done: the three bumps were taken in 7.4. Here the lower bounds move to
+  `arkhai-kit-alkahest>=0.14.0` in all three and `arkhai-kit-arkhai-payments>=0.9.0`
+  in the VM and API-credit storefronts (the bare-metal one pins it, moved in
+  8.3); the storefront kit's pin is 7.4's. Relocked `kit/storefront`, the three
+  storefronts and `e2e-tests` (only the storefronts' locks moved). Both checks
+  pass.
+- [x] 9.4 Verification: `uv run pytest domains/vms/storefront/tests
   domains/bare_metal/storefront/tests domains/apicredits/storefront/tests` passes,
   and `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
   passes. End-to-end: the lanes' payment and dispute scenarios publish options from
@@ -1043,6 +1110,48 @@ recommendations it could not read", its storefront scenarios). Touches
   `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal` — exercising the
   unchanged startup read beside the new cycle; no lane starts a storefront before
   its registry, and none is owed.
+  Done: `make -C domains/vms/storefront test` (unit 1196 passed, 1 skipped;
+  integration 615 passed, again after the degraded-startup extension), `make -C domains/bare_metal/storefront test` 659 passed, `make -C
+  domains/apicredits/storefront test` 286 passed, `kit/storefront`'s unit
+  test 5 passed after 9.1's amendment; the three storefront suites again after
+  the fresh-context fixes. `pre-commit` did not pass, for section 8's
+  environmental cause (the section's notes). End-to-end, reasoned and not run
+  (the lanes run at validation): the three markers' lanes publish from a
+  registry answering at startup, so the first cycle's re-read finds nothing
+  unread and reads nothing; none is owed.
+
+Section 9 notes (handoff):
+
+- `pre-commit` at `5549f6b7e`: `after-functional-change` and the closing
+  `pre-commit` hook passed; `pre-commit-functional` failed in `make test`'s
+  `test-release-tooling` alone, the same 50 Compose render cases as section 8,
+  with no Docker daemon running; every suite `make test` runs before that
+  target passed, the three storefronts' and the storefront kit's among them.
+  The suites after it (`helm test-render`, the frps plugin, `injected-time`,
+  `lane-double-controls`, the two lane doubles) are untouched by the section
+  and unrun at this commit.
+- For the round's triage: "settlement status" in the delta's "A registry is
+  still unread" and in D6 is shown through the status route (`GET
+  /api/v1/system/status`, `settlement`), which reads the running
+  composition. The VM storefront's `market-storefront settlement status`
+  command computes readiness in its own process with no dispute policy
+  (`groups/settlement.py`), so it never shows `dispute_authorities_unread`;
+  whether the requirement means that command too is the round's to settle.
+- For the round's triage and closeout's promotion (11.9): the API-credit
+  storefront reads again when a listing's options are composed, at its
+  creation or seeding, since it runs no publication cycle; the delta and the
+  promotion text say "each publication cycle".
+- The fresh-context check's findings were taken: the bare-metal test moved
+  into `tests/integration/`, three inaccurate comments (the API-credit
+  double's publication, the bare-metal world's `registries` in its served
+  branch, "signed descriptor"), the bare-metal test asserting the Alkahest
+  option and the VM test that no listing opens while unread, and the evidence
+  claims above. Declined: replacing `MultiRegistryClient` on the core module
+  in the API-credit test, which `testing-python.md` warns against for a
+  command module's factories. The storefront's startup takes its factory by
+  name (`server.py` imports `_make_registry_client`), so no seam the
+  storefront owns reaches startup's read, and the VM harness replaces the same
+  name for its publication tests.
 
 ## 10. A bare-metal end under a delivery conflict
 

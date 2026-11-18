@@ -220,7 +220,11 @@ class RecordingRegistries:
     ``failing`` holds ``(operation, url)`` pairs that fail until removed; an
     update's operation is the status it sets. A read of the storefront's open
     listings returns what a test planted with :meth:`plant`, and a close sent
-    for one removes it; ``unreachable`` makes the read fail.
+    for one removes it; ``unreachable`` makes the read fail. A descriptor read
+    returns what ``descriptors`` holds for the registry, its descriptor as the
+    real client returns it once verified, or ``None`` for a read that
+    fails, as it does until a test sets one; ``descriptor_reads`` records the
+    registries each read selected.
     """
 
     def __init__(self) -> None:
@@ -230,6 +234,13 @@ class RecordingRegistries:
         self.planted: list[ListingSummary] = []
         self.unreachable = False
         self.publisher_reads: list[Any] = []
+        self.descriptors: dict[str, Any] = {REGISTRY_URL: None}
+        self.descriptor_reads: list[list[str]] = []
+
+    async def get_descriptors(self, registries=None):
+        selected = [url for url in self.urls if registries is None or url in registries]
+        self.descriptor_reads.append(selected)
+        return {url: self.descriptors[url] for url in selected}
 
     def plant(self, listing_id: str, *, offering_mode: str) -> None:
         self.planted.append(

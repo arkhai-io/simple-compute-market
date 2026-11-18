@@ -52,6 +52,9 @@ class RegistryDisputePolicy:
     _recommendations: dict[str, list[Any]] = field(default_factory=dict, init=False, repr=False)
     _last_failures: dict[str, datetime] = field(default_factory=dict, init=False, repr=False)
     _unread: set[str] = field(default_factory=set, init=False, repr=False)
+    # The registry client factory the startup read was given, which the
+    # re-read uses, so it reads the registries the storefront publishes through.
+    _client_factory: Callable[[], Any] | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> RegistryDisputePolicy:
@@ -96,6 +99,7 @@ class RegistryDisputePolicy:
         """
         self._recommendations.clear()
         self._unread.clear()
+        self._client_factory = client_factory
         if client_factory is not None:
             client = client_factory()
             urls = client.urls
@@ -104,18 +108,19 @@ class RegistryDisputePolicy:
                 await self._read(client, urls)
         self._resolve()
 
-    async def reread(self, client_factory: Callable[[], Any] | None) -> None:
+    async def reread(self) -> None:
         """Read again only the registries whose last read failed.
 
-        Every other registry keeps the recommendations its read gave. With
-        no registry unread, nothing is read.
+        It reads through the client factory :meth:`refresh` was given. Every
+        other registry keeps the recommendations its read gave. With no
+        registry unread, nothing is read.
         """
-        if client_factory is None or not self._unread:
+        if self._client_factory is None or not self._unread:
             return
         unread = [url for url in self._recommendations if url in self._unread]
         # A registry still unread changes nothing, so resolving again would
         # only repeat the warnings its first failure gave.
-        if await self._read(client_factory(), unread):
+        if await self._read(self._client_factory(), unread):
             self._resolve()
 
     async def _read(self, client: Any, urls: Iterable[str]) -> bool:

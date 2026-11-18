@@ -133,7 +133,7 @@ class VmSettlementComposition:
         statuses = await self.configuration_registry.ordered_readiness(
             self.settlement_config,
             role="seller",
-            resources=self.mechanism_resources,
+            resources={**self.mechanism_resources, **self.disputes.readiness_resources()},
         )
         return tuple(
             status for status in statuses if status.mechanism in self.seller_stages
@@ -195,7 +195,9 @@ class VmSettlementComposition:
             else None
         )
 
-        readiness_resources = merged_resources
+        # Each registry whose recommendations could not be read is reported
+        # in the mechanisms' readiness, and blocks none of them.
+        readiness_resources = {**merged_resources, **self.disputes.readiness_resources()}
         if compiled is not None:
             for clause in compiled:
                 if clause.mechanism not in self.seller_stages:
