@@ -2364,6 +2364,85 @@ name the deal's endpoint, the test-only provisioning mock's result rules.
 - [ ] 11.3 Verification point: the `e2e-tests` unit suite and both lanes' runs pass.
       End-to-end: `e2e_vm_rate_watchdog`, `e2e_bare_metal_rate_watchdog`.
 
+Section 11 work in progress (round 2's second session; returned to design, no task
+checked, no code written):
+
+- **Design finding: a mock-provisioning rule cannot disclose the listener in either
+  lane.** D10, 11.1 and the delta requirement "The buyer's watchdog is qualified
+  against a delivered deal" (`test-compatibility`: "which the deal's mock fulfillment
+  result discloses through a rule the scenario installs") assume a rule's output names
+  the deal's endpoint. The code says otherwise:
+  - The mock's rule output is fixed and verbatim. The rule is matched when the job's
+    playbook run starts, and its `result_stdout` replaces the whole output with no
+    substitution (`provisioning/compute/ansible/src/compute_provisioning_ansible/mock.py`,
+    `wait_for_playbook`, lines 193–202).
+  - VM: the endpoint's host is the registered host's tenant-facing address, never the
+    fact's (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`:
+    `interpret` passes `tenant_address=host.public_host or host.ssh_host`, line 278,
+    and `create_evidence` builds the endpoint from it, lines 634–675). Only the port
+    is the fact's `external_ssh_port`. A replaced create output also yields no
+    evidence unless its `vm_name` is the job's guest (`create_fact_mismatch`, lines
+    592–612). Provisioning derives that guest from the capacity reservation
+    (`guest_names.py`, `fulfillment_guest_name`). Settle creates the reservation, after
+    the rule had to be installed and in the same call that dispatches the create, so
+    no rule installed in advance can name it.
+  - Bare metal: a direct grant's endpoint is the registered host's route alone,
+    `public_host` else `ssh_host` and `public_port` else `ssh_port`; the fact's host and
+    port are kept only as detail (`domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/codec.py`,
+    module docstring and `grant_evidence`, lines 166–200). Only a relayed grant takes
+    an address from the fact, and that needs a relay the lane does not run. A change
+    to the test-only mock's result rules, which this section's plan allows, therefore
+    cannot move bare metal's endpoint at all: that would take a production codec
+    change.
+  - What does disclose it, with no change outside `e2e-tests`: the scenario's own
+    executor-host registration. The host connection's `public_host` and `public_port`
+    are the address tenants reach the host on
+    (`provisioning/compute/ansible/src/compute_provisioning_ansible/connection.py`, lines
+    11–13 and 55–61); the real-provisioning drivers already register `public_host`. In
+    bare metal, `public_host` set to the harness container's lane address and
+    `public_port` to the listener's port make the grant disclose the listener. In VM,
+    `public_host` set to that address discloses it at the mock's forwarded port, 2222
+    (`mock_output.py`, `MOCK_FORWARDED_PORT`), which the listener would bind in the
+    harness container. Each watchdog module already registers a host of its own, so
+    no other scenario is affected.
+  - Recommendation for design: amend D10 and the delta requirement so the disclosed
+    endpoint is the listener the harness opens and closes, disclosed through the
+    tenant-facing route of the executor host the scenario registers, not through a
+    rule. 11.1's unit check then becomes the registration naming the listener's
+    address (and, in bare metal, its port). Rejected, for design to confirm: changing
+    the mock and both codecs so a rule's output names the endpoint. That puts
+    production code in the way of a test fixture, and the host registry owns how
+    tenants reach a host.
+- Found reading the watchdog, for planning once design settles the finding above:
+  - Probes run on a real-time schedule, not lane time
+    (`kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/watchdog.py`,
+    `watch_deal`: `time.monotonic` and `asyncio.sleep`; `--watchdog-interval` is at
+    least 1 second). Each probe is only stamped with lane time. So the threshold of
+    failed probes arrives after interval × threshold real seconds whatever lane time
+    is, and 11.2's "lane time set through the threshold of probes" moves nothing. A
+    module would opt in with `--watchdog-interval 1 --watchdog-threshold 2`, as each
+    storefront's `test_watchdog_buy.py` does, and wait, bounded, for the stop. Lane
+    time moves only to make the last probe stale: past interval + probe timeout + 5
+    seconds (`GRACE_SECONDS`), 7 seconds at interval 1. It also moves a minute into
+    the first period, so the watchdog's stop charges the started period, as
+    `Recurring08` does. Neither instant passes the first reservation, so no
+    reservation stage is needed.
+  - Once the watchdog journals its stop, the buyer's read shows `stopped`
+    (`watchdog_status`). On one deal, the killed-and-resumed case therefore comes
+    before the access-lost case: buy, then a passing probe (the listener's accepted
+    connection), then kill, `unmonitored`, `buy --from`, `monitored`, then close the
+    listener for the resumed run's stop. 11.2 lists them the other way round.
+  - The watchdog's stop is the buyer's ordinary stop and hint (`watch_deal`'s
+    docstring). On the hint the storefront records the payer's end before any loop is
+    stepped, and in bare metal it also carries out the physical end, as `Recurring08`
+    shows. So "nothing from the storefront between" is observable at the payments
+    double: the transaction's events are the storefront's `start` then the payer's
+    stop, and nothing else. The recorded end may already stand before
+    `deal-servicing` is stepped. The module's held storefront loops are the "paused"
+    D18 names; no new loop control is needed.
+- Not done: no fixture, stage, module, marker or lane run. Section 10 was already
+  complete and committed; this session changed nothing of it.
+
 ## 12. Closeout
 
 Closes the change through `docs/guidance/workflow/closeout.md`'s parts in order, with this
