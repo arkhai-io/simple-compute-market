@@ -939,7 +939,10 @@ async def test_a_delivery_other_than_the_recorded_result_is_a_conflict(
 ) -> None:
     """The site reports a different delivery: the buyer's status, result, and
     access reads answer 409 ``delivery_conflict``, and the recorded result
-    stands."""
+    stands. The buyer's end of the deal is not refused for the conflict: the
+    production buyer's teardown, the lifecycle ``end``, terminates the lease,
+    and the reads still answer the conflict. Spec scenario "A buyer ends a deal
+    while the site reports a different delivery"."""
 
     async def verifier(**_kwargs):
         return 1
@@ -964,17 +967,29 @@ async def test_a_delivery_other_than_the_recorded_result_is_a_conflict(
         buyer = _fulfillment_client(base_url)
         recorded = buyer.result(negotiation_id)["result"]
         provisioning.delivered_user = "tenant-b"
-        refusals = []
-        for read in (buyer.status, buyer.result, buyer.access):
-            with pytest.raises(AuthenticatedHTTPError) as refused:
-                read(negotiation_id)
-            refusals.append(refused.value)
+
+        def refusals_of_each_read() -> list[AuthenticatedHTTPError]:
+            refusals = []
+            for read in (buyer.status, buyer.result, buyer.access):
+                with pytest.raises(AuthenticatedHTTPError) as refused:
+                    read(negotiation_id)
+                refusals.append(refused.value)
+            return refusals
+
+        before_end = refusals_of_each_read()
+        ended = buyer.teardown(negotiation_id)
+        after_end = refusals_of_each_read()
 
     assert recorded["ssh_user"] == "tenant-a"
-    assert [refusal.status_code for refusal in refusals] == [409, 409, 409]
-    assert [refusal.body["detail"]["error"] for refusal in refusals] == [
-        "delivery_conflict"
-    ] * 3
+    for refusals in (before_end, after_end):
+        assert [refusal.status_code for refusal in refusals] == [409, 409, 409]
+        assert [refusal.body["detail"]["error"] for refusal in refusals] == [
+            "delivery_conflict"
+        ] * 3
+    assert ended["delivery"]["progress"] == "tearing_down"
+    assert provisioning.terminations == [
+        ("reservation-a", stable_ref(negotiation_id, "terminate", "terminate"))
+    ]
     stands = await runtime.db.load_bare_metal_result(negotiation_id=negotiation_id)
     assert stands.model_dump(mode="json") == recorded
 

@@ -452,17 +452,6 @@ class BareMetalFulfillmentService:
         await self.lifecycle.local_end(negotiation_id, cause=reason)
         return await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
 
-    async def converge_teardown(
-        self,
-        *,
-        negotiation_id: str,
-        buyer_principal: Identity,
-    ) -> dict[str, Any]:
-        return await self.status(
-            negotiation_id=negotiation_id,
-            buyer_principal=buyer_principal,
-        )
-
 
 async def fulfill_bare_metal(
     *,

@@ -1179,6 +1179,51 @@ delivery"). Touches `domains/bare_metal/storefront`.
   their deals through the buyer's teardown with no conflict, the unchanged path; no
   lane plants a conflicting delivery, and none is owed.
 
+Section 10 notes (stopped; the change returns to design):
+
+- What the code shows. The planned scenario (D9; the `storefront-publication`
+  delta's "A buyer ends a deal while the site reports a different delivery";
+  10.1) has the status, result and access reads "still answer 409
+  `delivery_conflict`" after the buyer's end. They do not, and the code says
+  why: `BareMetalFulfillmentService.status` judges a conflict
+  (`_refuse_conflicting_delivery`) only while the site reports the
+  fulfillment `active`. Once the lifecycle `end` reaches `apply_end`, which
+  calls `terminate_lease` and records the lease `terminating`, a status read
+  returns the ending as it stands — `terminating` while the site has not begun
+  the teardown, then the teardown state it reports — with no comparison; the
+  access read refuses as outside any active lease (409, "bare-metal access is
+  unavailable outside an active lease", no `delivery_conflict`); and the
+  result route answers "not ready" (409) while `terminating`, and the recorded
+  result once a teardown state is reported. So the scenario's first half
+  holds — the end is not refused for the conflict, and terminates the lease —
+  and its "still answer 409 `delivery_conflict`" after the end does not.
+- Evidence. `test_a_delivery_other_than_the_recorded_result_is_a_conflict`,
+  extended as 10.1 plans: before the end the three reads answer 409
+  `delivery_conflict`; the production buyer's teardown (its `end_delivery`,
+  the lifecycle `end`) is answered `tearing_down`; then the first read after
+  the end, status, does not raise (`make -C domains/bare_metal/storefront
+  test`: that test failed, 658 others passed). The provisioning double's
+  `terminate_lease` reports the fulfillment torn down at once; a real site
+  reports it `active` or tearing down first, and either way the status read
+  makes no comparison after the end.
+- The decision design owes. Either the scenario is restated to what the code
+  does — the end terminates the lease and is not refused; reads made while the
+  delivery is active answer 409 `delivery_conflict`, the recorded result
+  standing; once the lease is ending, the reads report the ending as for any
+  ended lease — which the recommendation is, since a conflict is a
+  disagreement about a live delivery and an ending lease has none to serve;
+  or the storefront is to keep refusing the reads with `delivery_conflict`
+  after an end, a behaviour change design would have to motivate. Either way
+  the delta (written whole at design, and not edited by implementation) and
+  D9 change, and 10.1 with them.
+- Done and committed here, no task checked: `converge_teardown` deleted from
+  `fulfillment_service.py` (10.2's edit; `git grep -n converge_teardown`
+  outside `openspec/` and `docs/` names only the provisioning service's
+  `converge_teardowns` and two e2e comments naming it), and the test extended
+  as 10.1 plans, failing at its after-end reads. 10.3 needs no bump: the
+  bare-metal storefront was bumped in 7.4. Not run: `pre-commit` and the
+  fresh-context check, which follow the design's answer.
+
 ## 11. Closeout
 
 The closeout task of `docs/guidance/workflow/closeout.md`, its parts in order, with
