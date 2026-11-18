@@ -706,7 +706,7 @@ delivery's relay is its declaration's pool's"). Touches tests only:
 `provisioning/compute/iac/tests`, `domains/vms/provisioning/adapter/tests`, and
 `provisioning/compute/service/tests`.
 
-- [ ] 6.1 Static test of the family roles
+- [x] 6.1 Static test of the family roles
   (`provisioning/compute/iac/tests/test_client_baseline.py`, or beside it): the
   `relay-proxy` role's `add.yml` includes `relay-client` before adding the proxy;
   `relay-client` synchronizes the baseline from `frp_server_addr`,
@@ -715,25 +715,105 @@ delivery's relay is its declaration's pool's"). Touches tests only:
   another relay with a proxy block, rewrites the three fields, reports `changed`, and
   keeps the proxy block ("A proxy is added on a host whose client names another
   relay").
-- [ ] 6.2 Library integration
+  Done, in two files. Static, `test_relay_assets.py`'s
+  `test_a_proxy_is_added_only_after_the_client_baseline_names_the_jobs_relay`:
+  `add.yml` includes `relay-client` before its `blockinfile` and its reload; the
+  synchronize task's stdin maps `serverAddr`, `serverPort` and `auth.token` from
+  the three job variables, it is `changed` only on the command printing
+  `changed`, notifies `restart frpc-buyers` (a `restarted` systemd handler), and
+  a `meta: flush_handlers` task follows it. Library integration of the shipped
+  editor, `test_client_baseline.py`'s
+  `test_a_client_naming_another_relay_is_pointed_at_the_jobs_and_keeps_its_proxies`:
+  `client_config.py prepare` run as a subprocess with the job's values on stdin,
+  as the role runs it, over a baseline naming another relay with a proxy block,
+  prints `changed`, rewrites address, port and token, keeps the block, and
+  prints `unchanged` on a rerun; the in-process rewrite of address and token
+  over a proxy block was already the module's first test's. Neither runs
+  Ansible, and no test runs `relay-client` or its handler on a host: the
+  native gate runs only `add.yml`'s wait task (`test_frp_proxy_wait.py`), and
+  the real-provisioning modules, in no lane, never meet a client naming
+  another relay.
+- [x] 6.2 Library integration
   (`domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`):
   a host placed in a pool on relay R2, and an unplaced host, each with its
   declaration in a pool on R1, are leased a port on R1 by an accepted relayed
   create, whose prepared job carries R1 as its relay ("A host placed under another
   relay delivers through its declaration's", "An unplaced host delivers through its
   declaration's relay").
-- [ ] 6.3 Application integration through the typed client
+  Done, at application integration rather than in the VM adapter's file:
+  `provisioning/compute/service/tests/integration/test_fulfillment_api.py`'s
+  `TestRelayPortLifecycleOverTheApi.test_a_create_is_leased_on_its_declarations_pools_relay`,
+  parametrized over a host placed in a pool on R2 and an unplaced host, each
+  declared in a pool on R1. Relays, pools, host, declaration, reservation (its
+  lease end set by commit), scheduling and acceptance all go through the
+  canonical clients, over the real acceptance path (the fulfillment kit reading
+  the settlement record's pool, the VM plan, the real allocator). Read back
+  through the clients: R1's holdings show the reservation's active lease, R2's
+  none, and the dispatched job's parameters carry R1, the leased port and the
+  host. Moved
+  because the fresh-context check showed a plan-level test in the VM adapter
+  could not fail: the VM plan and the allocator read no host row, and the test
+  handed the plan the declaration's pool configuration itself, so the choice
+  under test was the test's. Here, acceptance choosing the host's pool would
+  lease on R2 or on no relay, and fail.
+- [x] 6.3 Application integration through the typed client
   (`provisioning/compute/service/tests/integration/test_capacity_api.py`): a
   declaration in a pool on R1 whose reservation holds a relay port lease on R1 is
   refused a move to a pool on R2, and stays in its pool ("A declaration holding a
   lease is moved to a pool on another relay").
-- [ ] 6.4 Verification: `uv run pytest provisioning/compute/iac/tests
+  Done by the existing test, with no new one: the refusal is the site's refusal
+  to move a declaration a reservation holds capacity against, which reads no
+  relay and no lease, and `test_capacity_api.py`'s
+  `test_a_held_resource_moves_pools_only_once_released` already holds it
+  through the typed clients (409, the declaration staying in its pool, and the
+  move going through once released). A relay port lease is only ever held by a
+  reservation's fulfillment, so a declaration holding one is a declaration
+  under that rule. Two drafts were withdrawn after the fresh-context checks: a
+  new test seeding the lease as a row, unjustified where the typed client
+  reaches acceptance, and the move asserted inside 6.2's test, which repeated
+  the existing test's assertions once per parametrization. The round's triage
+  may judge whether the scenario wants a relay-specific test of its own.
+- [x] 6.4 Verification: `uv run pytest provisioning/compute/iac/tests
   domains/vms/provisioning/adapter/tests provisioning/compute/service/tests/integration/test_capacity_api.py`
   passes, and `scripts/change-workflow run pre-commit
   resolve-delivery-correctness-gaps` passes. End-to-end: no lane runs a
   relay-backed pool; none is owed. The real-provisioning modules
   (`e2e_vm_real_provisioning`, `e2e_bare_metal_real_provisioning`) exercise relayed
   delivery but run in no lane.
+  Done: `make -C provisioning/compute/iac test` 35 passed, 19 skipped (the native
+  Ansible tests, which skip without supported Ansible, as before);
+  `test_fulfillment_api.py` and `test_capacity_api.py` 70 passed together; the
+  VM adapter's suite (`make -C domains/vms/provisioning/adapter test`) 295
+  passed, its files unchanged by the section; `pre-commit` passed over the
+  final tree, every suite with it (`after-functional-change`,
+  `pre-commit-functional` and `pre-commit` at `5eb9527c4`).
+  End-to-end confirmed as planned: no lane runs a relay-backed pool, and the
+  two real-provisioning markers are in no lane (`e2e-tests/Makefile`); none is
+  owed.
+
+Section 6 notes (handoff):
+
+- Tests only; no package bump (`provisioning/compute/iac` is a virtual project,
+  and tests are not packaged).
+- Deviation from the plan's files: 6.2 is an application-integration test in
+  `test_fulfillment_api.py`, 6.3 the existing capacity test, and neither
+  `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`
+  nor `test_capacity_api.py` changes (see 6.2 and 6.3). The verification
+  command's VM adapter and capacity paths still pass.
+- `test_fulfillment_api.py`'s container outlives a test, so the new test's
+  relays (`site-r1`, `site-r2`, windows 6400 and 6500) are created once and its
+  pools, host and declaration carry a per-run suffix, as the module's other
+  relay tests do. A pool a relayed declaration is reserved in must declare `vm`
+  among its `deliverable_modes`, and a relayed create needs its reservation to
+  state a lease end, which the site's commit sets.
+- Two fresh-context checks ran; their findings were taken: the level of 6.2,
+  its setup and reads moved onto the typed clients, the seeded lease and the
+  repeated refusal of 6.3, the CLI test narrowed to what it adds, the flush
+  asserted as a flush, the restart wording, fixture comments, and the
+  evidence claims.
+  The delta's "restarting the client only when that baseline changes" reads
+  as if nothing else restarts it; the unit-file task also notifies the
+  restart. The section changes no specification; the wording is the round's.
 
 ## 7. The descriptor read selects registries, and the policy reads again what failed
 
