@@ -152,7 +152,8 @@ places that matter, so read all of this first, in full:
 If a dependency gates `design` and has not reached `archived`, stop and tell
 the owner: designing now risks designing work the
 dependency may make unnecessary. If it is archived on this branch — it landed on
-dev, and dev was merged in — the dependency is released on the owner's word
+the branch this change lands on, and that branch was merged in — the dependency is
+released on the owner's word
 (section 4, "When the design needs another change first").
 
 When the change has been through design before, find what has moved since:
@@ -319,12 +320,15 @@ prerequisite's proposal, below.
 When the discussion shows the design cannot proceed until another change lands,
 that change is a prerequisite, and its workflow is the owner's to start. One change
 is worked per branch, so the prerequisite's proposal reaches this branch only
-through dev, never written here:
+through the branch this change lands on — `base` in `scripts/change-workflow find
+--json <change>` — never written here:
 
 1. With the owner, shape the prerequisite: its requirements and an initial
    `proposal.md` only. Its design is its own workflow's, started by the owner.
-2. Write it in a worktree on a new branch from dev, never on this branch:
-   `git worktree add ../<prerequisite>-proposal -b propose-<prerequisite> origin/dev`,
+2. Write it in a worktree on a new branch from that landing branch as its remote
+   holds it, never on this branch: `git worktree add ../<prerequisite>-proposal -b
+   propose-<prerequisite> <remote>/<landing>`, the remote being this branch's
+   upstream's,
    then, in that worktree, its directory under `openspec/changes/` and its
    `ready for design` row in that worktree's `openspec/changes/README.md`. Run
    `make -C ../<prerequisite>-proposal check-change-index`.
@@ -332,13 +336,14 @@ through dev, never written here:
    its pull request. Leave this change `in design`; do not record the dependency
    yet, since the index check refuses a `Depends on` entry naming a change this
    branch does not list. The design halts here.
-4. Once the proposal has merged to dev and dev has been merged into this branch,
+4. Once the proposal has merged to the landing branch and that branch has been
+   merged into this one,
    record the dependency: add the prerequisite to this change's `Depends on`
    gating `design` (`` `<prerequisite>` (design) ``), name it in `Notes`, keep the
    status `in design`, and run `scripts/change-workflow check index`. `blocked in design` is
    for reasons that are not another change; the dependency itself holds design,
    through section 1's entry check, and the design halts again until it lands.
-5. Once the prerequisite is archived and dev is merged in again, the index check
+5. Once the prerequisite is archived and the landing branch is merged in again, the index check
    refuses this change's dependency on an archived change. On the owner's word,
    drop only that dependency, leaving the status `in design`, run
    `scripts/change-workflow check index`, and resume the discussion.

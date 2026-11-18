@@ -45,7 +45,7 @@ CHANGE_WORKFLOW_ARGUMENTS = $(if $(strip $(ARGUMENTS)), --arguments '$(subst ','
 .PHONY: design plan implement review triage validate merge closeout archive-cleanup orchestrate
 .PHONY: change-next change-clone change-clone-remove round-view round-done round-view-closed
 .PHONY: change-watch change-cost change-history check-change-index check-tasks
-.PHONY: check-agent-skills check-review check-push-ready push-branch change-graph
+.PHONY: check-agent-skills check-change-workflow-config check-review check-push-ready push-branch change-graph
 
 design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start design "$(CHANGE)"$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
@@ -114,6 +114,9 @@ check-tasks: ## Fail if a task of a change's task list sits under another sectio
 
 check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills
 	@$(CHANGE_WORKFLOW) check skills
+
+check-change-workflow-config: ## Fail, naming each field, unless the workflow configuration and the guides it names pass the configuration's check
+	@$(CHANGE_WORKFLOW) check config
 
 check-review: ## Fail if the review on standard input would be refused publishing, printing each problem the format check finds (KIND=design|implementation|pre-closeout|closeout|merge CHANGE=<change>)
 	@$(CHANGE_WORKFLOW) check review "$(KIND)" "$(CHANGE)"

@@ -697,7 +697,8 @@ the pre-closeout review, once that validation passed; after a pre-closeout revie
 the merge of the branch the change lands on into its own (`change-merge`), whose
 own exits validate the
 merged `HEAD`, the triage's fixes with it, before closeout or a review of the
-merge; after a closeout
+merge — the fixes are not validated before the merge, so a message naming that
+exit says the merged `HEAD`'s validation covers them; after a closeout
 review, archive cleanup, after a validation of `HEAD` when a path outside the
 repository's inert paths changed since the commit it reviewed; after a merge review,
 archive cleanup run again, or another merge review, each after a validation of a fix

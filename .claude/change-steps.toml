@@ -205,6 +205,8 @@ allow = [
   "Bash(scripts/change-workflow check push)",
   "Bash(scripts/change-workflow push)", "Bash(scripts/change-workflow run *)",
   "Bash(scripts/change-workflow gather *)", "Bash(scripts/change-workflow evidence *)",
+  # One failing test of the scripts' suite run alone, to tell its cause.
+  "Bash(make test-release-tooling TESTS=*)",
   "Bash(make helm-values-schema)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",

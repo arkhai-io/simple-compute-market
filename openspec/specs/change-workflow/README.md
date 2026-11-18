@@ -2356,9 +2356,6 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
 - Tree evidence is only as stable as what Git ignores: a file the workflow writes
   after implementation that Git does not ignore, outside an evidence pattern's
   directory, which the check covers, would change the tree its evidence describes.
-- Four skills' procedures still name `dev` and `origin` as the landing branch and its
-  remote, where the workflow derives both; the test of what a skill names reads only
-  targets and paths.
 - The diagrams of the engine's parts and of a step run's life draw neither the
   evidence modules nor the actions and hooks around a step, and the engine's parts
   still label the configuration's validation entries as parts; redrawing them in

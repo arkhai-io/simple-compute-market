@@ -180,7 +180,8 @@ When the owner picks edits and asks for a change, write its `proposal.md` as
 `docs/guidance/workflow/changes.md` asks of a proposal: why — the period it covered and the figures
 behind each edit, in aggregate — what changes, and its permanent documentation impact.
 Write it, with its `ready for design` row in the change index, in a worktree on a new
-branch from `origin/dev`, as `change-design` writes a prerequisite's proposal ("When
+branch from the branch the workspace has checked out, as its remote holds it, as
+`change-design` writes a prerequisite's proposal ("When
 the design needs another change first"), never on a branch another change is worked
 on, and check the index there as that procedure does. The owner commits it and opens
 its pull request. The change then goes through the workflow like any other; its design

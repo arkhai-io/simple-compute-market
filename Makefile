@@ -180,10 +180,10 @@ dist-lane-double-controls: ## Build the lane doubles' control-contract wheel int
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
-test-release-tooling: dist-identity ## Run the scripts' tests, among them the release declaration's, its checks', and the wheelhouse's.
+test-release-tooling: dist-identity ## Run the scripts' tests, among them the release declaration's, its checks', and the wheelhouse's; TESTS names files or node ids to run alone, PYTEST_ARGS adds pytest's own options (-k, -x)
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
 		--with 'arkhai-kit-identity' --with pyyaml --find-links "$(DIST_DIR)" \
-		pytest -q scripts/tests
+		pytest -q $(PYTEST_ARGS) $(or $(TESTS),scripts/tests)
 
 test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm schema/render contracts.
 	$(MAKE) -C helm test-render

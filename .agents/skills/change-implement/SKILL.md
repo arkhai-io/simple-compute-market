@@ -164,7 +164,8 @@ rather than choose.
 ## Resolving a merge's conflicts
 
 Invoked with no sections and an argument naming a merge's conflicted files —
-`resolve the merge conflicts in <files>` — you conclude a merge of `dev` that the
+`resolve the merge conflicts in <files>` — you conclude a merge of the branch the
+change lands on, or another the owner named, that the
 orchestrating session started on the owner's word and that stopped at conflicts in
 code the owner did not rule on. Steps 1 to 9 do not apply; this is the whole run,
 and it checks no task.
@@ -179,7 +180,7 @@ and it checks no task.
    tasks touch it and their notes, and what each side did to it: `git log --merge
    -p -- <file>`.
 3. **Resolve.** Edit each file so both sides hold: the change's behaviour as its
-   sections built it, and `dev`'s as its commits made it, with comments describing
+   sections built it, and the merged branch's as its commits made it, with comments describing
    the system that results. Where the two cannot both hold, the resolution is a
    decision: ask the owner, with the options and your recommendation. Then `git
    add` each resolved file.
@@ -192,7 +193,7 @@ and it checks no task.
    hooks rebuilt, to the merge.
 5. **Conclude.** `git commit -m "<Git's merge subject>" -m "<resolutions>"`
    concludes the merge without opening an editor: the subject is the one Git
-   wrote for it (`Merge branch 'dev' into <branch>`), and the paragraph names each
+   wrote for it (`Merge branch '<merged>' into <branch>`), and the paragraph names each
    conflicted file and how it was resolved. Push it with `scripts/change-workflow
    push`; if it refuses, stop and report its reasons. Report each file's resolution, and end `finished`. A merge is the
    owner's intervention, so where the change goes after it is theirs, not this
@@ -321,7 +322,7 @@ the design does not make, do not guess and do not work around it:
    tests, and notes — as one work-in-progress commit, checking no task for it: the
    message names the change and the section, says the work is in progress, and why
    the change returns. No check need pass first: the change's branch is not
-   protected — only `main` and `dev` are — and a commit known not to work harms
+   protected — only the configuration's protected branches are — and a commit known not to work harms
    nothing on it, while no session is left to commit the work, and a dirty
    checkout blocks every later step's guarded push. Push it with `scripts/change-workflow push`; if it refuses, stop
    and report its reasons, leaving the commit as it is.
@@ -421,7 +422,10 @@ When the session stops, tell the owner, for each section implemented:
 - the evidence: each check and suite with its result;
 - what the fresh-context check found, what was fixed, and what was declined;
 - the handoff recorded;
-- what comes next — validation (`make validate CHANGE=<change>`) and one
+- what comes next. While the round's recorded sessions leave sections you were
+  not given, that is the round's next session, named by its sections, and nothing
+  else: validation and the review read the whole round. Once yours was the round's
+  last session, it is validation (`make validate CHANGE=<change>`) and one
   implementation review (`make review CHANGE=<change> KIND=implementation`), run
   side by side, and the owner's reading of the commits since the last round as
   uncommitted changes (`make round-view CHANGE=<change>`, closed with `make

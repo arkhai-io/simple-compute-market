@@ -138,6 +138,13 @@ ifeq ($(CHANGE),)
 	$(error teardown needs CHANGE=<change>: it deletes that change's validation namespace, never $(NAMESPACE))
 endif
 	kubectl delete namespace $(NAMESPACE) --context $(HELM_CONTEXT) --ignore-not-found --wait
+	@# A cluster whose kubelet runs on this Docker daemon, as Docker Desktop's does,
+	@# leaves the namespace's exited pod containers until its own collection removes
+	@# them, and an image a container still references cannot be removed: remove
+	@# them first, each labelled with the namespace it ran in.
+	@for container in $$(docker ps -aq --filter label=io.kubernetes.pod.namespace=$(NAMESPACE)); do \
+		docker rm -f "$$container" >/dev/null; \
+	done
 	@status=0; \
 	for image in $$(python3 ../scripts/change_namespace.py $(CHANGE) --images); do \
 		if docker image inspect "$$image" >/dev/null 2>&1; then \

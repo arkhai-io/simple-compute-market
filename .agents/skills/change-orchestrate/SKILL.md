@@ -17,7 +17,7 @@ whose entry check wants a clean worktree. Tracked work a finished step
 leaves uncommitted is a defect of that step: bring it to the owner as one, and
 commit it only on their word. You also maintain the workflow the change runs on:
 you create the change's clone and branch, and commit workflow maintenance, what the
-owner instructs, and merges of `dev` on their word ("Maintain the workflow",
+owner instructs, and merges of the branch it lands on on their word ("Maintain the workflow",
 below); never write the change's feature work of your own accord. This session
 uses the owner's interactive permissions; the step table limits unattended runs
 only.
@@ -529,8 +529,9 @@ Never run it yourself: a step's exit is the step's, or the owner's, to record.
 
 A prerequisite `blocked` outcome halts this workflow. Relay what the owner must
 do; never orchestrate the prerequisite. Design writes its proposal in a separate
-worktree branched from dev. The owner commits and merges it to dev, then merges
-dev here before this change records its dependency. After the prerequisite is
+worktree branched from the branch this change lands on. The owner commits and
+merges it there, then merges that branch here before this change records its
+dependency. After the prerequisite is
 archived and merged here, propose releasing the dependency. Only on the owner's
 word remove it from this change's row, keep `in design`, run
 `scripts/change-workflow check index`, record the decision, and recompute. An absent
@@ -554,7 +555,8 @@ first. Removing a clone is
 the owner's alone: never run it.
 
 Open the pull request from the drafts archive cleanup wrote to the archived
-change's `reviews/pull-request.md`: from the change's branch into `dev`, titled
+change's `reviews/pull-request.md`: from the change's branch into the branch it
+lands on — the `landing` its last merge recorded — titled
 with the merge commit message's subject, its body the pull request description.
 When a pull request from the branch already exists, open no second one; give its
 link, and relay the notes a merge after the archive and archive cleanup appended to
@@ -736,10 +738,10 @@ declined one for that review's triage, the commit waits too. Never write the cha
 finding's code to decide what to change.
 
 The merge before closeout is a step of the graph (`merge`), not maintenance: run it
-when the computation names it. Merging `dev` at any other time, or another branch whose workflow tooling the change's later rounds need, into the
+when the computation names it. Merging the branch the change lands on at any other time, or another branch whose workflow tooling the change's later rounds need, into the
 change's branch is workflow maintenance, done only on the owner's word — and, after
 the pre-closeout triage, name the merge step to the owner instead, since it
-validates what it brings in and a merge of yours does not: `git -C <clone> pull --no-rebase origin dev`, or `workspace
+validates what it brings in and a merge of yours does not: `git -C <clone> pull --no-rebase <remote> <landing>`, the landing branch as `scripts/change-workflow find --json <change>` gives it as `base`, or `workspace
 <branch>` for another branch, then `make -C <clone> push-branch`. Make it only
 between the change's steps, never while its round view is open, and never between
 a round's sections being committed and that round's triage, so the merge never
