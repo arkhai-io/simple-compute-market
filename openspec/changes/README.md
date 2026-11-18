@@ -92,6 +92,12 @@ No change owns this yet. It was found by `project-capacity-resources-without-hos
 |---|---|
 | Adding a fulfillment provider touches its adapter bundle and, separately, the service container's host-requirement merge. One descriptor per adapter package could supply both; drift between them is refused at startup today | `project-capacity-resources-without-hosts` design, follow-up after A7 |
 
+No change owns this yet either. It was found by `resolve-delivery-correctness-gaps`.
+
+| Item | Origin |
+|---|---|
+| Some 25 test modules of the kits and of compute provisioning build their tables with SQLAlchemy's `create_all`, where a test needing a migrated database migrates it through its chain, or in a kit through the kit's own baseline ([`testing-python.md`, "Building tables"](../../docs/guidance/engineering/testing-python.md#building-tables); [`migration-chain-tests.md`](../../docs/guidance/repository/migration-chain-tests.md)). `git grep -ln create_all -- 'kit/*/tests/*' 'provisioning/*/tests/*'` lists them | `resolve-delivery-correctness-gaps` implementation, its fresh-context check of `kit/fulfillment`'s acceptance tests |
+
 ## Roadmap goal — Negotiate full compute capability, not GPU count alone
 
 ```text

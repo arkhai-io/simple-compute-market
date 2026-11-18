@@ -77,7 +77,6 @@ class FakeTransaction:
     def accept(self, **kwargs):
         return FulfillmentAcceptanceDecision(
             record=self.record,
-            newly_accepted=True,
             dispatch_required=self.dispatch_required,
         )
 

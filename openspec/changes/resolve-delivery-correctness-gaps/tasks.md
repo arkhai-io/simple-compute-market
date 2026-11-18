@@ -537,12 +537,18 @@ first"). Touches `kit/fulfillment` only. A defect found during the change, outsi
 item 2's stated scope; record it so in this section's task notes
 (`docs/guidance/workflow/changes.md`, "Defects found during a change").
 
-- [ ] 4.1 In `kit/fulfillment/src/market_fulfillment/settlement_repository.py`,
+- [x] 4.1 In `kit/fulfillment/src/market_fulfillment/settlement_repository.py`,
   `accept_fulfillment`'s locked select takes `populate_existing`. In
   `fulfillment_persistence.py`, `FulfillmentTransaction.accept` drops its unlocked
   pre-read, and `FulfillmentAcceptanceDecision` drops `newly_accepted`; confirm no
   caller reads it (`git grep -n newly_accepted`). Verify with 4.2. (D2, 11 F7.)
-- [ ] 4.2 Library integration
+  Done: the select takes `.execution_options(populate_existing=True)`, its
+  docstring stating why; `accept` reads nothing before the lock. `git grep -n
+  newly_accepted` names only the change's documents and an archived change's
+  tasks; the one other construction of the decision, the unit suite's
+  `FakeTransaction` in `kit/fulfillment/tests/unit/test_fulfillment.py`, drops
+  the field.
+- [x] 4.2 Library integration
   (`kit/fulfillment/tests/integration/test_fulfillment_acceptance.py`): two sessions
   on one file-backed database — session 2 loads the reservation's row, session 1
   accepts and commits, session 2 accepts an equivalent request and receives session
@@ -551,14 +557,64 @@ item 2's stated scope; record it so in this section's task notes
   `populate_existing`, the same steps would accept anew (state the stale read the
   test pins in its docstring). Sequential steps, no threads
   (`docs/guidance/engineering/concurrency-tests.md`).
-- [ ] 4.3 Bump `arkhai-kit-fulfillment` (minor, the exported
+  Done: library integration,
+  `test_an_acceptance_that_read_the_row_before_another_committed_returns_the_first`,
+  passes (the module's 2). Both acceptances go through a real
+  `FulfillmentOrchestrator.begin_fulfillment` over `SqlAlchemyFulfillmentUnitOfWork`;
+  the second's unit of work is handed the session that read the row first, so
+  its locked select meets the identity-mapped object. It asserts the retry's
+  `fulfillment_id` is the first's, the provider's `prepare_create` called once and
+  `dispatch_create` awaited once across both, and the row's identity, prepared
+  operation and `dispatching` state as the first left them. Both tests of the
+  module now build their database from the pools and fulfillment kits'
+  baselines, not `create_all`, and share the pool handler the first test held
+  inline (`docs/guidance/repository/migration-chain-tests.md`). The docstring states
+  the stale read (`fulfillment_id is None`, `assigned`) the fix prevents.
+  Fail-before not shown: `scripts/change-workflow run test-before` runs only a
+  test file as `HEAD` holds it, and section 1's notes record that its
+  `--no-project` environment fails collecting a kit suite importing
+  `injected_time`, as this package's `conftest.py` does.
+- [x] 4.3 Bump `arkhai-kit-fulfillment` (minor, the exported
   `FulfillmentAcceptanceDecision` loses a field) and refresh the locks it requires.
   Verify with `make check-version-bumps` and `make check-locks`.
-- [ ] 4.4 Verification: `uv run pytest kit/fulfillment/tests` passes, and
+  Done: 0.8.0 → 0.9.0. No dependent's lower bound moves, since none reads the
+  removed field. Relocked the eight projects whose locks name it (`make lock
+  PROJECTS=…`: `kit/fulfillment`, `provisioning/compute` and its `ansible` and
+  `service`, the VM and bare-metal adapters, `domains/vms/storefront`,
+  `e2e-tests`); each lock moves only that version. Both checks pass.
+- [x] 4.4 Verification: `uv run pytest kit/fulfillment/tests` passes, and
   `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
   passes. End-to-end: every lane deal accepts its fulfillment once, on the unchanged
   path (`e2e_deal`, `e2e_bare_metal_mock_deal`); no lane overlaps two acceptances,
   and none is owed (design, Open Questions: the PostgreSQL proof).
+  Done: `make -C kit/fulfillment test` 213 passed; `pre-commit` passed, every
+  suite with it (`pre-commit-functional` and `pre-commit` at `f3e4949ab`), before
+  the second test's move to the baselines, after which the package's suite was
+  run again and passed, and `make check-change-index`, `make check-tasks` and
+  `make check-repository` passed over the notes and the change index's new gap.
+  End-to-end, reasoned and not run (the lanes run at
+  validation): both markers exist in `e2e-tests/pyproject.toml` and their lanes in
+  `e2e-tests/Makefile`; each accepts its fulfillment once, neither overlaps two
+  acceptances, and none is owed.
+
+Section 4 notes (handoff):
+
+- Outside item 2's stated scope, as D2 records: the stale read is a defect found
+  during the change (`docs/guidance/workflow/changes.md`, "Defects found during a
+  change"), reachable wherever two acceptances of one reservation overlap, as on
+  PostgreSQL; the shipped single-process SQLite deployment cannot overlap them.
+- The stale read needs pysqlite's default transaction handling: the earlier
+  `SELECT` opens no SQLite transaction, so the later `BEGIN IMMEDIATE` succeeds
+  and reads committed rows, and only the identity map is stale. A test that
+  opens a real read transaction first would test something else.
+- Left as it is, and recorded as an unowned gap in `openspec/changes/README.md`
+  (under Goal 1, after `project-capacity-resources-without-hosts`'s item): seven
+  other `kit/fulfillment` test modules, and some 25 across the kits and compute
+  provisioning, still build their tables with `create_all`; only the module this
+  section touched moved to the baselines.
+- The fresh-context check's findings were taken: the first test's `create_all`,
+  and two evidence claims (end-to-end "confirmed", and a pre-commit result not
+  recorded), now worded as above.
 
 ## 5. A concurrent allocation for one owner receives that owner's lease
 

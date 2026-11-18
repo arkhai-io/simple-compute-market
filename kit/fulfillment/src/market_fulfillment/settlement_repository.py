@@ -212,6 +212,12 @@ class SettlementRepository:
         only -- there is no caller-supplied resource to compare, since
         ``begin_fulfillment`` loads the already-scheduled resource from this
         row rather than trusting one from the caller.
+
+        The row is judged as the lock returns it. Without
+        ``populate_existing`` the select hands back the object the session's
+        identity map already holds, unrefreshed, so a caller that read the row
+        before another acceptance of it committed would see a stale
+        ``fulfillment_id is None`` and accept again under a new identity.
         """
 
         _begin_sqlite_write_transaction(db)
@@ -219,6 +225,7 @@ class SettlementRepository:
             select(SettlementRecord)
             .where(SettlementRecord.capacity_reservation_id == capacity_reservation_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         record = db.execute(statement).scalar_one_or_none()
         if record is None:
