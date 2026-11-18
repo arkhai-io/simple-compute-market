@@ -315,9 +315,17 @@ class ListingSummary:
                 "settlement_options": self.settlement_options,
                 "demands": self.demands,
                 "max_duration_seconds": self.max_duration_seconds,
-                "title": self.title,
-                "description": self.description,
-                "metadata": self.metadata,
+                **(
+                    {"title": self.title} if self.title is not None else {}
+                ),
+                **(
+                    {"description": self.description}
+                    if self.description is not None
+                    else {}
+                ),
+                **(
+                    {"metadata": self.metadata} if self.metadata is not None else {}
+                ),
                 "status": self.status,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
@@ -403,6 +411,9 @@ class ValidatePublishRequest:
     settlement_options: list[dict] = field(default_factory=list)
     max_duration_seconds: int | None = None
     storefront_url: str = ""
+    title: str | None = None
+    description: str | None = None
+    metadata: dict | None = None
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -414,6 +425,12 @@ class ValidatePublishRequest:
         }
         if self.max_duration_seconds is not None:
             d["max_duration_seconds"] = self.max_duration_seconds
+        if self.title is not None:
+            d["title"] = self.title
+        if self.description is not None:
+            d["description"] = self.description
+        if self.metadata is not None:
+            d["metadata"] = self.metadata
         return d
 
 

@@ -1,0 +1,13 @@
+# Tasks
+
+- [x] Add common envelope fields in `core/src/market_core`, registry schema, migration and signed routes in `core/registry`, and registry request/read models in `core/registry-client`.
+- [x] Wire seller inputs, persistence and publication through `core/storefront`, `core/storefront-client` and the VM, bare-metal and API-credits publications and seller CLI paths.
+- [x] Run existing focused suites for those boundaries and exercise signed publish, GET, validation and filtering.
+- [ ] Closeout: confirm comment hygiene and import placement; check documentation placement and compress notes; record roadmap and campaign dispositions; check packaging and architecture; record pipeline evidence and gaps; promote the registry discovery and storefront publication deltas; check citations and validate the change; archive.
+
+## Validation notes
+
+- Registry: 139 unit + 55 integration (listings, identity publish, filter spec, filtering, asking rate) passed. Storefront: 182 unit passed. VM storefront: 1215 unit passed, 1 pre-existing skip. Bare metal: 224 domain + 590 storefront passed. API credits: 255 passed. Clients: 25 + 68 passed. Registry-client mypy clean.
+- Signed publish → GET round trip with VM/bare-metal/API-credits resources carrying the fields: `docs/attachments/seller-listing-metadata/roundtrip.py`, output in `roundtrip-output.json` (run from `core/registry`). Covers refusal naming the field, the dry-run route, `$.metadata["acme.tier"]` filtering both by value and on missing, and unchanged reads for listings without the fields.
+- Migration 019 exercised by downgrade to 018 and re-upgrade on a stamped database; fresh databases create the columns through `create_all` and stamp head.
+- Tests that reach httpx fail on a machine with `ALL_PROXY` set to a SOCKS URL (`socksio` not installed); run suites with the proxy variables unset. Unrelated to this change.
