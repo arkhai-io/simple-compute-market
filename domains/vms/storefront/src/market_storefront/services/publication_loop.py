@@ -446,7 +446,11 @@ class VmPublicationCycle:
             max_duration_seconds=normalize_max_duration_seconds(
                 pricing.get("max_duration_seconds")
             ),
-            details=candidate.get("details"),
+            **{
+                field: value
+                for field, value in (candidate.get("details") or {}).items()
+                if field in VmCreateListingRequest.model_fields
+            },
         )
         return request, composed.rate_structure, ruled_out
 

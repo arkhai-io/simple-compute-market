@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from market_core.listing_details import ListingMetadata, ListingTitle
 from market_identity import Identity
 from pydantic import BaseModel, Field
 from storefront_client.models import ListingListResponse
@@ -37,8 +38,8 @@ class PublishFromQuotaRequest(BaseModel):
     accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
     settlement_clauses: list[dict[str, Any]] | None = None
     description: str | None = None
-    title: str | None = None
-    metadata: dict[str, Any] | None = None
+    title: ListingTitle | None = None
+    metadata: ListingMetadata | None = None
     openapi_url: str | None = None
     base_url: str | None = None
     paused: bool = False

@@ -8,6 +8,11 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from market_core.listing_details import (
+    ListingDescription,
+    ListingMetadata,
+    ListingTitle,
+)
 from market_identity import Identity
 
 
@@ -57,6 +62,12 @@ class CreateListingRequest(BaseModel):
         ),
     )
     max_duration_seconds: int | None = None
+    # Seller-authored claims published beside the envelope, under the limits
+    # the registry serves in its listing_shape: a short title, prose, and
+    # flat string-key to scalar-value facts.
+    title: ListingTitle | None = None
+    description: ListingDescription | None = None
+    metadata: ListingMetadata | None = None
     paused: bool = Field(
         default=False,
         description=(
