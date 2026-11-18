@@ -81,7 +81,7 @@ This repository's closeout runs `make check-packaging` and resolves every failur
 
 ### End-to-end pipeline
 
-This repository's closeout records the end-to-end pipeline's run at the closeout's code — dispatched by `make run-e2e` and collected by `make fetch-e2e-logs` — its result, and the scenarios that exercise the change's behaviour; a failed run returns the change to implementation, and a run that could not be made is recorded as unrun, naming its cause and the change that owns it ([`docs/guidance/engineering/testing.md`, "Work is not complete because its own tests pass"](../docs/guidance/engineering/testing.md#work-is-not-complete-because-its-own-tests-pass); [`docs/guidance/workflow/working-model.md`, "Implement"](../docs/guidance/workflow/working-model.md#implement)).
+This repository's closeout records the end-to-end pipeline's run that the latest passing validation gathered — a run of the code the closeout commit carries, since closeout changes no code; validation dispatches it by `make run-e2e` and collects it by `make fetch-e2e-logs` — with its result and the scenarios that exercise the change's behaviour, from that validation's record. Closeout dispatches no run of its own. A failed run fails that validation, which returns the change to implementation before closeout; a run that could not be made is recorded as unrun, naming its cause and the change that owns it ([`docs/guidance/engineering/testing.md`, "Work is not complete because its own tests pass"](../docs/guidance/engineering/testing.md#work-is-not-complete-because-its-own-tests-pass); [`docs/guidance/workflow/working-model.md`, "Implement"](../docs/guidance/workflow/working-model.md#implement)).
 
 ## Current capability documentation
 

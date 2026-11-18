@@ -42,6 +42,8 @@ allow = [
   # with the change named or not.
   "Bash(scripts/change-workflow check tasks*)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
+  # The repository's own OpenSpec wrapper, validating only: a fixed script and subcommand.
+  "Bash(scripts/openspec validate *)",
   "Bash(openspec show *)", "Bash(openspec status*)",
   "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
   "Bash(grep *)", "Bash(echo *)", "Bash(diff *)", "Bash(find *)",

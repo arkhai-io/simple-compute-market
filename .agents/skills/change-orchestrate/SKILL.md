@@ -174,6 +174,14 @@ enough, or a fix to the session that made the edits. Then pass that run's `sessi
 from its log line as `SESSION_ID=<id>` beside `SECTIONS` or `ARGUMENTS`; the wrapper
 continues it on its model and refuses one waiting on the owner, which is resumed
 with the answer instead. Never continue a session on your own judgement.
+An implementation run whose `question` asks only whether its remaining sections go
+to a fresh session or continue in its own — its work committed, nothing else
+awaiting the owner — is answered by the owner's standing direction: a fresh
+session. Resume the waiting `seq` with that choice, quoting the option the
+question names for it, and record it through `note --by orchestrator`, naming this
+standing direction; once the run has logged its line, start the next session fresh
+as the computation names it. A question that also asks anything else goes to the
+owner as any other.
 For `review`, run `make review CHANGE=<change> KIND=<computed-kind>`, in the clone
 likewise: the review runs on its row's models, Codex first and Claude when Codex is
 unavailable. Never set `REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's
@@ -698,7 +706,9 @@ Save the owner's answer verbatim as the next `reviews/NN-implementation-owner.md
 in the change's directory — the clone's, for a change worked there — at the path
 `scripts/change-workflow find --next-record implementation-owner <change>` prints
 there, never a number counted or taken from the log's `seq`, using exclusive
-creation.
+creation. Save it only once every validation and review of the round has published
+its record, and ask for the path at that moment: a run still in progress takes its
+number when it publishes, so a path asked for earlier can collide with it.
 Never overwrite a record. If there are no findings, save the owner's actual reply
 so the reading is recorded. On restart with a view open, recover its round head
 from Git's view state and finish that reading; preserve notes already saved.

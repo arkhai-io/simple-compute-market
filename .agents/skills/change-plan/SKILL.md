@@ -231,7 +231,9 @@ or change its completion state. When the reviewed design changes what follows fr
 a completed task, amend it with a correction note, or append a task that carries
 the correction. An unchecked task the reviewed design superseded may be replaced;
 say at the top of the replaced section that it was replanned against the reviewed
-design.
+design. An unchecked task whose work moves to another section is checked where it
+stood, its text beginning "(Moved to section N.)", so the section it leaves reads
+complete and the next-step computation does not name it again.
 
 **Sections are slices.** Each section:
 
