@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from compute_provisioning import TeardownRerunPolicy
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
@@ -66,10 +67,13 @@ def build_bare_metal_runtime(
     job_engine,
     job_submission: JobSubmissionService,
     config,
+    teardown_rerun_policy: TeardownRerunPolicy,
     relay_port_allocator=None,
     relay_resolver=None,
     connection_codecs=None,
 ) -> BareMetalProvisioningRuntime:
+    """The bare-metal runtime over the service's one job authority, and its one
+    teardown rerun policy, which the release status reads too."""
     active = [
         profile.strip()
         for profile in os.environ.get("ACTIVE_PROFILES", "").split(",")
@@ -89,6 +93,7 @@ def build_bare_metal_runtime(
             ),
             submission=job_submission,
             jobs=job_engine,
+            rerun_policy=teardown_rerun_policy,
         ),
         pool_config_handler=BareMetalPoolConfigHandler(
             settings=config, connection_codecs=connection_codecs

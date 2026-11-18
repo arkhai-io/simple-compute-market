@@ -19,7 +19,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import injected_time
 import pytest
+from compute_provisioning import JobExecutorTable, TeardownRerunPolicy
+from compute_provisioning.jobs import JobRetryPolicy
 from compute_provisioning.jobs.db import Base as JobsBase
+from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
@@ -215,6 +218,17 @@ def _settings(**overrides):
     return s
 
 
+def _job_engine(session_factory) -> JobEngine:
+    """The job authority over these tables, read by the release status for a
+    reservation's teardown jobs; no job runs here."""
+    executors = JobExecutorTable()
+    executors.freeze()
+    return JobEngine(
+        session_factory, executors=executors, host_lookup=lambda host_id: None,
+        retry_policy=JobRetryPolicy(),
+    )
+
+
 def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_overrides):
     """The lifecycle as the service composes it, over these tables."""
     fulfillment_service = fulfillment_service or _fulfillment_service(session_factory)
@@ -236,6 +250,10 @@ def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_
         release_status=FulfillmentReleaseStatusPort(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
+            rerun_policy=TeardownRerunPolicy(
+                teardown_rerun_limit=3, retry_policy=JobRetryPolicy()
+            ),
+            jobs=_job_engine(session_factory),
         ),
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(

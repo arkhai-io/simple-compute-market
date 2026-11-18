@@ -356,7 +356,7 @@ lease is released by what its fulfillment proves"; the release-failure scenarios
 `domains/bare_metal/provisioning/adapter`, `helm`, two `e2e-tests` comments, and
 `docs/operator-handbook.md`; depends on section 2.
 
-- [ ] 3.1 In `provisioning/compute/service/src/compute_provisioning_service/settings.toml`,
+- [x] 3.1 In `provisioning/compute/service/src/compute_provisioning_service/settings.toml`,
   add `teardown_rerun_limit = 3` with a comment stating its meaning, and raise
   `lease_watchdog_grace_period_seconds` from 300 to 3600, its comment restated as
   D3 sizes it; restate `relay_grant_expiry_grace_seconds`'s comment over the
@@ -364,14 +364,30 @@ lease is released by what its fulfillment proves"; the release-failure scenarios
   once from the settings and the job retry policy (`services/job_retry.py`'s
   `retry_policy_from`), so a negative limit refuses startup naming the setting.
   Verify with 3.5. (D3, D5.)
-- [ ] 3.2 Compose the policy and the engine's teardown-job read into
+  Done: the container's `teardown_rerun_policy` singleton
+  (`_make_teardown_rerun_policy`). Beyond the plan: the two code-level fallbacks
+  for the grace (`lease_lifecycle.py`'s `getattr(…, 300)` and `app_runtime.py`'s
+  startup log) now fall back to 3600, matching the default, and the comment on
+  `DEFAULT_GRANT_EXPIRY_GRACE` in `relays/allocator.py` is restated over the
+  teardown still due, as the setting's is.
+- [x] 3.2 Compose the policy and the engine's teardown-job read into
   `FulfillmentReleaseStatusPort` in `compute_provisioning_service/container.py`, and
   into `JobFulfillmentProvider` in
   `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/runtime.py` and
   `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/runtime.py`
   (and their `bundle.py` where it builds the provider), from the one policy the
   service builds. Verify with 3.5. (D5.)
-- [ ] 3.3 Set `lease_watchdog_grace_period_seconds: 3600` in
+  Done: `build_vm_runtime` and `build_bare_metal_runtime` take
+  `teardown_rerun_policy` (the VM runtime keeps it as a field); neither
+  `bundle.py` builds a provider. Section 2's `None` defaults and branches are
+  removed: `JobFulfillmentProvider`'s `rerun_policy` and the status port's
+  `rerun_policy` and `jobs` are required, and every construction passes them
+  (the tests section 2's notes list, plus `test_vm_fulfillment_plan.py` and
+  `test_test_controller.py`, which pass `None` to a runtime that dispatches no
+  teardown). Unit (`tests/unit/test_authority_composition.py`, the container
+  over an in-memory database): one policy reaches both providers and the release
+  status, whose job read is the container's one engine.
+- [x] 3.3 Set `lease_watchdog_grace_period_seconds: 3600` in
   `helm/charts/provisioning/values.yaml` and `helm/values.yaml`, and bump each
   chart's version, since its packaged values changed
   (`docs/guidance/repository/package-versions.md`, "A version changes when its
@@ -380,7 +396,11 @@ lease is released by what its fulfillment proves"; the release-failure scenarios
   `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal_buyer_cli.py` to the
   configured grace, keeping their reasoning. Verify with `make -C helm test-render`
   and `uv run pytest e2e-tests/tests/unit`. (D3, D10.)
-- [ ] 3.4 In `docs/operator-handbook.md`, "Upgrading a deployment" — "What the
+  Done: the provisioning chart 0.1.2 → 0.1.3 (and the umbrella's dependency on
+  it), the umbrella chart 0.5.0 → 0.5.1; both values files at 3600, the
+  provisioning chart's with a comment. `make -C helm test-render` passed;
+  `e2e-tests/tests/unit` 956 passed, 1 skipped.
+- [x] 3.4 In `docs/operator-handbook.md`, "Upgrading a deployment" — "What the
   upgrade from v0.3.0 changes": state that `lease_watchdog_grace_period_seconds`'s
   default rises to 3600 and that a deployment that pinned 300 should raise it, else
   a teardown that succeeds on a retry is timed out; that an operator who raises
@@ -391,7 +411,14 @@ lease is released by what its fulfillment proves"; the release-failure scenarios
   on a version-1 host", why those leftovers are not rerun (nothing on their jobs
   proves their playbooks never ran), keeping its manual steps. Verify by reading the
   section against D3 and D4.
-- [ ] 3.5 Application integration through the typed client
+  Done: three bullets added before the version-1 leftovers — the grace's default
+  and when to raise both graces; teardowns that never started being run again,
+  with what to do for a lease whose reruns are spent (its workload is still on
+  the host: the version-1 steps apply); and the retry-release of a lease timed
+  out while its teardown went on or with a rerun pending — and the leftovers'
+  bullet now says why they are not run again; its manual steps are unchanged.
+  Read against D3 and D4.
+- [x] 3.5 Application integration through the typed client
   (`provisioning/compute/service/tests/integration/test_ledger_lease_lifecycle.py`
   and `test_fulfillment_convergence.py`), with the injected time source:
   - a releasing VM lease whose teardown is refused before its playbook (the host's
@@ -417,18 +444,90 @@ lease is released by what its fulfillment proves"; the release-failure scenarios
   - the service refuses to start with a negative `teardown_rerun_limit`, and
     `teardown_rerun_limit = 0` submits no rerun ("The rerun limit is negative",
     "Reruns are disabled").
-- [ ] 3.6 Bump `arkhai-vm-provisioning-adapter` and
+
+  Done, with deviations. Application integration through the typed clients, in
+  `test_lease_release_api.py` — the module already driving a lease's release
+  through the real app, convergence stepped by `advance-cycle` and the watchdog
+  by `check-leases` — not the two modules the plan names, which drive the
+  lifecycle and the watchdog directly with doubles rather than through the
+  client. Seven cases, all on bare-metal leases set up through scheduling and
+  `begin`, the time source injected and moved forward:
+  - a reclaim refused before its playbook (the host's stored connection set to
+    version 1, which the executor's inventory refuses — the refusal the version-1
+    leftovers met; an undecryptable key needs a real runner the bare-metal mock
+    does not take) records no start and a finish; the lease stays `releasing`
+    while the rerun waits; once the host is repaired rerun 1 runs under
+    `…:teardown:rerun-1`, the aggregate reaches `torn_down`, and the lease is
+    released, no operator call;
+  - `teardown_rerun_limit = 0` (the fixture overridden by parametrization): the
+    lease reaches `release_failed` / `teardown_failed`, and no rerun is submitted
+    a day later;
+  - the refused reclaim with its `finished_at` cleared, as an earlier release
+    left its jobs: `release_failed`, no rerun;
+  - past the harness's 300-second grace with a rerun pending: `release_failed` /
+    `teardown_timeout`; a retry-release returns it to `releasing` under the same
+    fulfillment, the next check does not time it out again, and the rerun
+    releases it;
+  - a reclaim held running past the grace: `teardown_timeout`; once it succeeds
+    and the aggregate is `torn_down`, one retry-release releases the lease, with
+    one teardown job (the hold released in a `finally`, its `waiting` count
+    asserted zero);
+  - a reclaim failing retryably after its start (`fail_with`, its
+    `execution_started_at` recorded) is retried by the job engine and succeeds;
+    the lease is `releasing` while the retry waits and is then released;
+  - a failed create's compensating reclaim refused before its playbook: the real
+    watchdog records the failure keeping `create_compensation`, the lease waits,
+    and the rerun tears the aggregate down still carrying it.
+  The negative limit is shown at the composition root (unit,
+  `test_authority_composition.py`): the container refuses to build the policy,
+  and so the release status, naming the setting; startup builds both, but no test
+  starts the app with the negative setting, since that refusal has no client
+  surface and comes after the database check. Not shown at this level: the VM
+  lease's rerun — the VM runtime's provider holds the same policy (the
+  composition test) and the provider and predicate are domain-neutral, but no
+  VM lease is driven through a rerun; a teardown whose playbook ran and failed is
+  the existing `test_a_failing_compensation_leaves_the_lease_for_an_operator`
+  and `test_a_delivered_teardown_that_fails_once_is_not_read_as_compensated`,
+  which pass with no change to their assertions (the second's docstring is
+  restated). The VM rerun at this level is left for the round's triage to judge:
+  it needs a VM fulfillment driven through `begin` in this module, which the
+  bare-metal helpers do not give.
+- [x] 3.6 Bump `arkhai-vm-provisioning-adapter` and
   `arkhai-bare-metal-provisioning-adapter` (or the names their `pyproject.toml`
   states; minor, the provider's new argument) and raise their lower bound on
   `arkhai-compute-provisioning`; the service's bump is section 1's. Refresh the
   locks. Verify with `make check-version-bumps` and `make check-locks`.
-- [ ] 3.7 Verification: `uv run pytest provisioning/compute/service/tests
+  Done: `arkhai-vms-provisioning-adapter` 0.19.1 → 0.20.0 and
+  `arkhai-bare-metal-provisioning-adapter` 0.13.1 → 0.14.0, both on
+  `arkhai-compute-provisioning>=0.29.0`; the service's `adapters` extra and dev
+  group raised to them. Relocked the two adapters and the service. Both checks
+  pass.
+- [x] 3.7 Verification: `uv run pytest provisioning/compute/service/tests
   domains/vms/provisioning/adapter/tests domains/bare_metal/provisioning/adapter/tests`
   passes, `make -C helm test-render` passes, and `scripts/change-workflow run
   pre-commit resolve-delivery-correctness-gaps` passes. End-to-end: the lanes'
   back-dated-lease stages run under the new grace — `e2e_vm_payment_purchase`,
   `e2e_deal_buyer_cli` and `e2e_bare_metal_payment_deal` release their leases
   through the unchanged path; none induces a rerun or a timeout, and none is owed.
+  Done: the service (`make -C provisioning/compute/service test`, which sets the
+  `mock` profile its test routes need) 636 unit and 565 integration passed; the
+  VM adapter 287 and the bare-metal adapter 138 passed; the compute package 593;
+  `make -C helm test-render` passed; `pre-commit` passes (section notes).
+  End-to-end, reasoned and not run (the lanes run at validation): the lanes take
+  the charts' 3600-second grace and run with reruns on, but no lane refuses a
+  teardown before its start.
+
+Section 3 notes (handoff):
+
+- The service suite's `client_and_queue` takes a `teardown_rerun_limit` fixture
+  (3), which a test overrides by parametrizing it; its harness grace stays 300.
+- Outside the plan: the service suite's signed ASGI transport stamped requests
+  with `time.time()` while the service checks them against the injected source,
+  so a test moving the source past the timestamp window had its signed calls
+  refused. It now signs with `injected_time.now()`.
+- The service's `/test` routes exist only under the `mock` profile: run the
+  service suite through `make -C provisioning/compute/service test`, not a bare
+  `uv run pytest`.
 
 ## 4. An equivalent acceptance that waited on another returns the first
 

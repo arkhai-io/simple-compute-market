@@ -329,7 +329,7 @@ class LeaseLifecycleService:
         await self._drain_capacity_release_outbox()
         now = injected_time.now_datetime()
         grace_seconds = int(
-            getattr(self._settings, "lease_watchdog_grace_period_seconds", 300)
+            getattr(self._settings, "lease_watchdog_grace_period_seconds", 3600)
         )
 
         checked = 0

@@ -70,6 +70,36 @@ def test_one_engine_and_one_host_authority_reach_both_runtimes():
     assert job_engine._host_lookup == host_authority.lookup
 
 
+def test_one_teardown_rerun_policy_reaches_both_providers_and_the_release_status():
+    """Dispatch and the release status judge alike whether a rerun is pending,
+    and the status reads the one job authority's teardown jobs."""
+    container = _container()
+    policy = container.teardown_rerun_policy()
+
+    assert policy.teardown_rerun_limit == 3
+    assert policy.retry_policy == container.job_engine()._retry_policy
+    assert container.vm_runtime().fulfillment_provider()._rerun_policy is policy
+    assert container.bare_metal_runtime().fulfillment_provider._rerun_policy is policy
+    release_status = container.release_status()
+    assert release_status._rerun_policy is policy
+    assert release_status._jobs is container.job_engine()
+
+
+def test_a_negative_teardown_rerun_limit_refuses_composition_naming_the_setting():
+    """Startup composes both providers and the release status, so this refusal
+    stops the service."""
+    container = _container()
+    container.config.override(SimpleNamespace(
+        teardown_rerun_limit=-1, default_max_retries=3, retry_backoff_initial_seconds=60,
+        retry_backoff_multiplier=2.0, retry_backoff_max_seconds=3600,
+    ))
+
+    with pytest.raises(ValueError, match="teardown_rerun_limit must not be negative"):
+        container.teardown_rerun_policy()
+    with pytest.raises(ValueError, match="teardown_rerun_limit"):
+        container.release_status()
+
+
 def test_the_host_authority_carries_the_relays_pool_change_hooks():
     """Both relay checks, the rebinding rule and the management route, over
     the codecs the authority and the relay service share."""

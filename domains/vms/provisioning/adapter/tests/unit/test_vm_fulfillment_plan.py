@@ -188,6 +188,7 @@ class TestPlaybookFrozenAtPreparation:
             vm_operations_service=None,
             host_operations_service=None,
             relay_port_allocator=None,
+            teardown_rerun_policy=None,
         )
 
         prepared = _create(

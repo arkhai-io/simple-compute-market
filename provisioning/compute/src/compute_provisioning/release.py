@@ -354,13 +354,11 @@ class FulfillmentReleaseStatusPort:
         *,
         settlement_repository: Any,
         session_factory: Callable[[], Any],
-        rerun_policy: TeardownRerunPolicy | None = None,
-        jobs: BoundJobReader | None = None,
+        rerun_policy: TeardownRerunPolicy,
+        jobs: BoundJobReader,
     ) -> None:
         self._settlement_repository = settlement_repository
         self._session_factory = session_factory
-        # Without both, no rerun is ever pending, and ``teardown_failed`` is
-        # failed.
         self._rerun_policy = rerun_policy
         self._jobs = jobs
 
@@ -403,8 +401,6 @@ class FulfillmentReleaseStatusPort:
         self, capacity_reservation_id: str, detail: str | None
     ) -> ReleaseStatus:
         error = detail or "teardown failed"
-        if self._rerun_policy is None or self._jobs is None:
-            return ReleaseStatus(ReleaseProgress.FAILED, reason="teardown_failed", error=error)
         outcome = teardown_rerun(
             self._jobs.bound_jobs(capacity_reservation_id, "teardown"),
             self._rerun_policy,

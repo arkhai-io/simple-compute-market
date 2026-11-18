@@ -332,13 +332,11 @@ class JobFulfillmentProvider(FulfillmentProvider):
         plan: JobFulfillmentPlan,
         submission: JobSubmissionService,
         jobs: JobReader,
-        rerun_policy: TeardownRerunPolicy | None = None,
+        rerun_policy: TeardownRerunPolicy,
     ) -> None:
         self._plan = plan
         self._submission = submission
         self._jobs = jobs
-        # ``None`` runs no teardown reruns: every dispatch submits, or finds,
-        # the reservation's one teardown job.
         self._rerun_policy = rerun_policy
 
     # Create.
@@ -535,8 +533,6 @@ class JobFulfillmentProvider(FulfillmentProvider):
     async def _teardown_job(self, operation: PreparedJobOperation) -> str:
         """The teardown job this dispatch names: the reservation's latest,
         adopted, or a rerun of the prepared teardown when one is ready."""
-        if self._rerun_policy is None:
-            return (await self._submit(operation, require_enabled_host=False)).job_id
         jobs = self._jobs.bound_jobs(operation.capacity_reservation_id, "teardown")
         if not jobs:
             return (await self._submit(operation, require_enabled_host=False)).job_id

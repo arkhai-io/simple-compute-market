@@ -69,6 +69,15 @@ retry_backoff_max_seconds = 3600
 # has elapsed and re-enqueues them. Keep well below retry_backoff_initial_seconds.
 retry_scheduler_poll_interval_seconds = 10
 
+# How many times a fulfillment's teardown is run again, each under a new job,
+# when its job failed before its execution started — refused before anything
+# acted on the host, so running it again does what the first should have. Each
+# rerun waits after the previous teardown job's finish as a job waits for its
+# retry (the retry backoff above). A teardown whose execution started, or whose
+# job was cancelled, is never run again. 0 disables reruns; the service refuses
+# to start with a negative value.
+teardown_rerun_limit = 3
+
 # Further failure messages that are never retried. The Ansible executor
 # already refuses to retry transport failures (an unreachable host, refused
 # authentication), and each domain's codec its own (a VM that does not exist);
@@ -88,11 +97,15 @@ relay_token = ""
 
 # How long a relay port lease's grants outlive the reservation's scheduled lease
 # end. A relay admits a proxy whose grant is unexpired, and teardown is what
-# revokes access, so the grace must cover the lease watchdog's grace period
-# (lease_watchdog_grace_period_seconds) and a teardown job's retries
-# (default_max_retries and the retry backoff) with their runs; the default
-# covers the defaults with room. The expiry is fixed when the port is leased.
-# The service refuses to start with a negative value.
+# revokes access, so the grace must cover the teardown still due after the
+# lease ends: the reruns' spacing for teardown_rerun_limit reruns, a teardown
+# job's retries with their backoff (default_max_retries and the retry backoff),
+# and the playbook runs a teardown is expected to take. It is sized for the same
+# expected teardown as lease_watchdog_grace_period_seconds; past that grace no
+# teardown is due, since the lease is release_failed and an operator acts. The
+# default covers the defaults' backoff and spacing with room for runs. The
+# expiry is fixed when the port is leased. The service refuses to start with a
+# negative value.
 relay_grant_expiry_grace_seconds = 3600
 
 # How long a released relay port is held past its last grant's expiry before it
@@ -176,7 +189,18 @@ capacity_definitions_path = ""
 # ARKHAI_IDENTITY_CREDENTIAL.
 lease_watchdog_enabled = true
 lease_watchdog_poll_interval_seconds = 60
-lease_watchdog_grace_period_seconds = 300
+# How long a lease may stay releasing, timed from when it entered releasing,
+# before it is marked release_failed with teardown_timeout for an operator,
+# whether its teardown is in progress or a rerun of it is pending. Sized for the
+# teardowns a deployment is expected to run: at the defaults a teardown's waits
+# are the reruns' spacing (60, 120 and 240 seconds) and the retry backoff of the
+# one job whose execution starts (60, 120 and 240 seconds again), 14 minutes in
+# all, leaving about 46 minutes for that job's playbook runs. A teardown running
+# longer is timed out like any stuck release; an operator's retry-release then
+# releases its lease once its teardown is torn down. Raise it with
+# teardown_rerun_limit, the job retries or ansible_timeout_seconds, or for
+# teardowns that run longer, and relay_grant_expiry_grace_seconds with it.
+lease_watchdog_grace_period_seconds = 3600
 capacity_reservation_watchdog_enabled = true
 capacity_reservation_watchdog_poll_interval_seconds = 60
 storefront_url = ""

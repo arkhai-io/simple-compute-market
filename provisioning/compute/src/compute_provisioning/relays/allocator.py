@@ -53,11 +53,14 @@ from .db import Relay, RelayPortLease
 
 logger = logging.getLogger(__name__)
 
-#: How long a lease's grants outlive its scheduled end, by default: the lease
-#: watchdog's grace period (300 seconds by default) and a teardown job's
-#: retries (three by default, backing off 60, 120, and 240 seconds) with their
-#: runs, so a grant never expires while the teardown that revokes it is still
-#: due. The service's ``relay_grant_expiry_grace_seconds`` sets it.
+#: How long a lease's grants outlive its scheduled end, by default: the
+#: teardown still due after the lease ends — the reruns' spacing for a teardown
+#: that never started (60, 120 and 240 seconds by default), a teardown job's
+#: retries with their backoff (60, 120 and 240 seconds again), and the runs a
+#: teardown is expected to take — so a grant does not expire while a working
+#: teardown that revokes it is still due. Past the lease watchdog's grace no
+#: teardown is due: the lease is release_failed for an operator. The service's
+#: ``relay_grant_expiry_grace_seconds`` sets it.
 DEFAULT_GRANT_EXPIRY_GRACE = timedelta(hours=1)
 
 #: How long a released port is held past its grant's expiry, by default. The
