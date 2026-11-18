@@ -70,7 +70,9 @@ drive of a deal. Local materialization is adoption history, not current chain
 authority.
 
 Delivery enters through core's `fulfill_domain` hook, as VM's does: payment
-settle and the Alkahest ready step build a `StorefrontFulfillmentContext`, and the
+settle, the Alkahest ready step, the delivery re-drive's `redeliver` and a status
+read each call the fulfillment service's `deliver`, which revalidates the settlement
+through the accepted entry and builds a `StorefrontFulfillmentContext`, and the
 registered hook builds the compute delivery path from the clients in `ports` and
 the storefront's lifecycle in `domain_input`, refusing before any call when the
 lifecycle is absent. There is therefore one registered entry, and it always admits
@@ -90,7 +92,12 @@ domain port reserves the whole-machine claim with `escrow_uid` beside the
 `:settlement` placement key, so recovery replays by key rather than scanning the
 site's reservations, and schedules and records the assigned resource before
 building the materialization over the Agreement window, since the request names
-that resource. The lifecycle cycle drives waiting and pending deals. A status read
+that resource. The `delivery-recovery` loop drives waiting and pending deals again
+through the compute family's re-drive
+([compute delivery, "Dispatch and recovery"](../compute-delivery/architecture.md#dispatch-and-recovery)):
+it lists the deals whose lifecycle row shows a delivery started and not finished,
+skips one whose lock is held, re-checks its settlement through the settlement
+service's `verified_evidence`, and drives it through `deliver`. A status read
 drives a deal whose fulfillment is active and not yet available before answering,
 so the administrator's settle wait and a buyer's status read reach availability;
 the access read does not drive, reaching no payment authority, and goes through the

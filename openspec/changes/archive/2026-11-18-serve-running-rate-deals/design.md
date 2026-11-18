@@ -722,9 +722,190 @@ which `test-seams.md` rules out beside a seam; and the harness restoring its own
 source after each in-process command, a step to forget that leaves the buyer's file
 source installed while `buy` is parked.
 
+## Implementation findings
+
+What implementation found or decided beyond the decisions above, kept here when
+`tasks.md`'s notes were shortened at closeout.
+
+### End service, the list and the contracts
+
+- D1's changed answer compares authorization answers by status alone, since a rate
+  adapter's evidence reference names each fresh snapshot. An end due by now at the same
+  revision is admission's own `refuse`, returned unjournaled, not a held changed answer.
+- Stored servicing views and journal rows written before contracts 0.3.0 omit the
+  fields that release dumps; they read back at their defaults, and every comparison in
+  `kit/deal-servicing` is between parsed models, so none is affected.
+- D12's check leaves out the watch's stored observation views (`servicing_watch`,
+  `servicing_observations`), which keep the authority's view as read, amounts and
+  funded boundary included; D12 admits them as journaled observations.
+
+### Versions taken beyond the plan
+
+- New public API took a minor step even where the package was already bumped on this
+  branch (`docs/guidance/engineering/versioning.md`, "One bump per unit of work"):
+  `kit/arkhai-payments` 0.9.0, `tools/lane-double-controls` 0.2.0,
+  `tools/payments-lane-double` 0.3.0 and `arkhai-core-buyer` 0.8.0. D17's sentence that
+  the reservation costs no further version and the tools one patch step each is
+  superseded by these.
+
+### Classification and the term end
+
+- The family classifier reads a `PaymentStop` protocol (`cause`, `at`) and returns a
+  kind string, since `arkhai_compute`'s allowlist admits only the shape kit; each
+  storefront wraps the kind in the kit's `Classification` in its own two-line closure.
+  A shared wrapper would need a package both storefronts and the kit admit, so the two
+  closures stay. The buyer kit likewise names `"exhaustion"` as a literal, since it
+  cannot import the servicing kit's `ClassificationKind`.
+- Each storefront registers its term end from the Agreement's start truncated to whole
+  seconds, while the payments mandate's part end is `ceil(start + duration)`: for a
+  fractional start the payment stop lands a second after the registered term end and
+  still classifies `terms`, and which of the two sorts first depends on the fraction.
+- The servicing cycle's authorities read records a payment stop before reconciliation
+  records the storefront's own term end, so the first physical end commands the
+  termination at the payment stop's instant; a termination never restarts.
+- The buyer checks rate parts only for funds running out: a once-only part's end is the
+  Agreement's end, so its `terms` stop never reads as exhaustion.
+
+### Composition and the startup report
+
+- `PAYMENTS_SERVICING_FIELDS` is stated in each storefront beside its payments
+  composition rather than in `kit/arkhai-payments`, which would take that package a
+  version and every dependent a relock for one string.
+- Every `dataclasses.replace` of the frozen VM composition builds an equal payments
+  stage again: the stage holds only its section, client factory and declaration, and a
+  frozen composition has no other way to gain its coordinator and lifecycle. A test
+  needing the exact stage object reads it after the last replace.
+- `VmDealLifecycle` takes `capacity=` and `physical=` so tests pass a world's runtime
+  rather than replacing `lifecycle.end.physical` after construction; production passes
+  neither and keeps the configured sites' runtime.
+
+### The servicing cycle, the loops and the re-drive
+
+- The cycle's authorities read is `SellerServicing.read`, not `watch`, so only the filing
+  step dispatches filings.
+- The page position is saved once a page is serviced, `NULL` after the last, so a
+  storefront stopped mid-page services that page again rather than skipping its rest.
+- A resolved respondent case clears its repair under any record, since repairs held
+  under the earlier account-and-authority record have no poller to clear them once the
+  listing restarts by authority.
+- Every servicing loop in both storefronts runs its first cycle one interval after its
+  timer starts, so an operator can hold the loops as the storefront starts; a restarted
+  storefront's first re-drive is therefore 30 seconds after start by default.
+- Bare metal's re-drive drives through `BareMetalFulfillmentService.redeliver`, so every
+  delivery enters through core's fulfillment hook and its identity check
+  (`physical-provisioning`). The hook takes the deal's `asyncio.Lock`, which is not
+  re-entrant, so the routine's claim only answers whether the lock is free, and
+  `deliver`'s gate re-checks the evidence a second time; VM's claim holds its lease
+  across re-check and drive. Both re-checks answer `False` with a warning, an
+  unreachable chain included; the routine logs only what raises.
+- Waits of `buy` still on real time after section 10a: the Alkahest settle's submit
+  retries on a propagation-lag refusal (no rate deal settles through Alkahest), and the
+  payments kit's approval poll while the service has no snapshot of a transaction it
+  just approved, which neither the service nor the lane double answers.
+
+### Storefront test worlds
+
+- VM's recurring world delivers against `tests.delivery_fakes.DeliverySite` as the one
+  site of a real `CapacityRuntime`, since the publication harness's `FakeSite` serves
+  projections only and has no activation route. Bare metal's needed a fulfillment client
+  scheduling the pool member's machine in the world's pool, since delivery refuses a
+  resource whose pool or host differs.
+- Bare metal's lifecycle row `state` is provisioning's state as last read (it stays
+  `dispatch_pending` after a settle-driven delivery), so tests assert availability from
+  end service.
+- Each world builds fresh fakes, so a restarted storefront meets a site holding no
+  reservation and no restart case asserts teardown; VM's `DeliveryProvisioning` has no
+  `terminate_lease` and bare metal's `WorldProvisioning` and payments harness no
+  `get_lease`, so a cycle logs a harmless physical-end or site-recovery failure there.
+- Restarting VM's configured app over a recurring world's database needs the harness's
+  seller seed as its credential and the harness's administrator: lifecycle routes refuse
+  to sign as another seller, and startup refuses an administrator configuration dropping
+  a durable identity.
+
+### The lanes and the payments double
+
+- "No payment hold" in the recurring purchase's clean-up is read as nothing reserved for
+  the payer and nothing the stages left running: the same requirement demands the
+  started period charged, which the double holds for the payee until its release
+  instant, as a once-only purchase's payment stays held until the lane ends.
+- A rate part holds two periods reserved once started (`FIRST_RESERVATION_PERIODS`):
+  approval reserves one, and the start tops up to its reserve ahead plus the engine's
+  60-second slack. A row setting lane time past that boundary declares the reservation
+  stage first. Like `_refill`, the reservation covers 60 seconds past `through`, so
+  reserving through a stop on a period boundary reserves the next period too, which the
+  stop refunds; reserving through the Agreement's end is capped there.
+- The double charges nothing for a stop at the start itself, so the recurring purchase
+  stops a minute into the first period. No route reads a storefront's classification,
+  so the rows assert its consequences: cause, instant, no filing, teardown and the
+  buyer's `funding_stop`.
+- The rate rows run only against the lane's doubles (D19); `MaximumTerm07` is not split
+  from the reservation so it could run against the payments service, which has no lane
+  time to set to the Agreement's end.
+- A VM scenario's GPU model must be one `core/registry/src/core_registry/filter-spec.yaml`
+  admits; the registry refuses to publish any other while the storefront reports the
+  listing open.
+- A lane's storefront needs the seller's `[[DisputeCredential]]` for the mediation
+  double its deals name, or every such deal lists `repair_required`; the bare-metal
+  lane's overlay lacked it until section 10.
+- The lane harness mounts `e2e-tests/tests` and `src` read-only from the worktree, so a
+  stage edited while a lane runs changes the run. The two lanes share host ports, so one
+  stack comes down before the other starts; a VM watchdog run needs a fresh stack, its
+  resource listed once per stack.
+
+### The in-process buyer
+
+- pytest points `sys.stdout` at its own capture for each stage and around each live-log
+  record, so a background command's output after its stage ends is unreliable: stages
+  read its exit status and run log, and a foreground command runs with logging held.
+- A `WaitClock`'s `sleep` is awaited on event loops the command makes for itself (VM's
+  `run_sync` threads, bare metal's `run_sync`, the watchdog's `asyncio.run`), so the
+  harness's gate is a thread condition, not an `asyncio` primitive, and work on the
+  harness's loop goes through `run_coroutine_threadsafe`. `buy` builds one clock per
+  command, so the replaced factory may return the same gated clock each call.
+- The watchdog probes once on entering, before its first sleep, so a release yields the
+  second probe and a threshold of two takes two releases after the probe fails.
+
+### Test-before evidence
+
+- `scripts/change-workflow run test-before` runs a test file as `HEAD` holds it and
+  without the packages' environments, so it showed nothing for this change's sections:
+  their new tests fail at the base by the code — the refusal, API or route they assert
+  is absent there — not by a run.
+
 ## Open Questions
 
 - The published mediation contract gives no verifiable answer for an Agreement the
   authority holds no record of, nor a way to check which account a credential
   authenticates, so D16 reads an unsigned `404` as no case on an unchecked premise.
   Revisit D16's mapping if the contract comes to offer either.
+
+## Design promotion record
+
+The six capability specifications are written by the archive from the change's deltas;
+the rest was promoted at closeout.
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — a changed authorization answer at an unchanged revision is pending; the refusal removed | `openspec/specs/deal-lifecycle/spec.md#requirement-delivery-authorization-delegates-payment-interpretation` and `openspec/specs/compute-delivery/spec.md#requirement-protected-delivery-steps-are-authorized-and-admitted` (by the archive; `compute-delivery/spec.md`'s "Delivery is driven one deal at a time and reports where it stands" loses the `rate_servicing_unavailable` reason by hand); `openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission` ("A changed authorization answer holds a phase back", "The deadline barrier") and `#current-limits`; `openspec/specs/compute-delivery/architecture.md#commit-and-hold-adoption`; `docs/development/ARCHITECTURE.md#settlement-servicing`; `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement` and `#current-limits`; `openspec/specs/settlement-servicing/configuration.md#seller-servicing-budget-diagnostics`; `openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover`; `openspec/specs/storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors` |
+| D2, D3 — one compute-family stop classifier; `terms` split by the Agreement's end | `openspec/specs/deal-lifecycle/spec.md#requirement-cause-classification-is-owned-by-end-service` (by the archive); `openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission` ("One compute-family classifier for every payment stop"); `docs/development/ARCHITECTURE.md#settlement-servicing` |
+| D4, D6 — the kit's servicing step order, respondent port, unified term end and paging; the kit-owned page position | `openspec/specs/deal-lifecycle/spec.md#requirement-each-deals-servicing-steps-run-in-one-kit-owned-order` (by the archive); `openspec/specs/deal-lifecycle/architecture.md#package-and-counterpart-boundaries` ("The kit owns each deal's servicing order"), `#current-limits` and `#buyer-surrender-and-cases`; `openspec/specs/vm-storefront-fulfillment/architecture.md#delivery-end-and-post-release-history`; `openspec/specs/settlement-servicing/architecture.md#current-limits` |
+| D5 — one four-loop layout and one delivery re-drive | `openspec/specs/compute-delivery/spec.md#requirement-unfinished-deliveries-are-re-driven-by-one-routine` and `openspec/specs/market-composition/spec.md#requirement-both-compute-storefronts-run-one-loop-layout` (by the archive); `openspec/specs/compute-delivery/architecture.md#dispatch-and-recovery`, `#the-agreement-window-and-the-future-start-wait` and `#domain-compositions`; `openspec/specs/physical-provisioning/architecture.md#bare-metal-storefront-pull-boundary`; `openspec/specs/vm-storefront-fulfillment/architecture.md#evidence-and-delivery-ownership`; `openspec/specs/market-composition/architecture.md#storefront-composition-kit`; `docs/development/ARCHITECTURE.md#operator-lifecycle-controls`; `openspec/specs/storefront-publication/configuration.md#durations-are-positive-seconds` and `#the-settlement-servicing-interval`; `docs/development/TESTING.md#the-canonical-compute-deal` (the VM lane's `delivery-recovery` step) |
+| D7 — *ended* is physical and financial; the `ending` codes; the read and list carry every field | `openspec/specs/deal-lifecycle/spec.md#requirement-the-seller-half-lists-deals` and `#requirement-stop-requests-are-distinct-from-final-stops` (by the archive); `openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission` ("When a deal is ended") and `#seller-notice-and-administrator-interruption`; `kit/deal-servicing/README.md` and `kit/deal-lifecycle-client/README.md`, written with the code |
+| D8 — a storefront that cannot service its deals starts and reports them | `openspec/specs/market-composition/spec.md#requirement-a-storefront-reports-deals-its-configuration-cannot-service` (by the archive); `openspec/specs/market-composition/architecture.md#settlement-runtime-composition`; `openspec/specs/storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors`; `openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover` |
+| D9, D10 — lane rows set lane time; the watchdog's delivered-deal cases are lane rows | `openspec/specs/test-compatibility/spec.md#requirement-rate-deals-are-qualified-in-both-compute-lanes-on-lane-time`, `#requirement-a-recurring-purchase-is-delivered-end-to-end-in-each-compute-lane` and `#requirement-the-buyers-watchdog-is-qualified-against-a-delivered-deal` (by the archive); `docs/development/TESTING.md#the-canonical-compute-deal`; `openspec/specs/test-compatibility/architecture.md#the-in-lane-payments-double`, `#ordinary-arkhai-purchase-evidence` and `#the-in-lane-mediation-double`; `docs/development/ROADMAP.md`, Goal 8 |
+| D11 — the VM composition builds its own payments seller stage | `openspec/specs/market-composition/spec.md#requirement-each-compute-composition-builds-its-payments-seller-stage` (by the archive); `openspec/specs/market-composition/architecture.md#settlement-runtime-composition`; `openspec/specs/storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors` |
+| D12 — the servicing loop may journal observations, never balances | `openspec/specs/settlement-servicing/spec.md#requirement-payment-settlement-is-retryable-and-idempotent` (by the archive) |
+| D13 — what the buyer is shown | `openspec/specs/buyer-orchestration/spec.md#requirement-the-buyer-is-shown-the-penaltys-collectible-bound-and-why-a-funding-stop-is-final` (by the archive); `openspec/specs/buyer-orchestration/architecture.md#compute-terms-before-approval` and `#the-buyers-watchdog` |
+| D14 — the buyer requirement reworded; restart recovery proven | `openspec/specs/buyer-orchestration/spec.md#requirement-the-buyer-refuses-seller-ends-that-keep-the-started-period` (by the archive); `openspec/specs/test-compatibility/architecture.md#lifecycle-contract-evidence` |
+| D15 — implementation cadence | No permanent destination: it ordered this change's own work |
+| D16 — an authority holding no record of the Agreement is read as no case | `openspec/specs/deal-lifecycle/spec.md#requirement-the-seller-half-lists-deals` (by the archive); `openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission` ("When a deal is ended"), `#buyer-surrender-and-cases` and `#current-limits`; `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement` and `#current-limits`; `kit/arkhai-mediation/README.md`, written with the code |
+| D17 — the scenario programs the payments double's further reservation | `openspec/specs/test-compatibility/spec.md#requirement-lane-double-controls-are-typed-deterministic-steps` (by the archive); `openspec/specs/test-compatibility/architecture.md#the-in-lane-payments-double` and `#lane-time-and-the-doubles-controls`; `docs/development/TESTING.md#private-service-dependencies`; `kit/arkhai-payments/README.md`, `tools/payments-lane-double/README.md` and `tools/lane-double-controls/README.md`, written with the code |
+| D18, D19 — the watchdog's storefront paused; the Compose lanes as evidence | `openspec/specs/test-compatibility/spec.md#requirement-the-buyers-watchdog-is-qualified-against-a-delivered-deal` and `#requirement-rate-mechanics-qualification-consumes-the-shared-lane-contract` (by the archive); `docs/development/TESTING.md#the-canonical-compute-deal` |
+| D20 — the watchdog's buyer runs in the harness's process, its probe and clock programmed | `openspec/specs/test-compatibility/spec.md#requirement-the-buyers-watchdog-is-qualified-against-a-delivered-deal` (by the archive); `docs/development/TESTING.md#the-canonical-compute-deal` and `#lane-time`; `openspec/specs/test-compatibility/architecture.md#lane-time-and-the-doubles-controls`; `openspec/specs/buyer-orchestration/architecture.md#the-buyers-watchdog` and `#the-buyers-time`; `e2e-tests/README.md` and `e2e-tests/tests/e2e/roles/buyer_cli.py`'s module note, written with the code |
+| The owner's principle: a change taking on another change's work names the move | `docs/guidance/workflow/changes.md#defects-found-during-a-change` |
+| The owner's principle: a released client is not owed compatibility with a later storefront | `docs/guidance/repository/package-versions.md#compatibility-is-owed-to-what-a-release-has-shipped` |
+| The owner's principle: a producer's scheduled actions are answers a scenario programs | `docs/guidance/engineering/test-doubles.md#a-double-mirrors-its-producer` |
+| The owner's principle: a local end-to-end test holds a party's time-based signals by pausing it | `docs/guidance/repository/deterministic-tests.md#pause-the-loop-then-advance-it-explicitly` |
+| The owner's principle: a CLI under a system test is controlled as a service is, its mock layer in the harness's process | `docs/guidance/engineering/system-tests.md#a-system-test-reaches-services-only-through-their-interfaces` |
+| Roadmap currency | `docs/development/ROADMAP.md`, Goal 8: the open-gap row removed; the current state absorbs rate delivery and servicing in both storefronts, classification, *ended* and *ending*, the shared servicing order and loop layout, the buyer's display and the lane qualification; the respondent/term-end difference dropped |
+| Campaign index currency | `openspec/changes/README.md`: this change's row, linked to its archive directory; the unowned rows "`VmSettlementComposition` builds no payments seller stage" and "The VM buyer's settlement wait has no clock seam" removed; the Goal 8 prose's refusal wording made current |

@@ -125,6 +125,26 @@ Alkahest and payments; bare-metal purchase binds payments while its seller also
 binds Alkahest and contact exchange. Delivery consumes validated source
 and domain facts, not the mechanism ID or an escrow-shaped progress row.
 
+What services a payment deal, once-only or rate, is the payments seller stage. The VM
+and bare-metal settlement compositions each build their own in `__post_init__`
+(`VmSettlementComposition`, `BareMetalStorefrontSettlementComposition`), over the
+rate servicing declaration their publication and acceptance read, whenever the
+payments section has its servicing fields, whether or not new payment options are
+published; no composition root or test helper builds a second. A storefront whose
+configuration builds no stage while it holds open deals of that mechanism still
+starts, so one mechanism's configuration mistake does not take down its other
+business. Its seller list shows each such deal repair required, naming the missing
+`[Settlement].arkhai_payments` servicing fields, and it reports them at startup, a
+warning in its log per deal, and in its readiness report, system status's
+`unserviceable_deals`. A deal is reported while it is open: until the seller list's
+rule would call it ended, read from its last saved views, so a released rate deal
+whose part last showed no stop stays reported until the stage is restored.
+Withdrawing a treatment from the servicing declaration withdraws new offers and
+acceptances only: a deal's mandate is checked against the declaration when it is
+materialized, and servicing re-checks the stored mandate against the accepted
+Agreement without the declaration, so a deal already materialized is serviced to its
+end.
+
 Every domain's seller stage-table entry declares `fulfils_through_capacity`:
 whether settling through that mechanism delivers through capacity. It is one
 name each domain's own settlement-admissibility callback reads from the entry a
@@ -279,6 +299,28 @@ holds reaches status; the full exception stays in the log. A preview records
 nothing, and an exited or cancelled loop stays distinct from a running one
 whose last cycle failed. The controller's snapshot is what every storefront's
 system status reports as `lifecycle`.
+
+Both compute storefronts register the same four servicing loops through the
+controller, under the same names (`deal_servicing` in status, stepped at the route
+`deal-servicing`, and so for each), each running one job:
+
+| Loop | Job |
+|---|---|
+| `deal-servicing` | One page of the kit servicing cycle (`market_deal_servicing.ServicingCycle`): respondent discovery per dispute authority, then each deal's steps in the kit's order |
+| `delivery-recovery` | The compute family's re-drive of unfinished deliveries ([compute delivery, "Dispatch and recovery"](../compute-delivery/architecture.md#dispatch-and-recovery)) |
+| `payment-reconciliation` | Advancing accepted payment deals their buyer has not settled |
+| `settlement-servicing` | The settlement worker alone |
+
+One job per loop lets an operator holding the loops step servicing without
+re-driving delivery, and a lane scenario hold one job apart from another. A loop
+whose job the storefront composes nothing for — payment reconciliation with no
+payments stage, VM's servicing with no deal lifecycle, bare metal's settlement
+servicing with no settlement worker — still registers and runs an empty cycle, so
+both storefronts report the same layout. Each loop's interval is its own key;
+`deal_servicing_interval_seconds` and `delivery_recovery_interval_seconds`, unstated,
+take the interval of a key the storefront already reads — in VM
+`settlement_servicing_interval_seconds` and `fulfillment_resume_sweep_interval`
+respectively, in bare metal `payment_reconciliation_interval` for both.
 
 Every capacity effect — reserve, commit, lease activation, release, lease
 truncation — passes one guarded boundary, `CapacityEffects`, composed over any

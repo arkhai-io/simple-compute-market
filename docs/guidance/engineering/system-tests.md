@@ -86,6 +86,14 @@ same no-raw-calls discipline integration tests follow
 ([Integration tests](integration-tests.md)); an observability seam a system test
 needs is designed as such an interface.
 
+A command-line client a system test runs is controlled on the same principles as a
+service: a mock layer the test programs overrides its outbound IO and its time.
+Unlike a service's, that layer can be applied in the test's own process — the test
+runs the shipped command through its entry point there and replaces the command's
+own composition factories — so no test functionality ships with the client. The
+test still reaches every service only through its interfaces, and reaches into the
+client only through those factories, its existing composition seam.
+
 ## Locally verifiable and external-topology scenarios
 
 System tests come in two kinds, each with its own coverage. A *locally verifiable*

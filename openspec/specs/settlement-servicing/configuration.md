@@ -22,6 +22,5 @@ or a buyer guarantee. Current compute role roots do not expose a budget table.
 Use [the deterministic budget example](../../../kit/deal-servicing/examples/budget_first_use.py)
 for a runnable warning-and-continue check. During storefront downtime, physical
 service can continue until the lease maximum. A rate buyer's protection requires
-its own authority stop/case, not a seller-advertised processing budget, and no
-storefront services a running rate deal while end service refuses to commit one. See
+its own authority stop/case, not a seller-advertised processing budget. See
 [lifecycle authority limits](../deal-lifecycle/architecture.md#current-limits).

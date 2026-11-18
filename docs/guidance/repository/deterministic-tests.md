@@ -51,6 +51,13 @@ draws a scenario following this:
 | Bare-metal storefront loops (`publication`, `site-projections`, `deal-servicing`, `delivery-recovery`, `payment-reconciliation`, `settlement-servicing`, `negotiation-watchdog`, `introduction-retention` while contact exchange is enabled, and `alkahest-chain-probe` while Alkahest is composed) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication` and `introduction-retention`; the `bare-metal-storefront publish` command is a client of the `publication` step and its preview |
 | API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`, `payment-reconciliation` while Arkhai payments is composed, `alkahest-chain-probe` while Alkahest is composed, and `listing-seed` while a seed listing is configured) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
 
+A local end-to-end test holds a party's time-based signals — a term end, a teardown,
+a filing — by pausing its loops, never by stopping the party: a paused storefront
+still answers its API and acts on a request it receives, and emits nothing on its own
+until a stage steps one of its loops. An external-topology test handles time
+differently
+([`system-tests.md`, "Locally verifiable and external-topology scenarios"](../engineering/system-tests.md#locally-verifiable-and-external-topology-scenarios)).
+
 A provisioning worker's pause answers `at_gate` beside `paused`: a cycle that
 began before the pause finishes first, so a caller that needs the worker held
 repeats the pause until `at_gate` is true. A storefront's pause answers each
