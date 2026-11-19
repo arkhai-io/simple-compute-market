@@ -10,19 +10,22 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from change_workflow.cli import (expand_sections, main, merge_arguments, parse_sections,
-                                 split_rules)
+from change_workflow.cli import expand_sections, main, merge_arguments, parse_sections
 from change_workflow.common import StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.running import live_runs, recorded_run, select_run, signal_run, stop
-from change_workflow_fixtures import (ACCEPTING, CHANGE, COMMIT, DENIALS, HEAD, LANDED, VALID,
-                                      FakeClaude, configured, event_lines, log_file,
-                                      make_wrapper, option, option_rules, prompted, repository,
-                                      review_text)
+from change_workflow.sandbox import Confinement
+from change_workflow.scope import GRANT, Scope, ScopedPath, grant_paths
+from change_workflow.wrapper import Wrapper
+from change_workflow_fixtures import (ACCEPTING, CHANGE, COMMIT, DENIALS, HEAD, LANDED,
+                                      NO_SANDBOX, VALID, FakeClaude, configured, event_lines,
+                                      log_file, make_wrapper, option, option_rules, prompted,
+                                      repository, review_text)
 
 
 def _checkout(path: Path) -> Path:
@@ -471,39 +474,94 @@ def test_the_command_line_refuses_a_revisit_the_log_refuses(
     assert refused in capsys.readouterr().err
 
 
-def test_a_fresh_run_is_granted_each_rule_its_allow_values_hold(tmp_path: Path) -> None:
+def _granting(tmp_path: Path, claude: FakeClaude) -> tuple[Wrapper, list[Scope]]:
+    """A wrapper whose stand-in sandbox keeps each scope it is asked to mount."""
+    scopes: list[Scope] = []
+    wrapper = replace(make_wrapper(tmp_path, claude), confinement=Confinement(
+        probe=lambda: None, prepare=scopes.append, launch=NO_SANDBOX.launch),
+        home=tmp_path / "home")
+    return wrapper, scopes
+
+
+def _granted(found: Scope) -> list[ScopedPath]:
+    return [path for path in found.writable if path.source == GRANT]
+
+
+def test_the_owner_grants_paths_before_a_fresh_run(tmp_path: Path) -> None:
+    """CW-tl5v's "The owner grants rules before a fresh run": two values, one holding
+    two paths, reach the run's scope and its line as `writes_granted`, and the step's
+    next run is held to its scope alone. Library integration: a real Git checkout,
+    the sandbox stood in for."""
+    claude = FakeClaude((event_lines(VALID["finished"]), 0), (event_lines(VALID["finished"]), 0))
+    _checkout(tmp_path)
+    wrapper, scopes = _granting(tmp_path, claude)
+
+    assert main(["start", "validate", CHANGE, "--unattended", "--write", "docs/notes; build",
+                 "--write", "~/.cache/tool"], root=tmp_path, wrapper=wrapper) == 0
+    granted = read_log(log_path(tmp_path, CHANGE))[-1]
+    assert main(["start", "validate", CHANGE, "--unattended"], root=tmp_path,
+                wrapper=wrapper) == 0
+    rerun = read_log(log_path(tmp_path, CHANGE))[-1]
+
+    assert granted["writes_granted"] == ["docs/notes", "build", "~/.cache/tool"]
+    assert [path.entry for path in _granted(scopes[0])] == ["docs/notes", "build",
+                                                           "~/.cache/tool"]
+    assert "writes_granted" not in rerun and _granted(scopes[1]) == []
+
+
+def test_the_owner_grants_a_path_to_a_stopped_run(tmp_path: Path) -> None:
+    """CW-tl5v's "The owner grants a path to a stopped run": the resumed run's scope
+    holds the path from the checkout's root, marked to be created, and its line
+    records it."""
+    claude = FakeClaude((event_lines(VALID["stopped"], session="d-1"), 0),
+                        (event_lines(VALID["finished"], session="d-1"), 0))
+    _checkout(tmp_path)
+    wrapper, scopes = _granting(tmp_path, claude)
+    stopped = wrapper.run("design", CHANGE)
+
+    assert main(["resume", CHANGE, "--seq", str(stopped["seq"]), "--answer", "Granted.",
+                 "--write", "kit/site/.venv"], root=tmp_path, wrapper=wrapper) == 0
+
+    [grant] = _granted(scopes[-1])
+    assert (grant.path, grant.create) == (tmp_path / "kit/site/.venv", True)
+    assert read_log(log_path(tmp_path, CHANGE))[-1]["writes_granted"] == ["kit/site/.venv"]
+
+
+@pytest.mark.parametrize("value,refused", [
+    # CW-tl5v's "A grant names a pattern".
+    ("kit/*/.venv", "the grant 'kit/*/.venv' names kit/*/.venv, a pattern"),
+    # CW-drf6's "A protected path is asked to be granted".
+    (".agents/workflow.toml", "the grant '.agents/workflow.toml' names .agents/workflow.toml, "
+                              "which is or lies under the protected path "
+                              ".agents/workflow.toml"),
+])
+def test_a_grant_the_scope_cannot_hold_is_refused_before_anything_launches(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], value: str, refused: str) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
     _checkout(tmp_path)
+    wrapper, scopes = _granting(tmp_path, claude)
 
-    assert main(["start", "validate", CHANGE, "--unattended",
-                 "--allow", "Bash(gh run download *);Bash(make lock)",
-                 "--allow", "Bash(helm version)"], root=tmp_path,
-                wrapper=make_wrapper(tmp_path, claude)) == 0
+    assert main(["start", "implement", CHANGE, "--unattended", "--write", value],
+                root=tmp_path, wrapper=wrapper) == 1
 
-    rules = ["Bash(gh run download *)", "Bash(make lock)", "Bash(helm version)"]
-    assert read_log(log_path(tmp_path, CHANGE))[-1]["granted"] == rules
-
-
-def test_a_resumed_run_splits_its_allow_values_too(tmp_path: Path) -> None:
-    claude = FakeClaude((event_lines(VALID["question"], session="d-1"), 0),
-                        (event_lines(VALID["finished"], session="d-1"), 0))
-    wrapper = make_wrapper(tmp_path, claude)
-    wrapper.run("design", CHANGE)
-
-    assert main(["resume", CHANGE, "--seq", "1", "--answer", "Yes.",
-                 "--allow", "Bash(helm version);; Bash(make lock) ;"], root=tmp_path,
-                wrapper=wrapper) == 0
-
-    rules = ["Bash(helm version)", "Bash(make lock)"]
-    assert read_log(log_path(tmp_path, CHANGE))[-1]["granted"] == rules
+    assert refused in capsys.readouterr().err
+    assert (claude.commands, scopes) == ([], [])
+    assert not any(line.get("step") == "implement"
+                   for line in read_log(log_path(tmp_path, CHANGE)))
 
 
-@pytest.mark.parametrize("values,rules", [
-    ([], []), (["a"], ["a"]), (["a;b"], ["a", "b"]), ([";a;;b;"], ["a", "b"]),
-    (["a; b", "c"], ["a", "b", "c"]), ([" ; "], []),
-])
-def test_allow_values_split_on_semicolons(values: list[str], rules: list[str]) -> None:
-    assert split_rules(values) == rules
+@pytest.mark.parametrize("command", [
+    ["start", "design", CHANGE, "--unattended", "--allow", "Bash(make lock)"],
+    ["resume", CHANGE, "--seq", "1", "--answer", "Yes.", "--allow", "Bash(make lock)"],
+], ids=["start", "resume"])
+def test_allow_is_refused_as_a_usage_error(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                          command: list[str]) -> None:
+    claude = FakeClaude()
+
+    assert main(command, root=tmp_path, wrapper=make_wrapper(tmp_path, claude)) == 2
+
+    assert "unrecognized arguments: --allow" in capsys.readouterr().err
+    assert claude.commands == []
 
 
 def test_a_stopped_run_exits_non_zero(tmp_path: Path) -> None:
@@ -787,7 +845,7 @@ def _make_n(*arguments: str) -> list[str]:
     """
     env = {key: value for key, value in os.environ.items()
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
-                          "ALLOW", "ARGUMENTS", "SESSION_ID", "FROM", "BASE", "BRANCH",
+                          "WRITE", "ARGUMENTS", "SESSION_ID", "FROM", "BASE", "BRANCH",
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
                           "CHANGE_WORKFLOW", "CHANGE_BASE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
@@ -809,8 +867,12 @@ def _make_n(*arguments: str) -> list[str]:
     ("review", ["KIND=design"], [f'{COMMAND} review "X" --kind "design"     ']),
     ("review", ["KIND=design", "REVIEW_BASE=main"],
      [f'{COMMAND} review "X" --kind "design" --base "main"    ']),
-    ("design", ["UNATTENDED=1", "ALLOW=Bash(make lock)"],
-     [f"{COMMAND} start design \"X\" --unattended --allow 'Bash(make lock)'"]),
+    # Each path WRITE grants reaches the command as its own --write.
+    ("design", ["UNATTENDED=1", "WRITE=kit/site/.venv"],
+     [f"{COMMAND} start design \"X\" --unattended --write 'kit/site/.venv'"]),
+    ("triage", ["UNATTENDED=1", "WRITE=kit/site/.venv;~/.cache/tool"],
+     [f"{COMMAND} start triage \"X\" --unattended --write 'kit/site/.venv' "
+      "--write '~/.cache/tool'"]),
     ("orchestrate", [], [f'{COMMAND} start orchestrate "X"']),
     ("change-next", [], [f'{COMMAND} find "X" >/dev/null', f'{COMMAND} next "X" --plain']),
     ("check-change-index", [], [f"{COMMAND} check index"]),
@@ -873,18 +935,27 @@ def test_a_repository_target_refuses_while_a_round_view_is_open(target: str) -> 
     assert _make_n(target, "WORKFLOW=tests.yml")[0] == f"{COMMAND} check round-view"
 
 
-def test_a_granted_rule_and_arguments_reach_the_command_as_written(tmp_path: Path) -> None:
-    """The shell quoting `make` writes, run by a real shell: quotes, `*`, and
-    backticks arrive untouched, and an empty part of `ALLOW` is dropped by the
+def test_a_granted_path_and_arguments_reach_the_command_as_written(tmp_path: Path) -> None:
+    """The shell quoting `make` writes, run by a real shell: quotes, spaces, and
+    backticks arrive untouched, and an empty part of `WRITE` is dropped by the
     command."""
-    rule, other = "Bash(git commit -m 'wip' *)", 'Bash(echo "`id`" *)'
+    path, other = "kit/it's here", 'build/"`id`"'
     (command,) = _make_n("implement", "CHANGE=X", "UNATTENDED=1",
                          "ARGUMENTS=resolve `scripts/a.py`'s conflicts",
-                         f"ALLOW={rule};;{other}")
+                         f"WRITE={path};;{other}")
     printed = subprocess.run(
         ["sh", "-c", command.replace(f"{COMMAND} start", "printf '%s\\n'")],
         cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
 
     assert printed == ["implement", "X", "--arguments", "resolve `scripts/a.py`'s conflicts",
-                       "--unattended", "--allow", rule, "--allow", "", "--allow", other]
-    assert split_rules([rule, "", other]) == [rule, other]
+                       "--unattended", "--write", path, "--write", "", "--write", other]
+    assert [part for _, part in grant_paths([path, "", other])] == [path, other]
+
+
+def test_the_step_targets_help_names_write_and_not_allow() -> None:
+    fragment = (Path(__file__).resolve().parents[1] / "change_workflow/workflow.mk").read_text(
+        "utf-8")
+    helps = [line for line in fragment.splitlines() if "## Open" in line and "UNATTENDED=1" in line]
+
+    assert helps and all("[WRITE='<path>;<path>']" in line for line in helps)
+    assert "ALLOW" not in fragment

@@ -459,7 +459,7 @@ def test_an_unattended_run_that_stops_exits_1_with_its_reason_on_standard_error(
     assert f"ERROR: {line['reason']}" in err
 
 
-@pytest.mark.parametrize("flag", [["--allow", "Bash(make lock)"], ["--session", "s-1"],
+@pytest.mark.parametrize("flag", [["--write", "kit/site/.venv"], ["--session", "s-1"],
                                   ["--fresh"]])
 def test_an_interactive_start_refuses_what_qualifies_an_unattended_run(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: list[str]) -> None:
@@ -502,10 +502,11 @@ def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -
     launched = Launched()
 
     assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev", "--unattended",
-                     "--allow", "Bash(make lock)"], root=root, launch=launched,
+                     "--write", "kit/site/.venv"], root=root, launch=launched,
                     wrapper=make_wrapper(root, claude)) == 0
     assert launched.commands == []
     assert claude.commands[0][2] == prompted(f"/change-merge {CHANGE} from dev", "merge")
+    assert read_log(log_path(root, CHANGE))[-1]["writes_granted"] == ["kit/site/.venv"]
 
 
 class Recorded(Launched):
@@ -799,7 +800,7 @@ def _fragment(tmp_path: Path, target: str, *variables: str) -> list[str]:
     makefile = tmp_path / "Makefile"
     makefile.write_text(f"include {FRAGMENT}\n", "utf-8")
     env = {key: value for key, value in os.environ.items()
-           if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "ALLOW", "ARGUMENTS",
+           if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "WRITE", "ARGUMENTS",
                           "SESSION_ID", "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT",
                           "UNVALIDATED", "FROM", "BASE", "BRANCH", "KIND", "CHANGE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
@@ -814,9 +815,11 @@ COMMAND = "scripts/change-workflow"
 
 @pytest.mark.parametrize("target,variables,commands", [
     ("design", [], [f'{COMMAND} start design "X"']),
-    ("design", ["UNATTENDED=1", "ALLOW=Bash(make lock);Bash(gh run *)"],
-     [f"{COMMAND} start design \"X\" --unattended --allow 'Bash(make lock)' "
-      "--allow 'Bash(gh run *)'"]),
+    ("design", ["UNATTENDED=1", "WRITE=kit/site/.venv;~/.cache/tool"],
+     [f"{COMMAND} start design \"X\" --unattended --write 'kit/site/.venv' "
+      "--write '~/.cache/tool'"]),
+    # An interactive session takes no grant: no sandbox confines it.
+    ("design", ["WRITE=kit/site/.venv"], [f'{COMMAND} start design "X"']),
     ("design", ["ARGUMENTS=x"], [f'{COMMAND} start design "X"']),
     ("design", ["UNATTENDED=1", "ARGUMENTS=it's"],
      [f"{COMMAND} start design \"X\" --arguments 'it'\\''s' --unattended"]),

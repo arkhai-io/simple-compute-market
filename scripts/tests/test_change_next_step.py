@@ -2407,9 +2407,9 @@ def test_a_read_stop_waits_until_its_resumed_run_supersedes_it(tmp_path: Path) -
     _committed_round(root, "01-implementation-owner.md")
     run = _log(root, "validate", STOPPED)
 
-    _decide(root, "gap: proposed Bash(make lock) as a one-run grant", reads=run["seq"])
+    _decide(root, "gap: proposed kit/site/.venv as a one-run grant", reads=run["seq"])
     read = _next(root)
-    _log(root, "validate", _done(ROUND_TRIAGE), granted=["Bash(make lock)"])
+    _log(root, "validate", _done(ROUND_TRIAGE), writes_granted=["kit/site/.venv"])
     resumed = _next(root)
 
     assert (read["step"], read["seq"]) == ("owner", run["seq"]) and "stopped" in read["reason"]

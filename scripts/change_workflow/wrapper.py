@@ -15,9 +15,12 @@ same model, never passed over. `Wrapper.resume` continues the session of a waiti
 run, named by its line in the log, with the owner's answer; with steps run side by
 side the last run is not necessarily the one that asked, so the run is never
 inferred. An implementation run may instead continue a session the caller names,
-one not waiting on the owner, with new instructions. Any run may be granted rules
-for that one run, passed on its command line and recorded as `granted` on its line,
-never added to the step table.
+one not waiting on the owner, with new instructions. Any run, fresh or resumed, may
+be granted writable paths for that one run, passed on its command line, added to its
+scope, and recorded as `writes_granted` on its line, never kept: the step's next run
+is held to its scope again. A grant the scope cannot hold — a pattern, or a path that
+is or lies under a protected one — is refused, naming it, before anything runs
+(CW-tl5v, CW-drf6).
 
 Either way the run's event stream is kept as its transcript, and its outcome is
 appended to the workflow log, with what the run invoked as `invoked`: what each of
@@ -73,7 +76,7 @@ and `invariants` on the line; nothing after the session runs, and nothing is rep
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
 CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, CW-q5fy, CW-5ldi,
 CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np, CW-59c7, CW-q7ub, CW-f9le,
-CW-x3pf, CW-m8wq, CW-v5ny, CW-w3oa, and CW-j4cs.
+CW-x3pf, CW-m8wq, CW-v5ny, CW-w3oa, CW-j4cs, and CW-drf6.
 """
 
 from __future__ import annotations
@@ -104,6 +107,7 @@ from .running import (drop_invocations, invocations_directory, kept_invocations,
                       refused_pushes, runs_directory, termination_deferred,
                       termination_ends_the_run)
 from .sandbox import BUBBLEWRAP, Confined, Confinement, confine, missing
+from .scope import grant_paths
 from .stream import Stream
 from .subagents import subagent_denials
 
@@ -290,7 +294,7 @@ class Wrapper:
 
     def run(self, step: str, change: str, *, arguments: str = "",
             sections: Sequence[int | str] | None = None, fresh: bool = False,
-            granted: Sequence[str] = (), continuing: str | None = None) -> Entry:
+            writes: Sequence[str] = (), continuing: str | None = None) -> Entry:
         """Run `step`: a fresh session, or, for a step that resumes another's, the
         latest session of either, unless `fresh`; or, for implementation, the
         session `continuing` names.
@@ -298,8 +302,8 @@ class Wrapper:
         Continuing an implementation session is the owner's choice of which
         session's context the work goes to — the next section, or a fix to edits
         it made — so the session is named, never inferred, and may be any of the
-        change's implementation runs not waiting on the owner. A granted rule
-        applies to this run alone, as it does to a resumed run.
+        change's implementation runs not waiting on the owner. A path granted by
+        `writes` is writable for this run alone, as it is for a resumed run.
         """
         if step not in STEP_DEFINITIONS or step == "review":
             raise StepError(f"{step!r} has no unattended run of its own; a review runs "
@@ -331,31 +335,36 @@ class Wrapper:
                 models = _session_models(previous, models)
         if sections:
             extra["sections"] = list(sections)
-        if granted:
-            extra["granted"] = list(granted)
+        confined = self._confine(step, models, writes, extra)
         target = self.target(self.root, change) if step == VALIDATE else None
         if target is not None:
             extra["target"] = target
             arguments = " ".join(part for part in (arguments, target_note(target)) if part)
-        confined = self._confine(step, models)
         return self._turn(step, change, log, step_prompt(definition.skill, change, arguments),
-                          models, confined, session=session, granted=granted, extra=extra,
-                          target=target, before=True)
+                          models, confined, session=session, extra=extra, target=target,
+                          before=True)
 
-    def _confine(self, step: str, models: Sequence[Model]) -> Confined:
+    def _confine(self, step: str, models: Sequence[Model], writes: Sequence[str],
+                 extra: Entry) -> Confined:
         """How a run of `step` on `models` is confined, its scope resolved for the
-        harness of each, before anything runs: refused, as any `StepError`, where the
-        configuration cannot be read or a harness's adapter cannot run the step."""
+        harness of each with the paths `writes` grants, before anything runs:
+        refused, as any `StepError`, where the configuration cannot be read, a
+        harness's adapter cannot run the step, or a grant names a pattern or a
+        protected path (`scope.granted`). The granted paths, as each value splits,
+        are recorded in `extra` as `writes_granted`."""
         configuration = config.load(self.root)
         for model in models:
             if model.harness not in ADAPTERS or not ADAPTERS[model.harness].runs(step):
                 raise StepError(f"the {model.harness} harness cannot run the {step} step")
-        return confine(self.confinement, [model.harness for model in models],
-                       lambda harness: configuration.scope(step, self.root, harness=harness,
-                                                           home=self.home,
-                                                           temporary=self.temporary), step)
+        confined = confine(self.confinement, [model.harness for model in models],
+                           lambda harness: configuration.scope(
+                               step, self.root, harness=harness, grants=writes,
+                               home=self.home, temporary=self.temporary), step)
+        if granted := [path for _, path in grant_paths(writes)]:
+            extra["writes_granted"] = granted
+        return confined
 
-    def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
+    def resume(self, change: str, seq: int, answer: str, writes: Sequence[str] = ()) -> Entry:
         """Resume the step session of the run at `seq` with the owner's answer.
 
         The run is named, never inferred: with steps run side by side, the log's
@@ -367,9 +376,9 @@ class Wrapper:
         latest triage of the reviews it triaged (`revisit_refusal`). Its line
         records the run it `resumes`, which uses the direction.
 
-        A granted rule applies to this run alone: it is passed on this command line
-        and noted on this run's log line, never added to the step table, so the
-        step's next run is held to its table again.
+        A path granted by `writes` is writable for this run alone: it is passed on
+        this command line, added to this run's scope, and noted on its log line,
+        never kept, so the step's next run is held to its scope again.
 
         The session resumes on the model it ran on, never the step's next one: a
         session cannot move between harnesses, so a resume whose model is
@@ -412,8 +421,8 @@ class Wrapper:
         if revisited:
             # Marks the direction used: it resumes the run once.
             extra["resumes"] = seq
-        if granted:
-            extra["granted"] = list(granted)
+        models = _session_models(previous, config.load(self.root).step_models(step))
+        confined = self._confine(step, models, writes, extra)
         # The resumed run's own line names it: the computation, reading that run,
         # would name the owner instead.
         target = previous.get("target") if step == VALIDATE else None
@@ -423,15 +432,12 @@ class Wrapper:
         if target is not None:
             extra["target"] = target
             prompt += f"\n\n{target_note(target)}"
-        models = _session_models(previous, config.load(self.root).step_models(step))
-        return self._turn(step, change, log, prompt, models, self._confine(step, models),
-                          session=previous["session"], granted=granted, extra=extra,
-                          target=target)
+        return self._turn(step, change, log, prompt, models, confined,
+                          session=previous["session"], extra=extra, target=target)
 
     def _turn(self, step: str, change: str, log: Path, prompt: str, models: Sequence[Model],
-              confined: Confined, *, session: str | None, granted: Sequence[str] = (),
-              extra: Entry | None = None, target: Entry | None = None,
-              before: bool = False) -> Entry:
+              confined: Confined, *, session: str | None, extra: Entry | None = None,
+              target: Entry | None = None, before: bool = False) -> Entry:
         """Run one turn and log it, recorded as in progress in the checkout until its
         line is written, however it ends.
 
@@ -441,8 +447,8 @@ class Wrapper:
         with termination_deferred(), recorded_run(self.runs(self.root), step, change,
                                                   clock=self.clock):
             return self._logged_turn(step, change, log, prompt, models, confined,
-                                     session=session, granted=granted, extra=extra,
-                                     target=target, before=before)
+                                     session=session, extra=extra, target=target,
+                                     before=before)
 
     def _around(self, step: str, change: str) -> Around:
         """The actions and hooks around a run of `step`, a triage's given the kind of
@@ -454,8 +460,8 @@ class Wrapper:
 
     def _logged_turn(self, step: str, change: str, log: Path, prompt: str,
                      models: Sequence[Model], confined: Confined, *, session: str | None,
-                     granted: Sequence[str] = (), extra: Entry | None = None,
-                     target: Entry | None = None, before: bool = False) -> Entry:
+                     extra: Entry | None = None, target: Entry | None = None,
+                     before: bool = False) -> Entry:
         """Run one turn on the first of `models` that is available, and log it.
 
         A model whose harness is missing, not signed in, or at its usage limit

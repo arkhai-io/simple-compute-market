@@ -25,9 +25,10 @@ the record set's format does not depend on them. A run stopped because its check
 after the session found a violation carries `invariants`: each check it failed, by
 name, and what it found (`invariants`). A run carries `refusals`, each write its
 sandbox refused and each push its `git` refused, with its tool, command or path,
-and error, which a decision `reads` as it reads denials; and `unconfined: true`
-when the sandbox could not run. Each is optional, added beside the outcome as any
-field the writer is given is.
+and error, which a decision `reads` as it reads denials; `writes_granted`, the
+paths the owner granted that run alone; and `unconfined: true` when the sandbox
+could not run. Each is optional, added beside the outcome as any field the writer
+is given is.
 
 A finished merge's or archive cleanup's outcome carries `landing`, the remote,
 branch, and commit the run fetched, which the writer checks against the checkout

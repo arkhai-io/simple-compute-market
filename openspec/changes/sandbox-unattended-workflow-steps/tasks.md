@@ -1094,17 +1094,80 @@ Files: `cli.py`, `wrapper.py`, `log.py`, `scripts/change_workflow/workflow.mk`,
 `test_change_workflow_cli.py`, `test_change_workflow_wrapper.py`,
 `scripts/tests/test_workflow_command.py` where it covers the fragment.
 
-- [ ] 8.1 `start` and `resume` take `--write <path>`, parsed as 2.3, refused before
+- [x] 8.1 `start` and `resume` take `--write <path>`, parsed as 2.3, refused before
   anything launches; the wrapper adds each to the run's scope and records
   `writes_granted`; `--allow` is removed and exits 2 (D8; CW-tl5v, CW-drf6). Verify:
   library-integration tests for CW-tl5v's three scenarios and CW-drf6's protected-path
   scenario, and `--allow` refused as a usage error.
-- [ ] 8.2 `workflow.mk`'s step targets take `WRITE=`, several paths separated by `;`,
+  Done. `start` and `resume` take `--write`, appended, and an interactive start
+  refuses it as a usage error, as it refuses `--session` and `--fresh`.
+  - `Wrapper.run(writes=…)` and `Wrapper.resume(…, writes)` pass the values to
+    `_confine`, which resolves each harness's scope with them as `grants`. So
+    `scope.granted` refuses a pattern or a protected path, naming the value, before
+    the run's inputs are claimed or anything runs.
+  - The parts, split as `scope.grant_paths` splits them, are recorded as
+    `writes_granted`.
+  - `granted`, `split_rules`, and `--allow` are gone. `--allow` is now an unknown
+    argument: argparse refuses it, and `main` exits 2.
+  Tests, all passing:
+  - in `test_change_workflow_cli_steps.py`, library integration on a real Git
+    checkout through `cli.main`, the sandbox stood in for by a `Confinement` that
+    keeps the scopes it is asked to mount:
+    - CW-tl5v's fresh run: two `--write` values, one holding two paths, in the scope
+      as grants and on the line; the next run has neither;
+    - CW-tl5v's stopped run resumed with `--write kit/site/.venv`: the scope holds
+      the path from the root, marked to be created, and the line records it. That it
+      is then created is `sandbox.prepare`'s, which section 3 tests;
+    - CW-tl5v's pattern and CW-drf6's protected path: exit 1 naming the value, no
+      scope mounted, no session, and no run line. The log's opening line, which
+      `start` writes before the wrapper runs, stands;
+  - in the same file, a usage test of the parser: `--allow` on `start` and on
+    `resume` exits 2, "unrecognized arguments", before anything is read;
+  - the wrapper's grant tests in `test_change_workflow_wrapper.py` now grant paths:
+    a fresh run's, a question's resume, and a read stop's resume. A next-step test's
+    resumed line records `writes_granted`.
+- [x] 8.2 `workflow.mk`'s step targets take `WRITE=`, several paths separated by `;`,
   each reaching the command as its own `--write`, and drop `ALLOW=` from their
   targets and help (D8). Verify: the fragment's command lines (`make -n`) for one and
   two paths, and its help naming `WRITE`.
-- [ ] 8.3 Verification point: the CLI, wrapper, and fragment tests (library
+  Done. `CHANGE_WORKFLOW_GRANTS` writes `--write '<path>'` per part, and the eight
+  step targets' help says `[WRITE='<path>;<path>']`. The header says what an
+  unattended target runs in, the unconfined fallback included. Tests, all passing,
+  static configuration tests (`docs/guidance/repository/static-configuration-tests.md`):
+  - `make -n` through the fragment (`test_change_workflow_cli.py`): two paths; an
+    interactive design ignoring `WRITE`;
+  - through the root Makefile (`test_change_workflow_cli_steps.py`): one path, two
+    paths;
+  - a real shell running the printed command keeps a path's quotes and backticks,
+    and an empty part is dropped by `grant_paths`;
+  - the `##` help text of every unattended step target names `WRITE`, read from the
+    fragment, not from `make help`; and the fragment names no `ALLOW`.
+- [x] 8.3 Verification point: the CLI, wrapper, and fragment tests (library
   integration); `run pre-commit` passes. End-to-end: none.
+  Done. The CLI and wrapper tests are library integration, the fragment's dry runs
+  static configuration tests.
+  - `make test-release-tooling` on the wrapper, CLI, CLI steps, validate-slice,
+    scope, review, push, and assumptions tests: 688 passed, none skipped. After the
+    check's fixes, the CLI steps, next-step, and CLI tests: 519 passed.
+  - `run pre-commit`: its functional hooks pass, the relock, packaging, and every
+    suite. Its `pre-commit` fails only `check-doc-citations` on `propose.py`,
+    expected. The relock left the locks as committed.
+  - Fresh-context check fixes:
+    - "no line" narrowed to "no run line";
+    - the tests' levels named;
+    - the help claim narrowed;
+    - a next-step test's stale `granted` line made `writes_granted`;
+    - `--write`'s help naming absolute paths;
+    - the fragment's header naming the unconfined fallback;
+    - the grant tests' home made the test's own.
+  Handoff:
+  - The spec delta's CW-tl5v scenario is still titled "The owner grants rules
+    before a fresh run". The section's test quotes it. Closeout's promotion, or the
+    triage, may retitle it "paths".
+  - `--write` is unchecked against the review, which takes no grant: `review` has no
+    such option.
+  - The handbook, the change-workflow companion, and change-orchestrate still name
+    `ALLOW=` and `--allow`: 10.4 and 12.9 own them.
 
 ## 9. `propose`, the history copy, and the round view's refusal
 

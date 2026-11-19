@@ -2,8 +2,9 @@
 module that does its work.
 
 `start` starts a step: without `--unattended` it opens the interactive Claude Code
-session of the step's skill; with it, it runs the step through the wrapper, granting
-rules for that one run with `--allow`, and `--session` continues a named
+session of the step's skill; with it, it runs the step through the wrapper inside
+its sandbox, granting writable paths for that one run with `--write`, which
+`resume` takes too, and `--session` continues a named
 implementation session. Before either it refuses what the step cannot take — an
 archived change for a step whose node takes only an active one, an active change
 for archive cleanup — and, for implementation and every step after it, an open
@@ -182,14 +183,6 @@ def parse_sections(text: str) -> list[list[int | str]]:
             for session in text.split(";") if session.strip()]
 
 
-def split_rules(values: Sequence[str]) -> list[str]:
-    """Each `--allow` value split on `;`, each part trimmed and empty ones dropped:
-    `make`'s `ALLOW` holds several rules so separated. No rule loses by it, since
-    the harness matches each command of a chain on its own, so a rule holding `;`
-    could never match."""
-    return [rule.strip() for value in values for rule in value.split(";") if rule.strip()]
-
-
 def section_words(text: str) -> str:
     """How a skill's invocation names the sections `text` gives: `section 2`, or
     `sections 1-3`; empty for none."""
@@ -203,7 +196,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser(
         "start", help="start a step: an interactive session, or with --unattended a run "
-                      "held to the step's permissions whose outcome is logged")
+                      "inside the step's sandbox whose outcome is logged")
     start.add_argument("step", choices=STARTABLE)
     start.add_argument("change")
     start.add_argument("--unattended", action="store_true",
@@ -218,17 +211,18 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--session", default="",
                        help="unattended implementation only: continue this session, one of "
                             "the change's implementation runs not waiting on the owner")
-    start.add_argument("--allow", action="append", default=[],
-                       help="unattended: permission rules granted for this run alone, several "
-                            "separated by ';'")
+    start.add_argument("--write", action="append", default=[],
+                       help="unattended: a path this run alone may write, from the checkout's "
+                            "root, from ~, or absolute, never a pattern; several separated by "
+                            "';'")
     resume = commands.add_parser("resume", help="resume a waiting run with the owner's answer")
     resume.add_argument("change")
     resume.add_argument("--seq", type=int, required=True,
                         help="the waiting run's line in the workflow log")
     resume.add_argument("--answer", required=True)
-    resume.add_argument("--allow", action="append", default=[],
-                        help="permission rules granted for this run alone, several separated "
-                             "by ';'")
+    resume.add_argument("--write", action="append", default=[],
+                        help="a path this run alone may write, from the checkout's root, from "
+                             "~, or absolute, never a pattern; several separated by ';'")
     review = commands.add_parser(
         "review", help="review a change, read-only, on the first available of the review's "
                        "models")
@@ -523,9 +517,9 @@ def merge_arguments(root: Path, change: str, arguments: str) -> str:
 
 
 def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch) -> int:
-    if not args.unattended and (args.allow or args.session or args.fresh):
-        raise _Usage("--allow, --session, and --fresh qualify an unattended run; an "
-                     "interactive session runs with the owner's own permissions")
+    if not args.unattended and (args.write or args.session or args.fresh):
+        raise _Usage("--write, --session, and --fresh qualify an unattended run; an "
+                     "interactive session runs unconfined, with the owner's own settings")
     if args.step == ORCHESTRATE and (args.unattended or args.sections or args.arguments):
         raise _Usage("the orchestrating session is opened interactively, on the change alone")
     if args.sections and args.step != "implement":
@@ -561,8 +555,7 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
         return _session_status(launch(["claude", prompt], root))
     line = wrapper.run(args.step, args.change, arguments=arguments,
                        sections=expand_sections(args.sections), fresh=args.fresh,
-                       granted=split_rules(args.allow),
-                       continuing=args.session.strip() or None)
+                       writes=args.write, continuing=args.session.strip() or None)
     return _logged(line)
 
 
@@ -847,8 +840,7 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
             print(f"Review written to {line['record']}", file=sys.stderr)
         return _logged(line)
     if args.command == "resume":
-        return _logged(wrapper.resume(args.change, args.seq, args.answer,
-                                      split_rules(args.allow)))
+        return _logged(wrapper.resume(args.change, args.seq, args.answer, args.write))
     if args.command == "log":
         if args.branch:
             found = branch_decisions(read_log(path), args.branch, args.change)

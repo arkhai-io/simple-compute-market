@@ -210,7 +210,7 @@ def test_review_is_not_a_claude_step(tmp_path: Path) -> None:
         make_wrapper(tmp_path, FakeClaude()).run("review", CHANGE)
 
 
-def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
+def test_a_question_is_answered_by_resuming_its_session_with_a_granted_path(
         tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["question"], session="v-1"), 0),
                         (event_lines(VALID["finished"], session="v-1"), 0),
@@ -219,31 +219,29 @@ def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
     asked = wrapper.run("validate", CHANGE)
     note_orchestrator(log_path(tmp_path, CHANGE), "asked the owner", "question")
 
-    resumed = wrapper.resume(CHANGE, asked["seq"], "Delete the volume.",
-                             ["Bash(kubectl delete pvc *)"])
+    resumed = wrapper.resume(CHANGE, asked["seq"], "Write the cache.", ["kit/site/.venv"])
     rerun = wrapper.run("validate", CHANGE)
 
     command = claude.commands[1]
-    assert command[2] == "The owner's answer: Delete the volume."
+    assert command[2] == "The owner's answer: Write the cache."
     assert option(command, "--resume") == "v-1"
-    assert (resumed["step"], resumed["session"], resumed["granted"]) == (
-        "validate", "v-1", ["Bash(kubectl delete pvc *)"])
+    assert (resumed["step"], resumed["session"], resumed["writes_granted"]) == (
+        "validate", "v-1", ["kit/site/.venv"])
     assert "--resume" not in claude.commands[2]
-    assert "granted" not in rerun
+    assert "writes_granted" not in rerun
 
 
-def test_a_fresh_run_granted_rules_holds_them_for_that_run_alone(tmp_path: Path) -> None:
-    # The owner grants two rules before the step's next run has started.
-    granted = ["Bash(gh run download *)", "Bash(make check-packaging)"]
+def test_a_fresh_runs_granted_paths_hold_for_that_run_alone(tmp_path: Path) -> None:
+    # The owner grants two paths, in one value, before the step's next run started.
     claude = FakeClaude((event_lines(VALID["finished"], session="v-1"), 0),
                         (event_lines(VALID["finished"], session="v-2"), 0))
     wrapper = make_wrapper(tmp_path, claude)
 
-    line = wrapper.run("validate", CHANGE, granted=granted)
+    line = wrapper.run("validate", CHANGE, writes=["build ; ~/.cache/tool"])
     rerun = wrapper.run("validate", CHANGE)
 
-    assert line["granted"] == granted
-    assert "granted" not in rerun
+    assert line["writes_granted"] == ["build", "~/.cache/tool"]
+    assert "writes_granted" not in rerun
 
 
 def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
@@ -254,7 +252,7 @@ def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
     line = wrapper.resume(CHANGE, asked["seq"], "Yes.")
 
     assert line["sections"] == [2]
-    assert "granted" not in line
+    assert "writes_granted" not in line
 
 
 def test_implementation_continues_a_finished_session_it_names(tmp_path: Path) -> None:
@@ -352,13 +350,13 @@ def test_a_stopped_run_is_read_then_resumed_with_a_grant_and_not_again(
     wrapper = make_wrapper(tmp_path, claude)
     stopped = wrapper.run("validate", CHANGE)
     note_orchestrator(log_path(tmp_path, CHANGE),
-                      "gap: proposed Bash(make lock) as a one-run grant", "r",
+                      "gap: proposed kit/site/.venv as a one-run grant", "r",
                       reads=stopped["seq"])
 
-    line = wrapper.resume(CHANGE, stopped["seq"], "Go on.", ["Bash(make lock)"])
+    line = wrapper.resume(CHANGE, stopped["seq"], "Go on.", ["kit/site/.venv"])
 
     assert option(claude.commands[1], "--resume") == "v-1"
-    assert (line["step"], line["granted"]) == ("validate", ["Bash(make lock)"])
+    assert (line["step"], line["writes_granted"]) == ("validate", ["kit/site/.venv"])
     assert line["seq"] != stopped["seq"]
     with pytest.raises(StepError, match="latest run"):
         wrapper.resume(CHANGE, stopped["seq"], "Go on.")
@@ -645,8 +643,8 @@ def test_an_unavailable_model_falls_to_the_next_in_order(tmp_path: Path) -> None
     models = (OPUS, second)
 
     line = wrapper._turn("validate", CHANGE, log_path(tmp_path, CHANGE),
-                         "/change-validate x", models, wrapper._confine("validate", models),
-                         session=None)
+                         "/change-validate x", models,
+                         wrapper._confine("validate", models, (), {}), session=None)
 
     assert [option(command, "--model") for command in claude.commands] == [
         "claude-opus-5-5", "second-model"]
