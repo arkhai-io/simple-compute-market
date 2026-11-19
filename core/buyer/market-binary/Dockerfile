@@ -12,13 +12,18 @@
 # byte-for-byte repeatable, so the binary is identified by its file's SHA-256,
 # not by these pins.
 ARG PYTHON_VERSION=3.13
+# The stage reads the declared version under another name: the base image sets
+# ENV PYTHON_VERSION to its full patch version, which Buildah (Podman) lets win
+# over a redeclared ARG of the same name, so the check below would compare 3.13
+# with 3.13.N and fail.
+ARG DECLARED_PYTHON_VERSION=${PYTHON_VERSION}
 
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim@sha256:531f855bda2c73cd6ef67d56b733b357cea384185b3022bd09f05e002cd144ca AS build
 
 # The digest, not the tag, selects the image, so a Python version bump that
 # leaves the digest behind would still build with the old Python.
-ARG PYTHON_VERSION
-RUN python3 -c "import sys; have = '%d.%d' % sys.version_info[:2]; sys.exit(None if have == '${PYTHON_VERSION}' else f'the pinned build image runs Python {have}; .python-version declares ${PYTHON_VERSION}: pin the image for it')"
+ARG DECLARED_PYTHON_VERSION
+RUN python3 -c "import sys; have = '%d.%d' % sys.version_info[:2]; sys.exit(None if have == '${DECLARED_PYTHON_VERSION}' else f'the pinned build image runs Python {have}; .python-version declares ${DECLARED_PYTHON_VERSION}: pin the image for it')"
 
 # PyInstaller reads each bundled shared library's dependencies with binutils.
 RUN apt-get update && apt-get install -y --no-install-recommends binutils \
