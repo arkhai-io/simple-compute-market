@@ -5,7 +5,9 @@ dispute authority the registries recommend, which the case stages reach through
 the authority their Agreement pins. A lane that runs its own target, the
 mediation lane double, also sets MEDIATION.LANE_OWNED: an unready target is then
 the lane's own failure and fails setup by name, where an external target that
-is not ready, or none at all, blocks the stages that need it.
+is not ready, or none at all, blocks the stages that need it. A live
+verification scenario refuses a lane-owned target outright (``live_mediation``):
+a double yields no live evidence.
 
 The buyer's mediation token is a setting, MEDIATION.BUYER_API_KEY, never a
 variable of the runner's environment: the harness writes the buyer's
@@ -141,6 +143,45 @@ def configured_mediation(*, ready: Callable[[str], bool] | None = None) -> Media
     if target is None:
         pytest.skip(f"blocked: MEDIATION.{_TARGET_KEY} not configured")
     return target
+
+
+def live_mediation(*, ready: Callable[[str], bool] | None = None) -> MediationTarget:
+    """The mediation target of a live verification scenario that files a case,
+    as ``configured_mediation`` gives it, unless it is a lane's own.
+
+    A lane-owned target (MEDIATION.LANE_OWNED) is a mediation double, which
+    yields no live evidence, so the scenario is a blocked skip naming it
+    before anything else is read. A live dispute scenario reads the
+    authority's record as the buyer, so a run stating no buyer token fails
+    naming MEDIATION.BUYER_API_KEY before anything is bought.
+    """
+    if _flag("LANE_OWNED"):
+        target = mediation_setting(_TARGET_KEY) or "(none named)"
+        pytest.skip(f"blocked: the mediation target {target} is a lane's own double "
+                    "(MEDIATION.LANE_OWNED), which yields no live evidence")
+    target = configured_mediation(ready=ready)
+    if not target.buyer_api_key:
+        pytest.fail("MEDIATION.BUYER_API_KEY not configured: a live dispute scenario reads "
+                    "the authority's record as the buyer")
+    return target
+
+
+def pinned_authority_difference(target: MediationTarget,
+                                agreement: Mapping[str, Any]) -> str | None:
+    """How the dispute authority the accepted Agreement pins differs from the
+    run's target, or None when it is the target's. The buyer's credential and
+    the record reads are bound to the target's identity, so an Agreement
+    pinning another authority — one the buyer's registry recommended instead —
+    is read by no client the harness holds. An accepted Agreement naming no
+    dispute authority at all is the market's failure, not the topology's, and
+    fails here."""
+    terms = decode_terms(agreement["settlement"]["lifecycle"])
+    assert terms is not None, "the accepted Agreement names no dispute authority"
+    pinned = terms.adjudication.dispute.identity
+    ours = (INTERFACE, target.service_url, target.account, target.record_key)
+    if pinned == ours:
+        return None
+    return f"the Agreement pins the dispute authority {pinned}, not the run's target {ours}"
 
 
 def buyer_mediation_environment(target: MediationTarget | None) -> dict[str, str]:

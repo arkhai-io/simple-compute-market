@@ -4,13 +4,17 @@ A run naming no mediation target has its case stages blocked and its buyers
 written without a dispute credential. Once a target is named, a missing setting
 fails rather than hiding a broken configuration behind a skip, and an unready
 target blocks the stages unless it is the lane's own (LANE_OWNED), which fails
-them, naming it. The buyer's credential names its token's variable, and the
-harness hands the token over under it. Every value below is a development
+them, naming it. A live verification scenario refuses a lane-owned target
+with a blocked skip naming it, and fails a run stating no buyer token; an
+Agreement pinning another authority than the run's target is named with both.
+The buyer's credential names its token's variable, and the harness hands the
+token over under it. Every value below is a development
 fixture, never used on any network.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import tomllib
@@ -149,6 +153,44 @@ def test_a_ready_target_is_read_without_a_trailing_slash(configure) -> None:
     )
 
 
+@pytest.mark.parametrize("lane_owned", [True, "true"])
+def test_a_live_scenario_refuses_a_lane_owned_target_before_reading_anything(
+        configure, lane_owned) -> None:
+    configure(**{**_LANE_OWNED, "LANE_OWNED": lane_owned})
+    with pytest.raises(Skipped, match=(
+            r"blocked: the mediation target https://mediation-double:8443/ is a lane's own "
+            r"double \(MEDIATION.LANE_OWNED\), which yields no live evidence")):
+        mediation.live_mediation(ready=_never_asked)
+
+
+def test_a_live_scenario_takes_an_external_target(configure) -> None:
+    configure(**_EXTERNAL)
+    target = mediation.live_mediation(ready=_ready)
+    assert (target.service_url, target.lane_owned, target.buyer_api_key) == (
+        "https://mediation-double:8443", False, _EXTERNAL["BUYER_API_KEY"])
+
+
+def test_a_live_scenario_with_no_target_or_an_unready_one_is_blocked(configure) -> None:
+    configure()
+    with pytest.raises(Skipped, match="blocked: MEDIATION.SERVICE_URL not configured"):
+        mediation.live_mediation(ready=_never_asked)
+    configure(**_EXTERNAL)
+    with pytest.raises(Skipped, match="blocked: mediation service at .* is not ready"):
+        mediation.live_mediation(ready=_unready)
+
+
+def test_a_live_scenario_with_no_buyer_token_fails_naming_it(configure) -> None:
+    configure(**{key: value for key, value in _EXTERNAL.items() if key != "BUYER_API_KEY"})
+    try:
+        mediation.live_mediation(ready=_ready)
+    except (Skipped, Failed) as raised:
+        outcome: BaseException = raised
+    else:
+        raise AssertionError("live_mediation neither skipped nor failed")
+    assert isinstance(outcome, Failed)
+    assert "MEDIATION.BUYER_API_KEY not configured" in str(outcome)
+
+
 def test_the_buyer_credential_binds_the_authority_and_resolves_the_handed_token(configure) -> None:
     """The buyer's own loader reads the written credential as bound to the
     target's identity, trusting the CA bundle, and resolves its token from the
@@ -221,6 +263,37 @@ def _read(peer: MediationContractFake, *, page_size: int) -> list[dict[str, Any]
         transaction=request["transaction"], agreement=request["agreement"],
         page_size=page_size, transport=peer.transport(),
     )
+
+
+def test_an_agreement_pinning_the_runs_authority_differs_in_nothing() -> None:
+    peer = MediationContractFake()
+    agreement = peer.data["filing"]["request"]["agreement"]
+
+    assert mediation.pinned_authority_difference(_peer_target(peer), agreement) is None
+
+
+def test_an_agreement_pinning_another_authority_is_named_with_both_identities() -> None:
+    peer = MediationContractFake()
+    agreement = peer.data["filing"]["request"]["agreement"]
+    target = dataclasses.replace(_peer_target(peer),
+                                 account="00000000-0000-4000-8000-0000000000d9")
+
+    difference = mediation.pinned_authority_difference(target, agreement)
+
+    assert difference is not None
+    assert peer.authority["account"] in difference
+    assert "00000000-0000-4000-8000-0000000000d9" in difference
+
+
+def test_an_agreement_naming_no_dispute_authority_fails_rather_than_differs() -> None:
+    """No dispute terms is the market's failure, never a topology's other
+    authority, so it fails rather than reading as a difference to skip on."""
+    peer = MediationContractFake()
+    agreement = peer.data["filing"]["request"]["agreement"]
+    unpinned = {**agreement, "settlement": {**agreement["settlement"], "lifecycle": None}}
+
+    with pytest.raises(AssertionError, match="names no dispute authority"):
+        mediation.pinned_authority_difference(_peer_target(peer), unpinned)
 
 
 def test_the_record_is_read_whole_page_by_page_as_the_buyer(tmp_path) -> None:

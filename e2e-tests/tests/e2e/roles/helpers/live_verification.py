@@ -15,9 +15,13 @@ assertion (``producer_assertions.py``), on wall time. Its run states, in the
 - the provenance its evidence is labelled with, all public-safe:
   SOURCE_REVISION, the revision of this repository's code the topology runs;
   TARGET_ALIAS, the deployment's alias for the topology; PAYMENTS_REVISION, the
-  payments authority's revision identifier. A scenario missing one is a
-  blocked skip naming it, so its observation is unproven rather than made with
-  no provenance.
+  payments authority's revision identifier; and, for a scenario that files a
+  case, MEDIATION_REVISION, the mediation authority's. A scenario missing one
+  is a blocked skip naming it, so its observation is unproven rather than made
+  with no provenance.
+
+A scenario that files a case polls the dispute authority's record until the
+case is closed (``await_case_closed``), bounded like any other output.
 
 A value that is not a positive whole number of seconds fails the scenario
 naming the setting, and so do a term past the listing's maximum duration, a
@@ -30,14 +34,16 @@ states.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import pytest
 
 from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
+from tests.e2e.roles.helpers.lane_time import PollBoundPassed, poll_until
 from tests.e2e.roles.helpers.rate_servicing_stages import SPOT_NOTICE_SECONDS
 from tests.e2e.roles.helpers.recurring_purchase_stages import PERIOD_SECONDS, RateTerms
 
@@ -52,6 +58,8 @@ LISTING_MAXIMUM_SECONDS = DURATION_HOURS * 3600
 DEFAULT_POLL_BOUND_SECONDS = 120
 #: The provenance settings, each named in a skip when absent.
 PROVENANCE = ("SOURCE_REVISION", "TARGET_ALIAS", "PAYMENTS_REVISION")
+#: The provenance setting a scenario filing a case also needs.
+MEDIATION_PROVENANCE = "MEDIATION_REVISION"
 
 
 def _setting(path: str) -> Any:
@@ -122,30 +130,77 @@ def live_settings(*, setting: Callable[[str], Any] = _setting) -> LiveSettings:
 
 @dataclass(frozen=True)
 class Provenance:
-    """The public-safe provenance a live run's evidence is labelled with."""
+    """The public-safe provenance a live run's evidence is labelled with; the
+    mediation authority's revision only for a scenario that files a case."""
 
     source_revision: str
     target_alias: str
     payments_revision: str
+    mediation_revision: str | None = None
 
 
-def live_provenance(*, setting: Callable[[str], Any] = _setting) -> Provenance:
-    """The run's provenance, or a blocked skip naming every setting it lacks."""
-    values = {name: _live_setting(name, setting) for name in PROVENANCE}
+def live_provenance(*, setting: Callable[[str], Any] = _setting,
+                    mediation: bool = False) -> Provenance:
+    """The run's provenance, or a blocked skip naming every setting it lacks;
+    with ``mediation``, for a scenario whose evidence is also the mediation
+    authority's, MEDIATION_REVISION among them."""
+    names = PROVENANCE + ((MEDIATION_PROVENANCE,) if mediation else ())
+    values = {name: _live_setting(name, setting) for name in names}
     missing = [f"{SECTION}.{name}" for name, value in values.items() if value is None]
     if missing:
         pytest.skip(f"blocked: live evidence is labelled with its provenance, and the run "
                     f"states no {', '.join(missing)}")
+    revision = values.get(MEDIATION_PROVENANCE)
     return Provenance(source_revision=str(values["SOURCE_REVISION"]),
                       target_alias=str(values["TARGET_ALIAS"]),
-                      payments_revision=str(values["PAYMENTS_REVISION"]))
+                      payments_revision=str(values["PAYMENTS_REVISION"]),
+                      mediation_revision=None if revision is None else str(revision))
+
+
+def _holds(record: list[Mapping[str, Any]], case_ref: str, kind: str) -> bool:
+    return any(entry.get("case_ref") == case_ref and entry.get("kind") == kind
+               for entry in record)
+
+
+def await_case_closed(
+    read: Callable[[], list[dict[str, Any]]], *, case_ref: str, bound: timedelta,
+    ruling_requirement: str | None = None, interval: timedelta = POLL_INTERVAL,
+    clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], Any] = time.sleep,
+) -> list[dict[str, Any]]:
+    """The Agreement's signed record, read by ``read`` until it holds the case's
+    ``closed`` entry; that record.
+
+    The dispute authority rules and closes a case on its own schedule, so the
+    record is polled (``lane_time.poll_until``) and, once ``bound`` has passed
+    without the case closed, the stage fails naming the case and the last
+    record: an authority that documents the ruling and does not make it
+    differs from the expectation. Where a ruling is a decision a person makes,
+    reaching the scenario only through a policy the topology applies, a
+    record holding no ruling of the case once the bound has passed is the
+    topology's unmet requirement instead: a blocked skip naming
+    ``ruling_requirement``, so the observation is unproven. A ruling made and
+    the case still open at the bound fails, as the authority's own, and so
+    does any failure of a read itself: only the bound passing is the
+    requirement's.
+    """
+    try:
+        return poll_until(read, lambda record: _holds(record, case_ref, "closed"),
+                          bound=bound, interval=interval, what=f"case {case_ref} closed",
+                          clock=clock, sleep=sleep)
+    except PollBoundPassed as passed:
+        if ruling_requirement is not None and not _holds(passed.last, case_ref, "ruled"):
+            pytest.skip(f"blocked: case {case_ref} was not ruled within {bound}, and "
+                        f"{ruling_requirement}")
+        raise
 
 
 __all__ = [
     "LISTING_MAXIMUM_SECONDS",
     "LiveSettings",
+    "MEDIATION_PROVENANCE",
     "POLL_INTERVAL",
     "Provenance",
+    "await_case_closed",
     "live_provenance",
     "live_settings",
 ]

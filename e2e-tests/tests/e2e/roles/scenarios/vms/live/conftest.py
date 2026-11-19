@@ -10,8 +10,9 @@ recurring purchase's, against the run's external payments target, which a
 lane's own double never is (``payments.live_payments``).
 
 A module takes its prerequisites first among its fixtures — ``payments_config``,
-``live_provenance``, ``mock_provisioning``, and the payer its deal pays from,
-``funded_buyer`` or, for funds running out, ``funded_rate_payer`` — so a
+for a module filing a case ``mediation_target``, ``live_provenance``,
+``mock_provisioning``, and the payer its deal pays from, ``funded_buyer`` or,
+for funds running out, ``funded_rate_payer`` — so a
 topology that does not meet a requirement is a blocked skip naming it, and a
 run missing a setting it owes fails naming the setting, before the module's
 holds and anything it buys. Only the session's fixtures (lane time, the buyer
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from market_arkhai_payments import ArkhaiPaymentsConfig
@@ -32,6 +34,7 @@ from tests.e2e.roles.buyer_cli import BuyerCli
 from tests.e2e.roles.helpers.cleanup import run_cleanup
 from tests.e2e.roles.helpers import live_verification
 from tests.e2e.roles.helpers.live_verification import LiveSettings, Provenance
+from tests.e2e.roles.helpers.mediation import MediationTarget, live_mediation
 from tests.e2e.roles.helpers.payments import live_payments, payment_setting
 from tests.e2e.roles.helpers.rate_servicing_stages import FUNDED_PERIODS
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
@@ -64,6 +67,21 @@ def payments_config() -> ArkhaiPaymentsConfig:
                     "test mode, and the run states PAYMENTS.LIVEMODE true")
     assert payment_setting("SELLER_ACCOUNT"), "PAYMENTS.SELLER_ACCOUNT is required for the listing"
     return config
+
+
+@pytest.fixture(scope="module")
+def mediation_target() -> MediationTarget:
+    """The run's hosted dispute authority, for a module that files a case: a
+    blocked skip when the run names none, an unready one, or a lane's own
+    double; a failure naming a setting the run owes."""
+    return live_mediation()
+
+
+@pytest.fixture(scope="module")
+def buyer_evidence(tmp_path_factory) -> Path:
+    """The directory of the buyer's evidence store, which the harness's filing
+    keeps its operation keys in, as the buyer's lifecycle does."""
+    return tmp_path_factory.mktemp("vm_live_dispute_buyer_evidence")
 
 
 @pytest.fixture(scope="module")
@@ -206,7 +224,8 @@ def purchase_cleanup(purchase_cli, deal_driver: VmLiveRatePurchaseDriver,
     stop, then remove the gates' rules; the lane's cleanup releases the
     module's holds and its reserved resources. A deal the module stopped, or
     whose stop it is waiting for, is the payments authority's to end; the
-    balance reset and anything else between runs are the caller's.
+    balance reset, a case a module filed that the dispute authority left
+    open, and anything else between runs are the caller's.
 
     The gates are opened before their rules are removed, since a removed rule
     leaves a job it holds waiting.

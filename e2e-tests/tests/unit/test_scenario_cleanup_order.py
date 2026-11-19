@@ -56,15 +56,20 @@ QUALIFICATION_GATES = {
 }
 
 #: The live verification modules, and the prerequisites each checks before any
-#: hold: the payments target, the provenance, mock provisioning and the payer
-#: its deal pays from.
+#: hold: the payments target, for a module filing a case the mediation target,
+#: the provenance, mock provisioning and the payer its deal pays from.
 LIVE = SCENARIOS / "vms" / "live"
 _LIVE_PREREQUISITES = ("payments_config", "live_provenance", "mock_provisioning")
+_LIVE_DISPUTE_PREREQUISITES = (
+    "payments_config", "mediation_target", "live_provenance", "mock_provisioning",
+)
 LIVE_GATES = {
     LIVE / "test_buyer_stop.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
     LIVE / "test_funds_exhausted.py": (*_LIVE_PREREQUISITES, "funded_rate_payer"),
     LIVE / "test_preemption.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
     LIVE / "test_term_end.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_seller_filing.py": (*_LIVE_DISPUTE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_buyer_contested_case.py": (*_LIVE_DISPUTE_PREREQUISITES, "funded_buyer"),
 }
 
 _FIXTURE_LINE = re.compile(r"^\s+(SETUP|TEARDOWN)\s+M (\S+)(?: \(fixtures used: (.*)\))?$")

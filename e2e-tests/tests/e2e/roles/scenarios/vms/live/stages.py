@@ -17,16 +17,35 @@ waiting for it, bounded (``LaneTime.reach``, ``recorded_by_authority``); the
 part is reserved ahead by the authority's own scheduler; the payer's balance is
 the one the topology funded, which funds running out reads and, when it
 differs from its requirement, is a blocked skip naming it.
+
+A dispute module runs its lane twin's shared stages the same way, waits on wall
+time until the payments authority holds the part's first period's earnings
+(``LiveDispute07``), and files as its lane twin does, through the same client
+code (``rate_dispute/stages.py``'s functions): the storefront's own filing as
+the payee, or the buyer's filing and the storefront's contest. It then polls
+the hosted dispute authority's signed record, read as the buyer through the
+mediation kit's public client, until the case is closed, bounded
+(``live_verification.await_case_closed``), and asserts on the record and the
+payments snapshot through the lane twin's shared dispute assertion. The ruling
+is the authority's own: a mechanical ruling of the payee's filing, which it
+documents, or, for the contested case, a person's decision, which reaches the
+scenario only through a ruling policy the topology applies. No stage calls an
+operator endpoint, and a topology applying no policy leaves the contested
+case's ruling unproven, naming the requirement.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 from dataclasses import dataclass
+from datetime import timedelta
+from pathlib import Path
 from typing import Any, Mapping
 
 import injected_time
+import pytest
 
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.lane_time import poll_until
@@ -34,10 +53,18 @@ from tests.e2e.roles.helpers.live_verification import (
     POLL_INTERVAL,
     LiveSettings,
     Provenance,
+    await_case_closed,
+)
+from tests.e2e.roles.helpers.mediation import (
+    MediationTarget,
+    pinned_authority_difference,
+    read_record,
 )
 from tests.e2e.roles.helpers.payments import payment_setting
 from tests.e2e.roles.helpers.producer_assertions import (
+    assert_contested_case_ruled,
     assert_funds_exhausted,
+    assert_payee_filing_ruled,
     assert_payee_stop,
     assert_payee_stop_pending,
     assert_payer_stop,
@@ -45,7 +72,6 @@ from tests.e2e.roles.helpers.producer_assertions import (
 )
 from tests.e2e.roles.helpers.rate_servicing_stages import (
     FUNDED_PERIODS,
-    RateServicingState,
     submit_the_sellers_notice,
 )
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
@@ -55,20 +81,57 @@ from tests.e2e.roles.helpers.recurring_purchase_stages import (
     reach_lane_instant,
     transaction_snapshot,
 )
+from tests.e2e.roles.scenarios.vms.rate_dispute.stages import (
+    RateDisputeState,
+    contest_as_respondent,
+    end_delivery_as_a_failure,
+    file_the_buyers_claim,
+    filed_as_payee,
+    premature_stop_penalty,
+)
 
 log = logging.getLogger(__name__)
 
 
+#: The observations the live dispute modules make: the seller's filing, ruled
+#: as the dispute authority documents a mechanical ruling; and the buyer's
+#: contested case in three, its filing, the storefront's contest of it, and the
+#: ruling a policy the topology applies makes, which a topology applying none
+#: leaves unproven while the other two stand.
+SELLERS_FILING = "the seller's filing"
+BUYERS_FILING = "the buyer's filing"
+STOREFRONTS_CONTEST = "the storefront's contest"
+POLICY_RULING = "the policy's ruling"
+#: The repair reason the storefront's seller lifecycle refuses a filing with
+#: when it holds no dispute credential for the Agreement's authority.
+MISSING_CREDENTIAL_REPAIR = "repair required: Agreement authority credential is missing"
+#: What a topology lacks when no ruling of the buyer's contested case appears.
+RULING_POLICY_REQUIREMENT = (
+    "the topology applied no ruling policy to it: the buyer's contested case needs a policy "
+    "that rules a contested delivery_end with a stop returning its period and a reverse "
+    "(e2e-tests/README.md, \"Live verification\")"
+)
+
+
 @dataclass
-class LiveRateState(RateServicingState):
-    """What a live module's stages hand each other, beside a rate row's."""
+class LiveRateState(RateDisputeState):
+    """What a live module's stages hand each other, beside a rate row's and,
+    for a module filing a case, a rate-dispute row's."""
 
     #: The run's live-evidence label and provenance are logged.
     _live_labelled: bool = False
+    #: The payments authority holds the part's first period's earnings.
+    _first_period_held: bool = False
+    #: The storefront contested the buyer's case on the record.
+    _case_contested: bool = False
 
 
 def _stopped(snapshot: Mapping[str, Any]) -> bool:
     return "stop" in snapshot["parts"][0]
+
+
+def _periods_earned(snapshot: Mapping[str, Any]) -> int:
+    return int(snapshot["parts"][0].get("rate", {}).get("periodsEarned", 0))
 
 
 def _funded_through(snapshot: Mapping[str, Any]) -> int:
@@ -83,14 +146,14 @@ def _funded_through(snapshot: Mapping[str, Any]) -> int:
 
 
 def _poll_snapshot(payments_config: Any, deal_state: LiveRateState, settings: LiveSettings,
-                   until: Any, what: str) -> dict[str, Any]:
+                   until: Any, what: str, *, bound: timedelta | None = None) -> dict[str, Any]:
     """The transaction's snapshot, read with the payer's token until ``until``
-    holds of it, within the run's polling bound; its one rate part checked to
-    be its only part."""
+    holds of it, within ``bound``, the run's polling bound unless given; its
+    one rate part checked to be its only part."""
     snapshot: dict[str, Any] = poll_until(
         lambda: transaction_snapshot(payments_config, deal_state.payer_account,
                                      deal_state.settlement_id),
-        until, bound=settings.poll_bound, interval=POLL_INTERVAL,
+        until, bound=settings.poll_bound if bound is None else bound, interval=POLL_INTERVAL,
         what=f"{what} of transaction {deal_state.settlement_id}",
     )
     assert len(snapshot["parts"]) == 1, snapshot["parts"]
@@ -109,16 +172,19 @@ class Live00_LabelledLiveEvidence:
         """The run's log carries the live-evidence label and its public-safe
         provenance: the source revision the topology runs, the deployment's
         alias for the topology, the payments authority's revision identifier,
-        and the provisioning mode the provisioning service reports, beside the
-        terms the deal is offered on. A run stating no provenance is a blocked
+        for a module filing a case the mediation authority's, and the
+        provisioning mode the provisioning service reports, beside the terms
+        the deal is offered on. A run stating no provenance is a blocked
         skip naming the setting at the ``live_provenance`` fixture, which the
         module takes before any stage, so its observation is unproven."""
         provenance = live_provenance
         mocked = provisioning_client.get_system_status().execution.mocked
+        mediation = ("" if provenance.mediation_revision is None
+                     else f", mediation authority revision {provenance.mediation_revision}")
         log.info("[l00] Live evidence: source revision %s, target %s, payments authority "
-                 "revision %s, provisioning %s; period %ss, seller notice %ss, term %ss",
+                 "revision %s%s, provisioning %s; period %ss, seller notice %ss, term %ss",
                  provenance.source_revision, provenance.target_alias,
-                 provenance.payments_revision, "mock" if mocked else "real",
+                 provenance.payments_revision, mediation, "mock" if mocked else "real",
                  live_settings.period_seconds, live_settings.payee_notice_seconds,
                  live_settings.maximum_term_seconds)
         deal_state._live_labelled = True
@@ -313,3 +379,217 @@ class LiveTermEnd07_PartEndsAtTheAgreementsEnd:
                         period_seconds=terms.period_seconds)
         log.info("[lt07] Transaction %s ended at the Agreement's end %s",
                  deal_state.settlement_id, end)
+
+
+# ===========================================================================
+# The dispute modules: both
+# ===========================================================================
+
+def _ruled_output(payments_config: Any, mediation_target: MediationTarget,
+                  settings: LiveSettings, deal_state: LiveRateState, *,
+                  ruling_requirement: str | None = None,
+                  ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The dispute authority's record of the deal, read as the buyer through
+    the mediation kit's public client until the case is closed, within the
+    run's polling bound (``await_case_closed``), then the payments snapshot
+    the ruling's effects moved, read by the payer: a closed case's effects
+    were each applied at payments, as its closed entry records. Both are
+    logged, with the identifiers they are read by."""
+    record = await_case_closed(
+        lambda: read_record(mediation_target, negotiation_id=deal_state.negotiation_id,
+                            transaction=deal_state.settlement_id, agreement=deal_state.agreement),
+        case_ref=str(deal_state.case_ref), bound=settings.poll_bound,
+        ruling_requirement=ruling_requirement,
+    )
+    snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
+                                    deal_state.settlement_id)
+    assert len(snapshot["parts"]) == 1, snapshot["parts"]
+    log.info("Producer output for Agreement %s, transaction %s, case %s: %s",
+             deal_state.negotiation_id, deal_state.settlement_id, deal_state.case_ref,
+             json.dumps({"record": record, "snapshot": snapshot}, sort_keys=True))
+    return record, snapshot
+
+
+class LiveDispute07_FirstPeriodHeld:
+    def test_ld07_the_payments_authority_holds_the_first_periods_earnings(
+        self, payments_config, mediation_target, live_settings: LiveSettings,
+        deal_driver: RecurringPurchaseDriver, deal_state: LiveRateState,
+    ):
+        """The Agreement pins the run's dispute authority, the one the buyer's
+        registry recommends; an Agreement pinning another is the topology's
+        unmet requirement, a blocked skip naming both, since the harness reads
+        no record of another authority.
+
+        The payments authority earns the part's first period on its own
+        schedule, an output of the rate the scenario's purchase started, so
+        the snapshot is polled until it shows the period earned and its
+        earnings held, or the part stopped. The bound is the time left until
+        the first period ends — the start the authority recorded plus the
+        Agreement's period, which bounds the wait and is not reached as an
+        instant — and the run's polling bound after it. The part must still
+        run: a case filed after it has earnings for a ruling to reverse and
+        penalise, as the lane twin's has a minute into the second period."""
+        require_state(deal_state, "_live_labelled", "_accepted_money_shown",
+                      "_teardown_gate_armed", "payer_account", "settlement_id", "agreement")
+        difference = pinned_authority_difference(mediation_target, deal_state.agreement)
+        if difference is not None:
+            pytest.skip(f"blocked: {difference}; the buyer's registry recommends the run's "
+                        "dispute authority (e2e-tests/README.md, \"Live verification\")")
+        snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
+                                        deal_state.settlement_id)
+        assert len(snapshot["parts"]) == 1, snapshot["parts"]
+        first_period_end =(int(snapshot["parts"][0]["started"])
+                            + deal_driver.rate_terms.period_seconds)
+        left = timedelta(seconds=max(0, first_period_end - injected_time.now()))
+        snapshot = _poll_snapshot(
+            payments_config, deal_state, live_settings,
+            lambda read: _stopped(read) or (_periods_earned(read) >= 1
+                                            and int(read["parts"][0]["held"]) > 0),
+            "the first period's earnings held", bound=left + live_settings.poll_bound,
+        )
+        part = snapshot["parts"][0]
+        assert part.get("stop") is None, part
+        deal_state._first_period_held = True
+        log.info("[ld07] Transaction %s after %s: %s periods earned, %s held",
+                 deal_state.settlement_id, first_period_end, _periods_earned(snapshot),
+                 part["held"])
+
+
+# ===========================================================================
+# The seller's filing
+# ===========================================================================
+
+class LiveSellerFiling09_StorefrontFilesAsPayee:
+    def test_ls09_the_administrators_end_files_as_the_payee(
+        self, storefront_admin_client, deal_state: LiveRateState,
+    ):
+        """The storefront's administrator ends the delivery as a failure, as
+        the lane twin's does: the storefront records the operator's end, files
+        ``delivery_end`` as the payee with the hosted dispute authority, which
+        accepts the filing, and begins the teardown, held at its gate
+        (``rate_dispute.stages.end_delivery_as_a_failure``,
+        ``filed_as_payee``). The end the storefront recorded is the one its
+        filing claims. A storefront holding no dispute credential for the
+        Agreement's authority refuses the filing, naming its repair; that is
+        the topology's unmet requirement, a blocked skip naming it."""
+        require_state(deal_state, "_first_period_held", "negotiation_id", "settlement_id")
+        deal_state._deal_ending = True
+        ended = end_delivery_as_a_failure(storefront_admin_client, deal_state)
+        if (ended.get("lifecycle_outcome") or {}).get("reason") == MISSING_CREDENTIAL_REPAIR:
+            pytest.skip("blocked: the storefront holds no dispute credential for the Agreement's "
+                        "dispute authority, which the topology provides (e2e-tests/README.md, "
+                        "\"Live verification\")")
+        deal_state.delivery_end_at, deal_state.case_ref = filed_as_payee(ended)
+        log.info("[ls09] Operator end of Agreement %s at %s filed as case %s",
+                 deal_state.negotiation_id, deal_state.delivery_end_at, deal_state.case_ref)
+
+
+class LiveSellerFiling10_MechanicalRulingRead:
+    def test_ls10_the_authoritys_mechanical_ruling_matches_the_lane_twins(
+        self, payments_config, mediation_target, live_settings: LiveSettings,
+        deal_driver: RecurringPurchaseDriver, deal_state: LiveRateState,
+    ):
+        """The hosted dispute authority rules the payee's filing mechanically,
+        on its own schedule, as it documents; the scenario calls no operator
+        endpoint. Its record is polled until the case is closed, and the record
+        and snapshot are held to the lane twin's assertion
+        (``producer_assertions.assert_payee_filing_ruled``): the filing and its
+        protection of the part, the ruling's basis, delivery end and effects
+        each applied, the authority's stop returning its period, the reversal
+        of the earnings since the end, the Agreement's penalty capped at what
+        the part held, the extension lifted, and the case closed. The claimed
+        end is the one the storefront recorded, the period the run's. No stage
+        runs after it."""
+        require_state(deal_state, "case_ref", "delivery_end_at", "agreement", "negotiation_id",
+                      "settlement_id", "payer_account")
+        record, snapshot = _ruled_output(payments_config, mediation_target, live_settings,
+                                         deal_state)
+        terms = deal_driver.rate_terms
+        assert_payee_filing_ruled(
+            record, snapshot, case_ref=str(deal_state.case_ref),
+            payee=str(payment_setting("SELLER_ACCOUNT")), claimed_end=deal_state.delivery_end_at,
+            authority=mediation_target.account,
+            penalty=premature_stop_penalty(deal_state.agreement),
+            period_price=terms.period_gross, period_seconds=terms.period_seconds,
+        )
+        deal_state._ruling_applied = True
+        log.info("[ls10] Case %s ruled: stopped at %s, reversed %s, case closed",
+                 deal_state.case_ref, snapshot["parts"][0]["stop"].get("effectiveAt"),
+                 snapshot["parts"][0]["reversed"])
+
+
+# ===========================================================================
+# The buyer's contested case
+# ===========================================================================
+
+class LiveContestedCase08_BuyerFiles:
+    def test_lc08_the_buyers_filing_is_accepted_and_the_part_held(
+        self, mediation_target, buyer_evidence: Path, deal_state: LiveRateState,
+    ):
+        """The buyer files ``delivery_end`` through the mediation kit's dispute
+        adapter, as the lane twin's does, claiming the end now; the hosted
+        dispute authority accepts the filing and holds the part
+        (``rate_dispute.stages.file_the_buyers_claim``)."""
+        require_state(deal_state, "_first_period_held", "negotiation_id", "settlement_id",
+                      "agreement")
+        deal_state.delivery_end_at = injected_time.now()
+        deal_state.case_ref = file_the_buyers_claim(mediation_target, buyer_evidence, deal_state)
+        log.info("[lc08] The buyer filed case %s on Agreement %s, claiming the end at %s",
+                 deal_state.case_ref, deal_state.negotiation_id, deal_state.delivery_end_at)
+
+
+class LiveContestedCase09_StorefrontContests:
+    #: The buyer's filing stands without the contest.
+    observations = (STOREFRONTS_CONTEST, POLICY_RULING)
+
+    def test_lc09_a_servicing_step_contests_the_case_as_respondent(
+        self, storefront_admin_client, deal_driver: RecurringPurchaseDriver,
+        deal_state: LiveRateState,
+    ):
+        """One servicing step: the storefront's respondent discovery finds the
+        case on the hosted authority's respondent listing and contests it on
+        the record, as the lane twin's does
+        (``rate_dispute.stages.contest_as_respondent``)."""
+        require_state(deal_state, "case_ref", "negotiation_id")
+        contest_as_respondent(storefront_admin_client, deal_driver, deal_state)
+        deal_state._case_contested = True
+        log.info("[lc09] The storefront contested case %s", deal_state.case_ref)
+
+
+class LiveContestedCase10_PolicyRuling:
+    #: A topology applying no ruling policy leaves this observation alone
+    #: unproven.
+    observations = (POLICY_RULING,)
+
+    def test_lc10_the_policys_ruling_matches_the_lane_twins(
+        self, payments_config, mediation_target, live_settings: LiveSettings,
+        deal_state: LiveRateState,
+    ):
+        """A contested case is a person's decision, which reaches the scenario
+        only through the ruling policy the topology applies; the scenario
+        calls no operator endpoint. The record is polled until the case is
+        closed: with no ruling of it by the run's polling bound, the stage is a
+        blocked skip naming the policy requirement, so this observation is
+        unproven while the filing and the contest stand. A ruling is held to
+        the lane twin's assertion
+        (``producer_assertions.assert_contested_case_ruled``): the filing and
+        its protection, the contest before the ruling, the ruling's effects
+        each applied, the authority's stop returning its period, payments
+        reversing the reverse effect's amount, the extension lifted, and the
+        case closed; the ruling's delivery end and reverse amount are the
+        policy's, so not compared. No stage runs after it."""
+        require_state(deal_state, "_case_contested", "case_ref", "delivery_end_at", "agreement",
+                      "negotiation_id", "settlement_id", "payer_account")
+        record, snapshot = _ruled_output(payments_config, mediation_target, live_settings,
+                                         deal_state, ruling_requirement=RULING_POLICY_REQUIREMENT)
+        # A stopped part is the authority's to end; any other is left to the
+        # module's cleanup, which ends it by the buyer's own stop.
+        deal_state._deal_ending = _stopped(snapshot)
+        assert_contested_case_ruled(
+            record, snapshot, case_ref=str(deal_state.case_ref),
+            payer=str(deal_state.payer_account), payee=str(payment_setting("SELLER_ACCOUNT")),
+            claimed_end=deal_state.delivery_end_at, authority=mediation_target.account,
+        )
+        deal_state._ruling_applied = True
+        log.info("[lc10] The policy ruled case %s: stopped, reversed %s, case closed",
+                 deal_state.case_ref, snapshot["parts"][0]["reversed"])

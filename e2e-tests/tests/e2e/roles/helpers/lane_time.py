@@ -123,6 +123,17 @@ def wait_until(instant: datetime, *, bound: timedelta = MAX_CLOCK_WAIT,
     return now()
 
 
+class PollBoundPassed(AssertionError):
+    """A polled output did not appear within its bound; ``last`` is the last
+    read. An assertion failure, so the stage fails; a caller that reads a
+    missing output as a topology's unmet requirement catches this alone, never
+    a failure the read itself raised."""
+
+    def __init__(self, message: str, last: Any) -> None:
+        super().__init__(message)
+        self.last = last
+
+
 def poll_until(read: Callable[[], T], until: Callable[[T], bool], *, bound: timedelta,
                interval: timedelta, what: str,
                clock: Callable[[], float] = time.monotonic,
@@ -133,9 +144,9 @@ def poll_until(read: Callable[[], T], until: Callable[[T], bool], *, bound: time
     the scenario's own request: its scheduler acting at an instant the
     scenario reached, or its decision on a filing. The read is repeated every
     ``interval`` until the output appears, and once ``bound`` has passed
-    without it the stage fails, naming ``what`` it waited for and the last
-    read, never skips: a producer that does not emit the output differs from
-    the expectation.
+    without it the stage fails (``PollBoundPassed``), naming ``what`` it waited
+    for and the last read, never skips: a producer that does not emit the
+    output differs from the expectation.
     """
     deadline = clock() + bound.total_seconds()
     while True:
@@ -144,8 +155,8 @@ def poll_until(read: Callable[[], T], until: Callable[[T], bool], *, bound: time
             return value
         remaining = deadline - clock()
         if remaining <= 0:
-            raise AssertionError(
-                f"{what} did not appear within {bound}; the last read was {value!r}")
+            raise PollBoundPassed(
+                f"{what} did not appear within {bound}; the last read was {value!r}", value)
         sleep(min(interval.total_seconds(), remaining))
 
 
@@ -627,6 +638,7 @@ __all__ = [
     "LaneTimeError",
     "MAX_CLOCK_WAIT",
     "MODES",
+    "PollBoundPassed",
     "SET_ORDER",
     "TimeParty",
     "TimeReading",

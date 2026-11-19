@@ -15,9 +15,9 @@ servicing row, those of ``rate_servicing_stages.py``, for a watchdog module thos
 of ``rate_watchdog_stages.py`` — once each, in one order, with an empty body, and
 inserts only its listing stage, its stage closing the listing and, for a
 rate-dispute row, its domain's dispute stages between them. A live verification
-module declares its lane twin's shared stages up to the ending's input and none
-after, its own stages giving the live payments authority that input and
-asserting on the output. A module setting
+module declares its lane twin's shared stages up to the ending's input or the
+filing and none after, its own stages giving the live payments or dispute
+authority that input and asserting on the output. A module setting
 lane time past its part's first reservation, in a shared stage or its own,
 declares the payments double's reservation before that stage, and one that sets
 none declares no reservation.
@@ -187,9 +187,9 @@ WATCHDOG_ORDER = [
 SELLER_FILING_ORDER = [*READINESS, *PURCHASE, *DELIVERY, RESERVATION, *TEARDOWN]
 CONTESTED_CASE_ORDER = [*READINESS, *PURCHASE, *DELIVERY, *TEARDOWN]
 #: A live verification module: its lane twin's shared stages up to the
-#: ending's input, which its own stages give the live payments authority and
-#: whose output they assert on; no shared stage after it, and no reservation,
-#: since the authority's own scheduler reserves.
+#: ending's input or the filing, which its own stages give the live payments or
+#: dispute authority and whose output they assert on; no shared stage after it,
+#: and no reservation, since the authority's own scheduler reserves.
 LIVE_ORDER = [*READINESS, *PURCHASE, *DELIVERY]
 #: Each stage, shared or a domain's own, that sets lane time past the part's
 #: first reservation, which the reservation must precede in its module.
@@ -218,7 +218,8 @@ ORDERS = {
     **{
         SCENARIOS / "vms" / "live" / module: LIVE_ORDER
         for module in ("test_buyer_stop.py", "test_funds_exhausted.py", "test_preemption.py",
-                       "test_term_end.py")
+                       "test_term_end.py", "test_seller_filing.py",
+                       "test_buyer_contested_case.py")
     },
 }
 

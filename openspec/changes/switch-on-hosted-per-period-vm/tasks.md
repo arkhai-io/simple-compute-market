@@ -980,20 +980,114 @@ Replanned after section 5's return: 6.4 and 6.5 no longer run the modules agains
 local Helm release, for section 5's reasons and because the release's e2e pods hold no
 control token for its mediation double; section 8 is their only run.
 
-- [ ] 6.1 The seller's filing module: the storefront's own payee filing on a running
+- [x] 6.1 The seller's filing module: the storefront's own payee filing on a running
       rate deal, sent by its journal through the mediation kit's adapter as in 3.1; read,
       by bounded polls of the public record and snapshot reads, the per-part protection,
       the authority's ruled entry, the authority stop, reversals, penalty, lifted
       extensions and closed case, and assert through 3.3's assertion. No operator
       endpoint is called (D5, D6). Verify (unit): the module's stages pass the order and
       shared-stage checks.
-- [ ] 6.2 The buyer's contested case module: the buyer's filing through the mediation
+      Done: `scenarios/vms/live/test_seller_filing.py`, marker `e2e_vm_live_dispute`,
+      on its own host, pool, resource and GPU model (`host_registry.py`, RTX 3070 Ti),
+      observation `the seller's filing`. Its twin's shared stages through `Stage09c2`,
+      then `live/stages.py`'s: `Live00` (its provenance now names the mediation
+      authority's revision, LIVE.MEDIATION_REVISION, for a module filing a case —
+      the module overrides `live_provenance` with `mediation=True`); `LiveDispute07`
+      holds the Agreement to pinning the run's dispute authority (another is a
+      blocked skip naming both, `mediation.pinned_authority_difference`), then
+      polls the snapshot until a period is earned and its earnings held, or the
+      part stopped, bounded by the time left until the first period's end (the
+      part's `started` plus the period) and the poll bound after it, and requires
+      the part still running — a poll of the producer's output, not a reached
+      instant, so `LaneTime.reach`'s recorded case is not widened;
+      `LiveSellerFiling09` ends the delivery as a failure through
+      `admin_interrupt_deal`, as 3.1's row does, and takes the storefront's typed
+      refusal for want of a dispute credential (its seller lifecycle's
+      `repair required: Agreement authority credential is missing`, matched as
+      `MISSING_CREDENTIAL_REPAIR`) as a blocked skip naming that requirement —
+      the reason is read from `kit/deal-servicing`'s seller lifecycle, not seen
+      in any run here; `LiveSellerFiling10` polls the record
+      until the case is closed and reads the snapshot once, then
+      `assert_payee_filing_ruled` with the storefront's recorded end as the claimed
+      one, the Agreement's penalty and the run's period. One poll, not two as
+      planned: the snapshot is read once after the record shows the case closed,
+      since the closed entry records each effect applied at payments; a snapshot
+      lagging it fails the assertion naming the field. Shared with the lane row by
+      factoring its inputs out of `rate_dispute/stages.py`'s stages into functions
+      both call — `end_delivery_as_a_failure` and `filed_as_payee` (the end, then
+      its answer held to the filing, split so the live stage reads a refusal
+      between them), `file_the_buyers_claim`, `contest_as_respondent`,
+      `premature_stop_penalty` — the lane stages keeping their double-only checks
+      (the double's case state, the lane instant); the administrator's end now
+      also requires the outcome's `filing`, from which the case reference is read.
+      `pinned_authority_difference` fails, rather than reading as another
+      authority, on an Agreement naming none. The record is read by `read_record` as the buyer, so
+      `live_mediation` (`helpers/mediation.py`) refuses a lane-owned mediation target
+      with a blocked skip naming it, as `live_payments` does payments', and fails a
+      run with no MEDIATION.BUYER_API_KEY before anything is bought. The module takes
+      `payments_config`, `mediation_target`, `live_provenance`, `mock_provisioning`
+      and `funded_buyer` before its holds. Unit: `make -C e2e-tests test-unit`
+      (1184 passed, 1 skipped): the module in `ORDERS` (`LIVE_ORDER`, its shared
+      stages once each in order, and the handoff check over `live/stages.py`,
+      which reads the union of every state's fields and so does not show which
+      state declares them; `LiveRateState` carrying `RateDisputeState`'s fields and
+      its own is a test of its own, `test_live_verification.py`), and in `LIVE_GATES`
+      (`test_scenario_cleanup_order.py`, its prerequisites set up in order before
+      any hold, read from pytest's setup plan); `live_mediation`'s refusal, external
+      target, missing and unready target and missing token, and
+      `pinned_authority_difference` on the mediation kit's contract fake's
+      Agreement, the run's authority differing in nothing, another account named
+      with both, and an Agreement with no lifecycle terms failing
+      (`test_mediation_helper.py`); the provenance with and
+      without the mediation revision and the skip naming it
+      (`test_live_verification.py`). The live stages' bodies — the first-period
+      poll, the filing and its credential refusal, the ruled output's read and the
+      assertion's arguments — run only against a hosted target (section 8); in
+      this repository they are
+      evidenced only as ordered and handed off by those source checks and as
+      refusing the lane's double (6.4).
+- [x] 6.2 The buyer's contested case module: the buyer's filing through the mediation
       kit's adapter, the storefront's contest, then the ruling the topology's declared
       policy makes, read and asserted through 3.3's assertion; with no policy applied by
       the bound, the ruling observation is unproven naming the policy requirement, its
       filing and contest observations standing (D5, D13). Verify (unit): as 6.1, and the
       unproven outcome names the requirement.
-- [ ] 6.3 Register the marker `e2e_vm_live_dispute`, in no lane, and write both modules'
+      Done: `live/test_buyer_contested_case.py` (RTX 3070), observations `the buyer's
+      filing`, `the storefront's contest` and `the policy's ruling`: the shared stages,
+      `Live00` and `LiveDispute07` require all three; `LiveContestedCase08` files
+      through `file_the_buyers_claim` claiming the end now; `LiveContestedCase09`
+      (declaring the contest and the ruling) contests through `contest_as_respondent`
+      in one servicing step, marking the case contested; `LiveContestedCase10`
+      (declaring the ruling alone) requires the contest, so after a failed one it
+      skips at once rather than waiting out the bound, and polls
+      the record through `live_verification.await_case_closed` with the policy
+      requirement, then `assert_contested_case_ruled` with the buyer's claimed end
+      and no `ruled_end` or `reverse_amount`. `await_case_closed` fails at the bound
+      naming the case, unless given a ruling requirement and the last record holds
+      no `ruled` entry for the case, when it is a blocked skip naming the
+      requirement (`RULING_POLICY_REQUIREMENT`, citing the README); a ruling made and
+      the case still open at the bound fails, and so does a failure the read
+      itself raises: `lane_time.poll_until` now raises `PollBoundPassed`, an
+      `AssertionError` carrying the last read, which is all the helper catches.
+      The stage marks the deal ending only when the snapshot shows the part
+      stopped, so the cleanup ends an unruled deal by the buyer's own `end`. Unit
+      (`test_live_verification.py`, the helper with a fake clock and the module's
+      declared stages through `qualification`'s `stage_observations` and
+      `observation_outcomes`): the record polled until closed; a case never closed
+      failing at the bound naming it; no ruling of the case (another case's ruling
+      beside it) a blocked skip naming the requirement; a ruling with the case open
+      at the bound failing, not skipping; a read failing before the bound failing,
+      not skipping; the skip the helper raises with `RULING_POLICY_REQUIREMENT`
+      given as the ruling stage's reason leaves the filing and contest made and the
+      ruling unproven with exactly that reason; a failed contest failing the
+      contest and ruling, the filing made; a failed shared stage failing all three
+      — pass, with the order, handoff and gate checks as 6.1. Not exercised in this
+      repository: that `LiveContestedCase10` passes the requirement to the poll
+      (read from its source only), and the module's cleanup in the last stage's
+      teardown — `stage_result` counts a failed teardown as a failed stage, so
+      the ruling reads unproven only if the buyer's own `end` succeeds with the
+      case still open (the handoff).
+- [x] 6.3 Register the marker `e2e_vm_live_dispute`, in no lane, and write both modules'
       topology requirements in prose under "Live verification" in `e2e-tests/README.md`:
       a hosted mediation authority serving filing, the respondent listing and record
       reads, the contested case's ruling policy in this repository's own words (a
@@ -1002,20 +1096,177 @@ control token for its mediation double; section 8 is their only run.
       awaiting an operator and resetting balances (D13). Verify:
       `make check-doc-citations CHANGE=switch-on-hosted-per-period-vm` and
       `make -C e2e-tests test-unit` pass.
-- [ ] 6.4 Show both modules inert on a lane, as 5.5 does: collected in the VM lane, each
+      Done: the marker in `e2e-tests/pyproject.toml`, the Makefile's lane comment
+      naming it in no lane, the shared payment-scenario list naming it, and under
+      "Live verification" its command, what both modules do, a table of input and
+      compared output, the contested case's three observations, and the topology's
+      requirements: mock provisioning with the storefront's dispute credential (a
+      deployment proves it with the storefront's own `check-mediation`; the
+      seller's filing skips naming it on the storefront's refusal, the contest
+      cannot read it and fails) and the authority the buyer's registry recommends
+      (an Agreement pinning another a blocked skip naming both, once bought — the
+      opening paragraph now says such requirements are checked where the deal
+      shows them); a hosted `arkhai.mediation.v1` authority against the payments
+      target in test mode, serving filing with protection, appends, the respondent
+      listing and record reads and applying effects before closing, its documented
+      mechanical ruling of a payee's `delivery_end` stated as the output the
+      seller's filing compares, not a topology requirement, so its absence at the
+      bound fails; the ruling policy as the
+      assertion holds it (once the payee has answered once, rule as an operator,
+      basis `operator`, with exactly a delivery end, a `stop` returning its period
+      and a `reverse` of its choosing, in that order, closing the case; other
+      effects, order or basis fail); the accounts and the buyer's mediation token;
+      the `MEDIATION` settings with LANE_OWNED unset and LIVE.MEDIATION_REVISION;
+      and what the caller owes — topping up the buyer and closing a case left open.
+      The README's opening paragraph describes the payment endings' form as theirs,
+      and the rate modules' "No case is filed" became theirs alone.
+      `make check-doc-citations` reports only section 8's summary, as in sections
+      1 to 5; `make -C e2e-tests test-unit` — 1184 passed, 1 skipped.
+- [x] 6.4 Show both modules inert on a lane, as 5.5 does: collected in the VM lane, each
       refusing the lane's doubles at its first live fixture with a blocked skip naming
       the lane-owned target, logging its observations unproven with that reason, and
       running no stage after; the lane twin `e2e_vm_rate_dispute` passing beside them
       (D6). Verify (system, the VM lane's Compose stack): `make -C e2e-tests test-e2e-vm
       "E2E_MODULE=e2e_vm_rate_dispute or e2e_vm_live_dispute"` passes, every skip a live
       module's refusal naming the lane-owned target.
-- [ ] 6.5 Verification point: the `e2e-tests` unit suite passes, 6.4 holds, the whole VM
+      Done. System, the VM lane's Compose stack, the command above — 69 passed, 59
+      skipped, 2223 deselected: the rate-dispute rows' 69 stages pass on the
+      refactored stages (the administrator's end, the buyer's filing and the contest
+      now through the shared functions); the 59 skips are the two live modules' 29
+      and 30 stages, each at `payments_config` with `blocked: the payments target
+      https://payments-double:8443 is a lane's own double (PAYMENTS.LANE_OWNED), which
+      yields no live evidence`; each module logs every observation unproven naming
+      that reason for every stage requiring it (116 stage reasons over the four
+      observations, all that one), so no stage ran. The refusal is the payments
+      target's, the first prerequisite; the mediation target's own refusal is the
+      unit-tested `live_mediation`, which a lane never reaches. Run three times —
+      before the first fresh-context check's fixes, after them, and on the final
+      code after the second's (the lane stage's administrator end split into
+      `end_delivery_as_a_failure` and `filed_as_payee`) — each with the same
+      result (on the final code 69 passed, 59 skipped, 2228 deselected, the same
+      four observation lines); the stack taken down after each (`make -C
+      e2e-tests e2e-vm-down`).
+- [x] 6.5 Verification point: the `e2e-tests` unit suite passes, 6.4 holds, the whole VM
       lane passes, and `scripts/change-workflow run pre-commit
       switch-on-hosted-per-period-vm` reports no failure but the citation of section 8's
       summary.
       End-to-end: none in the pipeline — `e2e_vm_live_dispute` belongs to no lane; its
       lane twin is `e2e_vm_rate_dispute`.
       Nothing is owed to validation.
+      Evidence: unit, `make -C e2e-tests test-unit` on the final code — 1184
+      passed, 1 skipped. 6.4 holds, as above. The whole VM lane, `make -C e2e-tests
+      test-e2e-vm` with the lane's default module list and both
+      `e2e_vm_live_rate_servicing` and `e2e_vm_live_dispute` added — 513 passed,
+      169 skipped, 1669 deselected: the skips are the six live modules' 110 and 59
+      stages, every one of the 226 stage reasons over the eight observations the
+      lane-owned payments target's refusal. That run was on the code before the
+      fresh-context checks' fixes, which changed the live dispute stages and
+      helpers the lane never runs past their first fixture, `poll_until`'s
+      exception class (the live modules' alone call it), in `rate_dispute/stages.py`
+      one comment and the split of the administrator's end into two functions,
+      unit tests and the README; the lane twins' final code ran in 6.4's third
+      run, and the rest of the lane touches none of it.
+      `scripts/change-workflow run pre-commit` on the final tree:
+      `after-functional-change` passed (no lock changed); `pre-commit-functional`
+      passed (local evidence for tree `d5652a34cc83`: `check-packaging` and `make
+      test`); the index, tasks, skills and strict OpenSpec checks passed, and
+      `check-repository` passed 8 of 9, documentation citations reporting only
+      section 8's summary
+      (`docs/attachments/switch-on-hosted-per-period-vm/live-verification.md`). A
+      first run, on the tree before the second fresh-context check's fixes, gave
+      the same.
+      End-to-end scenarios confirmed: none in the pipeline, as planned; the lane twin
+      `e2e_vm_rate_dispute` is lane-double evidence of the inputs the live modules
+      give — the administrator's end and filing, the buyer's filing and the contest,
+      through the same functions — and of the assertions they compare with, not of
+      the hosted authority, whose evidence is section 8's summary.
+
+Handoff (section 6):
+
+- Outside the plan's "Touches" line (the two modules, `pyproject.toml`, the README):
+  `rate_dispute/stages.py` (the inputs factored into shared functions, the
+  administrator's end split into `end_delivery_as_a_failure` and
+  `filed_as_payee`, the lane stages' behaviour unchanged but the administrator's
+  end now requiring the outcome's `filing`; `delivery_end_at`'s comment),
+  `live/stages.py` (the dispute stages, `LiveRateState` extending
+  `RateDisputeState`, `Live00` logging the mediation revision, `_poll_snapshot`
+  taking a bound, `MISSING_CREDENTIAL_REPAIR`), `live/conftest.py` (the
+  `mediation_target` and `buyer_evidence` fixtures, docstrings),
+  `helpers/mediation.py` (`live_mediation`, `pinned_authority_difference`),
+  `helpers/live_verification.py` (`MEDIATION_REVISION` provenance,
+  `await_case_closed`), `helpers/lane_time.py` (`PollBoundPassed`),
+  `host_registry.py` (two hosts, pools, resources, RTX 3070 Ti and 3070), the
+  Makefile's lane comment, and the unit files `test_live_verification.py`,
+  `test_mediation_helper.py`, `test_recurring_purchase_stages.py` and
+  `test_scenario_cleanup_order.py`. `e2e-tests` stays 0.3.1, as section 2's
+  handoff says.
+- For section 8's deployment: the dispute modules need, beside the rate modules'
+  topology, the `MEDIATION` section naming the hosted authority with the buyer's
+  token, LIVE.MEDIATION_REVISION, the storefront's dispute credential for that
+  authority, and the buyer's registry recommending it; POLL_BOUND_SECONDS must
+  cover the authority's time to rule mechanically and the policy's to rule the
+  contested case. The contest is one servicing step: a respondent listing that
+  shows the case only later fails `the storefront's contest`. The first period's
+  wait is up to a whole period, so a short LIVE period keeps both modules short.
+- When no policy rules the contested case, the module's cleanup ends the deal by
+  the buyer's own `end` with the case still open and its extension standing; if the
+  hosted payments service refuses that stop, the last stage's teardown fails, and
+  the ruling reads failed rather than unproven (the filing and the contest stand,
+  since only the ruling stage requires it). Nothing here shows which the payments
+  service does; a deployment seeing it records it beside the summary.
+- Not met as the spec words it ("A requirement the topology does not meet MUST
+  leave the observations needing it unproven"): in the contested case, a
+  storefront holding no dispute credential fails the contest rather than leaving
+  it unproven, since no route the harness holds shows the credential before a
+  filing and the contest has none of the storefront's own; the seller's filing
+  reads the storefront's refusal and skips. The README names the deployment's
+  proof of the credential (`check-mediation`) and that the contest fails without
+  it. For triage: accept it as the harness's limit, as section 5's "a requirement
+  … the harness can read" does, or have the spec say so. A mechanical ruling not
+  made within the bound is no such case: the README now states it as the
+  authority's documented output, which failing to emit fails the observation as
+  the spec's comparison requirement says.
+- For closeout's promotion of D6 (9.9), "bounded polling of a live producer for an
+  effect of the scenario's own request": `LiveDispute07`'s wait for the first
+  period's earnings is such a poll, bounded by up to a whole period plus the poll
+  bound, with no instant reached; `system-tests.md`, `deal-scenarios.md` and
+  `TESTING.md`, "Lane time", admit on wall time only an instant the scenario's
+  data fixes, so the promoted paragraph should cover a poll whose bound outlasts
+  the poll bound by the producer's own schedule.
+- The seller's filing's claimed end is the storefront's recorded end, read from
+  the administrator's answer; the buyer's is the instant the harness filed at. The
+  hosted authority's ruling instant is its own, so the reverse relation and the
+  penalty cap in `assert_payee_filing_ruled` need no lane instant, as section 3's
+  handoff foresaw.
+- `scripts/change-workflow run test-before` cannot run `e2e-tests`' unit tests (no
+  project environment), as in sections 1 to 5.
+- The fresh-context check found: the record poll catching an assertion raised
+  inside a read, which a contested case would have read as an unmet policy
+  (fixed: `PollBoundPassed`, with a test of a failing read); the first-period
+  poll's condition narrower than its docstring (fixed: earnings held or the part
+  stopped); the first-period wait passing `recorded_by_authority` for an instant
+  derived from the recorded start (replaced by a bounded poll of the output); the
+  pinned authority unchecked though readable (now a blocked skip naming both);
+  6.2's outcome test writing its own skip reason (now the helper's real skip) and
+  the unexercised stage wiring and teardown (stated in 6.2's note and above);
+  `delivery_end_at`'s comment naming only lane time, and the README's policy
+  requirement not stating the effects' order, basis and single answer (both
+  fixed); and no single list of the departures from "Touches" (above). Declined
+  then: skipping on a storefront without a dispute credential, which no route the
+  harness holds can read — narrowed after the second check to the contest alone.
+- A second fresh-context check, on the fixed diff, found: the spec gap above,
+  then also covering the mechanical ruling (the seller's filing now skips on the
+  storefront's credential refusal, and the README states the ruling as the
+  authority's output); an Agreement with no dispute terms read as another
+  authority and skipped (now fails); the first-period poll beyond the written
+  wall-time rules (recorded above for closeout); the README's opening paragraph
+  saying every readable requirement is checked before the purchase (now naming
+  those the deal shows); 6.1's note claiming the handoff check shows
+  `LiveRateState`'s base (corrected, with a test of its fields); two unit tests
+  that would report a wrong skip as a skip (now catching both); the ruling stage
+  running after a failed contest (now requires it); and the mediation authority's
+  mode unstated (the README says it acts against the payments target in test
+  mode). Declined: nothing beyond the contest's credential, above.
 
 ## 7. What sellers, buyers and storefront operators are told
 

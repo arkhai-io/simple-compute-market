@@ -63,7 +63,7 @@ The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_de
 `e2e_bare_metal_recurring_purchase`, `e2e_vm_rate_servicing`,
 `e2e_bare_metal_rate_servicing`, `e2e_vm_rate_watchdog`,
 `e2e_bare_metal_rate_watchdog`, `e2e_vm_rate_dispute` and the live verification
-modules `e2e_vm_live_rate_servicing`, and the qualification modules
+modules `e2e_vm_live_rate_servicing` and `e2e_vm_live_dispute`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -517,12 +517,12 @@ modules are blocked.
 ### Live verification
 
 The live verification scenarios compare a hosted authority's outputs with what
-the lanes' doubles emit. Each extends a lane row in the live verification form:
-it runs its lane twin's shared stages against the run's external payments
-target, on wall time, until the input its lane twin gives the payments double;
-gives the live authority that input through the same client code; polls the
-authority's signed transaction snapshot until the output appears, bounded; and
-asserts on it through the lane twin's shared assertion in
+the lanes' doubles emit. Each extends a lane row in the live verification form.
+A payment ending runs its lane twin's shared stages against the run's external
+payments target, on wall time, until the input its lane twin gives the payments
+double; gives the live authority that input through the same client code; polls
+the authority's signed transaction snapshot until the output appears, bounded;
+and asserts on it through the lane twin's shared assertion in
 `tests/e2e/roles/helpers/producer_assertions.py`, which names the fields it
 compares exactly, by relation, or not at all. A different output fails the
 observation. No stage runs after it: what the storefront does with the output is
@@ -540,6 +540,10 @@ double (LANE_OWNED), with no provenance to label its evidence, or with a
 topology that misses a requirement below that the harness can read — test mode,
 mock provisioning, a payer's balance — it is a blocked skip naming what is
 missing, and with a setting the run owes missing it fails naming the setting.
+A requirement only the deal itself shows is checked where the deal shows it,
+still a blocked skip naming it: the dispute authority the bought Agreement pins,
+and, for the seller's filing, the storefront's dispute credential, which its
+filing reveals.
 Only the session's fixtures and the VM lane's idempotent host registration, an
 autouse fixture, set up before them. Each module's first own stage logs the
 live-evidence label with its provenance, every stage logs the identifiers it
@@ -574,7 +578,7 @@ What a topology provides for them, naming no deployment:
   filing window PAYMENTS.DISPUTE_WINDOW_SECONDS covers beside the delivery
   deadline, as every compute payments option requires. The site holds no
   reservation but the run's: a module's cleanup releases every reservation the
-  site holds. No case is filed.
+  site holds. No rate servicing module files a case.
 - **Payments: Arkhai payments in test mode, executing rate parts.** The target
   starts a rate part, keeps it reserved ahead by its own scheduler as far as the
   payer's balance pays, holds a payee's stop with notice as pending until it is
@@ -620,6 +624,91 @@ What a topology provides for them, naming no deployment:
   site's reserved resources and removes its mock gates' rules; once its holds are
   released the storefront services the stopped deals and tears them down on its
   own.
+
+```bash
+make test-module MODULE=e2e_vm_live_dispute ACTIVE_PROFILES=<the topology's profiles>
+```
+
+`e2e_vm_live_dispute`, two modules under `tests/e2e/roles/scenarios/vms/live/`,
+each on a deal of its own, extend `e2e_vm_rate_dispute`'s rows the same way.
+Each runs the recurring purchase's shared stages, waits until the payments
+authority holds the first period's earnings, and files as its lane twin does,
+through the same client code. It then polls the hosted dispute authority's signed record,
+read as the buyer through the mediation kit's public client, until the case is
+closed, within POLL_BOUND_SECONDS, and asserts on the record and the payments
+snapshot through its lane twin's dispute assertion. No module calls an operator
+endpoint of the authority: a ruling is the authority's own. The wait for the
+first period's earnings is a poll of the payments snapshot, bounded by the time
+left in the first period and POLL_BOUND_SECONDS after it.
+
+| Module | What it proves | Input to the dispute authority | Output compared |
+|---|---|---|---|
+| `test_seller_filing.py` | the seller's filing, twin of the rate-dispute row | the storefront's own `delivery_end` filing as the payee, made when its administrator ends the delivery as a failure through the storefront client's interruption | the authority's mechanical ruling: the part protected by an extension, basis `payee_filed`, the delivery end the one the storefront claimed, an authority stop returning its period, a reversal of the earnings since the end, the Agreement's premature-stop penalty capped at what the part held, the extension lifted and the case closed (`assert_payee_filing_ruled`) |
+| `test_buyer_contested_case.py` | the buyer's contested case, twin of the rate-dispute row | the buyer's `delivery_end` filing through the mediation kit's dispute adapter in the harness (`file_as_buyer`), then the storefront's contest, an append its respondent discovery makes in one servicing step | the ruling the topology's policy makes: the part protected, the payee's answer before the ruling, basis `operator`, an authority stop returning its period and a reversal payments applied as ruled, the extension lifted and the case closed; the ruled delivery end and the reverse amount are the policy's and not compared (`assert_contested_case_ruled`) |
+
+The contested case makes three observations: the buyer's filing, the
+storefront's contest and the policy's ruling. With no ruling of the case once
+POLL_BOUND_SECONDS has passed, its last stage is a blocked skip naming the
+ruling-policy requirement below, so the ruling is unproven while the filing and
+the contest stand; a ruling made with the case still open at the bound, or any
+other ruling, fails it. The seller's filing makes one observation, which an
+authority leaving the filing unruled at the bound fails, since it documents the
+mechanical ruling.
+
+What a topology provides for them, beside what the rate servicing modules need
+above, naming no deployment:
+
+- **Provisioning: mock**, as above. The storefront also holds a dispute
+  credential for the dispute authority, which it files as the payee and answers
+  the respondent listing with; a deployment proves it before a run with the
+  storefront's own `check-mediation --origin <the authority's origin>` in the
+  storefront's process. The seller's filing reads the storefront's refusal of a
+  filing for want of one, a blocked skip naming this requirement; the contested
+  case cannot read it, so a storefront without one fails its contest. The
+  buyer's registry recommends that authority, so the Agreement pins it: an
+  Agreement pinning another is a blocked skip naming both, once the deal is
+  bought. Each module files one case.
+- **Dispute: a hosted mediation authority serving `arkhai.mediation.v1`**
+  against the payments target in test mode, so its effects move only test-mode
+  money — filing with each part's protection by an extension at the payments
+  target, appends, the respondent listing, and signed record reads by either
+  party — applying a ruling's effects at that payments target before it records
+  the case closed. The seller's filing compares the mechanical ruling the
+  authority documents for a payee's `delivery_end` — a delivery end at the
+  claimed instant, a `stop` returning its period, a `reverse` of the earnings
+  since the end and the premature-stop penalty — and an authority that does not
+  make it within POLL_BOUND_SECONDS of the filing fails the observation, as a
+  different ruling does: that output is the authority's own, not the
+  topology's.
+- **Ruling policy, for the buyer's contested case.** A buyer's `delivery_end`
+  filing that the storefront contests goes to the authority's operators. The
+  topology applies a policy standing in for that person's decision: once the
+  payee has answered, once, it rules the case as an operator, basis
+  `operator`, with exactly these effects in this order — a delivery end, a
+  `stop` of the part returning its period, and a `reverse` of the part of an
+  amount it chooses — applies them and closes the case as ruled, within
+  POLL_BOUND_SECONDS of the contest. Without it the ruling is unproven; a
+  ruling with other effects, another order or another basis fails it.
+- **Accounts and starting balances.** The buyer account holds at least one
+  term's price at the run's period as each module starts, as above. MEDIATION's
+  ACCOUNT and RECORD_KEY are the authority's identity, the one the buyer's
+  registry recommends; BUYER_API_KEY is the buyer's token at it, which the
+  buyer's filing and both modules' record reads use.
+- **Run settings.** The `PAYMENTS` and `LIVE` sections as above, with
+  POLL_BOUND_SECONDS covering the authority's or the policy's time to rule; the
+  `MEDIATION` section (`tests/e2e/roles/helpers/mediation.py`) naming the hosted
+  authority, with LANE_OWNED unset — a lane-owned target is a blocked skip
+  naming it — and no CONTROL_TOKEN; and LIVE.MEDIATION_REVISION, the mediation
+  authority's revision identifier, beside the other provenance, without which
+  each module is a blocked skip naming the setting. A missing BUYER_API_KEY
+  fails each module naming it.
+- **What the caller owes between runs.** Topping up the buyer, and closing a
+  case a module left open: the contested case's, awaiting an operator, when no
+  policy rules it, and the seller's filing's when the authority did not rule it.
+  The contested case's cleanup ends a deal no ruling stopped by the buyer's own
+  `end`; the seller's filing leaves its deal to the authority's ruling. Each
+  module releases the site's reserved resources and removes its mock gates'
+  rules, as above.
 
 ### Real bare-metal provisioning
 

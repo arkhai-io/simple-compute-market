@@ -41,9 +41,15 @@ from its classification ``ruling``: the end recorded with no filing for it.
 
 The rules, the decision and the reservation are the lane doubles' controls, so
 these stages run only against a Compose lane's doubles on injected lane time,
-and are a blocked skip anywhere else. Each row is lane-double evidence. These
-stages are not named ``Test*``: a module collects each by subclassing it with an
-empty body, in its run order.
+and are a blocked skip anywhere else. Each row is lane-double evidence. The
+inputs a row gives the dispute authority through this repository's own client
+code — the administrator's end and the storefront's filing
+(``end_delivery_as_a_failure``, held to its filing by ``filed_as_payee``), the
+buyer's filing (``file_the_buyers_claim``), the storefront's contest
+(``contest_as_respondent``) — are functions apart from the stages, which the
+live verification modules give a hosted authority the same way
+(``scenarios/vms/live/stages.py``). These stages are not named ``Test*``: a
+module collects each by subclassing it with an empty body, in its run order.
 """
 
 from __future__ import annotations
@@ -96,8 +102,9 @@ SELLER_FAILURE_REASON = "the seller's delivery failed"
 class RateDisputeState(RateServicingState):
     """What a rate-dispute row's stages hand each other, beside a rate row's."""
 
-    #: The lane instant the case's delivery end falls at: the seller's recorded
-    #: end, or the buyer's claimed one.
+    #: The instant the case's delivery end falls at, lane time's in a lane and
+    #: the wall clock's in a live run: the seller's recorded end, or the
+    #: buyer's claimed one.
     delivery_end_at: Optional[int] = None
     #: The Agreement's premature-stop penalty the seller's filing is ruled with.
     penalty: Optional[int] = None
@@ -142,6 +149,68 @@ def _producer_output(payments_config: Any, mediation_target: MediationTarget,
              deal_state.negotiation_id, deal_state.settlement_id, deal_state.case_ref,
              json.dumps({"record": record, "snapshot": snapshot}, sort_keys=True))
     return record, snapshot
+
+
+def premature_stop_penalty(agreement: Any) -> int:
+    """The Agreement's premature-stop penalty, which a mechanical ruling of a
+    payee's ``delivery_end`` takes from the part's held earnings, capped."""
+    terms = decode_terms(agreement["settlement"]["lifecycle"])
+    assert terms is not None and terms.early_termination is not None, terms
+    return int(terms.early_termination.premature_stop_penalty)
+
+
+def end_delivery_as_a_failure(storefront_admin_client: Any,
+                              deal_state: RateDisputeState) -> dict[str, Any]:
+    """The storefront's administrator ends the deal's delivery as a failure,
+    through the storefront client's interruption; the storefront's answer,
+    which ``filed_as_payee`` holds to its filing."""
+    ended: dict[str, Any] = storefront_admin_client.admin_interrupt_deal(
+        deal_state.negotiation_id, reason=SELLER_FAILURE_REASON, interruption_kind="failure",
+    )
+    return ended
+
+
+def filed_as_payee(ended: dict[str, Any]) -> tuple[int, str]:
+    """The administrator's end recorded the operator's end, filed
+    ``delivery_end`` as the payee, which the dispute authority accepted, and
+    began the teardown. The instant the storefront recorded the end at, which
+    its filing claims, and the case the authority filed."""
+    assert ended["settlement_action"] == "delivery_end_filing", ended
+    outcome = ended["lifecycle_outcome"]
+    assert outcome["status"] == "accepted" and outcome.get("filing"), ended
+    recorded = ended["delivery"]["recorded_end"]
+    assert recorded["cause"] == "operator_end", ended
+    assert ended["delivery"]["progress"] == "tearing_down", ended
+    return int(recorded["ended_at"]), str(outcome["filing"]["case_ref"])
+
+
+def file_the_buyers_claim(mediation_target: MediationTarget, buyer_evidence: Path,
+                          deal_state: RateDisputeState) -> str:
+    """The buyer files ``delivery_end`` at ``delivery_end_at`` through the
+    mediation kit's dispute adapter, as its lifecycle would; the authority
+    accepts the filing and holds the one part by an extension. The case it
+    filed."""
+    outcome = file_as_buyer(mediation_target, negotiation_id=deal_state.negotiation_id,
+                            transaction=deal_state.settlement_id,
+                            agreement=deal_state.agreement, store=buyer_evidence,
+                            ended_at=deal_state.delivery_end_at)
+    assert outcome.status == "accepted" and outcome.filing is not None, outcome
+    assert [(part.part, part.status) for part in outcome.filing.parts] == [("0", "held")], outcome
+    return str(outcome.filing.case_ref)
+
+
+def contest_as_respondent(storefront_admin_client: Any, deal_driver: RecurringPurchaseDriver,
+                          deal_state: RateDisputeState) -> None:
+    """One servicing step: the storefront's respondent discovery finds the
+    buyer's case on the authority's respondent listing and answers it on the
+    record, one append by the seller's account, which contests the claim;
+    delivery stays active, no end recorded."""
+    advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
+    read = deal_driver.lifecycle_read(deal_state.negotiation_id)
+    answers = [event.actor for event in read.authority.disputes
+               if event.kind == "appended" and event.case_ref == deal_state.case_ref]
+    assert answers == [str(payment_setting("SELLER_ACCOUNT"))], read.authority.disputes
+    assert (read.delivery.progress, read.delivery.recorded_end) == ("active", None), read.delivery
 
 
 def _ruling_recorded(deal_driver: RecurringPurchaseDriver, deal_state: RateDisputeState, *,
@@ -261,9 +330,7 @@ class SellerFiling08_MechanicalRulingInstalled:
         """
         require_state(deal_state, "delivery_end_at", "agreement", "settlement_id",
                       "reserved_through")
-        terms = decode_terms(deal_state.agreement["settlement"]["lifecycle"])
-        assert terms is not None and terms.early_termination is not None, terms
-        penalty = int(terms.early_termination.premature_stop_penalty)
+        penalty = premature_stop_penalty(deal_state.agreement)
         view = lane_double_rules.install("mediation", Rule(
             rule_id=SELLER_FILING_RULE,
             match={"operation": "file", "transaction": deal_state.settlement_id,
@@ -296,17 +363,11 @@ class SellerFiling09_StorefrontFilesAsPayee:
         require_state(deal_state, "penalty", "delivery_end_at", "negotiation_id",
                       "settlement_id")
         deal_state._deal_ending = True
-        ended = storefront_admin_client.admin_interrupt_deal(
-            deal_state.negotiation_id, reason=SELLER_FAILURE_REASON, interruption_kind="failure",
-        )
-        assert ended["settlement_action"] == "delivery_end_filing", ended
-        assert ended["lifecycle_outcome"]["status"] == "accepted", ended
-        recorded = ended["delivery"]["recorded_end"]
-        assert (recorded["cause"], recorded["ended_at"]) == (
-            "operator_end", deal_state.delivery_end_at), ended
-        assert ended["delivery"]["progress"] == "tearing_down", ended
+        ended_at, case_ref = filed_as_payee(
+            end_delivery_as_a_failure(storefront_admin_client, deal_state))
+        assert ended_at == deal_state.delivery_end_at, (ended_at, deal_state.delivery_end_at)
         case = _the_case(lane_double_rules, deal_state.settlement_id)
-        assert (case.state, case.filer) == ("applying", "payee"), case
+        assert (case.case_ref, case.state, case.filer) == (case_ref, "applying", "payee"), case
         view = lane_double_rules.view("mediation", SELLER_FILING_RULE)
         assert (view.matched, view.waiting) == (1, 1), view
         part = _the_part(payments_config, deal_state)
@@ -387,15 +448,9 @@ class ContestedCase08_BuyerFiles:
         an extension and rules nothing; the case stays open."""
         require_state(deal_state, "delivery_end_at", "negotiation_id", "settlement_id",
                       "agreement")
-        outcome = file_as_buyer(mediation_target, negotiation_id=deal_state.negotiation_id,
-                                transaction=deal_state.settlement_id,
-                                agreement=deal_state.agreement, store=buyer_evidence,
-                                ended_at=deal_state.delivery_end_at)
-        assert outcome.status == "accepted" and outcome.filing is not None, outcome
-        assert [(part.part, part.status) for part in outcome.filing.parts] == [("0", "held")], outcome
+        case_ref = file_the_buyers_claim(mediation_target, buyer_evidence, deal_state)
         case = _the_case(lane_double_rules, deal_state.settlement_id)
-        assert (case.case_ref, case.state, case.filer) == (
-            outcome.filing.case_ref, "open", "payer"), case
+        assert (case.case_ref, case.state, case.filer) == (case_ref, "open", "payer"), case
         deal_state.case_ref = case.case_ref
         log.info("[c08] The buyer filed case %s on Agreement %s", case.case_ref,
                  deal_state.negotiation_id)
@@ -410,12 +465,7 @@ class ContestedCase09_StorefrontContests:
         the record, one append by the seller's account, which contests the
         claim; delivery stays active, no end recorded."""
         require_state(deal_state, "case_ref", "negotiation_id")
-        advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
-        read = deal_driver.lifecycle_read(deal_state.negotiation_id)
-        answers = [event.actor for event in read.authority.disputes
-                   if event.kind == "appended" and event.case_ref == deal_state.case_ref]
-        assert answers == [str(payment_setting("SELLER_ACCOUNT"))], read.authority.disputes
-        assert (read.delivery.progress, read.delivery.recorded_end) == ("active", None), read.delivery
+        contest_as_respondent(storefront_admin_client, deal_driver, deal_state)
         log.info("[c09] The storefront contested case %s", deal_state.case_ref)
 
 
