@@ -25,6 +25,10 @@ FORMAT = 2
 # non-empty value marks a run unattended. The marker is internal: no repository or
 # runner reads it.
 UNATTENDED_RUN = "CHANGE_WORKFLOW_UNATTENDED"
+# Set by the guarded push in the environment of the one `git push` it runs, so the
+# engine's `git`, which the sandbox mounts over the system's, lets that push through
+# while it refuses every other of an unattended run (`sandbox_git`).
+GUARDED_PUSH = "CHANGE_WORKFLOW_GUARDED_PUSH"
 # Where Claude Code gives every command it starts the id of its session. The
 # variable is not documented, so a run where it is unset is refused rather than
 # recorded without a session, and `record --session` gives the id instead; what a

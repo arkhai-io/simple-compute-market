@@ -381,7 +381,7 @@ a new executable `scripts/change_workflow/sandbox-git`, `sandbox.py`, `push.py`,
 `scripts/tests/test_change_workflow_sandbox_git.py`, `scripts/tests/test_check_push_ready.py`
 where it covers `push.py`.
 
-- [ ] 4.1 Write `sandbox-git`: while `CHANGE_WORKFLOW_UNATTENDED` is set and the
+- [x] 4.1 Write `sandbox-git`: while `CHANGE_WORKFLOW_UNATTENDED` is set and the
   guarded push's marker is not, it refuses a `push` subcommand wherever it stands
   among Git's options — `--no-verify`, `-c core.hooksPath=…`, `-C <dir>` among them —
   printing why and exiting non-zero, and records the refusal, with its command line,
@@ -389,14 +389,76 @@ where it covers `push.py`.
   the real Git at the path the sandbox binds it to (D2; CW-j4cs). Verify: unit tests
   of the decision for each option form, a non-push command, the marker unset, and the
   guarded marker set.
-- [ ] 4.2 `sandbox.py` binds the real `/usr/bin/git` at a path only `sandbox-git`
+  Done, as a module rather than an executable file: `change_workflow/sandbox_git.py`.
+  Why the plan's form could not hold:
+  - A program mounted at `/usr/bin/git` cannot find the engine's package by its own
+    path.
+  - A new file's mode cannot be set in this session: `chmod` has no rule, and Git
+    applies a mode only on checkout.
+
+  So `sandbox.py` mounts a short generated shell program over Git (4.2). It runs
+  `sandbox_git.main` with the engine's Python, `-I`, from the engine's directory, and
+  passes `$0`.
+  - `subcommand` reads past Git's own options. `_VALUED` names those that take their
+    value as the next argument. A dashed name such as `git-receive-pack` gives its
+    subcommand.
+  - `refusal` refuses a push under `UNATTENDED_RUN` without `common.GUARDED_PUSH`
+    (`CHANGE_WORKFLOW_GUARDED_PUSH`).
+  - `main` keeps a refusal as `{"hook": running.REFUSED_PUSH, "command", "error",
+    "started"}`, with no change named. Otherwise it `execv`s `REAL_GIT` under the
+    name it was run by.
+  - Found while testing 4.3: Git's local transport runs `git-receive-pack`, a link to
+    Git. Run as `git`, it broke a push to a local path. So the name Git was run by is
+    kept.
+
+  Unit tests in `test_change_workflow_sandbox_git.py`, all passing:
+  - nine option forms found as a push and refused;
+  - five other commands, among them `-C push status`, run;
+  - dashed names;
+  - the marker unset, and the guarded marker set.
+
+  `test_a_refusal_is_said_and_kept_for_the_sessions_line` uses a real Git checkout
+  for the invocations directory.
+- [x] 4.2 `sandbox.py` binds the real `/usr/bin/git` at a path only `sandbox-git`
   names, then `sandbox-git` read-only over `/usr/bin/git` and `/usr/lib/git-core/git`
   (Git's exec path), both protected (D2, D4; CW-r6kd). Verify: library-integration
   tests through real bubblewrap on a repository with a bare remote: `git push`, `git
   push --no-verify`, `git -c core.hooksPath=/dev/null push`, and
   `/usr/lib/git-core/git push` are refused and nothing reaches the remote; `git
   status` and `git commit` work (CW-j4cs's scenarios).
-- [ ] 4.3 `push.py` sets the guarded push's marker in the environment of the `git push`
+  Done. `arguments(scope, program, *, git)` renders three mounts after the protected
+  ones:
+  - `--ro-bind /usr/bin/git /dev/change-workflow-git`, the real Git at
+    `sandbox_git.REAL_GIT`;
+  - then `--perms 0755 --ro-bind-data <fd>` over each of `scope.GIT_EXECUTABLES`.
+
+  Why `/dev`: bubblewrap cannot make a mount point on the read-only root ("Can't
+  mkdir parents …: Read-only file system", tried here), and the sandbox's own `/dev`
+  is a fresh tmpfs. An overlay of `/usr/lib/git-core` also worked, but is heavier.
+
+  `launch` writes `git_program()` into one `memfd` per mount and returns them as
+  `Launch.fds`. `Launch` is a context manager that closes them. A caller passes them
+  with `pass_fds`, and section 7's runner must too.
+
+  The data mount copies the shell program at launch, so it needs no executable file
+  on disk. The module it runs is read from the engine's directory at each call. Where
+  the engine runs from the change's own checkout, a step writing that checkout can
+  therefore change what its `git` refuses. That is outside P1, and no protected path
+  covers the engine's package.
+
+  Section 3's `binds` parameter had no other user, so it was removed. Section 3's
+  tests now pass the descriptors.
+
+  External-process integration tests (not library integration: they run bwrap, sh,
+  and git), on a real repository with a bare `origin` the scope makes writable, so a
+  refusal is not a read-only failure. All pass here, none skipped:
+  - CW-j4cs's four pushes each exit 1 naming the refusal, `dev` on the remote
+    unchanged, and the refusal kept with its command line;
+  - `git commit` and `git status` work through the mounted program.
+
+  As 3.3 flagged, nothing gates these tests on a skip. They join 3.3's in that
+  question for the triage.
+- [x] 4.3 `push.py` sets the guarded push's marker in the environment of the `git push`
   it runs, so `sandbox-git` lets it through, and, under a run, records each attempted
   push once Git returns — branch, remote, commit sent, Git's exit status — among the
   session's invocations; under a run it never passes `--set-upstream` (D2; CW-59c7).
@@ -405,15 +467,79 @@ where it covers `push.py`.
   status 0; a push Git fails after the pre-push hook passed is recorded with its
   failing status (CW-59c7's "An unattended push fails"); outside a run the owner's
   push sets its upstream as today.
-- [ ] 4.4 After a session ends, before its line is written, the wrapper sets the
+  Done. `git push` always runs with `GUARDED_PUSH=1`, which matters only inside the
+  sandbox. Under `UNATTENDED_RUN`:
+  - the target's `set_upstream` is dropped;
+  - `check` says the engine sets the upstream;
+  - each push is kept as `{"hook": running.ATTEMPTED_PUSH, "command", "branch",
+    "remote", "commit", "exit_status", "started", "seconds"}`, with no change named.
+
+  Tests, all passing:
+  - in `test_change_workflow_sandbox_git.py`, external-process integration: the
+    guarded push, run as `scripts/change-workflow push` inside bwrap, reaches the
+    bare remote and is kept with `HEAD` and status 0;
+  - in `test_check_push_ready.py`, library integration on real Git through
+    `push.main`: an unattended push sets no upstream and is kept; a non-fast-forward
+    push after a passing `pre-push` is kept with Git's status, 1, after the
+    `pre-push` entry.
+
+  Outside a run, the existing upstream and keeps-nothing tests pass unchanged.
+- [x] 4.4 After a session ends, before its line is written, the wrapper sets the
   branch's upstream outside the sandbox to the remote of the run's last successful
   guarded push of that branch, as its record names it, and sets none where no push of
   it succeeded (D2; CW-59c7's "An unattended run pushes a branch with no upstream").
   Verify: library-integration tests with the harness doubled pushing a branch with no
   upstream, and failing to.
-- [ ] 4.5 Verification point: `test_change_workflow_sandbox_git.py` (unit, library
+  Done. `push.set_upstreams(root, invoked)` gives each branch with neither
+  `branch.<b>.remote` nor `.merge` its own name on its last successful push's remote.
+  `Wrapper._logged_turn` calls it with what the sessions kept, before
+  `record_outcome`. A failure is printed and stops no line.
+
+  Tests in `test_check_push_ready.py`, all passing, library integration on real Git
+  and a bare remote. Two drive the wrapper, the harness doubled by a fake whose turn
+  runs `cli.main(["push", "--remote", "origin"])`:
+  - a design run's push leaves `origin/feat/change` as the upstream;
+  - a rejected push leaves none.
+
+  A third calls `push.main` and `set_upstreams` directly: a branch already tracking
+  keeps its upstream after an unattended push to another remote. No test drives
+  `check`'s new message, or a failure to set an upstream.
+- [x] 4.5 Verification point: `test_change_workflow_sandbox_git.py` (unit, library
   integration through real bubblewrap), the push and wrapper tests above; `run
   pre-commit` passes. End-to-end: none.
+  Done:
+  - `make test-release-tooling` on the sandbox `git`, sandbox, push, wrapper, and
+    scope tests: 196 passed, none skipped (`PYTEST_ARGS=-rs`).
+  - `run pre-commit`: its functional hooks pass, the relock, packaging, and every
+    suite. Its `pre-commit` fails only `check-doc-citations`, on the three files
+    sections 5 and 9 create. The relock left the locks as committed.
+  - A first run failed its "tree after" check: this session edited the worktree
+    while the suites ran. Every suite had passed. The rerun, untouched, passed.
+  - Fresh-context check fixes:
+    - the false claim that the engine's `git` is fixed at launch;
+    - `Launch`'s descriptor wording;
+    - two overstated notes;
+    - Git's status asserted as 1;
+    - the skip gate flagged again.
+
+    Declined: its reading that the push and wrapper comments describe a sandbox that
+    no step yet launches in. The branch lands whole, and those comments describe the
+    system it lands as.
+  Handoff:
+  - Section 7's runner starts the `Launch` command with `pass_fds=launched.fds`,
+    inside `with launched:`.
+  - Section 7.2 reads `REFUSED_PUSH` entries from the sessions' kept invocations.
+    A Codex reviewer has no session id (`SESSION_ID` is withheld from it), so the
+    sandbox's `git` keeps nothing for it. The review pushes nothing, but 7.2's
+    "whatever the harness" needs a run-scoped key, or Codex given one.
+  - Gaps for the triage, outside P1:
+    - A plain alias naming `push` (`-c alias.p=push p`) passes as its alias's name.
+    - An unknown Git option taking a separate value would be read as the
+      subcommand.
+    - The module the mounted program runs is the engine's, live (4.2).
+  - Every Git call inside the sandbox now starts a Python process first (not
+    measured). Watch for slowness in Git-heavy hooks once section 7 launches steps
+    there.
 
 ## 5. The seven checks after every run
 

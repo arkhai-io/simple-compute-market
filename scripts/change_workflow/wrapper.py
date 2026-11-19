@@ -16,7 +16,10 @@ never added to the step table.
 Either way the run's event stream is kept as its transcript, and its outcome is
 appended to the workflow log, with what the run invoked as `invoked`: what each of
 its attempts' sessions invoked for the change through `run`, and through the
-guarded push, that no line has taken yet. A run that crashes, ends without an outcome, or ends
+guarded push, that no line has taken yet. Before the line is written, each branch the
+session's guarded push pushed with no upstream is given the upstream of its own
+name on the remote of its last successful push, outside the sandbox that kept
+`.git/config` from the session (CW-59c7). A run that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself, and so is
 a triage whose outcome does not name the records it triaged, and a finished merge
 or archive cleanup whose landing record the log's writer refuses. A step
@@ -76,6 +79,7 @@ from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, 
 from .log import (Checkout, git_checkout, landing_problems, last_run, log_path, read_log,
                   record_outcome, revisit_direction, revisit_refusal)
 from .outcome import load_schema, outcome_problems, triage_outcome_problems
+from .push import set_upstreams
 from .records import git_head, next_transcript
 from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
                       runs_directory, termination_deferred, termination_ends_the_run)
@@ -470,6 +474,7 @@ class Wrapper:
         sessions = list(dict.fromkeys(s for s in (session, *(a.session for a in attempts), ran)
                                       if s))
         taken = {s: kept_invocations(directory, s, change) for s in sessions}
+        self._set_upstreams([entry for s in sessions for entry in taken[s]])
         if invoked := [*ahead, *(entry for s in sessions for entry in taken[s]), *behind]:
             extra["invoked"] = invoked
         try:
@@ -492,6 +497,19 @@ class Wrapper:
         if failure is not None and not isinstance(failure, Exception):
             raise failure
         return line
+
+    def _set_upstreams(self, invoked: Sequence[Entry]) -> None:
+        """Set, outside the session's sandbox, the upstream of each branch the session's
+        guarded push pushed with none (`push.set_upstreams`). A failure is said and
+        stops nothing: the push is done, and the run still ends with its line."""
+        try:
+            done = set_upstreams(self.root, invoked)
+        except StepError as exc:
+            print(f"WARNING: {exc}", file=sys.stderr)
+            return
+        for upstream in done:
+            if self.echo is not None:
+                self.echo(f"upstream set: {upstream}")
 
     def _actions(self, moment: Callable[[Path], list[Ran]], directory: Path) -> list[Entry]:
         """Run the actions and hooks before a session into `directory`, and return

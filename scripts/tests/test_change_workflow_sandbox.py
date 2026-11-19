@@ -26,6 +26,11 @@ from change_workflow.sandbox import BWRAP, Launch
 from change_workflow.scope import ADAPTER, ENGINE, GRANT, Scope, ScopedPath
 
 BASE = [BWRAP, "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+# The engine's `git` over the system's two, read from descriptors 7 and 8, and the
+# system's Git where only the engine's names it.
+GIT = ["--ro-bind", "/usr/bin/git", "/dev/change-workflow-git",
+       "--perms", "0755", "--ro-bind-data", "7", "/usr/bin/git",
+       "--perms", "0755", "--ro-bind-data", "8", "/usr/lib/git-core/git"]
 
 
 def _paths(source: str, *paths: Path, create: bool = False) -> tuple[ScopedPath, ...]:
@@ -41,8 +46,7 @@ def test_a_scope_renders_writable_paths_then_the_protected_ones_inside_them() ->
                    _paths(ENGINE, root / ".agents/workflow.toml", root / ".git/config",
                           Path("/usr/bin/git")))
 
-    command = sandbox.arguments(design, ["claude", "-p", "go"],
-                                binds=[(Path("/opt/engine-git"), Path("/usr/bin/git"))])
+    command = sandbox.arguments(design, ["claude", "-p", "go"], git=(7, 8))
 
     def bind(flag: str, path: str) -> list[str]:
         return [flag, path, path]
@@ -55,7 +59,9 @@ def test_a_scope_renders_writable_paths_then_the_protected_ones_inside_them() ->
         # Only the protected path inside a writable one: the configuration and Git's
         # executable lie outside design's, read-only under the root already.
         *bind("--ro-bind", "/work/checkout/.git/config"),
-        "--ro-bind", "/opt/engine-git", "/usr/bin/git",
+        # Then the engine's `git` over the system's, after every writable path, so no
+        # writable directory holding an executable hides it.
+        *GIT,
         "--die-with-parent", "--", "claude", "-p", "go"]
 
 
@@ -64,11 +70,11 @@ def test_a_checkout_wide_scope_mounts_the_configuration_read_only_after_the_chec
     implement = Scope("implement", _paths(ENGINE, root),
                       _paths(ENGINE, root / ".agents/workflow.toml"))
 
-    command = sandbox.arguments(implement, ["true"])
+    command = sandbox.arguments(implement, ["true"], git=(7, 8))
 
     assert command[len(BASE):-3] == ["--bind", str(root), str(root), "--ro-bind",
                                      str(root / ".agents/workflow.toml"),
-                                     str(root / ".agents/workflow.toml")]
+                                     str(root / ".agents/workflow.toml"), *GIT]
 
 
 # What is created before launch.
@@ -160,10 +166,11 @@ def test_without_the_sandbox_the_program_runs_unconfined_with_the_reason(
 def test_with_the_sandbox_the_program_runs_inside_it(tmp_path: Path) -> None:
     found = Scope("triage", _paths(GRANT, tmp_path / "build", create=True), ())
 
-    launched = sandbox.launch(found, ["claude"], probing=lambda: None)
-
-    assert launched.unconfined is None
-    assert launched.command[0] == BWRAP and launched.command[-2:] == ("--", "claude")
+    with sandbox.launch(found, ["claude"], probing=lambda: None) as launched:
+        assert launched.unconfined is None
+        assert launched.command[0] == BWRAP and launched.command[-2:] == ("--", "claude")
+        # The engine's `git`, open for bubblewrap to read over each Git executable.
+        assert [os.read(fd, 10) for fd in launched.fds] == [b"#!/bin/sh\n"] * 2
     assert (tmp_path / "build").is_dir()
 
 
@@ -190,9 +197,10 @@ def checkout(tmp_path: Path) -> Path:
 
 
 def _run(found: Scope, script: str, root: Path) -> subprocess.CompletedProcess:
-    launched = sandbox.launch(found, ["sh", "-c", script])
-    assert launched.unconfined is None
-    return subprocess.run(launched.command, cwd=root, capture_output=True, text=True)
+    with sandbox.launch(found, ["sh", "-c", script]) as launched:
+        assert launched.unconfined is None
+        return subprocess.run(launched.command, cwd=root, capture_output=True, text=True,
+                              pass_fds=launched.fds)
 
 
 @needs_bwrap
@@ -283,9 +291,9 @@ def _docker_socket() -> str | None:
 def test_the_docker_socket_carries_traffic_from_inside(checkout: Path) -> None:
     if (path := _docker_socket()) is None:
         pytest.skip("no Docker socket answering this user here")
-    launched = sandbox.launch(_scope("design", checkout), [sys.executable, "-c", PING, path])
-
-    pinged = subprocess.run(launched.command, capture_output=True, text=True)
+    with sandbox.launch(_scope("design", checkout), [sys.executable, "-c", PING, path]) as launched:
+        pinged = subprocess.run(launched.command, capture_output=True, text=True,
+                                pass_fds=launched.fds)
 
     assert (pinged.returncode, pinged.stdout.strip()) == (0, "OK"), pinged.stderr
 
@@ -295,11 +303,13 @@ def test_the_session_dies_with_its_launcher(checkout: Path) -> None:
     """Once the process that launched the sandbox dies, every process inside dies with
     it, a command left running in the background included: the pipe they all hold
     reaches its end only when the last of them is gone."""
-    launched = sandbox.launch(_scope("design", checkout),
-                              ["sh", "-c", "sleep 600 & echo ready; exec sleep 600"])
-    launcher = subprocess.Popen(
-        [sys.executable, "-c", "import subprocess, sys; subprocess.Popen(sys.argv[1:]).wait()",
-         *launched.command], stdout=subprocess.PIPE)
+    with sandbox.launch(_scope("design", checkout),
+                        ["sh", "-c", "sleep 600 & echo ready; exec sleep 600"]) as launched:
+        # The launcher hands bubblewrap the descriptors it inherited.
+        launcher = subprocess.Popen(
+            [sys.executable, "-c",
+             "import subprocess, sys; subprocess.Popen(sys.argv[1:], close_fds=False).wait()",
+             *launched.command], stdout=subprocess.PIPE, pass_fds=launched.fds)
     assert launcher.stdout is not None
     try:
         assert launcher.stdout.readline() == b"ready\n"
