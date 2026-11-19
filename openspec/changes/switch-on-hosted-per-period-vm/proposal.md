@@ -1,81 +1,51 @@
 ## Why
 
-`serve-running-rate-deals` proves on-demand and spot deals in both compute lanes
-against the lane doubles. No production composition declares rate servicing, so no
-real buyer can take one, and the MVP replaces the automated remedies Goal 8 designs
-with operator procedures that do not yet exist.
+`serve-running-rate-deals` services on-demand and spot deals in both compute lanes
+against the lane doubles, but no shipped configuration offers them, nothing tells a
+seller how to or a buyer what they get, and nothing has compared the hosted payment and
+dispute authorities with the doubles the lanes rely on. The payments service documents
+rate execution as implemented, and its hosted mediation rules a payee's delivery-end
+filing mechanically; SCM's lanes cannot yet produce a dispute authority's stop on a rate
+deal, because the mediation double executes only reversals.
 
-The contract side of the hosted gate is clear. Every hosted payments deployment runs
-the vendored contract revision (`kit/arkhai-payments/schema/SOURCE.md`) or a later,
-additive one, and the payments service documents rate execution as implemented: rate
-parts and their scheduler, partial-period billing for every treatment, scheduled
-stops, and the dispute authority's `chosen` stop entry. What has not run against a
-hosted target is narrower. The producer's own hosted run covered a payee stop under
-`charged` and funds running out; it did not cover `returned`, a term end, the `chosen`
-dispute stop or reversal, which the archived `spot-deals-through-arkhai-payments`
-leaves to the switch-on. And every hosted option names the mediation authority — the
-`chosen` stop entry is the mediation account's, and a storefront files `delivery_end`
-with mediation when it ends delivery — while mediation is not yet deployed to the
-hosted test target.
-
-This change is the last of Goal 8's MVP changes, after `drive-the-storefront-clock-in-lanes`
-and `serve-running-rate-deals`. It takes the switch-on from
-[`activate-per-period-compute-servicing`](../activate-per-period-compute-servicing/),
-reduced to VM and to operator-handled disputes, and adds the operator runbooks.
+This change is the last of Goal 8's MVP changes, after
+`drive-the-storefront-clock-in-lanes` and `serve-running-rate-deals`. It takes the VM
+switch-on from
+[`activate-per-period-compute-servicing`](../activate-per-period-compute-servicing/).
 Turning the MVP on does not complete Goal 8.
 
 ## What Changes
 
-- **Prepare the hosted target** through existing setup tooling and run its readiness
-  check before any deal scenario.
-- **Live runs**, VM only, recorded as live evidence apart from lane-double evidence:
-  a complete on-demand deal; the buyer's stop, charged through its started period;
-  funds running out; spot preemption with notice, returning the unstarted remainder;
-  the term end, returning the unstarted remainder; the dispute authority's stop
-  through the `chosen` entry; and reversal of held money while the part runs and
-  after it stops. They are gated on mediation being deployed to the hosted test
-  target; everything else in this change proceeds before it.
-- **The production declaration.** The VM production composition declares
-  `[charged, returned]` — the treatments the shipped presets use — only after the
-  live runs pass, with startup and withdrawal requalified under it, and a recorded
-  rollback. The production presets carry no setup charge.
-- **A delivery deadline from the seller's payments clause, as a stopgap.** The VM
-  production configuration sets `delivery_deadline_seconds` in the seller's payments
-  clause, which publication uses when the pool's deadline port supplies none
-  (`kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py`), so
-  every option promises a deadline and the default buyer accepts without a waiver. The
-  storefront enforces it, classifying a missed deadline as seller non-delivery; the
-  site does not. `renewable-compute-lease-deadlines` retires it after the MVP, when the
-  pool's tag supplies the deadline and the site enforces it.
-- **The dispute authority's policy.** Arkhai operators staff the MVP's dispute
-  authority and rule by hand. A published policy states how cases are dismissed or
-  ruled, the expected time to rule as advisory, and continuity. On key retention it
-  states the MVP's assumption — each environment's payments receipt key stays stable
-  for a deal's life, and a key change is a drained cutover — rather than promising a
-  retention the payments service has not committed to.
-- **Operator runbooks**, in `docs/operator-handbook.md`:
-  - a seller-side failure on an on-demand deal: stop now through the `chosen` entry
-    with `returned`, then reverse what was earned since the failure, since a stop
-    cannot be backdated;
-  - an unentitled seller end: rule the premature-stop penalty, up to what is still
-    held for the seller;
-  - refunding through the payments service's reversal while money is held;
-  - truncating a lease the storefront abandoned before delivery, and monitoring
-    committed reservations still unactivated past their delivery deadline;
-  - draining running deals before the payments receipt key changes.
-- **Payout and funding, stated for sellers and buyers.** A seller is paid at the
-  earliest at the part's stop, plus the dispute window, plus the payments service's
-  fixed payout delay of 7 days. Approval is refused when the buyer's balance cannot
-  cover the first reservation; a top-up or recharge landing before the funded
-  boundary keeps the part running, and after it the stop is final and the buyer
-  opens a new deal.
+- **A documented, supported switch-on.** The seller quickstart explains offering
+  on-demand and spot VM: the recurring clause, the declaration `[charged, returned]`
+  with no setup charge, the clause's delivery deadline and dispute window, withdrawal and
+  payout timing. The VM storefront chart ships a production example doing the same. The
+  buyer quickstart explains the options, the default refusals, funding and the dispute
+  remedy. No code gate is added; withdrawal is the seller removing the declaration.
+- **A delivery deadline from the seller's payments clause, as a stopgap**, enforced by
+  the storefront and retired by `renewable-compute-lease-deadlines`.
+- **Ruling side effects on the doubles.** The mediation double executes a ruling's
+  `stop` and `penalty`, and the VM lane runs a seller's filing and a buyer's contested
+  case on rate deals, each ruled with an authority stop, proving what the storefront does
+  after a ruling.
+- **Live verification as boundary comparisons.** Six VM live scenarios — the buyer's
+  stop, funds running out, a spot preemption, the term end, a seller's filing and a
+  buyer's contested case ruled by a topology's policy — give the hosted authorities the
+  inputs their lane twins gave the doubles and compare the outputs through shared
+  assertions, on wall time with mock provisioning. Each states its topology requirements
+  in prose; the deployment prepares a topology meeting them, runs them and records the
+  sanitized evidence in the change.
+- **Storefront operator runbooks**: an abandoned lease, committed reservations past
+  their deadline, draining before a receipt key change, and what each dispute outcome
+  shows a seller operator.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `settlement-configuration`: the deployment-qualified production declaration and its rollback.
-- `test-compatibility`: hosted live evidence distinct from lane-double evidence.
+- `test-compatibility`: the live verification form, topology requirements in prose, the
+  six live scenarios, the two lane rows and the mediation double's `stop` and `penalty`.
+- `deployment-state`: the VM storefront chart's production example.
 
 ### New Capabilities
 
@@ -83,39 +53,50 @@ None.
 
 ## Non-Goals
 
-- Bare metal's switch-on, which waits on a qualified real host, and Goal 8's completion bar, which stay with `activate-per-period-compute-servicing`.
-- `prorated` treatment, which no shipped preset offers.
-- Setup charges in production: a setup charge's return on non-delivery is a mechanical `delivery_end` remedy, which waits on hosted mediation's rulings.
-- Mechanical rulings and the hosted mediation `delivery_end` revision; filings that reach the hosted mediation service are triaged by hand.
-- Convergence's full matrix.
-- A site-enforced delivery deadline, the pool's tag and wiring the pool's deadline port (`renewable-compute-lease-deadlines`); the clause's storefront-enforced deadline stands in, and the runbook covers abandoned leases until it lands.
-- Re-anchoring running deals across a receipt key change; the runbook drains instead, as the archived spot change decided.
-- The payments service's own production readiness, which this change records as an external gate and does not perform.
+- Bare metal, setup charges, `prorated`, and Goal 8's completion bar, which stay with `activate-per-period-compute-servicing`.
+- Any release: creating a release is independent of any change.
+- Naming or preparing a hosted target; the deployment prepares topologies from the stated requirements.
+- Any SCM dependency on the dispute authority's operator API, or tests of the interaction between mediation and payments, which the payments service's own live verification covers.
+- Hosting the dispute authority's policy or operator procedures, which stay with the authority.
+- A pre-written fallback for a failed live comparison.
+- A site-enforced delivery deadline (`renewable-compute-lease-deadlines`).
+- Re-anchoring running deals across a receipt key change; the runbook drains instead.
+- The payments service's production readiness.
 
 ## Impact
 
-- Deployment: the VM production profile declares `[charged, returned]` once qualified, and sets the payments clause's `delivery_deadline_seconds`; the declaration can be withdrawn without reinterpreting existing deals.
-- Operations: Arkhai operators hold the dispute authority's credentials and follow the runbooks.
-- No wire or database change beyond those of the earlier MVP changes.
+- Documentation: the seller and buyer quickstarts, the operator handbook's storefront runbooks, the VM chart's production example, and the corrected caveats in `settlement-configuration`'s companion and `deal-lifecycle`'s architecture.
+- Test tooling: the mediation double (`stop`, `penalty`), two VM lane rows, `LaneTime`'s wall-time case, and six live scenarios with their requirements in `e2e-tests/README.md`.
+- No wire, database or service configuration change; no compatibility is owed, since no release carries rate servicing.
 
 ## Dependencies and Related Changes
 
-- Depends on `serve-running-rate-deals`.
-- The hosted live runs are gated on mediation deployed to the hosted test target, which the payments service's maintainers schedule; design and runbooks are not.
-- Production is gated externally on the payments service going live: live Stripe Connect, WorkOS in production, a counsel review and EU VAT. Nothing in this repository can unblock it.
-- Parts taken from `activate-per-period-compute-servicing` (task numbers in its `tasks.md`): 1.1 (without the discovery and delivery-deadline gates), 1.2 (the hosted revision and the treatments the shipped presets use), 1.3a's policy in the MVP's operator-ruled form, 2.3–2.4 (target preparation and readiness), 3.1, 3.1a and 3.2 (live runs, VM only), 3.3 (the VM production declaration), 3.4 (startup and withdrawal requalification under it).
+- Depends on `serve-running-rate-deals` (archived).
+- Takes the mediation double's `stop` execution from `converge-ongoing-compute-leases`; its index row and Goal 8 gap are edited in implementation.
+- Live verification waits for the deployment to prepare a topology meeting the stated requirements and record the evidence; the buyer's contested case needs a topology applying a ruling policy and may close out unproven.
+- Production is gated externally on the payments service going live.
+- Parts taken from `activate-per-period-compute-servicing` (task numbers in its `tasks.md`): 1.1, 1.2, 1.3a's policy in the form D11 leaves it, 2.3–2.4 as topology requirements, 3.1, 3.1a and 3.2 (live scenarios, VM only), 3.3 (the VM production example), 3.4 (withdrawal, already a requirement).
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification: `settlement-configuration`, `test-compatibility`
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification: `test-compatibility`, `deployment-state`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- D1: `settlement-configuration`'s spec and `docs/development/DEPLOYMENT_AND_CONFIG.md` — the hosted gate and the declaration's rollback.
-- D5: `docs/development/DEPLOYMENT_AND_CONFIG.md` — the production clause deadline, and that it is the storefront-enforced stopgap `renewable-compute-lease-deadlines` retires.
-- D2: `docs/operator-handbook.md` — the runbooks and the payout timing; `deal-lifecycle/architecture.md` — operators as the MVP's dispute authority and the key-retention assumption.
-- D3: `test-compatibility`'s spec — live evidence apart from lane-double evidence.
-- D4: the buyer and seller documentation that already describes funding and payout.
+- D1: `docs/seller-quickstart.md` and the VM chart's production example — the supported switch-on and its withdrawal; `settlement-configuration`'s companion and `deal-lifecycle/architecture.md` — the corrected hosted-qualification caveat.
+- D2: `docs/guidance/workflow/changes.md` — creating a release is independent of any change.
+- D3: `docs/guidance/engineering/system-tests.md` — the repository declares a live scenario's topology requirements without naming infrastructure, and the deployment prepares topologies from them; `docs/development/TESTING.md` — this repository's form.
+- D4: `docs/guidance/engineering/system-tests.md` — a live test's provisioning mode follows what it proves; `test-compatibility`'s companion — `LaneTime.reach`'s wall-time case.
+- D5: `docs/guidance/engineering/test-doubles.md` and `docs/development/ARCHITECTURE.md`'s external authorities — no dependency on an endpoint the producer's public client lacks; past it, the producer's own live tests qualify; `docs/guidance/engineering/system-tests.md` — a person's decision comes from a topology policy or the test.
+- D6: `docs/guidance/engineering/system-tests.md` — the live verification form, its shared assertion, bounded polling and failure on difference; `docs/guidance/engineering/test-doubles.md` — asynchronous producer decisions by polling and by inbound call; `test-compatibility`'s spec and companion — the double's `stop` and `penalty` and the lane rows.
+- D7: `docs/development/DEPLOYMENT_AND_CONFIG.md` and `docs/seller-quickstart.md` — the clause deadline as the storefront-enforced stopgap `renewable-compute-lease-deadlines` retires.
+- D8: `test-compatibility` and `deployment-state` specifications, by archive.
+- D9: `docs/attachments/switch-on-hosted-per-period-vm/` — the live evidence summary; `docs/development/ROADMAP.md` Goal 8 cites it.
+- D10: `docs/seller-quickstart.md` and `docs/buyer-quickstart.md`.
+- D11: `docs/operator-handbook.md` — the storefront runbooks; `deal-lifecycle/architecture.md` — the key-stability assumption.
+- D12: no permanent destination — the implementation cadence governs this change's rounds only.
+- D13: `docs/guidance/engineering/system-tests.md` — requirements start as prose read with judgement, and a mode earns its own scenario only where the producer runs different code; `docs/development/TESTING.md` — where this repository's requirements live.
+- D14: no permanent destination — a decision about this change's handling of a failed live comparison.
