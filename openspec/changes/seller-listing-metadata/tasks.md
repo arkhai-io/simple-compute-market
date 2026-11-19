@@ -23,7 +23,7 @@ join `dev`'s migration chain. Touches `core/registry`, `core/registry-client`,
 `domains/vms/listings`, `domains/vms/storefront`, `domains/bare_metal`,
 `domains/bare_metal/storefront`, `domains/apicredits/storefront`.
 
-- [ ] 2.1 Merge `origin/dev` into the branch and resolve every conflict (D3, F1).
+- [x] 2.1 Merge `origin/dev` into the branch and resolve every conflict (D3, F1).
   Registry: keep `dev`'s publish path, which stores `dict(body)` as
   `published_document` and serves it through `order_to_dict`
   (`core/registry/src/core_registry/api/listing_routes.py`, `api/utils.py`,
@@ -46,7 +46,20 @@ join `dev`'s migration chain. Touches `core/registry`, `core/registry-client`,
   `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`,
   `pool_overrides.py`). Verify: `git diff --check` reports no conflict marker and
   `git grep -n "listing_details" core/registry` names no column or revision.
-- [ ] 2.2 Verify the merge (repository obligation: `AGENTS.md`, "Tests and
+  Done as merge commit `6cd479734` (`origin/dev` at `033e799a6`): the implement step
+  may not fetch or merge, so the orchestrating session started the merge on the
+  owner's word, resolving the change index, and a merge-resolution run resolved the
+  fifteen code files left conflicted as this task directs. The storefront migration is `20261118_001_listing_details`,
+  last in `MIGRATIONS`; the registry's detail check runs inside
+  `listing_validation_errors`, which publish and dry run share. Checked here:
+  `git diff --check origin/dev HEAD` reports nothing, no conflict marker is in
+  `core/` or `domains/`, and `git grep -n listing_details core/registry` names only
+  the `market_core.listing_details` imports in `api/filter_spec.py` and
+  `api/validate_routes.py`. Outside the plan: the re-applied `write_listing_update`
+  JSON-encoded `title` and `description`, which the upsert stores as plain text, so
+  an update would have stored `"x"` with its quotes; only `metadata` is encoded now.
+  Sections 4 and 5 prove the update path.
+- [x] 2.2 Verify the merge (repository obligation: `AGENTS.md`, "Tests and
   diagnostics"). Rebuild the wheels (`make dist`, then `make reinit` in each touched
   project) and run, with proxy variables unset: registry unit and integration,
   registry-client, `core` unit, core storefront unit and integration,
@@ -58,6 +71,68 @@ join `dev`'s migration chain. Touches `core/registry`, `core/registry-client`,
   End-to-end: none new; validation's pipeline run on the merge commit is evidence
   that the merged stack still publishes and deals, through every lane's existing
   scenarios.
+  After `make dist`, each `make -C <package> test` (which runs its `reinit`):
+  registry 155 unit and 172 integration passed; registry-client 31; `core` unit
+  (`make -C core test-core`) 130; core storefront 234, its library integration
+  included; storefront-client 75; VM storefront 1199 unit passed, 1 skipped, and
+  632 integration passed; VM domain 60; bare-metal domain 226. VM listings has no
+  suite of its own: its reconciler, comparison and models run under the VM
+  storefront's unit and integration suites. Three suites failed only on the
+  session's SOCKS `ALL_PROXY` (`socksio` not installed): bare-metal storefront 65
+  failed, 611 passed; VM storefront integration 2 failed
+  (`test_watchdog_buy.py`); API-credit storefront 1 failed
+  (`test_lifecycle_status.py`), 284 passed. Every failure's traceback is that
+  ImportError. This step's rules do not let a command clear the proxy variables,
+  and `run test-before --at origin/dev` cannot collect the API-credit file (its
+  `--no-project` environment lacks `injected_time`), so each was rerun with
+  `socksio` added instead: `uv run --directory <package> --with socksio pytest`
+  (`--find-links ../../../.dist` for the VM storefront) gave bare-metal storefront
+  676 passed, API-credit storefront 285 passed, and VM `test_watchdog_buy.py` 2
+  passed. `make check-packaging` passes. `scripts/change-workflow run pre-commit
+  seller-listing-metadata --base origin/dev` (the change's clone records no landing
+  branch, so `{base}` is given) fails two checks, both work the plan gives section 3
+  and so outside this section: the strict OpenSpec validation, as the registry
+  delta's MODIFIED "Schema-driven listing validation" lacks `dev`'s scenario "A
+  schema-invalid publication is submitted" (3.4), and `make check-local-imports` on
+  `roundtrip.py:92`, `:109` and `:115` (3.3). Correction: 2.2 asked both checks to
+  pass, which its plan's order made impossible before section 3; section 3's
+  verification point carries the passing pre-commit. A third failure, the guidance
+  check on section 7's preamble citing a "plan closeout requirements" heading
+  `openspec/README.md` no longer has, was fixed here, outside the plan: the
+  preamble cites `closeout.md` and that README's "This repository's closeout parts"
+  instead, and section 7 gains the Guidance placement part `closeout.md` lists
+  between Promotion and Documentation citations, which it lacked (7.10; citations
+  and archival renumbered 7.11 and 7.12). Correction: the three suites above did not
+  pass as 2.2 words it, nor were their failures shown on `origin/dev`; the `socksio`
+  reruns stand in for both, since every failure was the proxy's ImportError. 2.2's
+  "`AGENTS.md`, "Tests and diagnostics"" names a heading `AGENTS.md` no longer has;
+  the wheel rebuild and `reinit` it asks for are
+  `docs/guidance/repository/wheelhouse.md` and `project-environments.md`. `core`
+  unit ran as `make -C core test-core`, which has no `reinit`; `arkhai-core` has no
+  internal dependency to refresh.
+
+Handoff from section 2:
+
+- `core/storefront/pyproject.toml` and `domains/apicredits/storefront/pyproject.toml`
+  declare `arkhai-core>=0.4.0`, but both now import `market_core.listing_details`,
+  which only `arkhai-core` 0.6.0 has (`versioning-python.md`, "Compatibility is
+  declared by lower bounds"). Section 4 raises the core storefront's bound to
+  `>=0.6.0` and section 6 the API-credit storefront's, each in its own functional
+  commit, with `make lock`. Left here because section 2's commit touches only inert
+  paths, and a `pyproject.toml` edit would make it run the whole `make
+  validate-local` matrix for a one-line fix those sections carry anyway.
+- The session's environment sets a SOCKS `ALL_PROXY` without `socksio`, and the
+  implement step may not clear it; every test whose client builds an httpx transport
+  then fails at construction. `uv run --directory <package> --with socksio pytest …`
+  (`--find-links ../../../.dist` for the VM storefront) runs them; a `make -C
+  <package> test` failure whose traceback is that ImportError is environmental.
+- `scripts/change-workflow run pre-commit` needs `--base origin/dev`: the clone
+  records no landing branch.
+- The registry's explicit-null handling sits in `listing_validation_errors`
+  (`core/registry/src/core_registry/api/validate_routes.py`): a detail stated as null
+  is dropped from the served-schema check, and `ListingDetails` admits it, so 3.2's
+  "an explicit null is admitted as unstated and served as sent" exercises that
+  branch.
 
 ## 3. The registry keeps seller details in the retained document
 
@@ -210,8 +285,10 @@ seller's prose". Touches `domains/apicredits/storefront`
 ## 7. Closeout
 
 Documentation only, after the pre-closeout review; a part needing a code edit
-returns the change to implementation. The eleven parts of
-`openspec/README.md#plan-closeout-requirements`, in order.
+returns the change to implementation. The parts, in order: the workflow's
+(`docs/guidance/workflow/closeout.md`), with this repository's
+(`openspec/README.md#this-repositorys-closeout-parts`) after campaign index
+currency.
 
 - [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and confirm the
   comments sections 2–6 added describe current invariants; a needed edit returns the
@@ -251,12 +328,15 @@ returns the change to implementation. The eleven parts of
   state, with its limits; the `## Evidence` lists of
   `openspec/specs/registry-discovery/spec.md` and
   `openspec/specs/storefront-publication/spec.md` — the tests of sections 3–6. The
-  two `spec.md` requirement sets are written by the archive in 7.11. Complete the
+  two `spec.md` requirement sets are written by the archive in 7.12. Complete the
   design promotion record in `design.md` with each destination.
-- [ ] 7.10 **Documentation citations.** Run
+- [ ] 7.10 **Guidance placement.** The change adds and rewrites no guidance file; the
+  companions and configuration text 7.9 writes describe their capability. Confirm
+  that against the layer test, record it, and run `make check-guidance`.
+- [ ] 7.11 **Documentation citations.** Run
   `make check-doc-citations CHANGE=seller-listing-metadata` and resolve every
   match, then `openspec validate seller-listing-metadata --strict`.
-- [ ] 7.11 **Archival.** Last: `openspec archive seller-listing-metadata -y`,
+- [ ] 7.12 **Archival.** Last: `openspec archive seller-listing-metadata -y`,
   merging both deltas into `openspec/specs/registry-discovery/spec.md` and
   `openspec/specs/storefront-publication/spec.md`; point the index row at the
   archived directory and run `openspec validate --specs --strict`.
