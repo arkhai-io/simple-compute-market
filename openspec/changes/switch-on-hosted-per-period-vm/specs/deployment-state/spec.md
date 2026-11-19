@@ -17,6 +17,14 @@ set no injected time.
 - **THEN** the render succeeds and the storefront's startup check accepts the rendered
   configuration
 
+#### Scenario: The production example publishes both recurring options
+
+- **WHEN** the rendered example's configuration is loaded and its recurring clauses are
+  derived against a representative dispute authority advertisement and pool horizon
+- **THEN** an on-demand and a spot option are published, each with the clause's delivery
+  deadline, a dispute window covering it plus the authority's minimum filing window, and
+  the `charged` and `returned` treatments, and no clause is refused
+
 #### Scenario: The production example withdraws rate servicing
 
 - **WHEN** an operator removes the example's `rate_servicing` table

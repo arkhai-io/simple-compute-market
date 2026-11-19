@@ -105,6 +105,14 @@ authority under its own plan — runs the live scenarios, and records their sani
 evidence in the change. An unmet requirement leaves the observations needing it
 unproven, never passed.
 
+The switch-on is qualified only when the buyer's stop, funds running out, the spot
+preemption, the term end and the seller's filing are each recorded made (18 F1). The
+buyer's contested case is the one observation that may stay unproven, recorded as a
+Goal 8 gap. Until the five are made, the caveats D1 corrects stay as they are and the
+change does not go to pre-closeout: an unproven required observation holds the change at
+live verification for the deployment to meet the requirement it names, or, on the
+owner's word, returns it to design, as a failed comparison does (D14).
+
 Rejected: gating on mediation being deployed to one named hosted target, which the
 payments service's maintainers schedule only near production and which would hold the
 change indefinitely; and naming a development topology here, which is the deployment's
@@ -215,7 +223,9 @@ The party running the live scenarios records a sanitized summary in
 `docs/attachments/switch-on-hosted-per-period-vm/`: per observation, made, failed or
 unproven, with public-safe provenance — source revision, target alias, authority
 revision identifiers, provisioning mode. Raw logs and records stay in the caller's
-storage. The closeout documentation cites that summary.
+storage. The summary states whether D3's threshold is met — the five required
+observations made — and names any unproven observation with the requirement it lacked.
+The closeout documentation cites that summary.
 
 ### D10 — What sellers and buyers are told
 
@@ -250,7 +260,8 @@ Two rounds, split by internal and live verification.
 
 - **Round 1, internal:** the mediation double's `stop` and `penalty` with its suite cases;
   the two VM lane rows on rate deals, with the shared output assertions the live
-  scenarios reuse; the VM chart's production example and its render test; the
+  scenarios reuse; the VM chart's production example, its render test and its
+  publication check (18 F2); the
   convergence index row and Goal 8 gap edits. Two sessions: the double, then the lane
   rows and example. Its review includes the full internal end-to-end results.
 - **Round 2, live verification:** `LaneTime.reach`'s wall-time case; the six live

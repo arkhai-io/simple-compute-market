@@ -54,7 +54,7 @@ None.
 ## Non-Goals
 
 - Bare metal, setup charges, `prorated`, and Goal 8's completion bar, which stay with `activate-per-period-compute-servicing`.
-- Any release: creating a release is independent of any change.
+- Any release, or declaring anything in production: creating a release is independent of any change, and production is the latest release.
 - Naming or preparing a hosted target; the deployment prepares topologies from the stated requirements.
 - Any SCM dependency on the dispute authority's operator API, or tests of the interaction between mediation and payments, which the payments service's own live verification covers.
 - Hosting the dispute authority's policy or operator procedures, which stay with the authority.
