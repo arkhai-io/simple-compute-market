@@ -426,13 +426,17 @@ cleanup stops running `history`; design's section 4 uses `propose`.
 
 `change-workflow` removes CW-2lvd, CW-2h9t and CW-56zq; renames and modifies CW-qu42,
 CW-4yhk, CW-k5mk, CW-svng, CW-5rmh, CW-vdqj, CW-jqi7, CW-drf6, CW-b5cf and CW-hak6;
-modifies CW-tl5v, CW-z5me, CW-zq4h, CW-dtpz, CW-o6kc and CW-59c7; and adds CW-x3pf,
+modifies CW-tl5v, CW-z5me, CW-zq4h, CW-dtpz, CW-o6kc, CW-59c7 and CW-m4ps; and adds CW-x3pf,
 CW-m8wq, CW-r6kd, CW-h2zt, CW-v5ny, CW-j4cs, CW-q7ub, CW-f9le, CW-w3oa, CW-k8dn,
 CW-t6mb, CW-g5ry and CW-p3vz. `market-change-workflow` modifies MCW-5tgp (the step table no
 longer names targets) and adds MCW-s4bx (this repository's `[sandbox]`). The new
 log fields — `invariants`, `refusals`, `writes_granted`, `unconfined` — are additive
 and need no format version (P9, CW-x7jd). Both companions and indexes follow at
 closeout.
+
+CW-m4ps, like MCW-5tgp, names the step table among what its test reads; with D11
+removing the table it names only the make fragment. Planning recorded that delta as
+a consequence of D11, with no choice in it.
 
 ### Implementation cadence
 

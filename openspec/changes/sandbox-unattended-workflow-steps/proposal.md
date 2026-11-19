@@ -77,7 +77,8 @@ harness, as categorical bounds on what a step can change on the owner's machine.
 - `change-workflow`: the unattended-run requirements (CW-qu42, CW-4yhk, CW-k5mk,
   CW-svng, CW-5rmh, CW-vdqj, CW-jqi7, CW-drf6, CW-tl5v, CW-b5cf, CW-z5me, CW-zq4h),
   history's copy (CW-hak6), a blocked design (CW-dtpz), the configuration's
-  listing (CW-o6kc), and the guarded push's upstream (CW-59c7) change; CW-2lvd,
+  listing (CW-o6kc), the guarded push's upstream (CW-59c7), and the roles test's
+  reading (CW-m4ps, the step table gone) change; CW-2lvd,
   CW-2h9t, and CW-56zq are removed; the sandbox, scopes, protected paths,
   extension, fallback, the sandbox's `git`, checks, refusals,
   `propose`, adapters, interactive runs, and the round view's refusal are added.
@@ -198,20 +199,25 @@ owner has ruled out; and Read reaching any file, which P3 keeps open by design.
 - D6: CW-q7ub and CW-f9le; `change-workflow`'s companion, "A step run's life".
 - D7: CW-w3oa, CW-k5mk, CW-svng, CW-5rmh, CW-vdqj, and CW-jqi7; `change-workflow`'s
   companion, the restrictions section; the orchestrating skill.
-- D8: CW-tl5v and CW-drf6; `change-workflow`'s companion; the owner's handbook.
+- D8: CW-tl5v and CW-drf6; `change-workflow`'s companion, "Restrictions bind
+  unattended runs only" (its grants paragraph); `docs/change-workflow-handbook.md`,
+  "Interventions".
 - D9: CW-g5ry; `change-workflow`'s companion, "Interactive runs record their own
   outcome".
-- D10: CW-v5ny; `change-workflow`'s companion; the owner's handbook.
-- D11: `change-workflow`'s companion, "Its parts" and "The engine's own assumptions"
-  (the step table's row removed).
+- D10: CW-v5ny; `change-workflow`'s companion, "Restrictions bind unattended runs
+  only"; `docs/change-workflow-handbook.md`, "Interventions".
+- D11: CW-m4ps; `change-workflow`'s companion, "Its parts" and "The engine's own
+  assumptions" (the step table's row removed); `market-change-workflow`'s companion,
+  "The engine's own assumptions"; `docs/change-workflow-handbook.md`, "The engine"
+  and "Customization".
 - D12: CW-h2zt and CW-o6kc; `change-workflow`'s companion, "A repository's
   configuration"; MCW-s4bx and `market-change-workflow`'s companion.
 - D13: CW-t6mb and CW-zq4h; `change-workflow`'s companion, "Models are policy, with
   no same-vendor fallback" and the restrictions section, with P6.
 - D14: CW-p3vz and CW-z5me; `change-workflow`'s companion, the restrictions section
   and its hook table.
-- D15: the skills; MCW-5tgp's exemption table in `market-change-workflow`'s
-  companion, its three rows removed.
+- D15: the skills; `market-change-workflow`'s companion, "What the workflow's skills
+  name of this repository", its rows owned by this change removed.
 - D16: no permanent destination beyond the requirements it lists — the log's new
   fields are recorded in their requirements, and P9 in `change-workflow`'s
   companion, "A change's records carry one format version".

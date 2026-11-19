@@ -620,6 +620,25 @@ of it succeeded.
 - **THEN** the push's record carries Git's failing status, and once the session ends
   the engine sets no upstream
 
+### Requirement: CW-m4ps An adopting repository provides the workflow's roles
+
+The workflow MUST describe each field of the configuration, who uses it, and how,
+and each role an adopting repository provides outside it. A repository MUST state how
+it provides what the configuration does not hold. A test MUST fail on a make target
+or repository path the make fragment names that both the statement and the
+configuration's commands omit.
+
+#### Scenario: A skill names a new target
+
+- **WHEN** a skill is edited to run `make check-something`
+- **THEN** the test fails, naming the target and the skill, since a skill names no
+  repository's target (CW-n8tr), whatever this repository's statement lists
+
+#### Scenario: A role has no provision
+
+- **WHEN** the workflow states a role this repository's statement does not provide
+- **THEN** the test fails, naming the role
+
 ## REMOVED Requirements
 
 ### Requirement: CW-2lvd A deny rule's refusal stands, except a write-steering rule's
