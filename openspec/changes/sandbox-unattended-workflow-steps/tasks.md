@@ -1567,7 +1567,7 @@ them).
   `uv run … pytest` is not run; it now gives the reason itself (12.10 checks the
   guidance). A search of `scripts/` finds neither phrase; `make
   check-comment-hygiene` passes.
-- [ ] 11.6 Verification point: the whole scripts suite and `make check-agent-skills`;
+- [x] 11.6 (Moved to section 11a.) Verification point: the whole scripts suite and `make check-agent-skills`;
   `run pre-commit` passes. End-to-end: none.
   Outside the plan, on the owner's direction: the sandbox failed to launch where a
   protected settings file is a symlink. `make change-clone` links a clone's
@@ -1673,6 +1673,122 @@ them).
   CW-r6kd); its F5 is planning's: the D18 session, 11.1–11.5's checkboxes against
   this section's note, and closeout's promotion extended to D17–D21.
 
+  Correction (planning, after the return to design): 11.1 to 11.5 were checked in the
+  work-in-progress commit `d05a2b130`, and their notes record each as done; the note's
+  "No task of this section is checked" and the commit message's "no task is checked"
+  are wrong for them and hold for 11.6 alone. 11.6's verification point moves to
+  section 11a, which completes it once D18's work is in, with 48 F1's and F3's tasks
+  above placed there.
+
+## 11a. The private `/tmp`, Codex's confined review, and section 11's verification point
+
+Replanned against the design settled after the return and its review 48: delivers
+every step's private tmpfs `/tmp` with `TMPDIR` pointing at it and the scope's named
+host paths bound inside it, its listing and the refusal of `/tmp` as an entry or a
+grant (D17, D18; CW-x3pf, CW-m8wq, CW-h2zt, CW-tl5v, CW-o6kc); a confined Codex
+review without Codex's own sandbox, and its engine run key (D13; CW-t6mb, CW-w3oa;
+48 F1, F3); the delta's statements of what sections 4, 5 and 11 already built (D6's
+check 6, D19, D20, D21; CW-q7ub, CW-r6kd, MCW-s4bx), proven as stated; and section
+11's verification point. Files: `scripts/change_workflow/graph.py`, `scope.py`,
+`sandbox.py`, `config.py`, `review.py`, `codex.py`, `sandbox_git.py`, `hooks.py`,
+`.agents/workflow.toml`'s `[models]` comment, `scripts/tests/test_change_workflow_scope.py`,
+`test_change_workflow_sandbox.py`, `test_change_workflow_config.py`,
+`test_change_workflow_review.py`, `test_change_workflow_harness.py`,
+`test_change_workflow_sandbox_git.py`, `test_change_workflow_invariants.py`.
+
+This section's session runs in a sandbox the engine launched before its work, which
+binds the host's `/tmp`: its own `run pre-commit` meets the ledger suite's failure
+until the commit's engine launches the next step (design, "Implementation
+cadence"). Its evidence for D17 is the change's sandbox launched from inside its own.
+
+- [ ] 11a.1 The private `/tmp` (D17, D18; CW-m8wq, CW-x3pf). The scope's temporary
+  entry renders as `--perms 0700 --tmpfs /tmp`, mounted before every bind; the
+  sandbox sets `TMPDIR` to `/tmp` (`--setenv`); each writable path under the host's
+  temporary directory the scope names — a grant, the review's drafts directory — is
+  bound at its own path inside the tmpfs, created first where absent, as every
+  writable path is; inside the engine's sandbox (`nested`) the same holds, from the
+  enclosing private `/tmp`. Comments and docstrings of `scope.py`, `sandbox.py` and
+  `graph.py` describe the private `/tmp` where they describe the host's. Verify:
+  - unit, `test_change_workflow_sandbox.py`: the rendered command holds the tmpfs and
+    its mode before any bind, `TMPDIR`, and a named path under the host's
+    temporary directory bound at its own path after the tmpfs; the nested command
+    the same;
+  - library integration through real bubblewrap, `test_change_workflow_sandbox.py`:
+    inside a launched scope `/tmp` is the owner's with mode `0700`, the ancestor
+    check the bare-metal helper makes passing (CW-m8wq's "A suite checks its
+    temporary directory's owner": each ancestor of a path under `/tmp` owned by root
+    or the caller and writable by no one else); `TMPDIR` is `/tmp`; a host file under
+    `/tmp` outside the scope is not visible; a named path under the host's `/tmp` is
+    written at the same host path; the bubblewrap tests of sections 3, 6, 7 and 11
+    still pass, each giving the inner sandbox what it reads under `tmp_path` where
+    the private `/tmp` now hides it.
+- [ ] 11a.2 The listing and the refusals (D18, D8, D12; CW-o6kc, CW-h2zt, CW-tl5v).
+  `config` and `config --json` list each scope's temporary entry as the private
+  `/tmp`, from the engine (in JSON, `path` `/tmp` and `"private": true`); the
+  configuration's check refuses `/tmp` itself in any `writable` key, and `granted`
+  refuses a `--write` of `/tmp` itself, each naming the value, before anything
+  launches; a path under `/tmp` is admitted in both. Verify, unit in
+  `test_change_workflow_scope.py` and `test_change_workflow_config.py`: CW-h2zt's "A
+  repository opens the host's temporary directory", CW-tl5v's "A grant names the
+  host's temporary directory", a grant of `/tmp/x` admitted and bound inside, and
+  the listing in both forms.
+- [ ] 11a.3 The review's drafts directory (D18; CW-m8wq's "A Codex review writes its
+  final message"). `review.py` keeps making the drafts directory in the host's
+  temporary directory and adds it to the review's scope as an engine writable path,
+  so it is bound inside the private `/tmp` at its own path. Verify, library
+  integration in `test_change_workflow_review.py` through real bubblewrap with the
+  Codex harness doubled by a program writing its `-o` file: the draft written
+  inside reaches the transcripts after the run, and the drafts directory is gone.
+- [ ] 11a.4 Codex in a confined review (D13; CW-t6mb; 48 F1). A confined review runs
+  Codex without its own sandbox — `--sandbox danger-full-access` on `exec`, and
+  `sandbox_mode="danger-full-access"` on `exec resume` — and an unconfined one keeps
+  `read-only` in both; `codex.py`'s module docstring says which and why. Verify:
+  - unit, `test_change_workflow_harness.py`: both commands, fresh and resumed, for a
+    confined and an unconfined launch (CW-t6mb's two scenarios);
+  - library integration through real bubblewrap with a Codex double that runs
+    `git rev-parse --show-toplevel` and `scripts/change-workflow run pre-commit
+    <change>`: both reach the system's Git through the engine's `git`;
+  - a real `codex exec` under the engine's review scope, running `git rev-parse` and
+    `run pre-commit`, where the owner grants this session `~/.codex` (`WRITE=~/.codex`);
+    without the grant the note says so, and the round's review, on Codex, is its
+    first real run (design, "Implementation cadence").
+- [ ] 11a.5 The Codex review's run key (D13, D2, D5, D7; CW-w3oa; 48 F3). Each Codex
+  review attempt runs with an engine run key in its commands' environment, distinct
+  from the starting session's id and from Codex's thread id; the engine's `git`
+  keeps a refused push under it and `run` keeps the reviewer's checks under it; the
+  review's line reads its invocations and refused pushes by that key, as it reads a
+  Claude reviewer's by its session. Verify, library integration in
+  `test_change_workflow_review.py` and `test_change_workflow_sandbox_git.py`: a
+  Codex double that runs `git push` and `run pre-commit` leaves the refused push in
+  the line's `refusals` and the check among its invocations (CW-w3oa's "A Codex
+  reviewer pushes"); the starting session's line holds neither.
+- [ ] 11a.6 The `[models]` comment of `.agents/workflow.toml` says the review runs on
+  Codex, which a confined review runs without its own sandbox, falling back to Claude
+  (D13). The configuration is protected: this task is the orchestrator's, on the
+  owner's word before the section's session starts, and the session commits it with
+  the section. Verify: `scripts/change-workflow check config` passes.
+- [ ] 11a.7 What the delta now states of the built behaviour, each proven by a test
+  that names its scenario or, where one exists, checked to name it (D6, D19, D20,
+  D21; CW-q7ub, CW-r6kd, MCW-s4bx):
+  - check 6 as built (D6; 48 F4): a remote unreadable at either end unchecked, and a
+    protected branch's tip compared with the run's commits — the existing
+    `test_change_workflow_invariants.py` cases named for CW-q7ub, one added for an
+    unreadable remote where none exists;
+  - CW-r6kd's "A clone's settings file is a link" (D20): the external-process test
+    11.6 added, named for the scenario;
+  - MCW-s4bx's "Design validates the change" (D21): the scope test of 11.1 extended
+    to `~/.npm` for design.
+  D19 changes no code. Verify: those tests pass.
+- [ ] 11a.8 Verification point, completing 11.6: the whole scripts suite (`-rs`, no
+  skip on this machine); `make check-agent-skills`; `make check-comment-hygiene`;
+  `scripts/change-workflow run pre-commit sandbox-unattended-workflow-steps`, whose
+  `make validate-local` in this session's own sandbox may fail only on the
+  bare-metal ledger suite's "unsafe ancestor", recorded as such; and `make
+  validate-local` run inside the change's sandbox launched from this session's,
+  through `sandbox.launch` with implementation's resolved scope, passing, the
+  ledger suite among its suites — the command and its result recorded in the note.
+  End-to-end: none; no scenario exercises the workflow's tooling, and none is owed.
+
 ## 12. Closeout
 
 The workflow's closeout parts (`docs/guidance/workflow/closeout.md`), in order, with
@@ -1683,13 +1799,14 @@ its seventh position.
   docstrings the change added under `scripts/` for history wording or a change
   reference; anything to rewrite returns the change to implementation.
 - [ ] 12.2 Import placement — check the imports the change added in `scope.py`,
-  `sandbox.py`, `sandbox-git`, `invariants.py`, `propose.py`, and the edited modules;
+  `sandbox.py`, `sandbox_git.py`, `invariants.py`, `propose.py`, `codex.py`,
+  `review.py`, and the edited modules;
   one to move returns the change to implementation.
-- [ ] 12.3 Documentation compliance — check D1 to D16 and the cadence against
+- [ ] 12.3 Documentation compliance — check D1 to D21 and the cadence against
   `docs/guidance/workflow/openspec-documentation.md` and
   `openspec/README.md#documentation-placement`, and each permanent document written
   for the current state, with no wording relative to the change.
-- [ ] 12.4 Narrative compression — shorten sections 1 to 11's notes to final behaviour,
+- [ ] 12.4 Narrative compression — shorten sections 1 to 11a's notes to final behaviour,
   evidence, deferrals, and destinations, moving rationale into `design.md` first.
 - [ ] 12.5 Roadmap currency — record that no goal of `docs/development/ROADMAP.md` is
   affected: the change serves the lesser goal "Make the change workflow a tool any
@@ -1710,7 +1827,9 @@ its seventh position.
 - [ ] 12.9 Promotion — write, beside the deltas the archive merges into
   `openspec/specs/change-workflow/spec.md` and `market-change-workflow/spec.md`:
   - `openspec/specs/change-workflow/index.md`: the entries 1.1 added, their summary
-    lines checked against the requirements as implemented; summary lines revised for
+    lines checked against the requirements as implemented, CW-x3pf's, CW-m8wq's,
+    CW-r6kd's, CW-h2zt's, CW-t6mb's and CW-w3oa's against the delta as revised after
+    the return and review 48; summary lines revised for
     CW-qu42, CW-4yhk, CW-k5mk, CW-svng, CW-5rmh, CW-vdqj, CW-jqi7, CW-drf6, CW-tl5v,
     CW-b5cf, CW-z5me, CW-zq4h, CW-hak6, CW-dtpz, CW-o6kc, CW-59c7, CW-m4ps; the
     retired ids' notes checked; "### Permissions" renamed only if no citation names
@@ -1722,27 +1841,34 @@ its seventh position.
     sandbox (D3, D4), each step's scope and the protected paths (D5, D5a, D5c),
     refusals (D7), grants (D8), the unconfined fallback (D10), adapters (D13), what
     survives of the deny rules and the hook table (D14), and the two retired limits'
-    content, the forgeable marker and open reads; "Pushing is guarded, never repaired"
+    content, the forgeable marker and open reads; the private `/tmp`, `TMPDIR`, and
+    the host's `/tmp` hidden from reads (D17, D18); paths mounted where their symlinks
+    lead (D20); the three unguarded names of protected paths as boundaries of the
+    threat model (D19); "Pushing is guarded, never repaired"
     (D2); "Its parts" (the scope, sandbox, sandbox `git`, invariants, adapters, and
     `propose` modules; D11); "A step run's life" (the probe, the recorded state, the
-    seven checks; D6); "Interactive runs record their own outcome" (D9); "Models are
-    policy, with no same-vendor fallback" (D13, P6); "A prerequisite is proposed apart
+    seven checks, check 6 read by listing each remote; D6); "Interactive runs record their own outcome" (D9); "Models are
+    policy, with no same-vendor fallback" (D13, P6: a confined Codex review without
+    Codex's own sandbox, an unconfined one in it, and the Codex review's run key); "A prerequisite is proposed apart
     and halts its dependent" (D5b); "Validation observes a committed slice" (D5c);
     "History lives in the owner's workspace" (the engine's copy); "A repository's
     configuration" (D12); "The command and its tiers" (`propose`, `--write`); "A
     change's records carry one format version" (P9, D16); "The engine's own
-    assumptions" (the step table's row removed, `bwrap` and the sandbox `git` added,
-    the harnesses' commands named in `claude_code` and `codex`);
+    assumptions", under "What an adopting repository provides" (the step table's row
+    removed, `bwrap` and the sandbox `git` added, the harnesses' commands named in
+    `claude_code` and `codex`, and the overflow uid: inside the sandbox only the
+    owner's uid is mapped, root-owned paths showing as 65534; D17);
     "Current limits" — the unchecked configuration and the step table's place removed
     as closed, the forgeable marker and Read reaching any file removed as retired.
   - `openspec/specs/market-change-workflow/README.md`: "Current limits" (the container
     per change's trigger "when unattended steps are to be sandboxed from the owner's
     files" revised to the sandbox as built), checking the sections 10.2 and 11.4
-    wrote.
+    wrote: "How this repository provides the workflow's roles" naming `~/.npm` (D21),
+    and "The engine's own assumptions" a clone's linked settings (D20).
   - `docs/change-workflow-handbook.md`: "Interventions" (grants as `WRITE=` and
     `--write`, refusals, unconfined runs, `propose`), "The engine" and "Customization"
     (the step table gone, `[sandbox]`).
-  - The design-promotion record in `design.md`, a row for each of D1 to D16, D5a,
+  - The design-promotion record in `design.md`, a row for each of D1 to D21, D5a,
     D5b, and D5c, and the cadence's "no permanent destination" with its reason, as
     the proposal's "Knowledge to promote" gives them.
   Run `make check-spec-index CHANGE=sandbox-unattended-workflow-steps`.

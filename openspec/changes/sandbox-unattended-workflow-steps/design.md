@@ -611,7 +611,19 @@ and the nested sandbox tests adjusted — and, from design review 48, Codex's la
 without its own sandbox in a confined review and the Codex review's run key (D13) —
 then completes section 11's verification
 point with `validate-local` passing inside its own sandbox. The round's review and
-triage then read every section together, before closeout. D19, D20 (already built)
+triage then read every section together, before closeout.
+
+That session runs, as every session of the round does, on the engine the sessions
+before it committed, so the sandbox the engine launched it in still binds the host's
+`/tmp`, and its own `run pre-commit` meets the ledger suite's failure D17 answers.
+Its evidence for `validate-local` is therefore the change's sandbox launched from
+inside its own, through the launcher it has just changed, with implementation's
+resolved scope, as the suite's nested bubblewrap tests already launch one; the
+round's triage, the first step the engine launches with the private `/tmp`, runs
+`run pre-commit` in its own sandbox. Likewise the implementing session's scope does
+not write `~/.codex`, so a real Codex review under the engine's sandbox (D13) runs
+where the owner grants it that path for the session, and otherwise first as the
+round's own review, on Codex, whose line the triage reads. D19, D20 (already built)
 and D21 (already declared) change the specification and design only.
 
 Rejected (28 F1): keeping the command rules until a final atomic switch — two
