@@ -39,6 +39,10 @@ harness, as categorical bounds on what a step can change on the owner's machine.
   `openspec/`, `.git/`, and what the repository adds (`docs/` here); closeout its
   inert paths; archive cleanup `openspec/changes/`; implementation, triage, the
   merge, and validation the checkout. A file or pattern entry mounts its directory.
+  Every step has a private `/tmp` of its own, owned by the owner, since inside the
+  sandbox's user namespace the host's root-owned `/tmp` shows as the overflow uid's
+  and fails suites that check their temporary directory's owner; paths are mounted
+  where their symlinks lead.
 - **Protected paths no step writes:** the workflow's configuration, `.git/config`,
   the engine's `git`, and every settings file the harness loads, present or absent.
 - **No `git push` but the guarded push's leaves a checkout during an unattended
@@ -101,13 +105,18 @@ harness, as categorical bounds on what a step can change on the owner's machine.
 - **Do not support other operating systems.** Ubuntu is canonical.
 - **Do not confine interactive runs.** The owner's own settings apply.
 - **Do not ship permission packs.**
+- **Do not guard a protected path's name.** Renaming a writable directory that holds
+  a protected mount, replacing a link to a protected file, and a repository's
+  protected directory holding a baseline writable path are routes around the
+  sandbox, recorded as limits; the review is their backstop.
 
 ## Impact
 
 - `.claude/change-steps.toml` and the engine's `steps` module, removed; each
   step's definition moves into the engine beside `graph.py`.
 - `scripts/change_workflow/harness.py`, reorganized into internal adapters, and a
-  new sandbox launcher; `wrapper.py` and `review.py`, which launch through them;
+  new sandbox launcher, with its private `/tmp`; `wrapper.py` and `review.py`, which
+  launch through them, the review binding its drafts directory inside that `/tmp`;
   `config.py` for `[sandbox]` and the scope listing; the sandbox's `git`, and
   `push.py` and the wrapper for the upstream under a run; `log.py` and
   `next_step.py` for `refusals`, `invariants`,
@@ -135,7 +144,7 @@ declared here.
 | Interface | Change | Judgement |
 |---|---|---|
 | `start`, `resume` | `--allow` removed | incompatible: a grant is now a path, `--write` |
-| `start`, `resume` | `--write <path>` added | compatible |
+| `start`, `resume` | `--write <path>` added, refusing `/tmp` itself | compatible |
 | the make targets | `ALLOW=` removed; `WRITE=` added | incompatible; compatible |
 | `propose <change> <prerequisite>` | added | compatible |
 | `config`, `config --json` | each step's resolved scope, each path's source | compatible: an output gains a field |
@@ -218,6 +227,17 @@ owner has ruled out; and Read reaching any file, which P3 keeps open by design.
   and its hook table.
 - D15: the skills; `market-change-workflow`'s companion, "What the workflow's skills
   name of this repository", its rows owned by this change removed.
+- D17: CW-m8wq; `change-workflow`'s companion, the restrictions section's scope
+  table, and "The engine's own assumptions" (the overflow uid inside the sandbox).
+- D18: CW-x3pf, CW-m8wq, CW-h2zt and CW-tl5v; `change-workflow`'s companion, the
+  restrictions section (the private `/tmp`, `TMPDIR`, and reads of the host's `/tmp`).
+- D19: CW-r6kd; `change-workflow`'s companion, the restrictions section, the three
+  routes as boundaries of the threat model.
+- D20: CW-r6kd; `change-workflow`'s companion, the restrictions section;
+  `market-change-workflow`'s companion, "The engine's own assumptions" (a clone's
+  linked settings).
+- D21: MCW-s4bx; `market-change-workflow`'s companion, "How this repository provides
+  the workflow's roles".
 - D16: no permanent destination beyond the requirements it lists — the log's new
   fields are recorded in their requirements, and P9 in `change-workflow`'s
   companion, "A change's records carry one format version".

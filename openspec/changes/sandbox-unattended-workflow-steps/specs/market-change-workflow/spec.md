@@ -6,8 +6,9 @@ This repository's configuration MUST give design and planning `docs/` beside the
 baseline scope, and every step but the review the tool state its suites, builds,
 and deployments write outside the checkout: uv's Pythons and tools, the Kubernetes
 client's cache, the Google Cloud SDK's configuration, which refreshes its tokens,
-and Docker's client configuration. It MUST protect nothing beyond the engine's and
-the adapters' protected paths.
+Docker's client configuration, and npm's cache, which the configured OpenSpec command
+writes. It MUST protect nothing beyond the engine's and the adapters' protected
+paths.
 
 #### Scenario: Design edits the roadmap
 
@@ -18,6 +19,13 @@ the adapters' protected paths.
 
 - **WHEN** an unattended implementation run's `uv sync` installs a Python under
   `~/.local/share/uv`
+- **THEN** the write succeeds, since the configuration gives every writing step that
+  path
+
+#### Scenario: Design validates the change
+
+- **WHEN** an unattended design run runs `scripts/change-workflow openspec validate
+  <change> --strict`, whose `npx` writes npm's cache under `~/.npm`
 - **THEN** the write succeeds, since the configuration gives every writing step that
   path
 

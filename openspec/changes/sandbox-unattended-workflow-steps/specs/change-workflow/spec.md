@@ -5,8 +5,9 @@
 The engine MUST start every unattended step's harness process inside an OS sandbox
 it owns, on Linux bubblewrap, so that the harness's own file tools, its shell, and
 every process they start are confined alike. The sandbox MUST leave the network,
-the environment, and every file the owner can read as they are, and MUST end the
-session when the wrapper ends. The workflow's guarantees on what a step writes hold
+the environment but `TMPDIR`, which it sets to its own `/tmp` (CW-m8wq), and every
+file the owner can read but those under the host's `/tmp` as they are, and MUST end
+the session when the wrapper ends. The workflow's guarantees on what a step writes hold
 for the runs the sandbox confines (CW-v5ny).
 
 #### Scenario: A step's file tool writes outside its scope
@@ -28,9 +29,11 @@ only the engine's record of what a session invoked, `.git/change-invocations/`;
 design and planning `openspec/` and `.git/`; implementation, triage, the merge, and
 validation the checkout; closeout its inert paths and `.git/`; archive cleanup
 `openspec/changes/` and `.git/`. Every step, the review included, MUST also write a
-temporary directory and its adapter's state; every step but the review MUST also
-write `~/.cache` and the repository's additions. A file or pattern entry MUST mount
-each match's directory.
+private `/tmp` of its own, owned by the owner and open to no one else, which hides
+the host's `/tmp` but for the paths under it its scope names, each mounted at its own
+path inside it; and its adapter's state. Every step but the review MUST also write
+`~/.cache` and the repository's additions. A file or pattern entry MUST mount each
+match's directory.
 
 #### Scenario: Closeout edits a README beside code
 
@@ -53,15 +56,33 @@ each match's directory.
   `.git/change-invocations/`, and the harness keeps its session state under
   `~/.claude`
 
+#### Scenario: A suite checks its temporary directory's owner
+
+- **WHEN** an unattended implementation run's suite checks that each ancestor of a
+  path under `/tmp` is owned by root or the caller and writable by no one else
+- **THEN** the check passes, since `/tmp` inside the sandbox is the owner's with no
+  group or other access, though the host's `/tmp` shows there as the overflow uid's
+
+#### Scenario: A Codex review writes its final message
+
+- **WHEN** an unattended review run on Codex writes its final message to the drafts
+  directory the engine made under the host's temporary directory
+- **THEN** the write lands at the same path on the host, since the review's scope
+  names that directory, and the engine moves the draft into the transcripts once the
+  reviewer has ended
+
 ### Requirement: CW-r6kd No step writes the protected paths
 
 The sandbox MUST mount read-only, inside every step's scope, the workflow's
 configuration, `.git/config`, the engine's `git` (CW-j4cs), and the paths the
-harness's adapter and the repository protect, so no step changes what its hooks run,
-how its pushes are checked, or its harness's settings. A harness's adapter MUST
-protect every settings file its harness loads. A protected path absent at launch
-MUST be created first, a settings file in its harness's empty form, and mounted
-read-only like any other. A protected path MUST NOT be granted.
+harness's adapter and the repository protect, so no step writes a protected file.
+A harness's adapter MUST protect every settings file its harness loads. Each
+writable and protected path MUST be mounted where its symlinks lead. A protected
+path absent at launch MUST be created first, a settings file in its harness's empty
+form, and mounted read-only like any other. A protected path MUST NOT be granted.
+The protected path's name is not guarded: renaming a directory holding a protected
+mount, or replacing a link to a protected file, inside a writable directory, is a
+step working around the sandbox, which its review catches.
 
 #### Scenario: An implementation run edits the configuration
 
@@ -80,6 +101,14 @@ read-only like any other. A protected path MUST NOT be granted.
 - **THEN** the write fails, since the engine created the file as `{}` before launch
   and mounted it read-only
 
+#### Scenario: A clone's settings file is a link
+
+- **WHEN** a clone's `.claude/settings.local.json` is an absolute link to the owner's
+  workspace's file, and an unattended implementation run on Claude Code writes
+  through it
+- **THEN** the run launches, the write fails with a read-only file system error, and
+  the workspace's file and the link are unchanged
+
 #### Scenario: A review on Codex edits Codex's configuration
 
 - **WHEN** an unattended review run on Codex writes `~/.codex/config.toml`
@@ -92,7 +121,8 @@ A repository MUST add writable paths in `[sandbox]`: `writable.common` for every
 but the review, `writable.<step>` for one step, relative paths from the checkout's
 root and `~` the home directory; and protected paths in `protected`, which only add.
 The configuration's check MUST refuse a writable path that is or lies under a
-protected one, a `writable.review`, and an unknown step. A writable directory
+protected one, `/tmp` itself, which every step writes as its own (CW-m8wq), a
+`writable.review`, and an unknown step. A writable directory
 containing a protected path MUST be admitted, the protected path mounted read-only
 inside it (CW-r6kd).
 
@@ -112,6 +142,11 @@ inside it (CW-r6kd).
 - **WHEN** the configuration declares `writable.design = [".agents/"]`
 - **THEN** design's sandbox writes `.agents/`, and `.agents/workflow.toml` stays
   read-only inside it
+
+#### Scenario: A repository opens the host's temporary directory
+
+- **WHEN** the configuration declares `writable.common = ["/tmp"]`
+- **THEN** every reader of the configuration refuses, naming the field and `/tmp`
 
 ### Requirement: CW-v5ny Where the sandbox cannot run, a step runs unconfined and says so
 
@@ -456,9 +491,9 @@ for a fresh run through `start` or a resumed one through `resume`, recorded as
 `writes_granted` on the run's log line, and never kept, so the step's next run is
 held to its scope again. Each value MUST be split on `;`, each part trimmed and empty
 parts dropped, and each path resolved as a `[sandbox]` entry is (CW-h2zt). A grant
-MUST name a path: the engine MUST refuse a value with a glob character, and a path
-that is or lies under a protected path, naming the value, before it launches
-anything. A directory containing a protected path MUST be granted, the protected
+MUST name a path: the engine MUST refuse a value with a glob character, a path that
+is or lies under a protected path, and `/tmp` itself, naming the value, before it
+launches anything. A directory containing a protected path MUST be granted, the protected
 path staying read-only inside it. A file MUST mount its directory, and a path absent
 at launch MUST be created as a directory before it is mounted.
 
@@ -483,6 +518,12 @@ at launch MUST be created as a directory before it is mounted.
 
 - **WHEN** a run is started with `--write 'kit/*/.venv'`
 - **THEN** the engine refuses it, naming the value, and launches nothing
+
+#### Scenario: A grant names the host's temporary directory
+
+- **WHEN** a run is started with `--write /tmp`
+- **THEN** the engine refuses it, naming the value, and launches nothing, since the
+  step writes a private `/tmp` already
 
 ### Requirement: CW-b5cf An unattended step waits on a background command through wait
 

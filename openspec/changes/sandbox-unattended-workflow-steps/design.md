@@ -2,7 +2,9 @@
 
 Status: design settled 2026-11-19; revised the same day on the triage of design
 review 19 (D2, D4, D5, D5a, D6, D8, D10, D13) and of design review 28 (D2, D4, D6,
-D7, D8, D12, the cadence). Some decisions are expected to be
+D7, D8, D12, the cadence); revised again the same day on a return from
+implementation, when the sandbox's identity mapping failed the bare-metal ledger
+suite (D17–D21; D1, D4, D5, D6, D8, D12 and the cadence restated). Some decisions are expected to be
 reconsidered when `extract-change-workflow-repository` moves the workflow out of this
 repository; each stands until then.
 
@@ -38,7 +40,19 @@ repository; each stands until then.
   sits beside the checkout.
 - **This machine.** Ubuntu 26.04.1 on WSL2, with `bwrap` installed, unprivileged user
   namespaces available, and no AppArmor restriction on them. Claude Code's Edit tool
-  replaces a file by rename: a file's inode changes across an edit.
+  replaces a file by rename: a file's inode changes across an edit. The host's `/tmp`
+  is a tmpfs.
+- **The identity mapping.** Unprivileged bubblewrap's user namespace maps only the
+  owner's uid. Every other uid, root's included, shows inside it as the kernel's
+  overflow uid, 65534, and no unprivileged tool can map host root. The host's `/tmp`
+  shows as `65534`, mode `1777`, so a check trusting only root-owned or the caller's
+  ancestors refuses it: the bare-metal working-data helper's (`directory()` in
+  `domains/bare_metal/provisioning/iac/ansible/roles/bare-metal-access/files/tenant_working_data.py`)
+  failed every ledger test inside a step, and `validate-local` with it, which
+  returned this change from implementation (D17).
+- **Clones' settings.** `make change-clone` links each clone's
+  `.claude/settings.local.json` to the workspace's by an absolute symlink, and
+  bubblewrap cannot mount over a symlink (D20).
 
 ## Principles
 
@@ -72,8 +86,9 @@ recorded beside P3: no workflow writes into another repository's checkout.)
 
 The profiles guard against a step's mistakes, not against an agent working around
 them (P1). Steps keep their ambient credentials (P2): the sandbox neither scrubs the
-environment nor refuses the network. The guarantee is about what a step can write on
-the owner's machine.
+environment nor refuses the network. Its one change to the environment is `TMPDIR`,
+set to the sandbox's own `/tmp` (D18), which withholds no credential. The guarantee
+is about what a step can write on the owner's machine.
 
 Rejected: withholding the push credential and the route to the Git host, with the
 engine doing every remote operation (the agent's first recommendation) — the owner's
@@ -161,7 +176,13 @@ replacing one by rename fails busy, so `git config` cannot rewrite `.git/config`
 Unix socket on a read-only mount stays connectable, so Docker needs no setting. A
 protected path absent at launch is created first — a settings file in its harness's
 empty form, `{}` for JSON and an empty file otherwise — and bound read-only like any
-other, so it cannot be created during the run (19 F3); the placeholder stays.
+other, so it cannot be created during the run (19 F3); the placeholder stays. Each
+step's `/tmp` is a tmpfs of its own (D17, D18), and each writable and protected path
+is mounted where its symlinks lead (D20).
+
+Inside the sandbox only the owner's uid is mapped: root-owned paths show as the
+overflow uid. The private `/tmp` answers that for temporary files; `/`, `/home` and
+`/usr` still show so, a limit the runner's container remedies (P7).
 
 Rejected: Landlock — its rights only add up per tree, so `.git/config` cannot be
 protected while Git creates its lock files in `.git/`, and D2 would rest on
@@ -182,14 +203,15 @@ Each step writes only its scope, stopped rather than caught:
 | closeout | its inert paths and `.git/` |
 | archive cleanup | `openspec/changes/`, `.git/` |
 
-Every step, the review included, also writes a temporary directory and its adapter's
-state paths, without which its harness cannot run; every step but the review also
+Every step, the review included, also writes a private `/tmp` (D17, D18) and its
+adapter's state paths, without which its harness cannot run; every step but the review also
 writes `~/.cache` and the repository's additions (D12). The review's one path in the
 checkout is where `run` keeps what a session invoked, so the checks the review skill
 lets it run for evidence (`run pre-commit`) can record themselves; every file it
 reviews stays read-only (19 F2). Protected in every scope: `.agents/workflow.toml`,
 `.git/config`, the engine's `git`, and the adapter's and the repository's protected
-paths. Reads are open everywhere (P3).
+paths. Reads are open everywhere but the host's `/tmp`, which the private one hides
+but for the paths under it a scope names (P3, D18).
 
 The change's log is not mount-protected: closeout's archive moves its directory. It
 is guarded by D6. Archive cleanup's history copy becomes an engine action after its
@@ -266,8 +288,9 @@ after it, the wrapper checks against the state it recorded at the start:
 
 A violation logs the run `stopped`, its reason and an `invariants` field naming each,
 the step's message kept ahead, as `triage_outcome` and `landed_outcome` do; the
-after-hooks do not run; nothing is repaired. The configuration needs no check: it is
-mounted read-only.
+after-hooks do not run; nothing is repaired. The configuration and the harness's
+settings need no check: they are mounted read-only. Their names are not guarded, a
+limit D19 records.
 
 Rejected: fewer checks — 4 and 5 would rest on a review's luck, and 6 is the one
 backstop for a push to a protected branch; recording a violation beside a standing
@@ -304,7 +327,8 @@ directory. A grant names a path, never a pattern — a value with a glob charact
 refused — since a gap is answered with the narrowest path (D7). A file mounts its
 directory (D5a); a path absent at launch is created as a directory before it is
 mounted. The engine refuses, naming the value, a path that is or lies under a
-protected path, before launching anything (19 F7); a directory containing a
+protected path, or is `/tmp` itself, which would hide the step's private `/tmp` with
+the host's (D18), before launching anything (19 F7); a directory containing a
 protected path is granted, the protected path staying read-only inside it, as in
 every scope (D4, D12; 28 F4). `--allow` and `ALLOW=` go.
 
@@ -361,15 +385,18 @@ Following `[load]` (CW-l7hn):
 
 ```toml
 [sandbox]
-writable.common = ["~/.local/share/uv", "~/.kube/cache", "~/.config/gcloud", "~/.docker"]
+writable.common = ["~/.local/share/uv", "~/.kube/cache", "~/.config/gcloud", "~/.docker",
+                   "~/.npm"]
 writable.design = ["docs/"]
 writable.plan   = ["docs/"]
 protected = []
 ```
 
-Relative paths are from the checkout's root, `~` the home directory. The check
+Relative paths are from the checkout's root, `~` the home directory. `~/.npm` is
+npm's cache, which the configured OpenSpec command's `npx` writes (D21). The check
 refuses a writable path that is or lies under a protected one, since the sandbox
-could not honour it, `writable.review`, and an unknown step (CW-w8ne). A writable
+could not honour it, `/tmp` itself (D18), `writable.review`, and an unknown step
+(CW-w8ne). A writable
 directory containing a protected path is admitted, the protected path mounted
 read-only inside it, as the engine's own scopes hold `.agents/workflow.toml` inside
 the checkout and Codex's `config.toml` inside `~/.codex` (28 F4). `config` and
@@ -438,6 +465,96 @@ CW-m4ps, like MCW-5tgp, names the step table among what its test reads; with D11
 removing the table it names only the make fragment. Planning recorded that delta as
 a consequence of D11, with no choice in it.
 
+### D17 — Every step gets a private `/tmp` of its own
+
+The sandbox gives every step, the review included, a `/tmp` of its own, owned by the
+owner with mode `0700`, in place of the host's bound at its own path. Inside the
+user namespace the host's `/tmp` shows as the overflow uid's and world-writable
+(Context, "The identity mapping"), so a suite whose checks trust only root-owned or
+the caller's ancestors refuses it; the private one passes them, and the bare-metal
+ledger suite runs in full in every step (126 passed in a nested sandbox under it).
+The fix sits in the sandbox that caused the failure; no other domain changes.
+
+Rejected: a seam in the working-data helper trusting the overflow uid when root is
+unmapped — production security code in a second domain would change for the
+workflow, and a reviewer of the helper would have to rule out trusting
+`nobody`-owned ancestors in production; skipping the ledger tests under an unmapped
+root — no step would run them, and a bare-metal change would meet them first in the
+pipeline's evidence; running the suite in a container — `validate-local` would need
+Docker and an image for one suite, and the cause would stay for the next suite;
+running the suites outside the sandbox — the step's own code would run unconfined,
+against P1 and P5; mapping host root — no unprivileged tool can; deferring with a
+waiver — the change caused the failure and resolves it.
+
+### D18 — The private `/tmp` is a tmpfs; `TMPDIR` points at it; named paths are bound inside
+
+The sandbox mounts `--perms 0700 --tmpfs /tmp` before every bind, and sets `TMPDIR`
+to `/tmp`, so a `TMPDIR` the owner set elsewhere, outside the scope and under
+root-owned ancestors, does not bring the failure back. A path under the host's
+`/tmp` that the scope names — the review's drafts directory, a grant — is bound at
+its own path inside the tmpfs, so it means the same file on both sides: the engine
+keeps making the review's drafts directory in the host's temporary directory, adds
+it to the review's scope as an engine path, and Codex's final message and the
+engine's move after the run work unchanged. `config` lists the temporary entry as
+the private `/tmp`. The tmpfs ends with the sandbox; nothing is left on the host.
+The host's `/tmp` is hidden from reads inside the step but for the paths bound in, an
+exception to P3's local fulfilment; sessions outside the sandbox are unaffected.
+
+Rejected: a per-run host directory bound at `/tmp`, removed after the session — a
+mount whose source and destination differ, paths translated across the boundary in
+both directions, and a directory left behind when the engine is killed, for a
+stopped run's `/tmp` no record has needed; the tmpfs with the review's draft moved
+into `.git/change-invocations/` — a second purpose for the invocation record; the
+private directory mounted at `tempfile.gettempdir()` — fails D17 whenever `TMPDIR`
+lies under `/home`; leaving `TMPDIR` alone — a set one points outside the scope.
+
+### D19 — The protected mounts' names are not guarded
+
+A read-only bind protects the file it binds, not its name in the directory around
+it. Three routes around a protected mount are recorded as limits of the threat model
+(P1), with the step's review as backstop (P8), and nothing checks them:
+
+- renaming a writable directory holding a protected mount and creating a new file
+  at the old name — the configuration, a checkout's `.claude/settings*.json`, and
+  `~/.claude/settings.json` inside the adapter's writable `~/.claude`;
+- removing or replacing a link to a protected file inside a writable directory, as
+  every clone's `.claude/settings.local.json` is (D20);
+- a repository's `protected` naming a directory holding an engine or adapter
+  writable path, `protected = ["~"]`, which `[sandbox]`'s check admits while the
+  inner path stays writable.
+
+No route is one a mistake takes; each works around a refusal. CW-r6kd promises that
+no step writes a protected file, not that a protected path's name stays bound.
+
+Rejected (the agent's recommendation): an eighth check after every run comparing each
+protected path's kind, link target and content with the start, a difference stopping
+the run, with `[sandbox]`'s check refusing a protected directory holding a baseline
+path — the owner holds these routes to be workarounds outside P1; mounting each
+protected path's parent read-only — it would stop every legitimate write beside
+them, in `.agents/`, `.claude/` and `~/.claude`.
+
+### D20 — Paths are mounted where their symlinks lead
+
+Each writable and protected path is mounted where its symlinks lead, and an absent
+target is created there before launch. A link whose target lies outside every
+writable path needs no mount: the target is read-only under the root. A clone's
+linked `.claude/settings.local.json` therefore launches, and a write through it fails
+read-only; the link itself is one of D19's limits.
+
+Rejected: `change-clone` copying the settings rather than linking them — the owner's
+settings would diverge across clones, and a linked writable path such as `~/.cache`
+would still need this; refusing to launch on a symlinked scope path — every clone
+would stop.
+
+### D21 — `~/.npm` is a repository addition for every writing step
+
+The configured OpenSpec command runs `npx`, which writes npm's cache at `~/.npm`;
+this repository's `writable.common` names it (D12, MCW-s4bx).
+
+Rejected: redirecting npm's cache under `~/.cache` in the configured command —
+repository plumbing in a command for a narrower declaration, and a second cache for
+the owner's interactive runs.
+
 ### Implementation cadence
 
 One round, three sessions, then closeout:
@@ -467,9 +584,19 @@ them, under the whole sandbox. The session removing `.claude/change-steps.toml` 
 under rules that deny edits under `.claude/`, so the plan gives that removal to the
 orchestrating session or the owner.
 
+After the return from implementation (D17–D21), the round gains one session: it
+implements D18 — the tmpfs `/tmp`, `TMPDIR`, the review's drafts directory in its
+scope, the `config` listing, the refusal of `/tmp` as a grant or `[sandbox]` entry,
+and the nested sandbox tests adjusted — then completes section 11's verification
+point with `validate-local` passing inside its own sandbox. The round's review and
+triage then read every section together, before closeout. D19, D20 (already built)
+and D21 (already declared) change the specification and design only.
+
 Rejected (28 F1): keeping the command rules until a final atomic switch — two
 restraint systems at once, which D10 rejects as a fallback; one session for every
-launch and guard change — a review slice much larger than the others.
+launch and guard change — a review slice much larger than the others. After the
+return: a second round for the private `/tmp`, reviewed apart — a slice smaller than
+its review, which the first round's verification point cannot pass without.
 
 ## Open Questions
 
