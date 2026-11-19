@@ -897,7 +897,7 @@ read scenarios). Touches `core/storefront` and `kit/storefront`.
   with it (`after-functional-change`, `pre-commit-functional` and `pre-commit`
   at `703750505`), before those fixes and again after them (section notes).
   End-to-end: section 9's, as planned.
-- [ ] 7.6 In `MultiRegistryClient.get_descriptors`, refuse a selection naming a URL
+- [x] 7.6 In `MultiRegistryClient.get_descriptors`, refuse a selection naming a URL
   `urls` does not name, and a string passed in place of a collection, with
   `ValueError` naming the problem; an empty selection still reads nothing (D6,
   40 F4). This restores, by the owner's decision, the refusal of an unconfigured
@@ -905,6 +905,19 @@ read scenarios). Touches `core/storefront` and `kit/storefront`.
   `core/storefront/tests/unit/test_multi_registry_descriptors.py`: an unknown URL
   and a bare string are refused and read no registry. No bump: 7.4's is unreleased.
   Verify with `make -C core/storefront test`.
+  Done: both refusals are checked before any registry is read; a URL is
+  matched exactly as `urls` names it, and the refusal names the unconfigured
+  URLs. Unit, new cases in `test_multi_registry_descriptors.py` (the module 6
+  passed; `make -C core/storefront test` 240 passed): a selection naming a
+  configured registry beside an unconfigured one — another registry, or a
+  configured one with a trailing slash `urls` does not give it — is refused
+  naming the unconfigured one, and a configured URL given as a bare string is
+  refused, none reading any registry. The one caller, the dispute policy,
+  passes the client's own `urls` (read from the code; the kit's tests use a
+  double of the client, and `make -C kit/storefront test` 146 passed).
+  Fail-before not shown: `scripts/change-workflow run test-before` fails
+  collecting the module in its `--no-project` environment (`No module named
+  'market_identity'`), as section 1's notes record for other packages.
 
 Section 7 notes (handoff):
 
@@ -927,6 +940,23 @@ Section 7 notes (handoff):
   design's open assumption as fact, both restated; `_read`'s selection flag;
   and three evidence claims (the warning claim, now asserted; the pre-commit
   record; the readiness projection marked beyond the plan).
+- 7.6, in the session that completes the round: `pre-commit` at `825bac9e9`
+  over 7.6's edits — `after-functional-change` and the closing `pre-commit`
+  hook passed; `pre-commit-functional` failed in `make test`'s first target,
+  `test-domains`, on the one test section 10's work in progress left failing
+  at `1d93f5d5f` (`test_a_delivery_other_than_the_recorded_result_is_a_conflict`,
+  1 failed, 658 passed), which section 10 completes; `make test` stopped
+  there, so the core storefront and storefront kit suites were run on their
+  own (7.6's note). Section 10's `pre-commit` runs every suite over both.
+- 7.6's fresh-context check: its docstring misstated what a bare string would
+  read (every configured URL inside it, not fewer), restated; and the exact
+  match was untested against a configured URL spelled otherwise, now a case.
+  It also observed that the refusal is reachable by no integration test — the
+  one caller passes the client's own `urls` and catches every exception — which
+  `implementation.md`'s "No speculative guard code" rules against, and which is
+  why section 7's first check removed it. The owner restored it (40 F4, D6),
+  so it stays; whether that wants an exception declared under `rules.md` is
+  the round's triage's to settle.
 
 ## 8. The mechanisms report an unread registry in their public details
 

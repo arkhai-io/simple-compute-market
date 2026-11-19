@@ -2,7 +2,9 @@
 
 Each registry's client is a fake built by the injected client factory, which
 counts the descriptor reads made of it. A selection reads only the registries
-it names; no selection reads every configured registry.
+it names; no selection reads every configured registry; a selection naming an
+unconfigured registry, or a string in place of a collection, is refused before
+anything is read.
 """
 
 from __future__ import annotations
@@ -96,3 +98,34 @@ async def test_an_empty_selection_reads_nothing():
         assert await client.get_descriptors(registries=[]) == {}
 
     assert registry.reads == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unconfigured",
+    # Another registry, and a configured one spelled other than ``urls`` names it.
+    [_C, _B + "/"],
+)
+async def test_a_selection_naming_an_unconfigured_registry_is_refused_and_reads_nothing(
+    unconfigured: str,
+):
+    registries = {_A: _DescriptorRegistry(), _B: _DescriptorRegistry()}
+
+    async with _client(registries) as client:
+        with pytest.raises(ValueError, match="not configured") as refused:
+            await client.get_descriptors(registries=[_A, unconfigured])
+
+    assert repr(unconfigured) in str(refused.value)
+    assert [registry.reads for registry in registries.values()] == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_a_string_given_as_the_selection_is_refused_and_reads_nothing():
+    # A configured URL as a bare string: its characters are not registries.
+    registries = {_A: _DescriptorRegistry()}
+
+    async with _client(registries) as client:
+        with pytest.raises(ValueError, match="not a string"):
+            await client.get_descriptors(registries=_A)
+
+    assert registries[_A].reads == 0

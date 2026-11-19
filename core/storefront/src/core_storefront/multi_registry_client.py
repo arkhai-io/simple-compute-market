@@ -235,8 +235,26 @@ class MultiRegistryClient:
 
         ``registries`` selects the registries to read, named as :attr:`urls`
         names them; only those are read and returned, in configured order.
-        Absent, every configured registry is.
+        Absent, every configured registry is, and an empty selection reads
+        none.
+
+        A selection naming a registry that is not configured, or a string
+        given in place of a collection, is refused with :class:`ValueError`
+        before anything is read. Membership is exact, so an unknown name would
+        otherwise match nothing and be silently skipped, and a string would
+        select every configured URL contained in it; either answer would read
+        as a complete read of the registries the caller meant.
         """
+        if registries is not None:
+            if isinstance(registries, str):
+                raise ValueError(
+                    "registries must be a collection of registry URLs, not a string"
+                )
+            unknown = [url for url in registries if url not in self._urls]
+            if unknown:
+                raise ValueError(
+                    f"registries names registries that are not configured: {unknown!r}"
+                )
         selected = [
             (url, client)
             for url, client in zip(self._urls, self._clients)
