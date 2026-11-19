@@ -156,6 +156,22 @@ def _recorded_end_with_no_filing(deal_driver: RecurringPurchaseDriver,
     return read
 
 
+def submit_the_sellers_notice(storefront_admin_client: Any,
+                              deal_state: RateServicingState) -> None:
+    """The seller's notice on the deal, which the payments authority accepted.
+
+    The storefront's administrator sends it through the typed seller lifecycle
+    client, the call ``deals preempt`` makes, with no instant asked: the
+    payments authority enforces the Agreement's seller notice. The input a spot
+    preemption gives the payments authority, which the lane's preemption row
+    and a live preemption share.
+    """
+    answer = SyncSellerLifecycleClient(storefront_admin_client).notice(
+        deal_state.negotiation_id, operation_key=f"preempt-{deal_state.negotiation_id}",
+    )
+    assert answer.outcome.status == "accepted", answer
+
+
 def _require_lane_double(lane_time: LaneTime | None, what: str) -> None:
     """A blocked skip unless the run is a Compose lane's: injected lane time and
     the lane's own payments double, whose controls ``what`` calls."""
@@ -348,10 +364,7 @@ class Preemption07_SellerNoticeHeld:
                         "injected lane time reaches")
         notice_at = lane_time.now()
         deal_state._deal_ending = True
-        answer = SyncSellerLifecycleClient(storefront_admin_client).notice(
-            deal_state.negotiation_id, operation_key=f"preempt-{deal_state.negotiation_id}",
-        )
-        assert answer.outcome.status == "accepted", answer
+        submit_the_sellers_notice(storefront_admin_client, deal_state)
         effective = notice_at + SPOT_NOTICE_SECONDS
 
         snapshot = _the_snapshot(payments_config, deal_state)

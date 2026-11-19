@@ -182,6 +182,21 @@ def configured_payments(
     return config
 
 
+def live_payments(*, ready: Callable[[str], bool] | None = None) -> ArkhaiPaymentsConfig:
+    """The payments target of a live verification scenario, as
+    ``configured_payments`` gives it, unless it is a lane's own.
+
+    A lane-owned target (PAYMENTS.LANE_OWNED) is a payments double, which
+    yields no live evidence, so the scenario is a blocked skip naming it
+    before anything else is read.
+    """
+    if payment_flag("LANE_OWNED"):
+        target = payment_setting(_TARGET_KEY) or "(none named)"
+        pytest.skip(f"blocked: the payments target {target} is a lane's own double "
+                    "(PAYMENTS.LANE_OWNED), which yields no live evidence")
+    return configured_payments(ready=ready)
+
+
 def payer_api_key(payer: str | None) -> str:
     """The bearer key the run states for ``payer``: the rate payer's for
     PAYMENTS.RATE_PAYER_ACCOUNT, and the buyer's for any other payer or none."""

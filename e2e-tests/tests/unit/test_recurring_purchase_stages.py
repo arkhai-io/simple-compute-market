@@ -1,5 +1,6 @@
-"""Recurring purchases', rate servicing rows', the watchdog cases' and the
-rate-dispute rows' stage sets are declared, ordered, and handed their inputs.
+"""Recurring purchases', rate servicing rows', the watchdog cases', the
+rate-dispute rows' and the live verification modules' stage sets are declared,
+ordered, and handed their inputs.
 
 Read from source rather than collected, so a scenario module is checked without
 its lane's settings or services. Each module is one entry of ``ORDERS``, with
@@ -13,7 +14,10 @@ purchase stages, the stages of ``recurring_purchase_stages.py`` and, for a rate
 servicing row, those of ``rate_servicing_stages.py``, for a watchdog module those
 of ``rate_watchdog_stages.py`` — once each, in one order, with an empty body, and
 inserts only its listing stage, its stage closing the listing and, for a
-rate-dispute row, its domain's dispute stages between them. A module setting
+rate-dispute row, its domain's dispute stages between them. A live verification
+module declares its lane twin's shared stages up to the ending's input and none
+after, its own stages giving the live payments authority that input and
+asserting on the output. A module setting
 lane time past its part's first reservation, in a shared stage or its own,
 declares the payments double's reservation before that stage, and one that sets
 none declares no reservation.
@@ -65,11 +69,13 @@ DOMAIN_STAGES = [
         SCENARIOS / "vms" / "rate_servicing" / "stages.py",
         SCENARIOS / "bare_metal" / "rate_servicing" / "stages.py",
         SCENARIOS / "vms" / "rate_dispute" / "stages.py",
+        SCENARIOS / "vms" / "live" / "stages.py",
     )
     for node in classes(tree(path))
     if is_stage(node)
 ]
 RATE_DISPUTE_TREE = tree(SCENARIOS / "vms" / "rate_dispute" / "stages.py")
+LIVE_TREE = tree(SCENARIOS / "vms" / "live" / "stages.py")
 #: The domain's identity and the other fields a scenario's state is built
 #: with, which a stage may read without any stage writing them.
 DOMAIN_DEAL_FIELDS = fields(class_named(tree(HELPERS / "domain_deal.py"), "DomainDealState"))
@@ -83,6 +89,7 @@ STATE_FIELDS = (
     | fields(class_named(RATE_TREE, "RateServicingState"))
     | fields(class_named(WATCHDOG_TREE, "RateWatchdogState"))
     | fields(class_named(RATE_DISPUTE_TREE, "RateDisputeState"))
+    | fields(class_named(LIVE_TREE, "LiveRateState"))
 )
 
 #: The canonical deal's readiness, a mock lane's mode check among them.
@@ -179,6 +186,11 @@ WATCHDOG_ORDER = [
 #: case is ruled inside it.
 SELLER_FILING_ORDER = [*READINESS, *PURCHASE, *DELIVERY, RESERVATION, *TEARDOWN]
 CONTESTED_CASE_ORDER = [*READINESS, *PURCHASE, *DELIVERY, *TEARDOWN]
+#: A live verification module: its lane twin's shared stages up to the
+#: ending's input, which its own stages give the live payments authority and
+#: whose output they assert on; no shared stage after it, and no reservation,
+#: since the authority's own scheduler reserves.
+LIVE_ORDER = [*READINESS, *PURCHASE, *DELIVERY]
 #: Each stage, shared or a domain's own, that sets lane time past the part's
 #: first reservation, which the reservation must precede in its module.
 SETS_PAST_THE_FIRST_RESERVATION = (
@@ -203,13 +215,20 @@ ORDERS = {
     },
     SCENARIOS / "vms" / "rate_dispute" / "test_seller_filing.py": SELLER_FILING_ORDER,
     SCENARIOS / "vms" / "rate_dispute" / "test_buyer_contested_case.py": CONTESTED_CASE_ORDER,
+    **{
+        SCENARIOS / "vms" / "live" / module: LIVE_ORDER
+        for module in ("test_buyer_stop.py", "test_funds_exhausted.py", "test_preemption.py",
+                       "test_term_end.py")
+    },
 }
 
 
 def _label(path: Path) -> str:
-    nested = path.parent.name in ("rate_servicing", "rate_watchdog", "rate_dispute")
+    nested = path.parent.name in ("rate_servicing", "rate_watchdog", "rate_dispute", "live")
     domain = path.parent.parent.name if nested else path.parent.name
-    return f"{domain}/{path.stem}"
+    # A live module shares its name with its lane twin's row.
+    live = "live/" if path.parent.name == "live" else ""
+    return f"{domain}/{live}{path.stem}"
 
 
 def order_faults(scenario: Path, expected: list[str]) -> list[str]:

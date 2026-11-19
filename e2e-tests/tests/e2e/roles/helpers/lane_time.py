@@ -26,9 +26,13 @@ a party already holds when a run before this one on the same stack left lane
 time ahead. The chain is frozen between sets.
 
 In a wall run nothing is set: a stage reaches an instant the Agreement fixes by
-waiting for it, and any other instant is a blocked skip naming the wall-time
-target. Either way the session reads the status of every party the profile
-names and fails naming a mix of sources. A run whose profile has no
+waiting for it, and so an instant an authority recorded, in a signed record the
+stage read, as the effect of the scenario's own request — a pending stop's
+effective instant, a funded boundary — each wait bounded and refused past its
+bound; any other instant is a blocked skip naming the wall-time target. An
+output the authority makes on its own schedule after such an instant is read by
+polling its public read, bounded (``poll_until``). Either way the session reads
+the status of every party the profile names and fails naming a mix of sources. A run whose profile has no
 ``lane_time`` section, a hosted target's, has no lane time and reads no status,
 and a stage there waits for an Agreement instant as a wall run does
 (``compute_deal_stages.reach_agreement_instant``).
@@ -42,7 +46,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, TypeVar
 
 import httpx
 import injected_time
@@ -59,6 +63,7 @@ from e2e_harness.settings import settings
 
 Mode = Literal["injected", "wall"]
 MODES: tuple[Mode, ...] = ("injected", "wall")
+T = TypeVar("T")
 
 #: The order a set moves the parties in, by kind: the services first, so a
 #: double's due state never runs ahead of the service that acts on it, then the
@@ -90,20 +95,23 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def wait_until(instant: datetime, *, now: Callable[[], datetime] = _utc_now,
+def wait_until(instant: datetime, *, bound: timedelta = MAX_CLOCK_WAIT,
+               now: Callable[[], datetime] = _utc_now,
                sleep: Callable[[float], Any] = time.sleep) -> datetime:
     """Wait for the wall clock to reach ``instant``, and return the time it did.
 
     A wall-time run's one wait that is not on a request a stage made, and only
-    for an instant the deal's Agreement fixes: nothing moves a wall-time
-    party's clock, so a deal that must be late, or must reach its start, waits
-    for the instant itself, and the stage then advances whatever acts on it
-    explicitly. It never waits for a loop to have run.
+    for an instant the deal's Agreement fixes or an authority recorded as the
+    effect of the scenario's own request: nothing moves a wall-time party's
+    clock, so a deal that must be late, or must reach its start, waits for the
+    instant itself, and the stage then advances whatever acts on it
+    explicitly. It never waits for a loop to have run. An instant further off
+    than ``bound`` is refused before any wait, so a mistaken one fails the
+    stage at once rather than after the bound.
     """
     remaining = instant - now()
-    assert remaining <= MAX_CLOCK_WAIT, (
-        f"refusing to wait {remaining} for {instant.isoformat()}; the bound is "
-        f"{MAX_CLOCK_WAIT}"
+    assert remaining <= bound, (
+        f"refusing to wait {remaining} for {instant.isoformat()}; the bound is {bound}"
     )
     # A sleep may return slightly before the wall clock reaches the instant,
     # so it is repeated for whatever remains.
@@ -111,6 +119,32 @@ def wait_until(instant: datetime, *, now: Callable[[], datetime] = _utc_now,
         sleep(remaining.total_seconds())
         remaining = instant - now()
     return now()
+
+
+def poll_until(read: Callable[[], T], until: Callable[[T], bool], *, bound: timedelta,
+               interval: timedelta, what: str,
+               clock: Callable[[], float] = time.monotonic,
+               sleep: Callable[[float], Any] = time.sleep) -> T:
+    """Read a producer's public read until ``until`` holds of it; that read.
+
+    For an output a live producer makes on its own schedule as the effect of
+    the scenario's own request: its scheduler acting at an instant the
+    scenario reached, or its decision on a filing. The read is repeated every
+    ``interval`` until the output appears, and once ``bound`` has passed
+    without it the stage fails, naming ``what`` it waited for and the last
+    read, never skips: a producer that does not emit the output differs from
+    the expectation.
+    """
+    deadline = clock() + bound.total_seconds()
+    while True:
+        value = read()
+        if until(value):
+            return value
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise AssertionError(
+                f"{what} did not appear within {bound}; the last read was {value!r}")
+        sleep(min(interval.total_seconds(), remaining))
 
 
 @dataclass(frozen=True)
@@ -150,7 +184,7 @@ class LaneTime:
 
     def __init__(self, mode: Mode, parties: Sequence[TimeParty], *,
                  harness: InjectedTime | None = None,
-                 wait: Callable[[datetime], datetime] | None = None,
+                 wait: Callable[..., datetime] | None = None,
                  target: str = "") -> None:
         if mode not in MODES:
             raise LaneTimeError(f"lane_time.mode is 'injected' or 'wall', not {mode!r}")
@@ -265,23 +299,29 @@ class LaneTime:
                 held.append(reading.now)
         return held
 
-    def reach(self, instant: int, *, fixed_by_agreement: bool) -> int:
+    def reach(self, instant: int, *, fixed_by_agreement: bool,
+              recorded_by_authority: bool = False, bound: timedelta | None = None) -> int:
         """Bring the lane to ``instant``, or past it; the lane instant after.
 
         An injected run sets lane time, leaving it where it is when it is already
         past ``instant``. A wall run waits for an instant the Agreement fixes,
-        and is a blocked skip for any other, since a wall-time target offers no
-        way to reach it.
+        or one an authority recorded, in a signed record the stage read, as the
+        effect of the scenario's own request (``recorded_by_authority``), and is
+        a blocked skip for any other, since a wall-time target offers no way to
+        reach it. The wait refuses an instant further off than ``bound``, or
+        than the wait function's own bound when none is given.
         """
         if self.injected:
             return self.set(max(instant, self.now()))
-        if not fixed_by_agreement:
+        if not (fixed_by_agreement or recorded_by_authority):
             pytest.skip(
                 f"blocked: reaching {instant} needs lane time, and the run is on wall time"
                 + (f" against {self._target}" if self._target else ""))
         if self._wait is None:
             raise LaneTimeError("a wall-time run waits through a wait function, and has none")
-        return int(self._wait(datetime.fromtimestamp(instant, timezone.utc)).timestamp())
+        when = datetime.fromtimestamp(instant, timezone.utc)
+        reached = self._wait(when) if bound is None else self._wait(when, bound=bound)
+        return int(reached.timestamp())
 
     @staticmethod
     def _read(party: TimeParty) -> TimeReading:
@@ -593,6 +633,7 @@ __all__ = [
     "lane_time_of",
     "lane_time_settings",
     "parties_from",
+    "poll_until",
     "wait_until",
     "wall_instant",
 ]

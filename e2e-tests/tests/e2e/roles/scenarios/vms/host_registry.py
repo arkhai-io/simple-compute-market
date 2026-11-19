@@ -88,6 +88,12 @@ E2E_RATE_WATCHDOG_HOST = "kvm-rate-watchdog"
 #: The VM rate-deal dispute rows, each on its own deal and so its own executor.
 E2E_RATE_SELLER_FILING_HOST = "kvm-rate-seller-filing"
 E2E_RATE_CONTESTED_CASE_HOST = "kvm-rate-contested-case"
+#: The VM live verification scenarios, each on its own deal and so its own
+#: executor.
+E2E_LIVE_BUYER_STOP_HOST = "kvm-live-buyer-stop"
+E2E_LIVE_FUNDS_EXHAUSTED_HOST = "kvm-live-funds-exhausted"
+E2E_LIVE_PREEMPTION_HOST = "kvm-live-preemption"
+E2E_LIVE_TERM_END_HOST = "kvm-live-term-end"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
@@ -115,6 +121,10 @@ E2E_RATE_MAXIMUM_TERM_POOL_ID = "compute-e2e-rate-maximum-term-pool"
 E2E_RATE_WATCHDOG_POOL_ID = "compute-e2e-rate-watchdog-pool"
 E2E_RATE_SELLER_FILING_POOL_ID = "compute-e2e-rate-seller-filing-pool"
 E2E_RATE_CONTESTED_CASE_POOL_ID = "compute-e2e-rate-contested-case-pool"
+E2E_LIVE_BUYER_STOP_POOL_ID = "compute-e2e-live-buyer-stop-pool"
+E2E_LIVE_FUNDS_EXHAUSTED_POOL_ID = "compute-e2e-live-funds-exhausted-pool"
+E2E_LIVE_PREEMPTION_POOL_ID = "compute-e2e-live-preemption-pool"
+E2E_LIVE_TERM_END_POOL_ID = "compute-e2e-live-term-end-pool"
 
 #: The resource each VM dispute scenario lists. A listing's binding to its
 #: resource outlives the listing, so no two scenarios on one stack list the same.
@@ -142,6 +152,14 @@ E2E_RATE_SELLER_FILING_RESOURCE_ID = "compute-e2e-rate-seller-filing-001"
 E2E_RATE_SELLER_FILING_GPU_MODEL = "RTX 5070 Ti"
 E2E_RATE_CONTESTED_CASE_RESOURCE_ID = "compute-e2e-rate-contested-case-001"
 E2E_RATE_CONTESTED_CASE_GPU_MODEL = "RTX 5070"
+E2E_LIVE_BUYER_STOP_RESOURCE_ID = "compute-e2e-live-buyer-stop-001"
+E2E_LIVE_BUYER_STOP_GPU_MODEL = "RTX 3090 Ti"
+E2E_LIVE_FUNDS_EXHAUSTED_RESOURCE_ID = "compute-e2e-live-funds-exhausted-001"
+E2E_LIVE_FUNDS_EXHAUSTED_GPU_MODEL = "RTX 3090"
+E2E_LIVE_PREEMPTION_RESOURCE_ID = "compute-e2e-live-preemption-001"
+E2E_LIVE_PREEMPTION_GPU_MODEL = "RTX 3080 Ti"
+E2E_LIVE_TERM_END_RESOURCE_ID = "compute-e2e-live-term-end-001"
+E2E_LIVE_TERM_END_GPU_MODEL = "RTX 3080"
 
 
 def resource_gpus(resource: dict[str, Any]) -> tuple[int, str] | None:

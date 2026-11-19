@@ -726,6 +726,108 @@ and four modules), `e2e-tests/pyproject.toml`'s markers and `e2e-tests/README.md
       `e2e_vm_recurring_purchase` and `e2e_vm_rate_servicing`.
       Nothing is owed to validation.
 
+Work in progress (section 5), returned to planning: 5.5 cannot be done as planned,
+and its verification cannot pass. No task is checked; 5.1–5.4 are written and their
+unit evidence passes, as below.
+
+Why 5.5 cannot run as planned (the evidence):
+
+- 5.2 has the live modules refuse a lane-owned payments target, and the local Helm
+  release's payments target is its payments double marked lane-owned:
+  `helm/local-values.yaml`, `e2e-tests.payments.lane_owned: true`. Run there, every
+  live module is a blocked skip at its first fixture, by design, before any
+  observation.
+- The release's storefront cannot serve a rate deal: Bob's agent in
+  `helm/local-values.yaml` declares no `[Settlement.rate_servicing.arkhai_payments]`,
+  so publication refuses every recurring option (`rate_servicing_undeclared`, as 4.3's
+  probe shows with the table removed), and the release's e2e profile states "the
+  release serves no payment scenario"; validation's helm kind lists every payment
+  module as not run against Helm for that reason (`reviews/34-validation.md`).
+- Serving the modules there needs a values change outside the section's plan (Bob's
+  declaration, the e2e profile's `LIVE` settings and short terms, and either
+  LANE_OWNED cleared for the rehearsal, which contradicts 5.2's refusal, or a
+  rehearsal-only bypass of it), and a deployment of the release, which the
+  implementation step's rules do not admit (no deploy target; `kubectl` is denied).
+
+Recommendation for planning: drop 5.5 and 5.6's "5.5's runs are recorded", leaving the
+lane twins and the unit checks as the in-repository evidence and the deployment's run
+(section 8) as the only run of the modules; or, if the owner wants a rehearsal,
+plan it as its own task with the values overlay it needs, a stated way past 5.2's
+refusal that cannot be mistaken for live evidence, and an owner or orchestrator who
+deploys. 6.4 plans the same Helm rehearsal for the dispute modules and meets the same
+three obstacles, plus a mediation double the release's e2e pods hold no control token
+for.
+
+What is written (uncommitted until this commit):
+
+- 5.1: `LaneTime.reach` takes `recorded_by_authority` and `bound`: on wall time it
+  waits for an instant an authority recorded as the effect of the scenario's own
+  request, refusing one further off than the bound before any wait; any other
+  instant stays a blocked skip; injected runs set it as before. `wait_until` takes a
+  `bound` (default the old two minutes). `poll_until` reads a producer's public read
+  until a predicate holds, failing at its bound naming what it waited for and the
+  last read. `recurring_purchase_stages.reach_lane_instant` passes both through for a
+  run with no lane time. Unit (`tests/unit/test_lane_time.py`, `LaneTime` with fake
+  parties and wait, `wait_until` and `poll_until` with fake clocks): a recorded
+  instant waited for within its bound; one past its bound refused with no sleep; the
+  wait sleeping until the instant passes; an unrecorded instant still a blocked skip;
+  an injected run setting a recorded instant; a poll returning the first read
+  carrying the output, and failing at its bound naming both — 38 pass.
+- 5.2: `helpers/live_verification.py` reads the `LIVE` section: PERIOD_SECONDS,
+  PAYEE_NOTICE_SECONDS, MAXIMUM_TERM_SECONDS and POLL_BOUND_SECONDS, defaulting to the
+  lanes' 900, 120, 3600 and 120, failing a value that is no positive whole number of
+  seconds or terms no deal can hold (a term past the listing's hour, a period past the
+  term, a notice not inside it); and the provenance SOURCE_REVISION, TARGET_ALIAS and
+  PAYMENTS_REVISION, a blocked skip naming each missing one. `payments.live_payments`
+  is a blocked skip naming a lane-owned target before anything else. Unit
+  (`tests/unit/test_live_verification.py`, `tests/unit/test_payments_helper.py`):
+  defaults, short terms as numbers or text, bad values and terms each named, the
+  provenance read and its skip, a lane-owned target refused as `True` or `"true"`, an
+  external target taken, none blocked — pass.
+- 5.3: the shared stages read the option's per-period terms from the driver
+  (`RecurringPurchaseDriver.rate_terms`, a `RateTerms` whose lanes' value
+  `LANE_RATE_TERMS` is the old constants; both domains' recurring drivers default to
+  it), so `Recurring04`, `07`, `08` and `09` and the option's clause and check hold a
+  live run's period; the buyer's end (`end_by_the_buyers_stop`) and the seller's notice
+  (`submit_the_sellers_notice`) are factored out of `Recurring08` and `Preemption07`,
+  their state writes left in the stages' bodies for the handoff check.
+  `VmLiveRatePurchaseDriver` asks `market buy` for the run's term in seconds. Four
+  modules under `scenarios/vms/live/` (marker `e2e_vm_live_rate_servicing`, in no
+  lane), each on its own host, pool, resource and GPU model (`host_registry.py`,
+  RTX 3090 Ti, 3090, 3080 Ti, 3080), run their twin's shared stages through
+  `Stage09c2`, then `live/stages.py`'s: `Live00` logs the label and provenance;
+  the buyer's stop, funds running out (the rate payer holding exactly three periods'
+  price, else a blocked skip naming it; each funded boundary reached in turn until
+  the terms stop), the preemption (pending, then its recorded instant reached and the
+  final stop) and the term end (the Agreement's end reached), each polling the
+  snapshot and asserting through section 2's assertion, with no stage after. Each
+  module declares `OBSERVATIONS`, so `qualification.py` logs its outcome. Unit:
+  `make -C e2e-tests test-unit` — 1143 passed, 1 skipped, the four modules in
+  `ORDERS` (order and handoff checks), the cleanup-order and lane-hold checks
+  collecting them.
+- 5.4: `e2e-tests/README.md`, "Live verification": what the modules prove, the table
+  of inputs and compared outputs, and the topology requirements in prose — mock
+  provisioning, Arkhai payments in test mode executing rate parts, the accounts and
+  the rate payer's exact balance, the `PAYMENTS` and `LIVE` settings, and what the
+  caller owes between runs — naming no deployment; the shared payment-scenario list
+  names the marker, and the Makefile's lane comment says it is in no lane.
+  `make check-doc-citations CHANGE=switch-on-hosted-per-period-vm` reports only
+  section 8's summary, as in sections 1 to 4.
+- System, on this commit's code: the VM lane's Compose stack, `make -C e2e-tests
+  test-e2e-vm "E2E_MODULE=e2e_vm_recurring_purchase or e2e_vm_rate_servicing or
+  e2e_vm_rate_watchdog or e2e_vm_rate_dispute or e2e_vm_live_rate_servicing"` — 220
+  passed, 110 skipped, 1926 deselected: the lane twins and the other rows on the
+  refactored shared stages pass, and every skip is a live module's stage refusing the
+  lane's double (`blocked: the payments target https://payments-double:8443 is a lane's
+  own double (PAYMENTS.LANE_OWNED)`), each module logging its observation unproven
+  naming it. The bare-metal lane's Compose stack, `make -C e2e-tests
+  test-e2e-bare-metal "E2E_MODULE=e2e_bare_metal_recurring_purchase or
+  e2e_bare_metal_rate_servicing or e2e_bare_metal_rate_watchdog"` — 249 passed, the
+  bare-metal rows sharing the same stage bodies. Each stack taken down after.
+- Not yet done: 5.5 (above); the fresh-context check of the diff and
+  `scripts/change-workflow run pre-commit`, which the session finishing the section
+  runs on its final diff; the whole VM lane.
+
 ## 6. The live dispute scenarios
 
 Delivers the two live dispute scenarios — the seller's filing, and the buyer's contested

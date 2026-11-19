@@ -144,6 +144,28 @@ def test_a_lane_owned_run_without_a_target_fails(configure) -> None:
     assert "PAYMENTS.LANE_OWNED is set but PAYMENTS.SERVICE_URL is not configured" in str(outcome)
 
 
+@pytest.mark.parametrize("lane_owned", [True, "true"])
+def test_a_live_scenario_refuses_a_lane_owned_target_as_a_blocked_skip_naming_it(
+    configure, lane_owned,
+) -> None:
+    configure(**_COMPLETE, LANE_OWNED=lane_owned)
+    with pytest.raises(Skipped, match=r"blocked: the payments target http://127\.0\.0\.1:9 is a "
+                                      r"lane's own double \(PAYMENTS\.LANE_OWNED\)"):
+        payments.live_payments(ready=_never_asked)
+
+
+def test_a_live_scenario_takes_an_external_target_as_any_payment_scenario(configure) -> None:
+    configure(**_COMPLETE)
+    config = payments.live_payments(ready=lambda _url: True)
+    assert config.service_url == "http://127.0.0.1:9"
+
+
+def test_a_live_scenario_without_a_target_is_blocked_as_any_payment_scenario(configure) -> None:
+    configure()
+    with pytest.raises(Skipped, match="blocked: PAYMENTS.SERVICE_URL not configured"):
+        payments.live_payments(ready=_never_asked)
+
+
 def test_an_unready_target_marked_external_still_blocks(configure) -> None:
     configure(**_COMPLETE, LANE_OWNED="false")
     outcome = _outcome(ready=lambda _url: False)

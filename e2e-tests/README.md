@@ -62,7 +62,8 @@ The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_de
 `e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase`,
 `e2e_bare_metal_recurring_purchase`, `e2e_vm_rate_servicing`,
 `e2e_bare_metal_rate_servicing`, `e2e_vm_rate_watchdog`,
-`e2e_bare_metal_rate_watchdog` and `e2e_vm_rate_dispute`, and the qualification modules
+`e2e_bare_metal_rate_watchdog`, `e2e_vm_rate_dispute` and the live verification
+modules `e2e_vm_live_rate_servicing`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -512,6 +513,95 @@ open case or extension. No stage steps the storefront's servicing while a ruling
 waits at its gate, and each module removes its rules through
 `lane_double_rules`. Off a Compose lane's injected lane time and doubles the
 modules are blocked.
+
+### Live verification
+
+The live verification scenarios compare a hosted authority's outputs with what
+the lanes' doubles emit. Each extends a lane row in the live verification form:
+it runs its lane twin's shared stages against the run's external payments
+target, on wall time, until the input its lane twin gives the payments double;
+gives the live authority that input through the same client code; polls the
+authority's signed transaction snapshot until the output appears, bounded; and
+asserts on it through the lane twin's shared assertion in
+`tests/e2e/roles/helpers/producer_assertions.py`, which names the fields it
+compares exactly, by relation, or not at all. A different output fails the
+observation. No stage runs after it: what the storefront does with the output is
+the lane twin's evidence. Where the lane twin moves lane time or calls a
+double's control, the live scenario waits for the instant the authority recorded
+(a pending stop's, a funded boundary) or the Agreement fixes, bounded by the
+term, and leaves reserving to the authority's own scheduler.
+
+The modules are in no lane. A deployment prepares a topology meeting the
+requirements below, runs them through `test-module`, and records its own
+sanitized summary of the outcome; raw logs and records stay in its storage.
+Against no external payments target, or against a lane's own double (LANE_OWNED),
+each module is a blocked skip before any hold or write. Each module's first own
+stage logs the live-evidence label with its provenance, every stage logs the
+identifiers it reads, and the module logs its observation's outcome at its end:
+made, failed, or unproven naming what a skipped stage lacked
+(`tests/e2e/roles/helpers/qualification.py`).
+
+```bash
+make test-module MODULE=e2e_vm_live_rate_servicing ACTIVE_PROFILES=<the topology's profiles>
+```
+
+`e2e_vm_live_rate_servicing`, four modules under
+`tests/e2e/roles/scenarios/vms/live/`, each on a deal of its own:
+
+| Module | What it proves | Input to the payments authority | Output compared |
+|---|---|---|---|
+| `test_buyer_stop.py` | the buyer's stop, twin of `e2e_vm_recurring_purchase`'s buyer end | the buyer's own `market end`, a payer stop with no notice | the part stopped with cause `payer` and `charged`, the started periods settled, the rest refunded (`assert_payer_stop`) |
+| `test_funds_exhausted.py` | funds running out, twin of the rate servicing row | none beyond the purchase: the rate payer's balance, three periods' price | a `terms` stop at the funded boundary the snapshot last reported, three periods settled (`assert_funds_exhausted`) |
+| `test_preemption.py` | a spot seller's preemption, twin of the rate servicing row | the seller's notice through the typed seller lifecycle client, as `deals preempt` sends it | a pending `payee` stop due the notice after its receipt (`assert_payee_stop_pending`), then the final stop then, `returned`, the unstarted remainder refunded (`assert_payee_stop`) |
+| `test_term_end.py` | the term end, twin of the maximum-term row | none beyond the purchase: the Agreement's end | a `terms` stop at the Agreement's end, `returned` (`assert_term_end`) |
+
+What a topology provides for them, naming no deployment:
+
+- **Provisioning: mock.** They prove the payments authority, not delivery, so
+  this repository's VM storefront, provisioning service and registry run with
+  provisioning in its mock mode, its test controls, fulfillment convergence and
+  lease watchdog reachable as in a lane, and the storefront's loops pausable
+  through its administrator. The storefront settles in `arkhai.payments.v1`
+  against the payments target and declares rate servicing for `charged` and
+  `returned` with no setup charge, as the VM chart's production example does;
+  the buyer's registry recommends a dispute authority whose advertised minimum
+  filing window PAYMENTS.DISPUTE_WINDOW_SECONDS covers beside the delivery
+  deadline, as every compute payments option requires. No case is filed.
+- **Payments: Arkhai payments in test mode, executing rate parts.** The target
+  starts a rate part, keeps it reserved ahead by its own scheduler as far as the
+  payer's balance pays, holds a payee's stop with notice as pending until it is
+  due, and stops a part by its terms at its funded boundary and at its mandate's
+  end. LIVEMODE is false.
+- **Accounts and starting balances.** The run's buyer account
+  (PAYMENTS.BUYER_ACCOUNT, with BUYER_API_KEY) holds enough for the buyer's
+  stop, the preemption and the term end, at most one term's price each at the
+  run's period, and nothing else spends from it during a run. The seller account
+  (PAYMENTS.SELLER_ACCOUNT) is the storefront's. Funds running out pays from a
+  rate payer (PAYMENTS.RATE_PAYER_ACCOUNT, with RATE_PAYER_API_KEY) holding
+  exactly three periods' price at the run's period — 49 998 USD/6 base units at
+  a one-minute period, 750 000 at the lanes' fifteen minutes — and nothing else;
+  any other balance makes that module a blocked skip naming this requirement.
+  No module funds an account.
+- **Run settings.** The `PAYMENTS` section as every payment scenario reads it,
+  with LANE_OWNED unset. The `LIVE` section (environment prefix `ARKHAI_LIVE__`,
+  `tests/e2e/roles/helpers/live_verification.py`): PERIOD_SECONDS, the option's
+  period (900); PAYEE_NOTICE_SECONDS, the spot seller's notice (120);
+  MAXIMUM_TERM_SECONDS, the Agreement's duration the buyer asks for, at most the
+  listing's hour (3600); POLL_BOUND_SECONDS, how long an output is polled for
+  once due (120); and the provenance the evidence is labelled with,
+  SOURCE_REVISION, TARGET_ALIAS and PAYMENTS_REVISION, without which each module
+  is a blocked skip naming the setting. The period, notice and term set how long
+  a run takes on wall time, the term end waiting out the whole term, so a
+  deployment states short ones, the period no longer than the term and the
+  notice shorter than it.
+- **What the caller owes between runs.** Resetting the rate payer to exactly
+  three periods' price, which a run leaves empty, and topping up the buyer. A
+  module stops only the deal its input stops; funds running out and the term end
+  leave the authority to stop theirs, and a module's cleanup ends an approved
+  deal no input stopped by the buyer's own `end`. Each module releases its
+  reserved resources and removes its mock gates' rules; once its holds are
+  released the storefront services the stopped deals and tears them down on its
+  own.
 
 ### Real bare-metal provisioning
 

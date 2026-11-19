@@ -104,7 +104,10 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
 # the dev chain's own deployments. `e2e_vm_real_provisioning` is in no lane: it
 # provisions on a real KVM host an operator provides, which the pipeline never
-# has, and runs from the operator's machine through `test-module`. The six
+# has, and runs from the operator's machine through `test-module`;
+# `e2e_vm_live_rate_servicing` is in no lane either: it needs an external
+# payments target, refuses the lane's own double, and a deployment runs it
+# through `test-module` against a topology it prepared. The six
 # `e2e_vm_dispute_*` scenarios each run on a deal of their own, and each removes
 # its rules from the lane's doubles when it ends, so they need no order among
 # themselves; lane time only moves forward, and a module after the hold-passed
