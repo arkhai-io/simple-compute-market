@@ -10,8 +10,8 @@ repository; each stands until then.
 
 - **The current model.** An unattended run uses Claude Code's `dontAsk` permission
   mode with only the project's settings loaded. Each step's allow and deny rules are
-  its own plus `[common]`'s, in `.claude/change-steps.toml`, read by
-  `scripts/change_workflow/steps.py`, which also holds each step's skill and
+  its own plus `[common]`'s, in `.claude/change-steps.toml`, read by the engine's
+  `steps` module, which also holds each step's skill and
   `resume_from`. A call no rule allows is denied and recorded in the run's
   `permission_denials`; deny rules encode each skill's "never" lines. The contract is
   CW-qu42, CW-4yhk, CW-2lvd, CW-2h9t, CW-svng, CW-5rmh, CW-vdqj, CW-jqi7, CW-drf6,

@@ -20,7 +20,6 @@ from change_workflow.graph import (AFTER, ARCHIVE_CLEANUP, BEFORE, CLOSEOUT_TRIA
                                    HISTORY, HOOK_STEPS, NODES, OWNER, STEP_ACTIONS, STEPS,
                                    TABLE, WAIT, Node, step_actions)
 from change_workflow.running import INVOCATIONS
-from change_workflow.steps import load_steps
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = Path("openspec/specs/change-workflow/README.md")
@@ -413,13 +412,11 @@ def test_every_step_with_a_run_has_one_definition() -> None:
         assert definition.resume_from is None or definition.resume_from in STEPS, name
 
 
-def test_each_steps_skill_and_resumed_session_are_the_step_tables() -> None:
-    table = load_steps()
-
-    assert set(table) == set(graph.STEP_DEFINITIONS)
-    for name, rules in table.items():
-        definition = graph.STEP_DEFINITIONS[name]
-        assert (definition.skill, definition.resume_from) == (rules.skill, rules.resume_from), name
+def test_every_step_runs_its_own_skill_and_planning_resumes_the_design() -> None:
+    assert {name: definition.skill for name, definition in graph.STEP_DEFINITIONS.items()} \
+        == {name: f"change-{name}" for name in STEPS}
+    assert {name: definition.resume_from for name, definition in graph.STEP_DEFINITIONS.items()
+            if definition.resume_from is not None} == {"plan": "design"}
 
 
 def test_the_review_writes_no_path_of_its_checkout_but_the_engines_invocation_record() -> None:

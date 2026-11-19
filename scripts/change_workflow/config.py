@@ -5,9 +5,8 @@ Each field configures one operation of a skill or the engine, and a value Git or
 the invocation supplies is never one. The workflow defines every table and key; an
 adopting repository changes what a field holds and adds none, so an unknown table
 or key is a typo or a newer workflow's, and is refused, naming it. Every reader
-checks the whole file as it loads it (`load`), as the step table's loader refuses
-a malformed table, so a subcommand never acts on half a configuration; with no
-file, every field is absent.
+checks the whole file as it loads it (`load`), so a subcommand never acts on half a
+configuration; with no file, every field is absent.
 
 A hook, an evidence kind's command, or the preflight holds one shell command or a
 list of them. A command names the values it needs as placeholders the engine

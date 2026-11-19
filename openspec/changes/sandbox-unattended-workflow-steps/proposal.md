@@ -104,7 +104,7 @@ harness, as categorical bounds on what a step can change on the owner's machine.
 
 ## Impact
 
-- `.claude/change-steps.toml` and `scripts/change_workflow/steps.py`, removed; each
+- `.claude/change-steps.toml` and the engine's `steps` module, removed; each
   step's definition moves into the engine beside `graph.py`.
 - `scripts/change_workflow/harness.py`, reorganized into internal adapters, and a
   new sandbox launcher; `wrapper.py` and `review.py`, which launch through them;

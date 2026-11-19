@@ -37,8 +37,6 @@ siblings by relative import:
   `HEAD` lacks (`evidence`);
 - `gather` — gathering the evidence a change's `HEAD` lacks, or a new attempt of one
   kind (`gather`);
-- `steps` — the step table: each step's skill and the permission rules an
-  unattended run of it is held to;
 - `stream` — a Claude Code run's event stream, transcript, progress, denials, and
   refusals;
 - `subagents` — the denials a run's subagents met, read from their transcripts;

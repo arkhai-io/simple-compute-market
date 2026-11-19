@@ -78,6 +78,33 @@ def test_a_checkout_wide_scope_mounts_the_configuration_read_only_after_the_chec
                                      str(root / ".agents/workflow.toml"), *GIT]
 
 
+def test_paths_that_are_symlinks_are_mounted_where_they_lead(tmp_path: Path) -> None:
+    """Bubblewrap cannot mount over a symlink, so a writable path that is one is bound
+    at its target, a protected file linked inside a writable path is bound read-only at
+    its target, and one linked outside every writable path, as a clone's local settings
+    link to the owner's workspace, is read-only under the root and not mounted."""
+    root, workspace, home = tmp_path / "clone", tmp_path / "workspace", tmp_path / "home"
+    (root / ".claude").mkdir(parents=True)
+    (workspace / ".claude").mkdir(parents=True)
+    (workspace / ".claude/settings.local.json").write_text("{}", "utf-8")
+    (root / ".claude/settings.local.json").symlink_to(workspace / ".claude/settings.local.json")
+    (root / "shared.json").write_text("{}", "utf-8")
+    (root / ".claude/settings.json").symlink_to("../shared.json")
+    (tmp_path / "cache").mkdir()
+    home.mkdir()
+    (home / ".cache").symlink_to(tmp_path / "cache")
+    implement = Scope("implement", _paths(ENGINE, root, home / ".cache"),
+                      _paths(ADAPTER, root / ".claude/settings.local.json",
+                             root / ".claude/settings.json"))
+
+    command = sandbox.arguments(implement, ["true"], git=(7, 8))
+
+    assert command[len(BASE):-3] == [
+        "--bind", str(tmp_path / "cache"), str(tmp_path / "cache"),
+        "--bind", str(root), str(root),
+        "--ro-bind", str(root / "shared.json"), str(root / "shared.json"), *GIT]
+
+
 # What is created before launch.
 
 def test_absent_paths_are_created_in_their_empty_forms(tmp_path: Path) -> None:
@@ -99,6 +126,21 @@ def test_absent_paths_are_created_in_their_empty_forms(tmp_path: Path) -> None:
     assert (root / ".claude/notes").read_text("utf-8") == ""
     assert (root / "secrets").is_dir()
     assert (root / "build/cache").is_dir()
+
+
+def test_an_absent_path_behind_a_symlink_is_created_where_it_leads(tmp_path: Path) -> None:
+    root = tmp_path / "checkout"
+    (root / ".claude").mkdir(parents=True)
+    (root / ".claude/settings.json").symlink_to("../shared/settings.json")
+    (root / "cache").symlink_to("build/cache")
+    found = Scope("implement", _paths(ENGINE, root) + _paths(GRANT, root / "cache"),
+                  _paths(ADAPTER, root / ".claude/settings.json"))
+
+    sandbox.prepare(found)
+
+    assert json.loads((root / "shared/settings.json").read_text("utf-8")) == {}
+    assert (root / "build/cache").is_dir()
+    assert (root / ".claude/settings.json").is_symlink() and (root / "cache").is_symlink()
 
 
 def test_an_absent_state_file_mounted_alone_is_created_as_a_file(tmp_path: Path) -> None:
@@ -180,12 +222,27 @@ def test_without_the_sandbox_the_program_runs_unconfined_with_the_reason(
 def test_with_the_sandbox_the_program_runs_inside_it(tmp_path: Path) -> None:
     found = Scope("triage", _paths(GRANT, tmp_path / "build", create=True), ())
 
-    with sandbox.launch(found, ["claude"], probing=lambda: None) as launched:
+    with sandbox.launch(found, ["claude"], probing=lambda: None,
+                        inside=lambda: False) as launched:
         assert launched.unconfined is None
         assert launched.command[0] == BWRAP and launched.command[-2:] == ("--", "claude")
         # The engine's `git`, open for bubblewrap to read over each Git executable.
         assert [os.read(fd, 10) for fd in launched.fds] == [b"#!/bin/sh\n"] * 2
     assert (tmp_path / "build").is_dir()
+
+
+def test_inside_the_engines_sandbox_the_git_it_finds_is_kept(tmp_path: Path) -> None:
+    """The enclosing sandbox's `git` cannot be mounted over, so a sandbox started
+    inside it keeps that `git` and mounts the system's Git from where it sits there."""
+    found = Scope("triage", _paths(GRANT, tmp_path / "build", create=True), ())
+
+    with sandbox.launch(found, ["claude"], probing=lambda: None,
+                        inside=lambda: True) as launched:
+        assert launched.fds == ()
+        assert launched.command[len(BASE):] == (
+            "--bind", str(tmp_path / "build"), str(tmp_path / "build"),
+            "--ro-bind", "/dev/change-workflow-git", "/dev/change-workflow-git",
+            "--die-with-parent", "--", "claude")
 
 
 # Through real bubblewrap.
@@ -271,6 +328,59 @@ def test_a_step_cannot_create_an_absent_settings_file(checkout: Path) -> None:
     assert created.returncode != 0
     assert "Read-only file system" in created.stderr
     assert (checkout / ".claude/settings.local.json").read_text("utf-8") == "{}"
+
+
+@needs_bwrap
+def test_a_settings_file_linked_to_the_workspace_launches_and_stays_read_only(
+        checkout: Path) -> None:
+    """A clone links its `.claude/settings.local.json` to the owner's workspace by an
+    absolute symlink: the sandbox launches, and a write through the link fails, the
+    workspace's file unchanged."""
+    workspace = checkout.parent / "workspace"
+    (workspace / ".claude").mkdir(parents=True)
+    (workspace / ".claude/settings.local.json").write_text("{}", "utf-8")
+    (checkout / ".claude").mkdir()
+    (checkout / ".claude/settings.local.json").symlink_to(
+        workspace / ".claude/settings.local.json")
+    found = _scope("implement", checkout, adapter_protected=(".claude/settings.local.json",))
+
+    written = _run(found, "echo '{\"permissions\": {}}' > .claude/settings.local.json",
+                   checkout)
+
+    assert written.returncode != 0
+    assert "Read-only file system" in written.stderr, written.stderr
+    assert (workspace / ".claude/settings.local.json").read_text("utf-8") == "{}"
+    assert (checkout / ".claude/settings.local.json").is_symlink()
+
+
+@needs_bwrap
+def test_a_settings_file_linked_inside_the_scope_stays_read_only(checkout: Path) -> None:
+    """A protected file linked to another file inside a writable path is mounted
+    read-only where the link leads, so a write through the link fails."""
+    (checkout / "shared.json").write_text("{}", "utf-8")
+    (checkout / ".claude").mkdir()
+    (checkout / ".claude/settings.json").symlink_to("../shared.json")
+    found = _scope("implement", checkout, adapter_protected=(".claude/settings.json",))
+
+    written = _run(found, "echo '{\"hooks\": {}}' > .claude/settings.json", checkout)
+    beside = _run(found, "echo y > src/new.py", checkout)
+
+    assert "Read-only file system" in written.stderr, written.stderr
+    assert (checkout / "shared.json").read_text("utf-8") == "{}"
+    assert beside.returncode == 0, beside.stderr
+
+
+@needs_bwrap
+def test_a_writable_path_that_is_a_symlink_is_written_where_it_leads(checkout: Path) -> None:
+    home = checkout.parent / "home"
+    (checkout.parent / "cache").mkdir()
+    home.mkdir()
+    (home / ".cache").symlink_to(checkout.parent / "cache")
+
+    written = _run(_scope("design", checkout), f"echo y > {home}/.cache/entry", checkout)
+
+    assert written.returncode == 0, written.stderr
+    assert (checkout.parent / "cache/entry").read_text("utf-8") == "y\n"
 
 
 @needs_bwrap

@@ -364,9 +364,6 @@ def test_start_takes_an_archived_change_for_a_step_that_may_follow_the_archive(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str) -> None:
     root = _repository(tmp_path / "workspace")
     _archive(root)
-    (root / ".claude").mkdir()
-    (root / ".claude/change-steps.toml").write_text(
-        (REPO / ".claude/change-steps.toml").read_text("utf-8"), "utf-8")
     monkeypatch.chdir(root)
     launched = Launched()
 

@@ -18,6 +18,15 @@ The sandbox has its own process namespace and dies with the process that launche
 and with it, as the namespace's first process, every process the session started,
 a command it left running in the background included.
 
+Bubblewrap cannot mount over a symlink: it fails to start at one whose target it
+cannot reach from inside the sandbox it is building, as an absolute target is. So
+each writable and protected path is mounted where its symlinks lead, and a write
+through the link reaches the mount. A protected settings file that a clone links to
+the owner's workspace, outside the clone's scope, is then read-only under the root
+and needs no mount. The link itself is no mount: inside a writable directory, a step
+can remove it or rename a file over it, and the file it leaves there is not
+protected.
+
 Over each of the system's two Git executables, the one on `PATH` and the one in
 Git's exec path, the sandbox mounts the engine's `git` (`sandbox_git`), which
 refuses every push of the run but the guarded push's, and mounts the system's Git
@@ -30,6 +39,12 @@ it runs is read from the engine's directory as each command runs. The process st
 from a `Launch` inherits its descriptors (`fds`), which are inheritable, so a runner
 that keeps its descriptors open across the start, as each adapter's does, passes them
 on, and which the launcher may close once that process has started.
+
+A sandbox started inside the engine's sandbox, as a step's suite starts one, finds
+an engine's `git` already over the system's two, mounted from a file bubblewrap
+removed once it was mounted, so no mount over it can be made. There the sandbox keeps
+the `git` it finds, which refuses pushes alike, and mounts the system's Git at
+`REAL_GIT` again from where the enclosing sandbox put it.
 
 A mount needs something to mount, so before launch each absent writable path is
 created as a directory, and each absent file an adapter's state mounts alone, and
@@ -56,7 +71,7 @@ import os
 import shlex
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -117,11 +132,28 @@ def _depth(path: ScopedPath) -> tuple[int, str]:
     return len(path.path.parts), str(path.path)
 
 
+def _followed(path: ScopedPath) -> ScopedPath:
+    """`path` where a mount of it lands: every symlink on it followed, as far as the
+    paths it leads to exist."""
+    real = path.path.resolve()
+    return path if real == path.path else replace(path, path=real)
+
+
+def mounted_writable(scope: Scope) -> list[ScopedPath]:
+    """The scope's writable paths as the sandbox mounts them, each where its symlinks
+    lead."""
+    return [_followed(writable) for writable in scope.writable]
+
+
 def mounted_protected(scope: Scope) -> list[ScopedPath]:
-    """The scope's protected paths that lie inside one of its writable paths, which the
-    sandbox mounts read-only."""
-    return [guarded for guarded in scope.protected
-            if any(within(guarded.path, writable.path) for writable in scope.writable)]
+    """The scope's protected paths, each where its symlinks lead, that lie inside one
+    of its writable paths, which the sandbox mounts read-only."""
+    writable = mounted_writable(scope)
+    mounted: dict[Path, ScopedPath] = {}
+    for guarded in map(_followed, scope.protected):
+        if any(within(guarded.path, open_.path) for open_ in writable):
+            mounted.setdefault(guarded.path, guarded)
+    return list(mounted.values())
 
 
 def arguments(scope: Scope, program: Sequence[str], *, git: Sequence[int]) -> list[str]:
@@ -129,19 +161,27 @@ def arguments(scope: Scope, program: Sequence[str], *, git: Sequence[int]) -> li
     then each writable path, a directory before any path inside it, so no mount hides
     another; then each protected path inside them, read-only; then the system's Git
     where the engine's `git` finds it, and the engine's `git`, read from the
-    descriptors `git`, one for each of the system's Git executables, over each.
+    descriptors `git`, one for each of the system's Git executables, over each. With
+    no descriptors, inside the engine's sandbox (`nested`), the engine's `git` already
+    over them is kept, and the system's Git is mounted from `REAL_GIT`.
 
     Bubblewrap reads a mount's source from outside the sandbox, so the system's Git
     is the one it mounts at `REAL_GIT` whatever is mounted over it after."""
     command = [BWRAP, *_BASE]
-    for path in sorted(scope.writable, key=_depth):
+    for path in sorted(mounted_writable(scope), key=_depth):
         command += ["--bind", str(path.path), str(path.path)]
     for path in sorted(mounted_protected(scope), key=_depth):
         command += ["--ro-bind", str(path.path), str(path.path)]
-    command += ["--ro-bind", GIT_EXECUTABLES[0], str(REAL_GIT)]
-    for fd, executable in zip(git, GIT_EXECUTABLES, strict=True):
+    command += ["--ro-bind", GIT_EXECUTABLES[0] if git else str(REAL_GIT), str(REAL_GIT)]
+    for fd, executable in zip(git, GIT_EXECUTABLES if git else (), strict=True):
         command += ["--perms", "0755", "--ro-bind-data", str(fd), executable]
     return [*command, *_TAIL, *program]
+
+
+def nested() -> bool:
+    """Whether this process runs inside the engine's sandbox, where the system's Git
+    sits at `REAL_GIT`, a path only the sandbox makes."""
+    return REAL_GIT.exists()
 
 
 def _readable(data: bytes) -> int:
@@ -166,8 +206,8 @@ def _empty_form(path: ScopedPath) -> None:
 def prepare(scope: Scope) -> None:
     """Create what the sandbox mounts and does not exist: each absent writable path as
     a directory, or, a file mounted alone, in its empty form; and each absent protected
-    path it mounts in its empty form."""
-    for path in scope.writable:
+    path it mounts in its empty form, each where its symlinks lead."""
+    for path in mounted_writable(scope):
         if path.path.exists():
             continue
         if path.alone:
@@ -195,16 +235,18 @@ def probe(run: Run = subprocess.run) -> str | None:
 
 
 def launch(scope: Scope, program: Sequence[str], *,
-           probing: Callable[[], str | None] = probe) -> Launch:
+           probing: Callable[[], str | None] = probe,
+           inside: Callable[[], bool] = nested) -> Launch:
     """The command that runs `program` in the scope's sandbox, its mounts created and
-    the engine's `git` open for it to read; or, where the probe finds the sandbox
-    cannot run, `program` itself, unconfined, with the probe's reason."""
+    the engine's `git` open for it to read, unless `inside` finds the engine's sandbox
+    around this process; or, where the probe finds the sandbox cannot run, `program`
+    itself, unconfined, with the probe's reason."""
     if (reason := probing()) is not None:
         return Launch(tuple(program), unconfined=reason)
     prepare(scope)
     program_text = git_program()
     # One descriptor for each mount: bubblewrap reads each to its end.
-    fds = tuple(_readable(program_text) for _ in GIT_EXECUTABLES)
+    fds = () if inside() else tuple(_readable(program_text) for _ in GIT_EXECUTABLES)
     return Launch(tuple(arguments(scope, program, git=fds)), fds=fds)
 
 

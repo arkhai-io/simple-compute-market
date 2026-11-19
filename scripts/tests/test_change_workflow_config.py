@@ -14,8 +14,12 @@ from change_workflow import config
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.config import ConfigError
-from change_workflow_fixtures import (CHANGE, CONFIGURED, MODELS, VALID, FakeClaude, configured,
-                                      event_lines, evidence_kind, make_wrapper)
+from change_workflow.harness import Model
+from change_workflow.scope import REPOSITORY as REPOSITORY_SOURCE
+from change_workflow.scope import Scope, within
+from change_workflow_fixtures import (CHANGE, CONFIGURED, MODELS, OPUS, SONNET, VALID,
+                                      FakeClaude, configured, event_lines, evidence_kind,
+                                      make_wrapper)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 
@@ -939,6 +943,79 @@ def test_the_repositorys_own_configuration_passes_its_check(
                           *(f"models.{step}" for step in config.STEPS)) == []
     assert main(["check", "config"], root=REPOSITORY) == 0
     assert "passes its check" in capsys.readouterr().out
+
+
+def test_each_step_runs_on_the_models_its_work_needs() -> None:
+    """This repository's configuration: design, triage, implementation, the merge, and
+    closeout on Opus at high effort; validation and archive cleanup on Sonnet at
+    medium; the review on Codex, then Claude."""
+    loaded = config.load(REPOSITORY)
+
+    assert {name: loaded.step_models(name) for name in config.STEPS} == {
+        "design": (OPUS,), "plan": (OPUS,), "triage": (OPUS,), "implement": (OPUS,),
+        "merge": (OPUS,), "closeout": (OPUS,), "validate": (SONNET,),
+        "archive-cleanup": (SONNET,), "review": (Model("codex", "gpt-6-sol", "high"), OPUS)}
+
+
+def _repository_scope(step: str, home: Path) -> Scope:
+    return config.load(REPOSITORY).scope(step, REPOSITORY, home=home,
+                                         temporary=home.parent / "tmp")
+
+
+def _writes(found: Scope, path: Path) -> bool:
+    return (any(within(path, open_.path) for open_ in found.writable)
+            and not any(within(path, guarded.path) for guarded in found.protected))
+
+
+def test_design_and_planning_write_the_repositorys_documents(tmp_path: Path) -> None:
+    """MCW-s4bx's "Design edits the roadmap": the configuration gives design `docs/`,
+    and planning too, beside their baseline."""
+    roadmap = REPOSITORY / "docs/development/ROADMAP.md"
+
+    for step in ("design", "plan"):
+        found = _repository_scope(step, tmp_path / "home")
+        assert _writes(found, roadmap), step
+        assert [path.source for path in found.writable
+                if path.path == REPOSITORY / "docs"] == [REPOSITORY_SOURCE], step
+    assert not _writes(_repository_scope("archive-cleanup", tmp_path / "home"), roadmap)
+
+
+def test_every_writing_step_writes_the_tool_state_its_suites_and_deployments_need(
+        tmp_path: Path) -> None:
+    """MCW-s4bx's "Implementation syncs an environment": uv's Pythons, and the cluster
+    client's cache, the cloud CLI's configuration, Docker's client configuration, and
+    npm's cache for the OpenSpec command, for every step but the review; and nothing
+    protected beyond the engine's and the adapters'."""
+    home = tmp_path / "home"
+    tools = [home / ".local/share/uv/python", home / ".kube/cache", home / ".config/gcloud",
+             home / ".docker", home / ".npm/_cacache"]
+
+    for step in config.STEPS:
+        found = _repository_scope(step, home)
+        writes = [_writes(found, tool) for tool in tools]
+        assert writes == [step != "review"] * len(tools), step
+        assert not any(path.source == REPOSITORY_SOURCE for path in found.protected), step
+    assert config.load(REPOSITORY).sandbox_protected == ()
+
+
+def test_no_step_writes_the_configuration_or_the_harnesss_settings(tmp_path: Path) -> None:
+    """CW-z5me: no step changes what its own hooks run or what its harness loads. The
+    configuration and each adapter's settings files are read-only in every step's
+    scope, whichever harness runs it, while a step that writes the checkout writes the
+    skills beside the configuration."""
+    home = tmp_path / "home"
+    settings = [REPOSITORY / ".agents/workflow.toml", REPOSITORY / ".claude/settings.json",
+                REPOSITORY / ".claude/settings.local.json", home / ".claude/settings.json",
+                home / ".codex/config.toml"]
+    loaded = config.load(REPOSITORY)
+
+    for step in config.STEPS:
+        for harness in (model["harness"] for model in loaded.models[step]):
+            found = loaded.scope(step, REPOSITORY, harness, home=home,
+                                 temporary=tmp_path / "tmp")
+            assert not any(_writes(found, path) for path in settings), (step, harness)
+    assert _writes(_repository_scope("implement", home),
+                   REPOSITORY / ".agents/skills/change-plan/SKILL.md")
 
 
 def test_the_repository_declares_every_hook() -> None:

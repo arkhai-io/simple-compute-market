@@ -153,7 +153,7 @@ def test_the_unattended_prompt_is_one_harness_neutral_paragraph() -> None:
     no harness's permission mode, and no `-C` form."""
     lowered = UNATTENDED.lower()
 
-    for absent in ("rule", "chain", "don't ask mode", "bash call", "step table"):
+    for absent in ("rule", "chain", "don't ask mode", "bash call"):
         assert absent not in lowered, absent
     assert not re.search(r"-c\b", lowered)
     for present in ("sandbox scoped to it", "read-only file system", "resource busy",

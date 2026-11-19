@@ -558,8 +558,8 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
     open_log(log_path(root, args.change), args.change, args.step,
              interactive=not args.unattended)
     if not args.unattended:
-        # The skill a step's session opens is named for the step, so an interactive
-        # session needs no step table, as no table restricts it.
+        # The skill a step's session opens is named for the step; an interactive
+        # session runs outside the sandbox, under the owner's own settings.
         prompt = f"/change-{args.step} {args.change}" + (f" {arguments}" if arguments else "")
         return _session_status(launch(["claude", prompt], root))
     line = wrapper.run(args.step, args.change, arguments=arguments,

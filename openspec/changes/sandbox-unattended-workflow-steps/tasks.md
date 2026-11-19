@@ -1465,16 +1465,16 @@ of this repository" (the assumptions test reads it),
 Delivers this repository's `[sandbox]` declaration, the step table and its loader
 removed, the roles test reading only the make fragment, and every comment naming the
 table rewritten (D11, D12, D14; MCW-s4bx, MCW-5tgp, CW-m4ps, CW-z5me). Files:
-`.agents/workflow.toml`, `.claude/change-steps.toml`, `scripts/change_workflow/steps.py`,
+`.agents/workflow.toml`, `.claude/change-steps.toml`, the engine's `steps.py`,
 `__init__.py`, `common.py`, `config.py`, `cli.py`, `workflow.mk`, `scripts/ci_evidence.py`,
-`scripts/tests/test_change_workflow_steps.py`, `test_change_workflow_assumptions.py`,
+its `test_change_workflow_steps.py`, `scripts/tests/test_change_workflow_assumptions.py`,
 `test_change_workflow_cli.py`, `test_change_workflow_harness.py`,
 `test_change_workflow_review.py`, `test_change_workflow_wrapper.py`,
 `openspec/specs/market-change-workflow/README.md`'s "The engine's own assumptions" and
 "How this repository provides the workflow's roles" (the assumptions test reads
 them).
 
-- [ ] 11.1 Declare `.agents/workflow.toml`'s `[sandbox]`: `writable.common =
+- [x] 11.1 Declare `.agents/workflow.toml`'s `[sandbox]`: `writable.common =
   ["~/.local/share/uv", "~/.kube/cache", "~/.config/gcloud", "~/.docker"]`,
   `writable.design = ["docs/"]`, `writable.plan = ["docs/"]`, `protected = []`, each
   with its comment naming who uses it (D12; MCW-s4bx). The configuration is denied to
@@ -1483,31 +1483,179 @@ them).
   Verify: `config --json` lists design's `docs/` from the repository, and
   `test_the_repositorys_own_configuration_passes_its_check` passes, with a unit test
   for MCW-s4bx's two scenarios against the resolved scopes.
-- [ ] 11.2 Remove `.claude/change-steps.toml` (D11). Every step is denied edits under
+  Done. The orchestrator's edit was in the worktree, as the task gives it, and is
+  committed with the section. `config --json` lists design's and planning's `docs/`
+  from the repository, the four tool paths from the repository for every step but the
+  review, and no repository protected path; `check config` passes. Tests in
+  `test_change_workflow_config.py`, library integration (the plan said unit: each
+  resolves the repository's scopes through real Git), all passing:
+  - MCW-s4bx's "Design edits the roadmap": `docs/development/ROADMAP.md` lies in a
+    writable path of design's and planning's scope, from the repository, and not of
+    archive cleanup's;
+  - MCW-s4bx's "Implementation syncs an environment": uv's Pythons, `~/.kube/cache`,
+    `~/.config/gcloud`, and `~/.docker` are writable for every step but the review,
+    and no step's protected path is the repository's;
+  - `test_the_repositorys_own_configuration_passes_its_check`, existing.
+- [x] 11.2 Remove `.claude/change-steps.toml` (D11). Every step is denied edits under
   `.claude/`: this task is the orchestrator's, on the owner's word before the
   section's session starts, and the session commits it with the section. Verify:
   the file is gone, and nothing under `scripts/` reads it.
-- [ ] 11.3 Remove `steps.py` and `test_change_workflow_steps.py`, moving each test
+  Done. The orchestrator's removal was in the worktree and is committed with the
+  section. A search of `scripts/` finds no `change-steps`. `test_change_workflow_cli.py`
+  no longer copies the table into its archived-change fixture: `start` reads it no
+  more.
+- [x] 11.3 Remove `steps.py` and `test_change_workflow_steps.py`, moving each test
   still meaningful — every step has a skill, the review writes nothing it reviews, no
   step's scope holds the configuration — onto the engine's definitions and scopes in
   `test_change_workflow_graph.py` and `test_change_workflow_scope.py`; drop
   `steps.STEP_TABLE` and the wrapper's and review's `steps_path` (D11; CW-z5me).
   Verify: the moved tests pass, and a search of `scripts/` finds no `load_steps`,
   `StepRules`, or `STEP_TABLE`.
-- [ ] 11.4 The roles test reads the make fragment and the configuration only, no step
+  Done, with `git rm`. The wrapper's and review's `steps_path` went in section 7. What
+  moved, all passing:
+  - every step has a skill: `test_change_workflow_graph.py`'s
+    `test_every_step_runs_its_own_skill_and_planning_resumes_the_design` (unit), in
+    place of the test comparing the definitions with the table;
+  - no step's scope holds the configuration, nor the harness's settings:
+    `test_no_step_writes_the_configuration_or_the_harnesss_settings` in
+    `test_change_workflow_config.py`, library integration, every step on each harness
+    its models name, with the skills beside the configuration writable for
+    implementation. It is beside MCW-s4bx's tests, which resolve the repository's
+    scopes the same way, rather than in `test_change_workflow_scope.py` as planned;
+  - the review writes nothing it reviews: already held by the graph's
+    `test_the_review_writes_no_path_of_its_checkout_but_the_engines_invocation_record`
+    and the scope's `test_the_reviews_scope_holds_no_path_of_its_checkout_but_the_invocation_record`,
+    and by MCW-s4bx's second test, under which the review's scope writes none of the
+    repository's tool paths;
+  - the repository's models: `test_each_step_runs_on_the_models_its_work_needs`,
+    moved to `test_change_workflow_config.py`, its assertion unchanged.
+  Every other test of the table judged its allow and deny rules, which the sandbox,
+  the engine's `git`, and the checks after a run replace (D14); they went with it. A
+  search of `scripts/` finds no `load_steps`, `StepRules`, or `STEP_TABLE`.
+- [x] 11.4 The roles test reads the make fragment and the configuration only, no step
   table (CW-m4ps, MCW-5tgp); `market-change-workflow/README.md`'s "The engine's own
   assumptions" drops the step table's row and names `bwrap` among the tools, and "How
   this repository provides the workflow's roles" gives the tests-and-environments
   role through the hooks and `[sandbox]` rather than the step table's grants. Verify:
   `test_change_workflow_assumptions.py` passes.
-- [ ] 11.5 Rewrite every comment and docstring naming the step table or its rules to
+  Done. `collected` reads the fragment alone; its test now gives a fragment's rule and
+  recipe. In the market companion:
+  - the test's paragraph names the fragment alone;
+  - "The engine's own assumptions" drops the step table's row and its mentions in the
+    configuration's and the changes' rows, names `bwrap` among the tools, without
+    which a step runs unconfined, and says the local settings are protected where a
+    clone's link leads;
+  - "How this repository provides the workflow's roles": the tests-and-environments
+    row gives the hooks and `[sandbox]`'s `writable.common`, then the targets the
+    steps that fix code run, in role forms rather than the table's rule patterns; the
+    local, pipeline, and closing-checks rows no longer say what the table granted or
+    denied.
+  `test_change_workflow_assumptions.py` passes, 18 tests.
+- [x] 11.5 Rewrite every comment and docstring naming the step table or its rules to
   describe the current system — `__init__.py`, `common.py`, `config.py`, `cli.py`,
   `workflow.mk`, `scripts/ci_evidence.py`, and any section 1 to 10 left (a repository
   obligation, `docs/guidance/engineering/comments.md#comments-describe-the-current-system`).
   Verify: a search of `scripts/` finds no "step table" or `change-steps`; `make
   check-comment-hygiene` passes.
+  Done: `__init__.py` drops the `steps` entry; `common.py`'s `repository_root` names a
+  configuration where it named a table; `config.py`'s docstring drops the loader's
+  comparison; `cli.py` says an interactive session runs outside the sandbox;
+  `ci_evidence.py` says the dispatch list binds every run, whichever harness;
+  `workflow.mk` named none. The harness's prompt test no longer lists "step table"
+  among the phrases the prompt avoids, its "rule" covering it. Outside `scripts/`,
+  `docs/guidance/repository/test-targets.md` gave the table as why a hand-written
+  `uv run … pytest` is not run; it now gives the reason itself (12.10 checks the
+  guidance). A search of `scripts/` finds neither phrase; `make
+  check-comment-hygiene` passes.
 - [ ] 11.6 Verification point: the whole scripts suite and `make check-agent-skills`;
   `run pre-commit` passes. End-to-end: none.
+  Outside the plan, on the owner's direction: the sandbox failed to launch where a
+  protected settings file is a symlink. `make change-clone` links a clone's
+  `.claude/settings.local.json` to the workspace's by an absolute symlink, and
+  bubblewrap cannot mount over a symlink, so every clone's first unattended run
+  stopped at launch ("Can't create file at …"). A writable path that is a symlink
+  failed the same way. `sandbox.py` now mounts each writable and protected path where
+  its symlinks lead (`mounted_writable`, `mounted_protected`), and `prepare` creates an
+  absent target there. A clone's settings link leads outside its scope, so the
+  workspace's file is read-only under the root and needs no mount. Tests in
+  `test_change_workflow_sandbox.py`, all passing:
+  - unit: the rendered command for a writable symlinked directory, a protected file
+    linked inside the checkout, and one linked outside it; `prepare` creating each
+    absent target where its link leads, the links kept;
+  - external-process integration through real bubblewrap: a checkout whose
+    `.claude/settings.local.json` is an absolute link to a workspace file outside the
+    scope launches, a write through the link fails "Read-only file system", the
+    workspace's file is unchanged, and the link stays; a file linked inside the
+    checkout is read-only through its link; a writable `~/.cache` that is a link is
+    written where it leads.
+  The orchestrator replaced this clone's link with a copy to let this run launch, so
+  this run itself did not launch through a link; the external-process test is the
+  evidence that one does.
+
+  Gap, for the triage: the link itself is no mount. Inside a writable checkout a step
+  can remove it or rename a file over it, and the file it leaves is not protected,
+  against CW-r6kd's "no step changes its harness's settings"; the owner's next
+  session in that clone would load it. The module docstring and the market
+  companion's assumptions row say so. Section 3's handoff named the same class of gap
+  for a renamed directory. Neither is in the design or the companions' "Current
+  limits"; closeout's promotion, or the triage, places them.
+
+  Outside the plan, found running the suites inside this run's own sandbox, the first
+  implementation session to do so:
+  - every bubblewrap test failed: a sandbox started inside the engine's sandbox
+    cannot mount over the enclosing `git`, a mount of a file bubblewrap removed once
+    mounted. `sandbox.launch` now keeps the `git` it finds there (`nested`, its
+    `inside` seam) and mounts the system's Git from `REAL_GIT`. A unit test renders
+    the nested command with `inside` doubled; the bubblewrap tests, run nested in
+    this session, exercise `nested()` and a real nested launch. Outside a sandbox
+    they take the other path, as before;
+  - a test's own `git push` to a bare remote in its temporary directory was refused
+    by the enclosing sandbox's `git`, since the suite inherits the step's marker.
+    `scripts/tests/conftest.py` now removes the marker for every scripts test, as
+    `test_round_view.py`'s fixture did for its own, which drops it.
+  The whole scripts suite: 3523 passed, none skipped (`-rs`), run in this sandbox.
+  Evidence so far, in this run's sandbox:
+  - `make check-agent-skills`, `make check-comment-hygiene`, `make check-spec-index`,
+    and `make check-doc-citations` pass. The citations check first failed on the
+    removed `steps.py` and its test, cited by `design.md`'s context, the proposal,
+    and this section's file list; each now names the engine's `steps` module
+    without its path;
+  - `run pre-commit`: `after-functional-change` passes and leaves the locks as
+    committed; `pre-commit`, the default and repository checks, passes nine of nine
+    once npm's cache is redirected (below); `pre-commit-functional`, `make
+    validate-local`, fails one suite. `make -k test` shows it is the only one:
+    `domains/bare_metal/provisioning/iac`'s ledger tests, 82 errors at setup,
+    "unsafe ancestor". Inside bubblewrap's user namespace only the owner's uid is
+    mapped, so `/` and `/tmp`, owned by root, show as uid 65534, and the ledger's
+    ancestor check (owner root or the caller) refuses. Every other suite passes,
+    the scripts' 3523 among them;
+  - the configured OpenSpec command (`npx`) failed "read-only file system" on its
+    cache, `~/.npm`, which no scope holds. Run with `npm_config_cache` under
+    `~/.cache`, `scripts/change-workflow openspec validate … --strict` passes.
+  On the owner's word, the orchestrator added `~/.npm` to `writable.common`,
+  committed with this section's work; MCW-s4bx's second test and the companion's
+  tests-and-environments row name it. The spec delta's MCW-s4bx does not yet: the
+  return below carries it.
+
+  Returned to design, on the owner's word: "We have to do something about the
+  bare-metal IaC suite before we can proceed with this change. This change caused
+  the failure and has to resolve it." The sandbox's user namespace maps only the
+  owner's uid, so every root-owned path shows as uid 65534, and
+  `tenant_working_data.py`'s ancestor check (`info.st_uid in (0, owner)`, line 123
+  of `domains/bare_metal/provisioning/iac/ansible/roles/bare-metal-access/files/`)
+  refuses `/` and `/tmp` when the suite runs inside a step. No task of this section
+  is checked: 11.1 to 11.5 are implemented and their notes stand; 11.6 waits on the
+  design's answer and `validate-local` passing in the sandbox. The section's work —
+  the code, tests, the orchestrator's two edits, and these notes — is one
+  work-in-progress commit. For the design: whether the sandbox maps root (bubblewrap
+  cannot, unprivileged), the suite gets a seam or a skip under an unmapped root, or
+  the step runs that suite outside the sandbox; and MCW-s4bx's delta gains `~/.npm`.
+  Handoff:
+  - The IaC ledger suite fails in every sandboxed step's `validate-local` until the
+    design settles it.
+  - The change-workflow companion, its specification, and the handbook still cite
+    `.claude/change-steps.toml` and `steps.STEP_TABLE`; closeout's promotion (12.9)
+    owns them, and the change-scoped citations check does not read them.
 
 ## 12. Closeout
 

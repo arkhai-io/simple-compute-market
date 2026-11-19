@@ -50,8 +50,8 @@ class NotInRepository(StepError):
 def repository_root(directory: Path | None = None) -> Path:
     """The top level of the Git repository containing `directory`, the working
     directory by default: the repository every command acts on. A command finds it
-    as it starts; a part not handed a repository, a step table, or a schema finds
-    it again from the same working directory, and so the same one.
+    as it starts; a part not handed a repository, a configuration, or a schema
+    finds it again from the same working directory, and so the same one.
 
     The engine acts on the repository it is run in, never on the one its own files
     sit in, so a change's clone and the owner's workspace each act on themselves.

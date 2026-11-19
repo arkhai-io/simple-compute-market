@@ -41,9 +41,6 @@ def _no_runs(_: Path) -> list[Run]:
 def _git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    # The owner opens a round view: a suite run inside an unattended run, a validation's
-    # say, inherits that run's marker, under which the view refuses.
-    monkeypatch.delenv(UNATTENDED_RUN, raising=False)
     for role in ("AUTHOR", "COMMITTER"):
         monkeypatch.setenv(f"GIT_{role}_NAME", "test")
         monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.invalid")
