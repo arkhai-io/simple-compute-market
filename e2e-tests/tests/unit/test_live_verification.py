@@ -8,7 +8,10 @@ authority's revision among them for a scenario filing a case. The dispute
 authority's record is polled until a case is closed, failing at the bound, or,
 where only a topology's ruling policy rules it, skipping naming that
 requirement when nothing ruled it; the buyer's contested case module then leaves
-only its ruling unproven, its filing and contest standing. A recurring option's
+only its ruling unproven, its filing and contest standing. A storefront's
+lifecycle read naming a missing dispute credential makes the contest a blocked
+skip naming that requirement, leaving the contest and ruling unproven and the
+filing made. A recurring option's
 terms at a run's period are what the lanes' are at theirs, and a live purchase
 asks for the run's term. Every value below is a development fixture, never used
 on any network.
@@ -21,6 +24,7 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from market_deal_lifecycle_contracts.models import LifecycleRead
 
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 from tests.e2e.roles.helpers.live_verification import (
@@ -48,10 +52,15 @@ from tests.e2e.roles.helpers.recurring_purchase_stages import (
 from tests.e2e.roles.scenarios.vms.live import test_buyer_contested_case as contested_case
 from tests.e2e.roles.scenarios.vms.live.stages import (
     BUYERS_FILING,
+    CREDENTIAL_REQUIREMENT,
+    MISSING_CREDENTIAL_REPAIR,
     POLICY_RULING,
     RULING_POLICY_REQUIREMENT,
     STOREFRONTS_CONTEST,
+    LiveContestedCase09_StorefrontContests,
+    LiveContestedCase10_PolicyRuling,
     LiveRateState,
+    storefront_credential_missing,
 )
 from tests.e2e.roles.scenarios.vms.rate_dispute.stages import RateDisputeState
 from tests.e2e.roles.scenarios.vms.purchase_driver import VmLiveRatePurchaseDriver
@@ -267,6 +276,72 @@ def test_a_failed_contest_fails_the_contest_and_the_ruling_and_the_filing_stands
 
     assert {name: outcome.outcome for name, outcome in outcomes.items()} == {
         BUYERS_FILING: "made", STOREFRONTS_CONTEST: "failed", POLICY_RULING: "failed"}
+
+
+def _lifecycle_read(outcome: dict[str, Any]) -> LifecycleRead:
+    return LifecycleRead.model_validate({
+        "negotiation_id": "negotiation-1", "authority": {"outcome": outcome},
+        "delivery": {"progress": "active"},
+    })
+
+
+@pytest.mark.parametrize(("outcome", "missing"), [
+    ({"status": "rejected", "reason": MISSING_CREDENTIAL_REPAIR}, True),
+    ({"status": "rejected", "reason": "repair required: respondent case: refused"}, False),
+    ({"status": "pending", "reason": MISSING_CREDENTIAL_REPAIR}, False),
+    ({"status": "accepted"}, False),
+])
+def test_the_storefronts_read_shows_a_missing_dispute_credential(outcome, missing) -> None:
+    """Only the deal's authority outcome refused for want of the credential,
+    as the storefront's seller lifecycle reports it, reads as missing."""
+    assert storefront_credential_missing(_lifecycle_read(outcome)) is missing
+
+
+class _ReadOnlyDriver:
+    """A deal driver answering only the storefront's lifecycle read."""
+
+    def __init__(self, read: LifecycleRead) -> None:
+        self.read = read
+
+    def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
+        assert negotiation_id == "negotiation-1", negotiation_id
+        return self.read
+
+
+def test_a_storefront_without_a_credential_leaves_the_contest_and_ruling_unproven() -> None:
+    """The contest stage reads the storefront's lifecycle read before its
+    servicing step: a read naming the missing credential is a blocked skip
+    naming the requirement, before the storefront is asked to contest, and
+    with that skip the contest and the ruling are unproven by it while the
+    buyer's filing is made."""
+    state = LiveRateState(domain_identity="vms.compute")
+    state.case_ref, state.negotiation_id = "case-1", "negotiation-1"
+    driver = _ReadOnlyDriver(_lifecycle_read(
+        {"status": "rejected", "reason": MISSING_CREDENTIAL_REPAIR}))
+    stage = LiveContestedCase09_StorefrontContests()
+    with pytest.raises(Skipped) as skipped:
+        stage.test_lc09_a_servicing_step_contests_the_case_as_respondent(
+            storefront_admin_client=None, deal_driver=driver, deal_state=state)
+    reason = str(skipped.value)
+    assert reason == f"blocked: {CREDENTIAL_REQUIREMENT}"
+    assert not state._case_contested
+
+    # The ruling stage then skips at its prerequisite, the contest not made.
+    with pytest.raises(Skipped) as unmet:
+        LiveContestedCase10_PolicyRuling().test_lc10_the_policys_ruling_matches_the_lane_twins(
+            payments_config=None, mediation_target=None, live_settings=None, deal_state=state)
+    prerequisite = str(unmet.value)
+    assert "_case_contested" in prerequisite, prerequisite
+
+    outcomes = _contested_outcomes(lambda stage: {
+        "TestLiveContestedCase09_StorefrontContests": ("skipped", reason),
+        "TestLiveContestedCase10_PolicyRuling": ("skipped", prerequisite),
+    }.get(stage, ("passed", "")))
+
+    assert {name: outcome.outcome for name, outcome in outcomes.items()} == {
+        BUYERS_FILING: "made", STOREFRONTS_CONTEST: "unproven", POLICY_RULING: "unproven"}
+    assert outcomes[STOREFRONTS_CONTEST].reasons == (reason,)
+    assert outcomes[POLICY_RULING].reasons == (reason, prerequisite)
 
 
 def test_a_live_modules_state_carries_a_rate_dispute_rows_fields() -> None:

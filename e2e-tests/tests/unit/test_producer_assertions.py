@@ -210,6 +210,26 @@ def test_a_term_end_charging_its_final_period_fails_naming_the_settlement():
     assert f"parts.0.stop.settled.gross: expected {12 * PRICE!r}" in str(failure.value)
 
 
+def test_a_payer_stop_in_the_parts_start_second_fails_rather_than_passing_on_nothing():
+    """A payer's stop taking effect in the second the part started has no
+    started period to charge — the engine settles nothing for it — so the
+    buyer's-stop observation fails naming the start and the stop, rather than
+    passing on zero periods settled."""
+    engine = Engine(funds=10 * PRICE)
+    transaction = engine.approve_and_start(payee_notice_seconds=None)
+    engine.stop(transaction, PAYER)
+    output = engine.snapshot(transaction)
+    started = int(field(output, "parts.0.started"))
+    assert int(field(output, "parts.0.stop.effectiveAt")) == started == T0
+    assert field(output, "parts.0.stop.settled.gross") == "0"
+    with pytest.raises(AssertionError) as failure:
+        _payer_stop(output)
+    message = str(failure.value)
+    assert (f"parts.0.stop.effectiveAt later than parts.0.started: expected True (a started "
+            f"period for the stop to charge: started {T0!r}, stop effective {T0!r}), "
+            f"got False") in message, message
+
+
 def test_every_differing_field_is_named():
     output = CASES[0][1]
     altered = _set(_set(output, "parts.0.stop.cause", "payee"),

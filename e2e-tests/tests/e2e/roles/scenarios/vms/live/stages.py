@@ -14,6 +14,8 @@ Where the lane twin moves lane time or calls a double's control, the live
 stage takes the input as the producer sees it: the instant a stop or a funded
 boundary falls at is read from the authority's own record and reached by
 waiting for it, bounded (``LaneTime.reach``, ``recorded_by_authority``); the
+buyer's stop waits, as its twin's lane time moves, until a minute after the
+Agreement's start, an instant the scenario's own data fixes; the
 part is reserved ahead by the authority's own scheduler; the payer's balance is
 the one the topology funded, which funds running out reads and, when it
 differs from its requirement, is a blocked skip naming it.
@@ -31,7 +33,9 @@ is the authority's own: a mechanical ruling of the payee's filing, which it
 documents, or, for the contested case, a person's decision, which reaches the
 scenario only through a ruling policy the topology applies. No stage calls an
 operator endpoint, and a topology applying no policy leaves the contested
-case's ruling unproven, naming the requirement.
+case's ruling unproven, naming the requirement; a storefront holding no
+dispute credential, which its refusal of the seller's filing or its lifecycle
+read before the contest shows, leaves what needs it unproven the same way.
 """
 
 from __future__ import annotations
@@ -46,6 +50,7 @@ from typing import Any, Mapping
 
 import injected_time
 import pytest
+from market_deal_lifecycle_contracts.models import LifecycleRead
 
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.lane_time import poll_until
@@ -76,6 +81,7 @@ from tests.e2e.roles.helpers.rate_servicing_stages import (
 )
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     ASSET,
+    STOP_INTO_PERIOD_SECONDS,
     RecurringPurchaseDriver,
     end_by_the_buyers_stop,
     reach_lane_instant,
@@ -103,8 +109,14 @@ BUYERS_FILING = "the buyer's filing"
 STOREFRONTS_CONTEST = "the storefront's contest"
 POLICY_RULING = "the policy's ruling"
 #: The repair reason the storefront's seller lifecycle refuses a filing with
-#: when it holds no dispute credential for the Agreement's authority.
+#: when it holds no dispute credential for the Agreement's authority, and
+#: reports as the deal's authority outcome on every lifecycle read of it.
 MISSING_CREDENTIAL_REPAIR = "repair required: Agreement authority credential is missing"
+#: What a topology lacks when the storefront holds no dispute credential.
+CREDENTIAL_REQUIREMENT = (
+    "the storefront holds no dispute credential for the Agreement's dispute authority, which "
+    "the topology provides (e2e-tests/README.md, \"Live verification\")"
+)
 #: What a topology lacks when no ruling of the buyer's contested case appears.
 RULING_POLICY_REQUIREMENT = (
     "the topology applied no ruling policy to it: the buyer's contested case needs a policy "
@@ -124,6 +136,16 @@ class LiveRateState(RateDisputeState):
     _first_period_held: bool = False
     #: The storefront contested the buyer's case on the record.
     _case_contested: bool = False
+
+
+def storefront_credential_missing(read: LifecycleRead) -> bool:
+    """Whether the storefront's lifecycle read of a deal reports that it holds
+    no dispute credential for the Agreement's authority: the deal's authority
+    outcome refused with ``MISSING_CREDENTIAL_REPAIR``, which the storefront's
+    seller lifecycle reports on every read of such a deal, before anything is
+    filed."""
+    outcome = read.authority.outcome
+    return outcome.status == "rejected" and outcome.reason == MISSING_CREDENTIAL_REPAIR
 
 
 def _stopped(snapshot: Mapping[str, Any]) -> bool:
@@ -196,16 +218,32 @@ class Live00_LabelledLiveEvidence:
 
 class LiveBuyerStop_PayerStopCharged:
     def test_lb_the_payer_stop_charges_the_started_period(
-        self, purchase_cli, payments_config, live_settings: LiveSettings,
+        self, purchase_cli, payments_config, lane_time, live_settings: LiveSettings,
         deal_driver: RecurringPurchaseDriver, deal_state: LiveRateState,
     ):
         """The buyer's own ``end``, the payer's stop, as the lane's buyer end
         sends it; the payments authority records the part stopped by its payer,
         charging the started period (``producer_assertions.assert_payer_stop``).
+
+        As its lane twin does, the stop is sent no earlier than
+        ``STOP_INTO_PERIOD_SECONDS`` after the Agreement's start, an instant
+        the scenario's own data fixes, reached by waiting for it, or at once
+        when the earlier stages took longer, so a fast run's stop does not
+        fall in the second the part started. A stop that still does — a part
+        started that late — has no started period to charge, and the
+        assertion fails it rather than passing on nothing settled. The instant
+        must fall before the Agreement's end, or the term end stops the part
+        first.
         The stop takes effect with no payer notice, so the snapshot is polled
         only until it carries the stop."""
         require_state(deal_state, "_live_labelled", "_accepted_money_shown", "purchase_run",
-                      "payer_account", "settlement_id")
+                      "payer_account", "settlement_id", "agreement_start", "agreement_end")
+        into_period = int(deal_state.agreement_start.timestamp()) + STOP_INTO_PERIOD_SECONDS
+        assert into_period < int(deal_state.agreement_end.timestamp()), (
+            f"the buyer's stop is sent {STOP_INTO_PERIOD_SECONDS} seconds into the term, at or "
+            "past the Agreement's end: LIVE.MAXIMUM_TERM_SECONDS must be longer")
+        reach_lane_instant(lane_time, into_period, fixed_by_agreement=True,
+                           bound=live_settings.reach_bound)
         deal_state._buyer_teardown_requested = True
         deal_state.buyer_end = end_by_the_buyers_stop(purchase_cli, deal_driver, deal_state)
         snapshot = _poll_snapshot(payments_config, deal_state, live_settings, _stopped,
@@ -476,9 +514,7 @@ class LiveSellerFiling09_StorefrontFilesAsPayee:
         deal_state._deal_ending = True
         ended = end_delivery_as_a_failure(storefront_admin_client, deal_state)
         if (ended.get("lifecycle_outcome") or {}).get("reason") == MISSING_CREDENTIAL_REPAIR:
-            pytest.skip("blocked: the storefront holds no dispute credential for the Agreement's "
-                        "dispute authority, which the topology provides (e2e-tests/README.md, "
-                        "\"Live verification\")")
+            pytest.skip(f"blocked: {CREDENTIAL_REQUIREMENT}")
         deal_state.delivery_end_at, deal_state.case_ref = filed_as_payee(ended)
         log.info("[ls09] Operator end of Agreement %s at %s filed as case %s",
                  deal_state.negotiation_id, deal_state.delivery_end_at, deal_state.case_ref)
@@ -549,8 +585,17 @@ class LiveContestedCase09_StorefrontContests:
         """One servicing step: the storefront's respondent discovery finds the
         case on the hosted authority's respondent listing and contests it on
         the record, as the lane twin's does
-        (``rate_dispute.stages.contest_as_respondent``)."""
+        (``rate_dispute.stages.contest_as_respondent``).
+
+        The storefront's lifecycle read of the deal comes first: a storefront
+        holding no dispute credential for the Agreement's authority cannot
+        contest, and its read says so (``storefront_credential_missing``);
+        that is the topology's unmet requirement, a blocked skip naming it, so
+        the contest and the ruling are unproven while the buyer's filing
+        stands."""
         require_state(deal_state, "case_ref", "negotiation_id")
+        if storefront_credential_missing(deal_driver.lifecycle_read(deal_state.negotiation_id)):
+            pytest.skip(f"blocked: {CREDENTIAL_REQUIREMENT}")
         contest_as_respondent(storefront_admin_client, deal_driver, deal_state)
         deal_state._case_contested = True
         log.info("[lc09] The storefront contested case %s", deal_state.case_ref)

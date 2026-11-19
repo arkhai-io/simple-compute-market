@@ -972,6 +972,33 @@ Handoff (section 5):
   drivers' being the one-shot option's price, a separate offering whose
   unification is outside the section.
 
+Fix from the sections 5–7 round's triage (`reviews/41-implementation.triage.md`,
+41 F1, outside the plan): the buyer's-stop observation could pass with nothing
+charged. `assert_payer_stop` settled `ceil(elapsed / period)` periods, zero for a stop
+effective in the second the part started, and the live stage sent the stop as soon as
+its earlier stages ended. The payments kit's contract fixture charges nothing for a
+`charged` stop with no time elapsed (`fixtures/authority.py`, `_stop`), as the
+archived serve-running-rate-deals design records, so the shared assertion keeps that
+calculation and now also requires, by relation, the stop effective later than the
+part's `started`, failing naming both instants — the lane twin's stop a minute in
+holds it. `LiveBuyerStop` now sends the stop as its twin does,
+no earlier than `STOP_INTO_PERIOD_SECONDS` after the Agreement's start, an instant the
+scenario's own data fixes, reached with `reach_lane_instant(fixed_by_agreement=True)`
+within the run's reach bound (at once when the earlier stages took longer; a part
+started later than that instant still meets the assertion's check, which fails it
+rather than passing), and fails naming LIVE.MAXIMUM_TERM_SECONDS when that instant is
+not before the Agreement's end. The README's input column, `test_buyer_stop.py`'s and
+`live/stages.py`'s docstrings say so. For closeout's promotion of D4 and D6 (9.9):
+`deal-scenarios.md` and `TESTING.md`, "Lane time", admit on wall time "an instant the
+deal's Agreement fixes, such as its start", which does not literally cover the
+Agreement's start plus the scenario's own minute, though the delta's "its own data
+fixes" and `system-tests.md` do; the promoted wording should cover it. The lane twins
+pass `fixed_by_agreement=False` for the same instant, which an injected run ignores. Unit: `test_producer_assertions.py`'s new case, a payer stop in the
+start second from the payments kit's engine, settling nothing, failing naming the
+check and both instants (`make -C e2e-tests test-unit`, the round's fix evidence in
+section 7's note). The live stage's wait runs only against a hosted target
+(section 8).
+
 ## 6. The live dispute scenarios
 
 Delivers the two live dispute scenarios — the seller's filing, and the buyer's contested
@@ -1110,7 +1137,8 @@ control token for its mediation double; section 8 is their only run.
       requirements: mock provisioning with the storefront's dispute credential (a
       deployment proves it with the storefront's own `check-mediation`; the
       seller's filing skips naming it on the storefront's refusal, the contest
-      cannot read it and fails) and the authority the buyer's registry recommends
+      cannot read it and fails — corrected by 41 F2, the note after the handoff
+      below) and the authority the buyer's registry recommends
       (an Agreement pinning another a blocked skip naming both, once bought — the
       opening paragraph now says such requirements are checked where the deal
       shows them); a hosted `arkhai.mediation.v1` authority against the payments
@@ -1233,6 +1261,14 @@ Handoff (section 6):
   made within the bound is no such case: the README now states it as the
   authority's documented output, which failing to emit fails the observation as
   the spec's comparison requirement says.
+  Corrected by the sections 5–7 round's triage (41 F2): the premise was wrong. The
+  storefront's seller lifecycle reports a missing credential on every lifecycle read
+  of the deal, before any filing — its authority outcome `Rejected` with
+  `MISSING_CREDENTIAL_REPAIR` and state `repair_required`
+  (`kit/deal-servicing`'s `seller.py`, `_observed`), which the buyer's read
+  (`lifecycle_buyer_read`, `delivery_read`) returns. The contest now reads it first
+  and is a blocked skip naming the requirement, so the requirement is met as the
+  spec words it (below).
 - For closeout's promotion of D6 (9.9), "bounded polling of a live producer for an
   effect of the scenario's own request": `LiveDispute07`'s wait for the first
   period's earnings is such a poll, bounded by up to a whole period plus the poll
@@ -1260,7 +1296,8 @@ Handoff (section 6):
   requirement not stating the effects' order, basis and single answer (both
   fixed); and no single list of the departures from "Touches" (above). Declined
   then: skipping on a storefront without a dispute credential, which no route the
-  harness holds can read — narrowed after the second check to the contest alone.
+  harness holds can read — narrowed after the second check to the contest alone,
+  and since made by 41 F2's fix, the storefront's lifecycle read showing it.
 - A second fresh-context check, on the fixed diff, found: the spec gap above,
   then also covering the mechanical ruling (the seller's filing now skips on the
   storefront's credential refusal, and the README states the ruling as the
@@ -1274,6 +1311,26 @@ Handoff (section 6):
   running after a failed contest (now requires it); and the mediation authority's
   mode unstated (the README says it acts against the payments target in test
   mode). Declined: nothing beyond the contest's credential, above.
+
+Fix from the sections 5–7 round's triage (`reviews/41-implementation.triage.md`,
+41 F2, outside the plan): a storefront holding no dispute credential failed the
+contested case's contest rather than leaving it unproven, as "Each live verification
+scenario states its topology requirements" requires. `LiveContestedCase09` now reads
+the storefront's lifecycle read of the deal through the driver before its servicing
+step, and `storefront_credential_missing` — the authority outcome `rejected` with
+`MISSING_CREDENTIAL_REPAIR` — makes it a blocked skip naming
+`CREDENTIAL_REQUIREMENT`, so the contest and the ruling are unproven by it and the
+buyer's filing stands. The seller's filing's skip names the same requirement. The
+README's provisioning requirement and opening paragraph, and `live/stages.py`'s module
+docstring, say so. The delta is unchanged. Unit (`test_live_verification.py`): the
+check over a read refused for the credential, refused for another repair, pending
+with that reason and accepted (only the first is missing); the contest stage given a
+driver whose read names the missing credential skips naming the requirement before
+asking the storefront anything, the ruling stage then skips at its prerequisite, and
+the module's outcomes read the filing made, the contest and the ruling unproven by
+that reason. That the hosted storefront's read carries the outcome rests on the
+seller lifecycle's code; no run here removes the credential, so the stage's use of it
+is proven only at section 8, as the seller's filing's skip is.
 
 ## 7. What sellers, buyers and storefront operators are told
 
@@ -1512,6 +1569,40 @@ Handoff (section 7):
   horizon value); all fixed. It also noted that `settlement-configuration`'s
   companion still says no shipped configuration declares rate servicing, which
   9.9's D1 corrects at closeout once section 8's evidence is in.
+
+The sections 5–7 round's triage (`reviews/41-implementation.triage.md`; validation 42
+passed at `68b5566e4`, the owner's notes 43 had none) fixed 41 F1 and 41 F2, each
+recorded in the notes of the section it concerns (5 and 6). Evidence for the fix
+commit:
+
+- Unit, `make -C e2e-tests test-unit` — 1190 passed, 1 skipped: the payer stop in the
+  part's start second failing (`test_producer_assertions.py`); the credential check
+  and the contest's skip leaving the contest and the ruling unproven
+  (`test_live_verification.py`). The first run failed only on the new contest test's
+  own construction (the state's `domain_identity`, the ruling stage's method name),
+  corrected.
+- `scripts/change-workflow run test-before` could not run either test file at
+  `68b5566e4` (`e2e-tests`' conftest needs `web3`, absent outside the project
+  environment), as in sections 1 to 6. Before the fix, the same-second stop passes
+  the assertion, and the credential names are not defined.
+- `scripts/change-workflow run pre-commit`: `after-functional-change` passed (no lock
+  changed); `pre-commit-functional` passed (local evidence for tree `6727c61660c5`:
+  `check-packaging` and `make test`); the index, tasks, skills and strict OpenSpec
+  checks passed; `check-repository` passed 8 of 9, documentation citations reporting
+  only section 8's summary
+  (`docs/attachments/switch-on-hosted-per-period-vm/live-verification.md`), which
+  section 8 writes.
+- A fresh-context check of the diff found no code defect. It found the stop's timing
+  overstated as "a minute after" when `reach_lane_instant` reaches that instant or
+  past it (now "no earlier than", with the assertion named as what refuses a stop in
+  the start second); `live/stages.py`'s module docstring not naming the
+  Agreement-fixed wait; the repository's wall-time wording not literally covering the
+  Agreement's start plus the scenario's minute (recorded in section 5's fix note for
+  closeout); 6.3's note and the handoff's "Declined then" still giving the contest's
+  failure (each marked corrected); and the unit file's docstring not naming the
+  credential skip. All fixed. Declined: listing the buyer's stop's
+  LIVE.MAXIMUM_TERM_SECONDS failure in the README's settings paragraph — the market
+  refuses any term short enough to meet it.
 
 ## 8. Live verification evidence
 

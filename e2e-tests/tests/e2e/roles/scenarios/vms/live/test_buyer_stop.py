@@ -4,8 +4,9 @@ Extends ``e2e_vm_recurring_purchase`` in the live verification form, against the
 run's external payments target in test mode, on wall time, with mock
 provisioning. The run's buyer buys a recurring on-demand option through ``market
 buy`` under the run's period and term, and the deal is delivered, through the
-recurring purchase's shared stages; the buyer's own ``market end`` then gives the
-payments authority the payer's stop its lane twin gave the payments double, and
+recurring purchase's shared stages; the buyer's own ``market end``, sent, as its
+lane twin's is, no earlier than a minute after the Agreement's start, then gives the payments
+authority the payer's stop its lane twin gave the payments double, and
 the authority's snapshot, polled until it carries the stop, is held to the lane
 twin's assertion: the part stopped by its payer with ``charged``, the started
 period settled (``producer_assertions.assert_payer_stop``). No stage runs after

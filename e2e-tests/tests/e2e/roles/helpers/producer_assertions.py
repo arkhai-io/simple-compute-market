@@ -194,16 +194,24 @@ def assert_payer_stop(snapshot: Mapping[str, Any], *, payer: str, period_price: 
     Exact: the stop's cause ``payer`` and treatment ``charged``, the stopping
     event's account the payer, nothing left reserved. By relation: the stop
     effective at the payments authority's receipt of the event plus the payer's
-    notice; settled the periods from the part's start through the one the stop
-    falls in, at ``period_price``; what the part kept equal to what it settled;
-    the rest of what was paid refunded. Everything else is ignored (module
-    docstring).
+    notice, and later than the part's start, so a period has started for it to
+    charge — a stop in the second the part started settles nothing, and would
+    otherwise pass on zero periods; settled the periods from the part's start
+    through the one the stop falls in, at ``period_price``; what the part kept
+    equal to what it settled; the rest of what was paid refunded. Everything
+    else is ignored (module docstring).
     """
     prefix, _ = _stopped_part(snapshot, part)
     effective = field(snapshot, f"{prefix}.stop.effectiveAt")
-    periods = _periods(field(snapshot, f"{prefix}.started"), effective, period_seconds,
-                       started_period=True)
+    started = field(snapshot, f"{prefix}.started")
+    periods = _periods(started, effective, period_seconds, started_period=True)
+    start_at, stop_at = (ABSENT if value is ABSENT else int(value)
+                         for value in (started, effective))
+    after_start = ABSENT if ABSENT in (start_at, stop_at) else stop_at > start_at
     require(f"the payer's stop of part {part}", [
+        Check(f"{prefix}.stop.effectiveAt later than {prefix}.started", after_start, True,
+              f"a started period for the stop to charge: started {start_at!r}, "
+              f"stop effective {stop_at!r}"),
         Check(f"{prefix}.stop.cause", field(snapshot, f"{prefix}.stop.cause"), "payer"),
         Check(f"{prefix}.stop.partialPeriod", field(snapshot, f"{prefix}.stop.partialPeriod"),
               "charged"),

@@ -542,8 +542,9 @@ mock provisioning, a payer's balance — it is a blocked skip naming what is
 missing, and with a setting the run owes missing it fails naming the setting.
 A requirement only the deal itself shows is checked where the deal shows it,
 still a blocked skip naming it: the dispute authority the bought Agreement pins,
-and, for the seller's filing, the storefront's dispute credential, which its
-filing reveals.
+and the storefront's dispute credential, which the seller's filing reveals and
+the storefront's lifecycle read of the deal reports before the contested case's
+contest.
 Only the session's fixtures and the VM lane's idempotent host registration, an
 autouse fixture, set up before them. Each module's first own stage logs the
 live-evidence label with its provenance, every stage logs the identifiers it
@@ -560,7 +561,7 @@ make test-module MODULE=e2e_vm_live_rate_servicing ACTIVE_PROFILES=<the topology
 
 | Module | What it proves | Input to the payments authority | Output compared |
 |---|---|---|---|
-| `test_buyer_stop.py` | the buyer's stop, twin of `e2e_vm_recurring_purchase`'s buyer end | the buyer's own `market end`, a payer stop with no notice | the part stopped with cause `payer` and `charged`, the started periods settled, the rest refunded (`assert_payer_stop`) |
+| `test_buyer_stop.py` | the buyer's stop, twin of `e2e_vm_recurring_purchase`'s buyer end | the buyer's own `market end`, a payer stop with no notice, sent no earlier than a minute after the Agreement's start, as its twin's is | the part stopped with cause `payer` and `charged`, the started periods settled, the rest refunded (`assert_payer_stop`) |
 | `test_funds_exhausted.py` | funds running out, twin of the rate servicing row | none beyond the purchase: the rate payer's balance, three periods' price | a `terms` stop at the funded boundary the snapshot last reported, three periods settled (`assert_funds_exhausted`) |
 | `test_preemption.py` | a spot seller's preemption, twin of the rate servicing row | the seller's notice through the typed seller lifecycle client, as `deals preempt` sends it | a pending `payee` stop due the notice after its receipt (`assert_payee_stop_pending`), then the final stop then, `returned`, the unstarted remainder refunded (`assert_payee_stop`) |
 | `test_term_end.py` | the term end, twin of the maximum-term row | none beyond the purchase: the Agreement's end | a `terms` stop at the Agreement's end, `returned` (`assert_term_end`) |
@@ -663,8 +664,11 @@ above, naming no deployment:
   the respondent listing with; a deployment proves it before a run with the
   storefront's own `check-mediation --origin <the authority's origin>` in the
   storefront's process. The seller's filing reads the storefront's refusal of a
-  filing for want of one, a blocked skip naming this requirement; the contested
-  case cannot read it, so a storefront without one fails its contest. The
+  filing for want of one, and the contested case reads the storefront's
+  lifecycle read of the deal before its contest, whose authority outcome names
+  the missing credential; either is a blocked skip naming this requirement, the
+  contested case's leaving the contest and the ruling unproven while the
+  buyer's filing stands. The
   buyer's registry recommends that authority, so the Agreement pins it: an
   Agreement pinning another is a blocked skip naming both, once the deal is
   bought. Each module files one case.
