@@ -549,6 +549,53 @@ worth the extra round. One session for everything, which serializes independent
 work. A second round for item 3's remainder alone, a review boundary for a few lines
 in one package already bumped.
 
+## Settled during implementation
+
+What the round's sessions and triages settled beyond the decisions above, kept here
+when closeout compressed the task notes.
+
+- **An unsettled latest teardown job reads as pending** (D3, D5). The predicate
+  answers a latest teardown job that is queued, running or succeeded as unsettled,
+  and the status port counts it as pending: it reads the aggregate and the jobs in
+  separate transactions, so a requeue and a rerun dispatched between the two reads
+  show a latest job not yet failed, which is still to be observed, not a failure.
+- **A transient failure to begin a teardown reaches the grace** (D3; pre-closeout
+  review 60 F1). The releasing pass caught only a refusal from `begin_teardown`, so
+  any other error reached the cycle's catch-all before the grace check, and a
+  teardown that kept failing to begin held its lease `releasing` without end,
+  against D3's backstop. The pass logs such a failure and goes on to the grace
+  check; a refusal still fails the release at once.
+- **Registry reads are serialized** (D6; implementation review 49 F1). Overlapping
+  compositions — two API-credit listing creations — could each re-read a registry,
+  and a failure answered after the other's success put a read registry back among
+  the unread. The policy holds one lock across `refresh()` and `reread()`, the
+  unread set read under it. The cost, accepted: while a registry stays
+  unreachable, overlapping compositions retry it one after another, each waiting
+  out the earlier reads' timeouts.
+- **The re-read keeps its factory** (D6). `refresh` keeps the registry client
+  factory it is given and `reread()` takes no argument, so no storefront plumbs a
+  factory into its publication step. The API-credit storefront re-reads as the
+  first act of its composition's `publication_artifacts`, its one place options
+  are composed.
+- **The selection's refusal is no speculative guard** (D6, 40 F4). It guards a
+  library's public parameter for a described case — a selection spelled otherwise,
+  or one string, read as a complete read — which the library's own tests trigger
+  through that API; that today's one caller passes the client's own `urls` does not
+  make it speculative. No exception to `implementation.md`'s "No speculative guard
+  code" is declared.
+- **The relay half of D1 is tested at application level.** A test of the VM plan
+  could not fail: the plan and the allocator read no host row, so a test handing
+  the plan the declaration's pool chose the answer itself. The test leases through
+  acceptance over the canonical clients, where choosing the host's pool would lease
+  on another relay or none. A declaration holding a relay lease is under the site's
+  held-capacity refusal, which reads no relay, and the existing capacity test
+  proves it; no relay-specific test is owed, since a relay port lease is only ever
+  held by a reservation's fulfillment.
+- **No VM rerun test is owed** (D5). The rerun is the compute family's
+  `JobFulfillmentProvider` and release status, which both adapters build with the
+  container's one policy; the composition test proves the wiring, and the
+  application cases drive bare-metal leases through the rerun.
+
 ## Implementation cadence
 
 One round of three sessions, as D10 gives it: session 1 implements item 5 (D3,
