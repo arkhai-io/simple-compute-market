@@ -151,7 +151,11 @@ The Helm targets carry the namespace and the tags:
   siblings, and the deploy names them through a values overlay naming every `arkhai`
   image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
   <path>`); a render test holds the overlay to every image the chart renders, so an
-  image added later cannot deploy under its bare tag. Compose, the pipeline lanes, and
+  image added later cannot deploy under its bare tag. On a kind cluster, whose node
+  keeps its own image store, the Helm kind loads the change's images into it after the
+  build (`scripts/kind_load.py`), each under `docker.io/library/arkhai:<tag>`, the name
+  a pod's `arkhai:<tag>` resolves to, since Podman would otherwise hand kind its
+  `localhost/`-qualified name. Compose, the pipeline lanes, and
   an operator's own deployments keep bare tags; a lane run with `RELEASE_IMAGES=1`
   instead runs a release candidate's release images under its `-<rev9>` suffix
   ([`TESTING.md`, "Release-image mode"](../../../docs/development/TESTING.md#release-image-mode)).
@@ -616,6 +620,8 @@ else, on an exemption no skill names, and on one whose owner is no open change.
   resources a namespace cannot separate; when side-by-side validations become
   routine, with several changes orchestrated from one session; or when unattended
   steps are to be sandboxed from the owner's files.
+- Teardown removes a change's images from the machine's daemon but not from a kind
+  node, which keeps every change's loaded images until the cluster is recreated.
 - Two releases at once may exhaust the node's memory: the capacity preflight is an
   estimate, and stays inactive on a cluster with no metrics source, which has no
   recorded figure.
