@@ -125,13 +125,17 @@ exceed, so a teardown that succeeds on a retry strands its lease for an operator
   `storefront-publication` scenario — the end is not refused, and once the lease is
   ending the reads report the ending, not the conflict — a storefront integration
   test, and `converge_teardown` deleted. The result read answers the recorded result
-  while a lease is `terminating`, a new `storefront-publication` requirement.
-- **A storefront reads again a registry it could not read** (D6). Each publication
-  cycle re-reads only the registries whose last read failed, through a selective
-  descriptor read in the core storefront package; while one is unread, each
+  while a lease is `terminating`, a new `storefront-publication` requirement scoped
+  to the ending lease.
+- **A storefront reads again a registry it could not read** (D6). Before it
+  composes listing options — each publication cycle in the VM and bare-metal
+  storefronts, each listing created or seeded in API credits — a storefront re-reads
+  only the registries whose last read failed, through a selective descriptor read in
+  the core storefront package, which refuses a selection naming an unknown registry;
+  while one is unread, each
   affected mechanism's readiness — Alkahest's and Arkhai Payments' — reports it in
   its public details as `dispute_authorities_unread`, a key each allowlists, which
-  `settlement status` shows. It is a report,
+  the storefront's system status route shows. It is a report,
   not a readiness blocker, so publication and open listings are unchanged. No
   restart, and `/health` is unaffected.
 - **A teardown that never started runs again without an operator** (D3, D4, D5,
@@ -238,7 +242,8 @@ None.
   - `market_fulfillment`'s exported `FulfillmentAcceptanceDecision` drops
     `newly_accepted`;
   - the core storefront package's `MultiRegistryClient.get_descriptors` gains an
-    optional selection of the registries to read;
+    optional selection of the registries to read, refusing an unknown registry or
+    a bare string;
   - the Alkahest and Arkhai Payments mechanisms allowlist the public detail
     `dispute_authorities_unread`;
   - the bare-metal result read answers the recorded result, where it answered 409

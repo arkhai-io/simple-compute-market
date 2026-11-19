@@ -357,15 +357,21 @@ needs a field on `extra="forbid"` metadata and a rule for when it goes stale
 ### D6 — A storefront reads again a registry it could not read
 
 `RegistryDisputePolicy` keeps, for each registry, whether its last descriptor read
-succeeded and when it last failed. Each storefront's publication cycle, at its
-`compose` stage, reads again every registry whose last read failed, so the first
-publication after the registry answers carries the payments option. A successful
+succeeded and when it last failed. Each time a storefront composes listing options,
+it first reads again every registry whose last read failed, so the first options
+composed after the registry answers carry the payments option: the VM and
+bare-metal storefronts at their publication cycle's `compose` stage, and the
+API-credit storefront, which runs no publication cycle, when it creates or seeds a
+listing (40 F3). A successful
 read is kept until the storefront restarts, as today, so a healthy registry is not
 read again (26 F3). Today's one read, `MultiRegistryClient.get_descriptors` in
 `core/storefront`, reads every configured registry, so it gains an optional
 selection of the registries to read: an additive parameter, absent meaning every
 registry as now, and a minor bump of the core storefront package. The policy's
-re-read passes the registries whose last read failed.
+re-read passes the registries whose last read failed. A selection names configured
+registries only: an unknown URL, or a string passed in place of a collection, is
+refused with `ValueError`, so a misspelled selection cannot read as a successful
+read of nothing; an empty selection reads nothing (40 F4).
 
 While a registry is unread and `use_registry_dispute_authorities` is true, the
 readiness of each mechanism whose options name a dispute authority reports it in
@@ -378,7 +384,11 @@ decide whether an open listing is closed or held. Readiness, publication and ope
 listings are therefore unchanged by an unread registry. The policy exposes its
 unread registries; each storefront passes them into the mechanism readiness
 resources under `dispute_authorities_unread`, as other readiness resources are
-passed. `settlement status` shows them; `/health` does not depend on them.
+passed. The storefront's system status route (`GET /api/v1/system/status`) shows
+them in each mechanism's readiness, since which registry a running storefront could
+not read is a fact about that process; the `settlement status` command, which checks
+configuration in its own process with no dispute policy, does not carry them
+(40 F2). `/health` does not depend on them.
 
 The detail is each mechanism's own (26 F3). `SettlementConfigurationRegistry`
 refuses a public detail its mechanism's registration does not allowlist, and keeps
@@ -390,7 +400,8 @@ its resources, as Alkahest's preflight copies `chain_probe`: Alkahest
 whose allowlist, empty today, gains it. Each kit takes a minor bump. Tests: the
 policy's re-read after a multi-registry read in which one registry failed reads
 only that registry; each of the two mechanisms reports an unread registry in its
-public details, with no blocker, and passes the registry's validation.
+public details, with no blocker, and passes the registry's validation; the core
+client refuses an unknown URL and a bare string as its selection.
 
 Item 4's defect is a storefront relying on registry recommendations alone: one
 whose local entries name no authority its options can use. A storefront with local
@@ -475,7 +486,10 @@ was added. The route admits `terminating`, and still answers "not ready" while n
 result or receipt is recorded, so a lease ended before delivery reads as before.
 `storefront-publication` gains "A bare-metal result read answers the recorded result
 while its lease ends", a requirement of its own since it holds for every ending
-lease, not only one under a conflict. Against `marketplace-v0.3.0` a 409 becomes a
+lease, not only one under a conflict. It is scoped to the ending lease, from
+`terminating` through release: while the lease is active, a result read under a
+delivery conflict is refused as the conflict requirement says, so the two
+requirements each decide one period of the lease and never disagree (40 F1). Against `marketplace-v0.3.0` a 409 becomes a
 200 carrying the recorded result, within the bare-metal storefront's minor bump this
 change already takes. This is a defect found during the change, recorded in the task
 notes.
@@ -524,8 +538,9 @@ specification file.
 
 Session 3 stopped in item 3, which returned to design (D9). A fresh session, in the
 same round, completes item 3 as D9 now gives it, in the bare-metal storefront, which
-section 7's bump already covers; the round's implementation review and validation
-follow it.
+section 7's bump already covers, and the descriptor read's refusal of an invalid
+selection (40 F4), in the core storefront package, which section 7 also bumped; the
+round's implementation review and validation follow it.
 
 *Rejected.* Two rounds reviewing item 5 alone first, which the owner judged not
 worth the extra round. One session for everything, which serializes independent
@@ -538,7 +553,8 @@ One round of three sessions, as D10 gives it: session 1 implements item 5 (D3,
 D4, D5, D7, D8); session 2 items 1 and 2 (D1, D2); session 3 items 3 and 4 (D6,
 D9). After item 3's return to design, a fresh session in the same round completes
 item 3 as D9 restates it (the result read during `terminating`, the extended
-conflict test and its sibling cases, and the deletion already made). One
+conflict test and its sibling cases, and the deletion already made), and the
+descriptor read's refusal of an invalid selection (D6, 40 F4). One
 implementation review follows the round, then closeout.
 
 ## Risks / Trade-offs

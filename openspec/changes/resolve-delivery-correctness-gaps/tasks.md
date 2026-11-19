@@ -897,6 +897,14 @@ read scenarios). Touches `core/storefront` and `kit/storefront`.
   with it (`after-functional-change`, `pre-commit-functional` and `pre-commit`
   at `703750505`), before those fixes and again after them (section notes).
   End-to-end: section 9's, as planned.
+- [ ] 7.6 In `MultiRegistryClient.get_descriptors`, refuse a selection naming a URL
+  `urls` does not name, and a string passed in place of a collection, with
+  `ValueError` naming the problem; an empty selection still reads nothing (D6,
+  40 F4). This restores, by the owner's decision, the refusal of an unconfigured
+  selection the fresh-context check removed (the notes below). Unit, in
+  `core/storefront/tests/unit/test_multi_registry_descriptors.py`: an unknown URL
+  and a bare string are refused and read no registry. No bump: 7.4's is unreleased.
+  Verify with `make -C core/storefront test`.
 
 Section 7 notes (handoff):
 
@@ -1292,9 +1300,13 @@ after campaign index currency.
     for teardowns of expected length, and `teardown_rerun_limit` (D3, D5).
   - `openspec/specs/settlement-configuration/configuration.md`, "Dispute authority
     preferences": descriptors are read at storefront startup and, for a registry
-    whose read failed, again at each publication cycle until one succeeds; an unread
-    registry is reported in each affected mechanism's public details as
-    `dispute_authorities_unread`, not as a blocker (D6).
+    whose read failed, again each time the storefront composes listing options —
+    each publication cycle in the VM and bare-metal storefronts, each listing
+    created or seeded in API credits — until one succeeds; an unread registry is
+    reported in each affected mechanism's public details as
+    `dispute_authorities_unread`, not as a blocker, on the storefront's system
+    status route (`GET /api/v1/system/status`), not by the `settlement status`
+    command (D6, 40 F2, 40 F3).
   - `docs/development/ARCHITECTURE.md`, "Release": the sentence that a compensated
     aggregate's requeue re-observes the same failed teardown job restated, and the
     rerun of a teardown recorded as never started added (D3, D5, D8).

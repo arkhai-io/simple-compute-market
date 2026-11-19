@@ -29,10 +29,11 @@ any ended lease, not the conflict.
 
 ### Requirement: A bare-metal result read answers the recorded result while its lease ends
 
-From delivery through release, a buyer's bare-metal result read MUST answer the recorded
-result and receipt once both are recorded, including while the lease is `terminating`
-before the site reports a teardown state. It MUST answer that the result is not ready only
-while no result or receipt is recorded.
+Once a bare-metal lease is ending — from `terminating`, before the site reports a teardown
+state, through its release — a buyer's result read MUST answer the recorded result and
+receipt when both are recorded, and MUST answer that the result is not ready while either
+is not. While the lease is active, a result read under a delivery conflict is refused as
+"A bare-metal delivery that conflicts with its recorded result is refused" requires.
 
 #### Scenario: A buyer reads the result of a deal whose lease is ending
 
