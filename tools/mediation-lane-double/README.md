@@ -69,14 +69,28 @@ read names no case. A rule whose action a call's operation cannot take is passed
 over for that call.
 
 A ruling is recorded in the signed record with its effects `prepared`, then each
-effect is applied as one payment event carrying the case reference and the
-effect's id, `<case_ref>:<ruling>:<n>`, under a key stable within the Agreement.
-The event is fixed when it is first sent, so every resend is the same request,
-and payments answers one it already took with the event it stored. Case
-references carry a prefix unique to the process, so a restarted double never
+effect is applied, in order, as payment events carrying the case reference and the
+effect's id, `<case_ref>:<ruling>:<n>`, under keys stable within the Agreement:
+
+- a `reverse` is one reverse event of its part and amount;
+- a `stop` is one stop event from the double's own account, which payments takes
+  through the part's `chosen` stop entry, carrying the ruling's partial-period
+  treatment; a stop time not yet reached is requested as it is, and one already
+  passed is sent as a stop now, since payments never backdates a stop;
+- a `penalty` is reversals of the earned amounts the transaction's parts still
+  hold, read once every earlier effect is applied: part by part in mandate order,
+  up to the penalty and no further than what is held, each under a key beneath
+  its effect's, so a penalty larger than the holdings reverses exactly them.
+
+An effect's events are kept once built, so a resend after a lost answer or a later
+event's failure is the same request, and payments answers one it already took with
+the event it stored. Only when payments refuses an effect's first event, which no
+earlier send delivered, is the effect built afresh when resumed: payments took none
+of it, so a stop time passed meanwhile is then a stop now.
+Case references carry a prefix unique to the process, so a restarted double never
 reuses a request id the payments double already answered. A ruling stopped
 part-way stays recorded as its ruled entry left it, its unapplied effects
-`prepared`. Only per-part `reverse` effects are applied (see "Deviation from its
+`prepared`. A ruling carrying an `award` is refused (see "Deviation from its
 producer"). A delivery end is recorded as applied with the ruling, since it is read from the
 record and never sent to payments. With `close`, the case's own extensions are
 lifted and the case closes with every effect `applied`; without it, a second
@@ -110,13 +124,15 @@ rule mechanically, is ruled only when a rule says so. The double verifies the
 filed Agreement's binding to its payment, the authority's admission rule, but no
 concurrence signature or mechanical guard, which are the marketplace's
 verification and the authority's decision logic; the mediation kit proves the
-marketplace's own verification against the producer's vectors. A rule
-may program only `reverse` effects, and a rule naming another is refused at
-install. A `stop` and a `penalty` act on rate parts — a stop schedules or applies a
-part's stop under its partial-period rule, and a penalty reverses earned amounts
-still held, across parts in mandate order — and no lane scenario files a case on a
-rate deal, so neither is applied untested; an `award` is not executable on
-`arkhai.payments.v1`, as the contract states.
+marketplace's own verification against the producer's vectors. Which effects a
+ruling carries is the scenario's: the double executes the `reverse`, `stop` and
+`penalty` effects a rule or an operator decision programs, and computes no ruling. A
+`stop` whose time has passed is a stop now with nothing more, where the authority
+would also reverse the still-held earnings beyond what a stop at that time would
+earn; a ruling wanting that reversal programs it as a `reverse` of its own. An
+`award` is not executable on `arkhai.payments.v1`, as the contract states, so a
+rule or a decision carrying one is refused, `422 invalid_request`, and nothing is
+installed or ruled.
 To know which party files before the app runs, so that a rule naming the filer can
 drop a filing's response, the fault classifier reads an unseen transaction's
 parties from payments. The transport-fault middleware runs the classifier on a

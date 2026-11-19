@@ -15,7 +15,7 @@ Touches `tools/mediation-lane-double` (`rules.py`, `service.py`, its tests, READ
 `pyproject.toml` and lock), the consumers' pins of it if any, and the convergence
 change's index row and Goal 8 gap (inert paths).
 
-- [ ] 1.1 Admit `stop` and `penalty` in the double's rules and operator decisions
+- [x] 1.1 Admit `stop` and `penalty` in the double's rules and operator decisions
       (`tools/mediation-lane-double/src/mediation_lane_double/rules.py`,
       `_APPLIED_EFFECTS`), keeping `award` refused at install with a typed code and
       nothing installed; the controls' `Ruling` model already admits every contract
@@ -23,7 +23,19 @@ change's index row and Goal 8 gap (inert paths).
       needs no change (D6). Verify (unit, `tools/mediation-lane-double/tests/unit/test_rules.py`):
       a rule and a decision carrying `stop` or `penalty` install; one carrying `award`
       is refused and installs nothing.
-- [ ] 1.2 Apply them in `service.py` as the requirement states (D6): a `stop` as one
+      Done: `rules.check_ruling` holds the one admission check, which `RuleBook.install`
+      and now `MediationDouble.decide` both call, so an operator decision is checked
+      before it rules anything; refusal `422 invalid_request` naming the effect.
+      Outside the plan: before this, `decide` checked no effect at all, so a decision
+      carrying a `stop` would have been recorded and then failed building a reverse
+      from it. Unit (`test_rules.py`, the rule book and `check_ruling` directly): a
+      rule and a decision with `reverse`, `stop` or `penalty` are admitted; a rule
+      carrying an `award` beside applied effects is refused with nothing installed,
+      and a decision carrying one is refused — pass. Application integration (`tests/integration/test_controls.py`, the app in
+      process through the typed `ControlClient`): an `award` rule refused at install,
+      and an operator decision carrying an `award` refused with the case left open,
+      nothing reversed and only its `filed` entry recorded — pass.
+- [x] 1.2 Apply them in `service.py` as the requirement states (D6): a `stop` as one
       stop event from the double's own account through the part's `chosen` stop entry,
       carrying the ruling's partial-period treatment, keyed like a `reverse`
       (`<case_ref>:<ruling>:<n>`) so every resend is the same request; a `penalty` as
@@ -38,19 +50,83 @@ change's index row and Goal 8 gap (inert paths).
       is held reverses exactly what is held, in mandate order; a gated ruling with a
       `stop` sends nothing until resumed; a payments failure after a `stop` and before a
       `reverse` resumes without stopping twice.
-- [ ] 1.3 Rewrite the double's README for the effects it applies ("Deviation from its
+      Done: `service._payment_events` builds each effect's events once, stored per
+      effect in `Case.events` (a list: one for a `reverse` or `stop`, one per part
+      reversed for a `penalty`) and resent unchanged until applied. A `stop` is sent
+      with the ruling's `partialPeriod`, and with its `at` only while that instant
+      has not passed by the double's clock: payments refuses a past `at`
+      (`invalid_event`) and never backdates a stop, so a passed time is a stop now.
+      The contract would also reverse the still-held earnings beyond a stop at that
+      time; the double computes nothing, so a ruling wanting that programs a
+      `reverse`, and the README states it as a deviation. A `penalty` reads the
+      snapshot once every earlier effect is applied and reverses each part's `held`,
+      in mandate order, keyed `mediation:<case_ref>:<ruling>:effect:<n>:part:<i>`.
+      Application integration, not library integration as planned
+      (`tests/integration/test_rulings.py`: the app in process, filed through the
+      kit's real `MediationClient` over an ASGI transport, ruled by rules installed
+      through the typed `ControlClient`, against the payments kit's `PaymentsAuthority`
+      engine behind `FakePaymentsClient`, on one injected time): a ruled
+      `stop returned` on a running rate part, its first answer lost after commit,
+      leaves the part stopped with cause `authority` and `returned`, only the first
+      hour earned, and its resend is the identical request with one stop recorded; a
+      stop time not yet reached is pending at that time, and a passed one stops the
+      part now; a `penalty` of 1000 after a `reverse` of 100 on two once parts holding
+      300 each reverses exactly the 200 and 300 left, in part order, keyed beneath
+      its effect, and a payments refusal of its second reversal resumes with each
+      part reversed once; a `penalty` on the running rate part reverses its held
+      first hour and leaves its reservation; a gated ruling with a `stop` sends
+      nothing until resumed; a payments refusal of the `reverse` after the `stop`
+      resumes with one stop sent and recorded; an operator decision through
+      `ControlClient.decide` ruling `stop returned` stops the part as the authority;
+      a stop with a future time that payments refuses once, resumed after lane time
+      passes that time, is built afresh and sent as a stop now; and a stop payments
+      took with its answer lost, then refused on its resend, is resent unchanged on
+      the next resume and takes effect at its own time — all pass, with the whole
+      suite (96). Unit (`tests/unit/test_penalty.py`, `penalty_reversals` directly):
+      the split over parts' holdings, capped, into a later part, within the first,
+      past a part holding nothing, and with nothing held — pass. An effect's events
+      are kept once built, so a lost answer or a later event's failure resends them
+      unchanged; only when payments refuses an effect's first event that no earlier
+      send can have delivered (`Case.reached`) are they built again on resume, since
+      a kept stop with a passed `at` would be refused `invalid_event` on every
+      resend, leaving the case applying for good.
+      `scripts/change-workflow run test-before` could not show the new cases failing
+      before the change: its command runs pytest with no project environment, so
+      the module fails at collection importing `lane_double_controls`, which shows
+      nothing about the change.
+- [x] 1.3 Rewrite the double's README for the effects it applies ("Deviation from its
       producer"; the effects paragraph), bump `tools/mediation-lane-double`'s version and
       relock (`make lock`), and raise any consumer's minimum to it
       (`docs/guidance/repository/package-versions.md`). Verify: `scripts/change-workflow
       run pre-commit switch-on-hosted-per-period-vm` passes, the packaging check among
       its functional hooks.
-- [ ] 1.4 In `openspec/changes/README.md`, `converge-ongoing-compute-leases`' row Notes
+      Done: the README's effects paragraph lists how each effect is applied and when
+      an effect is rebuilt, and "Deviation from its producer" states that the double
+      executes what a ruling programs, that a passed stop time is a stop now with no
+      reversal beside it, and that an `award` is refused. Version 0.1.0 to 0.2.0,
+      new behaviour before 1.0 (`origin/dev` holds 0.1.0); `make lock
+      PROJECTS=tools/mediation-lane-double` rewrote its own lock's version line. No
+      project pins or imports the double, so no consumer minimum moves.
+      `scripts/change-workflow run pre-commit` on the final tree: `after-functional-change`
+      passed; `pre-commit-functional` passed (local evidence for tree `af8c9d7cfd6f`:
+      `check-packaging` and `make test` passed, the tree unchanged); `pre-commit`'s
+      workflow checks passed (index, tasks, skills, strict OpenSpec validation) and
+      `check-repository` passed 8 of 9: documentation citations reports
+      `docs/attachments/switch-on-hosted-per-period-vm/live-verification.md`, the
+      summary 8.1 cites and the deployment writes in section 8 — expected until then.
+- [x] 1.4 In `openspec/changes/README.md`, `converge-ongoing-compute-leases`' row Notes
       record that this change took the double's `stop` and `penalty` execution; in
       `docs/development/ROADMAP.md`'s Goal 8, the convergence gap row no longer says the
       double executes only `reverse` effects and that its rate rows first add that
       execution (D6; `docs/guidance/workflow/changes.md`, "Defects found during a
       change"). Verify: `scripts/change-workflow check index` passes.
-- [ ] 1.5 Verification point: the double's unit and integration suites pass, and the VM
+      Done: the convergence row's Notes say this change took the double's `stop` and
+      `penalty` execution and its matrix rows keep their use; its deliverables cell is
+      left for its own reverification. The Goal 8 gap row drops the clause. This
+      change's own row is `in implementation`. `check index` — pass. The Goal 8
+      current-state sentence naming the double's `reverse` effects is left for
+      roadmap currency (9.5), as planned.
+- [x] 1.5 Verification point: the double's unit and integration suites pass, and the VM
       lane's dispute scenarios still pass against the amended double (system, the VM
       lane's Compose stack: `make -C e2e-tests test-e2e-vm "E2E_MODULE=e2e_vm_payment_deal
       or e2e_vm_dispute_ruled_end or e2e_vm_dispute_discount or e2e_vm_dispute_lost_filing
@@ -62,6 +138,61 @@ change's index row and Goal 8 gap (inert paths).
       `e2e_vm_dispute_hold_passed`; none yet exercises a `stop` or `penalty`, which
       section 3 adds.
       Nothing is owed to validation.
+      Evidence, on the section's final code: the double's suite, `make -C
+      tools/mediation-lane-double test` (unit and application integration) — 96
+      passed. System, the VM lane's Compose stack with the double's image rebuilt at
+      0.2.0, the command above — 107 passed, 1851 deselected (also run twice on
+      earlier states of the section, each 107 passed); the stack was taken down after
+      each run (`make -C e2e-tests e2e-vm-down`).
+      End-to-end scenarios confirmed as listed: they show the amended double still
+      serves the reverse-only rulings, filings and protection the dispute rows use;
+      none is evidence for `stop` or `penalty`, whose evidence is the suite above
+      until section 3's rows.
+
+Handoff (section 1):
+
+- Outside the plan: `decide` now checks its ruling (1.1). Also outside the plan,
+  a defect found by `make test`: `scripts/tests/test_change_workflow_assumptions.py`
+  failed at the round's base, since the step table names `scripts/openspec` and
+  `market-change-workflow`'s README, "How this repository provides the workflow's
+  roles", did not; its closing-checks row now names the validator it runs.
+  Comments and docs saying the double "extends, reverses and lifts" now include
+  "stops" (`authority.py`, its `fixtures/authority.toml`, its `pyproject.toml`,
+  `tools/payments-lane-double/README.md` and `fixtures/accounts.toml`,
+  `dev-env/identities/README.md`, a docstring in
+  `scripts/tests/test_committed_stack_values.py`); in `payments-lane-double` only a
+  fixture comment, outside its wheel, so it takes no bump. Its README's matching
+  sentence is left as it is: the README is its wheel's metadata, and the sentence
+  is incomplete rather than false.
+- For closeout's promotion of D6 to `test-compatibility`'s "The in-lane mediation
+  double": state the `stop` deviation the README now states — a passed stop time is
+  a stop now with no reversal of the earnings beyond it, which a ruling programs
+  as its own `reverse`. The delta requirement's "one stop event" already implies
+  it; the fresh-context check suggested naming it, and triage may prefer the delta.
+- For section 3's rows: the lane mandate's authority entry is `chosen` with no
+  notice (`kit/deal-lifecycle`'s `authorities.py`), so a ruled stop at the ruling's
+  instant takes effect at once. A `penalty` reverses each part's snapshot `held`
+  (earned and unreleased; a rate part's `reserved` is not held, as the rate-part
+  penalty case shows), read after the ruling's earlier
+  effects, so a `reverse` of earnings since the end placed before it leaves the
+  penalty only what remains. The double's integration suite now has a rate-part
+  helper, `support.Lane.approve_rate`, and a `Recording` payments peer.
+- A penalty's reversals are kept once one is taken: if money is released from an
+  unprotected part between a failure and the resume, a kept reversal can exceed
+  what is still held and be refused on every resend. No lane row meets this; it is
+  an unowned row of Goal 8's "Work this goal found and leaves unowned" in
+  `docs/development/ROADMAP.md`.
+- `scripts/change-workflow run test-before` cannot run this package's tests (no
+  project environment); a later session needing that proof should not expect it.
+- Two fresh-context checks ran. The first found stale "extends, reverses and lifts"
+  comments, this change's own row and proposal naming only `stop`, the operator
+  decision's `stop` untested, and a kept stop whose time passed refused forever;
+  all fixed. The second found the rebuild on a refused first event wrong after a
+  lost answer (a middleware refusal comes before payments' replay), fixed with
+  `Case.reached`; the penalty split moved to a pure `penalty_reversals`, unit
+  tested, with one integration case left; penalty retries and a rate-part penalty
+  tested; the edge case above recorded as unowned. Declined: the convergence row's
+  deliverables cell is left for its reverification, which its Notes now say.
 
 ## 2. The payment rows' producer outputs as shared assertions
 

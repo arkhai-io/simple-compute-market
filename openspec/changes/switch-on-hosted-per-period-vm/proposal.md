@@ -72,7 +72,7 @@ None.
 ## Dependencies and Related Changes
 
 - Depends on `serve-running-rate-deals` (archived).
-- Takes the mediation double's `stop` execution from `converge-ongoing-compute-leases`; its index row and Goal 8 gap are edited in implementation.
+- Takes the mediation double's `stop` and `penalty` execution from `converge-ongoing-compute-leases`; its index row and Goal 8 gap are edited in implementation.
 - Live verification waits for the deployment to prepare a topology meeting the stated requirements and record the evidence; the buyer's contested case needs a topology applying a ruling policy and may close out unproven.
 - Production is gated externally on the payments service going live.
 - Parts taken from `activate-per-period-compute-servicing` (task numbers in its `tasks.md`): 1.1, 1.2, 1.3a's policy in the form D11 leaves it, 2.3–2.4 as topology requirements, 3.1, 3.1a and 3.2 (live scenarios, VM only), 3.3 (the VM production example), 3.4 (withdrawal, already a requirement).

@@ -52,7 +52,7 @@ from market_identity import SignatureProof, canonical_json
 
 from mediation_lane_double.authority import AuthorityFixture
 from mediation_lane_double.protection import not_held_reason
-from mediation_lane_double.rules import Entry, RuleBook
+from mediation_lane_double.rules import Entry, RuleBook, check_ruling
 
 _KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 # The scheme name is case-insensitive (RFC 7235); a token holds no whitespace.
@@ -107,8 +107,13 @@ class Case:
     #: How many rulings the case has had; it names each ruling's effects.
     rulings: int = 0
     outcome: list[dict[str, Any]] = field(default_factory=list)
-    #: Each prepared effect's request id and payment event, by its effect id.
-    events: dict[str, tuple[str, dict[str, Any]]] = field(default_factory=dict)
+    #: Each prepared effect's payment events, each with its request id, by its
+    #: effect id: one for a reverse or a stop, one per part reversed for a penalty.
+    events: dict[str, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
+    #: The effect requests payments may have taken: answered, or lost in transit. A
+    #: refusal of such a request may come before payments' replay of it, so it never
+    #: shows that payments took nothing.
+    reached: set[str] = field(default_factory=set)
     rule_id: str | None = None
     lifted: set[int] = field(default_factory=set)
 
@@ -345,6 +350,7 @@ class MediationDouble:
     def decide(self, case_ref: str, ruling: Ruling) -> CaseView:
         """Rule an open case as its operator, or continue that ruling's application."""
 
+        check_ruling(ruling)
         with self._lock:
             case = self._open_case(case_ref)
             if case.state == "applying":
@@ -517,15 +523,29 @@ class MediationDouble:
             if item["effect"]["kind"] == "end_delivery":
                 item["state"] = "applied"
                 continue
-            # The event is fixed when it is first sent, so every resend under its
-            # key is the same request.
-            if item["id"] not in case.events:
-                prefix, number = item["id"].rsplit(":", 1)
-                case.events[item["id"]] = (f"mediation:{prefix}:effect:{number}",
-                                           self._payment_event(item, case.case_ref))
-            request_id, event = case.events[item["id"]]
+            # An effect's events are kept once built, so a resend under their keys,
+            # after a lost answer or a later event's failure, is the same request,
+            # and an event payments already took is answered with the one it stored.
             try:
-                self.payments.submit_event(case.transaction, event, request_id=request_id)
+                if item["id"] not in case.events:
+                    case.events[item["id"]] = self._payment_events(case, item)
+                for position, (request_id, event) in enumerate(case.events[item["id"]]):
+                    try:
+                        self.payments.submit_event(case.transaction, event,
+                                                   request_id=request_id)
+                    except PaymentsAPIError:
+                        if position == 0 and request_id not in case.reached:
+                            # Payments refused the effect's first event, which no
+                            # earlier send can have delivered, so it took none of the
+                            # effect, which is built afresh when resumed: a stop time
+                            # passed meanwhile is then a stop now, and a penalty reads
+                            # the holdings as they then are.
+                            del case.events[item["id"]]
+                        raise
+                    except PaymentsError:
+                        case.reached.add(request_id)
+                        raise
+                    case.reached.add(request_id)
             except PaymentsError:
                 self.rules.set_waiting(case.rule_id, case.case_ref, True)
                 return False
@@ -547,12 +567,40 @@ class MediationDouble:
         self.rules.set_waiting(case.rule_id, case.case_ref, False)
         return True
 
-    @staticmethod
-    def _payment_event(item: dict[str, Any], case_ref: str) -> dict[str, Any]:
-        # A rule's effects are reverses alone (``rules.py``).
+    def _payment_events(self, case: Case, item: dict[str, Any]
+                        ) -> list[tuple[str, dict[str, Any]]]:
+        """The payment events applying ``item``, each under a key beneath its effect's.
+
+        A reverse is one event. A stop is one stop event from the authority's own
+        account, which payments takes through the part's ``chosen`` stop entry
+        with the ruling's partial-period rule: a stop time not yet reached is
+        requested as it is, and one already passed is a stop now, since payments
+        never backdates a stop. Any reversal of earnings a ruling wants beside it
+        is an effect of its own. A penalty is read against the transaction as
+        every earlier effect left it: it reverses what each part still holds, part
+        by part in mandate order, up to its amount and never beyond what is held,
+        so a penalty larger than the holdings reverses exactly the holdings.
+        """
+
         effect = item["effect"]
-        return {"kind": "reverse", "part": effect["part"], "amount": effect["amount"],
-                "payload": {"case_ref": case_ref, "effect_id": item["id"]}}
+        prefix, number = item["id"].rsplit(":", 1)
+        key = f"mediation:{prefix}:effect:{number}"
+        payload = {"case_ref": case.case_ref, "effect_id": item["id"]}
+        if effect["kind"] == "reverse":
+            return [(key, {"kind": "reverse", "part": effect["part"],
+                           "amount": effect["amount"], "payload": payload})]
+        if effect["kind"] == "stop":
+            event = {"kind": "stop", "part": effect["part"],
+                     "partialPeriod": effect["partialPeriod"], "payload": payload}
+            if effect["at"] >= self._clock():
+                event["at"] = effect["at"]
+            return [(key, event)]
+        # A ruling carries only the effects ``check_ruling`` admits.
+        assert effect["kind"] == "penalty"
+        held = [int(part["held"]) for part in self._snapshot(case.transaction)["parts"]]
+        return [(f"{key}:part:{index}", {"kind": "reverse", "part": index,
+                                         "amount": str(amount), "payload": payload})
+                for index, amount in penalty_reversals(int(effect["amount"]), held)]
 
     def _lift(self, case: Case) -> bool:
         """Lift this case's extensions, and no other case's; ``False`` if payments stopped it."""
@@ -674,6 +722,20 @@ class MediationDouble:
     def _new_ref(self) -> str:
         self._next += 1
         return f"case-{self._prefix}-{self._next}"
+
+
+def penalty_reversals(amount: int, held: list[int]) -> list[tuple[int, int]]:
+    """A penalty's reversals, as ``(part, amount)``: what the parts hold, part by part
+    in mandate order, up to ``amount`` and never beyond what a part holds."""
+
+    reversals: list[tuple[int, int]] = []
+    left = amount
+    for part, holding in enumerate(held):
+        taken = min(left, holding)
+        if taken:
+            reversals.append((part, taken))
+            left -= taken
+    return reversals
 
 
 def _claim_properties(operation: str, filer: str, transaction: str,
