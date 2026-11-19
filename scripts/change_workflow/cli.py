@@ -26,7 +26,8 @@ The others reach the module that holds them: `next` the next-step computation,
 `find` a change's directory and records, `clone`, `clone where`, and `clone-remove`
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
 of a change's history, `cost` its cost report, `push` the guarded push, `config`
-how the repository's workflow configuration resolved, `config load` a step's
+how the repository's workflow configuration resolved and each step's scope,
+`config load` a step's
 documents, or with `common` those every session reads, `evidence` which evidence
 each kind needs for a change's `HEAD` and what is present, `gather` the gathering
 of what is missing, or of a new attempt of one kind (`gather`), `run` and `openspec`
@@ -400,8 +401,9 @@ def _parser() -> argparse.ArgumentParser:
                        help="the remote to push to, in place of the branch's upstream's")
     config_ = commands.add_parser(
         "config", help="list how every field of the repository's workflow configuration "
-                       "resolved; `config load <step>` a step's documents, `config load "
-                       "common` those every session reads")
+                       "resolved, and each step's scope with each path's source; `config "
+                       "load <step>` a step's documents, `config load common` those every "
+                       "session reads")
     config_.add_argument("action", nargs="?", choices=("load",), default=None)
     config_.add_argument("subject", nargs="?", default=None, metavar="step")
     config_.add_argument("--json", action="store_true", help="print it as JSON")

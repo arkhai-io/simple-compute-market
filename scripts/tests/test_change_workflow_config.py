@@ -709,6 +709,144 @@ def test_an_absent_or_empty_list_loads_nothing(tmp_path: Path) -> None:
     assert _checked("[load]\ncommon = []\n").documents("design", tmp_path) == []
 
 
+# `[sandbox]`: what a repository adds to a step's scope.
+
+@pytest.mark.parametrize("text,named", [
+    ("[sandbox]\nwritable = ['docs/']\n", "sandbox.writable must be a table of path lists"),
+    ("[sandbox]\nwritable.common = 'docs/'\n", "sandbox.writable.common must be a list"),
+    ("[sandbox]\nprotected = '.claude/'\n", "sandbox.protected must be a list"),
+    ("[sandbox]\nreadable = []\n", "sandbox.readable is no field the workflow defines; "
+                                   "sandbox takes writable, protected"),
+    ("[sandbox]\nwritable.review = ['docs/']\n", "sandbox.writable.review is refused"),
+    ("[sandbox]\nwritable.deploy = ['docs/']\n", "sandbox.writable.deploy names no step"),
+    ("[sandbox]\nwritable.round = ['docs/']\n", "sandbox.writable.round names no step"),
+    ("[sandbox]\nwritable.common = ['~/.cache/*']\n",
+     "sandbox.writable.common names ~/.cache/*, a pattern outside the checkout"),
+    ("[sandbox]\nprotected = ['.claude/*.json']\n",
+     "sandbox.protected names .claude/*.json, a pattern"),
+    ("[sandbox]\nwritable.design = ['.git/config']\n",
+     "sandbox.writable.design names .git/config, which is or lies under the protected path "
+     ".git/config"),
+    ("[sandbox]\nwritable.merge = ['/usr/lib/git-core/git']\n",
+     "sandbox.writable.merge names /usr/lib/git-core/git, which is or lies under the "
+     "protected path /usr/lib/git-core/git"),
+    ("[sandbox]\nwritable.plan = ['secrets/key']\nprotected = ['secrets/']\n",
+     "sandbox.writable.plan names secrets/key, which is or lies under the protected path "
+     "secrets/"),
+])
+def test_a_malformed_sandbox_table_is_refused_naming_the_field(text: str, named: str) -> None:
+    with pytest.raises(ConfigError) as refused:
+        _checked(text)
+    assert named in str(refused.value)
+
+
+def test_an_absent_sandbox_table_adds_nothing() -> None:
+    checked = _checked("")
+
+    assert (checked.sandbox_writable, checked.sandbox_protected) == ({}, None)
+    assert all(checked.repository_writable(step) == () for step in config.STEPS)
+
+
+def test_common_paths_are_every_step_but_the_reviews() -> None:
+    checked = _checked("[sandbox]\nwritable.common = ['~/.local/share/uv']\n"
+                       "writable.design = ['docs/', '~/.local/share/uv']\n")
+
+    assert checked.repository_writable("design") == ("~/.local/share/uv", "docs/")
+    assert checked.repository_writable("plan") == ("~/.local/share/uv",)
+    assert checked.repository_writable("review") == ()
+
+
+def _git_checkout(root: Path, text: str) -> Path:
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / ".agents").mkdir(parents=True, exist_ok=True)
+    return configured(root, text)
+
+
+def test_a_repository_gives_design_its_documents(tmp_path: Path) -> None:
+    """CW-h2zt's "A repository gives design its documents": design's scope lists
+    `docs/`, and planning's does not. Library integration: a real Git checkout."""
+    root = _git_checkout(tmp_path, "[sandbox]\nwritable.design = ['docs/']\n")
+    loaded = config.load(root)
+
+    design = {path.path: path.source for path in loaded.scope("design", root).writable}
+    plan = {path.path for path in loaded.scope("plan", root).writable}
+    assert design[root / "docs"] == "repository"
+    assert root / "docs" not in plan
+
+
+REFUSED_OPENING = ("sandbox.writable.common names .agents/workflow.toml, which is or lies "
+                   "under the protected path .agents/workflow.toml")
+
+
+@pytest.mark.parametrize("command", [["check", "config"], ["config", "--json"], ["config"],
+                                     ["config", "load", "design"]], ids=" ".join)
+def test_a_repository_opens_a_protected_path(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                             command: list[str]) -> None:
+    """CW-h2zt's "A repository opens a protected path": every reader refuses, naming
+    the field and the protected path, the commands driven in process."""
+    configured(tmp_path, "[sandbox]\nwritable.common = ['.agents/workflow.toml']\n")
+
+    assert main(command, root=tmp_path) == 1
+
+    assert REFUSED_OPENING in capsys.readouterr().err
+
+
+def test_a_writable_path_under_a_protected_home_path_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="sandbox.writable.common names ~/.ssh/keys, which "
+                                          "is or lies under the protected path ~/.ssh/"):
+        config.check("[sandbox]\nwritable.common = ['~/.ssh/keys']\nprotected = ['~/.ssh/']\n",
+                     tmp_path / config.CONFIGURATION, home=tmp_path / "home")
+
+
+def test_a_repository_opens_a_directory_holding_a_protected_path(tmp_path: Path) -> None:
+    """CW-h2zt's "A repository opens a directory holding a protected path": design's
+    scope lists `.agents/` writable and `.agents/workflow.toml` protected inside it.
+    Library integration: a real Git checkout."""
+    root = _git_checkout(tmp_path, "[sandbox]\nwritable.design = ['.agents/']\n")
+
+    found = config.load(root).scope("design", root)
+
+    assert root / ".agents" in {path.path for path in found.writable}
+    assert root / ".agents/workflow.toml" in {path.path for path in found.protected}
+
+
+def test_config_lists_each_steps_scope_with_each_paths_source(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-o6kc, without the adapter's paths: `config --json` gives planning's scope, its
+    `openspec/` and `.git/` from the engine and `docs/` from the repository, and
+    `config` lists the same. Library integration: a real Git checkout."""
+    root = _git_checkout(tmp_path, CONFIGURED + "\n[sandbox]\nwritable.plan = ['docs/']\n")
+    (root / "openspec").mkdir()
+
+    assert main(["config", "--json"], root=root) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    fields = {entry["field"]: entry for entry in shown["fields"]}
+    assert fields["sandbox.writable.plan"] == {"field": "sandbox.writable.plan",
+                                               "status": "declared", "value": ["docs/"]}
+    assert fields["sandbox.writable.common"]["status"] == "absent"
+    assert set(shown["scopes"]) == set(config.STEPS)
+    plan = {(entry["entry"], entry["source"]) for entry in shown["scopes"]["plan"]["writable"]}
+    assert {("openspec/", "engine"), (".git/", "engine"), ("docs/", "repository")} <= plan
+    docs = next(entry for entry in shown["scopes"]["plan"]["writable"]
+                if entry["entry"] == "docs/")
+    assert docs == {"path": str(root / "docs"), "source": "repository", "entry": "docs/",
+                    "absent": True}
+    protected = {entry["entry"] for entry in shown["scopes"]["plan"]["protected"]}
+    assert protected == {".agents/workflow.toml", ".git/config", "/usr/bin/git",
+                         "/usr/lib/git-core/git"}
+
+    assert main(["config"], root=root) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split() for line in lines if line.startswith("scope.plan.writable")
+            and "openspec" in line] == [["scope.plan.writable", "engine", "openspec"]]
+    assert ["scope.plan.writable", "repository", "docs", "(absent)"] in [
+        line.split() for line in lines]
+    assert ["scope.plan.protected", "engine", ".agents/workflow.toml"] in [
+        line.split() for line in lines]
+
+
 # A waiver names the kinds the configuration declares.
 
 def test_a_waiver_names_declared_kinds(tmp_path: Path,

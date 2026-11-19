@@ -112,7 +112,7 @@ protected ancestors; CW-h2zt, CW-o6kc, CW-m8wq, CW-r6kd's protected set). Files:
 `cli.py`'s `config`, `scripts/tests/test_change_workflow_config.py`, a new
 `scripts/tests/test_change_workflow_scope.py`.
 
-- [ ] 2.1 In `config.py`, read `[sandbox]`: `writable.common`, `writable.<step>` for a
+- [x] 2.1 In `config.py`, read `[sandbox]`: `writable.common`, `writable.<step>` for a
   step of `graph.STEPS`, and `protected`, each a list of paths; refuse, naming the
   field, an unknown key, a wrong type, `writable.review`, an unknown step, a glob
   character outside a path's pattern form, and a writable entry that is or lies under
@@ -121,7 +121,28 @@ protected ancestors; CW-h2zt, CW-o6kc, CW-m8wq, CW-r6kd's protected set). Files:
   contains one (D12; CW-h2zt, CW-w8ne). An absent table is every list empty. Verify:
   unit tests for each refusal, each naming the field, and for CW-h2zt's three
   scenarios.
-- [ ] 2.2 In `scope.py`, resolve a step's scope for one run as absolute paths: the
+  Done: `Configuration` gains `sandbox_writable` (by key), `sandbox_protected`,
+  `repository_writable(step)` (`common` but for the review, then the step's own), and
+  `scope(step, root, …)`.
+  - "A glob character outside a path's pattern form" is read as two refusals: a
+    pattern in a `~` or absolute entry, since patterns match the checkout's files,
+    and any pattern in `protected`, which is mounted whole.
+  - The protected test is `scope.protected_by`, the same one a grant's uses. It
+    resolves `.git/` entries through Git and judges a pattern by its fixed part.
+  - `check()` takes a `home` seam.
+  Tests in `test_change_workflow_config.py`, all passing:
+  - unit tests (`config.check` on text), each naming its field: the refusals, an
+    absent table, `common` but for the review, and a home-relative protected path;
+  - scenario 2 ("opens a protected path"), driven through `cli.main` in process.
+    `check config`, `config`, `config --json`, and `config load design` each exit 1,
+    naming the field and the protected path;
+  - scenarios 1 and 3, library integration on a real Git checkout. They show the
+    resolved scope only: `docs/` for design and not for planning, and `.agents/`
+    writable with `.agents/workflow.toml` protected. Mounting it is section 3's.
+  `scripts/change-workflow run test-before … --test
+  scripts/tests/test_change_workflow_config.py` at the round's base: the 18 new tests
+  fail there and the 122 others pass.
+- [x] 2.2 In `scope.py`, resolve a step's scope for one run as absolute paths: the
   baseline (1.2), the adapter's state and protected paths passed in by the caller
   (section 6 supplies them), the repository's additions, and the run's grants;
   relative entries from the checkout's root and `~` the home directory; a file or
@@ -133,22 +154,89 @@ protected ancestors; CW-h2zt, CW-o6kc, CW-m8wq, CW-r6kd's protected set). Files:
   and closeout's scopes on a fixture checkout, closeout's `**/README.md` yielding each
   README's directory and `AGENTS.md` the root, and `.agents/workflow.toml` protected
   inside a writable checkout.
-- [ ] 2.3 Grant parsing as `scope.py` takes it (D8; CW-tl5v): each value split on `;`,
+  Done: `scope.resolve(step, root, *, inert_paths, writable, protected,
+  adapter_writable, adapter_protected, grants, home, temporary)` returns a `Scope` of
+  `ScopedPath`s, each with its path, source, entry, and `create`.
+  - `PROTECTED` is the engine's protected set: `.agents/workflow.toml`, `.git/config`,
+    `/usr/bin/git`, and `/usr/lib/git-core/git`.
+  - `.git/` resolves through `git rev-parse` to the Git directory and the common
+    directory; `.git/<x>` through `--git-path`.
+  - Patterns match the files `git ls-files --cached --others --exclude-standard`
+    lists, through `records.inert`, now beside a public `records.is_pattern`. A
+    README inside an ignored `.venv` is no match.
+  - Every absent writable path is marked `create`, whatever its source, so the
+    review's `.git/change-invocations/` and an absent `~/.cache` can be mounted.
+  - Outside a Git checkout, `.git/` entries read lexically and patterns match
+    nothing. Git that cannot run at all raises `ScopeError`.
+  Tests in `test_change_workflow_scope.py` are library integration on a real Git
+  checkout (the plan said unit), all passing:
+  - design with the repository's `docs/`;
+  - the review: only `.git/change-invocations/` and the temporary directory;
+  - closeout: each README's directory, and the root from `AGENTS.md` alone, since
+    the fixture has no root README;
+  - `.agents/workflow.toml` protected inside a writable checkout;
+  - the adapter's and the repository's sources;
+  - a linked worktree's Git paths.
+  `absolute` is a unit test.
+- [x] 2.3 Grant parsing as `scope.py` takes it (D8; CW-tl5v): each value split on `;`,
   parts trimmed, empties dropped; a value with a glob character refused, naming it; a
   path that is or lies under a protected path refused, naming it; a directory
   containing one admitted, the protected path read-only inside; a file mounting its
   directory; an absent path marked to be created as a directory before launch. The
   command line takes it in section 8. Verify: unit tests for CW-tl5v's pattern
   scenario, a protected path, a protected ancestor, a file, and an absent path.
-- [ ] 2.4 `config` and `config --json` list each step's resolved scope — writable and
+  Done: `grant_paths` splits values, and `granted`, called by `resolve`, refuses a
+  pattern or a protected path, naming the value. Its protected set is the engine's,
+  the adapter's, and the repository's.
+  Tests: `grant_paths` is a unit test. The rest are library integration through
+  `resolve` on a real Git checkout (the plan said unit), all passing:
+  - CW-tl5v's pattern scenario: the scope is refused, naming the value. That nothing
+    launches is section 8's;
+  - a protected path, and an adapter's protected path;
+  - a protected ancestor granted, with the protected file inside;
+  - a file mounting its directory;
+  - an absent path marked `create`;
+  - `.git/config` refused in a linked worktree.
+- [x] 2.4 `config` and `config --json` list each step's resolved scope — writable and
   protected paths, each with its source — the adapter's paths absent until section 6
   adds them (CW-o6kc). Verify: a library-integration test of `config --json` on a
   fixture repository declaring `writable.plan = ["docs/"]` finding planning's
   `openspec/` and `.git/` from the engine and `docs/` from the repository (CW-o6kc's
   scenario, but for the adapter's paths, which 6.5 adds).
-- [ ] 2.5 Verification point: `test_change_workflow_scope.py` and
+  Done: `config --json` gains `scopes`, keyed by step, each with `writable` and
+  `protected` lists of `{path, source, entry}` and `absent` where marked. `config`
+  appends `scope.<step>.<writable|protected>` lines, shown from the root or `~`.
+  `resolution` lists `sandbox.writable.<key>` and `sandbox.protected`. The help and
+  the module docstring of `cli.py` say so.
+  Test: `test_config_lists_each_steps_scope_with_each_paths_source`, library
+  integration on a real Git checkout through `cli.main`, passing.
+- [x] 2.5 Verification point: `test_change_workflow_scope.py` and
   `test_change_workflow_config.py` (unit, library integration); `run pre-commit`
   passes. End-to-end: none.
+  Done:
+  - `make test-release-tooling` on the scope, config, and CLI tests: 328 passed.
+  - `make check-comment-hygiene` passes.
+  - `run pre-commit`: its functional hooks pass, the relock, packaging, and every
+    suite. Its `pre-commit` fails only `check-doc-citations`, on the six files
+    sections 3 to 5 and 9 create, as section 1 recorded. One earlier run failed a VM
+    storefront integration test this section does not reach,
+    `test_delivery_recovery_loop.py::test_a_deal_waiting_for_its_start_is_claimed_re_checked_and_driven_at_its_start`.
+    It passed in the next run.
+  - Fresh-context check fixes:
+    - comments that claimed later sections' mounting;
+    - one protected test for the configuration and grants;
+    - the `home` seam;
+    - a raise where Git cannot run;
+    - closeout's test proving `AGENTS.md`;
+    - each reader's refusal asserted;
+    - honest levels.
+  Handoff:
+  - Section 6: a file entry mounts its directory, so the adapter's `~/.claude.json`
+    state file would make all of `~` writable. Section 6 needs a narrower form for
+    it.
+  - Section 8: `resolve` accepts grants for the review; nothing yet refuses them.
+  - Closeout's scope here lists many nested directories under the root, which
+    `AGENTS.md` already makes writable. Section 3 may collapse nested writable binds.
 
 ## 3. The bubblewrap launcher, its probe, and the unconfined fallback
 

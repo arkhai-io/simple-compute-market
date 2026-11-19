@@ -1,0 +1,216 @@
+"""A step's scope for one run, `change_workflow.scope`: its baseline, the adapter's and
+the repository's paths, the protected paths kept read-only inside them, and the run's
+grants, each path with its source.
+
+`absolute` and `grant_paths` read an entry alone, and are unit tests. Whether a path is
+protected, and a scope's resolution, are library integration: they ask a real Git for
+the Git directory and the checkout's files, inside a checkout or outside one. What the
+tests show is the scope as resolved; mounting it is the sandbox's."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from change_workflow import scope
+from change_workflow.scope import ADAPTER, ENGINE, GRANT, REPOSITORY, ScopeError
+
+INERT = ("openspec/", "docs/", "**/README.md", "AGENTS.md")
+
+
+# Reading an entry.
+
+@pytest.mark.parametrize("entry,expected", [
+    ("docs/", "/repo/docs"),
+    ("./kit/../docs", "/repo/docs"),
+    ("~/.cache", "/user-home/.cache"),
+    ("~", "/user-home"),
+    ("/usr/bin/git", "/usr/bin/git"),
+])
+def test_an_entry_reads_from_the_root_the_home_directory_or_as_it_is(entry: str,
+                                                                    expected: str) -> None:
+    assert scope.absolute(entry, Path("/repo"), Path("/user-home")) == Path(expected)
+
+
+@pytest.mark.parametrize("entry,protected,expected", [
+    (".agents/workflow.toml", (".agents/workflow.toml",), ".agents/workflow.toml"),
+    (".git/config/x", (".git/config",), ".git/config"),
+    ("/usr/bin/git", scope.PROTECTED, "/usr/bin/git"),
+    # A directory holding a protected path is admitted; the path stays read-only.
+    (".agents/", (".agents/workflow.toml",), None),
+    (".", scope.PROTECTED, None),
+    ("~/.codex", ("~/.codex/config.toml",), None),
+    # A pattern is judged by the directory its matches lie under.
+    ("secrets/*/key", ("secrets/",), "secrets/"),
+    ("**/README.md", scope.PROTECTED, None),
+])
+def test_a_path_is_protected_where_it_is_or_lies_under_a_protected_path(
+        tmp_path: Path, entry: str, protected: tuple[str, ...], expected: str | None) -> None:
+    # Outside a Git checkout an entry under `.git/` reads as any path from the root.
+    assert scope.protected_by(entry, tmp_path, tmp_path / "home", protected) == expected
+
+
+def test_each_grant_value_is_split_trimmed_and_emptied() -> None:
+    assert scope.grant_paths(["kit/site/.venv; docs/ ;;", " ~/.npm "]) == [
+        ("kit/site/.venv; docs/ ;;", "kit/site/.venv"), ("kit/site/.venv; docs/ ;;", "docs/"),
+        (" ~/.npm ", "~/.npm")]
+
+
+# A scope resolved on a real checkout.
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+@pytest.fixture
+def checkout(tmp_path: Path) -> Path:
+    """A Git checkout holding a package whose README sits beside its code, an
+    environment Git ignores holding a README of its own, and `AGENTS.md` at the root,
+    which holds no README."""
+    root = tmp_path / "checkout"
+    for path in ("openspec/specs/x/spec.md", "docs/guide.md", "kit/site/README.md",
+                 "kit/site/src/code.py", "kit/site/.venv/lib/README.md", "AGENTS.md",
+                 ".agents/workflow.toml", "src/main.py"):
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("x\n", "utf-8")
+    (root / ".gitignore").write_text(".venv/\n", "utf-8")
+    _git(root, "init", "-q")
+    return root
+
+
+def _resolve(step: str, root: Path, **more) -> scope.Scope:
+    more.setdefault("inert_paths", INERT)
+    return scope.resolve(step, root, home=root.parent / "home",
+                         temporary=root.parent / "tmp", **more)
+
+
+def _writable(found: scope.Scope) -> dict[Path, str]:
+    return {path.path: path.source for path in found.writable}
+
+
+def _protected(found: scope.Scope) -> dict[Path, str]:
+    return {path.path: path.source for path in found.protected}
+
+
+def test_designs_scope_is_openspec_and_git_with_the_repositorys_documents(
+        checkout: Path) -> None:
+    home = checkout.parent / "home"
+
+    found = _resolve("design", checkout, writable=("docs/",))
+
+    assert _writable(found) == {checkout / "openspec": ENGINE, checkout / ".git": ENGINE,
+                                checkout.parent / "tmp": ENGINE, home / ".cache": ENGINE,
+                                checkout / "docs": REPOSITORY}
+    assert _protected(found) == {checkout / ".agents/workflow.toml": ENGINE,
+                                 checkout / ".git/config": ENGINE,
+                                 Path("/usr/bin/git"): ENGINE,
+                                 Path("/usr/lib/git-core/git"): ENGINE}
+
+
+def test_the_reviews_scope_holds_no_path_of_its_checkout_but_the_invocation_record(
+        checkout: Path) -> None:
+    found = _resolve("review", checkout, writable=())
+    record = checkout / ".git/change-invocations"
+
+    assert _writable(found) == {record: ENGINE, checkout.parent / "tmp": ENGINE}
+    # Absent until a session first invokes something, so created before launch.
+    (invocations,) = [path for path in found.writable if path.path == record]
+    assert invocations.create
+
+
+def test_closeouts_scope_mounts_each_inert_files_directory(checkout: Path) -> None:
+    """Each README's directory, the package's code beside it included, and the root for
+    `AGENTS.md`; a README inside an ignored environment is no match."""
+    found = _resolve("closeout", checkout)
+
+    assert set(_writable(found)) == {checkout / "openspec", checkout / "docs",
+                                     checkout / "kit/site", checkout, checkout / ".git",
+                                     checkout.parent / "tmp", checkout.parent / "home/.cache"}
+    assert checkout / "kit/site/.venv/lib" not in _writable(found)
+    entries = {path.path: path.entry for path in found.writable}
+    assert entries[checkout / "kit/site"] == "**/README.md"
+    assert entries[checkout] == "AGENTS.md"
+
+
+def test_the_configuration_stays_protected_inside_a_writable_checkout(checkout: Path) -> None:
+    found = _resolve("implement", checkout)
+
+    assert checkout in _writable(found)
+    assert _protected(found)[checkout / ".agents/workflow.toml"] == ENGINE
+
+
+def test_the_adapters_and_the_repositorys_paths_carry_their_source(checkout: Path) -> None:
+    home = checkout.parent / "home"
+
+    found = _resolve("plan", checkout, writable=("~/.local/share/uv",),
+                     protected=("secrets/",), adapter_writable=("~/.claude",),
+                     adapter_protected=(".claude/settings.json",))
+
+    assert _writable(found)[home / ".claude"] == ADAPTER
+    assert _writable(found)[home / ".local/share/uv"] == REPOSITORY
+    assert _protected(found)[checkout / ".claude/settings.json"] == ADAPTER
+    assert _protected(found)[checkout / "secrets"] == REPOSITORY
+
+
+def test_a_linked_worktrees_git_paths_resolve_through_git(checkout: Path) -> None:
+    """A worktree's `.git` is a file; its Git directory, and the common directory its
+    commits write, are where Git says, and so is the configuration Git reads."""
+    _git(checkout, "add", "-A")
+    _git(checkout, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "commit", "-qm", "x")
+    linked = checkout.parent / "linked"
+    _git(checkout, "worktree", "add", "-q", str(linked))
+
+    found = _resolve("design", linked)
+
+    assert checkout / ".git/worktrees/linked" in _writable(found)
+    assert checkout / ".git" in _writable(found)
+    assert checkout / ".git/config" in _protected(found)
+    # The configuration's check and a grant judge Git's paths as Git resolves them.
+    home = checkout.parent / "home"
+    assert scope.protected_by(".git/config", linked, home, scope.PROTECTED) == ".git/config"
+    assert scope.protected_by(".git/", linked, home, scope.PROTECTED) is None
+    with pytest.raises(ScopeError, match="protected path .git/config"):
+        _resolve("design", linked, grants=(".git/config",))
+
+
+# Grants.
+
+def test_a_grant_names_a_pattern(checkout: Path) -> None:
+    """CW-tl5v's "A grant names a pattern": the scope is refused, naming the value."""
+    with pytest.raises(ScopeError, match=r"the grant 'kit/\*/.venv' names kit/\*/.venv, a "
+                                         "pattern"):
+        _resolve("implement", checkout, grants=("kit/*/.venv",))
+
+
+def test_a_grant_of_a_protected_path_is_refused_naming_it(checkout: Path) -> None:
+    with pytest.raises(ScopeError, match=r"the grant 'docs/; \.agents/workflow\.toml' names "
+                                         r"\.agents/workflow\.toml, which is or lies under the "
+                                         "protected path"):
+        _resolve("design", checkout, grants=("docs/; .agents/workflow.toml",))
+
+
+def test_a_grant_of_an_adapters_protected_path_is_refused(checkout: Path) -> None:
+    with pytest.raises(ScopeError, match="settings.local.json"):
+        _resolve("implement", checkout, grants=(".claude/settings.local.json",),
+                 adapter_protected=(".claude/settings.local.json",))
+
+
+def test_a_grant_of_a_directory_holding_a_protected_path_keeps_it_read_only(
+        checkout: Path) -> None:
+    found = _resolve("design", checkout, grants=(".agents/",))
+
+    assert _writable(found)[checkout / ".agents"] == GRANT
+    assert checkout / ".agents/workflow.toml" in _protected(found)
+
+
+def test_a_granted_file_mounts_its_directory_and_an_absent_path_is_created(
+        checkout: Path) -> None:
+    found = _resolve("design", checkout, grants=("src/main.py;kit/site/.venv/cache",))
+    granted = {path.path: path for path in found.writable if path.source == GRANT}
+
+    assert set(granted) == {checkout / "src", checkout / "kit/site/.venv/cache"}
+    assert not granted[checkout / "src"].create
+    assert granted[checkout / "kit/site/.venv/cache"].create
