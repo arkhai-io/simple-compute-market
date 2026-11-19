@@ -547,7 +547,7 @@ hold. A test (`scripts/tests/test_change_workflow_assumptions.py`) fails when a 
 target or repository path the workflow's step table or its make fragment names, the
 fragment's own targets among them, is missing from these two tables and from the
 configuration's commands, or when the two documents' roles differ. The workflow's
-skills name none of this repository's targets or paths but the exemptions below
+skills name none of this repository's targets or paths
 ([What the workflow's skills name of this repository](#what-the-workflows-skills-name-of-this-repository)).
 This repository declares no step hook, `before-<step>` or `after-<step>`: the engine's
 own gathering before validation and cleanup before archive cleanup are all it needs
@@ -597,15 +597,10 @@ review.
 ## What the workflow's skills name of this repository
 
 The workflow's skills name no make target or path of an adopting repository, only the
-workflow's own (CW-n8tr), but for the exemptions below, each owned by the open change
-that removes it. The same test reads this table: it fails on a skill naming anything
-else, on an exemption no skill names, and on one whose owner is no open change.
-
-| Named in a skill | Owned by | Why |
-|---|---|---|
-| `make -C <package> test` | `sandbox-unattended-workflow-steps` | Implementation's command form for one project's tests, which the step table's allowlist matches and which goes with it |
-| `make -C <package> migrate` | `sandbox-unattended-workflow-steps` | A section's local bring-up, matched by the allowlist likewise |
-| `.claude/change-steps.toml` and `.claude/` | `sandbox-unattended-workflow-steps` | The step table, whose rules the skills cite and which denies every step edits under `.claude/`, so a plan gives such an edit to the orchestrator |
+workflow's own (CW-n8tr). An exemption would be a row of a table here — what a skill
+names, the open change that owns its removal, and why — and none stands. The same
+test reads this section: it fails on a skill naming anything else, on an exemption
+no skill names, and on one whose owner is no open change.
 
 ## Current limits
 

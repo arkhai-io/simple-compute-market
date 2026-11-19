@@ -62,28 +62,21 @@ reads as written:
   owner, end the turn with `question`: `message` says what you found, the options,
   and your recommendation; `awaiting` names what you need. The owner's answer
   resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed. If a
-  call is denied, finish every part of the work that does not depend on it. If the
-  step cannot complete without it, end with `stopped`, `reason` naming that exact
-  call and why the step needed it, and `denials` listing the calls as you saw them.
-  A call a deny rule refused is forbidden: no other tool does it, except where the
-  rule exists only to keep file writes on the Edit and Write tools — the step
-  table's comments name those rules: sed's in-place forms, find's deleting,
-  running, and writing actions, and the diff family's output-to-file forms —
-  whose refused shell write may be made with the Edit or Write tool this step's
-  rules allow. A call denied because no rule allows it — the harness reports it
-  as don't ask mode — may be done instead by a tool this step's rules allow for
-  the same work, such as the Edit tool for a shell write or Read or Grep for a
-  shell read. Either way, name the substitute in your message. Never ask about a
-  denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop — a
   repository guard refusing, `HEAD` moving under you — end with `stopped`, `reason`
   saying why, and `denials` empty.
-- **Git runs in this checkout**, never with `-C`, and Make here too. The merge you
-  start is never abandoned: no rule allows `git merge --abort`, `git reset`, or
-  `git checkout`, and a merge stopped at a conflict you ask about stays in progress
-  for the owner's answer.
+- **The merge you start is never abandoned.** Never run `git merge --abort`, `git
+  reset`, or `git checkout`: a merge stopped at a conflict you ask about stays in
+  progress for the owner's answer, and the checks after the run stop one that
+  rewrote the branch's history.
 - **A turn's end is its outcome.** Never end a turn with work still running. Wait
   for a background command inside one Bash call, with `scripts/change-workflow wait
   <output-file> '<pattern>'` matching the line it prints when it ends, repeated when

@@ -399,7 +399,8 @@ def test_every_exemption_is_named_by_a_skill_and_owned_by_an_open_change() -> No
     change owning its removal is archived, which moves its directory away."""
     exempted, named = exemptions(PROVISIONS.read_text("utf-8")), skill_names(tracked_root())
 
-    assert exempted
+    # None need stand: the section then holds no table, and the skills name only the
+    # workflow's own, which the test above checks.
     assert [name for name in exempted if name not in named] == []
     assert [f"{name}: {owner or 'no owner'}" for name, owner in exempted.items()
             if not owner or not (ROOT / "openspec/changes" / owner).is_dir()] == []

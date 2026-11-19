@@ -1320,7 +1320,7 @@ CW-v5ny). Files: `.agents/skills/*/SKILL.md`,
 of this repository" (the assumptions test reads it),
 `scripts/tests/test_change_workflow_assumptions.py`.
 
-- [ ] 10.1 Replace each step skill's "Running unattended" denial paragraphs — one
+- [x] 10.1 Replace each step skill's "Running unattended" denial paragraphs — one
   command per call, the write-steering exception, "don't ask mode", never `git -C` or
   `make -C`, commands in the forms the rules name, a helper carrying those rules —
   with the paragraph `UNATTENDED` gives (7.4), keeping each skill's other unattended
@@ -1328,21 +1328,80 @@ of this repository" (the assumptions test reads it),
   `make -C <package>` form or `docker compose -p` form remaining. Verify: a search of
   `.agents/skills/` finds no "don't ask mode", "write-steering", "step table", or
   `make -C <package>`; `make check-agent-skills` passes.
-- [ ] 10.2 `change-plan` and `change-implement` give an edit of the harness's settings
+  Done. In design, plan, implement, triage, validate, merge, closeout, and archive
+  cleanup, "A denied call stops the step only when it cannot go on" and "Git runs in
+  this checkout" are now one bullet, "The step runs in a sandbox scoped to it". It
+  carries `UNATTENDED`'s points:
+  - a read-only or busy write is outside the scope;
+  - stop naming the path, or go on and say what was done instead;
+  - a denial is the same, both recorded whatever the step says;
+  - wait with `wait`.
+  Implement, triage, and merge drop the wait sentence, since their own "A turn's end
+  is its outcome" bullet carries it. Each skill's other bullets stay, triage keeping
+  "Remove a tracked file with `git rm`" from its removed Git bullet. Per skill:
+  - validate says its sandbox writes the checkout while the checks hold every
+    tracked file; its `tail -f` and redirect sentences, and triage's redirect
+    sentence, no longer cite rules;
+  - closeout says its README directories reach code, which the checks hold;
+  - archive cleanup says the workspace is outside its scope;
+  - merge keeps "never abandoned", without the rules;
+  - implement's "Commands in the forms the rules name" and "Helpers carry these
+    rules" become "A project's tests and bring-up, by role", naming no `make -C
+    <package>` or `docker compose -p` form;
+  - review's paragraph says its sandbox keeps what it reviews read-only, and that a
+    check refused its cache is evidence not gathered.
+  guidance-review's "no row in the step table" is "no definition in the engine". A
+  search of `.agents/skills/` finds none of the four phrases, no "one command per",
+  no "no rule allows" or "no rule admits", and no "deny rule". `make
+  check-agent-skills` passes.
+- [x] 10.2 `change-plan` and `change-implement` give an edit of the harness's settings
   to the orchestrator because no step writes them (the adapter's protected paths), and
   an edit of the workflow's configuration because no step writes it, never naming
   `.claude/`; `change-triage` likewise (D15). Remove the exemption rows this change
   owns from `market-change-workflow/README.md`'s "What the workflow's skills name of
   this repository" (CW-n8tr). Verify: `test_change_workflow_assumptions.py` passes,
   its exemption test finding no row owned by this change.
-- [ ] 10.3 `change-design`'s "When the design needs another change first": the design
+  Done. The plan's "Give what no step writes to the orchestrator", implementation's
+  worktree check and orchestrator task, triage's fix step, and orchestration's
+  "Carry an implementation round" each name a protected path, never `.claude/`: the
+  harness's settings, the workflow's configuration, or one the repository protects,
+  as `config --json` lists them.
+  - The three exemption rows are gone, and none stands. The section says so, and
+    holds no table; the companion's "How this repository provides the workflow's
+    roles" no longer points at "the exemptions below". The spec's MCW evidence line
+    citing "the README's table of exemptions" is left for closeout's promotion
+    (12.9).
+  - The assumptions test no longer requires an exemption to exist (`assert
+    exempted`). It still fails on one no skill names, or one whose owner is no open
+    change.
+  `test_change_workflow_assumptions.py` passes, 18 tests.
+- [x] 10.3 `change-design`'s "When the design needs another change first": the design
   ends with a question naming the prerequisite; once the orchestrating session ran
   `propose` on the owner's word, the resumed session writes and checks the proposal
   in the worktree and ends blocked (D5b; CW-dtpz). `change-archive-cleanup` no longer
   runs `history`: the engine copies after its session, and its report names the
   copy's result from the line (CW-hak6). Verify: a reading of both sections against
   CW-dtpz's and CW-hak6's scenarios; `make check-agent-skills` passes.
-- [ ] 10.4 `change-orchestrate`: refusals and denials read from the line and classified
+  Done. Design's step 2 ends the turn with a question asking for the prerequisite's
+  worktree. `propose` runs on the owner's word, by the orchestrating session or,
+  interactively, by the session itself. The resumed session writes the directory and
+  index row there, and checks them. Steps 3 and 4, at which the design ends
+  `blocked`, are unchanged.
+  Archive cleanup's step 10 is "The history copy, the engine's": it never runs
+  `history`; the engine copies once the session finishes, the copy on the line's
+  `invoked`, and interactively `run after archive-cleanup` copies.
+  - Its description, introduction, end bullet, "Status" repeat (steps 7 to 9), and
+    interactive paragraph follow.
+  - Its report gives, interactively, what `run after` reported, each refused file
+    named; unattended, that the engine copies once the session ends, its status on
+    the line and its report in the run's `after/` directory, which the orchestrating
+    session relays. The unattended session cannot read its own line, so this narrows
+    the task's "its report names the copy's result from the line", for the triage.
+  Reading against the scenarios: CW-dtpz's "asks for the prerequisite's worktree,
+  writes … once `propose` made it, and ends with a blocked outcome" matches steps 2
+  to 4. CW-hak6's copy after the session, extended later by the next copy, matches
+  step 10 and orchestration's `done`.
+- [x] 10.4 `change-orchestrate`: refusals and denials read from the line and classified
   as a finding or a gap (CW-svng), a finding's run checked for a workaround
   (CW-5rmh), a gap answered with the narrowest path from `config --json`'s scope as a
   `--write` grant or a `[sandbox]` edit (CW-vdqj), `unconfined: true` relayed to the
@@ -1350,8 +1409,56 @@ of this repository" (the assumptions test reads it),
   `invariants` relayed (CW-f9le); the classification by deny rules, write-steering,
   and the step table's rules removed (D7, D8, D10, D14). Verify: a reading against
   those requirements; a search finds no `change-steps.toml` or `ALLOW=`.
-- [ ] 10.5 Verification point: `make check-agent-skills` and
+  Done. "Read every denial before advancing" is now "Read every refusal and denial
+  before advancing". It covers:
+  - both read from the line, never the message;
+  - each classified, from the call and the step's job, as a finding or a gap. Every
+    refused push and every adapter-rule denial is a finding;
+  - a finding's later calls checked for a workaround;
+  - a gap answered with the narrowest path from `config --json`'s scope, as `--write`
+    or `WRITE=` for one run or a `[sandbox]` edit, never a protected path or a
+    denied push;
+  - readings recorded `gap:`, `finding:`, or `workaround:`;
+  - recovery by `--write`;
+  - a line's `invariants` relayed.
+  "Run the computed step" takes `WRITE=`, `writes_granted`, and relays `unconfined:
+  true`. The prerequisite paragraph runs `propose` on the owner's word. `done`
+  relays the engine's history copy. The denials report reads denials alone, so the
+  skill lets the orchestrating session read a run's transcript after a refusal read
+  as a finding, for the calls that followed it; the engine's report could cover
+  refusals in a later change. The orchestrator's edits, the maintained
+  workflow, the merge's conflicts, and "Report what only you see" name the
+  configuration and its `[sandbox]`, never the step table. A search finds no
+  `change-steps.toml`, `ALLOW=`, `--allow`, "deny rule", or "step table" in the skill.
+- [x] 10.5 Verification point: `make check-agent-skills` and
   `test_change_workflow_assumptions.py`; `run pre-commit` passes. End-to-end: none.
+  Done:
+  - `make check-agent-skills` passes.
+  - The tests reading the skills pass: the assumptions, steps, agent-skills, next-step,
+    guidance, code-snapshot, and CLI tests, 549. After the check's fixes, the
+    assumptions, agent-skills, and steps tests pass again, 64.
+  - `run pre-commit` passed every hook and check, nine of nine, before the check's
+    fixes and again after them; the relock left the locks as committed.
+  - Fresh-context check fixes:
+    - the redirect sentences in validate and triage cite no rule;
+    - triage keeps `git rm`;
+    - "what no step writes" names every protected path;
+    - orchestration reads a refusal's later calls from the transcript, the denials
+      report reading denials alone;
+    - its two denial-only references name refusals too;
+    - archive cleanup's report distinguishes the interactive copy from the engine's;
+    - the companion's pointer at the exemptions;
+    - design's interactive case;
+    - the test comment;
+    - these notes.
+  Handoff:
+  - The merge runs in a sandbox where the configuration and the harness's settings
+    are read-only. A landing branch that changed either makes the merge fail partway,
+    caught only by the generic "stop naming the path". Neither merge nor
+    orchestration says the orchestrator brings such a merge in. For the triage.
+  - Section 11 removes the step table. "How this repository provides the workflow's
+    roles" and "The engine's own assumptions" in the market companion still name it
+    (11.4), and so does `docs/guidance/repository/test-targets.md` (11.5, 12.10).
 
 ## 11. This repository's `[sandbox]`, and the step table removed
 
