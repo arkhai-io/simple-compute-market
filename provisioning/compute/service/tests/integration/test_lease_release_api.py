@@ -822,6 +822,37 @@ async def test_a_release_is_durable_before_teardown_and_a_restart_resumes_it(
     )
 
 
+async def test_a_teardown_that_keeps_failing_to_begin_times_out_after_the_grace(
+    client_and_queue, monkeypatch, source
+):
+    """Beginning teardown keeps failing transiently: within the grace each
+    cycle leaves the lease releasing to try again; past it, the lease is
+    release_failed with teardown_timeout, its aggregate never torn down."""
+    clients, _ = client_and_queue
+    capacity_reservation_id, fulfillment_id = await _granted(clients, "escrow-bm-unbegun")
+
+    async def unreachable(self, fulfillment_id):
+        raise ConnectionError("fulfillment authority unreachable")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FulfillmentOrchestrator, "begin_fulfillment_teardown", unreachable)
+        await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+        await clients.family.check_leases()
+        waiting = await clients.family.get_lease(capacity_reservation_id)
+
+        source.set(source.now() + 301)
+        await clients.family.check_leases()
+        timed_out = await clients.family.get_lease(capacity_reservation_id)
+
+    assert (waiting.status, waiting.release_job_id) == (LeaseState.RELEASING, fulfillment_id)
+    assert (timed_out.status, timed_out.failure_reason, timed_out.release_job_id) == (
+        LeaseState.RELEASE_FAILED,
+        "teardown_timeout",
+        fulfillment_id,
+    )
+    assert _aggregate_state(capacity_reservation_id) == _State.active.value
+
+
 async def test_a_bare_metal_lease_reports_the_machine_its_activation_recorded(
     client_and_queue,
 ):

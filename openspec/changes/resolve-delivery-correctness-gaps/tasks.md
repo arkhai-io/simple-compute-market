@@ -533,6 +533,42 @@ Section 3 notes (handoff):
 - The service's `/test` routes exist only under the `mock` profile: run the
   service suite through `make -C provisioning/compute/service test`, not a bare
   `uv run pytest`.
+- Fix at the pre-closeout triage (60 F1): a teardown that kept failing to begin
+  never reached the grace. The releasing pass's `READY_FOR_TEARDOWN` branch caught
+  only `TeardownRefused`, so any other error from `begin_teardown` propagated to the
+  cycle's catch-all, which counted the lease skipped before the grace check; the
+  aggregate stayed `active`, and the lease waited in `releasing` indefinitely,
+  against the requirement's "whatever its teardown's progress" and D3's backstop.
+  The branch predates this change; the change's stronger grace sentence made it a
+  defect. `lease_lifecycle.py` now logs such a failure and continues to the grace
+  check: within the grace the next cycle retries the begin, past it the lease goes
+  to `release_failed` with `teardown_timeout`, its capacity held. A refusal still
+  fails the release at once, and a successful begin still returns before the grace
+  check. Evidence:
+  - unit, `provisioning/compute/tests/unit/test_lease_lifecycle.py`
+    `test_a_transient_failure_to_begin_in_the_releasing_pass_is_retried_within_the_grace`
+    (the existing case, which now records `release_requested_at` and also asserts
+    the timeout past the grace); `make -C provisioning/compute test`, 595 passed;
+  - application integration, `test_lease_release_api.py`
+    `test_a_teardown_that_keeps_failing_to_begin_times_out_after_the_grace`
+    (`begin_fulfillment_teardown` patched to raise, as the durable-release case
+    does: `releasing` within the grace, `release_failed` / `teardown_timeout` past
+    it, the aggregate still `active`); `make -C provisioning/compute/service test`,
+    636 unit and 568 integration passed;
+  - both new assertions failed with the fix set aside (the source edited back and
+    the wheel rebuilt, since `scripts/change-workflow run test-before` runs outside
+    the packages' environments and could not import them), and pass with it;
+  - the fresh-context check found no problem with the requirement, D3, the
+    guidance, determinism or versions (`arkhai-compute-provisioning` 0.29.0 is
+    this change's, unreleased). It observed that both levels assert the timeout,
+    as this module's other grace cases do; kept, the unit case being the existing
+    one corrected.
+  - `scripts/change-workflow run pre-commit`: "after-functional-change at
+    adaf09539…: passed, exit 0", "pre-commit-functional at adaf09539…: passed,
+    exit 0" (the full `make test`), "pre-commit at adaf09539…: passed, exit 0".
+  - Unchanged, as the requirement states: the grace runs from entering
+    `releasing`, so a create in flight longer than the grace has its teardown
+    timed out at the first cycle after it is ready.
 
 ## 4. An equivalent acceptance that waited on another returns the first
 

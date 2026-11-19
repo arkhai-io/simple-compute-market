@@ -534,7 +534,19 @@ class LeaseLifecycleService:
                         message=refused.message,
                         expected_handle=str(fulfillment_id),
                     )
-                return "skipped"
+                except Exception as exc:
+                    # A transient failure to begin is retried on the next
+                    # cycle, but only until the grace period passes: a begin
+                    # that keeps failing is a stuck release like any other.
+                    logger.warning(
+                        "[LEASE_LIFECYCLE] Teardown of fulfillment %s for reservation %s "
+                        "did not begin; the releasing pass retries it within the grace: %s",
+                        fulfillment_id,
+                        reservation["capacity_reservation_id"],
+                        exc,
+                    )
+                else:
+                    return "skipped"
             if status.progress is ReleaseProgress.CREATE_IN_FLIGHT:
                 # Waiting on a create is not a stalled teardown: the grace
                 # period starts counting only once there is a teardown to wait on.
