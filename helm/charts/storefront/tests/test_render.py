@@ -8,10 +8,14 @@ only: values are written as JSON, which is YAML.
 Agents are keyed by name, and a test states only what it changes in Bob's
 default agent from ``values.yaml``, as an operator's overlay does: Helm merges
 the overlay into the agent key by key and replaces lists, and the chart removes a
-key or an agent the overlay sets to ``None``.
+key or an agent the overlay sets to ``None``. The production example's tests
+render the storefront chart alone instead, over ``examples/production-values.yaml``,
+which states the globals that render reads, and read its own agent.
 
 Set ``STOREFRONT_PYTHON`` to the storefront environment's interpreter to also
-load rendered documents with the storefront's own configuration loader.
+load rendered documents with the storefront's own configuration loader, run its
+startup refusal over them, and publish the production example's clauses through
+its per-clause publication step.
 """
 
 from __future__ import annotations
@@ -1485,6 +1489,221 @@ def test_rendered_document_loads_with_the_storefront_loader() -> None:
     assert identifier == config["Identity"]["principal"]["identifier"]
     assert wallet == config["Wallet"]["address"]
     assert registries == config["registry"]["urls"]
+
+
+# --- the production example ----------------------------------------------
+
+
+EXAMPLE = CHART / "examples" / "production-values.yaml"
+#: The agent the production example declares.
+EXAMPLE_AGENT = "seller"
+#: The minimum filing window a representative dispute authority advertises: the
+#: fourteen days of the Arkhai mediation contract's default authority description.
+AUTHORITY_MINIMUM_WINDOW = 14 * 86400
+
+
+def _render_example(*layers: dict) -> subprocess.CompletedProcess[str]:
+    """Render the storefront chart alone with its production example, which
+    states the globals the chart reads, then each of ``layers`` in order."""
+    with tempfile.TemporaryDirectory() as directory:
+        command = ["helm", "template", RELEASE, str(CHART), "--values", str(EXAMPLE)]
+        for index, layer in enumerate(layers):
+            path = Path(directory) / f"layer-{index}.json"
+            path.write_text(json.dumps(layer))
+            command += ["--values", str(path)]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+def _example_config(manifest: str) -> dict:
+    """The example agent's storefront.json, from the chart rendered alone."""
+    marker = "# Source: storefront/templates/configmap.yaml"
+    (document,) = [item for item in manifest.split("\n---\n") if marker in item]
+    return json.loads(_block(document, "storefront.json"))
+
+
+def _without_rate_servicing() -> dict:
+    """An overlay removing the example agent's rate servicing declaration."""
+    return {"agents": {EXAMPLE_AGENT: {"config": {"Settlement": {"rate_servicing": None}}}}}
+
+
+def test_the_production_example_offers_on_demand_and_spot_through_live_payments() -> None:
+    """The example renders one agent settling in arkhai.payments.v1 alone, in live
+    mode, declaring rate servicing for `charged` and `returned` with no setup
+    charge, and publishing two recurring clauses — on-demand, and spot with the
+    seller's notice — whose payments clause sets a delivery deadline and a
+    dispute window covering it plus a fourteen-day minimum filing window. It
+    sets no time source, so the release runs on wall time; the chart derives the
+    release's provisioning URL and default site, and states no secret."""
+    manifest = _ok(_render_example())
+    config = _example_config(manifest)
+
+    settlement = config["Settlement"]
+    assert settlement["priority"] == ["arkhai.payments.v1"]
+    assert settlement["arkhai_payments"]["enabled"] is True
+    assert settlement["arkhai_payments"]["livemode"] is True
+    assert settlement["rate_servicing"] == {
+        "arkhai_payments": {"treatments": ["charged", "returned"], "setup": False}
+    }
+    clauses = config["pricing"]["settlements"]
+    assert [clause["recurring"].get("payee_notice_seconds") for clause in clauses] == [None, 120]
+    for clause in clauses:
+        assert clause["mechanism"] == "arkhai.payments.v1"
+        terms = clause["mechanism_input"]
+        assert terms["dispute_window_seconds"] >= (
+            terms["delivery_deadline_seconds"] + AUTHORITY_MINIMUM_WINDOW
+        ), terms
+    assert not any(key.lower() == "time" for key in config), sorted(config)
+    assert config["provisioning"]["service_url"] == "http://vm-provisioning:8081"
+    assert config["capacity"]["sites"] == {"default": "http://vm-provisioning:8081"}
+    assert "api_key" not in json.dumps(config) and "DisputeCredential" not in json.dumps(config)
+
+
+def test_the_production_example_passes_the_storefront_startup_check() -> None:
+    """`deployment-state`'s "The production example is rendered": the rendered
+    document loads with the storefront's own loader, and its startup refusal
+    finds nothing, which shows it publishable, not that the storefront starts on
+    it, since the runtime also needs the credential and the overlay's keys."""
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront startup check did not run")
+        return
+    config = _example_config(_ok(_render_example()))
+
+    refusal = _startup_refusal(config, python)
+    assert refusal is None, refusal
+    with tempfile.TemporaryDirectory() as home:
+        directory = Path(home) / "arkhai"
+        directory.mkdir()
+        (directory / "storefront.json").write_text(json.dumps(config))
+        probe = (
+            "import json, warnings; warnings.simplefilter('ignore')\n"
+            "from market_storefront.utils import config as c\n"
+            "print(json.dumps([c.settings.port, c.settings.get('identity.principal.identifier'),"
+            " sorted(c.get_registry_authorities())]))"
+        )
+        loaded = subprocess.run(
+            [python, "-c", probe],
+            env={**os.environ, "XDG_CONFIG_HOME": home},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    port, identifier, registries = json.loads(loaded.stdout.strip().splitlines()[-1])
+    assert port == config["port"]
+    assert identifier == config["Identity"]["principal"]["identifier"]
+    assert registries == config["registry"]["urls"]
+    # The loader reads every setting as stated: it reports one it would read
+    # another way, such as a base_url with no port, and keeps the raw value.
+    assert "[CONFIG]" not in loaded.stderr, loaded.stderr[-2000:]
+
+
+# Publishes the loaded configuration's clauses through the per-clause step the
+# storefront's publication composes, wired as its composition wires it, against a
+# representative dispute authority advertising a fourteen-day minimum filing
+# window, the payments kit's recurring-options fixture's horizon (a day, no
+# availability end) and no pool deadline, as the VM composition supplies none, so
+# each clause's own deadline publishes; at a fixed instant. Prints each option's
+# terms and every refusal.
+_PUBLICATION_PROBE = """
+import json, warnings; warnings.simplefilter('ignore')
+from datetime import datetime, timezone
+from market_arkhai_payments.presets import payments_rate_wiring
+from market_core.schemas import SettlementOption
+from market_deal_lifecycle.configuration import DisputeEntry
+from market_settlement_runtime import MechanismReadiness
+from market_settlement_runtime.rate_publication import ClausePublication
+from market_settlement_runtime.rate_servicing import option_treatments
+from market_storefront.settlement_registry import build_storefront_settlement_registry
+from market_storefront.utils.config import (
+    default_premature_stop_penalty_periods, settings, settlement_config_mapping,
+    settlement_publication_defaults,
+)
+authority = DisputeEntry.model_validate({
+    "interface": "arkhai.mediation.v1", "origin": "https://mediation.example.com",
+    "account": "00000000-0000-4000-8000-0000000000dd",
+    "record_key": "ed25519:" + "R" * 42 + "A", "params": {},
+    "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                      "minimum_dispute_window_seconds": MINIMUM_WINDOW,
+                      "minimum_case_hold_seconds": None},
+})
+registry = build_storefront_settlement_registry()
+config = registry.resolve(settlement_config_mapping(settings), role="seller")
+helpers, _ = payments_rate_wiring(lambda: (authority,))
+step = ClausePublication(
+    registry=registry, config=config, servicing=config.rate_servicing, helpers=helpers,
+    authorities=(authority,), dispute_interfaces=frozenset({"arkhai.mediation.v1"}),
+    compute=True, default_penalty_periods=default_premature_stop_penalty_periods(),
+    clock=lambda: datetime(2027, 1, 1, tzinfo=timezone.utc),
+)
+ready = MechanismReadiness(mechanism="arkhai.payments.v1", configured=True, enabled=True, ready=True)
+refusals, options = [], []
+for clause in settlement_publication_defaults():
+    artifacts = step.publish(
+        ready, clause, resources={}, delivery_deadline=lambda: None,
+        max_duration_seconds=86400, available_until_utc=None, diagnose=refusals.append,
+    )
+    for item in artifacts.settlement_options:
+        option = SettlementOption.model_validate(item)
+        lifecycle = option.lifecycle
+        options.append({
+            "entitlements": sorted(lifecycle["early_termination"]["entitlements"]),
+            "delivery_deadline_seconds": lifecycle.get("delivery_deadline_seconds"),
+            "dispute_window_seconds": lifecycle["adjudication"]["dispute_window_seconds"],
+            "treatments": sorted(option_treatments(option)),
+        })
+print(json.dumps({"options": options, "refusals": refusals}))
+""".replace("MINIMUM_WINDOW", str(AUTHORITY_MINIMUM_WINDOW))
+
+
+def _published(config: dict, python: str) -> dict:
+    """The options and refusals ``_PUBLICATION_PROBE`` reports for one rendered
+    document, read with the storefront's own loader."""
+    with tempfile.TemporaryDirectory() as home:
+        directory = Path(home) / "arkhai"
+        directory.mkdir()
+        (directory / "storefront.json").write_text(json.dumps(config))
+        loaded = subprocess.run(
+            [python, "-c", _PUBLICATION_PROBE],
+            env={**os.environ, "XDG_CONFIG_HOME": home},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    assert loaded.returncode == 0, loaded.stderr[-3000:]
+    return json.loads(loaded.stdout.strip().splitlines()[-1])
+
+
+def test_the_production_example_publishes_both_recurring_options() -> None:
+    """`deployment-state`'s "The production example publishes both recurring
+    options": an on-demand option, entitling the payer alone, and a spot one,
+    entitling the seller too, each promising the clause's delivery deadline,
+    covering it plus the authority's minimum filing window for disputes, and
+    naming only the `charged` and `returned` treatments, with nothing refused —
+    the default buyer's refusals included. With the example's rate servicing
+    removed, "… withdraws rate servicing": no recurring option publishes, each
+    clause refused for want of the declaration. That deals already held stay
+    serviced is "Rate servicing is a composition capability"'s own scenario."""
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront publication check did not run")
+        return
+    config = _example_config(_ok(_render_example()))
+    published = _published(config, python)
+
+    assert published["refusals"] == [], published["refusals"]
+    deadline = config["pricing"]["settlements"][0]["mechanism_input"]["delivery_deadline_seconds"]
+    assert published["options"] == [
+        {"entitlements": entitlements, "delivery_deadline_seconds": deadline,
+         "dispute_window_seconds": 1296000, "treatments": ["charged", "returned"]}
+        for entitlements in (["payer"], ["payee", "payer"])
+    ], published["options"]
+    assert 1296000 >= deadline + AUTHORITY_MINIMUM_WINDOW
+
+    withdrawn = _published(_example_config(_ok(_render_example(_without_rate_servicing()))), python)
+    assert withdrawn["options"] == [], withdrawn["options"]
+    assert [refusal["code"] for refusal in withdrawn["refusals"]] == [
+        "rate_servicing_undeclared", "rate_servicing_undeclared",
+    ], withdrawn["refusals"]
 
 
 def main() -> int:

@@ -503,20 +503,55 @@ production example offering on-demand and spot" (`deployment-state`, added). Tou
 example, `helm/charts/storefront/tests/test_render.py`, and
 `scripts/tests/test_committed_time_sources.py`.
 
-- [ ] 4.1 Write the example: every value a public placeholder or a well-known
+- [x] 4.1 Write the example: every value a public placeholder or a well-known
       development value, no secret (the payments key and dispute credential named as
       overlay entries in comments), wall time (D1, D7;
       `docs/guidance/engineering/repository-content.md`). Verify (unit):
       `scripts/tests/test_committed_time_sources.py` lists it among the chart examples
       and passes.
-- [ ] 4.2 Render it and run the storefront's own loader and startup check over the
+      Done: `helm/charts/storefront/examples/production-values.yaml`, values of the
+      storefront chart installed alone, as the bare-metal example is of its chart:
+      it states the globals the chart reads on its path, the release's own
+      provisioning service and its principal (the registry's globals are read only
+      for the internal registry, which it does not use); one agent, `seller`,
+      settling in
+      `arkhai.payments.v1` alone in live mode against `https://payments.example.com`;
+      `[Settlement.rate_servicing.arkhai_payments]` with `charged` and `returned`
+      and `setup = false`; an on-demand and a spot clause, USD 1.00 an hour paid by
+      the hour, ten minutes to approve, `delivery_deadline_seconds = 1800` and a
+      fifteen-day dispute window (the authority's fourteen-day minimum filing window
+      plus a day, as the harness's default coverage); an external registry; no
+      `[Time]`. Every principal is an Ed25519 placeholder of one repeated
+      character, accounts the `00000000-0000-4000-8000-…` fixture form, URLs under
+      `example.com`, and the header names the host, Secret and storage class names
+      placeholders too; the payments key and `[[DisputeCredential]]` are named as
+      runtime-Secret entries in the header. `base_url` states its port, which the
+      VM storefront's loader otherwise warns of. Unit:
+      `make test-release-tooling TESTS=scripts/tests/test_committed_time_sources.py`
+      — 5 passed, its family check now naming both chart examples. Examples are
+      packaged with the chart (`helm/.helmignore` leaves `charts/*/examples/` in),
+      so the storefront chart takes 0.5.0 to 0.5.1 and the umbrella 0.5.0 to 0.5.1,
+      its pin following (`origin/dev` holds 0.5.0 for both).
+- [x] 4.2 Render it and run the storefront's own loader and startup check over the
       rendered `storefront.json`, as the bare-metal chart's test does with its example
       (`helm/charts/bare-metal-storefront/tests/test_render.py`, "the storefront's own
       loader"), under `STOREFRONT_PYTHON` (requirement scenario "The production example
       is rendered"). Verify (unit, the chart render tests, `make -C helm test-render`
       with `STOREFRONT_PYTHON` set): the render succeeds and the check reports no
       problem.
-- [ ] 4.3 The publication check (18 F2): from the rendered example's loaded
+      Done, in `helm/charts/storefront/tests/test_render.py` ("the production
+      example"): the chart renders alone over the example; one test reads the
+      rendered `storefront.json` (payments alone in live mode, the declaration, both
+      clauses' coverage, no time source, the derived provisioning URL and default
+      site, no key or dispute credential); another runs the storefront's startup
+      refusal over it under `STOREFRONT_PYTHON`, which finds nothing, and its loader,
+      reading the port, principal and registries as rendered and reporting no
+      setting it would read otherwise (no `[CONFIG]` line on its stderr). The
+      refusal caught a payments receipt identity no Ed25519 key can spell, refused as
+      an invalid `[Settlement.arkhai_payments]`; the loader's report showed a
+      portless `base_url`, which it keeps raw, and the last assertion now holds the
+      example to stating it.
+- [x] 4.3 The publication check (18 F2): from the rendered example's loaded
       configuration, derive its recurring clauses through the storefront's publication
       path against a representative dispute authority advertisement and pool horizon
       (the payments kit's recurring-options fixture,
@@ -529,12 +564,72 @@ example, `helm/charts/storefront/tests/test_render.py`, and
       servicing"; continued servicing of held deals is "Rate servicing is a composition
       capability"'s existing scenario). Verify (unit, in the chart render tests): both
       cases pass.
-- [ ] 4.4 Verification point: the chart render tests pass with the loader and
+      Done, a probe under `STOREFRONT_PYTHON`: the storefront's loader reads the
+      rendered document, its settlement registry resolves the configuration, and
+      each of `settlement_publication_defaults()`' clauses is published through the
+      kit's `ClausePublication` step — the one the VM storefront's
+      `publication_artifacts` composes — with the payments kit's preset helper
+      (`payments_rate_wiring`), the storefront's default penalty multiple, a ready
+      payments mechanism, an `arkhai.mediation.v1` authority advertising a fourteen-day
+      minimum filing window, the recurring-options fixture's horizon (a day, no
+      availability end) and no pool deadline — the fixture passes one, but the VM
+      composition supplies none, so each clause's own publishes — at a fixed
+      instant. It publishes an
+      on-demand option (payer entitlement alone) and a spot one (payer and payee),
+      each with the 1800-second deadline, the fifteen-day window, and treatments
+      exactly `charged` and `returned`, and nothing refused, the default buyer's
+      refusals included; rendered with `rate_servicing` removed, it publishes no
+      option and refuses both clauses `rate_servicing_undeclared`. The step's class
+      is the storefront's own, but the probe states its wiring as
+      `publication_artifacts` does rather than taking it from the composition, so
+      the two could drift without this check failing; the rest of
+      `publication_artifacts` — readiness of a reachable service, the listing's
+      resources — is not run, since the render check has no service.
+- [x] 4.4 Verification point: the chart render tests pass with the loader and
       publication checks run, not skipped, and `scripts/change-workflow run pre-commit
       switch-on-hosted-per-period-vm` passes.
       End-to-end: none; the `helm` evidence kind runs these render and chart-to-loader
       checks against the tree, and no pipeline scenario reads the example.
       Nothing is owed to validation.
+      Evidence: `make -C helm test-render`, the VM storefront environment built by
+      `make init-storefront` so `test-render.sh` sets `STOREFRONT_PYTHON` — every
+      chart's checks pass, the three example tests among them reporting `ok` and no
+      check reporting a skip, the subchart-pin check among them after the bump.
+      `scripts/change-workflow run pre-commit` on the final tree:
+      `after-functional-change` passed; `pre-commit-functional` passed (local
+      evidence for tree `d900fc7b6c65`: `check-packaging` and `make test`, whose
+      deployment-packaging target runs these render checks); the workflow checks
+      passed and `check-repository` passed 8 of 9, documentation citations
+      reporting only section 8's summary, as in sections 1 to 3.
+      End-to-end scenarios confirmed: none, as planned.
+
+Handoff (section 4):
+
+- For section 7's seller quickstart (7.1, "the TOML shown parses as the
+  storefront's settings, the same loader as 4.2"): the example's agent `config` is
+  the TOML to show, and `_startup_refusal` with `_example_config` in the chart's
+  render test is the loader check to reuse; the quickstart should point at
+  `helm/charts/storefront/examples/production-values.yaml`.
+- The VM storefront chart rendered alone needs `global.provisioning` (and the
+  registry globals unless `config` names `registry.urls`): the example states the
+  former and names its registry, so it installs with the chart alone.
+- The chart's own checks do not validate a principal's spelling; only the
+  storefront's loader does, so a placeholder change to the example wants
+  `STOREFRONT_PYTHON` set when its render tests run.
+- For closeout's promotion: `docs/guidance/repository/chart-render-tests.md`,
+  "Where they live and how they run", describes what the VM chart's render test
+  runs under `STOREFRONT_PYTHON` and does not yet name the production example's
+  startup and publication checks, beside the bare-metal example's it names; 9.9's
+  D8 lists only the specs and `deployment-state/configuration.md`, which has no
+  production-examples passage, so the guidance file is the destination to add.
+- The fresh-context check found: the test file's docstring describing only
+  umbrella renders (updated), the probe comment and the 4.3 note attributing "no
+  pool deadline" to the fixture (corrected: the VM composition's), the 4.2 note
+  claiming a check caught the portless `base_url` (the loader assertion added makes
+  it so), placeholders the header did not name (named), the 4.1 note's "two
+  globals" (made precise), the probe's wiring stated rather than taken from the
+  composition (stated in 4.3's note), and the guidance file above (left to
+  closeout).
 
 ## 5. Wall-time reach and the live payment scenarios
 
