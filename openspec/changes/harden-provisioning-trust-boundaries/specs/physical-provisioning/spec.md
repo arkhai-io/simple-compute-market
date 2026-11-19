@@ -4,7 +4,7 @@
 
 An `ssh` connection MAY state `host_keys`: a non-empty list of OpenSSH public keys, each its key type and base64 encoding without a comment, which the codec MUST parse and MUST refuse when empty or malformed. The keys a host's connection states are its pin. A submission that omits `host_keys` MUST keep the stored pin, whatever else it changes, the connection's `ssh_host` and `ssh_port` included. The host definitions document and its canonical export MUST carry `host_keys` as a public field; the INI import carries none and MUST keep a stored pin. A pin MUST be replaced only by a submission stating other keys or by a capture with `replace`.
 
-A connectivity check of a host with no pin MUST connect accepting the key the host presents into a file it discards, MUST store nothing, and MUST report the presented key's type and SHA-256 fingerprint with the endpoint `[ssh_host]:ssh_port`; a check of a pinned host MUST report whether the presented key matches the pin. `POST /api/v1/hosts/{host}/host-keys/capture`, admitted to the administrator alone, MUST probe the host again, MUST record the presented key as the host's pin only when its fingerprint equals the one the request names, and MUST answer 409 naming the presented fingerprint otherwise. It MUST answer 409 for a host that already has a pin unless the request states `replace`.
+A connectivity check of a host with no pin MUST connect accepting the key the host presents into a file it discards, MUST store nothing, and MUST report the presented key's type and SHA-256 fingerprint with the endpoint `[ssh_host]:ssh_port`; a check of a pinned host MUST report whether the presented key matches the pin. `POST /api/v1/hosts/{host}/host-keys/capture`, admitted to the administrator alone, MUST probe the host again and MUST record the presented key as the host's pin only when its fingerprint equals the one the request names. It MUST answer 404 for an unknown host; 422 naming the kind for a host whose connection kind presents no key, and 422 naming the field for an empty or malformed fingerprint; and, recording nothing, 409 with the code `host_key_mismatch` naming the endpoint and the presented fingerprint when the host presents another key, 409 with the code `host_key_pinned` naming the pinned fingerprints for a host that already has a pin unless the request states `replace`, and 409 with the code `no_host_key_presented` naming the endpoint and the probe's reason when the probe reaches no SSH handshake. A capture that records a pin MUST answer with the endpoint and the pinned fingerprints. The provisioning family client MUST offer the capture with the fingerprint and an optional `replace`, and MUST surface each refusal's code.
 
 #### Scenario: A host is registered with its key
 
@@ -34,12 +34,37 @@ A connectivity check of a host with no pin MUST connect accepting the key the ho
 #### Scenario: The host presents another key at capture
 
 - **WHEN** an operator captures a host's key naming a fingerprint other than the one the host presents
-- **THEN** the capture answers 409 naming the presented fingerprint, and no pin is stored
+- **THEN** the capture answers 409 with `host_key_mismatch` naming the presented fingerprint, and no pin is stored
 
 #### Scenario: A capture meets a pinned host
 
 - **WHEN** an operator captures a pinned host's key without `replace`
-- **THEN** the capture answers 409, and the pin is unchanged
+- **THEN** the capture answers 409 with `host_key_pinned`, and the pin is unchanged
+
+#### Scenario: An operator replaces a pinned host's key by capture
+
+- **WHEN** an operator captures a pinned host's key with `replace`, naming the fingerprint the host presents
+- **THEN** the presented key becomes the host's pin in place of the old one
+
+#### Scenario: A capture reaches no handshake
+
+- **WHEN** an operator captures the key of a host whose probe times out or is refused before any key is presented
+- **THEN** the capture answers 409 with `no_host_key_presented` naming the endpoint and the probe's reason, and no pin is stored
+
+#### Scenario: A capture names a malformed fingerprint
+
+- **WHEN** an operator captures a host's key naming an empty fingerprint, or one that is not `SHA256:` followed by base64
+- **THEN** the capture answers 422 naming the field, and no probe runs
+
+#### Scenario: A capture names an unknown host or a kind without keys
+
+- **WHEN** an operator captures the key of a host that is not registered, or of one whose connection kind presents no key
+- **THEN** the capture answers 404 for the unknown host, and 422 naming the kind for the other
+
+#### Scenario: A connectivity check reaches no handshake
+
+- **WHEN** an operator checks connectivity to a host that presents no key before the probe fails
+- **THEN** the result is unreachable with the probe's reason, and its `host_key` is null
 
 #### Scenario: An INI import names a pinned host
 
@@ -82,13 +107,25 @@ Every inventory the Ansible executor or its connectivity probe renders MUST veri
 
 ### Requirement: Hosts deployed before pins are adopted before their first job
 
-The provisioning migration that rewrites `ssh` connections to version 3 MUST mark every host it rewrites as pending adoption, on the host record outside its connection; no other write marks a host, and neither the host definitions document nor the export carries the mark. For a pending host, the Ansible executor's check before a job's start, and a connectivity check, MUST connect accepting the presented key into an empty file, running nothing on the host, MUST record that key as the host's pin, and MUST clear the mark; the job then runs against the pin. A submission stating `host_keys`, or a capture, MUST clear the mark. Once any Ansible executor is real, readiness MUST list pending hosts without reporting itself not ready for them.
+The provisioning migration that rewrites `ssh` connections to version 3 MUST mark every host it rewrites as pending adoption, on the host record outside its connection; no other write marks a host, and neither the host definitions document nor the export carries the mark. For a pending host, the Ansible executor's check before a job's start, and a connectivity check, MUST connect accepting the presented key into an empty file, running nothing on the host, and MUST record that key as the host's pin and clear the mark in one write that takes effect only while the host is still pending. Whichever adoption's write takes effect, a job MUST then make its check before the start against the committed pin, as for any pinned host, and its playbook MUST be checked against that committed pin, never against the key the job observed. A submission stating `host_keys`, or a capture, MUST clear the mark; a capture that meets a host an adoption has pinned answers as for any pinned host. Once any Ansible executor is real, readiness MUST list pending hosts without reporting itself not ready for them.
 
 #### Scenario: A deployed host's first job after the upgrade
 
 - **GIVEN** a host the version-3 migration marked pending adoption
 - **WHEN** a job is dispatched against it
 - **THEN** the key it presents becomes its pin, the mark is cleared, and the playbook runs checked against that pin
+
+#### Scenario: Two first jobs adopt one host
+
+- **GIVEN** a host pending adoption
+- **WHEN** two jobs against it are dispatched together and their adopting connections are answered with different keys
+- **THEN** exactly one key becomes the pin, and the job whose key lost fails before its execution start is recorded, with no playbook run against the key it observed
+
+#### Scenario: A capture races an adoption
+
+- **GIVEN** a host pending adoption
+- **WHEN** a job's adoption commits a pin before an operator's capture without `replace` reaches it
+- **THEN** the capture answers 409 with `host_key_pinned`, and the adopted pin is unchanged
 
 #### Scenario: A host registered after the upgrade
 
@@ -102,7 +139,7 @@ The provisioning migration that rewrites `ssh` connections to version 3 MUST mar
 
 ### Requirement: A VM guest reaches no other guest on its host
 
-Every VM guest MUST be created with its interface's bridge port isolated and with libvirt's `clean-traffic` filter binding it to its MAC address and the address it leased by DHCP. VM host preparation MUST drop forwarding from the guests' bridge back to it, ahead of libvirt's own rules, and MUST keep that rule across a reload of libvirt and a reboot. A host whose libvirt lacks port isolation or the nwfilter driver MUST fail host preparation naming what is missing. A guest's address discovery, DHCP reservation, and teardown are unchanged.
+Every VM guest MUST be created with its interface's bridge port isolated and with libvirt's `clean-traffic` filter binding it to its MAC address and the address it leased by DHCP. VM host preparation MUST drop forwarding from the guests' bridge back to it, in a chain of the host kit's own reached before any rule libvirt or UFW installs, and MUST keep that rule first across a restart of libvirt, a reload of UFW, and a reboot. A host whose libvirt lacks port isolation or the nwfilter driver MUST fail host preparation naming what is missing. A guest's address discovery, DHCP reservation, and teardown are unchanged.
 
 #### Scenario: A guest probes another guest on its host
 
@@ -122,7 +159,7 @@ Every VM guest MUST be created with its interface's bridge port isolated and wit
 
 ### Requirement: A VM guest reaches only DHCP and DNS on its host and no undeclared private destination
 
-VM host preparation MUST accept, from the guests' bridge to the host, only DHCP, DNS to the bridge's address, and traffic of connections already established, and MUST drop everything else. It MUST drop forwarding from the guests' bridge to link-local addresses and to private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), except each destination the host-kit variable `guest_allowed_private_destinations` lists, which is empty by default. Connections the host opens to a guest and DNATed buyer connections are unaffected.
+VM host preparation MUST accept, from the guests' bridge to the host, only DHCP, DNS to the bridge's address, and traffic of connections already established, and MUST drop everything else. It MUST drop forwarding from the guests' bridge to link-local addresses and to private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), except traffic of connections already established and each destination the host-kit variable `guest_allowed_private_destinations` lists, which is empty by default. These rules MUST sit in chains of the host kit's own, reached before any rule libvirt or UFW installs and kept first across a restart of libvirt and a reload of UFW; host preparation MUST NOT leave in place a rule accepting all traffic from the guests' bridge to the host. Connections the host opens to a guest and DNATed buyer connections, from public or private addresses, are unaffected.
 
 #### Scenario: A guest reaches a service on its host
 
@@ -143,6 +180,17 @@ VM host preparation MUST accept, from the guests' bridge to the host, only DHCP,
 
 - **WHEN** a buyer connects to their guest's forwarded or relayed port
 - **THEN** the connection reaches the guest, and the host's own SSH into the guest still works
+
+#### Scenario: A buyer connects from a private address
+
+- **WHEN** a buyer whose address is in a private range connects directly to their guest's forwarded port
+- **THEN** the connection is established and the guest's replies reach the buyer
+
+#### Scenario: The host's firewall rules are reloaded
+
+- **GIVEN** a prepared host whose UFW is enabled
+- **WHEN** libvirt is restarted and UFW is reloaded
+- **THEN** a guest still reaches DHCP and DNS on its host, and still cannot reach another host port or an unlisted private destination
 
 ### Requirement: VM host preparation converges running guests
 
@@ -293,7 +341,8 @@ MUST be refused. The probe's execution resources MUST be composed by the provisi
 service, not borrowed from a domain's runtime. The result MUST carry, for a kind whose
 hosts present a key, a `host_key` member stating the endpoint, whether the host is pinned,
 the presented key's type and fingerprint, and for a pinned host whether it matched and the
-pinned fingerprints.
+pinned fingerprints; that member MUST be null when the probe failed before the host
+presented a key.
 
 #### Scenario: A bare-metal host is probed
 

@@ -198,11 +198,28 @@ host it reports whether the key matched. The connectivity result gains `host_key
               "presented": "ssh-ed25519 SHA256:Q1m9xkP3…"}}
 ```
 
+`host_key` is null when no key was presented — the probe timed out, was refused, or
+reached no SSH handshake — with `reachable: false` and the probe's reason in `detail`;
+it is omitted only for a connection kind whose hosts present no key.
+
 `POST /api/v1/hosts/{host}/host-keys/capture`, with the fingerprint the operator
 compared, probes the host again and records the key only when it presents that
-fingerprint; it answers 409 naming the presented fingerprint otherwise, and 409 for a
-pinned host unless the body says `"replace": true`. The route is the administrator's
-(D14), and the family client offers it as `capture_host_key(host_id, fingerprint)`.
+fingerprint. It answers, as the connectivity check answers an unknown host and a kind
+with no probe:
+
+- 404 for an unknown host;
+- 422 for a host whose connection kind presents no key, naming the kind, and for an
+  empty or malformed fingerprint (not `SHA256:` and base64), naming the field;
+- 409 with a code for each refusal, recording nothing: `host_key_mismatch`, with the
+  endpoint and the presented fingerprint; `host_key_pinned`, with the pinned
+  fingerprints, for a pinned host unless the body says `"replace": true`; and
+  `no_host_key_presented`, with the endpoint and the probe's reason, when the probe
+  reaches no handshake;
+- on success, the endpoint and the pinned fingerprints.
+
+The route is the administrator's (D14), and the family client offers it as
+`capture_host_key(host_id, fingerprint, *, replace=False)`, surfacing each refusal's
+code so a caller branches on it rather than on text (17 F5).
 
 **Rotation.** Keys are replaced by stating new ones or capturing with `replace`;
 stating the old key with the new lets a host rotate without a refusal between.
@@ -219,17 +236,25 @@ and readiness.
 Rejected: a `GET` connectivity check that stores the key, a read that writes and pins
 what nobody compared; a capture route taking no fingerprint; refusing inside the
 playbook, which counts the job as started and holds a teardown for an operator though
-nothing touched the host.
+nothing touched the host; a separate rotation operation with its own result type,
+which duplicates what stating keys or capturing with `replace` already does (17 F5).
 
 ### D6 — Hosts deployed before pins are adopted by the probe before their first job
 
 The migration of D4 marks each host it rewrites as pending adoption, a flag on the
 `hosts` row outside the connection, which neither the export nor the document carries.
 For a pending host, the check before a job's start, or the connectivity check, connects
-with `accept-new` into an empty file, records the key presented as the host's pin, and
-clears the mark; the job's playbook then runs against that pin. Stating `host_keys`, or
-capturing, clears the mark as well. A host registered after the upgrade is never
-marked. Readiness lists pending hosts, as information rather than a reason for being
+with `accept-new` into an empty file and records the key presented as the host's pin,
+clearing the mark, in one compare-and-set: the write takes effect only while the host
+is still pending. Whichever adoption wins, every job then re-reads the committed pin
+and makes the ordinary check before its start against it, as for a host always pinned;
+its playbook's `known_hosts` is rendered from that committed pin, never from the key
+the job observed. A job whose observed key lost to another fails that check, before its
+start is recorded. Stating `host_keys`, or capturing, clears the mark as well; a
+capture arriving after an adoption committed meets a pinned host and answers
+`host_key_pinned` unless it states `replace`, and a submission stating `host_keys`
+replaces the adopted pin, as the operator's explicit word. A host registered after the
+upgrade is never marked (17 F1). Readiness lists pending hosts, as information rather than a reason for being
 not ready, once an Ansible executor is real.
 
 The adopting connection runs nothing and sends nothing secret, so no secret reaches an
@@ -249,6 +274,8 @@ Rejected:
   upgrade until each host is pinned, racing the lease watchdog's 3600 seconds;
 - a bounded capture on a deployed host's first job, whose contact may carry the relay
   token, and which races two first jobs;
+- a per-host lock held until the pin is committed and every waiting job has verified,
+  which holds one service process's lock across an SSH handshake (17 F1);
 - two releases, accepting pins then enforcing them, which needs an enforcement switch
   for one release and ordered releases;
 - an enforcement setting, a security control a configuration turns off.
@@ -272,9 +299,9 @@ Every guest's interface is defined once for all nine `virt-install` sites:
 An isolated bridge port forwards only to ports that are not isolated, here `virbr0`
 itself, so guests reach DHCP, DNS and the NAT uplink but never each other at layer 2.
 `clean-traffic` holds each guest to its MAC address and the address it leased, which
-closes the ARP takeover. The host kit adds, ahead of libvirt's chains and saved through
-the existing `iptables-restore` unit,
-`-A FORWARD -i virbr0 -o virbr0 -m comment --comment arkhai-guest-isolation -j DROP`,
+closes the ARP takeover. The host kit adds, first in its own forwarding chain (D8) and
+saved through the existing `iptables-restore` unit,
+`-i virbr0 -o virbr0 -m comment --comment arkhai-guest-isolation -j DROP`,
 closing the hairpin through the gateway. `default`, the DHCP reservations, address
 discovery, and every teardown path are unchanged. A GPU guest needs nothing different.
 The host kit ensures libvirt's nwfilter driver is present and requires libvirt 6.1 or
@@ -296,33 +323,59 @@ Rejected:
 
 ### D8 — A guest reaches DHCP and DNS on its host and no private destination unless listed
 
-The host kit installs, for `virbr0`:
+The host kit installs the guest policy, D7's hairpin drop with it, in two chains of its
+own, each jumped from the first position of its built-in chain:
 
 ```text
--A INPUT -i virbr0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
--A INPUT -i virbr0 -p udp --dport 67 -j ACCEPT
--A INPUT -i virbr0 -d 192.168.122.1 -p udp --dport 53 -j ACCEPT
--A INPUT -i virbr0 -d 192.168.122.1 -p tcp --dport 53 -j ACCEPT
--A INPUT -i virbr0 -m comment --comment arkhai-guest-isolation -j DROP
--A FORWARD -i virbr0 -d 169.254.0.0/16 -j DROP
--A FORWARD -i virbr0 -d 10.0.0.0/8 -j DROP
--A FORWARD -i virbr0 -d 172.16.0.0/12 -j DROP
--A FORWARD -i virbr0 -d 192.168.0.0/16 -j DROP
--A FORWARD -i virbr0 -d 100.64.0.0/10 -j DROP
+-I INPUT 1 -i virbr0 -j ARKHAI-GUEST-IN
+-A ARKHAI-GUEST-IN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A ARKHAI-GUEST-IN -p udp --dport 67 -j ACCEPT
+-A ARKHAI-GUEST-IN -d 192.168.122.1 -p udp --dport 53 -j ACCEPT
+-A ARKHAI-GUEST-IN -d 192.168.122.1 -p tcp --dport 53 -j ACCEPT
+-A ARKHAI-GUEST-IN -m comment --comment arkhai-guest-isolation -j DROP
+
+-I FORWARD 1 -i virbr0 -j ARKHAI-GUEST-FWD
+-A ARKHAI-GUEST-FWD -o virbr0 -m comment --comment arkhai-guest-isolation -j DROP
+-A ARKHAI-GUEST-FWD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A ARKHAI-GUEST-FWD -d <each guest_allowed_private_destinations entry> -j ACCEPT
+-A ARKHAI-GUEST-FWD -d 169.254.0.0/16 -j DROP
+-A ARKHAI-GUEST-FWD -d 10.0.0.0/8 -j DROP
+-A ARKHAI-GUEST-FWD -d 172.16.0.0/12 -j DROP
+-A ARKHAI-GUEST-FWD -d 192.168.0.0/16 -j DROP
+-A ARKHAI-GUEST-FWD -d 100.64.0.0/10 -j DROP
 ```
 
-Each entry of the host-kit variable `guest_allowed_private_destinations`, empty by
-default, is accepted ahead of the private-range drops. The scattered port-22 rules
-collapse into the default deny. cloud-init reads a seed ISO, and the host's SSH into a
-guest, frpc's proxy, and DNATed buyer SSH are connections the host opened or forwards,
-so none needs more.
+`guest_allowed_private_destinations` is empty by default. The forwarded
+established/related accept carries a guest's replies to a buyer who connected from a
+private address, on the seller's LAN, a network the host sits in, or a shared carrier
+NAT; a connection the guest itself opens toward a private address has its first packet
+dropped and never becomes established (17 F3).
+
+The chains are reached before anything UFW or libvirt installs: an appended rule would
+follow UFW's accepts on INPUT and libvirt's `LIBVIRT_FWO` accept on FORWARD and never
+run, and under libvirt's nftables backend its accepts sit in a table of their own,
+where they stop no drop in the filter table. The host kit removes its own
+`ufw allow in on virbr0 from 192.168.122.0/24`, which accepts every packet from a guest
+to the host, and the scattered port-22 rules, which collapse into the default deny; its
+`allow out on virbr0` governs only the host's own connections to guests and stays. It
+re-asserts both jumps at the first position after libvirt restarts and after UFW
+reloads (17 F4). cloud-init reads a seed ISO, and the host's SSH into a guest, frpc's
+proxy, and DNATed buyer SSH are connections the host opened or forwards, so none needs
+more.
 
 A guest that reaches the seller's network, its management route, or its cloud
 credentials has crossed the boundary a seller places beside buyers as surely as one
 that reaches another guest.
 
+The real-host proof of D7 also shows DHCP and DNS passing while another host port and a
+private destination are refused, before and after restarting libvirt and reloading
+UFW, and a buyer connecting directly from a private address reaching their guest.
+
 Rejected: host services alone, leaving the seller's network and cloud metadata open;
-host services and link-local alone; nothing beyond D7.
+host services and link-local alone; nothing beyond D7; installing the policy through
+UFW's `before.rules`, which couples it to UFW's layout and leaves hosts without UFW
+needing another path (17 F4); limiting buyers to public addresses, which narrows the
+topologies delivered to (17 F3).
 
 ### D9 — The host kit converges running guests live
 
@@ -340,8 +393,15 @@ The convergence retires at the same release as D6's adoption, with its row in
 run the host kit on every VM host before then, and a guest never converged keeps a
 port that is not isolated until it is torn down.
 
+Until such a guest's filter applies, port isolation keeps it from other guests at
+layer 2, but not from claiming another guest's address to the host's own end of the
+bridge. The owner reaffirmed this decision against that exposure (17 F2).
+
 Rejected: isolating new guests only, which leaves new guests' isolation to the oldest
-guest on the host; restarting running guests, which interrupts every buyer.
+guest on the host; restarting running guests, which interrupts every buyer; failing
+host preparation for a guest that cannot take the filter live, leaving its restart to
+the operator, and a permanent neighbour entry for its leased address as a host-side
+substitute (17 F2).
 
 ### D10 — No guest shares a segment with another by anyone's choice
 
@@ -631,9 +691,9 @@ key when signing is not configured.
 - **An operator's Ansible configuration.** Verification rests on host variables
   outranking configuration. A test runs Ansible's own command builder against an
   operator file that turns checking off and states `ssh_args`.
-- **The forwarding drop's place.** D7's rule must sit ahead of libvirt's chains and
-  survive libvirt reloading them; the real-host probe settles it, and the host kit
-  checks it after reloading libvirt.
+- **The guest policy's place.** D8's chains must be reached before UFW's and libvirt's
+  accepts, and stay first when either reloads its rules; the host kit re-asserts the
+  jumps, and the real-host proof checks the policy after both reloads.
 - **nwfilter on sellers' hosts.** `clean-traffic` needs libvirt's nwfilter driver,
   over ebtables and iptables or their nft shims. A host without it fails host
   preparation by name rather than running guests unfiltered.
