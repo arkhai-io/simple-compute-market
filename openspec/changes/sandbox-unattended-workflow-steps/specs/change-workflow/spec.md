@@ -82,7 +82,8 @@ path absent at launch MUST be created first, a settings file in its harness's em
 form, and mounted read-only like any other. A protected path MUST NOT be granted.
 The protected path's name is not guarded: renaming a directory holding a protected
 mount, or replacing a link to a protected file, inside a writable directory, is a
-step working around the sandbox, which its review catches.
+step working around the sandbox or, by a shell rewrite of a settings link, a step
+already writing what no step writes, which its review catches.
 
 #### Scenario: An implementation run edits the configuration
 
@@ -217,8 +218,10 @@ from the start commit; for validation and review, `HEAD` and every tracked file 
 unchanged; the workflow log and the ledger were only appended to; each review record
 is unchanged; `refs/stash` is unchanged; the remote moved only by the guarded push,
 the change's branch at the last successful guarded push its record names or
-unchanged (CW-59c7); and, for closeout, every path changed since the start, committed or not, is one
-closeout may change (CW-pkug).
+unchanged (CW-59c7), and no protected branch with a commit made in the run at its
+tip; and, for closeout, every path changed since the start, committed or not, is one
+closeout may change (CW-pkug). The remote is read by listing each remote at the
+start and the end; a remote unreadable at either end is not checked.
 
 #### Scenario: A step amends an earlier commit
 
@@ -273,6 +276,12 @@ scope.
 - **THEN** the run's line records the refusal with the command and the path, and the
   design's message says what it did without it
 
+#### Scenario: A Codex reviewer pushes
+
+- **WHEN** an unattended review run on Codex runs `git push`
+- **THEN** the sandbox's `git` refuses it, and the review's line records the refused
+  push in `refusals`, as for a review on Claude Code
+
 ### Requirement: CW-k8dn The engine creates a prerequisite's worktree
 
 `propose <change> <prerequisite>` MUST create the worktree `../<prerequisite>-proposal`
@@ -300,7 +309,13 @@ rules it adds. The engine MUST reach a harness only through its adapter.
 - **WHEN** a review runs on Codex
 - **THEN** the engine launches it through Codex's adapter inside the review's scope,
   with `~/.codex` writable but its `config.toml`, the checkout read-only but the
-  engine's invocation record, and Codex's own read-only sandbox inside it
+  engine's invocation record, and without Codex's own sandbox, which hides the
+  system's Git the engine's `git` runs; a Git command the reviewer runs reaches it
+
+#### Scenario: Codex runs a review without the sandbox
+
+- **WHEN** a review runs on Codex where the sandbox cannot run
+- **THEN** the review runs unconfined, in Codex's own read-only sandbox
 
 ### Requirement: CW-g5ry Interactive runs are not confined
 

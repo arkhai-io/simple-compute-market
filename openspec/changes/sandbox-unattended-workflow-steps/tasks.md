@@ -1657,6 +1657,22 @@ them).
     `.claude/change-steps.toml` and `steps.STEP_TABLE`; closeout's promotion (12.9)
     owns them, and the change-scoped citations check does not read them.
 
+  Design review 48's triage adds two tasks for the session the design's cadence
+  adds after the return, for planning to place beside D18's work (D13):
+  - 48 F1: a confined Codex review runs without Codex's own sandbox (`--sandbox
+    danger-full-access`, and `sandbox_mode` on resume), which mounts a fresh `/dev`
+    and hides `/dev/change-workflow-git`; an unconfined one keeps `--sandbox
+    read-only`. Verify: `git rev-parse` and `run pre-commit` inside a real `codex
+    exec` under the engine's sandbox.
+  - 48 F3: each Codex review attempt runs with an engine run key in its environment,
+    distinct from the starting session's and Codex's, under which the engine's `git`
+    keeps a refused push and `run` keeps the reviewer's checks; the review's line
+    reads them. Verify: a refused push and a `run pre-commit` on a Codex review's
+    line (CW-w3oa's scenario "A Codex reviewer pushes").
+  Its F2 and F4 changed the design and the delta only (D6's check 6, D19, CW-q7ub,
+  CW-r6kd); its F5 is planning's: the D18 session, 11.1–11.5's checkboxes against
+  this section's note, and closeout's promotion extended to D17–D21.
+
 ## 12. Closeout
 
 The workflow's closeout parts (`docs/guidance/workflow/closeout.md`), in order, with

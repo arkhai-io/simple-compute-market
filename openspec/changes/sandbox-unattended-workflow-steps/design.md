@@ -4,7 +4,8 @@ Status: design settled 2026-11-19; revised the same day on the triage of design
 review 19 (D2, D4, D5, D5a, D6, D8, D10, D13) and of design review 28 (D2, D4, D6,
 D7, D8, D12, the cadence); revised again the same day on a return from
 implementation, when the sandbox's identity mapping failed the bare-metal ledger
-suite (D17–D21; D1, D4, D5, D6, D8, D12 and the cadence restated). Some decisions are expected to be
+suite (D17–D21; D1, D4, D5, D6, D8, D12 and the cadence restated); revised on the
+triage of design review 48 (D6, D13, D19, the cadence). Some decisions are expected to be
 reconsidered when `extract-change-workflow-repository` moves the workflow out of this
 repository; each stands until then.
 
@@ -280,8 +281,9 @@ after it, the wrapper checks against the state it recorded at the start:
 4. each existing review record is unchanged, and the ledger only grew at its end;
 5. `refs/stash` is unchanged;
 6. the remote's change branch is the last successful guarded push, as its record
-   names it (D2), or unchanged, and no protected branch on the remote gained a commit
-   made in the run (one fetch);
+   names it (D2), or unchanged, and no protected branch on the remote has a commit
+   made in the run at its tip, read by listing each remote at the start and the end;
+   a remote unreadable at either end is not checked (48 F4);
 7. for closeout, every path changed since the start, committed or not, is one
    closeout may change (CW-pkug): the repository's inert paths, changes' records,
    and the archive's own writes.
@@ -293,7 +295,12 @@ settings need no check: they are mounted read-only. Their names are not guarded,
 limit D19 records.
 
 Rejected: fewer checks — 4 and 5 would rest on a review's luck, and 6 is the one
-backstop for a push to a protected branch; recording a violation beside a standing
+backstop for a push to a protected branch; check 6 as a guarantee, fetching a moved
+protected branch to find a run's commit below its tip and stopping a run whose
+remote cannot be read (48 F4) — a run's commit built on by another party within the
+run, or a remote lost between a push and the check, is no mistake's route, and an
+offline run would stop, though the sandbox never gates the workflow (D10);
+protection of the remote is the Git host's authorization (D2); recording a violation beside a standing
 outcome — a rewritten history would route as if nothing happened; a question — a
 resumed session rarely helps. Check 3 as byte-identical was restated: it would fire
 on a parallel review's line. Check 7 was added (19 F4): D5a's mounts let closeout
@@ -420,8 +427,16 @@ Code's `.claude/settings.json`, `.claude/settings.local.json` and
 `~/.claude/settings.json`, Codex's `~/.codex/config.toml`, inside its writable state
 (19 F3) — its reading of refusals and denials from its events, the steps it can run,
 and its optional command rules.
-Codex keeps `--sandbox read-only` inside the engine's sandbox, dropping it if the
-two cannot nest. CW-zq4h's harness clause becomes "only for steps its adapter can
+The two do not nest: Codex's own sandbox mounts a fresh `/dev`, hiding the system's
+Git where the engine's `git` runs it (D2), so every Git command of a reviewer inside
+both fails (48 F1). A confined review therefore runs Codex without its own sandbox,
+the review's scope (D5) keeping every reviewed file read-only; an unconfined review
+(D10), with no engine `git` mounted, keeps `--sandbox read-only` as its only guard.
+Codex names no session in its commands' environment, so the engine gives each Codex
+review attempt a run key of its own, distinct from the starting session's and from
+Codex's, under which the engine's `git` keeps a refused push and `run` keeps the
+checks the reviewer runs, and from which the review's line reads them (D2, D5, D7;
+48 F3). CW-zq4h's harness clause becomes "only for steps its adapter can
 run", so Codex stays review-only until `add-workflow-harness-adapters`, which makes
 the interface public and owner-supplied (P6).
 
@@ -523,10 +538,15 @@ it. Three routes around a protected mount are recorded as limits of the threat m
   writable path, `protected = ["~"]`, which `[sandbox]`'s check admits while the
   inner path stays writable.
 
-No route is one a mistake takes; each works around a refusal. CW-r6kd promises that
+None is a route a step's ordinary edits take: the harness's edit tools refuse to
+write through a link, and its target is read-only. A shell rewrite — `sed -i`, or a
+write to a temporary file renamed over the link — replaces a link without meeting a
+refusal, but only after a step has already broken its skill's rule that no step
+writes the harness's settings (D15); the owner holds that a further mistake, not one
+the sandbox guards (48 F2). CW-r6kd promises that
 no step writes a protected file, not that a protected path's name stays bound.
 
-Rejected (the agent's recommendation): an eighth check after every run comparing each
+Rejected (the agent's recommendation, made again on design review 48's F2): an eighth check after every run comparing each
 protected path's kind, link target and content with the start, a difference stopping
 the run, with `[sandbox]`'s check refusing a protected directory holding a baseline
 path — the owner holds these routes to be workarounds outside P1; mounting each
@@ -587,7 +607,9 @@ orchestrating session or the owner.
 After the return from implementation (D17–D21), the round gains one session: it
 implements D18 — the tmpfs `/tmp`, `TMPDIR`, the review's drafts directory in its
 scope, the `config` listing, the refusal of `/tmp` as a grant or `[sandbox]` entry,
-and the nested sandbox tests adjusted — then completes section 11's verification
+and the nested sandbox tests adjusted — and, from design review 48, Codex's launch
+without its own sandbox in a confined review and the Codex review's run key (D13) —
+then completes section 11's verification
 point with `validate-local` passing inside its own sandbox. The round's review and
 triage then read every section together, before closeout. D19, D20 (already built)
 and D21 (already declared) change the specification and design only.
