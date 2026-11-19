@@ -1161,31 +1161,77 @@ Section 9 notes (handoff):
   storefront owns reaches startup's read, and the VM harness replaces the same
   name for its publication tests.
 
-## 10. A bare-metal end under a delivery conflict
+## 10. A bare-metal end under a delivery conflict, and the result read while a lease ends
 
-Delivers the scenario's test and the dead method's deletion (D9;
-`storefront-publication` "A bare-metal delivery that conflicts with its recorded
-result is refused", "A buyer ends a deal while the site reports a different
-delivery"). Touches `domains/bare_metal/storefront`.
+Replanned against the reviewed design after the return to design (D9 as restated,
+design review 40 F1): the unchecked tasks 10.1–10.4 are replaced; the notes below
+record the stop that returned the change, and the task numbers they cite are the
+replaced tasks'.
 
-- [ ] 10.1 Extend `test_a_delivery_other_than_the_recorded_result_is_a_conflict`
-  in `domains/bare_metal/storefront/tests/test_http_settlement.py`, or add a sibling
-  sharing its setup: with the site reporting another delivery, the buyer's lifecycle
-  `end` terminates the lease (`terminate_lease` called on the provisioning double
-  for the reservation), and the status, result and access reads still answer 409
-  `delivery_conflict` with the recorded result unchanged. Application integration
-  through the storefront's typed clients.
-- [ ] 10.2 Delete `BareMetalFulfillmentService.converge_teardown` from
-  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/fulfillment_service.py`;
-  confirm nothing calls it (`git grep -n converge_teardown`, which should then name
-  only the provisioning service's `converge_teardowns`).
-- [ ] 10.3 Bump the bare-metal storefront package unless section 9 already bumped it
-  in this change; refresh the locks if bumped here.
-- [ ] 10.4 Verification: `uv run pytest domains/bare_metal/storefront/tests` passes,
-  and `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
-  passes. End-to-end: `e2e_bare_metal_payment_deal` and `e2e_bare_metal_deal` end
-  their deals through the buyer's teardown with no conflict, the unchanged path; no
-  lane plants a conflicting delivery, and none is owed.
+Delivers a buyer's end under a delivery conflict, not refused and reported as an
+ending by the reads after it; the result read answering the recorded result while a
+lease is `terminating`; and the dead method's deletion (D9; `storefront-publication`
+"A bare-metal delivery that conflicts with its recorded result is refused", its
+scenario "A buyer ends a deal while the site reports a different delivery", and "A
+bare-metal result read answers the recorded result while its lease ends").
+Touches `domains/bare_metal/storefront` only: its `api.py`, its
+`fulfillment_service.py` (the deletion, already committed), and
+`tests/test_http_settlement.py`.
+
+- [ ] 10.1 In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/api.py`,
+  `fulfillment_result` admits `terminating` (the module's `TERMINATING`, from
+  `fulfillment_service.py`, rather than a second literal) among the lifecycle
+  states its result is answered in, and keeps answering "bare-metal fulfillment
+  result is not ready" when no receipt or result is recorded. The read still goes
+  through `status` first, so an active lease under a conflict is still refused with
+  `delivery_conflict`. Verify with 10.3. (D9, 40 F1; "A bare-metal result read
+  answers the recorded result while its lease ends".)
+- [ ] 10.2 Confirm `BareMetalFulfillmentService.converge_teardown` is deleted from
+  `fulfillment_service.py` (committed at `1d93f5d5f`) and nothing calls it: `git
+  grep -n converge_teardown -- ':!openspec' ':!docs'` names only the provisioning
+  service's `converge_teardowns` and the e2e comments naming it. (D9.)
+- [ ] 10.3 Application integration through the storefront's typed clients, in
+  `domains/bare_metal/storefront/tests/test_http_settlement.py`:
+  - `test_a_delivery_other_than_the_recorded_result_is_a_conflict`, as extended at
+    `1d93f5d5f`, restated to the scenario: before the end the status, result and
+    access reads answer 409 `delivery_conflict`; the buyer's lifecycle `end` (the
+    buyer transport's `teardown`) answers `tearing_down` and calls `terminate_lease`
+    once for the reservation; afterwards the status read reports the lease ending
+    (its state not `active`), the result read answers the recorded result unchanged,
+    and the access read is refused with 409 as outside an active lease, none of
+    the three with `delivery_conflict`; the stored result is unchanged. Its
+    docstring names the scenario as restated ("A buyer ends a deal while the site
+    reports a different delivery").
+  - a delivered deal, no conflict, whose lease the buyer ends while the site still
+    reports the fulfillment `active` — the provisioning double given a way to leave
+    `torn_down` unset on `terminate_lease`, defaulting to today's behaviour so no
+    other test changes — so the lease reads `terminating`: the result read answers
+    the recorded result and receipt ("A buyer reads the result of a deal whose
+    lease is ending");
+  - a lease ended before any result is recorded — dispatched or begun, ended
+    through the lifecycle `end` before delivery is driven — whose result read
+    answers 409 "not ready" ("A lease ends before delivery"). If the module's
+    harness cannot end a begun lease before delivery through the typed clients,
+    record why in the section's notes and state the case at the lowest level that
+    reaches the route.
+  Verify with `make -C domains/bare_metal/storefront test`.
+- [ ] 10.4 No package bump: `arkhai-bare-metal-storefront` is at 0.29.0 from 7.4,
+  unreleased in this change (D10), and no lock moves. Verify with `make
+  check-version-bumps`.
+- [ ] 10.5 Verification: `make -C domains/bare_metal/storefront test` passes, and
+  `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
+  passes (Docker running, since `make test`'s `test-release-tooling` renders
+  Compose files; sections 8 and 9's notes). Record in the section's notes that
+  the result read during `terminating` is a defect found during the change, outside
+  item 3's stated scope (`docs/guidance/workflow/changes.md`, "Defects found during
+  a change"; D9). End-to-end: `e2e_bare_metal_mock_deal`,
+  `e2e_bare_metal_payment_deal` and `e2e_bare_metal_deal` end their deals through
+  the buyer's teardown with no conflict and read the result only while the lease
+  is active (`compute_deal_driver.py`'s `assert_delivery`) and status after the end
+  (`released`); they exercise the unchanged path beside the new admitted state. No
+  lane plants a conflicting delivery or reads the result while a lease is
+  `terminating`, and none is owed: 10.3's application-integration cases are the
+  evidence.
 
 Section 10 notes (stopped; the change returns to design):
 
@@ -1343,7 +1389,7 @@ in `design.md` and per destination named in 11.5, 11.6 and 11.9.
 | D6 — A storefront reads again a registry it could not read | `openspec/specs/settlement-configuration/spec.md` ("A storefront reads again a registry whose recommendations it could not read"); `openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences` |
 | D7 — A compensating teardown reruns by the same rule | `openspec/specs/physical-provisioning/spec.md` (the rerun requirement's compensating-teardown scenario) |
 | D8 — The rule that a fulfillment's teardown is one job is restated in `physical-provisioning` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/physical-provisioning/architecture.md#proof-driven-release`; `docs/development/ARCHITECTURE.md#release` |
-| D9 — Item 3 is a scenario, a test, and a deletion | `openspec/specs/storefront-publication/spec.md` ("A bare-metal delivery that conflicts with its recorded result is refused") |
+| D9 — Item 3 is two requirements' scenarios, a test, a fix to the result read, and a deletion | `openspec/specs/storefront-publication/spec.md` ("A bare-metal delivery that conflicts with its recorded result is refused"; "A bare-metal result read answers the recorded result while its lease ends", by the archive) |
 | D10 — One round of three sessions | No permanent destination: the implementation cadence is this change's plan |
 | Roadmap currency (11.5) | `docs/development/ROADMAP.md`, Goal 1 |
 | Campaign index currency (11.6) | `openspec/changes/README.md`, this change's row and Goal 1's graph |
