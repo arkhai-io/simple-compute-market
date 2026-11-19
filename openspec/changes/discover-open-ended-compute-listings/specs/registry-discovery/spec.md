@@ -23,6 +23,8 @@ class or lifecycle policy summary.
 
 ### Requirement: Option filtering preserves a realizable selection
 
+> **Stale.** Already permanent: `cli-query-language`'s "Settlement clauses are correlated ordered alternatives" and `registry-discovery`'s "Pushdown remains semantic rather than physical"; the common option predicates are pushed today.
+
 A discovery clause MUST match every predicate on one eligible option. A listing
 MUST survive only if such an option exists, and surviving option identities MUST
 reach selection. Registry pushdown and local evaluation MUST use the same common

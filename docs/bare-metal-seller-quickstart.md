@@ -20,13 +20,13 @@ buyer-side escrow requirements.
 
 - Docker/Podman with Compose v2.24 or later on a Linux host.
 - The staged internal wheels and the images built from this checkout.
-- Canonical marketplace principals and matching role-scoped signer files for
+- Canonical marketplace principals and matching service-scoped signer files for
   the registry, storefront, and selected-site provisioning authority.
 - A host definitions document declaring a real whole-host SSH target, and a
   dedicated provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- One strict shared settlement configuration, the `[Settlement]` section of the storefront's configuration. Alkahest roles require chain configuration and the wallet key in the storefront's Secret overlay, whose account, funded, is the public seller address. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose, the public configuration file, or this document.
+- One strict shared settlement configuration, the `[Settlement]` section of the storefront's configuration. A storefront settling through Alkahest requires chain configuration and the wallet key in its Secret overlay, whose account, funded, is the public seller address. A payments-only storefront uses public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose, the public configuration file, or this document.
 
 The installed `arkhai-bare-metal-buyer` contribution supplies `market bare-metal` discovery, negotiation, contact introduction, and physical lifecycle commands. A running seller stack is not end-to-end evidence until the public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
@@ -187,7 +187,7 @@ The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
 that mode.
 
-## Prepare role credentials
+## Prepare service credentials
 
 Use separate owner-readable files:
 
@@ -204,7 +204,7 @@ Use separate owner-readable files:
 - the Ansible key for the selected host. It is not a marketplace credential.
 
 The files must be regular owner-readable files. Do not reuse one principal or
-credential across roles, and do not commit credential values.
+credential across services, and do not commit credential values.
 
 ## Configure public bindings
 
@@ -473,7 +473,7 @@ closes as leased, and it is never reserved, scheduled, or fulfilled. It publishe
 only settlement options bare metal does not fulfil through capacity, which today
 means contact exchange: enable `[Settlement.contact]` with a contact for the site
 and a profile, here `[Settlement.contact.profiles.default]` (see
-`docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Contact-exchange contacts"), and offer it to
+`openspec/specs/contact-exchange-settlement/configuration.md`'s "Contact-exchange contacts"), and offer it to
 the pool through a `contact-exchange.v1` clause, in `[pricing].settlements` or, to
 keep it to this pool, a pool override:
 
@@ -574,7 +574,8 @@ the lifecycle pause holds the loop without stopping trading. Each cycle:
 - Leaves a listing its seller closed as it is.
 - Holds, without closing or refreshing, the listings of a site whose projection
   the storefront does not hold or whose projection is malformed, and of a pool
-  whose declarations do not resolve or that resolves no lease bound. A site that
+  whose declarations do not resolve. A pool that resolves no maximum lease
+  duration publishes with no relative limit. A site that
   stops answering keeps its last generation, reported stale,
   and its listings keep deriving from it. The cycle reports each hold; every other
   site is reconciled as usual.
@@ -604,7 +605,7 @@ remove the bare-metal deployment and install it fresh:
    so a lease left active there is orphaned rather than removed.
 2. `helm uninstall` the bare-metal release and delete its persistent volume
    claims. Its registry listings go with it only if the registry belongs to
-   that release. A registry shared with other roles keeps them, and nothing in
+   that release. A registry shared with other services keeps them, and nothing in
    a fresh storefront knows their listing ids; before uninstalling, disable the
    bare-metal capacity declarations at the provisioning service and let one
    publication cycle run (or run `bare-metal-storefront publish`) after the
@@ -641,9 +642,9 @@ delivered host's key (`ARKHAI_E2E_BARE_METAL_KNOWN_HOSTS_FILE`), and the registr
 purchase settings under `BARE_METAL`; without any of them it skips, naming it.
 
 It buys through `buy`, then reads the run back with `result`, `access`, and
-`teardown`, each given `--run-id` and the id `buy` printed. Every access attempt is
+`end`, each given `--run-id` and the id `buy` printed. Every access attempt is
 a fresh SSH process that reads no configuration and checks the host's key strictly
-against the pinned file. Teardown repeats `teardown --run-id` until the lease is
+against the pinned file. Teardown repeats `end --run-id` until the lease is
 `released`, failing at once on `teardown_failed` and at its bound with the last
 state. Revocation is proven only by that pinned host refusing the same key for its
 public key afterwards; a refused or timed-out connection, an unreachable host, or a

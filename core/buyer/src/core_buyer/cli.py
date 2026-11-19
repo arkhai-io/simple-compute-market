@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 import typer
+from injected_time import InvalidTimeSource, TimeFileError
+from market_config.config_loader import load_user_config
 
 from core_buyer.orchestrator import (
     fetch_listing_dict_multi,
@@ -30,6 +32,12 @@ from core_buyer.orchestrator import (
 from core_buyer.buyer_config import resolve_fresh_buyer_identity
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.plugins import discover_domains
+from core_buyer.time_source import (
+    TimeConfigurationError,
+    announcement,
+    install_configured_time_source,
+    live_warnings,
+)
 from core_buyer.registry_config import (
     resolve_discovery_timeout,
     resolve_indexer_urls,
@@ -625,6 +633,20 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
         ),
     ) -> None:
         """Buyer CLI for Arkhai market operations."""
+        # Before any command body, from the buyer configuration this option or
+        # the XDG default names: every instant a command signs, stamps or
+        # compares reads this source.
+        config = load_user_config()
+        try:
+            source = install_configured_time_source(config)
+        except (InvalidTimeSource, TimeConfigurationError, TimeFileError) as exc:
+            typer.secho(f"[market] {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        notice = announcement(source)
+        if notice is not None:
+            typer.secho(f"[market] {notice}", err=True)
+        for warning in live_warnings(source, config):
+            typer.secho(f"[market] warning: {warning}", err=True, fg=typer.colors.YELLOW)
 
     @app.command("plugins")
     def list_plugins() -> None:
@@ -673,7 +695,20 @@ def main() -> None:
     except DuplicateRootCommandError as exc:
         print(f"[market] {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    app()
+    run(app)
+
+
+def run(app: typer.Typer, args: Sequence[str] | None = None) -> None:
+    """Run the assembled ``market`` app on ``args``, the process's arguments if None.
+
+    A lane-time file that stops reading mid-command fails the command, naming
+    the file: the buyer never falls back to wall time.
+    """
+    try:
+        app(args=None if args is None else list(args))
+    except TimeFileError as exc:
+        print(f"[market] {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
 
 if __name__ == "__main__":

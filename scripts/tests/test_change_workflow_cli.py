@@ -10,6 +10,7 @@ unattended run's harness are injected.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -25,8 +26,10 @@ from change_workflow import (clone, cli, config, cost_report, diagram, find, his
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
-from change_workflow_fixtures import (CHANGE, CONFIGURED, VALID, FakeClaude, configured,
-                                      event_lines, make_wrapper, option_rules)
+from change_workflow.review import check_review
+from change_workflow_fixtures import (CHANGE, CONFIGURED, LANDED, VALID, FakeClaude,
+                                      configured, event_lines, ignore_evidence, make_wrapper,
+                                      option_rules, prompted)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -97,6 +100,8 @@ def _printed(capsys: pytest.CaptureFixture[str], run: Callable[[], int]) -> tupl
     (["find", "--active", CHANGE], lambda root: find.main(["--active", CHANGE], root=root)),
     (["find", "--archived", CHANGE], lambda root: find.main(["--archived", CHANGE], root=root)),
     (["find", "--records", CHANGE], lambda root: find.main(["--records", CHANGE], root=root)),
+    (["find", "--next-record", "validation", CHANGE],
+     lambda root: find.main(["--next-record", "validation", CHANGE], root=root)),
     (["clone", CHANGE], lambda root: clone.main(["create", CHANGE], root=root)),
     (["clone", CHANGE, "--branch", "b", "--from", "main"],
      lambda root: clone.main(["create", CHANGE, "--branch", "b", "--from", "main"], root=root)),
@@ -126,6 +131,26 @@ def test_a_subcommand_does_what_its_modules_command_line_does(
     expected = _printed(capsys, lambda: module(root))
     assert _printed(capsys, lambda: cli.main(subcommand, root=root)) == expected
     assert expected[0] in (0, 1)
+
+
+@pytest.mark.parametrize("text,status", [
+    ("# Design review — c\n\n## Summary\n\nWhat.\n\n## Assessment\n\nSound.\n\n"
+     "## Questions\n\nNone.\n\n## Findings\n\nNone.\n\n## Readiness\n\nReady.\n", 0),
+    ("Not a review.\n", 1),
+])
+def test_check_review_reads_the_review_on_standard_input(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+        text: str, status: int) -> None:
+    expected = _printed(capsys, lambda: check_review(text, "design", "c"))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+
+    assert _printed(capsys, lambda: cli.main(["check", "review", "design", "c"],
+                                             root=tmp_path)) == expected
+    assert expected[0] == status
+
+
+def test_check_review_refuses_an_unknown_kind(tmp_path: Path) -> None:
+    assert cli.main(["check", "review", "kindly", "c"], root=tmp_path) == 2
 
 
 @pytest.mark.parametrize("subcommand,module,arguments", [
@@ -177,6 +202,8 @@ def test_the_subcommands_this_module_runs_reach_no_other() -> None:
 @pytest.mark.parametrize("arguments", [
     [], ["deploy"], ["start"], ["start", "review", CHANGE], ["start", "design"],
     ["find"], ["find", "--records", "--json", CHANGE], ["find", "--active", "--archived", CHANGE],
+    ["find", "--next-record", "validation", "--json", CHANGE],
+    ["find", "--next-record", "validation", "--records", CHANGE],
     ["clone", "where"], ["clone", "a", "b"], ["clone", "where", CHANGE, "--from", "dev"],
     ["check"], ["check", "lint"], ["hook", "pre-compaction"], ["next"], ["review", CHANGE],
 ])
@@ -241,7 +268,7 @@ def test_a_failed_push_exits_1_whatever_git_returned(
 
 # `start`: the make targets' entry logic.
 
-@pytest.mark.parametrize("step", ["design", "plan", "implement", "merge"])
+@pytest.mark.parametrize("step", ["design", "plan", "implement"])
 def test_start_refuses_an_archived_change_for_a_step_taking_an_active_one(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], step: str) -> None:
     root = _repository(tmp_path / "workspace")
@@ -268,6 +295,20 @@ def test_start_takes_an_archived_change_for_a_step_that_may_follow_the_archive(
 
     assert cli.main(["start", step, CHANGE], root=root, launch=launched) == 0
     assert launched.commands[0][-1] == f"/change-{step} {CHANGE}"
+
+
+def test_start_takes_an_archived_change_for_the_merge_after_the_archive(
+        tmp_path: Path) -> None:
+    """One node of the merge step, the merge after the archive, enters an archived
+    change, so `start` takes it; the merge's route check refuses a run the
+    computation does not name."""
+    root = _repository(tmp_path / "workspace")
+    _archive(root)
+    launched = Launched()
+
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev"], root=root,
+                    launch=launched) == 0
+    assert launched.commands[0][-1] == f"/change-merge {CHANGE} from dev"
 
 
 def test_start_takes_only_an_archived_change_for_archive_cleanup(
@@ -377,6 +418,7 @@ def test_the_merge_brings_in_the_branch_the_clone_recorded(tmp_path: Path) -> No
     root = _repository(tmp_path / "workspace", CHANGE)
     clone_root = find.clone_directory(root, CHANGE)
     _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
+    ignore_evidence(clone_root)
     (clone_root / ".git" / find.CLONE_MARKER).write_text(
         json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
         "utf-8")
@@ -456,14 +498,14 @@ def test_a_session_that_cannot_be_started_is_a_refusal(
 
 def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    claude = FakeClaude((event_lines({**VALID["finished"], "landing": LANDED}), 0))
     launched = Launched()
 
     assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev", "--unattended",
                      "--allow", "Bash(make lock)"], root=root, launch=launched,
                     wrapper=make_wrapper(root, claude)) == 0
     assert launched.commands == []
-    assert claude.commands[0][2] == f"/change-merge {CHANGE} from dev"
+    assert claude.commands[0][2] == prompted(f"/change-merge {CHANGE} from dev", "merge")
     assert option_rules(claude.commands[0], "--allowedTools")[-1] == "Bash(make lock)"
 
 

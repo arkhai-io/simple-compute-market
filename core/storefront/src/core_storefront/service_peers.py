@@ -25,6 +25,7 @@ from functools import partial
 from types import MappingProxyType
 from typing import Any
 
+import injected_time
 from market_identity import Identity, RotationRequest, TrustedIdentitySet
 
 from core_storefront.auth import AuthError
@@ -93,7 +94,7 @@ def seed_service_peers(
     every principal durable state holds active.
     """
 
-    timestamp = int(time.time()) if now is None else now
+    timestamp = injected_time.now() if now is None else now
     authority = StorefrontIdentityAuthority(db_path)
     for peer_id, (role, site_id, principals) in peers.items():
         try:
@@ -281,7 +282,7 @@ class ServicePeerTrust:
         db_path: str,
         peers: ServicePeerConfigs,
         *,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = injected_time.now,
         retry_wait: Callable[[float], object] = time.sleep,
         start_retry: Callable[[Callable[[], None]], object] | None = None,
     ) -> None:

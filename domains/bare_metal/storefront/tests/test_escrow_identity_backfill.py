@@ -12,6 +12,7 @@ from market_settlement_runtime import (
 )
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 _BUYER = Eip191Signer(bytes.fromhex("22" * 32)).identity
@@ -43,6 +44,12 @@ def _plan() -> dict[str, Any]:
     }
 
 
+def _client(tmp_path) -> SQLiteClient:
+    path = tmp_path / "storefront.db"
+    migrate_storefront_database(path)
+    return SQLiteClient(str(path), domain=get_market_domain_contract())
+
+
 async def _legacy_deal(db: SQLiteClient, *, negotiation_id: str, with_plan: bool):
     await db.create_negotiation_thread(
         negotiation_id=negotiation_id,
@@ -64,9 +71,7 @@ async def _legacy_deal(db: SQLiteClient, *, negotiation_id: str, with_plan: bool
 
 
 async def test_backfill_records_legacy_escrows_idempotently(tmp_path) -> None:
-    db = SQLiteClient(
-        str(tmp_path / "storefront.db"), domain=get_market_domain_contract()
-    )
+    db = _client(tmp_path)
     await _legacy_deal(db, negotiation_id="neg-legacy", with_plan=True)
     await db.insert_escrow(
         escrow_uid=_ESCROW_UID,
@@ -74,7 +79,7 @@ async def test_backfill_records_legacy_escrows_idempotently(tmp_path) -> None:
         chain_name="base-sepolia",
         escrow_address="0x" + "ee" * 20,
     )
-    repository = SettlementSQLiteRepository(db.db_path, apply_migrations=False)
+    repository = SettlementSQLiteRepository(db.db_path)
     runtime = SettlementRuntime(repository, {})
 
     backfilled = await backfill_escrow_obligation_records(
@@ -100,9 +105,7 @@ async def test_backfill_records_legacy_escrows_idempotently(tmp_path) -> None:
 async def test_backfill_skips_planless_rows_without_inventing_identity(
     tmp_path,
 ) -> None:
-    db = SQLiteClient(
-        str(tmp_path / "storefront.db"), domain=get_market_domain_contract()
-    )
+    db = _client(tmp_path)
     await _legacy_deal(db, negotiation_id="neg-preplan", with_plan=False)
     escrow_uid = "0x" + "cd" * 32
     await db.insert_escrow(
@@ -111,7 +114,7 @@ async def test_backfill_skips_planless_rows_without_inventing_identity(
         chain_name="base-sepolia",
         escrow_address="0x" + "ee" * 20,
     )
-    repository = SettlementSQLiteRepository(db.db_path, apply_migrations=False)
+    repository = SettlementSQLiteRepository(db.db_path)
     runtime = SettlementRuntime(repository, {})
 
     backfilled = await backfill_escrow_obligation_records(

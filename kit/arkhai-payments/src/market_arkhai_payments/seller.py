@@ -13,9 +13,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from market_deal_lifecycle.operations import OperationKeys
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Pending, Rejected, Unknown
 
-from market_arkhai_payments.adapter import PaymentAdapter
+from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
     agreement_from_bytes,
@@ -30,7 +31,7 @@ from market_arkhai_payments.errors import (
     PaymentsUnavailable,
 )
 from market_arkhai_payments.models import SignedReceipt, StoredEvent
-from market_arkhai_payments.receipts import SnapshotVerifier, verify_receipt, verify_snapshot
+from market_arkhai_payments.receipts import SnapshotVerifier, verify_receipt
 from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsConfig,
     ArkhaiPaymentsConfigurationError,
@@ -176,6 +177,7 @@ class PaymentSellerStage:
         config: ArkhaiPaymentsConfig,
         *,
         client_for_owner: ClientForOwner | None = None,
+        rate_servicing: RateServicing | None = None,
         snapshot_verifier: Callable[[Mapping[str, Any], PaymentSettlementData], SnapshotVerifier] | None = None,
     ) -> None:
         if config.service_url is None or config.service_identity is None:
@@ -183,6 +185,7 @@ class PaymentSellerStage:
                 "payments service URL and receipt identity are required for servicing"
             )
         self.config = config
+        self.rate_servicing = rate_servicing or RateServicing()
         self._snapshot_verifier = snapshot_verifier or self._verifier_for
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
@@ -191,16 +194,12 @@ class PaymentSellerStage:
     def _verifier_for(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData,
     ) -> SnapshotVerifier:
-        return lambda signed, minimum_sequence: verify_snapshot(
-            signed, self.config.receipt_trust, mandate=data.mandate,
-            agreement_json=agreement, livemode=self.config.livemode,
-            minimum_sequence=minimum_sequence,
-        )
+        return pinned_snapshot_verifier(agreement, data, self.config)
 
     def settlement_data(self, agreement: Mapping[str, Any]) -> PaymentSettlementData:
         """Derive the acceptance artifact returned to the buyer and stored with the thread."""
 
-        return PaymentSettlementData.for_agreement(agreement, self.config)
+        return PaymentSettlementData.for_agreement(agreement, self.config, rate_servicing=self.rate_servicing)
 
     def accepted(
         self, agreement_bytes: bytes | str, stored: Any
@@ -287,8 +286,8 @@ class PaymentSellerStage:
 
         return PaymentAdapter(
             agreement, data, account=selected_payment_option(agreement).payee_account,
-            client_for_owner=self._client_for_owner,
-            verify_snapshot=self._snapshot_verifier(agreement, data), minimum_sequence=minimum_sequence,
+            client_for_owner=self._client_for_owner, verify_snapshot=self._snapshot_verifier(agreement, data),
+            minimum_sequence=minimum_sequence, snapshot_freshness_seconds=self.config.snapshot_freshness_seconds,
         )
 
     def reverse_now(
@@ -365,7 +364,8 @@ class PaymentSellerStage:
 
 
 def servicing_stage(
-    section: Any, *, client_for_owner: ClientForOwner | None = None
+    section: Any, *, client_for_owner: ClientForOwner | None = None,
+    rate_servicing: RateServicing | None = None,
 ) -> PaymentSellerStage | None:
     """The seller stage for servicing accepted deals, whether or not publishing is enabled.
 
@@ -373,6 +373,8 @@ def servicing_stage(
     stage even when the mechanism is disabled for new deals, so accepted deals
     keep settling and refunding. Without those fields there is nothing to
     service with, and the caller reports accepted deals as needing an operator.
+    ``rate_servicing`` is the composition's declaration, the one its publication
+    and acceptance doors read; without one the stage materializes no rate option.
     """
 
     if section is None:
@@ -382,7 +384,7 @@ def servicing_stage(
     )
     if config.service_url is None or config.service_identity is None:
         return None
-    return PaymentSellerStage(config, client_for_owner=client_for_owner)
+    return PaymentSellerStage(config, client_for_owner=client_for_owner, rate_servicing=rate_servicing)
 
 
 __all__ = [

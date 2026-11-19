@@ -43,7 +43,7 @@ Design phase; not planned.
   the registry publication helpers, and `SellerClosedListingError` through an edge
   no document sanctions — and both compute vocabulary packages import
   `core_storefront.publication_sources.PublicationSource`. A kit depending on a
-  composition is the layer rule inverted, and `ARCHITECTURE.md` lists it under
+  composition is the layer rule inverted, and `package-layers.md` lists it under
   "Where the current tree diverges" with this change as owner. Suggested
   resolution: carve the shared contracts out into a new repository-wide kit,
   `kit/storefront-contracts` — the hook shapes (`publication_sources`, `capacity`,

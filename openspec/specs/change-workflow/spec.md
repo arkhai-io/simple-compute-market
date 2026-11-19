@@ -45,8 +45,19 @@ same change.
   the owner's notes, or the orchestrating session's observations — and the triage
   file beside it once it is triaged.
 - **Waiver.** The owner's decision to let a change pass a guard the owner may waive,
-  or to leave a part of validation unrun; a step may recommend one only on a written
+  or to leave an evidence kind unassessed; a step may recommend one only on a written
   criterion, and only the owner takes it.
+- **Evidence kind.** One kind of evidence validation assesses, such as a local suite
+  or an end-to-end pipeline run, declared in the repository's configuration with its
+  requirement, its pattern keyed by a Git tree or a commit, and its commands
+  (CW-g4oz). Plain "kind" in a review's context is the review's kind, not this.
+- **Guide.** The prose that tells an agent how to read one evidence kind's evidence,
+  named by its configuration entry and restating none of the entry's fields
+  (CW-k7gd).
+- **Step hook.** A repository's `before-<step>` or `after-<step>` hook, run around a
+  step's session (CW-h3ks).
+- **Inputs directory.** A run's directory under its change's records, where the engine
+  writes `status.md` and keeps each hook's output for the session to read (CW-i9np).
 - **Default acceptance.** A review finding the default rule admits (CW-d5ac),
   accepted without the owner's stated disposition and reported in the triage's table.
 - **Revisit.** The owner's correction of a default acceptance, or of the advancing
@@ -201,10 +212,13 @@ the intervention ledger.
   changed only inert paths
 - **THEN** the computation names archive cleanup without a validation
 
-### Requirement: CW-pkug Closeout changes documentation only
+### Requirement: CW-pkug Closeout changes only inert paths
 
-Closeout MUST change documentation only; a closeout part that would need a code
-change MUST return the change to implementation.
+Closeout MUST change only the repository's inert paths, changes' records, and the
+archive's own writes — the change's own documents and their move into the archive,
+its row of the change index, and its deltas merged into the specifications; a
+closeout part that would change any other path MUST return the change to
+implementation.
 
 #### Scenario: Closeout finds a comment that needs rewriting
 
@@ -213,12 +227,28 @@ change MUST return the change to implementation.
 - **THEN** closeout stops without editing it and the change returns to
   implementation for a fix round
 
+#### Scenario: A citation to re-point lies inside a skill
+
+- **WHEN** closeout's guidance placement part moves a section that a skill outside the
+  inert paths cites
+- **THEN** closeout does not re-point the skill's citation, and the change returns to
+  implementation to re-point it
+
+#### Scenario: A repository declares no path inert
+
+- **WHEN** a repository declares `inert-paths = []` and closeout's promotion would
+  write a section of a guidance file
+- **THEN** the change returns to implementation to write it, and once nothing is left
+  to promote, closeout archives the change, its task notes, its index row, its move
+  into the archive, and the merge of its deltas into the specifications exempt
+
 ### Requirement: CW-1iaz Steps after the archive find a change by name
 
 The steps that follow the archive (the closeout review and its triage, validation,
-the round view, the scoped citation check, and archive cleanup) MUST find an
-archived change by its name. Design, planning, and implementation MUST refuse a
-change that is archived, naming its archived directory.
+the round view, the scoped citation check, archive cleanup, the merge after the
+archive, and the merge review and its triage) MUST find an archived change by its
+name. Design, planning, and implementation MUST refuse a change that is archived,
+naming its archived directory.
 
 #### Scenario: An archived change is given to implementation
 
@@ -463,7 +493,10 @@ checked; one that failed or was inconclusive MUST be brought to the owner.
 Each `tasks.md` section MUST be a coherent slice that can be verified, sized by
 what it changes and what proves it, and MUST end at a verification point. The plan
 MUST NOT prescribe in `tasks.md` how sections are distributed across agent sessions
-or review rounds.
+or review rounds. The task list's last section MUST be its closeout section, headed
+`## N. Closeout` exactly; the engine MUST know the closeout section by that title
+alone, and its task-list check MUST fail a list with sections that has none so
+titled, more than one, or one followed by another section.
 
 #### Scenario: Planning writes a section
 
@@ -471,22 +504,33 @@ or review rounds.
 - **THEN** the section ends with a verification task naming the evidence that
   proves it, and the task list names no session or round
 
+#### Scenario: A section's title mentions closeout
+
+- **WHEN** a task list's section 6 is "Qualification scenarios and pre-closeout
+  review" and its section 7 is "Closeout"
+- **THEN** section 6 is implemented by a round, and closeout implements section 7
+
+#### Scenario: A section follows the closeout section
+
+- **WHEN** an amended plan adds section 12b after "## 12. Closeout"
+- **THEN** `scripts/change-workflow check tasks <change>` fails, naming section 12b,
+  and the next-step computation routes on no section of the list
+
 ### Requirement: CW-5h8e Evidence only a push produces is owed by validation
 
 A section's verification MUST name only evidence an implementation session can
-produce. Evidence only a push produces MUST be named as owed by validation, as the
-repository's validation part that produces it identifies it, and MUST NOT gate a
-task's completion. A session that finds such evidence in a verification MUST check
-the task once its own evidence passes and name that evidence as owed by validation
-in the section's notes.
+produce. Evidence only a push produces MUST be named as owed by validation, by the
+evidence kind that produces it (CW-r5qk), and MUST NOT gate a task's completion. A
+session that finds such evidence in a verification MUST check the task once its own
+evidence passes and name that evidence as owed by validation in the section's notes.
 
 #### Scenario: A section owes CI evidence
 
 - **WHEN** a section's change can be shown only by a run of a CI workflow, which no
   push of the change's branch triggers
-- **THEN** the plan names the workflow, the job, and what it must show as owed by
-  validation, and the section's verification task is checked on its local evidence
-  alone
+- **THEN** the plan names the kind, the workflow, the job, and what it must show as
+  owed by validation, and the section's verification task is checked on its local
+  evidence alone
 
 #### Scenario: An older plan gates a task on a CI run
 
@@ -536,7 +580,10 @@ implement them.
 
 Each round MUST be recorded as it starts, from the latest plan's mapping, as its
 first round with a section not yet complete; a change with no mapping for its next
-incomplete section MUST ask the owner, once per round.
+incomplete section MUST ask the owner, once per round. A round recorded while the
+latest round is open — no implementation triage has finished or returned since it
+— MUST continue that round, whatever sections it names, keeping its last record and
+starting commit.
 
 #### Scenario: A round is recorded after the fact
 
@@ -544,6 +591,23 @@ incomplete section MUST ask the owner, once per round.
   round was recorded
 - **THEN** the round is recorded naming the last record before it, and the
   computation reads the records above that number as the round's
+
+#### Scenario: A round recorded mid-round continues the open round
+
+- **WHEN** a round naming sections 1 to 4 is open, no implementation triage has
+  finished since it, and the owner's direction or an amended plan records a round
+  naming only section 4
+- **THEN** the new round line keeps the open round's last record and starting
+  commit and names the line it continues, so the round's reading, validation, and
+  review still cover sections 1 to 4
+
+#### Scenario: A replan renumbers an open round's sections
+
+- **WHEN** a round naming sections 3 and 4 is open, section 3 and part of 4 are
+  committed, and a return to design re-plans the rest of section 4 as sections 5
+  and 6
+- **THEN** the round recorded for sections 5 and 6 continues the open round, and its
+  round view, validation, and review read every commit since the open round's base
 
 ### Requirement: CW-tc82 Each section is checked, handed off, and committed alone
 
@@ -753,9 +817,9 @@ after any step, or if `HEAD` is no longer the validated commit after any step, a
 MUST then collect no further evidence, though it MAY still stop what it started. It
 MUST NOT regenerate lockfiles or any other tracked file, `tasks.md` included.
 
-#### Scenario: A part leaves the worktree dirty
+#### Scenario: A kind leaves the worktree dirty
 
-- **WHEN** a validation part leaves an uncommitted change in the worktree
+- **WHEN** an evidence kind's command leaves an uncommitted change in the worktree
 - **THEN** validation fails, collects no further evidence, and still stops what it
   started
 
@@ -773,63 +837,65 @@ implementation.
 
 ### Requirement: CW-zkhs Validation's parts are the repository's
 
-Validation MUST run the parts the repository's configuration declares (CW-g4oz) but
-those the owner waived (CW-e7lm), and each part's evidence MUST come from the commit
-under validation, never from another commit's build, run, or state.
+Validation MUST assess the evidence kinds the repository's configuration declares
+but those the owner waived (CW-e7lm), and each kind's evidence MUST describe the tree
+or commit under validation, as its pattern keys it (CW-t3ev), never another tree's or
+commit's build, run, or state, whoever wrote it (CW-p4rs).
 
-#### Scenario: A part finds only another commit's evidence
+#### Scenario: A kind finds only another commit's evidence
 
-- **WHEN** a validation part finds a finished run of its evidence only for an earlier
-  commit of the branch
-- **THEN** it does not report that run as evidence of the validated commit
+- **WHEN** evidence of a kind exists only for an earlier commit's tree
+- **THEN** it is not evidence of the validated commit, and the kind is missing
 
 ### Requirement: CW-e7lm Validation's result is passed, failed, or inconclusive
 
 A validation's result MUST be `passed`; `failed`, for a failure caused by the commit
 or of unknown cause; or `inconclusive`, when no failure is caused by the commit but
-a part produced no evidence for an environmental reason. Any part MAY be waived, and
-only by the owner. A waived part MUST be recorded as `waived`: an omission of
+a kind has no evidence for an environmental reason. Any kind MAY be waived, and
+only by the owner. A waived kind MUST be recorded as `waived`: an omission of
 evidence, neither passed, failed, nor inconclusive, counted in no result, which is
-judged on the parts that ran; a requirement that validation run a part, dispatch
-its workflows, or judge its evidence applies only to the parts not waived. A
-validation with every part waived MUST NOT be recorded: waiving validation entirely
+judged on the kinds assessed; a requirement that validation gather a kind, dispatch
+its workflows, or judge its evidence applies only to the kinds not waived. A
+validation with every kind waived MUST NOT be recorded: waiving validation entirely
 is the owner's direction past the guard it remedies. A waiver for later validations
-MUST be the owner's decision in the change's workflow log, naming the parts and the
-condition they are waived on; validation MUST read it before running any part, and
-MUST run a waived part, saying in the record that the waiver lapsed and why, when
-the condition does not hold over the commits since the last validation that ran
-that part, or when those commits include a merge.
+MUST be the owner's decision in the change's workflow log, naming the kinds and the
+condition they are waived on; validation MUST read it before assessing any kind, and
+MUST gather a waived kind, saying in the record that the waiver lapsed and why, when
+the condition does not hold over the commits since the last validation that assessed
+that kind, or when the commits since the last validation that ran it — or since the
+latest validation, when none ran it — include a merge (CW-g6th).
 
-#### Scenario: A part produces no evidence for an environmental reason
+#### Scenario: A kind has no evidence for an environmental reason
 
-- **WHEN** no failure is caused by the commit, and one part produced no evidence
-  because its environment was unavailable
+- **WHEN** no failure is caused by the commit, and one kind has no evidence because
+  its environment was unavailable
 - **THEN** the result is `inconclusive`, neither `passed` nor `failed`
 
-#### Scenario: Parts are waived for the rest of the change
+#### Scenario: Kinds are waived for the rest of the change
 
 - **WHEN** the change's log holds the owner's decision waiving the Helm and pipeline
-  parts on a condition that holds over the commits since those parts last ran
-- **THEN** validation runs neither, records both as `waived` naming the decision, and
-  judges the result on the local and CI parts
+  kinds on a condition that holds over the commits since those kinds were last
+  assessed
+- **THEN** validation gathers neither, records both as `waived` naming the decision,
+  and judges the result on the local and CI kinds
 
 #### Scenario: A standing waiver lapses at a merge
 
-- **WHEN** the commits since the pipeline last ran include a merge
-- **THEN** validation runs the pipeline despite the owner's waiver of it, and the
+- **WHEN** the commits since the pipeline kind last ran include a merge
+- **THEN** the pipeline kind is gathered despite the owner's waiver of it, and the
   record says the waiver lapsed at the merge
 
 #### Scenario: The owner waives an environmental failure
 
-- **WHEN** a part fails for an environmental reason and the owner waives it rather
+- **WHEN** a kind fails for an environmental reason and the owner waives it rather
   than remedy it
-- **THEN** the part is recorded as `waived`, and the result is judged on the other
-  parts rather than being `inconclusive` for it
+- **THEN** the kind is recorded as `waived`, and the result is judged on the other
+  kinds rather than being `inconclusive` for it
 
 ### Requirement: CW-a1nz An environmental failure goes to the owner with its remedy
 
 A failure diagnosed as environmental MUST be put to the repository owner with its
-remedy before the record is written, and its part rerun on the owner's word; every
+remedy before the record is written, and its kind gathered again on the owner's word; every
 attempt's evidence MUST be kept.
 
 #### Scenario: Validation needs an environmental remedy
@@ -856,13 +922,22 @@ The implementation review, the validation of the same commit, and the owner's no
 on it MUST be triaged together, in a session that is not the implementing session.
 A review the review tooling publishes MUST name the commit it reviewed, so the
 commits can be compared mechanically; for a pasted review, triage MUST record the
-commit the owner says its reviewer saw.
+commit the owner says its reviewer saw. An implementation review awaiting its triage
+MUST be triaged before the round's unchecked sections are implemented, since its
+findings may change what is left to do.
 
 #### Scenario: A pasted review joins a round
 
 - **WHEN** the owner pastes a review into a round's triage
 - **THEN** triage records the commit the owner says its reviewer saw, and compares
   it with the commit the validation names
+
+#### Scenario: A review awaits triage while the round's sections are open
+
+- **WHEN** an implementation review the owner directed awaits triage, and planning
+  has added unchecked tasks to the round's sections
+- **THEN** the computation names the round's triage, not implementation, and the
+  triage's exit decides what is implemented next
 
 ### Requirement: CW-514y Records of different commits form a round only on the owner's waiver
 
@@ -880,7 +955,7 @@ be recorded in the intervention ledger.
 ### Requirement: CW-xg4v A validation failure is a finding, and missing evidence is not
 
 Each validation failure caused by the commit, or of unknown cause, MUST be presented
-as a finding, with its diagnosis checked against the logs; an `inconclusive` part
+as a finding, with its diagnosis checked against the logs; an `inconclusive` kind
 MUST be read as missing evidence, never as a finding.
 
 #### Scenario: Validation fails beside an implementation review
@@ -894,7 +969,17 @@ MUST be read as missing evidence, never as a finding.
 The owner's notes MUST be saved verbatim as a review record and triaged like any
 review: the triaging agent MUST state its own position on each point rather than
 carry it out as an instruction, and each disposition MUST be logged to the
-intervention ledger.
+intervention ledger. Notes saved while no review awaits a triage — on a finished
+triage's fixes, or on a re-plan — MUST be carried by the next round and triaged with
+its records; they MUST NOT stand as that round's reading.
+
+#### Scenario: The owner's notes on a triage's fixes reach the next round's triage
+
+- **WHEN** the owner saves notes on a finished triage's fix commit before the next
+  round starts
+- **THEN** the next round's line names them as carried, the round's own reading is
+  still asked for, and its triage reads the carried notes beside its review,
+  validation, and owner record
 
 #### Scenario: The owner's note is contradicted by the files
 
@@ -943,8 +1028,19 @@ Each review of a change MUST be written as one Markdown file in that change's
 `reviews/` directory, numbered in the order reviews are produced, and that file MUST
 be the only record of its findings. The records' order MUST be establishable, by
 number or, where two records of different kinds share a number, by their file
-times, and a record MUST NOT be overwritten. Each finding MUST state its lens, its
-basis, its severity, and the evidence it cites.
+times, and a record MUST NOT be overwritten. A record's number MUST follow every
+record and transcript in `reviews/` when it is written, and a record a skill writes
+itself — a validation's, a triage's external copy — MUST take the path the engine
+gives it, `scripts/change-workflow find --next-record <kind> <change>`, never a
+number it counts. Each finding MUST state its lens, its basis, its severity, and
+the evidence it cites.
+
+#### Scenario: Validation writes its record
+
+- **WHEN** a change's reviews hold records up to 69 and its log's latest line is seq
+  134
+- **THEN** validation writes the path `find --next-record validation` prints,
+  `70-validation.md`, and no number from the log
 
 #### Scenario: Two records share a number
 
@@ -1002,8 +1098,56 @@ earlier record MUST NOT count as its result.
 
 - **WHEN** the reviewing agent's final output is an error message rather than a
   review
-- **THEN** no review record is published, and the output is kept beside the
-  transcript
+- **THEN** it is sent back to the reviewer for correction (CW-r8fb), and when the
+  answer is still not a review, no review record is published, and the output is
+  kept beside the transcript
+
+### Requirement: CW-r8fb A review the format check refuses is sent back to its reviewer
+
+When a reviewer finishes with a draft the review format check refuses, the run MUST
+send the draft back to that reviewer's session, on the same harness and model, with
+the problems the check found, and check the answer again, as many times as the
+configuration's `review.format-retries` says: once when it is absent, never when it
+is 0. Only a reviewer that finished with a draft SHALL be sent back; one that was
+unavailable, could not be reached, or exited non-zero MUST NOT be. The run's line
+MUST record the problems of each send-back, and its message MUST say that the review
+was sent back for correction and whether it then passed; nothing waits on the
+owner's answer. A refusal that survives its send-backs MUST keep its draft beside the
+transcript, never as a record a triage reads, and its stopped line MUST record the
+reviewer's session and the problems; the next review of the same kind MUST continue
+that session, telling it the problems, unless it is started fresh.
+
+#### Scenario: A reviewer leaves a field empty
+
+- **WHEN** a design review's draft has a finding whose `Evidence` line is empty, its
+  evidence in a nested list beneath it
+- **THEN** the run sends the draft back to the same reviewer session, naming `F1 has
+  no Evidence`, publishes the corrected review, and its line and message say the
+  review was sent back for correction
+
+#### Scenario: A refusal survives its send-back
+
+- **WHEN** the corrected draft is refused again
+- **THEN** nothing is published, the draft is kept as
+  `transcripts/NN-design.rejected.md`, the stopped line records the reviewer's
+  session and the problems, the next-step computation names the design review again
+  once the stop is recovered, never its triage, and the next design review continues
+  that session with the problems
+
+### Requirement: CW-c4rv A reviewer runs the publishing check before it answers
+
+The engine MUST offer the review format check alone, `check review <kind> <change>`,
+on a review given on standard input, applying the very check a review passes before
+it is published, printing each problem it finds and failing when there is any. The
+reviewer MUST be allowed to run it and SHOULD run it on its review before its final
+message, without writing a file.
+
+#### Scenario: A reviewer checks its draft
+
+- **WHEN** a reviewer pipes a draft whose finding has no `Evidence` value to
+  `scripts/change-workflow check review design <change>`
+- **THEN** it prints `F1 has no Evidence` and fails, and the same draft passed to
+  the review would be refused for the same problem
 
 ### Requirement: CW-5sc1 A finding's lens and basis
 
@@ -1351,13 +1495,26 @@ workflow graph by its step, with its review kind for a review, the kind of revie
 it triages for a triage, and the sections for an implementation out of the plan's
 order. A review or a triage named without its kind, or with an empty or unknown
 one, MUST be refused. A validation MUST name as its exit the target the computation
-gave it, and archive cleanup the terminal node `done`.
+gave it, and archive cleanup the terminal node `done`. An unattended validation's
+target MUST be computed by the wrapper before its session starts, given to the
+session in its prompt, and recorded on its line; its resume MUST take the target
+from the line it resumes, never computing it again, and a finished validation given
+a target MUST be logged with that target as its exit, whatever exit its session
+named. An interactive validation reads its target from the computation itself.
 
 #### Scenario: A triage names its exit
 
 - **WHEN** an unattended triage of review 157 ends with
   `{"outcome": "finished", "message": "…", "triaged": ["157-closeout"], "next": {"step": "review", "kind": "closeout"}}`
 - **THEN** the wrapper records it, and the computation routes on its exit
+
+#### Scenario: An unattended validation names the owner
+
+- **WHEN** the computation names validation with closeout as its target, and the
+  unattended validation, given that target in its prompt, finishes naming
+  `{"step": "owner"}` as its exit
+- **THEN** the wrapper logs it finished with closeout as its exit, and a resume of a
+  question it asked first is given closeout again, from the question's line
 
 ### Requirement: CW-4vma A triage outcome names the records it triaged
 
@@ -1923,12 +2080,12 @@ owner.
 
 ### Requirement: CW-tnp6 A round and the merge advance only on a passed validation
 
-An implementation round, and the merge before closeout, MUST advance only on a
-`passed` validation naming its final commit, or a commit from which it differs only
-in changes' records or, for the merge's advance to closeout, only in inert paths. An
-`inconclusive` validation MUST be brought to the owner, and a `failed` validation of
-the merged `HEAD` MUST name the merge again, which repairs what it found or asks the
-owner.
+An implementation round, the merge before closeout, and the merge after the archive
+MUST advance only on a `passed` validation naming its final commit, or a commit from
+which it differs only in changes' records or, for a merge's advance to closeout or to
+archive cleanup, only in inert paths. An `inconclusive` validation MUST be brought to
+the owner, and a `failed` validation of a merged `HEAD` MUST name the merge that made
+it again, which repairs what it found or asks the owner.
 
 #### Scenario: A validation of the merged HEAD fails
 
@@ -1937,6 +2094,13 @@ owner.
 - **THEN** the computation names the merge, carrying the exit it named, so the merge
   repairs what the validation found
 - **AND** an `inconclusive` validation of the merged `HEAD` names the owner
+
+#### Scenario: A validation of HEAD merged after the archive fails
+
+- **WHEN** the merge after the archive named archive cleanup or a merge review, and
+  the validation of the merged `HEAD` failed
+- **THEN** the computation names the merge after the archive, carrying the exit it
+  named, so it repairs what the validation found
 
 #### Scenario: A round's validation is inconclusive
 
@@ -1976,9 +2140,10 @@ owner's direction as its override.
 ### Requirement: CW-xo82 The archive guards both sides of closeout
 
 The change's archive MUST be an unwaivable entry guard of the closeout review, its
-triage, and archive cleanup, and its absence one of design, planning,
-implementation, and the merge before closeout. Closeout MUST be reached by a step's
-exit only from the merge.
+triage, archive cleanup, the merge after the archive, the merge review, and its
+triage, and its absence one of design, planning, implementation, and the merge before
+closeout. Closeout MUST be reached by a step's exit only from the merge before
+closeout.
 
 #### Scenario: A step's exit meets an unmet entry guard
 
@@ -1986,6 +2151,13 @@ exit only from the merge.
   and the change's directory is not under the archive
 - **THEN** the computation names the owner, with the exit and the entry guard, and
   no closeout review
+
+#### Scenario: The owner directs implementation of an archived change
+
+- **WHEN** a merge after the archive found a conflict it cannot resolve so that both
+  sides hold, and the owner directs `{"step": "round"}`
+- **THEN** the log's writer refuses the direction, naming the entry guard, and the
+  merge's question stays with the owner
 
 ### Requirement: CW-iaeh A triage needs a record to triage, and a validation a target
 
@@ -2015,12 +2187,21 @@ exit, not on its entry.
 ### Requirement: CW-9tzd Archive cleanup ends at the terminal node
 
 Archive cleanup's exit MUST be the terminal node `done`, which has no exits and no
-step, and which no direction reaches.
+step, and which no direction reaches. An archived change MUST stay at `done` until the
+owner directs the merge after the archive, or archive cleanup's first exit is guarded
+to it (CW-5vkd).
 
 #### Scenario: Archive cleanup finishes
 
-- **WHEN** archive cleanup ends finished, naming `{"step": "done"}`
+- **WHEN** archive cleanup ends finished, naming `{"step": "done"}`, and the run's
+  commit contains the landing commit its outcome recorded
 - **THEN** the computation names `done`, with the reason `archived`, and no step runs
+
+#### Scenario: The owner directs done
+
+- **WHEN** the owner directs `{"step": "done"}`
+- **THEN** the log's writer refuses the direction, since only archive cleanup's exit
+  reaches `done`
 
 ### Requirement: CW-66kx The graph diagram is held to the table
 
@@ -2328,6 +2509,22 @@ The orchestrating session MUST NOT name one.
 - **THEN** the review runs on that model alone, and its record and log line mark it
   as the owner's override
 
+### Requirement: CW-f0cs The owner may direct one review where to look harder
+
+The owner MAY give one review run a direction in their words, through the review
+command's `--arguments` (the convenience target's `ARGUMENTS`). The reviewer's
+prompt MUST carry it, and every log line of that run MUST record it as `direction`.
+The reviewer MUST answer it and MUST still review the whole change in the review
+format, asking every question of its kind: a direction never narrows a review.
+
+#### Scenario: The owner points a pre-closeout review at the guidance edits
+
+- **WHEN** the owner runs a pre-closeout review with the direction "check the
+  guidance edits sit where the new layers put them"
+- **THEN** the reviewer's prompt carries those words, the review answers them
+  beside every other question of a pre-closeout review, and the run's log line
+  records them as its `direction`
+
 ### Requirement: CW-w2ld The orchestrating session's model is the configuration's
 
 The configuration MUST name the orchestrating session's model and effort, and the
@@ -2526,20 +2723,20 @@ with the branch given as an argument.
 
 ### Requirement: CW-ikmm Archive cleanup removes a change's validation resources
 
-Archive cleanup MUST run the `cleanup` of every validation part that declares one,
-through `run cleanup <change>`, which runs them in declaration order as one list
-(CW-k9vd), and each cleanup MUST succeed when it finds nothing to clean. A tracked
-file a cleanup writes MUST be committed on its own.
+Before archive cleanup's session starts, the engine MUST run the `cleanup` of every
+evidence kind that declares one, in declaration order as one list (CW-k9vd), and each
+cleanup MUST succeed when it finds nothing to clean. `run cleanup <change>` MUST run
+the same list again. A tracked file a cleanup writes MUST be committed on its own.
 
 #### Scenario: A change's validation left resources
 
-- **WHEN** archive cleanup runs for a change whose Helm part left a namespace
-- **THEN** it runs that part's cleanup and reports what it removed
+- **WHEN** archive cleanup starts for a change whose Helm kind left a namespace
+- **THEN** the engine runs that kind's cleanup first, and the session reports what it
+  removed
 
-#### Scenario: A part's cleanup finds nothing
+#### Scenario: A kind's cleanup finds nothing
 
-- **WHEN** archive cleanup runs a part's cleanup for a change that part never
-  validated
+- **WHEN** the engine runs a kind's cleanup for a change that kind never validated
 - **THEN** the cleanup succeeds, removing nothing
 
 ### Requirement: CW-d8de Each skill has one source for every harness
@@ -2644,16 +2841,16 @@ from the graph's declaration alone.
 ### Requirement: CW-m4ps An adopting repository provides the workflow's roles
 
 The workflow MUST describe each field of the configuration, who uses it, and how,
-and each role an adopting repository provides outside it, with the skills that use
-it. A repository MUST state how it provides what the configuration does not hold. A
-test MUST fail on a make target or repository path the skills or step table name that
-both the statement and the configuration's commands omit.
+and each role an adopting repository provides outside it. A repository MUST state how
+it provides what the configuration does not hold. A test MUST fail on a make target
+or repository path the step table or the make fragment names that both the statement
+and the configuration's commands omit.
 
 #### Scenario: A skill names a new target
 
-- **WHEN** a skill is edited to run `make check-something` and this repository's
-  statement of its roles does not list that target
-- **THEN** the test fails, naming the target and the skill
+- **WHEN** a skill is edited to run `make check-something`
+- **THEN** the test fails, naming the target and the skill, since a skill names no
+  repository's target (CW-n8tr), whatever this repository's statement lists
 
 #### Scenario: A role has no provision
 
@@ -2756,8 +2953,8 @@ MUST govern the reviews it names.
 ### Requirement: CW-q3dm Waivers are recommended and the owner's to take
 
 A step that meets a guard the owner may waive MAY recommend a waiver only when a
-written criterion holds — the commits differ from validated ones only in paths no part
-of validation exercises; a failure is a known environmental one diagnosed in an earlier
+written criterion holds — the commits differ from validated ones only in paths no
+evidence kind exercises; a failure is a known environmental one diagnosed in an earlier
 validation record of the change; a review and a validation name commits that differ
 only in records or documentation; or a decision made after a return to design is
 confined to one requirement's wording or a choice the design review weighed — and the
@@ -2908,7 +3105,7 @@ be read as absent. `check config` MUST run the same check alone.
 
 ### Requirement: CW-t5hz A missing required field refuses only the steps that need it
 
-A required field — `hooks.pre-commit-functional`, at least one validation part,
+A required field — `hooks.pre-commit-functional`, at least one evidence kind,
 `repository.protected-branches`, and the models of each step run unattended and of
 the orchestrating session — MUST, when absent, make the engine refuse a step that
 needs it before launching it, naming the field. An explicit empty value MUST count
@@ -2931,7 +3128,8 @@ A repository's commands MUST be declared as hooks named by the moment they run:
 `after-functional-change`, after a step's last functional change and before its
 pre-commit hooks; `pre-commit`, before every commit; `pre-commit-functional`, before
 a commit with a functional change; `pre-archive`, before closeout's archive;
-`pre-push`, before the guarded push sends; `post-clone`, as a clone is made.
+`pre-push`, before the guarded push sends; `post-clone`, as a clone is made; and
+`before-<step>` and `after-<step>`, around each step's session (CW-h3ks).
 
 #### Scenario: A merge resolves a conflicted lock
 
@@ -2957,13 +3155,24 @@ The engine MUST hold, beside the graph, which steps may run each hook through `r
 which no repository changes. An unattended run's marker MUST name its step, and `run`
 MUST refuse a hook its step is not listed for, naming both; a run with no marker
 MUST NOT be restricted. `pre-push` and `post-clone` MUST be run only by the engine's
-`push` and `clone`.
+`push` and `clone`. `test-before`, which implementation and triage MAY run, MUST run
+each named test file as `HEAD` holds it against an earlier commit — the round's base
+unless one is given — in a detached worktree it removes however the run ends, and
+MUST NOT change the change's worktree.
 
 #### Scenario: Validation asks for a functional hook
 
 - **WHEN** an unattended validation runs `scripts/change-workflow run
   after-functional-change <change>`
 - **THEN** `run` refuses, naming the hook and the validate step, and runs nothing
+
+#### Scenario: A fix's test is shown to fail before the fix
+
+- **WHEN** a triage runs `scripts/change-workflow run test-before <change> --test
+  <its new test>` with the round's base recorded
+- **THEN** the test runs against the base in a worktree of its own, its closing line
+  says whether it failed there, and afterwards the change's worktree is as it was and
+  no extra worktree remains
 
 ### Requirement: CW-y6mj A pre-commit hook changes nothing
 
@@ -2979,9 +3188,14 @@ worktree, so that a review MAY run it.
 ### Requirement: CW-n7ra The repository's inert paths
 
 The repository's inert paths, `repository.inert-paths`, MUST name the paths a change
-to which alters nothing validation or a code check would prove. The engine MUST read
-no inert path of its own; with none declared, no path is inert and only changes'
-records are exempt where a requirement exempts them.
+to which alters nothing validation or a code check would prove, other than a test
+that checks a document for currency, which the next full run of the suites reads
+again. An entry without a glob character MUST match a directory or a file whole; an
+entry with one MUST match as a pattern over the whole path, `**` spanning any number
+of directories. Where a repository declares none, the workflow's default MUST apply:
+`openspec/` and every Markdown file, `**/*.md`. A declaration, an empty one included,
+MUST replace the default; with an empty one, no path is inert, and only changes'
+records and the archive's own writes are exempt, where a requirement exempts them.
 
 #### Scenario: A repository marks images inert
 
@@ -2989,12 +3203,33 @@ records are exempt where a requirement exempts them.
   after a pre-closeout review changes only `assets/logo.svg`
 - **THEN** the computation accepts it without a new validation
 
+#### Scenario: A repository marks every README inert
+
+- **WHEN** a repository declares `inert-paths = ["docs/", "**/README.md"]` and a
+  commit changes only `tools/README.md` and `README.md`
+- **THEN** `run pre-commit` runs `pre-commit` alone, and after a pre-closeout review
+  the computation accepts the commit without a new validation
+
+#### Scenario: A repository declares no inert paths
+
+- **WHEN** a repository's configuration has no `repository.inert-paths` and a commit
+  changes only `guides/setup.md` and a capability's `spec.md` under `openspec/`
+- **THEN** `run pre-commit` runs `pre-commit` alone, as the default makes both paths
+  inert
+
+#### Scenario: A repository declares an empty list
+
+- **WHEN** a repository declares `inert-paths = []` and a commit changes only
+  `guides/setup.md`
+- **THEN** `run pre-commit` runs the functional hooks before `pre-commit`, since the
+  empty declaration replaces the default
+
 ### Requirement: CW-e1sg A commit's hooks follow from the paths it changes
 
 Before a commit changing any path outside the inert paths, a step MUST run
 `after-functional-change`, then `pre-commit-functional`, then `pre-commit`; before
 any other commit, `pre-commit` alone. Only implementation, triage, and the merge make
-functional commits. A tracked file a validation part's cleanup writes is the
+functional commits. A tracked file an evidence kind's cleanup writes is the
 repository's own record, made by its declared command, which answers for it:
 archive cleanup MUST commit it on its own, without the hooks (CW-ikmm).
 
@@ -3029,13 +3264,12 @@ reason, under `defaults.disable`. `check change <change>` MUST run them alone.
 
 ### Requirement: CW-v2dq A command receives its values through placeholders
 
-A declared command MUST receive the workflow's values as placeholders the engine
-fills in, shell-quoted, before running it with `sh -c` from the repository's root:
-`{change}`, `{base}`, `{remote}` in `pre-push` only, `{owed}` in an owed part only,
-filled from `run`'s `--owed <workflow>`, and `{after}` in a `collect` only. `run` MUST
-refuse `--owed` for a part not owed, and its absence for an owed part. A value of the
-owner's machine MUST reach the command through the environment, not the
-configuration.
+A declared command MUST receive the workflow's values as shell-quoted placeholders,
+run with `sh -c` from the repository's root: `{change}`, `{base}`; `{remote}` in
+`pre-push`; `{owed}` in an owed kind; `{after}` in a `collect`; `{tree}` and
+`{commit}` in a kind's commands and pattern and the functional hooks; `{kind}` in review and triage hooks;
+`{inputs}` in step hooks. A value of the owner's machine MUST reach it through the
+environment.
 
 #### Scenario: A placeholder is used where it is unavailable
 
@@ -3044,97 +3278,102 @@ configuration.
 
 ### Requirement: CW-g4oz Validation runs the parts the configuration declares
 
-Validation MUST run the parts the configuration declares but those waived: each
-`run` once, or `start` then `collect`; an owed part once per `Owed by validation:`
-line of a complete section. It MUST start every started part, in declared order,
-before it runs any `run` part, then run the `run` parts in declared order, each after
-the part its `after` names. It MUST run
-`validation.preflight` first, a failure ending it as environmental, and MUST
-diagnose each failure from the part's declared evidence. It MUST learn the parts from
-`config parts <change>`, never from the configuration's representation: the
-preflight, then each run of a part in declaration order with its shape, the part it
-follows, and its evidence, an owed part once per owed workflow, named by its part and
-that workflow, or once as not owed when no complete section owes it. Which parts are
-waived MUST stay validation's judgement, not the plan's. A part's `after` MUST name a
-part declared before it, and a part that is started and collected MUST follow only
-another such part, since every dispatch starts before any long part runs; the
-configuration's check MUST refuse any other `after`.
+The configuration MUST declare each evidence kind under `[validation.evidence.<kind>]`
+with its requirement, its pattern holding `{tree}` or `{commit}` (CW-t3ev), `run` or
+`start` then `collect`, and its guide (CW-k7gd), and MAY declare `after` and
+`cleanup`. The engine MUST gather started kinds before `run` kinds, each after the
+kind its `after` names. The configuration's check MUST refuse an `after` naming no
+other kind declared before it, and a started kind's `after` naming a `run` kind.
 
 #### Scenario: Two sections owe CI workflows
 
-- **WHEN** one complete section owes `ci.yml` and another owes `docker.yml`
-- **THEN** `config parts` lists the `ci` part twice, as `ci ci.yml` and `ci
-  docker.yml`, and validation starts and collects each by that name
+- **WHEN** one complete section owes `(ci ci.yml)` and another `(ci docker.yml)`
+- **THEN** `evidence` lists the `ci` kind twice, as `ci ci.yml` and `ci docker.yml`,
+  and the gathering starts and collects each by that name
 
-#### Scenario: A long part is declared before a dispatched one
+#### Scenario: A long kind is declared before a dispatched one
 
-- **WHEN** the configuration declares `local`, a `run` part, before `pipeline`, a
-  `start` and `collect` part, and neither names an `after`
-- **THEN** `config parts` lists `local` first, and validation starts `pipeline` before
-  it runs `local`
+- **WHEN** the configuration declares `local`, a `run` kind, before `pipeline`, a
+  `start` and `collect` kind, and neither names an `after`
+- **THEN** the gathering starts `pipeline` before it runs `local`
 
-#### Scenario: A repository has no Helm part
+#### Scenario: A dispatched kind follows a long one
 
-- **WHEN** a repository declares only a `local` part
-- **THEN** validation runs that part alone, and its record names no other
+- **WHEN** `pipeline`, a `start` and `collect` kind, declares `after = "local"`, a
+  `run` kind
+- **THEN** every reader of the configuration refuses, naming `pipeline`'s `after`,
+  since every start is dispatched before any `run` kind runs
+
+#### Scenario: A kind follows one declared after it
+
+- **WHEN** `local` declares `after = "helm"` and `helm` is declared below it
+- **THEN** every reader of the configuration refuses, naming `local`'s `after`
+
+#### Scenario: A repository has no Helm kind
+
+- **WHEN** a repository declares only a `local` kind
+- **THEN** validation assesses that kind alone, and its record names no other
 
 #### Scenario: No section owes CI evidence
 
-- **WHEN** a part is declared `owed` and no complete section has an `Owed by
-  validation:` line
-- **THEN** the part is not started, and the record says it is not owed
+- **WHEN** a kind is declared `owed` and no complete section owes it
+- **THEN** it is not gathered, and the record says it is not owed
 
 ### Requirement: CW-x9bt The engine keeps a started part's marker and closes each part
 
 A declared command MUST promise only its exit status and, for a `start`, a last
 line of standard output naming the marker its `collect` waits past. The engine MUST
-keep that marker for the commit, the part, and an owed part's workflow, a later
-`start` of the same key replacing it, MUST fill `{after}` from it, and MUST end each
-part with a closing line naming the part, its owed workflow, the commit, the result,
+keep that marker for the tree or commit the kind's pattern keys, the kind, and an
+owed kind's argument, a later `start`
+of the same key replacing it, MUST fill `{after}` from it, and MUST end each kind's
+gathering with a closing line naming the kind, its argument, the tree or commit, the
+result,
 the exit status, and the evidence.
 
 #### Scenario: Two owed runs are collected side by side
 
-- **WHEN** validation starts `ci` for `ci.yml`, which prints `401`, then for
-  `docker.yml`, which prints `402`, and collects both in the background
+- **WHEN** the gathering starts `ci` for `ci.yml`, which prints `401`, then for
+  `docker.yml`, which prints `402`, and collects both
 - **THEN** the collect of `ci.yml` waits past `401` and the collect of `docker.yml`
   past `402`
 
 #### Scenario: The pipeline is collected
 
-- **WHEN** a part's `start` printed `40733870392` last, and validation then runs its
-  `collect`
+- **WHEN** a kind's `start` printed `40733870392` last, and the gathering then runs
+  its `collect`
 - **THEN** the engine fills `{after}` with `40733870392`, with no marker passed by
-  the skill
+  a skill
 
 ### Requirement: CW-q5fy Each run's log line records what it invoked
 
-The log line of a run MUST record, as `invoked`, each hook, part, and command the run
-invoked through `run` or the guarded push, with its owed workflow and phase where it
-has them, the command it resolved to, its exit status, when it started, and how long
-it took. An unattended run's line is the wrapper's, an interactive run's the one
-`record` writes; an invocation outside any session MUST NOT be recorded. A clone's
-bootstrap, which belongs to no step's run, MUST be recorded in its bootstrap state
+The log line of a run MUST record, as `invoked`, each hook, kind, and command the run
+or its gathering invoked through the engine, with its argument and phase where it has
+them, the command it resolved to, its exit status, when it started, and how long it
+took, and MUST name the run's inputs directory. An invocation outside any session
+MUST NOT be recorded; a clone's bootstrap MUST be recorded in its bootstrap state
 (CW-8npg).
 
 #### Scenario: A step's push is refused by the pre-push hook
 
-- **WHEN** an unattended validation's guarded push runs `pre-push` and it exits 1
+- **WHEN** a validation's gathering pushes and `pre-push` exits 1
 - **THEN** the run's log line lists `pre-push` with its resolved command and exit
   status 1
 
-#### Scenario: Validation's Helm part fails
+#### Scenario: Validation's Helm kind fails
 
-- **WHEN** an unattended validation's `helm` part exits 2
-- **THEN** the run's log line lists that part with its resolved command and exit
+- **WHEN** the gathering's `helm` kind exits 2
+- **THEN** the run's log line lists that kind with its resolved command and exit
   status 2, whatever the validation record says
 
 ### Requirement: CW-s3ju The branch a change lands on is recorded where its orchestration began
 
 When the orchestrating session creates a change's clone, the engine MUST record the
 branch the workspace had checked out, or the clone's `--from`, as the branch the
-change lands on, and `find --json` MUST print it as `base`. An argument MUST override
-it for one run. A step needing it, with none recorded or given, MUST refuse.
+change lands on, and `find --json` MUST print it as `base`. A merge given no branch
+MUST bring in the branch the change's last finished merge recorded (CW-5vkd), else the
+clone's. An argument MUST override both. A step needing it, with none recorded or
+given, MUST refuse. The merge's target MUST pass the owner's direction after the
+branch, as every other step's target passes its own, and the merge MUST follow it.
 
 #### Scenario: Orchestration is run again from another branch
 
@@ -3144,22 +3383,51 @@ it for one run. A step needing it, with none recorded or given, MUST refuse.
 
 #### Scenario: A change worked in place merges with no base given
 
-- **WHEN** a change worked in place, with no clone, reaches the merge and no branch
-  is given
+- **WHEN** a change worked in place, with no clone, reaches the merge, no earlier
+  merge recorded `landing`, and no branch is given
 - **THEN** the merge refuses, naming the argument that gives the branch
+
+#### Scenario: The owner briefs the merge
+
+- **WHEN** the owner starts the merge with a direction and no branch
+- **THEN** the merge's invocation names the recorded branch, then the owner's
+  direction in their words
+
+#### Scenario: The merge before closeout is repeated after a review of it
+
+- **WHEN** a change's clone recorded `dev`, its first merge was given `FROM=main`, and
+  the pre-closeout review's triage advances to the merge again with no branch given
+- **THEN** `start merge` brings in `main`, the branch the first merge's `landing`
+  recorded
 
 ### Requirement: CW-l7hn A step's documents to load come from the configuration
 
 The documents a step's skill loads MUST be `load.common` and `load.<step>`, printed
 together by `config load <step>`; `config load common` MUST print `load.common`
 alone, for a session no step runs; and the post-compaction hook MUST have a session
-re-read `load.common`.
+re-read `load.common`. An entry ending in `/` names a directory and MUST resolve to
+the Markdown files beneath it, in sorted path order, each printed once; `config load`
+MUST refuse, naming the entry, a directory entry that is missing, unreadable, or
+holds no Markdown file.
 
 #### Scenario: Design loads the roadmap
 
 - **WHEN** the configuration lists the roadmap under `load.design`
 - **THEN** `config load design` prints the common documents and the roadmap, and
   `config load plan` prints only the common documents
+
+#### Scenario: A directory entry
+
+- **WHEN** `load.common` names `docs/guidance/`, which holds
+  `engineering/comments.md` and `workflow/closeout.md`
+- **THEN** `config load common` prints both files' paths in sorted order in place of
+  the directory, and the post-compaction hook names them
+
+#### Scenario: A directory entry names nothing
+
+- **WHEN** `load.common` names `docs/guidens/`, which does not exist
+- **THEN** `config load common` fails, naming the entry, and the post-compaction hook
+  tells the session the documents to re-read are unknown
 
 ### Requirement: CW-i2we The OpenSpec CLI runs through the configured command
 
@@ -3176,9 +3444,8 @@ through `openspec.command`, or `openspec` on the path when none is declared; `op
 ### Requirement: CW-o6kc The configuration's resolution is listed
 
 `config` MUST list every field and how it resolved — declared, default, disabled, or
-absent — with the command it resolves to, and `config --json` MUST give the same as
-structured output. `config parts <change>`, and its `--json`, MUST list validation's
-plan for the change (CW-g4oz).
+absent — with the command it resolves to, each evidence kind's guide among them, and
+`config --json` MUST give the same as structured output.
 
 #### Scenario: An optional hook is absent
 
@@ -3196,10 +3463,830 @@ step changes what its own hooks run.
 - **WHEN** an unattended implementation run tries to write `.agents/workflow.toml`
 - **THEN** the write is denied and recorded on the run's line
 
+### Requirement: CW-m4qe An archived change's branch merges its landing branch again
+
+The merge after the archive MUST bring the branch the change lands on, or the one the
+owner names, into an archived change's branch, resolving and reconciling as the merge
+before closeout does (CW-hdxi). It MUST be entered only once archive cleanup has run
+and while the change's index row says `archived`, by the owner's direction or archive
+cleanup's exit guard (CW-5vkd), and MUST declare no return. A `merge` run logged after
+an `archive-cleanup` run MUST be read as its run, other than a finished merge
+recording no `landing` where no finished merge before it recorded one (CW-j7wp).
+
+#### Scenario: The owner directs a merge after the archive
+
+- **WHEN** an archived change's pull request conflicts with the branch it lands on,
+  and the owner tells the orchestrating session to merge that branch again
+- **THEN** the owner's direction to `{"step": "late-merge"}` is recorded, the
+  computation names the merge, and the merge runs on the archived change
+
+#### Scenario: A merge after the archive is directed before archive cleanup
+
+- **WHEN** the owner directs `{"step": "late-merge"}` while the change's closeout
+  review awaits triage
+- **THEN** the log's writer refuses the direction, naming the entry guard that
+  archive cleanup has run
+
+#### Scenario: A merge after the archive is directed for a change whose row was pruned
+
+- **WHEN** the owner directs `{"step": "late-merge"}` for an archived change the change
+  index no longer lists
+- **THEN** the log's writer refuses the direction, naming the entry guard that the
+  change's index row says `archived`
+
+#### Scenario: The landing branch has gained nothing
+
+- **WHEN** a merge after the archive fetches the branch the change lands on and finds
+  no commit `HEAD` lacks
+- **THEN** it merges nothing and names archive cleanup, and `HEAD` and its validation
+  stand
+
+### Requirement: CW-x9tb The merge after the archive judges its review
+
+The merge after the archive MUST judge whether its resolutions need a merge review,
+against written criteria: a conflict resolved outside the mechanical files, a
+reconciliation of the change's code or scenarios, a file outside the mechanical files
+that both sides changed since the merge base, or a contract the landing branch changed
+in meaning. It MUST name the
+merge review or archive cleanup as its exit, which the orchestrating session MUST
+follow without asking the owner. The owner's waiver of the merged `HEAD`'s validation
+MUST be a direction to the exit the merge named, so that a merge review it named is
+not skipped with the validation; skipping that review too MUST be a direction to
+archive cleanup whose reason says it skips both.
+
+#### Scenario: Both changes edited one specification
+
+- **WHEN** the landing branch and the change each changed one `spec.md` since their
+  merge base, and Git merged it without a conflict
+- **THEN** the merge names `{"step": "review", "kind": "merge"}`, and the
+  orchestrating session runs that review once the merged `HEAD` is validated
+
+#### Scenario: Only the change index conflicted
+
+- **WHEN** the merge's only conflict was a row of the change index, and it reconciled
+  nothing
+- **THEN** it names archive cleanup, and the orchestrating session asks the owner
+  nothing
+
+#### Scenario: The owner waives only the validation of a merge that named its review
+
+- **WHEN** the merge after the archive named `{"step": "review", "kind": "merge"}`,
+  and the owner waives the validation of the merged `HEAD`
+- **THEN** the owner's direction names the merge review, and the computation names
+  that review, not archive cleanup
+
+### Requirement: CW-r2hu A merge review reads what a merge after the archive did
+
+A review of kind `merge` MUST read the merge after the archive: each conflict's
+resolution against both parents, each permanent specification and index it touched
+for both changes' meaning, and the change's code and end-to-end scenarios against
+what the landing branch changed. Its triage MUST advance to archive cleanup, once a
+fix outside the inert paths is validated, or name another merge review, and MUST
+declare no return.
+
+#### Scenario: A merge review's triage commits a code fix
+
+- **WHEN** a merge review's triage commits a fix to the change's code and names
+  archive cleanup
+- **THEN** the computation names a validation of `HEAD` with archive cleanup as its
+  target, and archive cleanup once it passed
+
+#### Scenario: A merge review is directed for a change not archived
+
+- **WHEN** the owner directs `{"step": "review", "kind": "merge"}` for a change in
+  implementation
+- **THEN** the log's writer refuses it, naming the archive entry guard
+
+### Requirement: CW-5vkd Archive cleanup's first exit waits for the landing branch
+
+Each merge's `finished` outcome, before closeout and after the archive, MUST record
+as `landing` the remote it fetched from, as its checkout names it or `.` for a branch
+the checkout holds, the branch it fetched, and the commit it fetched; a repair of a
+failed validation of the merged `HEAD`, which fetches nothing, MUST record the
+`landing` of the merge it repairs, and MAY omit it only before archive cleanup, when
+no finished merge in the log recorded one. The log's writer MUST refuse a finished merge's line whose `landing`
+is absent, other than for that repair, or malformed, names a remote that is neither one
+of the checkout's remotes nor `.`, or names a commit the run's `HEAD` does not contain,
+and MUST NOT require `landing` on a merge's `question`, `stopped`, or `returned`
+outcome. `start merge` MUST bring in the branch it is given, else the last finished
+merge's `landing` branch, else the branch the change's clone recorded (CW-s3ju), and
+MUST refuse with none. Archive cleanup MUST fetch the remote and branch the last
+finished merge's `landing` names, else the branch the change's clone recorded, MUST ask
+the owner when the recorded remote is not one of its checkout's, MUST end `stopped`
+rather than `finished` when the fetch fails, and MUST record what it fetched as its
+outcome's `landing`, the log's writer recording whether the run's commit contains it.
+The log's writer MUST refuse a finished archive cleanup line without a well-formed
+`landing` whenever such a source resolves for the change, and MUST refuse one whose
+`landing` names a branch other than that source's; a remote other than the source's
+where the source names a remote that is `.` or one of the checkout's, or otherwise — no
+source, a source naming no remote, or a remote the checkout lacks — a remote that is
+neither; or a commit other than the one the checkout's ref for that remote and branch
+names as the line is written — the remote-tracking branch, or, for `.`, the branch
+itself. Archive cleanup's first exit
+to `done` MUST be guarded by that recorded result, the guard's remedy the merge after
+the archive; a later exit MUST NOT be. The guard MUST read only the log, so that no
+fetch after the line was written changes it and the computation reads nothing over the
+network. An archive cleanup line with no `landing` MUST be read as checked.
+
+#### Scenario: The landing branch moved during closeout
+
+- **WHEN** archive cleanup first ends finished naming `{"step": "done"}`, and the
+  commit its `landing` records is not contained in the run's commit
+- **THEN** the computation names the merge, carrying `done` as its target, and the
+  orchestrating session runs it without asking the owner
+
+#### Scenario: The landing branch moves after the pull request opened
+
+- **WHEN** archive cleanup's first run recorded a `landing` commit its commit
+  contains, and a later fetch moves the landing branch's ref while the pull request
+  is open
+- **THEN** the computation still names `done`, and the owner directs a merge when
+  they want one
+
+#### Scenario: The landing branch moved after a merge after the archive
+
+- **WHEN** archive cleanup ends finished after a merge after the archive, and the
+  branch the change lands on has gained a commit since that merge
+- **THEN** the computation names `done`, and the owner directs another merge when
+  they want one
+
+#### Scenario: A change archived before the record existed
+
+- **WHEN** an archived change's log ends at an archive cleanup line with no `landing`,
+  and its landing branch has moved on since
+- **THEN** the computation names `done`
+
+#### Scenario: The merge before closeout was given another branch
+
+- **WHEN** a change's clone recorded `dev`, the merge before closeout was given
+  `FROM=main`, and archive cleanup runs
+- **THEN** archive cleanup fetches `main`, the branch the merge's `landing` names
+
+#### Scenario: Archive cleanup records another source than it fetched
+
+- **WHEN** the last finished merge's `landing` names `main` from `origin`, and archive
+  cleanup's finished outcome records `dev`, or `main` with a commit other than the one
+  `origin/main` names in its checkout, such as the merge's own `landing.commit`
+- **THEN** the log's writer refuses the line, naming the field, whether or not the
+  run's commit contains the recorded commit
+
+#### Scenario: A merge's outcome records no landing branch
+
+- **WHEN** a merge's `finished` outcome has no `landing`, or one whose commit `HEAD`
+  does not contain, or whose remote is not one of the checkout's remotes nor `.`
+- **THEN** the log's writer refuses the line, naming the field
+
+#### Scenario: A merge stops at a conflict it asks about
+
+- **WHEN** a merge ends with a `question` at a conflict it leaves in progress, or ends
+  `stopped` before it fetched
+- **THEN** the log's writer records the line without `landing`
+
+#### Scenario: A repair of the merged HEAD finishes
+
+- **WHEN** a merge run repairs what a failed validation of the merged `HEAD` found,
+  fetching nothing, and ends `finished`
+- **THEN** its `landing` is the one the merge it repairs recorded, and archive cleanup
+  fetches that remote and branch
+
+#### Scenario: A repair of a merge logged before the record existed
+
+- **WHEN** a merge before closeout was logged finished without `landing` by an engine
+  that predates the field, the validation of its merged `HEAD` failed, and its repair
+  ends `finished` without `landing`
+- **THEN** the log's writer records the line, and archive cleanup fetches the branch
+  the change's clone recorded, or, with no clone, fetches nothing and its line is read
+  as checked
+
+#### Scenario: Archive cleanup's fetch fails
+
+- **WHEN** archive cleanup cannot fetch the source the last finished merge's `landing`
+  names
+- **THEN** it ends `stopped`, naming the fetch, the computation names archive cleanup
+  again, and a finished cleanup line without `landing` would be refused by the log's
+  writer
+
+#### Scenario: A merge in a clone fetched from the workspace
+
+- **WHEN** a merge in a change's clone fetched a branch only the owner's workspace
+  holds, recording `landing.remote` as `workspace`
+- **THEN** archive cleanup, in that clone, fetches the branch from `workspace`, not
+  from `origin`
+
+#### Scenario: The recorded remote is absent from cleanup's checkout
+
+- **WHEN** the last finished merge's `landing.remote` is not one of the remotes of the
+  checkout archive cleanup runs in
+- **THEN** archive cleanup asks the owner which of its checkout's remotes, or `.`, to
+  take the branch from, and records nothing it guessed
+
+#### Scenario: A merge after the archive of a change worked in place
+
+- **WHEN** a merge after the archive starts for a change with no clone, without
+  `FROM`, and the merge before closeout recorded `landing` with branch `main`
+- **THEN** `start merge` brings in `main`
+
+#### Scenario: An older log records no branch
+
+- **WHEN** a merge starts without `FROM` for a change with no clone, and no finished
+  merge in its log recorded `landing`
+- **THEN** `start merge` refuses, naming `FROM`
+
+### Requirement: CW-p8fy Archive cleanup run again cleans up and copies only
+
+Archive cleanup run on a change whose index row already says `archived` MUST NOT
+release dependents, edit the row, or draft the pull request again. It MUST run the
+cleanup of every evidence kind, commit any tracked file that cleanup wrote, push,
+and copy the history, and MUST record what the cleanup reported by appending to the
+pull request's drafts.
+
+#### Scenario: Archive cleanup follows a merge after the archive
+
+- **WHEN** a merge after the archive's validation recreated the change's validation
+  resources, and archive cleanup runs again
+- **THEN** the resources are removed, any capacity figure the cleanup recorded is
+  committed on its own, the history is copied, and the row and dependents are
+  untouched
+
+### Requirement: CW-j7wp The computation answers done from the route
+
+For an archived change, the next-step computation MUST read the workflow log's route,
+and answer `done` only while that route ends at archive cleanup's exit to `done`, or
+the change has no log, whether or not it has an index row; a direction or exit logged
+after it MUST be followed. A change worked in its own clone MUST be named to its clone
+before `done` is answered. `done` MUST be answered before any check of which branch
+this checkout has checked out, and only a route with a step to run MUST go on to those
+checks and to the change's index row, naming the owner when the index has no row for
+the change. A finished merge logged after archive cleanup that records no `landing`,
+where no finished merge before it recorded one, MUST route nothing: it was run by hand
+before the merge after the archive was a node, and is a run of neither merge.
+
+#### Scenario: A merge was run by hand after archive cleanup before the merge after the archive was a node
+
+- **WHEN** archive cleanup's run named `done` and recorded no `landing`, and a later
+  finished `merge` line naming `done` records no `landing` either
+- **THEN** the computation names `done`, not the owner
+
+#### Scenario: The owner's direction follows done
+
+- **WHEN** archive cleanup's run named `done`, and a later line records the owner's
+  direction to `{"step": "late-merge"}`
+- **THEN** the computation names the merge, not `done`
+
+#### Scenario: An archived change in its clone is computed in the workspace
+
+- **WHEN** the computation runs in the owner's workspace for an archived change whose
+  clone still exists
+- **THEN** it names the clone, where the change's log is current, rather than `done`
+
+#### Scenario: An archived change without a clone, another branch checked out
+
+- **WHEN** the computation runs in the owner's workspace, with another branch checked
+  out, for an archived change with no clone whose records the workspace holds and
+  whose route ends at archive cleanup's exit to `done`
+- **THEN** it names `done`, not the owner
+
+#### Scenario: A merge after the archive directed without the branch
+
+- **WHEN** the owner directs `{"step": "late-merge"}` for an archived change with no
+  clone, and the workspace has another branch checked out
+- **THEN** the computation names the owner, until the change's branch is checked out
+
+#### Scenario: An archived change whose row was pruned
+
+- **WHEN** the change index no longer lists an archived change whose route ends at
+  archive cleanup's exit to `done`
+- **THEN** the computation names `done`
+
+### Requirement: CW-g3zn A merge after the archive keeps the change archived
+
+The merge after the archive MUST keep the change's index row `archived` and its
+archived directory as its branch has them, MUST release any row the landing branch
+brought that depends on the change, as archive cleanup does, and MUST record what it
+merged and how it was validated by appending to the pull request's drafts, never
+rewriting them.
+
+#### Scenario: The landing branch brought a dependent
+
+- **WHEN** the landing branch brought a change's row whose `Depends on` names the
+  archived change
+- **THEN** the merge removes the change from that row's `Depends on`, and sets a
+  status of `ready for planning`, `in planning`, or `ready for implementation` to
+  `ready for design`
+
+### Requirement: CW-g7lt Every guidance file carries one layer tag
+
+Every guidance file of an adopting repository MUST carry YAML frontmatter whose
+`tags` hold exactly one layer tag: `engineering` for guidance that holds in a
+repository using neither the workflow nor OpenSpec, `workflow` for guidance that
+holds in any repository adopting the workflow and names nothing of one repository,
+or `repository` for guidance that names the adopting repository's own packages,
+services, tools, documents, or targets. Every other tag MUST appear in the
+vocabulary table of the file's layer or of a lower one, engineering being the
+lowest and repository the highest.
+
+#### Scenario: A general rule with a market example
+
+- **WHEN** a section stating how comments are written cites a capability of the
+  adopting repository as its example
+- **THEN** the rule is tagged `engineering` with a neutral example, and the
+  repository's example moves to guidance tagged `repository`
+
+#### Scenario: A file states no layer
+
+- **WHEN** a guidance file's tags are `[testing, python]`
+- **THEN** it does not satisfy the requirement until one layer tag is added
+
+### Requirement: CW-d2rw Guidance never links to a higher layer
+
+A guidance file MUST NOT link to a guidance file tagged with a higher layer:
+engineering guidance links only to engineering guidance, and workflow guidance to
+workflow or engineering guidance.
+
+#### Scenario: Workflow guidance links to a repository document
+
+- **WHEN** a file tagged `workflow` links to a file tagged `repository`
+- **THEN** it does not satisfy the requirement, and the link is replaced by what the
+  workflow guidance can state without the repository
+
+### Requirement: CW-p9sa Guidance sits beside the system it pertains to
+
+Repository guidance that pertains to one system MUST sit beside that system's
+specification, in its capability directory; repository guidance spanning several
+systems MUST sit in the repository's cross-system documentation. The guidance
+placement part of closeout MUST check what a change added, moved, or rewrote against
+this requirement and the layer test, move what is misplaced, and report a placement
+needing a decision for the closeout review.
+
+#### Scenario: A capability's testing guidance
+
+- **WHEN** a section on how one capability's coverage divides between its packages'
+  tests sits in a repository-wide testing document
+- **THEN** it moves to a guidance file in that capability's directory
+
+#### Scenario: Closeout finds a misplaced promotion
+
+- **WHEN** a change's promotion writes a market rule into a file tagged
+  `engineering`
+- **THEN** closeout's guidance placement part moves it to repository guidance and
+  re-points its citations before the citations are checked
+
+### Requirement: CW-x4ex Exceptions to shared guidance are declared beside what they apply to
+
+A repository's exception to shared guidance — selecting a case the shared guidance
+leaves open, or overriding one of its rules — MUST be a row in a table headed
+"Exceptions to shared guidance" with the columns `Shared rule`, `Kind` (`selects` or
+`overrides`), `Here`, and `Reason`, sitting beside the component it applies to, or in
+the repository's root guidance when it spans several systems. Narrowing a shared
+rule is an ordinary repository rule and needs no row.
+
+#### Scenario: A repository is public
+
+- **WHEN** engineering guidance describes what may enter a private and a public
+  repository, and the adopting repository is public
+- **THEN** its root guidance holds a `selects` row citing the public case
+
+#### Scenario: One capability departs from a shared rule
+
+- **WHEN** one capability's tests patch a name the shared test-seam rule forbids
+  patching
+- **THEN** an `overrides` row sits in that capability's guidance, not in the root
+  guidance
+
+### Requirement: CW-n6dm Directories carry no meaning to the workflow
+
+The workflow MUST NOT derive a guidance file's layer or tags from the directory
+holding it; directories organize guidance for people, and the frontmatter alone
+states its layer and tags.
+
+#### Scenario: A workflow file in an engineering directory
+
+- **WHEN** a file tagged `workflow` sits under `docs/guidance/engineering/`
+- **THEN** it is workflow guidance, and moving it changes nothing the workflow does
+  with it
+
+### Requirement: CW-r8cg A step reads the guidance beside a capability
+
+Every Markdown file in a capability's directory other than its specification, its
+companion, and its index MUST be treated as that capability's guidance, whatever its
+name and whether or not it is tagged. Wherever a step reads a capability's
+specification and companion, it MUST also read every guidance file in that
+capability's directory.
+
+#### Scenario: Triage judges a finding against a capability
+
+- **WHEN** a finding cites a capability whose directory holds a guidance file with an
+  exception row
+- **THEN** the triage session reads that file with the specification before deciding
+  the finding's fix
+
+#### Scenario: Implementing a section that touches a capability
+
+- **WHEN** an implementation section changes code of a capability whose directory
+  holds a tagged `testing.md`
+- **THEN** the implementation session reads that file with the capability's
+  specification and companion
+
+### Requirement: CW-s7rq A skill restates guidance no stricter than its source
+
+A skill that restates a rule of the repository's guidance MUST restate it briefly,
+where its step applies the rule, and cite it; the restatement MUST NOT be stricter
+than its source. A step that needs a stricter rule MUST propose amending the
+guidance rather than restating it more strictly.
+
+#### Scenario: A skill needs a stricter rule
+
+- **WHEN** a step finds that the guidance's rule on test levels is too loose for the
+  work it does
+- **THEN** its skill keeps restating the rule as the guidance states it, and the
+  step proposes amending the guidance
+
+### Requirement: CW-b5cf An unattended step's calls take the forms its rules match
+
+An unattended step MUST run one command per shell call. A path it would otherwise
+reach by climbing with `..` after changing directory it MUST name from its
+checkout's root or read through a tool its rules allow for reading, and a file its
+rules refuse to a shell read it MUST read through such a tool. It MUST wait on a background command through the command's
+`wait`, never by following the command's output.
+
+#### Scenario: A step waits on a background suite
+
+- **WHEN** an unattended implementation runs the suites in the background
+- **THEN** it waits with `wait` on the output file for the line the suites print when
+  they end, never with a following read of the file
+
+### Requirement: CW-e3gt A step checks its entry before it works
+
+Planning, the merge, closeout, and archive cleanup MUST ask the next-step computation
+as they start, and go on only when it names them; archive cleanup MUST also go on
+when it names a validation before cleanup, and then only on the owner's waiver of
+that validation in the change's workflow log. A step that acts on a change's task
+list MUST check the task list first, and stop when a numbered task sits under another
+section's heading.
+
+#### Scenario: Closeout started before the merge
+
+- **WHEN** closeout is started while the computation names the merge
+- **THEN** closeout stops, naming the merge, and changes nothing
+
+### Requirement: CW-o9hd The orchestrating session tells the owner what it starts and leaves the owner's actions to them
+
+The orchestrating session MUST say when it starts a long unattended turn. When the
+owner tells it they closed an interactive step before it recorded its outcome, the
+session MUST start nothing for that step and MUST give the owner the command to
+resume or record it, never running it itself. After the owner hands back a step they
+took over, it MUST read the change's files again before routing.
+
+#### Scenario: The owner closed an interactive step before it recorded
+
+- **WHEN** the computation names again a step the owner ran interactively, and the
+  owner tells the orchestrating session they closed it before it recorded
+- **THEN** the orchestrating session starts nothing for it and gives the owner the
+  `record` command and the session to resume
+
+### Requirement: CW-t2lw A triage's records take their written shapes
+
+A triage MUST write each default acceptance's classification (CW-d5ac) on a line
+labelled `Classification:`, and MUST report the default acceptances under the
+heading "Accepted by default". It MUST make the default acceptances' fixes with the
+round's other accepted fixes. Each ledger line MUST be one JSON object with the keys
+`review`, `finding`, `section`, `lens`, `basis`, `severity`, `agent_position`,
+`owner_disposition`, and `summary`; an entry revising an earlier one, a revision of
+a revisit included, MUST begin its disposition `revises <review> <finding>:`, and a
+revisit of the advancing exit MUST name the finding `next`. A review pasted from elsewhere MUST
+be saved verbatim and triaged with any other review of its kind, the triage assigning
+its findings' lens, basis, severity, and alternatives.
+
+#### Scenario: The owner revises a revisit
+
+- **WHEN** the owner changes a disposition they gave in revisiting a default
+  acceptance
+- **THEN** one ledger line records it, its disposition beginning `revises` and naming
+  the review and finding
+
+### Requirement: CW-w6vy Waivers are recommended and recorded where they are given
+
+A step MUST make a waiver's recommendation in the message it already sends the owner.
+Planning that settled a design question itself MUST recommend a waiver of another
+design review when a criterion of CW-q3dm holds, and the merge after the archive MUST
+NOT
+recommend waiving its validation after reconciling the change's own code. Validation
+MUST take a standing waiver of its evidence kinds only from the owner's decision in
+the workflow log, never from an instruction in its invocation. That decision MUST
+name the kinds it waives; `evidence` MUST report each waived kind with the decision
+(CW-e2vd), the gathering MUST skip it unless a merge lapses the waiver, and `gather
+--kind` MUST refuse it without `--lapsed` (CW-g6th), and the validation record MUST say why the waiver's condition no
+longer holds when a waived kind is gathered (CW-e7lm). A standing waiver given as
+a triage's disposition MUST be that triage's ledger line, and one given outside a
+triage with no step's recommendation MUST stay in the workflow log alone. Archive
+cleanup MUST record the owner's waiver of its validation of a correction as a ledger
+line under the closeout review's record, its finding `validated`.
+
+#### Scenario: A waiver given in a validation's invocation
+
+- **WHEN** validation is started with an argument asking it to skip a kind
+- **THEN** it assesses the kind unless the change's workflow log holds the owner's
+  decision waiving it
+
+#### Scenario: Validation passes over a standing waiver
+
+- **WHEN** the owner's decision in the workflow log waives the Helm kind, and
+  validation runs `gather --kind helm` without judging the waiver
+- **THEN** the engine refuses, naming the decision, and gathers the kind only with
+  `--lapsed`, the validation record saying why the waiver's condition lapsed
+
+### Requirement: CW-d1nj A repository injects into the workflow through its configuration and its guides
+
+An adopting repository's configuration MUST hold every value the engine reads — what
+it runs, computes, orders, copies, or checks — and its guides MUST hold only what an
+agent is told. A value both need MUST live in the configuration, and a skill MUST
+learn it from the engine's structured output, never by reading the configuration's
+file.
+
+#### Scenario: A skill needs an evidence kind's pattern
+
+- **WHEN** the plan skill needs to know which evidence kinds may be owed
+- **THEN** it reads them from `config --json`, and no guide restates them
+
+### Requirement: CW-g2rs A guide restates nothing the configuration holds
+
+An evidence kind's guide MUST NOT restate a value its configuration entry holds, such
+as its commands, its evidence pattern, its requirement, or what it follows; review
+holds it to this.
+
+#### Scenario: A guide repeats its command
+
+- **WHEN** a guide's prose names the command its kind runs
+- **THEN** a review of the change that wrote it raises the duplication
+
+### Requirement: CW-k7gd An evidence kind has a guide the steps read
+
+Each evidence kind the configuration declares MUST name a guide, which MUST NOT be
+empty: Markdown, prose only, saying how to read the kind's evidence, how its failures are told apart, what
+its section of the validation record adds, what its cleanup writes, and what a
+section's verification names for it. Validation, planning, implementation, the
+merge, archive cleanup, and the reviews reading a validation record MUST read the
+guides of the kinds they handle.
+
+#### Scenario: The merge meets a file a cleanup writes
+
+- **WHEN** a merge conflicts over a tracked file a kind's cleanup writes
+- **THEN** the merge resolves it as that kind's guide says
+
+#### Scenario: A kind names no guide
+
+- **WHEN** a kind is declared with no `guide`, or with one naming an empty file
+- **THEN** every reader of the configuration refuses, naming the kind's `guide`
+
+### Requirement: CW-c5nt A skill names a contradiction it notices and follows its own text
+
+A guide or a hook's message MAY add to or narrow what a skill says. The workflow MUST
+NOT be taken to defend its obligations against the adopting repository's own
+extensions. A skill that notices a guide or message contradicting its own text MUST
+say so in its report and MUST follow its own text.
+
+#### Scenario: A guide is stale
+
+- **WHEN** a guide tells validation to write a record section the skill no longer
+  defines
+- **THEN** the validation's report names the contradiction and the record follows
+  the skill
+
+### Requirement: CW-n8tr The workflow's skills name no repository's targets or paths
+
+A make target or repository path a workflow skill names MUST be the workflow's own —
+its guidance, OpenSpec's tree, the change index, the make fragment's targets, or the
+engine's command — or one listed as an exemption owned by the change that removes
+it. A test MUST fail on any other, naming the skill.
+
+#### Scenario: A skill names a repository's check
+
+- **WHEN** a skill is edited to run `make check-comment-hygiene`
+- **THEN** the test fails, naming the target and the skill, and the skill names the
+  repository's comment check by its role
+
+### Requirement: CW-t3ev Evidence describes a tree, or a commit where its result depends on history
+
+An evidence kind's pattern MUST hold exactly one of `{tree}` and `{commit}`, and its
+evidence describes what that placeholder names. Evidence of a `{tree}` kind MUST
+describe the Git tree it was gathered against: `git write-tree` of the worktree as
+tested, its changes added to a temporary index that honours `.gitignore`; it MUST be
+reused for any commit whose tree is that tree. Evidence of a `{commit}` kind, whose
+result depends on the commit's history, MUST describe that commit, `HEAD`'s full
+object name, and MUST NOT be reused for another commit sharing its tree. Where the
+engine computes the identity — through a placeholder or its own gathering — it is
+the engine's; evidence written otherwise names its identity on its writer's word.
+
+#### Scenario: Implementation's checks stand for validation's
+
+- **WHEN** implementation's functional checks leave `local` evidence for the tree it
+  then commits
+- **THEN** validation of that commit finds `local` present and does not gather it
+
+#### Scenario: A commit amended only in its message
+
+- **WHEN** a commit validated with a `{commit}` pipeline kind is amended only in its
+  message, and the amended commit is validated
+- **THEN** its `{tree}` kinds are present and its pipeline kind is missing and
+  gathered
+
+### Requirement: CW-g1gn What the workflow writes after implementation is ignored by Git
+
+Every file a change's validation, its gathering, or a step hook writes after
+implementation MUST be ignored by Git, so that it never changes the tree its evidence
+describes. The configuration's check MUST refuse an evidence pattern whose fixed
+directory Git does not ignore.
+
+#### Scenario: An evidence pattern under a tracked directory
+
+- **WHEN** a kind declares `evidence = "reports/{tree}/*.json"` and `reports/` is not
+  ignored
+- **THEN** every reader of the configuration refuses, naming the kind's `evidence`
+
+### Requirement: CW-p4rs Evidence counts by its presence
+
+Evidence MUST count by being present at its kind's pattern for the tree or commit
+its pattern keys, whoever
+wrote it: a step, the engine, or whatever placed it from beyond the checkout. The
+workflow MUST NOT fetch evidence from beyond the checkout.
+
+#### Scenario: Evidence from an external topology
+
+- **WHEN** a run of tests needing a topology no checkout holds is placed at the
+  pipeline kind's pattern for the commit
+- **THEN** `evidence` reports the pipeline kind present, and validation assesses it
+
+### Requirement: CW-r5qk An evidence kind is required always or when owed
+
+Each evidence kind MUST be declared required `always` or when `owed`. An owed kind is
+required once for each argument a complete section's `Owed by validation (<kind>
+<argument>):` line names, and its evidence MUST be present for each argument on its
+own: an owed kind's pattern MUST hold `{owed}`. Every owed line MUST name an
+argument, a non-empty path segment that is neither `.` nor `..` and holds no `/`,
+whitespace, or glob character (`*`, `?`, `[`, `]`); the owed-line reader MUST refuse
+a line naming none or another, naming its section. A line naming no kind MUST be read
+as the one owed kind, its argument the first word in backticks, and refused when
+there is more than one owed kind. A waiver MUST name kinds.
+
+#### Scenario: A section owes the pipeline
+
+- **WHEN** a repository declares `pipeline` as owed and a complete section has
+  `Owed by validation (pipeline e2e.yml): scenario test_spot_deal_settles passes`
+- **THEN** `evidence` lists `pipeline e2e.yml` as required for that section
+
+#### Scenario: An owed argument climbs out of its directory
+
+- **WHEN** a complete section has `Owed by validation (ci ..): job lint — passes`
+- **THEN** the owed-line reader refuses the line, naming its section, and `evidence`
+  reports the refusal rather than a kind present or missing
+
+#### Scenario: Two workflows are owed and one has evidence
+
+- **WHEN** complete sections owe `(ci tests.yml)` and `(ci docker.yml)`, and only
+  `tests.yml`'s evidence is present
+- **THEN** `evidence` lists `ci tests.yml` present and `ci docker.yml` missing
+
+#### Scenario: An owed kind's pattern omits its argument
+
+- **WHEN** an owed kind declares `evidence = ".snapshot/evidence/{commit}/ci/*/summary.json"`
+- **THEN** every reader of the configuration refuses, naming the kind's `evidence`
+
+### Requirement: CW-e2vd The engine reports which required evidence is present
+
+`evidence <change>`, and its `--json`, MUST list for `HEAD`'s tree or commit, as
+each kind's pattern keys it, each required kind and an owed kind's argument, its
+pattern, and the evidence matching it, as present, missing, waived with the
+decision's `seq`, or not required. When several files match one kind and argument,
+it MUST list them all and mark the last in path order as current; validation MUST
+assess the current one and name its path in the record.
+
+#### Scenario: Only local evidence exists
+
+- **WHEN** `local` evidence exists for `HEAD`'s tree and no other kind's does
+- **THEN** `evidence` lists `local` present with its path and every other required
+  kind missing
+
+#### Scenario: A rerun beside a failed attempt
+
+- **WHEN** the Helm kind's pattern matches a failed attempt under
+  `20261117T1003Z/` and the rerun the owner allowed under `20261117T1140Z/`
+- **THEN** `evidence` lists both, the rerun as current, and validation assesses the
+  rerun
+
+### Requirement: CW-a8ss Validation gathers what is missing and assesses all of it
+
+Validation MUST gather each missing required kind and assess every required kind's
+evidence from its guide. Present failing evidence MUST be diagnosed, never gathered
+again for a pass; unreadable evidence MAY be gathered again, saying why. The record
+MUST name the tree and each kind's result and source, `present` or `gathered`.
+
+#### Scenario: Present evidence failed
+
+- **WHEN** `local` evidence present for the tree records a failing suite
+- **THEN** validation diagnoses the failure from it and does not run `local` again
+
+### Requirement: CW-g6th The engine gathers missing evidence before validation's session
+
+Before validation's session starts, the engine MUST run the preflight, push `HEAD`
+through the guarded push, start every missing `start` kind, run the missing `run`
+kinds in order, keeping each `after`, then collect each started kind. A gathering's
+failure MUST NOT prevent the session. A waived kind MUST be skipped unless a merge
+since it last ran lapses the waiver.
+
+`gather <change>` MUST gather only the required kinds and owed arguments that are
+missing and not waived, and MUST NOT gather a kind whose evidence is present. `gather
+<change> --kind <kind>` MUST gather a new attempt of that kind whatever is present: of
+the one owed argument `--owed <argument>` names, or of each argument the kind is owed
+without it. It MUST refuse a waived kind unless `--lapsed` is given. The skill MUST
+write the reason for a new attempt in the record beside the attempt's path.
+
+#### Scenario: The local suite fails during gathering
+
+- **WHEN** the gathering's `local` kind fails
+- **THEN** the session starts with that failure in its inputs and diagnoses it
+
+#### Scenario: Gathering leaves present evidence alone
+
+- **WHEN** `gather` runs for a commit whose `local` evidence is present and failing
+- **THEN** it does not run `local`, and validation diagnoses the present failure
+
+#### Scenario: One owed workflow is rerun after an environmental failure
+
+- **WHEN** `ci docker.yml` failed for an environmental reason, `ci tests.yml`
+  passed, and the owner allows a rerun
+- **THEN** `gather --kind ci --owed docker.yml` starts and collects a new attempt of
+  `docker.yml` alone, which `evidence` marks current, and the record names the
+  reason beside its path
+
+### Requirement: CW-h3ks Each step has a hook before and after it
+
+A repository MAY declare `before-<step>` and `after-<step>` for each step a run is
+logged as; review and triage hooks receive `{kind}`. An absent or empty hook MUST run
+nothing, with no default, and the orchestrating session MUST say in one sentence that
+it ran the step without it. Interactively, the skill MUST run them through `run
+before|after <step> <change>`, but for a review, which run interactively is no run
+and MUST run no hooks. A review's runner MUST run `before-review` before it starts
+the reviewer, giving the reviewer the run's inputs directory, and `after-review`
+once it has published the review's record.
+
+#### Scenario: No hook is declared before a review
+
+- **WHEN** a review starts and the configuration declares no `before-review`
+- **THEN** the review runs, and the orchestrating session says no `before-review`
+  hook was declared
+
+### Requirement: CW-b7fl A failing hook before a step informs its session
+
+A `before-<step>` hook that fails MUST NOT prevent the step's session: its closing
+line and log MUST be in the session's inputs, and the step's skill MUST say what the
+failure means for its work. A hook the configuration's check refuses MUST refuse the
+step.
+
+#### Scenario: An environment refresh fails before implementation
+
+- **WHEN** `before-implement` fails
+- **THEN** the implementation session starts, reads the failure from its inputs, and
+  stops to ask the owner rather than code in a broken environment
+
+### Requirement: CW-a4fl A failing hook after a step resumes its session once
+
+An `after-<step>` hook MUST run only after a `finished` outcome, before that outcome
+is logged as final. When it fails, the wrapper MUST resume the same session once
+with the failure; when it fails again, the run MUST end as a question to the owner
+naming the hook. A failing `after-review` MUST resume no reviewer: the run MUST end
+as that question at once, its published record standing and never published again.
+
+#### Scenario: A hook after implementation finds a lint failure
+
+- **WHEN** `after-implement` fails after an implementation finishes
+- **THEN** the implementation session resumes with the failure, fixes and commits it,
+  ends finished again, and the hook passes
+
+#### Scenario: A hook after a review fails
+
+- **WHEN** `after-review` fails once the review's runner has published `19-design.md`
+- **THEN** the run ends as a question to the owner naming the hook, the reviewer is
+  not resumed, and no second record is published
+
+### Requirement: CW-i9np A run's inputs reach its session through a directory
+
+Each run MUST have an inputs directory under its change's records, given to its hooks
+as `{inputs}` and named on its log line. The engine MUST write `status.md` and keep
+each hook's output as a log there. Every top-level Markdown file a hook writes MUST
+be read in full as the session loads; any other file is data, read where a message
+directs.
+
+#### Scenario: A hook passes a large artifact
+
+- **WHEN** `before-review` writes `message.md` and a multi-megabyte
+  `diff-summary.json` into `{inputs}`
+- **THEN** the review reads `message.md` in full and reads the JSON only where the
+  message directs
+
 ## Evidence
 
-- Contributor guide to each step, the review directory, and the ledger:
-  `docs/agents/change-workflow.md`; rationale, diagrams, and current limits:
+- The owner's handbook to each step, directions, waivers, and the ledger:
+  `docs/change-workflow-handbook.md`; rationale, diagrams, and current limits:
   `README.md`; the requirements' organization: `index.md`.
 - Leaf skills: `.agents/skills/change-design/`, `change-plan/`, `change-review/`,
   `change-triage/`, `change-implement/`, `change-validate/`, `change-merge/`,
@@ -3234,11 +4321,18 @@ step changes what its own hooks run.
   of change names on the workflow targets: `scripts/completions/make-change.bash`.
 - The repository's configuration, its check, and its resolution:
   `.agents/workflow.toml`, read by `scripts/change_workflow/config.py`
-  (`scripts/change-workflow config`, `config load`, `config parts`, `check config`);
-  the hooks and validation's parts: `scripts/change-workflow run`, `check change`, and
-  `openspec` (`scripts/change_workflow/hooks.py`), the hook table in
+  (`scripts/change-workflow config`, `config load`, `check config`); the hooks:
+  `scripts/change-workflow run`, `check change`, and `openspec`
+  (`scripts/change_workflow/hooks.py`), the hook table in
   `scripts/change_workflow/graph.py`, and each session's invocations in
   `scripts/change_workflow/running.py`.
+- Validation's evidence kinds: which evidence a commit has, `scripts/change-workflow
+  evidence` (`scripts/change_workflow/evidence.py`); gathering what is missing, or a
+  new attempt of one kind, `scripts/change-workflow gather`
+  (`scripts/change_workflow/gather.py`); each kind's guide, named by its configuration
+  entry.
+- The step hooks around a session and its inputs directory: `scripts/change-workflow
+  run before|after <step> <change>` (`scripts/change_workflow/around.py`).
 - A change's closing checks: `scripts/change-workflow run pre-commit`, which `make
   check-change` runs, the repository's own being `make check-repository`
   (`scripts/check_change.py`); its task list's sections: `make check-tasks`
@@ -3259,7 +4353,7 @@ step changes what its own hooks run.
   the command's subcommands and exit statuses: `test_change_workflow_cli.py` and
   `test_change_workflow_command.py`; the roles and assumptions an adopting
   repository's statement must cover: `test_change_workflow_assumptions.py`.
-- This repository's validation parts, its Helm validation namespace, and its
+- This repository's evidence kinds, its Helm validation namespace, and its
   capacity record: `market-change-workflow`'s Evidence.
 
 The skills are instructions to an agent; that a session follows them is shown by the

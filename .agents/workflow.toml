@@ -8,8 +8,9 @@
 protected-branches = ["main", "dev"]
 # Engine, next-step computation: after a pre-closeout review, a commit changing only
 # these paths or a change's records needs no new validation. Engine, `run
-# pre-commit`: a commit changing only these runs only `pre-commit`.
-inert-paths = ["openspec/", "docs/"]
+# pre-commit`: a commit changing only these runs only `pre-commit`. An entry with a
+# glob character is a pattern over the whole path; `**` spans directories.
+inert-paths = ["openspec/", "docs/", "**/README.md", "AGENTS.md"]
 
 [hooks]
 # Engine, `run pre-commit` and `run after-functional-change`, for change-implement,
@@ -21,8 +22,10 @@ after-functional-change = ["make lock"]
 # commit, after the workflow's default checks.
 pre-commit = "make check-repository CHANGE={change} CHANGE_BASE={base}"
 # Engine, `run pre-commit`, for change-implement, change-triage, and change-merge:
-# also before a commit that changes a path outside `inert-paths`.
-pre-commit-functional = ["make dist-clean", "make check-packaging", "make test"]
+# also before a commit that changes a path outside `inert-paths`. It clears the
+# wheelhouse, checks packaging, and runs every suite on the worktree as it stands,
+# leaving the `local` kind's evidence for the tree the commit then holds.
+pre-commit-functional = ["make validate-local TREE={tree}"]
 # Engine, `run pre-archive`, for change-closeout: once, before the archive.
 pre-archive = ["make check-packaging", "make check-architecture-change CHANGE={change}"]
 # Engine, guarded push: before anything is sent, under Git's hook contract. The
@@ -31,6 +34,10 @@ pre-push = "make pre-push REMOTE={remote}"
 # Engine, `clone`: as a clone is made, in the background; implementation and
 # validation wait for it.
 post-clone = "make init"
+# Engine, `run test-before`, for change-implement and change-triage: one test file,
+# as HEAD holds it, run in a detached worktree of an earlier commit, to show a test
+# fails without the change. The scripts' suites run there with no built environment.
+test-before = "uv run --no-project --with pytest --with pyyaml pytest -q {test}"
 
 [defaults]
 # Engine, `run pre-commit` and `check change`: the workflow's default checks this
@@ -44,9 +51,13 @@ command = "scripts/openspec"
 
 [load]
 # Engine, `config load <step>`: the documents every step's skill reads as it
-# starts; the engine's post-compaction hook re-reads them.
-common = ["AGENTS.md", "docs/development/ARCHITECTURE.md", "docs/development/TESTING.md",
-          "docs/development/DEPLOYMENT_AND_CONFIG.md", "openspec/README.md"]
+# starts; the engine's post-compaction hook re-reads them. The root guidance, then
+# `docs/guidance/`, a directory entry standing for every Markdown file beneath it,
+# so a guidance file added or moved there is read without editing this list, then
+# the repository's cross-system documents and its OpenSpec guide, each a file.
+common = ["AGENTS.md", "docs/guidance/", "docs/development/ARCHITECTURE.md",
+          "docs/development/TESTING.md", "docs/development/DEPLOYMENT_AND_CONFIG.md",
+          "openspec/README.md"]
 # Engine, `config load design`: change-design's own addition.
 design = ["docs/development/ROADMAP.md"]
 
@@ -67,39 +78,53 @@ merge           = [{ harness = "claude", model = "claude-opus-5-5",   effort = "
 closeout        = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
 archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 
+[review]
+# Engine, the review: how many times a reviewer's draft the format check refuses is
+# sent back to the reviewer's session for correction before the run stops; 0 never.
+format-retries = 1
+
 [validation]
-# Engine, `run validation <change> preflight`, for change-validate: before any part,
-# a failure ending validation as environmental.
+# Engine, `gather <change>`, for change-validate: before any kind, a failure ending
+# validation as environmental.
 preflight = ["make check-uv-version"]
 
-# Engine, `config parts <change>` and `run validation <change> <part>
-# run|start|collect`, for change-validate: validation's parts, in order; engine,
-# `history`, copies each part's evidence.
+# Engine, `evidence` and `gather`, for change-validate: validation's evidence kinds,
+# in order, each assessed from its guide; engine, `history`, copies the evidence
+# under each pattern's fixed directory, which Git ignores. `local` and `helm`
+# describe the tree they ran on; `pipeline` and `ci` the commit, since their runs are
+# dispatched for it and CI's baseline is chosen by its ancestry.
 
-[validation.parts.pipeline]
-# Started first, right after the guarded push: it is the slowest part.
+[validation.evidence.pipeline]
+# Started first, right after the guarded push: it is the slowest kind.
+required = "always"
 start    = "make run-e2e"
-collect  = "make fetch-e2e-logs E2E_AFTER_RUN={after}"
-evidence = ".snapshot/e2e-logs/"
+collect  = "make fetch-e2e-logs E2E_AFTER_RUN={after} COMMIT={commit}"
+evidence = ".snapshot/evidence/{commit}/pipeline/*/summary.json"
+guide    = ".agents/evidence/pipeline.md"
 
-[validation.parts.ci]
-# Started once for each `Owed by validation:` line of a complete section, each run
-# named by its workflow (`run validation <change> ci start --owed <workflow>`).
-owed     = true
+[validation.evidence.ci]
+# Started once for each workflow a complete section owes, each run named by its
+# workflow (`gather <change> --kind ci --owed <workflow>` for one again).
+required = "owed"
 start    = "make run-ci WORKFLOW={owed}"
-collect  = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}"
-evidence = ".snapshot/validation/"
+collect  = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after} COMMIT={commit}"
+evidence = ".snapshot/evidence/{commit}/ci-{owed}/*/summary.json"
+guide    = ".agents/evidence/ci.md"
 
-[validation.parts.local]
-# The commit's packaging and every suite, on this machine.
-run      = "make validate-local"
-evidence = ".snapshot/validation/"
+[validation.evidence.local]
+# The packaging and every suite, on this machine.
+required = "always"
+run      = "make validate-local TREE={tree}"
+evidence = ".snapshot/evidence/{tree}/local/*/summary.json"
+guide    = ".agents/evidence/local.md"
 
-[validation.parts.helm]
+[validation.evidence.helm]
 # After local, never beside it: they share Docker and the CPU.
+required = "always"
 after    = "local"
-run      = "make validate-helm CHANGE={change}"
-evidence = ".snapshot/validation/"
+run      = "make validate-helm CHANGE={change} TREE={tree}"
+evidence = ".snapshot/evidence/{tree}/helm/*/summary.json"
+guide    = ".agents/evidence/helm.md"
 # Engine, `run cleanup <change>`, for change-archive-cleanup: record what the
 # release used, then remove the change's namespace and images.
 cleanup  = ["make record-capacity CHANGE={change}", "make -C helm teardown CHANGE={change}"]

@@ -1,4 +1,4 @@
-"""Tests for the observational validation of the commit at HEAD."""
+"""Tests for the observational validation of the worktree's tree and of HEAD."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Sequence
 
@@ -23,6 +24,9 @@ sys.modules[_SPEC.name] = validator
 _SPEC.loader.exec_module(validator)
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
+# The tree the fake worktree holds, and the one it holds once a step has changed it.
+TREE = "abcdefabcdefabcdefabcdefabcdefabcdefabcd"
+CHANGED_TREE = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 VM_MARKERS = "e2e_deal or multi_registry or e2e_listing_shapes"
 BARE_METAL_MARKERS = "e2e_bare_metal_publication"
 APICREDITS_MARKERS = "e2e_credits_deal"
@@ -31,8 +35,11 @@ NAMESPACE = "validate-pilot"
 RELEASE = "arkhai-node-operator"
 POD = f"{RELEASE}-e2e-tests-e2e-scenarios"
 PAYMENTS_POD = f"{RELEASE}-storefront-bob-payments-check"
+MEDIATION_POD = f"{RELEASE}-storefront-bob-mediation-check"
 GIB = 2**30
 NOW = datetime(2026, 10, 22, 7, 0, tzinfo=timezone.utc)
+# The attempt an attempt started at NOW is kept in.
+ATTEMPT = "20261022T070000.000000Z"
 
 
 class Fake:
@@ -44,6 +51,7 @@ class Fake:
 
     def __init__(self, *, fail: Sequence[str] = (), output: dict[str, str] | None = None,
                  dirty_after: str | None = None, context: str = "docker-desktop",
+                 contexts: Sequence[str] = ("docker-desktop",),
                  markers: dict[str, str] | None = None, nodes: str = "docker-desktop=True\n",
                  docker_up: bool = True, cast: bool = True, metrics: bool = True,
                  allocatable: str = "16Gi", workloads: dict[str, dict[str, int]] | None = None,
@@ -53,17 +61,29 @@ class Fake:
                  samples_during_scenarios: int = 0, test_volume_lingers: int = 0,
                  broken_read: str | None = None, failing_read: str | None = None,
                  payments_pods: Sequence[str] = (PAYMENTS_POD,),
-                 payments_exit: str = "0") -> None:
+                 payments_exit: str = "0",
+                 mediation_pods: Sequence[str] = (MEDIATION_POD,),
+                 mediation_exit: str = "0") -> None:
         self.fail = set(fail)
-        # The payments-check pods the release's hooks render, and their exit status.
+        # The payments- and mediation-check pods the release's hooks render, and
+        # each kind's exit status.
         self.payments_pods = list(payments_pods)
         self.payments_exit = payments_exit
+        self.mediation_pods = list(mediation_pods)
+        self.mediation_exit = mediation_exit
         self.output = output or {}
+        # The step after which a tracked file is rewritten, changing the worktree's tree.
         self.dirty_after = dirty_after
-        # The step after which HEAD moves, as a commit or branch switch would.
+        # The step after which HEAD moves and the worktree with it, as a branch switch
+        # would.
         self.head_after = head_after
         self.head = COMMIT
+        self.worktree = TREE
+        # The selected context, and every context the kubeconfig names.
         self.context = context
+        self.contexts = list(contexts)
+        # KUBECONFIG as each command ran, and the file's content then.
+        self.kubeconfigs: list[tuple[str | None, str | None]] = []
         self.markers = markers or {"E2E_MODULE": VM_MARKERS,
                                    "E2E_BARE_METAL_MODULE": BARE_METAL_MARKERS,
                                    "E2E_APICREDITS_MODULE": APICREDITS_MARKERS}
@@ -104,14 +124,19 @@ class Fake:
     def run(self, command: Sequence[str], log: Path) -> int:
         command = list(command)
         self.commands.append(command)
+        kubeconfig = os.environ.get("KUBECONFIG")
+        self.kubeconfigs.append((kubeconfig, Path(kubeconfig).read_text("utf-8")
+                                 if kubeconfig and Path(kubeconfig).is_file() else None))
         name = log.stem
         self.events.append(name)
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(self.output.get(name, f"{name} output\n"), "utf-8")
         if name == self.dirty_after:
             self.dirty = [" M e2e-tests/uv.lock"]
+            self.worktree = CHANGED_TREE
         if name == self.head_after:
             self.head = "f" * 40
+            self.worktree = CHANGED_TREE
         if name in self.fail:
             return 2
         namespace = command[command.index("--namespace") + 1] if "--namespace" in command else None
@@ -147,6 +172,10 @@ class Fake:
                 for workload, replicas in self.workloads[target].items()}
         return 0
 
+    def tree(self) -> str:
+        """The worktree's tree, as `worktree_tree` computes it."""
+        return self.worktree
+
     def read(self, command: Sequence[str]) -> str:
         command = list(command)
         self.reads.append(command)
@@ -160,6 +189,10 @@ class Fake:
             return "\n".join(self.dirty)
         if command == ["kubectl", "config", "current-context"]:
             return self.context + "\n"
+        if command == ["kubectl", "config", "get-contexts", "--output", "name"]:
+            return "\n".join(self.contexts) + "\n"
+        if command[:4] == ["kubectl", "config", "view", "--raw"]:
+            return f"current-context: {command[-1]}\n"
         if command[:2] == ["docker", "info"]:
             if not self.docker_up:
                 raise validator.ValidationError("docker info failed: cannot connect")
@@ -195,9 +228,11 @@ class Fake:
         if command[:3] == ["kubectl", "get", "pod"]:
             if command[3].endswith(validator.PAYMENTS_CHECK_SUFFIX):
                 return self.payments_exit
+            if command[3].endswith(validator.MEDIATION_CHECK_SUFFIX):
+                return self.mediation_exit
             return self.exit_code
         if command[:3] == ["helm", "get", "hooks"]:
-            return _hooks(POD, *self.payments_pods)
+            return _hooks(POD, *self.payments_pods, *self.mediation_pods)
         if command[:2] == ["make", "-s"]:
             name = command[command.index("--eval") + 2].removeprefix("print-")
             settings = {"RELEASE": RELEASE, "TEST_VOLUMES": "arkhai-buyer-profiles"}
@@ -246,8 +281,8 @@ class Fake:
 def _hooks(*pods: str) -> str:
     """A release's hooks as `helm get hooks` prints them: a test ConfigMap, then a
     test pod per name, each with a container whose own name ends like a pod's."""
-    documents = ["---\n# Source: arkhai/templates/tests/test-config.yaml\napiVersion: v1\n"
-                 "kind: ConfigMap\nmetadata:\n  name: arkhai-test-config-payments-check\n"]
+    documents = ["---\n# Source: arkhai/templates/tests/helm-profile.yaml\napiVersion: v1\n"
+                 "kind: ConfigMap\nmetadata:\n  name: arkhai-helm-profile-payments-check\n"]
     documents += [f"---\n# Source: tests/{pod}.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n"
                   f"  name: {pod}\nspec:\n  containers:\n    - name: x-payments-check\n"
                   for pod in pods]
@@ -262,11 +297,13 @@ def _selected(command: list[str], workload: str) -> bool:
     return workload.split("/", 1)[1].startswith(release + "-")
 
 
-def _validation(tmp_path: Path, fake: Fake, part: str,
-                echo: object = lambda line: None) -> object:
+def _validation(tmp_path: Path, fake: Fake, kind: str,
+                echo: object = lambda line: None, *, given: str | None = None,
+                owed: str | None = None, now: datetime = NOW) -> object:
     clock = iter(float(n) for n in range(1000))
-    return validator.Validation(part, root=tmp_path, runner=fake.run, read=fake.read,
-                                clock=lambda: next(clock), echo=echo, now=lambda: NOW)
+    return validator.Validation(kind, given=given, owed=owed, root=tmp_path, runner=fake.run,
+                                read=fake.read, tree=fake.tree, clock=lambda: next(clock),
+                                echo=echo, now=lambda: now)
 
 
 def _storefront_env(tmp_path: Path, *, skip: str | None = None) -> None:
@@ -310,8 +347,8 @@ def _step(summary: object, name: str) -> object:
     return next(step for step in summary.steps if step.name == name)
 
 
-def _attempt(tmp_path: Path, attempt: int = 1) -> Path:
-    return tmp_path / ".snapshot/validation" / COMMIT[:12] / "helm" / str(attempt)
+def _attempt(tmp_path: Path, kind: str = "helm") -> Path:
+    return tmp_path / ".snapshot/evidence" / TREE / kind / ATTEMPT
 
 
 # --- local part ---------------------------------------------------------------
@@ -322,10 +359,13 @@ def test_local_runs_packaging_then_tests_and_writes_a_summary(tmp_path: Path) ->
 
     assert summary.passed
     assert fake.ran() == ["make dist-clean", "make check-packaging", "make test"]
-    log_dir = tmp_path / ".snapshot/validation" / COMMIT[:12] / "local" / "1"
+    log_dir = _attempt(tmp_path, "local")
     written = json.loads((log_dir / "summary.json").read_text("utf-8"))
-    assert written["commit"] == COMMIT and written["passed"] is True
+    assert (written["kind"], written["tree"], written["commit"], written["attempt"],
+            written["passed"]) == ("local", TREE, COMMIT, ATTEMPT, True)
     assert (log_dir / "test.log").read_text("utf-8") == "test output\n"
+    assert _results(summary)["tree before"] == "passed"
+    assert _results(summary)["tree after"] == "passed"
 
 
 def test_a_part_says_when_each_step_starts_and_ends(tmp_path: Path) -> None:
@@ -334,7 +374,7 @@ def test_a_part_says_when_each_step_starts_and_ends(tmp_path: Path) -> None:
 
     validator.validate_local(_validation(tmp_path, fake, "local", echo=said.append))
 
-    logs = f".snapshot/validation/{COMMIT[:12]}/local/1"
+    logs = f".snapshot/evidence/{TREE}/local/{ATTEMPT}"
     assert said == [
         f"dist-clean: running (make dist-clean; log {logs}/dist-clean.log)",
         "dist-clean: passed in 1.0s",
@@ -362,14 +402,34 @@ def test_local_stops_at_the_first_failure_with_its_output_tail(tmp_path: Path) -
     assert "lock is stale" in validator.render(summary)
 
 
-def test_a_dirty_worktree_before_validation_runs_nothing(tmp_path: Path) -> None:
+def test_a_worktree_with_changes_is_tested_as_it_stands_and_kept_under_its_tree(
+        tmp_path: Path) -> None:
+    """The functional checks before a commit run on the worktree with the commit's
+    changes in it; their evidence describes the tree the commit then holds."""
     fake = Fake()
-    fake.dirty = ["?? scratch.txt"]
-    summary = validator.validate_local(_validation(tmp_path, fake, "local"))
+    fake.dirty = [" M scripts/validate_slice.py", "?? scripts/new.py"]
+    fake.worktree = CHANGED_TREE
 
-    assert not summary.passed
+    summary = validator.validate_local(_validation(tmp_path, fake, "local",
+                                                   given=CHANGED_TREE))
+
+    assert summary.passed
+    assert fake.ran() == ["make dist-clean", "make check-packaging", "make test"]
+    assert (summary.tree, summary.commit) == (CHANGED_TREE, COMMIT)
+    assert (tmp_path / ".snapshot/evidence" / CHANGED_TREE / "local" / ATTEMPT
+            / "summary.json").is_file()
+
+
+def test_a_tree_the_worktree_does_not_hold_is_refused_and_nothing_runs(
+        tmp_path: Path) -> None:
+    fake = Fake()
+
+    with pytest.raises(validator.ValidationError, match=f"holds the tree {TREE}, not the "
+                                                        f"tree given, {CHANGED_TREE}"):
+        _validation(tmp_path, fake, "local", given=CHANGED_TREE)
+
     assert fake.commands == []
-    assert "?? scratch.txt" in summary.steps[0].detail
+    assert not (tmp_path / ".snapshot").exists()
 
 
 def test_a_step_that_rewrites_a_tracked_file_fails_and_stops_the_part(tmp_path: Path) -> None:
@@ -378,18 +438,33 @@ def test_a_step_that_rewrites_a_tracked_file_fails_and_stops_the_part(tmp_path: 
 
     assert not summary.passed
     failed = next(s for s in summary.steps if s.name == "check-packaging")
-    assert failed.result == "failed" and "e2e-tests/uv.lock" in failed.detail
+    assert failed.result == "failed"
+    assert f"its tree is now {CHANGED_TREE[:12]}, not the tree under validation " \
+           f"{TREE[:12]}" in failed.detail
+    assert "e2e-tests/uv.lock" in failed.detail
     assert "make test" not in fake.ran()
 
 
-def test_each_attempt_keeps_its_own_logs(tmp_path: Path) -> None:
+def test_each_attempt_keeps_its_own_logs_in_time_order(tmp_path: Path) -> None:
+    later = datetime(2026, 10, 22, 7, 0, 0, 5, tzinfo=timezone.utc)
     first = validator.validate_local(_validation(tmp_path, Fake(fail=["test"]), "local"))
-    second = validator.validate_local(_validation(tmp_path, Fake(), "local"))
+    second = validator.validate_local(_validation(tmp_path, Fake(), "local", now=later))
 
-    part = tmp_path / ".snapshot/validation" / COMMIT[:12] / "local"
-    assert (first.attempt, second.attempt) == (1, 2)
-    written = [json.loads((part / n / "summary.json").read_text("utf-8")) for n in ("1", "2")]
-    assert [(s["attempt"], s["passed"]) for s in written] == [(1, False), (2, True)]
+    kind = tmp_path / ".snapshot/evidence" / TREE / "local"
+    assert (first.attempt, second.attempt) == (ATTEMPT, "20261022T070000.000005Z")
+    attempts = sorted(kind.iterdir())
+    written = [json.loads((attempt / "summary.json").read_text("utf-8"))
+               for attempt in attempts]
+    # The last in path order is the latest attempt, the current one.
+    assert [(s["attempt"], s["passed"]) for s in written] == [
+        (ATTEMPT, False), ("20261022T070000.000005Z", True)]
+
+
+def test_an_attempt_already_started_at_the_same_instant_is_refused(tmp_path: Path) -> None:
+    validator.validate_local(_validation(tmp_path, Fake(), "local"))
+
+    with pytest.raises(validator.ValidationError, match="already holds an attempt"):
+        _validation(tmp_path, Fake(), "local")
 
 
 # --- Helm part: the change's namespace ------------------------------------------
@@ -425,6 +500,8 @@ def test_helm_runs_every_step_for_a_change_in_its_namespace(tmp_path: Path) -> N
         f"kubectl logs --namespace {NAMESPACE} {POD}",
         f"helm test {RELEASE} --namespace {NAMESPACE} --filter name={PAYMENTS_POD} --timeout 5m",
         f"kubectl logs --namespace {NAMESPACE} {PAYMENTS_POD}",
+        f"helm test {RELEASE} --namespace {NAMESPACE} --filter name={MEDIATION_POD} --timeout 5m",
+        f"kubectl logs --namespace {NAMESPACE} {MEDIATION_POD}",
         f"kubectl logs --namespace {NAMESPACE} {RELEASE}-registry-1 --all-containers --prefix",
         f"kubectl logs --namespace {NAMESPACE} {POD} --all-containers --prefix",
         f"kubectl get pods --namespace {NAMESPACE} --selector "
@@ -466,7 +543,7 @@ def test_no_namespace_but_the_changes_is_scaled_deleted_or_deployed(tmp_path: Pa
         if command[:3] == ["make", "-C", "helm"]:
             assert "CHANGE=pilot" in command, command
     for read in fake.reads:
-        if read[0] == "kubectl" and read[1:3] != ["config", "current-context"]:
+        if read[0] == "kubectl" and read[1] != "config":
             if "--namespace" in read:
                 assert read[read.index("--namespace") + 1] == NAMESPACE, read
             else:
@@ -733,8 +810,10 @@ def test_hooks_that_cannot_be_read_fail_the_payments_check(tmp_path: Path) -> No
     assert set(fake.workloads[NAMESPACE].values()) == {0}
 
 
-def test_only_payments_check_pods_are_read_from_the_hooks() -> None:
-    assert validator.payments_check_pods(_hooks(POD, PAYMENTS_POD)) == [PAYMENTS_POD]
+def test_only_each_kinds_pods_are_read_from_the_hooks() -> None:
+    hooks = _hooks(POD, PAYMENTS_POD, MEDIATION_POD)
+    assert validator.check_pods(hooks, validator.PAYMENTS_CHECK_SUFFIX) == [PAYMENTS_POD]
+    assert validator.check_pods(hooks, validator.MEDIATION_CHECK_SUFFIX) == [MEDIATION_POD]
 
 
 def test_the_payments_check_suffix_is_the_one_both_storefront_charts_render() -> None:
@@ -742,6 +821,68 @@ def test_the_payments_check_suffix_is_the_one_both_storefront_charts_render() ->
     for chart in ("storefront", "bare-metal-storefront"):
         template = (root / "helm/charts" / chart / "templates/tests/payments-check-test.yaml")
         assert f"}}}}{validator.PAYMENTS_CHECK_SUFFIX}\n" in template.read_text("utf-8")
+
+
+def test_the_mediation_check_suffix_is_the_one_the_storefront_chart_renders() -> None:
+    root = Path(__file__).resolve().parents[2]
+    template = root / "helm/charts/storefront/templates/tests/mediation-check-test.yaml"
+    assert f"}}}}{validator.MEDIATION_CHECK_SUFFIX}\n" in template.read_text("utf-8")
+
+
+def test_each_mediation_check_pod_runs_after_the_payments_checks_and_keeps_its_evidence(
+        tmp_path: Path) -> None:
+    fake = Fake(output={MEDIATION_POD: '{"check": "mediation", "outcome": "ok"}\n'})
+    summary = _helm(tmp_path, fake)
+
+    logs = _attempt(tmp_path)
+    assert summary.passed, validator.render(summary)
+    assert _results(summary)[f"mediation check {MEDIATION_POD}"] == "passed"
+    assert summary.evidence["mediation_checks"] == [
+        {"pod": MEDIATION_POD, "log": str((logs / f"{MEDIATION_POD}.log").relative_to(tmp_path)),
+         "exit_code": 0}]
+    assert fake.events.index(f"payments check {PAYMENTS_POD}") < fake.events.index(
+        f"mediation check {MEDIATION_POD}")
+    assert (logs / f"{MEDIATION_POD}.log").read_text("utf-8").endswith('"outcome": "ok"}\n')
+    assert f"mediation check pod {MEDIATION_POD}: exit 0" in validator.render(summary)
+
+
+def test_a_mediation_check_that_exited_non_zero_fails_the_part(tmp_path: Path) -> None:
+    fake = Fake(mediation_exit="1")
+    summary = _helm(tmp_path, fake)
+
+    assert not summary.passed
+    assert _step(summary, f"mediation check {MEDIATION_POD}").detail == f"{MEDIATION_POD} exited 1"
+    assert _results(summary)[f"payments check {PAYMENTS_POD}"] == "passed"
+    assert set(fake.workloads[NAMESPACE].values()) == {0}
+
+
+def test_a_passed_mediation_check_with_no_exit_status_fails_and_is_stopped(tmp_path: Path) -> None:
+    # `helm test` passes when its filter matches no test pod.
+    fake = Fake(mediation_exit="")
+    summary = _helm(tmp_path, fake)
+
+    assert not summary.passed
+    assert _step(summary, f"mediation check {MEDIATION_POD}").detail == (
+        f"{MEDIATION_POD} has no exit status, so its check is not shown to have run")
+    assert (f"kubectl delete pod {MEDIATION_POD} --namespace {NAMESPACE} --ignore-not-found "
+            "--wait=false") in fake.ran()
+
+
+def test_a_commit_during_a_payments_check_runs_no_mediation_check(tmp_path: Path) -> None:
+    fake = Fake(head_after=f"payments check {PAYMENTS_POD}")
+    summary = _helm(tmp_path, fake)
+
+    assert not summary.passed
+    assert "mediation_checks" not in summary.evidence
+    assert not any(MEDIATION_POD in command for command in fake.ran())
+
+
+def test_a_release_rendering_no_mediation_check_is_warned_not_passed(tmp_path: Path) -> None:
+    summary = _helm(tmp_path, Fake(mediation_pods=()))
+
+    assert summary.passed
+    assert _results(summary)["mediation check"] == "warning"
+    assert summary.evidence["mediation_checks"] == []
 
 
 def test_a_failed_read_of_one_piece_of_evidence_keeps_the_others(tmp_path: Path) -> None:
@@ -834,21 +975,23 @@ def test_a_restarted_containers_previous_log_is_kept(tmp_path: Path) -> None:
     assert (_attempt(tmp_path) / "pods" / f"{RELEASE}-registry-1.previous.log").exists()
 
 
-def _earlier(tmp_path: Path, commit: str, namespace: str, resources: str,
-             mtime: float) -> Path:
-    attempt = tmp_path / ".snapshot/validation" / commit / "helm/1"
-    attempt.mkdir(parents=True)
-    (attempt / "summary.json").write_text(json.dumps({"namespace": namespace}), "utf-8")
-    (attempt / "resources.txt").write_text(resources, "utf-8")
-    os.utime(attempt / "resources.txt", (mtime, mtime))
-    return attempt / "resources.txt"
+def _earlier(tmp_path: Path, tree: str, namespace: str, resources: str,
+             attempt: str) -> Path:
+    directory = tmp_path / ".snapshot/evidence" / tree / "helm" / attempt
+    directory.mkdir(parents=True)
+    (directory / "summary.json").write_text(json.dumps({"namespace": namespace}), "utf-8")
+    (directory / "resources.txt").write_text(resources, "utf-8")
+    return directory / "resources.txt"
 
 
 def test_the_rendered_resources_are_kept_beside_the_previous_validations(
         tmp_path: Path) -> None:
-    _earlier(tmp_path, "111111111111", NAMESPACE, "deployment/oldest app={}\n", 1_000)
-    latest = _earlier(tmp_path, "222222222222", NAMESPACE, "deployment/other app={}\n", 2_000)
-    _earlier(tmp_path, "333333333333", "validate-x", "x\n", 3_000)
+    # The latest is the attempt started last, whichever tree it describes.
+    latest = _earlier(tmp_path, "1" * 40, NAMESPACE, "deployment/other app={}\n",
+                      "20261021T000000.000000Z")
+    _earlier(tmp_path, "2" * 40, NAMESPACE, "deployment/oldest app={}\n",
+             "20261020T000000.000000Z")
+    _earlier(tmp_path, "3" * 40, "validate-x", "x\n", "20261021T120000.000000Z")
 
     summary = _helm(tmp_path, Fake())
 
@@ -859,30 +1002,31 @@ def test_the_rendered_resources_are_kept_beside_the_previous_validations(
 def test_resources_equal_to_the_previous_validations_are_unchanged(tmp_path: Path) -> None:
     rendered = "".join(f"deployment/{RELEASE}-{name} app={{\"limits\":{{\"memory\":\"1Gi\"}}}}\n"
                        for name in ("registry", "storefront-bob"))
-    _earlier(tmp_path, "222222222222", NAMESPACE, rendered, 2_000)
+    _earlier(tmp_path, "2" * 40, NAMESPACE, rendered, "20261021T000000.000000Z")
 
     summary = _helm(tmp_path, Fake())
 
     assert summary.evidence["resources"]["changed"] is False
 
 
-def test_a_commit_mid_part_stops_the_evidence_but_still_scales_to_zero(tmp_path: Path) -> None:
+def test_a_branch_switch_mid_part_stops_the_evidence_but_still_scales_to_zero(
+        tmp_path: Path) -> None:
     fake = Fake(head_after="resume")
     summary = _helm(tmp_path, fake)
 
     assert not summary.passed
-    assert "HEAD is now ffffffffffff" in _step(summary, "resume").detail
+    assert "the worktree changed" in _step(summary, "resume").detail
     assert not any(command[:2] == ["helm", "test"] for command in fake.commands)
     assert "events" not in fake.events and "resources query" not in fake.events
     assert fake.ran()[-1].startswith(f"kubectl scale --namespace {NAMESPACE} --replicas=0")
 
 
-def test_a_commit_or_branch_switch_mid_build_stops_before_the_namespace(tmp_path: Path) -> None:
+def test_a_branch_switch_mid_build_stops_before_the_namespace(tmp_path: Path) -> None:
     fake = Fake(head_after="build-dev")
     summary = _helm(tmp_path, fake)
 
     assert not summary.passed
-    assert "HEAD is now ffffffffffff" in _step(summary, "build-dev").detail
+    assert f"its tree is now {CHANGED_TREE[:12]}" in _step(summary, "build-dev").detail
     assert "make -C helm test-render CHANGE=pilot" not in fake.ran()
     assert not any(command[0] == "kubectl" for command in fake.commands)
 
@@ -900,13 +1044,27 @@ def test_a_skipped_render_check_fails_validation(tmp_path: Path) -> None:
 
 # --- Helm part: preflights ----------------------------------------------------
 
-def test_helm_refuses_a_kube_context_other_than_the_one_named(tmp_path: Path) -> None:
-    fake = Fake(context="production-cluster")
+def test_helm_refuses_a_kubeconfig_without_the_context_named(tmp_path: Path) -> None:
+    fake = Fake(context="production-cluster", contexts=("production-cluster",))
     summary = _helm(tmp_path, fake)
 
     assert not summary.passed
     assert fake.commands == []
-    assert "production-cluster" in summary.steps[-1].detail
+    assert "'docker-desktop'" in summary.steps[-1].detail
+
+
+def test_helm_pins_the_context_named_whatever_context_is_selected(tmp_path: Path) -> None:
+    fake = Fake(context="production-cluster", contexts=("production-cluster", "docker-desktop"))
+    earlier = os.environ.get("KUBECONFIG")
+    summary = _helm(tmp_path, fake)
+
+    assert summary.passed, validator.render(summary)
+    assert "production-cluster" in _step(summary, "kube context").detail
+    pinned = {path for path, _content in fake.kubeconfigs}
+    assert len(pinned) == 1 and None not in pinned
+    assert {content for _path, content in fake.kubeconfigs} == {"current-context: docker-desktop\n"}
+    assert not Path(pinned.pop()).exists()
+    assert os.environ.get("KUBECONFIG") == earlier
 
 
 @pytest.mark.parametrize(("missing", "step", "target"), [
@@ -1077,10 +1235,9 @@ def test_a_malformed_capacity_figure_is_refused(tmp_path: Path, body: str) -> No
         validator.read_capacity(path)
 
 
-# Archive cleanup's figure, from the change's latest validation, over a fake checkout:
-# its records and the Helm attempts' summaries they name.
+# Archive cleanup's figure, from the change's latest validation, over a real checkout:
+# its records, the commits they name, and the Helm attempts of those commits' trees.
 ARCHIVED_REVIEWS = Path("openspec/changes/archive/2026-10-22-pilot/reviews")
-OLDER = "fedcba9876543210fedcba9876543210fedcba98"
 
 
 def _checkout(root: Path) -> None:
@@ -1090,16 +1247,30 @@ def _checkout(root: Path) -> None:
         subprocess.run(["git", "init", "-q", str(root)], check=True)
 
 
-def _validated(root: Path, number: int, commit: str, *attempts: dict) -> None:
+def _git(root: Path, *arguments: str) -> str:
+    return subprocess.run(["git", *arguments], cwd=root, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def _validated(root: Path, number: int, *attempts: dict) -> tuple[str, str]:
+    """A commit holding a tree of its own, validated by record `number`, whose Helm
+    attempts measured `attempts` in turn; the commit and its tree."""
     _checkout(root)
+    (root / "slice.txt").write_text(f"slice {number}\n", "utf-8")
+    _git(root, "add", "slice.txt")
+    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
+         "-m", f"slice {number}")
+    commit, tree = _git(root, "rev-parse", "HEAD"), _git(root, "rev-parse", "HEAD^{tree}")
     reviews = root / ARCHIVED_REVIEWS
     reviews.mkdir(parents=True, exist_ok=True)
     (reviews / f"{number:02d}-validation.md").write_text(
         f"# Validation\n\n- **Commit:** {commit} on feat/pilot\n", "utf-8")
-    for attempt, memory in enumerate(attempts, 1):
-        directory = root / validator.LOG_ROOT / commit[:12] / "helm" / str(attempt)
+    for second, memory in enumerate(attempts):
+        directory = (root / validator.EVIDENCE_ROOT / tree / "helm"
+                     / f"20261022T0600{second:02d}.000000Z")
         directory.mkdir(parents=True)
         (directory / "summary.json").write_text(json.dumps({"memory": memory}), "utf-8")
+    return commit, tree
 
 
 def _figure_file(root: Path) -> Path:
@@ -1113,9 +1284,9 @@ def _figure_file(root: Path) -> Path:
 
 def test_the_figure_is_the_latest_validations_last_helm_attempt_with_its_time_and_change(
         tmp_path: Path) -> None:
-    _validated(tmp_path, 3, OLDER, {"peak_bytes": 9 * GIB, "measured_at": "early"})
-    _validated(tmp_path, 7, COMMIT, {"peak_bytes": GIB, "measured_at": "first"},
-               {"peak_bytes": 2 * GIB, "measured_at": "2026-10-22T06:00:00+00:00"})
+    _validated(tmp_path, 3, {"peak_bytes": 9 * GIB, "measured_at": "early"})
+    _, tree = _validated(tmp_path, 7, {"peak_bytes": GIB, "measured_at": "first"},
+                         {"peak_bytes": 2 * GIB, "measured_at": "2026-10-22T06:00:00+00:00"})
     path = _figure_file(tmp_path)
 
     said = validator.record_capacity(tmp_path, CHANGE)
@@ -1123,11 +1294,101 @@ def test_the_figure_is_the_latest_validations_last_helm_attempt_with_its_time_an
     assert validator.read_capacity(path) == validator.CapacityFigure(
         2 * GIB, "2026-10-22T06:00:00+00:00", CHANGE)
     assert said.startswith(f"Recorded {2 * GIB} bytes, measured 2026-10-22T06:00:00+00:00")
+    assert f".snapshot/evidence/{tree}/helm/20261022T060001.000000Z/summary.json" in said
+
+
+def _committed(root: Path) -> None:
+    """A repository whose worktree is its one commit, clean."""
+    _checkout(root)
+    (root / "slice.txt").write_text("committed\n", "utf-8")
+    _git(root, "add", "--all")
+    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
+         "-m", "committed")
+
+
+def test_the_worktrees_tree_is_the_tree_its_commit_then_holds(tmp_path: Path) -> None:
+    """Git's own answer, which the engine's `{tree}` is held to in its suite too: the
+    script refuses any tree but the one it computes, so both must give this one."""
+    _committed(tmp_path)
+    assert validator.worktree_tree(tmp_path) == _git(tmp_path, "rev-parse", "HEAD^{tree}")
+    (tmp_path / ".gitignore").write_text(".snapshot/\n", "utf-8")
+    (tmp_path / "slice.txt").write_text("staged\n", "utf-8")
+    _git(tmp_path, "add", "slice.txt")
+    (tmp_path / "slice.txt").write_text("staged, then edited\n", "utf-8")
+    (tmp_path / "untracked.txt").write_text("new\n", "utf-8")
+    (tmp_path / ".snapshot").mkdir()
+    (tmp_path / ".snapshot" / "ignored.txt").write_text("ignored\n", "utf-8")
+    index = (tmp_path / ".git" / "index").read_bytes()
+
+    tree = validator.worktree_tree(tmp_path)
+
+    assert (tmp_path / ".git" / "index").read_bytes() == index
+    _git(tmp_path, "add", "--all")
+    _git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
+         "-m", "the tested tree")
+    assert tree == _git(tmp_path, "rev-parse", "HEAD^{tree}")
+
+
+def test_a_change_in_the_second_the_index_was_written_changes_the_tree(
+        tmp_path: Path) -> None:
+    """A file rewritten at the same size in the second the index was written, its
+    modification time the one the index records for it, passes Git's comparison of
+    file states; only the index's own time tells Git to read it again, so the copy of
+    the index must keep it. The file's state is recorded well before the index is
+    written, so Git leaves the entry as recorded, and Git's comparison of change
+    times is turned off, so the case does not depend on when the test runs."""
+    _committed(tmp_path)
+    _git(tmp_path, "config", "core.trustctime", "false")
+    module, index = tmp_path / "slice.txt", tmp_path / ".git" / "index"
+    recorded = module.stat().st_mtime_ns - 10 * 10**9
+    os.utime(module, ns=(recorded, recorded))
+    _git(tmp_path, "update-index", "--refresh")
+    # The same size as what the index records, "committed\n".
+    module.write_text("rewritten\n", "utf-8")
+    os.utime(module, ns=(recorded, recorded))
+    os.utime(index, ns=(recorded, recorded))
+
+    tree = validator.worktree_tree(tmp_path)
+    _git(tmp_path, "add", "--all")
+    _git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
+         "-m", "the change tested")
+
+    assert tree == _git(tmp_path, "rev-parse", "HEAD^{tree}")
+
+
+def test_an_attempt_without_a_tree_given_describes_the_worktree_as_it_stands(
+        tmp_path: Path) -> None:
+    _committed(tmp_path)
+    (tmp_path / "untracked.txt").write_text("new\n", "utf-8")
+    fake = Fake()
+
+    validation = validator.Validation("local", root=tmp_path, runner=fake.run,
+                                      read=partial(validator._read, cwd=tmp_path),
+                                      echo=lambda line: None, now=lambda: NOW)
+
+    assert validation.summary.tree == validator.worktree_tree(tmp_path)
+    assert validation.summary.tree != _git(tmp_path, "rev-parse", "HEAD^{tree}")
+    assert validation.unchanged("before")
+    (tmp_path / "untracked.txt").write_text("changed\n", "utf-8")
+    assert "the worktree changed" in validation.identity_changed()
+    assert "untracked.txt" in validation.identity_changed()
+
+
+def test_a_validated_commit_the_checkout_cannot_read_records_nothing(tmp_path: Path) -> None:
+    _checkout(tmp_path)
+    reviews = tmp_path / ARCHIVED_REVIEWS
+    reviews.mkdir(parents=True)
+    (reviews / "07-validation.md").write_text(f"- **Commit:** {COMMIT}\n", "utf-8")
+
+    said = validator.record_capacity(tmp_path, CHANGE)
+
+    assert said.startswith(f"No memory figure recorded: the commit 07-validation.md "
+                           f"validated, {COMMIT[:12]}, cannot be read in this checkout")
 
 
 def test_with_no_measurement_nothing_is_written_and_the_figure_is_left_as_it_was(
         tmp_path: Path) -> None:
-    _validated(tmp_path, 7, COMMIT, {})
+    _validated(tmp_path, 7, {})
     path = _figure_file(tmp_path)
     before = path.read_text("utf-8")
 
@@ -1138,7 +1399,7 @@ def test_with_no_measurement_nothing_is_written_and_the_figure_is_left_as_it_was
 
 
 def test_with_no_measurement_and_no_figure_the_file_stays_without_one(tmp_path: Path) -> None:
-    _validated(tmp_path, 7, COMMIT, {})
+    _validated(tmp_path, 7, {})
 
     validator.record_capacity(tmp_path, CHANGE)
 
@@ -1146,7 +1407,7 @@ def test_with_no_measurement_and_no_figure_the_file_stays_without_one(tmp_path: 
 
 
 def test_a_validation_with_no_helm_part_records_nothing(tmp_path: Path) -> None:
-    _validated(tmp_path, 7, COMMIT)
+    _validated(tmp_path, 7)
 
     assert "ran no Helm part" in validator.record_capacity(tmp_path, CHANGE)
 
@@ -1155,8 +1416,9 @@ def test_a_validation_with_no_helm_part_records_nothing(tmp_path: Path) -> None:
 def test_a_summary_not_saying_when_it_measured_is_dated_by_the_file(
         tmp_path: Path, measured_at: str | None) -> None:
     memory = {"peak_bytes": GIB} | ({"measured_at": measured_at} if measured_at else {})
-    _validated(tmp_path, 7, COMMIT, memory)
-    summary = tmp_path / validator.LOG_ROOT / COMMIT[:12] / "helm/1/summary.json"
+    _, tree = _validated(tmp_path, 7, memory)
+    summary = (tmp_path / validator.EVIDENCE_ROOT / tree / "helm"
+               / "20261022T060000.000000Z" / "summary.json")
     os.utime(summary, (NOW.timestamp(), NOW.timestamp()))
 
     figure, _ = validator.capacity_figure(tmp_path, CHANGE)
@@ -1167,7 +1429,7 @@ def test_a_summary_not_saying_when_it_measured_is_dated_by_the_file(
 @pytest.mark.parametrize("memory", [[1], {"peak_bytes": "1Gi"}, {"peak_bytes": True}])
 def test_a_summary_whose_memory_is_not_a_measurement_records_nothing(
         tmp_path: Path, memory: object) -> None:
-    _validated(tmp_path, 7, COMMIT, memory)
+    _validated(tmp_path, 7, memory)
 
     assert validator.capacity_figure(tmp_path, CHANGE)[0] is None
 
@@ -1191,19 +1453,21 @@ def test_the_measurement_time_is_the_last_samples(tmp_path: Path) -> None:
     fake = Fake(memory=("400Mi", "700Mi"))
     _storefront_env(tmp_path)
     validation = validator.Validation("helm", root=tmp_path, runner=fake.run, read=fake.read,
-                                      clock=lambda: 0.0, echo=lambda line: None,
-                                      now=lambda: next(moments))
+                                      tree=fake.tree, clock=lambda: 0.0,
+                                      echo=lambda line: None, now=lambda: next(moments))
 
     summary = validator.validate_helm(validation, change=CHANGE, sleep=lambda seconds: None,
                                       credentials=lambda: None, capacity=_capacity(tmp_path))
 
+    # The attempt is named by the first moment, as it starts; the samples take the next.
+    assert summary.attempt == "20261022T060000.000000Z"
     assert len(summary.memory["samples_bytes"]) == 2
-    assert summary.memory["measured_at"] == "2026-10-22T06:01:00+00:00"
+    assert summary.memory["measured_at"] == "2026-10-22T06:02:00+00:00"
 
 
 def test_the_command_records_the_figure_for_a_change(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    _validated(tmp_path, 7, COMMIT, {"peak_bytes": GIB, "measured_at": "then"})
+    _validated(tmp_path, 7, {"peak_bytes": GIB, "measured_at": "then"})
     (tmp_path / validator.CAPACITY_FILE).parent.mkdir()
 
     assert validator.main(["capacity", "--change", CHANGE], root=tmp_path) == 0
@@ -1305,13 +1569,14 @@ class CIFake:
         (directory / "actions.log").write_text(_ci_log(*self.runs[run_id][0]), "utf-8")
         return 0
 
+    def tree(self) -> str:
+        raise AssertionError("the ci part's evidence describes the commit; it reads no tree")
+
     def read(self, command: Sequence[str]) -> str:
         command = list(command)
         self.reads.append(command)
         if command == ["git", "rev-parse", "HEAD"]:
             return self.head + "\n"
-        if command == ["git", "status", "--porcelain", "--untracked-files=all"]:
-            return ""
         if command[:3] == ["gh", "run", "view"]:
             if command[3] == self.unreadable:
                 raise validator.ValidationError(f"{' '.join(command)} failed: not found")
@@ -1325,13 +1590,13 @@ class CIFake:
 
 
 def _ci(tmp_path: Path, fake: CIFake, workflow: str = "tests.yml") -> object:
-    return validator.validate_ci(_validation(tmp_path, fake, "ci"), workflow=workflow,
-                                 after_run=AFTER_RUN,
+    return validator.validate_ci(_validation(tmp_path, fake, "ci", owed=workflow),
+                                 workflow=workflow, after_run=AFTER_RUN,
                                  contains=lambda ancestor, commit: ancestor == DEV_COMMIT)
 
 
-def _ci_attempt(tmp_path: Path) -> Path:
-    return tmp_path / ".snapshot/validation" / COMMIT[:12] / "ci" / "1"
+def _ci_attempt(tmp_path: Path, workflow: str = "tests.yml") -> Path:
+    return tmp_path / ".snapshot/evidence" / COMMIT / f"ci-{workflow}" / ATTEMPT
 
 
 def test_the_ci_part_keeps_the_run_its_baseline_and_each_jobs_classed_failures(
@@ -1371,10 +1636,11 @@ def test_the_ci_part_keeps_the_run_its_baseline_and_each_jobs_classed_failures(
     assert json.loads((runs / str(CI_RUN) / "run.json").read_text("utf-8"))["headSha"] == COMMIT
     kept = json.loads((_ci_attempt(tmp_path) / "summary.json").read_text("utf-8"))
     assert kept["evidence"]["classes"] == evidence["classes"]
-    assert _results(summary) == {"clean before": "passed", "fetch": "passed",
+    assert _results(summary) == {"commit before": "passed", "fetch": "passed",
                                  "run": "passed", "baseline fetch": "passed",
                                  "baseline": "passed", "failures": "passed",
-                                 "clean after": "passed"}
+                                 "commit after": "passed"}
+    assert (summary.tree, summary.commit) == (None, COMMIT)
     rendered = validator.render(summary)
     assert f"baseline tests.yml run {BASELINE_RUN} of {DEV_COMMIT[:12]}" in rendered
     assert "inherited    tests/test_vm.py::test_slow (TimeoutError)" in rendered
@@ -1564,14 +1830,48 @@ def test_the_ci_command_line_needs_the_workflow_and_the_run_before_the_dispatch(
         validator.main(["ci", "--after-run", "41"], root=tmp_path)
 
 
+@pytest.mark.parametrize("arguments", [
+    ["ci", "--workflow", "tests.yml", "--after-run", "41", "--tree", TREE],
+    ["local", "--commit", COMMIT],
+    ["helm", "--commit", COMMIT],
+])
+def test_a_part_takes_only_the_identity_its_evidence_describes(
+        tmp_path: Path, arguments: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        validator.main(arguments, root=tmp_path)
+
+
+@pytest.mark.parametrize("workflow", ["../tests.yml", "a/b.yml", "..", ""])
+def test_a_workflow_that_would_reach_another_directory_is_refused(
+        tmp_path: Path, workflow: str) -> None:
+    with pytest.raises(validator.ValidationError, match="not a workflow's file name"):
+        _validation(tmp_path, CIFake(run=[]), "ci", owed=workflow)
+
+
+def test_a_commit_head_is_not_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(validator.ValidationError,
+                       match=f"holds the commit {COMMIT}, not the commit given"):
+        _validation(tmp_path, CIFake(run=[]), "ci", given="f" * 40, owed="tests.yml")
+
+
 @pytest.mark.parametrize("arguments, command", [
     (["validate-ci", "WORKFLOW=tests.yml", "CI_AFTER_RUN=41"],
      'python3 scripts/validate_slice.py ci --workflow "tests.yml" --after-run "41"'),
+    (["validate-ci", "WORKFLOW=tests.yml", "CI_AFTER_RUN=41", f"COMMIT={COMMIT}"],
+     'python3 scripts/validate_slice.py ci --workflow "tests.yml" --after-run "41" '
+     f'--commit "{COMMIT}"'),
+    (["validate-local"], "python3 scripts/validate_slice.py local"),
+    (["validate-local", f"TREE={TREE}"],
+     f'python3 scripts/validate_slice.py local --tree "{TREE}"'),
+    (["validate-helm", "CHANGE=pilot", f"TREE={TREE}"],
+     'python3 scripts/validate_slice.py helm --context "docker-desktop" --change "pilot"  '
+     f'--tree "{TREE}"'),
     (["run-ci", "WORKFLOW=tests.yml"], 'python3 scripts/ci_evidence.py dispatch "tests.yml"'),
 ])
 def test_the_ci_targets_run_their_scripts(arguments: list[str], command: str) -> None:
     environment = {name: value for name, value in os.environ.items()
-                   if name not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "CHANGE")}
+                   if name not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "CHANGE", "TREE",
+                                   "COMMIT", "HELM_ALL_SCENARIOS", "HELM_CONTEXT")}
 
     printed = subprocess.run(["make", "-n", "-s", "--no-print-directory", *arguments],
                              cwd=REPO_ROOT, env=environment, capture_output=True, text=True,

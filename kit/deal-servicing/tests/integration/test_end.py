@@ -1,14 +1,16 @@
 import asyncio
+import itertools
 import threading
 from unittest.mock import AsyncMock
 
 import pytest
 from market_deal_lifecycle.delivery import (
     ActivatedDeliveryRef, BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase,
+    JournaledBillingStart,
 )
 from market_deal_lifecycle_contracts.models import Accepted, Unknown
 from market_deal_servicing import (
-    Classification, EndService, EndSession, FinalRequest, PhysicalResult,
+    Classification, EndService, EndSession, FinalRequest, PhysicalResult, SQLiteOperationStore,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -94,12 +96,17 @@ async def test_billing_intent_precedes_io_and_same_key_recovers_unknown(rig):
     adapter = AsyncMock()
     keys = []
 
-    async def start(key, received):
+    async def start(operation, received):
         assert received == evidence
         with transaction(rig["path"]) as conn:
             intents = [item for item in EndSession(conn).intents("deal") if item.kind == "billing"]
-        assert len(intents) == 1 and intents[0].operation_key == key
-        keys.append(key)
+        assert len(intents) == 1 and intents[0].operation_key == operation.operation_key
+        # The keys carry the journal's own replay guard for the adapter's descriptors.
+        assert operation.negotiation_id == "deal"
+        assert isinstance(operation.store, SQLiteOperationStore) and operation.store.path == rig["path"]
+        assert await operation.store.check_and_record("deal", f"descriptor-{len(keys)}", "digest")
+        assert not await operation.store.check_and_record("deal", f"descriptor-{len(keys)}", "changed")
+        keys.append(operation.operation_key)
         return BillingStartResult(outcome=Unknown(reason="lost") if len(keys) == 1 else Accepted())
 
     adapter.start_billing.side_effect = start
@@ -111,6 +118,45 @@ async def test_billing_intent_precedes_io_and_same_key_recovers_unknown(rig):
     assert isinstance(recovered.result.outcome, Accepted)
     refused = await restarted.begin_billing("changed", evidence, adapter=adapter)
     assert refused.result.outcome.status == "rejected"
+
+
+async def test_disclosure_reads_the_journaled_billing_start(rig):
+    evidence = DeliveryEvidence(
+        negotiation_id="deal", commitment_ref="commitment",
+        activated_delivery=ActivatedDeliveryRef(record_ref="activated", activated_at=140),
+    )
+    adapter = AsyncMock()
+    adapter.start_billing.return_value = BillingStartResult(outcome=Accepted())
+    answers = itertools.count()
+
+    async def authorize(phase, evidence, billing):
+        return DeliveryAuthorization(status="pending", reason="fixture",
+                                     operation_id=f"{phase.value}:{next(answers)}", evidence_refs=["commitment"])
+
+    adapter.authorize.side_effect = authorize
+    await rig["end"].authorize_delivery(DeliveryPhase.DISCLOSE, evidence, adapter=adapter, expected_revision=0)
+    assert adapter.authorize.await_args.args[2] is None
+    await rig["end"].begin_billing("start", evidence, adapter=adapter)
+    # With the intent journaled, only disclosure is decided against it, with
+    # its key and its recorded result; every other phase receives none.
+    for phase in (DeliveryPhase.COMMIT, DeliveryPhase.DISPATCH, DeliveryPhase.START):
+        await rig["end"].authorize_delivery(phase, evidence, adapter=adapter, expected_revision=0)
+        assert adapter.authorize.await_args.args[2] is None
+    await rig["end"].authorize_delivery(DeliveryPhase.DISCLOSE, evidence, adapter=adapter, expected_revision=0)
+    assert adapter.authorize.await_args.args[2] == JournaledBillingStart(
+        operation_key="start", result=BillingStartResult(outcome=Accepted()),
+    )
+
+
+async def test_billing_start_without_activation_evidence_is_refused_before_any_authority_call(rig):
+    adapter = AsyncMock()
+    refused = await rig["end"].begin_billing(
+        "start", DeliveryEvidence(negotiation_id="deal", commitment_ref="commitment"), adapter=adapter,
+    )
+    assert refused.result.outcome.status == "rejected"
+    adapter.start_billing.assert_not_called()
+    with transaction(rig["path"]) as conn:
+        assert [item for item in EndSession(conn).intents("deal") if item.kind == "billing"] == []
 
 
 def test_deadline_failure_and_pending_correction_are_atomic(rig):

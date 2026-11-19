@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from apicredits_service.config import settings
 from market_site.ledger import CapacityLedgerService
-from apicredits_service.db.database import create_db_engine, create_session_factory, run_migrations
+from apicredits_service.db.database import (
+    create_db_engine,
+    create_session_factory,
+    initialise_database,
+)
 from apicredits_service.services.keys_service import KeysService
 
 resolved_session_factory: "sessionmaker[Session] | None" = None
@@ -21,13 +25,17 @@ resolved_keys_service: "KeysService | None" = None
 
 
 def init() -> None:
-    """Build the engine, create tables, and wire the services."""
+    """Build the engine, check and initialise the database, and wire the services.
+
+    The database must already be migrated by ``apicredits-service-migrate``;
+    one that is not is refused here, before any service is built.
+    """
     global resolved_session_factory
     global resolved_capacity_ledger_service
     global resolved_keys_service
 
     engine = create_db_engine(settings.database_url, settings.is_sqlite)
-    run_migrations(engine)
+    initialise_database(engine)
     resolved_session_factory = create_session_factory(engine)
     # No eligibility invariant: token quota resources carry no host.
     # Uses the domain-neutral

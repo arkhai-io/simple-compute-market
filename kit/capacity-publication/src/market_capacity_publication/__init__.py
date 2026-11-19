@@ -24,6 +24,7 @@ from .capacity import (
 )
 from .capacity_remote import SiteEventCycle
 from .cycle import (
+    NOT_HELD,
     PAYLOAD_UNBUILDABLE,
     SETTLEMENT_MECHANISM_UNKNOWN,
     ListingLookup,
@@ -35,6 +36,7 @@ from .cycle import (
     SiteDerivationLog,
     converge_registries,
     record_payload_refusal,
+    retire_unheld_listings,
     site_derivations,
 )
 from .publication import (
@@ -44,7 +46,9 @@ from .publication import (
     PublicationRepository,
     PublicationRuntime,
     RegistryDivergence,
+    RegistrySweep,
     ReconciliationPlan,
+    UnheldListingClose,
 )
 from .site_projections import (
     CAPACITY_BUCKET,
@@ -82,7 +86,11 @@ __all__ = [
     "PublicationRepository",
     "PublicationRuntime",
     "RegistryDivergence",
+    "RegistrySweep",
     "ReconciliationPlan",
+    "UnheldListingClose",
+    "NOT_HELD",
+    "retire_unheld_listings",
     "CAPACITY_BUCKET",
     "RESOURCE_POOL",
     "SiteDerivation",

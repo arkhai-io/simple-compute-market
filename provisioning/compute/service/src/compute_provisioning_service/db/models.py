@@ -1,3 +1,4 @@
+import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -8,8 +9,8 @@ Base = declarative_base()
 
 # The job authority's models live in compute_provisioning; re-exported here
 # because the service's modules and tests reach all persistence models through
-# db.models. Their tables ride the job authority's own metadata, which init_db
-# creates with the others.
+# db.models. Their tables are created by the job authority's own baseline in
+# this service's migration chain (db/migrations.py), as every table here is.
 from compute_provisioning.jobs.db import (  # noqa: E402,F401
     TERMINAL_JOB_STATUSES,
     JobCredential,
@@ -58,8 +59,11 @@ class CapacityReleaseCallbackOutbox(Base):
     capacity_reservation_id = Column(String, primary_key=True)
     attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
     last_error = Column(Text, nullable=True)
+    # Pending callbacks are delivered oldest first, so creation is stamped from
+    # the process's time source rather than the database's clock.
     created_at = Column(
         DateTime(timezone=True),
+        default=injected_time.now_datetime,
         server_default=func.now(),
         nullable=False,
     )
@@ -80,7 +84,14 @@ class LeaseEndReportOutbox(Base):
     parked = Column(Boolean, nullable=False, default=False, server_default="0")
     attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
     last_error = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Reports are read and delivered in creation order, so creation is stamped
+    # from the process's time source rather than the database's clock.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     last_attempted_at = Column(DateTime(timezone=True), nullable=True)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -123,11 +134,10 @@ class ProvisioningIdentityRotationAudit(Base):
 
 
 
-# Provider-neutral resource-pool identity now lives in the shared
+# Provider-neutral resource-pool identity lives in the shared
 # market_resource_pools package (kit); re-exported here because the
 # service's modules and tests reach all persistence models through
-# db.models. The table rides market_resource_pools' own metadata —
-# init_db creates it alongside this service's own Base and market_site's.
+# db.models.
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool  # noqa: F401
 
 
@@ -157,15 +167,13 @@ class DefinitionDocumentImport(Base):
 
 # The host registry's model lives with the host authority in
 # compute_provisioning; re-exported here because the service's modules and
-# tests reach all persistence models through db.models. Its table rides the
-# host authority's own metadata, which init_db creates with the others.
+# tests reach all persistence models through db.models.
 from compute_provisioning.hosts.db import Host  # noqa: E402,F401
 
 
 # The site-authority ledger models live in the shared market_site
 # package; re-exported here because the service's modules and tests
-# reach all persistence models through db.models. The tables ride
-# market_site's own metadata — init_db creates both.
+# reach all persistence models through db.models.
 from market_site.db import (  # noqa: F401
     HELD_RESERVATION_STATES,
     ReservationState,
@@ -174,10 +182,7 @@ from market_site.db import (  # noqa: F401
 )
 
 # The settlement/fulfillment aggregate lives in the shared
-# market_fulfillment package; re-exported here for the same reason. The
-# tables ride market_fulfillment's own metadata — init_db creates it
-# alongside this service's own Base, market_site's, and
-# market_resource_pools'.
+# market_fulfillment package; re-exported here for the same reason.
 from market_fulfillment.db import (  # noqa: F401
     ProvisionedResource,
     SettlementRecord,

@@ -12,14 +12,14 @@ reports what they say, and lists the edits the owner may pick. The owner decides
 edit; you propose, measure, and record.
 
 The **default rule** is the one triage accepts findings by (`change-workflow`'s
-CW-d5ac; `docs/agents/change-workflow.md`, "Default acceptance"). Where it was chosen
+CW-d5ac). Where it was chosen
 it was measured as **Rule E**, one of several candidate rules, and its baseline below
 carries that name.
 
 This is not a step of a change. It has no node in the workflow graph, no row in the
 step table, no outcome, and nothing records it in a change's workflow log. The owner
 runs it interactively, in their workspace, which alone holds every cleaned-up change's
-records (`docs/agents/change-workflow.md`, "History and removal"). Nothing runs it
+records (`change-workflow`'s CW-hak6). Nothing runs it
 unattended; if you are in an unattended run, stop and say so. A change's clone is not
 the workspace: if `git remote` lists `workspace`, you are in a clone, whose archive is
 lost with it; stop and ask the owner to run the review in their workspace.
@@ -32,7 +32,9 @@ of their own. Apart from that, the one file it writes is the period ledger's lin
 ## What reaches the repository
 
 Everything you write that the repository keeps — a proposal, its design, a summary
-the owner commits — is public (`AGENTS.md`, "Public repository discipline"). Only
+the owner commits — is as public as the repository: its root guidance says which case
+of `docs/guidance/engineering/repository-content.md` it selects, and in a public
+repository nothing private reaches it. Only
 aggregates — counts, rates — and the principles drawn from them reach it: no
 correction's wording, and no private name, path, identifier, or log. The period ledger
 is untracked, and holds figures only.
@@ -116,12 +118,14 @@ the ledger for comparison:
   sample's size, each disagreement with its finding, and whether the disagreements
   share a cause.
 - **Waivers.** Each waiver a step recommended, by criterion
-  (`docs/agents/change-workflow.md`, "Waivers"), and the merge's, by its own judgement,
+  (`change-workflow`'s CW-q3dm), and the merge's, by its own judgement,
   with how many the owner took; a recommended waiver the owner declined is a ledger
   correction. Note waivers the owner gave that no step recommended, by reason.
 - **Terms the owner asked about.** Each word or mechanism the owner asked an agent to
-  explain, with how often, and whether its home defines it — the homes `AGENTS.md`'s
-  "Domain docs" names. An undefined term the owner asked about is a candidate entry,
+  explain, with how often, and whether its home defines it — the homes
+  `docs/guidance/workflow/terms.md` names, the repository's cross-subsystem terms in
+  the home its root guidance names. An undefined term the owner asked about is a
+  candidate entry,
   unless the change that met it added the entry then.
 
 The labelling is your reading of recorded text: say so, and say which counts a
@@ -133,8 +137,8 @@ Extract each correction's general principle — from the ledger's entries, and f
 accepted judgement findings — and cluster them. Where several changes carry copies of
 the same dispositions, such as changes planned together from one plan, count them
 once, and say so. Check each cluster against the guidance (the documents
-`scripts/change-workflow config load common` prints, `docs/agents/change-workflow.md`,
-the skills) and the
+`scripts/change-workflow config load common` prints, `change-workflow`'s
+specification and companion, the skills) and the
 repository's `check-*` targets, and place it in one of three kinds:
 
 - **guidance that is false:** the guidance says one thing and the owner repeatedly
@@ -167,16 +171,17 @@ the later ones. A rule fitted to cover more of the earlier changes at a lower ra
 did not hold on the later ones when Rule E was chosen — about 2% rose to 10–14% — so a
 widening that holds only on the data it was drawn from is no evidence.
 
-Ask in prose, each option and your recommendation written out (`AGENTS.md`, "Asking
-the owner"). The owner may pick, narrow, reword, or pick nothing.
+Ask in prose, each option and your recommendation written out
+(`docs/guidance/workflow/working-model.md#asking-the-owner`). The owner may pick, narrow, reword, or pick nothing.
 
 ## 5. Write the proposal, on the owner's word
 
 When the owner picks edits and asks for a change, write its `proposal.md` as
-`openspec/README.md` asks of a proposal: why — the period it covered and the figures
+`docs/guidance/workflow/changes.md` asks of a proposal: why — the period it covered and the figures
 behind each edit, in aggregate — what changes, and its permanent documentation impact.
 Write it, with its `ready for design` row in the change index, in a worktree on a new
-branch from `origin/dev`, as `change-design` writes a prerequisite's proposal ("When
+branch from the branch the workspace has checked out, as its remote holds it, as
+`change-design` writes a prerequisite's proposal ("When
 the design needs another change first"), never on a branch another change is worked
 on, and check the index there as that procedure does. The owner commits it and opens
 its pull request. The change then goes through the workflow like any other; its design

@@ -27,13 +27,17 @@ The others reach the module that holds them: `next` the next-step computation,
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
 of a change's history, `cost` its cost report, `push` the guarded push, `config`
 how the repository's workflow configuration resolved, `config load` a step's
-documents, or with `common` those every session reads, and `config parts`
-validation's plan for a change, `run` and `openspec`
-the repository's hooks and its OpenSpec command (`hooks`), `check` the
+documents, or with `common` those every session reads, `evidence` which evidence
+each kind needs for a change's `HEAD` and what is present, `gather` the gathering
+of what is missing, or of a new attempt of one kind (`gather`), `run` and `openspec`
+the repository's hooks and its OpenSpec command (`hooks`), `run before|after` what
+the wrapper runs around a step's session, for a step held interactively (`around`),
+`check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
-default checks (`check change`), and the graph diagram's comparison with the graph
-table, `hook post-compaction` the post-compaction hook, and `wait` the bounded wait
-on a background command's output. `check graph` is internal: it maintains the
+default checks (`check change`), a review's format check on standard input (`check
+review`), and the graph diagram's comparison with the graph table, `hook
+post-compaction` the post-compaction hook, and `wait` the bounded wait on a
+background command's output. `check graph` is internal: it maintains the
 engine's own diagram, and no repository or runner relies on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
@@ -60,18 +64,20 @@ import sys
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+from . import around
 from . import clone as clones
-from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
-               next_step, push, round_view, skills, tasks, wait)
+from . import (config, cost_report, diagram, evidence, find, gather, graph, history, hook,
+               hooks, index, next_step, push, round_view, skills, tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
-from .log import (branch_decisions, direction, history_log_path, last_entries, log_path,
-                  note_orchestrator, note_round, open_log, read_log, record_interactive)
+from .log import (Checkout, branch_decisions, direction, git_checkout, history_log_path,
+                  last_entries, log_path, note_orchestrator, note_round, open_log, read_log,
+                  record_interactive, recorded_landing)
 from .records import git_head
-from .review import review_and_log
+from .review import check_review, review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
 from .watch import denial_report, watch
 from .wrapper import Wrapper
@@ -116,7 +122,8 @@ ARCHIVED_ONLY = _taking(graph.ARCHIVED)
 def interactive_outcome(change: str, step: str, outcome_text: str, session: str | None,
                         environ: Mapping[str, str], root: Path,
                         head: Callable[[Path], str | None] = git_head,
-                        invocations: Callable[[Path], Path | None] = invocations_directory
+                        invocations: Callable[[Path], Path | None] = invocations_directory,
+                        checkout: Callable[[Path, str], Checkout] = git_checkout
                         ) -> dict:
     """Record the outcome of `step`, run interactively on `change`, and return its line.
 
@@ -126,6 +133,8 @@ def interactive_outcome(change: str, step: str, outcome_text: str, session: str 
     refuses. What the session invoked for this change through `run`, and through
     the guarded push, that no line has taken yet is recorded as `invoked`, and
     forgotten once the line is written, so a refused record keeps it for the next.
+    The inputs directory `run before|after` used for the session's step, when it
+    ran, is named as `inputs`.
     """
     if environ.get(UNATTENDED_RUN):
         raise StepError(f"this run is the wrapper's ({UNATTENDED_RUN} is set), and the "
@@ -140,8 +149,13 @@ def interactive_outcome(change: str, step: str, outcome_text: str, session: str 
         raise StepError(f"--outcome is not JSON: {exc}") from exc
     directory = invocations(root)
     invoked = kept_invocations(directory, session, change)
-    line = record_interactive(log_path(root, change), step, outcome, session=session,
-                              commit=head(root), invoked=invoked)
+    log = log_path(root, change)
+    inputs = around.session_inputs(log.parent, session, step)
+    line = record_interactive(log, step, outcome, session=session,
+                              commit=head(root), invoked=invoked,
+                              checkout=checkout(root, change),
+                              inputs=around.named(inputs, log.parent) if inputs.is_dir()
+                              else None)
     drop_invocations(directory, session, invoked)
     return line
 
@@ -233,6 +247,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
                         help="run a pre-closeout review without a passing validation of HEAD")
+    review.add_argument("--arguments", default="",
+                        help="the owner's direction to this review, in their words: where to "
+                             "look harder, never a narrower review; recorded on its log line")
     stop_ = commands.add_parser(
         "stop", help="stop the change's run in progress, in its clone when it has one, which "
                      "is logged `stopped`")
@@ -324,6 +341,10 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--resumes", type=int, default=None,
                           help="the owner's direction to revisit the finished triage run at "
                                "this seq, which `resume` then continues with their words")
+    decision.add_argument("--waives", default=None,
+                          help="the evidence kinds the owner waives for later "
+                               "validations, ','-separated, on the condition --decision "
+                               "states")
     next_ = commands.add_parser("next", help="compute the change's next step")
     next_.add_argument("change")
     next_.add_argument("--plain", action="store_true",
@@ -334,6 +355,9 @@ def _parser() -> argparse.ArgumentParser:
     found.add_argument("--archived", action="store_true", help="refuse an active change")
     found.add_argument("--records", action="store_true",
                        help="its records: this checkout's, else the owner's workspace's")
+    found.add_argument("--next-record", metavar="KIND",
+                       help="the path of its next record of KIND, numbered after every "
+                            "record and transcript, as the engine numbers its own")
     find_.add_argument("--json", action="store_true",
                        help="print name, directory, archived, records, format, and base, the "
                             "branch the change lands on, as JSON")
@@ -361,6 +385,11 @@ def _parser() -> argparse.ArgumentParser:
     viewing.add_argument("change")
     viewing.add_argument("--base", default=None)
     commands.add_parser("round-done", help="return the branch to the round's commit")
+    evidence_ = commands.add_parser(
+        "evidence", help="report which evidence each kind needs for HEAD's tree or commit, "
+                         "and what is present")
+    evidence_.add_argument("change")
+    evidence_.add_argument("--json", action="store_true", help="print it as JSON")
     history_ = commands.add_parser(
         "history", help="copy a change's history from its clone into the workspace")
     history_.add_argument("change")
@@ -372,22 +401,37 @@ def _parser() -> argparse.ArgumentParser:
     config_ = commands.add_parser(
         "config", help="list how every field of the repository's workflow configuration "
                        "resolved; `config load <step>` a step's documents, `config load "
-                       "common` those every session reads; `config parts <change>` "
-                       "validation's plan")
-    config_.add_argument("action", nargs="?", choices=("load", "parts"), default=None)
-    config_.add_argument("subject", nargs="?", default=None, metavar="step|change")
+                       "common` those every session reads")
+    config_.add_argument("action", nargs="?", choices=("load",), default=None)
+    config_.add_argument("subject", nargs="?", default=None, metavar="step")
     config_.add_argument("--json", action="store_true", help="print it as JSON")
+    gather_ = commands.add_parser(
+        "gather", help="gather the evidence HEAD lacks, or with --kind a new attempt of one "
+                       "kind, as the engine's hook table allows the step")
+    gather_.add_argument("change")
+    gather_.add_argument("--kind", default=None,
+                         help="gather a new attempt of this kind, whatever is present")
+    gather_.add_argument("--owed", default=None,
+                         help="with --kind, an owed kind: the one argument to gather")
+    gather_.add_argument("--lapsed", action="store_true",
+                         help="with --kind, a kind the owner waived whose waiver has lapsed")
+    gather_.add_argument("--base", default=None,
+                         help="the branch the change lands on, for a command naming {base}; "
+                              "the one its clone recorded by default")
     run_ = commands.add_parser(
         "run", help="run one of the repository's hooks for a change, as the engine's hook "
-                    "table allows the step")
-    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP))
-    run_.add_argument("change")
-    run_.add_argument("part", nargs="?", default=None,
-                      help="validation only: `preflight`, or the part to run")
-    run_.add_argument("phase", nargs="?", default=None, choices=hooks.PHASES,
-                      help="validation's part only: run, start, or collect")
-    run_.add_argument("--owed", default=None,
-                      help="an owed part only: the workflow its run is for")
+                    "table allows the step; `run before|after <step> <change>` what the "
+                    "wrapper runs around a step's session, for a step held interactively")
+    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.CLEANUP, hooks.TEST_BEFORE,
+                                       graph.BEFORE, graph.AFTER))
+    run_.add_argument("subjects", nargs="+", metavar="change",
+                      help="the change; `run before|after` takes the step, then the change")
+    run_.add_argument("--test", dest="tests", action="append", default=[],
+                      help="test-before only: a test file, as HEAD holds it, to run against "
+                           "the earlier commit; repeat for more")
+    run_.add_argument("--at", default=None,
+                      help="test-before only: the commit to run against; the current "
+                           "round's base by default")
     run_.add_argument("--base", default=None,
                       help="the branch the change lands on, for a command naming {base}; "
                            "the one its clone recorded by default")
@@ -406,6 +450,10 @@ def _parser() -> argparse.ArgumentParser:
     checks.add_parser("skills", help="every agent skill loaded from its one source")
     checks.add_parser("round-view", help="fail while a round view is open")
     checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
+    review_ = checks.add_parser(
+        "review", help="a review on standard input, checked as it is before it is published")
+    review_.add_argument("kind", choices=KINDS)
+    review_.add_argument("change")
     waiting = commands.add_parser(
         "wait", help="block until a file holds a line matching a pattern, within a bound")
     waiting.add_argument("file", type=Path)
@@ -451,15 +499,23 @@ _FROM = re.compile(r"from\s+\S")
 
 def merge_arguments(root: Path, change: str, arguments: str) -> str:
     """The merge's arguments, naming the branch it brings in: the one given, `from
-    <branch>`, or else the branch the change lands on, as its clone recorded it;
-    refused, naming the argument, with neither."""
+    <branch>`; else the branch the change's last finished merge recorded in its
+    `landing`, so a merge given another branch than the clone's is followed by merges
+    of that branch; else the branch the change lands on, as its clone recorded it;
+    refused, naming the argument, with none.
+
+    Only the recorded branch is taken, never its remote: a merge after the archive
+    may run in the workspace once the clone that recorded it is gone, where the
+    remote is named otherwise, and it chooses its remote afresh where it runs."""
     if _FROM.match(arguments):
         return arguments
-    base = find.landing_branch(root, change)
+    landing = recorded_landing(read_log(log_path(root, change)))
+    base = landing["branch"] if landing is not None else find.landing_branch(root, change)
     if base is None:
         raise StepError(f"the merge brings in the branch {change} lands on, and none is "
-                        "recorded, since the change has no clone that recorded one: give it "
-                        "with FROM=<branch>, or --arguments 'from <branch>'")
+                        "recorded, since no finished merge recorded one and the change has no "
+                        "clone that recorded one: give it with FROM=<branch>, or --arguments "
+                        "'from <branch>'")
     return " ".join(part for part in (f"from {base}", arguments) if part)
 
 
@@ -605,8 +661,14 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
         if args.json and args.records:
             raise _Usage("--json prints the records of this checkout alone, so it takes no "
                          "--records")
+        if args.json and args.next_record:
+            raise _Usage("--next-record prints a path, so it takes no --json")
         flag = [f"--{name}" for name in ("active", "archived", "records") if getattr(args, name)]
+        if args.next_record:
+            flag = ["--next-record", args.next_record]
         return find.main, [*flag, *(["--json"] if args.json else []), args.change]
+    if args.command == "evidence":
+        return evidence.main, [args.change, *(["--json"] if args.json else [])]
     if args.command == "clone" and args.change != "where":
         if args.where_change is not None:
             raise _Usage("clone takes one change, or `where` followed by the change")
@@ -636,33 +698,50 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
                 "round-view": (round_view.main, ["check"]),
                 "config": (config.main, ["check"]),
                 "graph": (_graph, None)}[args.check]
-    if args.command == "config" and args.action != "parts":
+    if args.command == "config":
         if args.action == "load":
             if args.subject is None or args.json:
                 raise _Usage("config load takes the step whose documents it prints, or "
                              "`common`, and no --json")
             return config.main, ["load", args.subject]
         if args.subject is not None:
-            raise _Usage("config alone takes no argument; `config load <step>` and `config "
-                         "parts <change>` take one")
+            raise _Usage("config alone takes no argument; `config load <step>` takes one")
         return config.main, ["show", *(["--json"] if args.json else [])]
     return None
 
 
-def _config_parts(args: argparse.Namespace, root: Path) -> int:
-    """Validation's plan for the change: the configuration's parts, an owed part
-    once per workflow its complete sections owe."""
-    if args.subject is None:
-        raise _Usage("config parts takes the change whose plan it prints")
-    configuration = config.load(root)
-    try:
-        directory = change_directory(root, args.subject)
-    except ChangeNotFound as exc:
-        raise StepError(str(exc)) from exc
-    runs = config.plan(configuration, tasks.owed_lines(directory / next_step.TASKS_FILE))
-    print(config.plan_json(configuration, runs) if args.json
-          else "\n".join(config.plan_lines(configuration, runs)))
-    return 0
+def _round_base(root: Path, change: str) -> str | None:
+    """The commit the change's latest round started from, its round view's base."""
+    path = log_path(root, change)
+    rounds = [e for e in read_log(path) if e.get("outcome") == "round"] if path.exists() else []
+    return rounds[-1].get("commit") if rounds else None
+
+
+def _kinds(root: Path, given: str) -> list[str]:
+    """The evidence kinds a waiver names, each one the configuration declares."""
+    names = [name.strip() for name in given.split(",") if name.strip()]
+    declared = {kind.name for kind in config.load(root).kinds or ()}
+    if unknown := [name for name in names if name not in declared]:
+        raise StepError(f"the waiver names evidence kinds validation does not declare: "
+                        f"{', '.join(unknown)}; declared: {', '.join(sorted(declared))}")
+    return names
+
+
+def _around(args: argparse.Namespace, root: Path, environ: Mapping[str, str],
+            wrapper: Wrapper) -> int:
+    """`run before|after <step> <change>`: a triage's hooks given the kind of review
+    it triages, as the next-step computation names it."""
+    if len(args.subjects) != 2:
+        raise _Usage(f"run {args.hook} takes the step, then the change")
+    step, change = args.subjects
+    if step not in STEPS:
+        raise _Usage(f"{step!r} is no step of the workflow; its steps: {', '.join(STEPS)}")
+    return around.interactive(args.hook, step, change, root=root,
+                              reviews=log_path(root, change).parent,
+                              configuration=config.load(root), environ=environ,
+                              base=args.base or find.landing_branch(root, change),
+                              kind=wrapper.kind(root, change) if step == "triage" else None,
+                              clock=wrapper.clock, invocations=wrapper.invocations)
 
 
 def _graph(root: Path) -> int:
@@ -677,20 +756,28 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         return start(args, root, wrapper, launch)
     if args.command == "clone" and args.change == "where":
         return _clone_where(args, root)
-    if args.command == "config" and args.action == "parts":
-        return _config_parts(args, root)
+    if args.command == "gather":
+        if args.kind is None and (args.owed is not None or args.lapsed):
+            raise _Usage("--owed and --lapsed qualify --kind")
+        return gather.main(args.change, root=root, configuration=config.load(root),
+                           environ=environ,
+                           base=args.base or find.landing_branch(root, args.change),
+                           kind=args.kind, owed=args.owed, lapsed=args.lapsed)
     if args.command == "run":
-        if args.hook == hooks.VALIDATION:
-            if args.part is None or (args.part == hooks.PREFLIGHT) != (args.phase is None):
-                raise _Usage("run validation takes `preflight`, or a part and its phase")
-        elif (args.part, args.phase, args.owed) != (None, None, None):
+        if args.hook != hooks.TEST_BEFORE and (args.tests or args.at):
+            raise _Usage("--test and --at belong to run test-before")
+        if args.hook in (graph.BEFORE, graph.AFTER):
+            return _around(args, root, environ, wrapper)
+        if len(args.subjects) != 1:
             raise _Usage(f"run {args.hook} takes the change alone")
+        args.change = args.subjects[0]
         # The branch the change lands on, for a command naming `{base}`: the one
         # given, or the one its clone recorded.
         base = args.base or find.landing_branch(root, args.change)
         return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
-                          environ=environ, base=base, part=args.part, phase=args.phase,
-                          owed=args.owed)
+                          environ=environ, base=base, tests=args.tests,
+                          commit=(args.at or _round_base(root, args.change)
+                                  if args.hook == hooks.TEST_BEFORE else None))
     if args.command == "check" and args.check == "change":
         configuration = config.load(root)
         try:
@@ -698,6 +785,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         except ChangeNotFound as exc:
             raise StepError(str(exc)) from exc
         return 0 if hooks.Hooks(root, configuration, environ).check_change(args.change) else 1
+    if args.command == "check" and args.check == "review":
+        return check_review(sys.stdin.read(), args.kind, args.change)
     if args.command == "wait":
         return _wait(args)
     if (reached := delegated(args)) is not None:
@@ -728,7 +817,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
     path = (history_log_path if args.command == "log" else log_path)(wrapper.root, args.change)
     if args.command == "record":
         line = interactive_outcome(args.change, args.step, args.outcome, args.session,
-                                   environ, wrapper.root, wrapper.head, wrapper.invocations)
+                                   environ, wrapper.root, wrapper.head, wrapper.invocations,
+                                   wrapper.checkout)
         print(json.dumps(line, ensure_ascii=False))
         return 0
     if args.command == "convert":
@@ -748,7 +838,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         _round_view_closed(root)
         line = review_and_log(args.change, args.kind, root=wrapper.root, base=args.base,
                               model=args.model or None, effort=args.effort or None,
-                              fresh=args.fresh, unvalidated=args.unvalidated)
+                              fresh=args.fresh, unvalidated=args.unvalidated,
+                              direction=args.arguments.strip() or None, environ=environ)
         if line["outcome"] != "stopped":
             print(f"Review written to {line['record']}", file=sys.stderr)
         return _logged(line)
@@ -783,6 +874,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                                  target=args.target,
                                  branch=args.branch,
                                  resumes=args.resumes,
+                                 waives=(_kinds(root, args.waives)
+                                         if args.waives is not None else None),
                                  # A branch decision is about the change whose log
                                  # holds it, which is where steps look.
                                  change=args.decided_change

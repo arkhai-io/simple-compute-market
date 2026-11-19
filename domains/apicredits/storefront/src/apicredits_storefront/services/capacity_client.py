@@ -86,11 +86,14 @@ _MIXED = frozenset({"capacity_changed"})
 
 def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
     async def reconcile(context: CapacityReconcileContext) -> None:
+        # Local: the publication service imports this module's capacity runtime
+        # at module level, so importing it here at module level is circular.
         from apicredits_storefront.services.publication_service import (
             close_token_listings_after_capacity_change,
             close_token_listings_on_source_mismatch,
             converge_registries,
             reopen_token_listings_after_capacity_change,
+            retire_unheld_listings,
         )
         delta = context.delta
         db = sqlite_client_factory()
@@ -103,6 +106,7 @@ def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
         if delta is None or delta.kind == "released" or delta.kind in _MIXED:
             await reopen_token_listings_after_capacity_change(db, dict(context.availability))
         await converge_registries(db)
+        await retire_unheld_listings(db)
     return reconcile
 
 

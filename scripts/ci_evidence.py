@@ -17,7 +17,10 @@ dispatching, printed as the fetch that follows takes it (`CI_AFTER_RUN=<id>`, or
 when there is none: the marker the workflow configuration's `collect` waits past,
 which the change workflow's engine keeps from a `start`'s last line.
 
-The rest is the comparison validation's `ci` part makes (`validate_slice.py ci`).
+The rest is the comparison validation's `ci` kind makes as it collects
+(`validate_slice.py ci`), keeping the run's evidence under
+`.snapshot/evidence/<commit>/ci-<workflow>/`: a dispatched run describes the commit
+it was dispatched for, and its baseline is chosen by that commit's ancestry.
 A workflow may fail on `dev` in jobs no change owes, so a run's conclusion says
 little; every failure of a job is compared instead with the same job in a
 baseline, the latest completed run of the workflow on `dev` whose head commit is an

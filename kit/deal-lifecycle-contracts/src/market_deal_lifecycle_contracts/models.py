@@ -6,6 +6,8 @@ not parsed JSON, so exporting evidence never reconstructs signed bytes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Annotated, Literal
 
 from market_identity import AuthenticatedRequest, AuthenticatedResponse, Identity
@@ -14,10 +16,21 @@ from pydantic import Base64Bytes, BaseModel, ConfigDict, Field, JsonValue, model
 Reference = Annotated[str, Field(min_length=1)]
 Instant = Annotated[int, Field(strict=True, ge=0)]
 Amount = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]*)$")]
-CommandKind = Literal["start", "stop", "reverse", "dispute", "delivery_end", "append"]
-PaymentEventKind = Literal["start", "stop", "collect", "reverse", "award", "return", "extend", "lift"]
+CommandKind = Literal["start", "stop", "notice", "reverse", "dispute", "delivery_end", "append"]
+PaymentEventKind = Literal["start", "stop", "stop_request", "collect", "reverse", "award", "return", "extend", "lift"]
 DisputeEventKind = Literal["filed", "appended", "ruled", "closed"]
 LifecycleState = Literal["unstarted", "running", "ending", "ended", "repair_required"]
+# Why a deal with a recorded end is still ending rather than ended.
+EndingCode = Literal["release_pending", "payment_running", "case_open", "case_unobserved"]
+
+#: Each ending code's text. Every reader renders these words, so a code added
+#: to ``EndingCode`` arrives with its text and no client interprets codes itself.
+ENDING_TEXT: Mapping[EndingCode, str] = MappingProxyType({
+    "release_pending": "The resource is not yet proven released.",
+    "payment_running": "A payment part has no verified stop or end at the payment authority.",
+    "case_open": "A case is open at the dispute authority.",
+    "case_unobserved": "The dispute authority has not yet been observed, so no case is verified closed.",
+})
 
 
 class WireModel(BaseModel):
@@ -55,6 +68,7 @@ class PaymentEvent(WireModel):
     extension_ref: Reference | None = None
     sequence: Annotated[int, Field(strict=True, ge=0)]
     authority_record_ref: Reference
+    settles_through: Literal["started_period", "last_boundary", "stop"] | None = None
 
     @model_validator(mode="after")
     def required_effect_fields(self) -> PaymentEvent:
@@ -202,6 +216,20 @@ class OpenExtension(WireModel):
     until: Instant | None
 
 
+class PaymentPartObservation(WireModel):
+    """Verified payment bounds, with requests distinct from controlling ends."""
+
+    part: Reference
+    started_at: Instant | None = None
+    end_at: Instant | None = None
+    funded_through: Instant | None = None
+    initial_reservation: bool | None = None
+    pending_stop: PaymentEvent | None = None
+    final_stop: PaymentEvent | None = None
+    release_at: Instant | None = None
+    evidence_ref: Reference
+
+
 class AuthorityView(WireModel):
     outcome: LifecycleOutcome
     # None means the adapter cannot supply a complete payout observation.
@@ -209,6 +237,7 @@ class AuthorityView(WireModel):
     payouts: dict[str, Instant | None] | None = None
     state: LifecycleState | None = None
     events: list[PaymentEvent] = Field(default_factory=list)
+    parts: list[PaymentPartObservation] = Field(default_factory=list)
     disputes: list[DisputeEvent] = Field(default_factory=list)
     cases: list[CaseRecord] = Field(default_factory=list)
     extensions: list[OpenExtension] = Field(default_factory=list)
@@ -269,10 +298,26 @@ class DealSummary(WireModel):
     mechanism: Reference
     entitlements: dict[str, JsonValue]
     state: LifecycleState
+    # Each condition still outstanding while the deal is ending.
+    ending: list[EndingCode] = Field(default_factory=list)
     deadline: Instant | None = None
+    parts: list[PaymentPartObservation] = Field(default_factory=list)
     has_open_extension: bool
     open_cases: list[Reference]
     filings: list[FilingProgress] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ending_only_while_ending(self) -> DealSummary:
+        if self.ending and self.state != "ending":
+            raise ValueError("ending codes are listed only while the deal is ending")
+        if len(set(self.ending)) != len(self.ending):
+            raise ValueError("an ending code is listed once")
+        return self
+
+    @property
+    def ending_reasons(self) -> list[tuple[EndingCode, str]]:
+        """Each outstanding code with the text every reader renders for it."""
+        return [(code, ENDING_TEXT[code]) for code in self.ending]
 
 
 class DealPage(WireModel):

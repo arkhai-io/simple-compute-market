@@ -18,7 +18,8 @@ from market_identity import (
 
 from market_deal_servicing import (
     DealWatch, DeliveryIngress, DeliveryRecord, EndService, EndSession, PhysicalResult, VerifiedSiteEnd, LifecycleRouteBinding, LifecycleRouteServices,
-    SellerDeal, SellerServicing, SellerSession, create_lifecycle_router,
+    SellerDeal, SellerServicing, SellerSession, create_lifecycle_router, create_payment_observations,
+    create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -40,6 +41,9 @@ async def main():
         )
         now = int(time.time())
         with transaction(path) as conn:
+            # The storefront chain's migrations, which no session runs.
+            create_schema(conn)
+            create_payment_observations(conn)
             EndSession(conn).register(DeliveryRecord(
                 negotiation_id="example", seller=seller.identity, commitment_ref="fixture-commitment",
                 start_at=now, committed_at=now, term_end=now + 1000, progress="active",

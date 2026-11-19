@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
 
+import injected_time
 from core_storefront.auth import (
+    ADMIN_TIME_OPERATION,
+    ADMIN_TIME_RESOURCE,
     AuthenticatedPrincipal,
     AuthError,
+    admin_time_setting_operation,
     authenticate_request,
     signed_response_headers,
 )
@@ -52,7 +55,7 @@ def initialize_administrator_identities(
 ) -> None:
     """Idempotently materialize configured administrator trust pins."""
 
-    timestamp = int(time.time()) if now is None else now
+    timestamp = injected_time.now() if now is None else now
     authority = StorefrontIdentityAuthority(db_path)
     for subject, principals in get_administrator_configs().items():
         try:
@@ -204,6 +207,7 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
     exact: dict[tuple[str, str], tuple[str, str]] = {
         ("POST", "/api/v1/admin/pause"): ("admin_pause", ""),
         ("POST", "/api/v1/admin/resume"): ("admin_resume", ""),
+        ("POST", "/api/v1/admin/time"): (ADMIN_TIME_OPERATION, ADMIN_TIME_RESOURCE),
         ("POST", "/api/v1/admin/portfolio/release-reservations"): (
             "admin_release_reservations",
             "",
@@ -470,7 +474,7 @@ async def administrator_identity_middleware(request: Request, call_next):
         if db is None:
             raise AuthError("authentication store unavailable", status_code=503)
         _storefront_signer()
-        now = int(time.time())
+        now = injected_time.now()
         claimed = _claimed_administrator(request)
         if claimed not in _active_administrators(db.db_path, now=now):
             raise AuthError(
@@ -486,6 +490,7 @@ async def administrator_identity_middleware(request: Request, call_next):
             expected_principal=claimed,
             replay_store=db,
             now=now,
+            time_setting_operation=admin_time_setting_operation(),
         )
         request.state.marketplace_authenticated = auth
         request.state.administrator_authenticated = True

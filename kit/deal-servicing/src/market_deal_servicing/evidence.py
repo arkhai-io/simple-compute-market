@@ -52,47 +52,19 @@ class RetentionObservation(WireModel):
         )
 
 
-def create_schema(conn: sqlite3.Connection) -> None:
-    """Install tables without committing the caller's acceptance transaction."""
-    for statement in (
-        """CREATE TABLE IF NOT EXISTS servicing_evidence_deals (
-            negotiation_id TEXT PRIMARY KEY,
-            acceptance_expires_at INTEGER,
-            accepted_by TEXT,
-            lifecycle TEXT,
-            observation TEXT
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_evidence_items (
-            position INTEGER PRIMARY KEY AUTOINCREMENT,
-            negotiation_id TEXT NOT NULL,
-            evidence_id TEXT NOT NULL,
-            item TEXT NOT NULL,
-            UNIQUE (negotiation_id, evidence_id)
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_evidence_commitments (
-            negotiation_id TEXT NOT NULL,
-            commitment_ref TEXT NOT NULL,
-            superseded INTEGER NOT NULL,
-            PRIMARY KEY (negotiation_id, commitment_ref)
-        )""",
-        """CREATE UNIQUE INDEX IF NOT EXISTS servicing_one_live_commitment
-            ON servicing_evidence_commitments(negotiation_id) WHERE superseded = 0""",
-    ):
-        conn.execute(statement)
-
-
 class EvidenceSession:
     """Borrow a storefront SQLite session; never commit or roll back its writes.
 
     Capture and acceptance can share the transaction which commits the Agreement.
     The signed transport calls capture only after verification, retaining the body
     and proof headers before parsing. Administrative acceptance supplies its author
-    independently of the principal who signed the buyer's message.
+    independently of the principal who signed the buyer's message. The session
+    issues no DDL: its tables are the storefront chain's
+    (``market_deal_servicing.schema``).
     """
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
-        create_schema(conn)
 
     def _ensure(self, negotiation_id: str) -> None:
         self.conn.execute(

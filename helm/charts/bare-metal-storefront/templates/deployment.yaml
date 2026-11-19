@@ -36,6 +36,22 @@ spec:
       enableServiceLinks: false
       securityContext:
         fsGroup: 1001
+      # The one init container is the storefront's own migration, which acts
+      # on its own database: the application refuses a database the migration
+      # has not brought to its chain. None waits on a dependency the storefront
+      # already tolerates being unreachable.
+      initContainers:
+        - name: migrate
+          image: {{ include "bare-metal-storefront.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - bare-metal-storefront-migrate
+          env:
+            {{- include "bare-metal-storefront.env" . | nindent 12 }}
+          volumeMounts:
+            {{- include "bare-metal-storefront.configMounts" . | nindent 12 }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath | quote }}
       containers:
         - name: bare-metal-storefront
           image: {{ include "bare-metal-storefront.image" . | quote }}

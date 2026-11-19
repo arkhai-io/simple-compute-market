@@ -31,3 +31,15 @@ def test_the_lifecycle_loops_are_read_when_reported():
 
 def test_the_lifecycle_loops_are_absent_when_not_reported():
     assert HealthResponse.from_dict({"status": "ok"}).lifecycle is None
+
+
+def test_the_time_section_is_read_in_either_mode():
+    injected = HealthResponse.from_dict(
+        {"status": "ok", "time": {"source": "injected", "now": 1794822300}}
+    )
+    wall = HealthResponse.from_dict({"status": "ok", "time": {"source": "wall"}})
+
+    assert injected.time == {"source": "injected", "now": 1794822300}
+    assert wall.time == {"source": "wall"}
+    assert "time" not in injected.extra
+    assert HealthResponse.from_dict({"status": "ok"}).time is None

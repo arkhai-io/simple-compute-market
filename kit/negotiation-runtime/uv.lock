@@ -22,20 +22,29 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.6.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-injected-time"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_injected_time-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "cryptography" },
     { name = "eth-account" },
     { name = "keyring" },
@@ -43,14 +52,15 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.5.2"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
@@ -63,8 +73,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
-    { name = "arkhai-kit-policy", specifier = "==0.6.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.5.0" },
+    { name = "arkhai-kit-policy", specifier = "==0.7.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -75,16 +86,17 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]

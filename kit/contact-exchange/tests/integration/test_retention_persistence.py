@@ -10,8 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from market_contact_exchange.migrations import BASELINE
 from market_contact_exchange import (
-    CONTACT_EXCHANGE_MIGRATIONS,
     IntroductionRecord,
     IntroductionRetentionPolicy,
     IntroductionRetentionService,
@@ -42,8 +42,7 @@ def db_path(tmp_path: Path) -> str:
     path = str(tmp_path / "storefront.db")
     conn = sqlite3.connect(path)
     try:
-        for migration in CONTACT_EXCHANGE_MIGRATIONS:
-            migration.apply(conn)
+        BASELINE.apply(conn)
         conn.commit()
     finally:
         conn.close()

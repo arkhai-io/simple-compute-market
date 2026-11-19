@@ -1,8 +1,8 @@
-.PHONY: test test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront dist dist-ci dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront test-arkhai-payments
+.PHONY: test test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront dist dist-ci dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront test-arkhai-payments test-schema-migrations dist-schema-migrations
 
 DIST_DIR ?= ../.dist
 
-test: dist test-deal-servicing test-deal-lifecycle-client test-deal-lifecycle-buyer test-arkhai-mediation test-deal-lifecycle test-deal-lifecycle-contracts test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
+test: dist test-deal-servicing test-deal-lifecycle-client test-deal-lifecycle-buyer test-arkhai-mediation test-deal-lifecycle test-deal-lifecycle-contracts test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments test-schema-migrations
 
 .PHONY: test-deal-servicing test-deal-lifecycle-client test-deal-lifecycle-buyer dist-deal-lifecycle-buyer
 
@@ -115,9 +115,18 @@ test-negotiation-runtime:
 test-storefront:
 	cd storefront && $(MAKE) test
 
+test-schema-migrations:
+	cd schema-migrations && $(MAKE) test
+
 dist: dist-ci
 
-dist-ci: dist-deal-lifecycle-client dist-deal-lifecycle-buyer dist-deal-servicing dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
+dist-ci: dist-deal-lifecycle-client dist-deal-lifecycle-buyer dist-deal-servicing dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments dist-schema-migrations
+
+dist-schema-migrations:
+	-mkdir -p $(DIST_DIR)
+	cd schema-migrations && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_schema_migrations-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-schema-migrations produced a platform-specific wheel" && exit 1)
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)

@@ -37,6 +37,7 @@ from market_storefront.settlement_composition import (
     serialize_settlement_job,
 )
 from market_storefront.settlement_stages import vm_seller_stages
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting
 from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admission
@@ -168,7 +169,7 @@ async def _persist_accepted_negotiation(
     )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
-        agreed_price=42,
+        negotiated_scalar=42,
         agreed_duration_seconds=3600,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         settlement_data={"accepted_escrow_proposal": proposal},
@@ -235,11 +236,16 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
     )
 
 
+def _client(db_path, registry) -> SQLiteClient:
+    migrate_storefront_database(db_path)
+    return SQLiteClient(db_path=str(db_path), registry=registry)
+
+
 @pytest.fixture
 def db(tmp_path):
-    return SQLiteClient(
-        db_path=str(tmp_path / "vm-settlement.db"),
-        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    return _client(
+        tmp_path / "vm-settlement.db",
+        build_vm_storefront_registry(build_vm_storefront_domain()),
     )
 
 
@@ -285,10 +291,7 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
             domain.settlement, seller_stages=vm_seller_stages(build_plan)
         ),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "injected-plan.db"),
-        registry=build_vm_storefront_registry(domain),
-    )
+    db = _client(tmp_path / "injected-plan.db", build_vm_storefront_registry(domain))
     thread_binding = await _persist_accepted_negotiation(
         db,
         negotiation_id="neg-1",
@@ -488,9 +491,8 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
         domain,
         fulfillment=replace(domain.fulfillment, fulfill=fulfill),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "injected-fulfillment.db"),
-        registry=build_vm_storefront_registry(domain),
+    db = _client(
+        tmp_path / "injected-fulfillment.db", build_vm_storefront_registry(domain)
     )
     await _persist_accepted_negotiation(
         db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
@@ -515,15 +517,7 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
     await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
     await db.update_vm_delivery(negotiation_id="neg-1", fulfillment_uid="0xfulfillment")
 
-    outcome = await fulfill_vm_settlement(
-        domain,
-        prepared,
-        # Peer evidence publication resolves the chain client from the
-        # mechanism adapter, so a bare object() is nothing the production
-        # path can use.
-        mechanism_client=SimpleNamespace(chain_client=lambda chain: object()),
-        sqlite_client=db,
-    )
+    outcome = await fulfill_vm_settlement(domain, prepared, sqlite_client=db)
 
     assert outcome.status == "fulfilled"
     assert outcome.fulfillment_ref == "0xfulfillment"
@@ -570,10 +564,7 @@ async def test_a_release_model_the_domain_cannot_deliver_refuses_composition(tmp
         }
     )
     domain = replace(base, settlement=replace(base.settlement, seller_stages=restricted))
-    db = SQLiteClient(
-        db_path=str(tmp_path / "vm-settlement.db"),
-        registry=build_vm_storefront_registry(domain),
-    )
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
     settlement = {
         "schema_version": 1,
         "priority": ["alkahest.v1"],
@@ -597,8 +588,63 @@ async def test_a_release_model_the_domain_cannot_deliver_refuses_composition(tmp
         )
 
 
+def test_the_configured_rate_servicing_declaration_is_the_compositions(tmp_path):
+    """The seller root's ``rate_servicing`` tables are the one declaration
+    publication and acceptance read."""
+    domain = build_vm_storefront_domain()
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
+    settlement = {
+        "schema_version": 1,
+        "priority": [],
+        "alkahest": {"enabled": False},
+        # Development fixture: a disabled payments section still services
+        # accepted deals, so it yields the seller stage.
+        "arkhai_payments": {
+            "enabled": False, "service_url": "http://127.0.0.1:9",
+            "service_identity": _SELLER_SIGNER.identity.model_dump(mode="json"),
+        },
+        "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
+    }
+
+    with replaced_setting("settlement", settlement):
+        composition = build_vm_settlement_composition(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+
+    assert composition.rate_servicing is composition.settlement_config.rate_servicing
+    declared = composition.rate_servicing.select("arkhai.payments.v1")
+    assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+    # Materialization reads the same declaration, and the payments kit's preset
+    # helper and timing projection are installed beside it.
+    assert composition.arkhai_payments_stage is not None
+    assert composition.arkhai_payments_stage.rate_servicing is composition.rate_servicing
+    assert set(composition.rate_preset_helpers or {}) == {"arkhai.payments.v1"}
+    assert set(composition.rate_term_projections or {}) == {"arkhai.payments.v1"}
+
+
+def test_the_configured_penalty_multiple_is_the_compositions(tmp_path):
+    domain = build_vm_storefront_domain()
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
+    settlement = {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}}
+
+    with replaced_setting("settlement", settlement), replaced_setting(
+        "pricing.default_premature_stop_penalty_periods", 6,
+    ):
+        composition = build_vm_settlement_composition(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+
+    assert composition.default_penalty_periods == 6
+
+
 @pytest.mark.asyncio
-async def test_persist_outcome_preserves_legacy_ready_projection(db):
+async def test_persist_outcome_records_the_ready_projection_and_no_credential(db):
     prepared = _prepared(db)
     await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
     from market_settlement_runtime import FulfillmentOutcome
@@ -619,7 +665,8 @@ async def test_persist_outcome_preserves_legacy_ready_projection(db):
     assert row["status"] == "ready"
     assert row["fulfillment_uid"] == "0xfulfillment"
     assert row["connection_details"] == "ssh tenant@host"
-    assert json.loads(row["tenant_credentials"]) == {"password": "secret"}
+    assert row["tenant_credentials"] is None
+    assert (await db.load_vm_delivery(negotiation_id="neg-1"))["tenant_credentials"] is None
 
 
 @pytest.mark.asyncio
@@ -643,9 +690,8 @@ async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass
         domain,
         fulfillment=replace(domain.fulfillment, fulfill=AsyncMock(return_value=deferred)),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "deferred-fulfillment.db"),
-        registry=build_vm_storefront_registry(domain),
+    db = _client(
+        tmp_path / "deferred-fulfillment.db", build_vm_storefront_registry(domain)
     )
     await _persist_accepted_negotiation(
         db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
@@ -654,12 +700,7 @@ async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass
     await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
     status_before = (await db.load_escrow(escrow_uid="0xescrow"))["status"]
 
-    outcome = await fulfill_vm_settlement(
-        domain,
-        prepared,
-        mechanism_client=SimpleNamespace(chain_client=lambda chain: object()),
-        sqlite_client=db,
-    )
+    outcome = await fulfill_vm_settlement(domain, prepared, sqlite_client=db)
     await persist_vm_settlement_outcome(prepared, outcome)
 
     assert outcome.status == "deferred"
@@ -667,6 +708,41 @@ async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass
     row = await db.load_escrow(escrow_uid="0xescrow")
     assert row["status"] == status_before
     assert row["status"] not in {"ready", "failed", "refunded"}
+
+
+@pytest.mark.asyncio
+async def test_an_available_deal_whose_claim_is_pending_is_deferred_not_fulfilled(tmp_path):
+    """A VM made available whose Alkahest continuation has not completed has a
+    running VM and no claim yet: the settlement is deferred to the resume
+    pass, and neither the escrow nor the delivery is terminal."""
+    available = {
+        "negotiation_id": "neg-1",
+        "settlement_ref": "0xescrow",
+        "site_id": "site-1",
+        "state": "fulfilled",
+        "domain_result": {"outcome": "available", "message": "available", "fulfillment_uid": None},
+    }
+    domain = build_vm_storefront_domain()
+    domain = replace(
+        domain,
+        fulfillment=replace(domain.fulfillment, fulfill=AsyncMock(return_value=available)),
+    )
+    db = _client(
+        tmp_path / "available-fulfillment.db", build_vm_storefront_registry(domain)
+    )
+    await _persist_accepted_negotiation(
+        db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
+    )
+    prepared = _prepared(db)
+    await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
+    status_before = (await db.load_escrow(escrow_uid="0xescrow"))["status"]
+
+    outcome = await fulfill_vm_settlement(domain, prepared, sqlite_client=db)
+    await persist_vm_settlement_outcome(prepared, outcome)
+
+    assert outcome.status == "deferred"
+    assert (await db.load_escrow(escrow_uid="0xescrow"))["status"] == status_before
+    assert (await db.load_vm_delivery(negotiation_id="neg-1"))["status"] == "provisioning"
 
 
 def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
@@ -686,7 +762,8 @@ def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
 
     assert serialized["fulfillment_id"] == "physical-123"
     assert serialized["fulfillment_uid"] == "0xonchain"
-    assert serialized["tenant_credentials"] == {"password": "secret"}
+    # A stored credential is never projected; the settle routes read it live.
+    assert "tenant_credentials" not in serialized
     assert "obligation_ref" not in serialized
 
 

@@ -22,9 +22,9 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Optional
 
+import injected_time
 import pytest
 from compute_provisioning_contracts import ConnectionSubmission
 from storefront_client import StorefrontClientError
@@ -227,6 +227,9 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
     reserved_resource_id: str = REAL_RESOURCE_ID
     dispatch_bound: float = DISPATCH_BOUND_SECONDS
 
+    def __post_init__(self) -> None:
+        self.reserved_resource_id = self.target.resource_id or self.reserved_resource_id
+
     @property
     def listing_status_after_first_fulfillment(self) -> str:
         return "open"
@@ -252,7 +255,7 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
             self.site_capacity_admin_client,
             host=self.target.host_id,
             pool_id=REAL_POOL_ID,
-            resource_id=REAL_RESOURCE_ID,
+            resource_id=self.reserved_resource_id,
             sellable_units=None,
             capacity=self.capacity,
             attributes={"region": REAL_REGION, "sla": "90.0"},
@@ -321,7 +324,7 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
         # quantities only from `dimensions`.
         return storefront_admin_client.admin_reserve_capacity(
             required_attributes={
-                "resource_id": REAL_RESOURCE_ID,
+                "resource_id": self.reserved_resource_id,
                 "dimensions": dict(self.capacity),
             },
             listing_id=listing_id,
@@ -468,8 +471,9 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
             # The lease is recorded once the fulfillment is active; the read
             # fails for one that never was, which is reported below.
             lease = self.provisioning_client.get_lease(reservation)
-            if lease.status == "active" and lease.lease_end_utc > datetime.now(timezone.utc):
-                end = datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+            now = injected_time.now_datetime()
+            if lease.status == "active" and lease.lease_end_utc > now:
+                end = now - E2E_LEASE_EXPIRY_BACKDATE
                 assert self.site_capacity.truncate_lease(
                     reservation, end.isoformat().replace("+00:00", "Z")
                 ) is not None, f"the site refused to truncate lease {reservation}"

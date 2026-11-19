@@ -12,7 +12,7 @@
 # Bump `version` on backwards-incompatible changes; add filters freely
 # (etag changes, clients re-fetch).
 
-version: 4
+version: 5
 
 schema:
   id: api_credits
@@ -70,21 +70,32 @@ listing_shape:
       type: array
       items:
         type: object
-        required: [option_id, mechanism, asset, rates, params]
+        required: [option_id, settlement]
         additionalProperties: false
         properties:
-          option_id: {type: string, minLength: 64, maxLength: 64}
-          mechanism: {type: string}
-          asset: {type: string}
-          rates: {type: array}
-          params:
+          option_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+          price:
             type: object
-            additionalProperties: true
+            additionalProperties: false
+            required: [asset, rates]
             properties:
-              interaction: {type: string}
-              country: {type: string}
-              authority_id: {type: string}
-              environment: {type: string}
+              asset: {type: string, minLength: 1}
+              rates:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [field, per, value]
+                  properties:
+                    field: {type: string, minLength: 1}
+                    per: {type: string, minLength: 1}
+                    value: {type: string, pattern: "^[0-9]+$"}
+          settlement:
+            type: object
+            required: [schema]
+            properties:
+              schema: {type: string, minLength: 1}
+          lifecycle: {type: object}
 
 filters:
   # service_name equality. The registry has no substring op, so v1 is

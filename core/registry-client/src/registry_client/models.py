@@ -67,6 +67,30 @@ class HealthResponse:
         )
 
 
+@dataclass
+class AdminStatusResponse:
+    """Response body from GET /admin/status: the registry's time source,
+    ``{"source": "wall"}`` or ``{"source": "injected", "now": <Unix seconds>}``."""
+
+    time: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AdminStatusResponse":
+        return cls(time=dict(d["time"]))
+
+
+@dataclass
+class TimeSettingResponse:
+    """Response body from POST /admin/time: the instant the registry is set to."""
+
+    source: str
+    now: int
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TimeSettingResponse":
+        return cls(source=d["source"], now=int(d["now"]))
+
+
 # ---------------------------------------------------------------------------
 # Publishers
 # ---------------------------------------------------------------------------
@@ -198,8 +222,11 @@ class ListingRequest:
     description: str | None = None
     metadata: dict[str, Any] | None = None
 
+    # Domain-owned listing-level terms travel without registry-client vocabulary.
+    extra: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
-        return {
+        common = {
             "listing_id": self.listing_id,
             "listing_resource": self.listing_resource,
             "accepted_escrows": self.accepted_escrows,
@@ -215,6 +242,10 @@ class ListingRequest:
             ),
             **({"metadata": self.metadata} if self.metadata is not None else {}),
         }
+        collisions = set(common).intersection(self.extra)
+        if collisions:
+            raise ValueError(f"extra listing terms collide with common fields: {sorted(collisions)}")
+        return {**common, **self.extra}
 
 
 @dataclass
@@ -222,8 +253,10 @@ class ListingSummary:
     """Single listing record as returned by GET /listings or
     GET /listings/{id}. Captures common fields defensively.
 
-    ``storefront_url`` is the publisher's storefront URL — where a buyer
-    negotiates.
+    ``storefront_url`` is where a buyer negotiates: the URL the seller signed
+    into the listing's publication, or, for a listing served without seller
+    publication evidence (``publisher_publication`` null), the publisher
+    record's URL.
     """
 
     id: str | int | None = None
@@ -414,6 +447,7 @@ class ValidatePublishRequest:
     title: str | None = None
     description: str | None = None
     metadata: dict | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -431,7 +465,10 @@ class ValidatePublishRequest:
             d["description"] = self.description
         if self.metadata is not None:
             d["metadata"] = self.metadata
-        return d
+        collisions = set(d).intersection(self.extra)
+        if collisions:
+            raise ValueError(f"extra listing terms collide with common fields: {sorted(collisions)}")
+        return {**d, **self.extra}
 
 
 @dataclass

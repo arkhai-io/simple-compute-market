@@ -55,7 +55,7 @@ def _contact_exchange() -> tuple[Any, Any]:
         settlement_config=build_storefront_settlement_registry().resolve(
             settlement_config_mapping(), role="seller"
         ),
-        repository=SettlementSQLiteRepository(db.db_path, apply_migrations=False),
+        repository=SettlementSQLiteRepository(db.db_path),
         # Re-delivery reads the durable reveal and drives no obligation.
         runtime=None,
     )

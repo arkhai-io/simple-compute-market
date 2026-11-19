@@ -24,26 +24,27 @@ CHANGE = "seed-pool"
 ARCHIVED = Path("openspec/changes/archive/2026-10-22-seed-pool")
 REVIEWS = ARCHIVED / "reviews"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
-VALIDATION = Path(".snapshot/validation") / COMMIT[:12]
-CITED = Path(".snapshot/validation/fedcba987654")
-RUN = Path(".snapshot/e2e-logs/39744936158")
-# The evidence directories the workspace's validation parts declare, as the clone's
-# checkout carries them; two parts share one.
-EVIDENCE = [".snapshot/e2e-logs/", ".snapshot/validation/"]
-CONFIGURATION = """
-[validation.parts.pipeline]
-start = "true"
-collect = "true"
-evidence = ".snapshot/e2e-logs/"
+TREE = "fedcba9876543210fedcba9876543210fedcba98"
+OTHER_TREE = "a" * 40
+# Where the workspace's evidence kinds' patterns fix their evidence, as the clone's
+# checkout carries them: the three kinds share one directory.
+EVIDENCE = [".snapshot/evidence/"]
+BY_TREE = Path(".snapshot/evidence") / TREE
+BY_COMMIT = Path(".snapshot/evidence") / COMMIT
+# An attempt a record cites by its path, of a tree no record names.
+CITED = Path(".snapshot/evidence") / OTHER_TREE / "helm/20261117T1140Z"
 
-[validation.parts.local]
-run = "true"
-evidence = ".snapshot/validation/"
 
-[validation.parts.helm]
-run = "true"
-evidence = ".snapshot/validation/"
-"""
+def _kind(name: str, pattern: str, shape: str = 'run = "true"') -> str:
+    required = "owed" if "{owed}" in pattern else "always"
+    return (f'[validation.evidence.{name}]\nrequired = "{required}"\n{shape}\n'
+            f'evidence = "{pattern}"\nguide = ".agents/evidence/{name}.md"\n')
+
+
+CONFIGURATION = (_kind("pipeline", ".snapshot/evidence/{commit}/pipeline/*/summary.json",
+                       'start = "true"\ncollect = "true"')
+                 + _kind("local", ".snapshot/evidence/{tree}/local/*/summary.json")
+                 + _kind("helm", ".snapshot/evidence/{tree}/helm/*/summary.json"))
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -76,8 +77,10 @@ def workspace(tmp_path: Path) -> Path:
     (work / ".gitignore").write_text(
         ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
     (work / "README.md").write_text("1\n", "utf-8")
-    (work / ".agents").mkdir()
+    (work / ".agents/evidence").mkdir(parents=True)
     (work / ".agents/workflow.toml").write_text(CONFIGURATION, "utf-8")
+    for name in ("pipeline", "local", "helm"):
+        (work / ".agents/evidence" / f"{name}.md").write_text(f"# The {name} kind\n", "utf-8")
     _git(work, "add", "--all")
     _git(work, "commit", "-q", "-m", "start")
     _git(work, "remote", "add", "origin", str(origin))
@@ -101,8 +104,8 @@ VALIDATION_RECORD = f"""\
 # Validation — {CHANGE} — {COMMIT[:12]}
 
 - **Commit:** {COMMIT} on feat/{CHANGE}
+- **Tree:** {TREE}
 - **Result:** passed
-- **Pipeline:** run {RUN.name}, success
 """
 
 
@@ -111,35 +114,48 @@ def _history(clone: Path) -> None:
     _write(clone, REVIEWS / "01-implementation.md", "# Implementation review\n")
     _write(clone, REVIEWS / "02-validation.md", VALIDATION_RECORD)
     _write(clone, REVIEWS / "workflow.jsonl",
-           f'{{"step": "validate", "evidence": "{CITED}/helm/1/"}}\n')
+           f'{{"step": "validate", "evidence": "{CITED}/summary.json"}}\n')
     _write(clone, REVIEWS / "transcripts/03-validate.progress",
-           "read .snapshot/validation/aaaaaaaaaaaa/helm/1/summary.json\n")
-    _write(clone, VALIDATION / "local/1/summary.json", '{"passed": true}\n')
-    _write(clone, VALIDATION / "helm/1/test.log", "helm\n")
-    _write(clone, CITED / "helm/1/summary.json", '{"passed": true}\n')
-    _write(clone, RUN / "actions.log", "pipeline\n")
-    # Beside the evidence but not named by any record, or rebuildable from it.
-    _write(clone, ".snapshot/validation/bbbbbbbbbbbb/local/1/summary.json", "{}\n")
+           f"read .snapshot/evidence/{'b' * 40}/helm/1/summary.json\n")
+    _write(clone, BY_TREE / "local/20261117T1003Z/summary.json", '{"passed": true}\n')
+    _write(clone, BY_TREE / "helm/20261117T1003Z/summary.json", '{"passed": true}\n')
+    _write(clone, BY_TREE / "helm/20261117T1003Z/test.log", "helm\n")
+    _write(clone, BY_COMMIT / "pipeline/20261117T1003Z/summary.json", '{"passed": true}\n')
+    _write(clone, BY_COMMIT / "pipeline/20261117T1003Z/actions.log", "pipeline\n")
+    _write(clone, CITED / "summary.json", '{"passed": true}\n')
+    # Beside the evidence but not named by any record: another attempt of the cited
+    # tree, another tree, and a zip of logs.
+    _write(clone, CITED.parent / "20261117T1003Z/summary.json", '{"passed": false}\n')
+    _write(clone, f".snapshot/evidence/{'b' * 40}/local/1/summary.json", "{}\n")
     _write(clone, ".snapshot/e2e-logs/39744936158.zip", "zip\n")
 
 
 # Which evidence the records name.
 
-def test_the_records_name_cited_paths_validated_commits_and_pipeline_runs(
+def test_the_records_name_cited_paths_and_validated_trees_and_commits(
         tmp_path: Path) -> None:
     reviews = tmp_path / "reviews"
     _write(reviews, "02-validation.md", VALIDATION_RECORD)
     _write(reviews, "05-implementation.triage.md",
-           f"Read `{CITED}/helm/1/` and `.snapshot/e2e-logs/111/actions.log`.\n")
+           f"Read `{CITED}/` and `.snapshot/evidence/{'c' * 40}/local/1/summary.json`.\n")
     # A transcript cites whatever its session read, so it names nothing.
-    _write(reviews, "transcripts/03-validate.jsonl", ".snapshot/e2e-logs/222/actions.log\n")
+    _write(reviews, "transcripts/03-validate.jsonl",
+           f".snapshot/evidence/{'d' * 40}/local/1/summary.json\n")
 
     cited, keys = history.named_evidence(reviews, EVIDENCE)
 
-    assert cited == sorted([CITED, Path(".snapshot/e2e-logs/111")])
-    # Which directory holds a validated commit's or a pipeline run's evidence the
-    # records do not say; the copy looks under each.
-    assert keys == sorted([COMMIT[:12], RUN.name])
+    assert cited == sorted([CITED, Path(f".snapshot/evidence/{'c' * 40}/local/1/summary.json")])
+    # Where a validated tree's or commit's evidence lies the records do not say; the
+    # copy looks where each kind keyed by that identity puts it.
+    assert keys == [("commit", COMMIT), ("tree", TREE)]
+
+
+def test_a_citation_ending_a_sentence_names_the_path_without_its_full_stop(
+        tmp_path: Path) -> None:
+    reviews = tmp_path / "reviews"
+    _write(reviews, "02-validation.md", f"The rerun is {CITED}.\n")
+
+    assert history.named_evidence(reviews, EVIDENCE) == ([CITED], [])
 
 
 def test_a_records_directory_naming_nothing_names_no_evidence(tmp_path: Path) -> None:
@@ -149,9 +165,9 @@ def test_a_records_directory_naming_nothing_names_no_evidence(tmp_path: Path) ->
     assert history.named_evidence(reviews, EVIDENCE) == ([], [])
 
 
-def test_a_directory_no_part_declares_is_never_named(tmp_path: Path) -> None:
+def test_a_directory_no_kind_declares_is_never_named(tmp_path: Path) -> None:
     reviews = tmp_path / "reviews"
-    _write(reviews, "05-implementation.triage.md", f"Read `{CITED}/helm/1/`.\n")
+    _write(reviews, "05-implementation.triage.md", f"Read `{CITED}/`.\n")
 
     assert history.named_evidence(reviews, [".snapshot/e2e-logs/"]) == ([], [])
 
@@ -169,16 +185,20 @@ def test_the_first_copy_brings_the_records_and_named_evidence_to_the_same_paths(
         (REVIEWS / "02-validation.md").as_posix(),
         (REVIEWS / "workflow.jsonl").as_posix(),
         (REVIEWS / "transcripts/03-validate.progress").as_posix(),
-        (VALIDATION / "local/1/summary.json").as_posix(),
-        (VALIDATION / "helm/1/test.log").as_posix(),
-        (CITED / "helm/1/summary.json").as_posix(),
-        (RUN / "actions.log").as_posix(),
+        (BY_TREE / "local/20261117T1003Z/summary.json").as_posix(),
+        (BY_TREE / "helm/20261117T1003Z/summary.json").as_posix(),
+        (BY_TREE / "helm/20261117T1003Z/test.log").as_posix(),
+        (BY_COMMIT / "pipeline/20261117T1003Z/summary.json").as_posix(),
+        (BY_COMMIT / "pipeline/20261117T1003Z/actions.log").as_posix(),
+        (CITED / "summary.json").as_posix(),
     }
     assert set(synced.copied) == copied
     assert synced.extended == synced.unchanged == synced.refused == []
     for name in copied:
         assert (workspace / name).read_bytes() == (clone / name).read_bytes()
-    assert not (workspace / ".snapshot/validation/bbbbbbbbbbbb").exists()
+    # A cited file brings the attempt holding it, and no other attempt of its tree.
+    assert not (workspace / CITED.parent / "20261117T1003Z").exists()
+    assert not (workspace / f".snapshot/evidence/{'b' * 40}").exists()
     assert not (workspace / ".snapshot/e2e-logs/39744936158.zip").exists()
     # The transcript's citation names nothing, so it is neither copied nor missed.
     assert synced.absent == []
@@ -186,34 +206,142 @@ def test_the_first_copy_brings_the_records_and_named_evidence_to_the_same_paths(
     assert history.differences(clone, workspace, CHANGE) == []
 
 
+def test_a_runs_inputs_directory_is_copied_with_the_records(
+        workspace: Path, clone: Path) -> None:
+    """CW-i9np: what the actions and hooks around a run left is under the change's
+    records, so it is copied with them."""
+    _history(clone)
+    inputs = REVIEWS / "runs/20261021T091540Z-validate"
+    names = [inputs / "before/status.md", inputs / "before/gather.log",
+             inputs / "before/message.md", inputs / "after/status.md"]
+    for name in names:
+        _write(clone, name, f"{name.name}\n")
+
+    synced = history.sync(clone, workspace.resolve(), CHANGE)
+
+    assert {name.as_posix() for name in names} <= set(synced.copied)
+    assert history.differences(clone, workspace, CHANGE) == []
+
+
 def test_evidence_the_records_name_that_the_clone_lacks_is_reported(
         workspace: Path, clone: Path) -> None:
     _history(clone)
     _write(clone, REVIEWS / "04-validation.md",
-           "- **Commit:** 999999999999aaaa on feat/seed-pool\n"
-           "Read `.snapshot/validation/777777777777/local/1/`.\n")
+           f"- **Commit:** {'9' * 40} on feat/seed-pool\n"
+           f"Read `.snapshot/evidence/{'7' * 40}/local/1/`.\n")
 
     synced = history.sync(clone, workspace, CHANGE)
 
-    # A commit no evidence directory holds is reported under each; a cited path
-    # where it was cited.
-    assert synced.absent == [".snapshot/e2e-logs/999999999999",
-                             ".snapshot/validation/777777777777",
-                             ".snapshot/validation/999999999999"]
+    # A commit no kind's pattern finds is reported as each kind keyed by the commit
+    # fills its pattern; a cited path where it was cited.
+    assert synced.absent == [f".snapshot/evidence/{'7' * 40}/local/1",
+                             f".snapshot/evidence/{'9' * 40}/pipeline/*/summary.json"]
     assert synced.refused == []
 
 
-def test_evidence_under_a_directory_no_part_declares_is_not_copied(
+def test_evidence_under_a_directory_no_kind_declares_is_not_copied(
         workspace: Path, clone: Path) -> None:
     _history(clone)
+    _write(clone, f".snapshot/validation/{TREE}/local/1/summary.json", "{}\n")
     (clone / ".agents/workflow.toml").write_text(
-        "[validation.parts.local]\nrun = 'true'\nevidence = '.snapshot/validation/'\n", "utf-8")
+        _kind("local", ".snapshot/validation/{tree}/local/*/summary.json"), "utf-8")
 
     synced = history.sync(clone, workspace, CHANGE)
 
-    assert not any(name.startswith(".snapshot/e2e-logs/") for name in synced.copied)
-    assert (VALIDATION / "local/1/summary.json").as_posix() in synced.copied
-    assert not (workspace / RUN).exists()
+    assert not any(name.startswith(".snapshot/evidence/") for name in synced.copied)
+    assert f".snapshot/validation/{TREE}/local/1/summary.json" in synced.copied
+    assert not (workspace / BY_COMMIT).exists()
+
+
+@pytest.mark.parametrize(("pattern", "named", "unnamed"), [
+    # Evidence keyed by a file directly in the evidence directory.
+    (".snapshot/runs/{tree}.json", f".snapshot/runs/{TREE}.json",
+     f".snapshot/runs/{OTHER_TREE}.json"),
+    # Evidence keyed by a directory whose name embeds the identity.
+    (".snapshot/runs/run-{tree}/summary.json", f".snapshot/runs/run-{TREE}/summary.json",
+     f".snapshot/runs/run-{OTHER_TREE}/summary.json"),
+    # Evidence keyed by a file in a directory per owed argument, which holds every
+    # tree's evidence of that argument.
+    (".snapshot/runs/{owed}/{tree}.json", f".snapshot/runs/tests.yml/{TREE}.json",
+     f".snapshot/runs/tests.yml/{OTHER_TREE}.json"),
+], ids=["file", "embedded", "owed"])
+def test_the_kinds_pattern_says_which_evidence_the_records_name(
+        workspace: Path, clone: Path, pattern: str, named: str, unnamed: str) -> None:
+    """CW-hak6 over any layout CW-t3ev admits: what the records name is copied, and
+    nothing else beside it, nor is named evidence the clone holds reported absent."""
+    _write(clone, REVIEWS / "02-validation.md",
+           VALIDATION_RECORD + f"\nCurrent: `{named}`.\n")
+    _write(clone, named, '{"passed": true}\n')
+    _write(clone, unnamed, '{"passed": false}\n')
+    (clone / ".agents/workflow.toml").write_text(_kind("local", pattern), "utf-8")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert synced.copied == [(REVIEWS / "02-validation.md").as_posix(), named]
+    assert synced.absent == [] and synced.refused == []
+    assert not (workspace / unnamed).exists()
+    assert history.differences(clone, workspace, CHANGE) == []
+
+
+def test_what_lies_beside_a_validated_trees_evidence_but_no_pattern_describes_is_not_copied(
+        workspace: Path, clone: Path) -> None:
+    """CW-hak6: a validated tree's evidence is what its kinds' patterns match, each
+    attempt with its logs, not everything under the directory its identity names."""
+    _history(clone)
+    # A retired kind's attempt, a stray file, and a file in a kind's directory
+    # outside any attempt, all under the validated tree.
+    strays = [BY_TREE / "retired/20261117T1003Z/summary.json", BY_TREE / "notes.txt",
+              BY_TREE / "local/notes.txt"]
+    for stray in strays:
+        _write(clone, stray, "stray\n")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert (BY_TREE / "helm/20261117T1003Z/test.log").as_posix() in synced.copied
+    for stray in strays:
+        assert not (workspace / stray).exists()
+    assert synced.absent == [] and synced.refused == []
+
+
+def test_a_pattern_matching_a_directory_copies_it_and_nothing_beside_it(
+        workspace: Path, clone: Path) -> None:
+    attempt = BY_TREE / "local/run-20261117T1003Z"
+    _write(clone, REVIEWS / "02-validation.md", VALIDATION_RECORD)
+    for name in (attempt / "summary.json", attempt / "test.log", BY_TREE / "local/notes.txt"):
+        _write(clone, name, "{}\n")
+    (clone / ".agents/workflow.toml").write_text(
+        _kind("local", ".snapshot/evidence/{tree}/local/run-*"), "utf-8")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert synced.copied == [(REVIEWS / "02-validation.md").as_posix(),
+                             (attempt / "summary.json").as_posix(),
+                             (attempt / "test.log").as_posix()]
+    assert not (workspace / BY_TREE / "local/notes.txt").exists()
+    assert synced.absent == [] and synced.refused == []
+
+
+def test_a_kinds_evidence_in_a_directory_another_kind_reaches_is_copied_alone(
+        workspace: Path, clone: Path) -> None:
+    """A file one kind keys directly in the tree's directory, where another kind's
+    attempts also lie, is copied without the directory holding it."""
+    report = BY_TREE / "report.json"
+    attempt = BY_TREE / "local/20261117T1003Z"
+    _write(clone, REVIEWS / "02-validation.md", VALIDATION_RECORD)
+    for name in (report, attempt / "summary.json", attempt / "test.log", BY_TREE / "notes.txt"):
+        _write(clone, name, "{}\n")
+    _write(clone, ".agents/evidence/report.md", "# The report kind\n")
+    (clone / ".agents/workflow.toml").write_text(
+        _kind("report", ".snapshot/evidence/{tree}/report.json")
+        + _kind("local", ".snapshot/evidence/{tree}/local/*/summary.json"), "utf-8")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert synced.copied == [(REVIEWS / "02-validation.md").as_posix(),
+                             (attempt / "summary.json").as_posix(),
+                             (attempt / "test.log").as_posix(), report.as_posix()]
+    assert not (workspace / BY_TREE / "notes.txt").exists()
+    assert synced.absent == [] and synced.refused == []
 
 
 def test_a_second_copy_extends_what_grew_adds_what_is_new_and_leaves_the_rest(
@@ -231,7 +359,7 @@ def test_a_second_copy_extends_what_grew_adds_what_is_new_and_leaves_the_rest(
     assert synced.extended == [(REVIEWS / "workflow.jsonl").as_posix(),
                                (REVIEWS / "transcripts/03-validate.progress").as_posix()]
     assert synced.copied == [(REVIEWS / "06-orchestrator.md").as_posix()]
-    assert len(synced.unchanged) == 6 and synced.refused == []
+    assert len(synced.unchanged) == 8 and synced.refused == []
     assert (workspace / REVIEWS / "workflow.jsonl").read_bytes() == log.read_bytes()
     assert (workspace / REVIEWS / "transcripts/03-validate.progress").read_bytes() == (
         transcript.read_bytes())
@@ -277,7 +405,7 @@ def test_a_link_in_the_clones_history_is_refused_and_named_not_followed(
         workspace: Path, clone: Path) -> None:
     _history(clone)
     (clone / REVIEWS / "linked.md").symlink_to(clone / REVIEWS / "02-validation.md")
-    (clone / REVIEWS / "linked-directory").symlink_to(clone / VALIDATION)
+    (clone / REVIEWS / "linked-directory").symlink_to(clone / BY_TREE)
 
     synced = history.sync(clone, workspace, CHANGE)
 
@@ -316,7 +444,7 @@ def test_the_command_copies_from_a_clone_and_reports(
     assert history.main(["sync", CHANGE], root=clone) == 0
 
     out = capsys.readouterr().out
-    assert f"Into {workspace.resolve()}: 8 file(s) copied, 0 extended, 0 already there." in out
+    assert f"Into {workspace.resolve()}: 10 file(s) copied, 0 extended, 0 already there." in out
     assert (workspace / REVIEWS / "02-validation.md").is_file()
 
 

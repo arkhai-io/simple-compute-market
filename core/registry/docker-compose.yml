@@ -5,6 +5,9 @@ services:
     image: arkhai:registry
     # Uncomment to build locally instead
     # build: .
+    # The migration before the application, which refuses a database it has
+    # not migrated.
+    command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
     ports:
       - "${PORT:-8080}:8080"
     environment:

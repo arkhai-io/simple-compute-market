@@ -22,6 +22,10 @@ When activated, compare expression indexes, generated columns, normalized side t
 
 Indexed execution must match Python evaluation for scalar/array projection, missing values, strict mode, set/range/existence operators, updates/deletes, double-encoded legacy JSON, and filter-spec identity. Dynamic YAML declarations cannot create/drop schema at runtime; migrations own durable index artifacts.
 
+### Index the served document, not the carrier columns
+
+Once `store-registry-listings-as-published` lands, filters evaluate the served document: the retained `published_document`, or, for a row published before retention, the shape rebuilt on read from the carrier columns. The carriers are stale or empty on republished and new rows (`oracle_address` excepted), so index paths project from the document, plus registry-owned lifecycle columns, and must match rebuilt legacy rows; never index the stale carriers. Starting this change triggers the deferred carrier-removal migration recorded in `openspec/changes/README.md`.
+
 ## Risks / Trade-offs
 
 - **[Premature indexes increase write/migration cost]** → Require measured activation.

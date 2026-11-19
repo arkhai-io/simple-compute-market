@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 
+import injected_time
 from market_deal_servicing import EndSession
 from market_deal_servicing.end import PhysicalResult
 from market_deal_servicing.evidence import transaction
@@ -45,9 +45,10 @@ class VmPhysicalEnd:
 
     async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
         capacity, binding, reservation = await self.reservation(negotiation_id)
+        # The delivery record's status is left to the delivery path's next
+        # drive, which records the end once nothing is left for it to do: an
+        # available deal's continuation still runs after an end.
         delivery = await self.db.load_vm_delivery(negotiation_id=negotiation_id)
-        if terminate and delivery is not None:
-            await self.db.update_vm_delivery(negotiation_id=negotiation_id, status="ended")
         if reservation is None and not terminate:
             return PhysicalResult(progress="end_recorded", done=False)
         if reservation is None:
@@ -90,7 +91,7 @@ class VmPhysicalEnd:
         return PhysicalResult(progress="tearing_down", done=False)
 
 
-async def request_delivery_end(db, negotiation_id, *, source_ref, cause, clock=lambda: int(time.time())):
+async def request_delivery_end(db, negotiation_id, *, source_ref, cause, clock=injected_time.now):
     now = clock()
     with transaction(db.db_path) as conn, atomic(conn):
         return record_delivery_end(conn, negotiation_id, source_ref=source_ref, cause=cause, now=now)

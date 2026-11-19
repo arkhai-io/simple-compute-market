@@ -29,7 +29,9 @@ from market_arkhai_payments import (
     Refunded,
     SignedReceipt,
 )
+from market_arkhai_payments.settlement_config import payments_billing_basis
 from market_core.schemas import (
+    agreed_price,
     Agreement,
     EscrowProposal,
     SettlementPlan,
@@ -82,12 +84,14 @@ def _accepted_payment(
         seller = Identity.model_validate(thread["seller_principal"])
     except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
         raise SettlementRequestError("accepted payment state is invalid") from exc
+    # Bare-metal pricing is flat, so the Agreement's amount is the negotiated
+    # scalar itself.
     if (
         agreement.get("negotiation_id") != negotiation_id
         or agreement.get("listing_id") != thread.get("our_listing_id")
         or agreement.get("buyer") != buyer_principal.model_dump(mode="json")
         or agreement.get("seller") != seller.model_dump(mode="json")
-        or accepted.amount != thread.get("agreed_price")
+        or agreed_price(accepted, project_billing=payments_billing_basis).amount != thread.get("negotiated_scalar")
         or agreement.get("duration_seconds") != thread.get("agreed_duration_seconds")
     ):
         raise SettlementRequestError("stored Agreement does not match the accepted negotiation")
@@ -245,12 +249,10 @@ async def settle_payment(
         raise SettlementRequestError(
             "payments integration needs operator action", status_code=500
         ) from exc
-    lifecycle = await service.start_delivery(
+    delivered = await service.start_delivery(
         negotiation_id=negotiation_id, buyer_principal=buyer_principal
     )
-    settled = result(
-        200, str(lifecycle.get("state") or "fulfillment_started"), lifecycle=lifecycle
-    )
+    settled = result(200, delivered.state, lifecycle=delivered.domain_result)
     # The neutral fields are a cross-domain contract; refuse to emit a payload
     # that would not parse as one.
     AgreementSettleResponse.model_validate(settled.payload)

@@ -221,7 +221,9 @@ def make_capacity_router(
                 lease_start_utc=body.lease_start_utc,
                 lease_duration_seconds=body.lease_duration_seconds,
             )
-        except UndeclaredOfferingModeError as exc:
+        except CapacityConflictError as exc:
+            # An undeclared offering mode, or a replay under a recorded
+            # placement key or escrow that does not match what it reserved.
             raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))

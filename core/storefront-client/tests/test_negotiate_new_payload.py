@@ -84,9 +84,7 @@ def _negotiate_kwargs(envelope):
     }
 
 
-def test_async_and_sync_negotiate_new_are_byte_equivalent(monkeypatch):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
-    monkeypatch.setattr("storefront_client.client.time.time", lambda: 1_000)
+def test_async_and_sync_negotiate_new_are_byte_equivalent(held_time):
     envelope = {
         "kind": "compute.v1",
         "version": 1,
@@ -233,9 +231,8 @@ _ENVELOPE = {
 
 
 def test_a_selection_only_opening_carries_no_escrow_and_is_identical_in_both_clients(
-    monkeypatch,
+    held_time,
 ):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
     async_transport = _CapturingAsyncTransport()
     sync_transport = _CapturingSyncTransport()
     publishers = TrustedIdentitySet(identities=(_PUBLISHER.identity,))
@@ -308,10 +305,9 @@ def test_an_escrow_opening_with_a_selection_is_unchanged():
     assert body["settlement_selection"] == _SELECTION
 
 
-def test_settle_restates_no_negotiated_term_and_is_identical_in_both_clients(monkeypatch):
+def test_settle_restates_no_negotiated_term_and_is_identical_in_both_clients(held_time):
     """Settlement names the accepted negotiation, the buyer, and the EVM
     settlement-effect address. The SSH key and chain are negotiated terms."""
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
     async_transport = _CapturingAsyncTransport()
     sync_transport = _CapturingSyncTransport()
     publishers = TrustedIdentitySet(identities=(_PUBLISHER.identity,))

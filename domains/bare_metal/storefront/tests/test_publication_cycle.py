@@ -10,7 +10,8 @@ run polls every site first, as the lane steps ``site-projections`` before
 publication; a site that has never answered is a storefront restarted while it
 was unreachable.
 
-This is not integration evidence under ``docs/development/TESTING.md``. The
+This is not integration evidence under
+``docs/guidance/engineering/test-levels.md``. The
 bare-metal storefront is an application, and the site authority and the
 registry are this repository's own services rather than external boundaries,
 so these tests prove how a run orchestrates, persists, closes, holds, and
@@ -36,6 +37,7 @@ from arkhai_bare_metal.fixtures.publication_view import (
     DEFAULT_GPU_MODEL,
     build_bare_metal_publication_view,
 )
+from core_storefront.multi_registry_client import RegistryListings
 from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_alkahest import AlkahestChainProbe, ProbedChain
 from market_alkahest.alkahest import get_recipient_arbiter
@@ -54,9 +56,11 @@ from market_site_client.fixtures.resource_pools import (
     build_resource_pool_projection,
     build_resource_pool_row,
 )
+from registry_client.models import ListingSummary
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.pool_overrides import compile_publication_clauses
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.publication_composition import (
@@ -214,13 +218,33 @@ class RecordingRegistries:
     """Stands where ``MultiRegistryClient`` wraps the registry, recording sends.
 
     ``failing`` holds ``(operation, url)`` pairs that fail until removed; an
-    update's operation is the status it sets.
+    update's operation is the status it sets. A read of the storefront's open
+    listings returns what a test planted with :meth:`plant`, and a close sent
+    for one removes it; ``unreachable`` makes the read fail.
     """
 
     def __init__(self) -> None:
         self.urls = [REGISTRY_URL]
         self.sent: list[tuple[str, str, str, dict[str, Any]]] = []
         self.failing: set[tuple[str, str]] = set()
+        self.planted: list[ListingSummary] = []
+        self.unreachable = False
+        self.publisher_reads: list[Any] = []
+
+    def plant(self, listing_id: str, *, offering_mode: str) -> None:
+        self.planted.append(
+            ListingSummary(
+                id=listing_id,
+                status="open",
+                listing_resource={"offering_mode": offering_mode},
+            )
+        )
+
+    async def list_publisher_listings_per_registry(self, principal):
+        self.publisher_reads.append(principal)
+        if self.unreachable:
+            return [RegistryListings(REGISTRY_URL, None, "unreachable")]
+        return [RegistryListings(REGISTRY_URL, tuple(self.planted))]
 
     def __call__(self) -> "RecordingRegistries":
         return self
@@ -250,7 +274,10 @@ class RecordingRegistries:
             body = request.to_dict()
             status = str(body["status"])
             self.sent.append((status, url, listing_id, body))
-            results.append(self._result(status, url))
+            result = self._result(status, url)
+            if result["success"] and status == "closed":
+                self.planted = [item for item in self.planted if item.id != listing_id]
+            results.append(result)
         return results
 
     def operations(self) -> list[tuple[str, str]]:
@@ -290,6 +317,10 @@ class Storefront:
         # The configured [pricing].default_max_duration_seconds; a pool resolves
         # its lease bound from its override first, then from this.
         self.default_max_duration: int | None = 3600
+        # The configured [pricing].settlements and [pricing.defaults.gpu.<model>]
+        # clauses, the lowest tiers of a listing's clauses.
+        self.default_clauses: tuple[Any, ...] | None = None
+        self.clauses_by_model: dict[str, tuple[Any, ...]] = {}
 
     async def run(self, *, dry_run: bool = False, poll: bool = True) -> dict[str, Any]:
         """Poll every site, as the lane steps ``site-projections``, then run a cycle.
@@ -312,6 +343,8 @@ class Storefront:
             seller_principal=SELLER,
             build_payload=self.terms,
             default_max_duration_seconds=self.default_max_duration,
+            default_publication_clauses=self.default_clauses,
+            publication_clauses_by_model=self.clauses_by_model,
             enter_stage=self.stages.append,
             derivation=self.derivation,
         )
@@ -361,7 +394,9 @@ def actions(report: dict[str, Any], action: str) -> list[dict[str, Any]]:
 
 @pytest.fixture
 def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(str(tmp_path / "storefront.db"))
+    path = tmp_path / "storefront.db"
+    migrate_storefront_database(path)
+    return SQLiteClient(str(path))
 
 
 # -- pool declarations -----------------------------------------------------
@@ -934,6 +969,7 @@ class FailingWrites(SQLiteClient):
 
 
 async def test_a_new_listing_whose_local_write_fails_reaches_no_registry(tmp_path):
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = FailingWrites(str(tmp_path / "storefront.db"))
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
 
@@ -992,6 +1028,56 @@ async def test_a_registry_left_closed_by_a_failed_reopen_is_repaired_by_the_next
     assert storefront.registries.sent == []
 
 
+async def test_a_run_closes_registry_listings_the_storefront_does_not_hold(db):
+    """The registry is read under the storefront's principal. A bare-metal
+    listing it does not hold open closes there, one it holds stays open, and a
+    VM listing another storefront publishes under the same principal is left
+    alone; a preview closes nothing."""
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    held = storefront.listing("site-a", "pool-1", "r1")[0]
+    storefront.registries.plant("superseded-1", offering_mode="bare_metal")
+    storefront.registries.plant(held, offering_mode="bare_metal")
+    storefront.registries.plant("vm-1", offering_mode="vm")
+
+    preview = await storefront.run(dry_run=True)
+
+    assert storefront.registries.sent == []
+    assert actions(preview, "close") == [
+        {
+            "action": "close",
+            "listing_id": "superseded-1",
+            "registry": REGISTRY_URL,
+            "reason": "not_held",
+        }
+    ]
+
+    report = await storefront.run()
+
+    assert storefront.registries.operations() == [("closed", "superseded-1")]
+    assert [item["listing_id"] for item in actions(report, "close")] == ["superseded-1"]
+    assert [item.id for item in storefront.registries.planted] == [held, "vm-1"]
+    assert storefront.registries.publisher_reads[-1] == SELLER
+    assert storefront.listing("site-a", "pool-1", "r1") == (held, "open", None)
+
+
+async def test_an_unreachable_registry_is_swept_by_a_later_run(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    storefront.registries.plant("superseded-1", offering_mode="bare_metal")
+    storefront.registries.unreachable = True
+
+    report = await storefront.run()
+
+    assert storefront.registries.sent == []
+    assert actions(report, "skip") == [
+        {"action": "skip", "registry": REGISTRY_URL, "reason": "registry_unreachable"}
+    ]
+    storefront.registries.unreachable = False
+    await storefront.run()
+    assert storefront.registries.operations() == [("closed", "superseded-1")]
+
+
 # -- an existing listing ---------------------------------------------------
 
 
@@ -1005,6 +1091,7 @@ async def test_a_sellers_close_is_left_closed(db):
         storefront.registries,
         registry_urls=(REGISTRY_URL,),
         storefront_url=STOREFRONT_URL,
+        publisher=SELLER,
     )
     await seller_close.close(
         BoundListing(listing_id, PublicationBinding("site-a", "bare_metal", "r1", BACKED)),
@@ -1126,7 +1213,9 @@ async def test_a_source_check_finds_the_backing_changed_as_a_declared_mismatch(d
 
 
 def _bindings(db: SQLiteClient, resource: str) -> list[tuple[str, str, str, str]]:
-    """``(listing_id, status, derivation_key, source_envelope_json)`` per binding."""
+    """``(listing_id, status, derivation_key, source_envelope_json)`` per binding,
+    in the order the listings were written: listings stamped in one second tie on
+    ``created_at``, so insertion breaks the tie."""
     with sqlite3.connect(db.db_path) as conn:
         return [
             tuple(row)
@@ -1136,7 +1225,7 @@ def _bindings(db: SQLiteClient, resource: str) -> list[tuple[str, str, str, str]
                 FROM storefront_listing_bindings b
                 JOIN listings l ON l.listing_id = b.listing_id
                 WHERE b.physical_resource_id = ?
-                ORDER BY l.created_at, b.listing_id
+                ORDER BY l.created_at, l.rowid
                 """,
                 (resource,),
             ).fetchall()
@@ -1310,16 +1399,27 @@ async def test_a_priced_machine_publishes_its_asking_rate(db):
 
     await storefront.run()
 
-    body = storefront.registries.sent[0][3]["listing_resource"]
-    assert body["asking_rate"] == {"amount": "12.50", "asset": "usd", "period": "hour"}
+    body = storefront.registries.sent[0][3]
+    # A price is a term of sale: published in the listing's pricing, never in
+    # the machine's description, though the storefront stores it beside the
+    # shape it prices.
+    assert body["pricing"] == {
+        "asking_rate": {"amount": "12.50", "asset": "usd", "period": "hour"},
+    }
+    assert "asking_rate" not in body["listing_resource"]
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    stored = await db.load_listing(listing_id=listing_id)
+    assert json.loads(stored["listing_resource"])["asking_rate"]["amount"] == "12.50"
 
 
-async def test_an_unpriced_machine_publishes_no_rate_field(db):
+async def test_an_unpriced_machine_publishes_no_pricing(db):
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
 
     await storefront.run()
 
-    assert "asking_rate" not in storefront.registries.sent[0][3]["listing_resource"]
+    body = storefront.registries.sent[0][3]
+    assert "pricing" not in body
+    assert "asking_rate" not in body["listing_resource"]
 
 
 async def test_a_rate_change_or_removal_refreshes_in_place(db):
@@ -1330,16 +1430,18 @@ async def test_a_rate_change_or_removal_refreshes_in_place(db):
 
     site.serve(_priced(_rate("11.00")))
     changed = await storefront.run()
-    changed_body = storefront.registries.sent[0][3]["listing_resource"]
+    changed_body = storefront.registries.sent[0][3]
     site.serve(pool("pool-1", member("r1", "pool-1")))
     removed = await storefront.run()
-    removed_body = storefront.registries.sent[0][3]["listing_resource"]
+    removed_body = storefront.registries.sent[0][3]
 
     assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
     assert [item["fields"] for item in actions(changed, "refresh")] == [["asking_rate"]]
     assert [item["fields"] for item in actions(removed, "refresh")] == [["asking_rate"]]
-    assert changed_body["asking_rate"]["amount"] == "11.00"
-    assert "asking_rate" not in removed_body
+    assert changed_body["pricing"]["asking_rate"]["amount"] == "11.00"
+    # The republication replaces the document whole, so the withdrawn price is
+    # gone rather than kept by a merge.
+    assert "pricing" not in removed_body
 
 
 async def test_an_unreadable_rate_holds_the_pool_and_keeps_its_listing(db):
@@ -1394,9 +1496,9 @@ async def test_an_override_rate_and_bound_reach_the_published_listing(db):
     report = await storefront.run()
 
     assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
-    body = storefront.registries.sent[0][3]["listing_resource"]
-    assert body["asking_rate"]["amount"] == "9.00"
-    assert body["min_duration_seconds"] == 3600
+    body = storefront.registries.sent[0][3]
+    assert body["pricing"]["asking_rate"]["amount"] == "9.00"
+    assert body["listing_resource"]["min_duration_seconds"] == 3600
     assert sorted(actions(report, "refresh")[0]["fields"]) == [
         "asking_rate", "min_duration_seconds",
     ]
@@ -1442,45 +1544,100 @@ async def test_an_override_minimum_above_the_configured_maximum_holds_its_pool(d
     assert storefront.registries.operations() == []
 
 
-async def test_a_pool_resolving_no_lease_bound_is_held_while_others_publish(db):
+async def _candidate_bound(candidate: dict[str, Any]) -> PublicationPayload:
+    """A payload publishing the maximum the cycle resolved for its candidate."""
+    return PublicationPayload(max_duration_seconds=candidate.get("max_duration_seconds"))
+
+
+async def test_a_pool_resolving_no_lease_bound_publishes_with_no_relative_limit(db):
     """No configured default maximum: the pool whose override states one
-    publishes, the pool with nothing to publish as its maximum is held and
-    reported, and the cycle completes. Spec scenario: "A bare-metal pool
-    resolves no lease bound"."""
+    publishes it, the pool resolving none publishes with no relative maximum,
+    and no pool is held. Spec scenario: "A bare-metal pool resolves no lease
+    bound"."""
     site = Site(pool("pool-1", member("r1", "pool-1")), pool("pool-2", member("r2", "pool-2")))
     storefront = Storefront(db, {"site-a": site})
+    storefront.terms = _candidate_bound
     storefront.default_max_duration = None
     await _override(db, terms={"max_duration_seconds": 7200})
 
     report = await storefront.run()
 
-    assert set(storefront.listings()) == {("site-a", "pool-1", "r1")}
-    assert actions(report, "hold") == [
-        {
-            "action": "hold",
-            "site_id": "site-a",
-            "pool_id": "pool-2",
-            "reason": "pool_lease_bound_missing",
-        }
-    ]
+    assert set(storefront.listings()) == {("site-a", "pool-1", "r1"), ("site-a", "pool-2", "r2")}
+    bounded = storefront.listing("site-a", "pool-1", "r1")[0]
+    unbounded = storefront.listing("site-a", "pool-2", "r2")[0]
+    assert storefront.stored(bounded)["max_duration_seconds"] == 7200
+    assert storefront.stored(unbounded)["max_duration_seconds"] is None
+    assert actions(report, "hold") == []
+
+
+class _RecordedClauses(Terms):
+    """Configured terms recording the clauses the cycle resolved per machine."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.clauses: dict[str, Any] = {}
+
+    async def __call__(self, candidate: dict[str, Any]) -> PublicationPayload:
+        self.clauses[candidate["physical_resource_id"]] = candidate.get("resolved_clauses")
+        return await super().__call__(candidate)
+
+
+async def test_each_machine_takes_its_clauses_from_the_highest_tier_stating_them(db):
+    """Per machine: the override, the pool's hint for its GPU model, the pool's
+    hint for the pool, the configured clauses for its model, then the flat
+    configured clauses -- each list whole."""
+    machines = {
+        "r1": "model-hint",  # the pool hints clauses for its model
+        "r2": "pool-hint",  # its model has no hint; the pool's own hint applies
+    }
+    site = Site(
+        pool(
+            "pool-1",
+            member("r1", "pool-1", attributes={"gpu_model": "H100"}),
+            member("r2", "pool-1", attributes={"gpu_model": "A100"}),
+            policy_tags={"pricing": {"settlements": ["pool-hint"], "gpu": {"H100": {"settlements": ["model-hint"]}}}},
+        ),
+        pool(
+            "pool-2",
+            member("r3", "pool-2", attributes={"gpu_model": "H100"}),
+            member("r4", "pool-2", attributes={"gpu_model": "L4"}),
+        ),
+    )
+    storefront = Storefront(db, {"site-a": site})
+    storefront.terms = recorded = _RecordedClauses()
+    storefront.default_clauses = ("flat",)
+    # Both pool-1 models are configured too, so its hints are seen to win.
+    storefront.clauses_by_model = {"H100": ("model-config",), "A100": ("model-config",)}
+
+    await storefront.run()
+    first = dict(recorded.clauses)
+    await _override(db, settlements=list(CONFIGURED_CLAUSES_RAW))
+    await storefront.run()
+
+    assert {resource: first[resource] for resource in machines} == {
+        resource: [tier] for resource, tier in machines.items()
+    }
+    assert first["r3"] == ("model-config",) and first["r4"] == ("flat",)
+    # The override's list replaces every lower tier, for every model.
+    assert recorded.clauses["r1"] == recorded.clauses["r2"] == CONFIGURED_CLAUSES
 
 
 @pytest.mark.parametrize("bound", [0, -1])
-async def test_a_bound_that_is_not_positive_holds_its_pools_listings_open(db, bound):
-    """A configured maximum that bounds nothing holds rather than closes: the
-    listing it published under an earlier bound stays as it was."""
+async def test_a_bound_that_is_not_positive_bounds_nothing(db, bound):
+    """A configured maximum that is not positive states no relative limit: the
+    listing published under an earlier bound stays open, now unbounded."""
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    storefront.terms = _candidate_bound
     await storefront.run()
     listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    assert storefront.stored(listing_id)["max_duration_seconds"] == 3600
     storefront.default_max_duration = bound
 
     report = await storefront.run()
 
     assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
-    assert {item["reason"] for item in actions(report, "hold")} == {
-        "pool_lease_bound_missing"
-    }
-    assert storefront.registries.operations() == []
+    assert storefront.stored(listing_id)["max_duration_seconds"] is None
+    assert actions(report, "hold") == []
 
 
 async def test_stored_terms_that_are_not_a_mapping_hold_rather_than_read_as_absent(db):
@@ -1651,11 +1808,12 @@ def alkahest_publication(tmp_path, monkeypatch, signer):
     Returns the composition and the configured publication clauses, as the
     runtime holds them from ``[pricing].settlements``. The deal token's metadata
     is cached where the option builder reads it, so the real Alkahest option
-    builds without a chain to ask.
+    builds without a chain to ask. A runtime restarted over the same
+    ``tmp_path`` rewrites the same cache.
     """
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     tokens = tmp_path / "cache" / "arkhai" / "tokens"
-    tokens.mkdir(parents=True)
+    tokens.mkdir(parents=True, exist_ok=True)
     (tokens / f"{DEAL_CHAIN_ID}.json").write_text(
         json.dumps(
             {

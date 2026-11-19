@@ -9,7 +9,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from market_core.schemas import settlement_option_schema, settlement_option_params
+from market_core.schemas import (
+    AgreedPrice, EscrowProposal, PriceBasis, SettlementOption, settlement_option_schema, settlement_option_params,
+)
 from market_settlement_runtime import (
     ComparisonOperator,
     FieldDescriptor,
@@ -22,6 +24,7 @@ from market_settlement_runtime import (
     SettlementRole,
     decimal_rate_to_base_units,
 )
+from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
 from market_config.config_loader import derive_wallet_address
 from market_config.setting_types import PositiveSeconds
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -932,6 +935,35 @@ def validate_alkahest_publication_input(
     return AlkahestPublicationInput.model_validate(value)
 
 
+def alkahest_billing_basis(option: SettlementOption) -> PriceBasis:
+    """An Alkahest escrow funds a whole-term total, never a recurring charge."""
+    if option.settlement_schema != ALKAHEST_MECHANISM_ID:
+        raise ValueError("billing projection requires an Alkahest option")
+    if option.lifecycle is not None:
+        raise ValueError("Alkahest billing requires an escrow option without lifecycle terms")
+    params = option.settlement_params
+    if set(params) == {"accepted_escrow"}:
+        if _alkahest_escrow(option) is None:
+            raise ValueError("Alkahest billing requires an accepted escrow")
+    else:
+        # Explicit proposal acceptances carry the negotiated escrow directly,
+        # while published selections wrap their advertised accepted escrow.
+        if not set(params) <= set(EscrowProposal.model_fields):
+            raise ValueError("Alkahest billing requires an escrow option")
+        EscrowProposal.model_validate(params)
+    return PriceBasis(unit="total")
+
+
+def alkahest_payment_presentation(
+    option: SettlementOption, duration_seconds: int | None, quote: AgreedPrice | None,
+) -> PaymentPresentation:
+    """A prepaid escrow has no separate setup charge or recurring reserve."""
+    basis = alkahest_billing_basis(option)
+    return PaymentPresentation(
+        quote=quote or amount_rate_quote(option, duration_seconds, basis), setup_once=0, initial_reserve=0,
+    )
+
+
 def create_alkahest_registration(
     *, command_group: Any | None = None
 ) -> MechanismRegistration:
@@ -943,6 +975,8 @@ def create_alkahest_registration(
         config_model=AlkahestSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
         negotiates_scalar_amount=True,
+        project_billing=alkahest_billing_basis,
+        present_payment=alkahest_payment_presentation,
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,

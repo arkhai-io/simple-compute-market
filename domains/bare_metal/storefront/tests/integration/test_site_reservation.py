@@ -2,13 +2,14 @@
 
 The site is `kit/site`'s capacity router over a real `CapacityLedgerService`,
 mounted in a FastAPI app whose responses are signed as the site authority, and
-the fulfillment service reaches it through the storefront's production capacity
-client: an `AggregateCapacityClient` over `SiteCapacityClient`, over
-`ASGITransport`. The ledger is configured as the compute provisioning service
-configures its own, so admission, the reservation it records, and the commit
-are the site's, not a matcher called beside the claim. The storefront's
-persistence, its settlement evidence, and provisioning are in-memory stand-ins:
-they hold what an accepted deal records and are not what these tests prove.
+the claim bare metal's delivery port builds reaches it through the guarded
+capacity effects over the storefront's production capacity client: an
+`AggregateCapacityClient` over `SiteCapacityClient`, over `ASGITransport`. The
+ledger is configured as the compute provisioning service configures its own, so
+admission, the reservation it records, and the commit are the site's, not a
+matcher called beside the claim. The storefront's record of the accepted deal is
+an in-memory stand-in: it holds what an accepted deal records and is not what
+these tests prove.
 
 Every signer here is a development fixture, never for use on a public network.
 """
@@ -17,15 +18,13 @@ from __future__ import annotations
 
 import json
 import time
-from types import SimpleNamespace
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
 import pytest
-from arkhai_bare_metal import BareMetalListing, BareMetalTerms
+from arkhai_bare_metal import BareMetalListing
 from core_storefront.aggregation import AggregateCapacityClient
 from fastapi import FastAPI, Request, Response
 from httpx import ASGITransport
-from market_core import SettlementEvidence
 from market_identity import (
     EMPTY_BODY,
     Ed25519Signer,
@@ -54,12 +53,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentService
-from arkhai_bare_metal_storefront.settlement_evidence import DeliveryInput, EvidencePayload
+from market_capacity_publication import CapacityEffects, PublicationBinding
+from market_resource_pools_contracts.backing import BACKED
+
+from arkhai_bare_metal_storefront.delivery_ports import BareMetalDeliveryDomain
 
 STOREFRONT_SIGNER = Ed25519Signer(b"\x51" * 32)
 SITE_AUTHORITY_SIGNER = Ed25519Signer(b"\x52" * 32)
-BUYER = Ed25519Signer(b"\x53" * 32).identity
 SITE, POOL, RESOURCE = "site-a", "pool-a", "resource-a"
 HOST, PHYSICAL_HOST = "machine-a", "physical-host-a"
 
@@ -152,21 +152,11 @@ def _site_app() -> tuple[FastAPI, CapacityLedgerService]:
 
 class AcceptedDeal:
     """The storefront's record of one accepted deal for the machine, as the
-    fulfillment service reads and advances it."""
+    delivery port reads it."""
 
     def __init__(self, listing: BareMetalListing) -> None:
-        self.lifecycle: dict[str, Any] | None = None
-        self.materialization = None
-        self.terms = BareMetalTerms(
-            host_id=HOST,
-            physical_host_id=PHYSICAL_HOST,
-            duration_seconds=3600,
-            ssh_public_key="ssh-ed25519 buyer",
-        )
+        self.lifecycle = {"negotiation_id": "neg-a", "settlement_ref": "escrow-a"}
         self.context = {
-            "buyer_scheme": BUYER.scheme.value,
-            "buyer_identifier": BUYER.identifier,
-            "terminal_state": "success",
             "listing_id": "listing-a",
             "site_id": SITE,
             "pool_id": POOL,
@@ -176,73 +166,11 @@ class AcceptedDeal:
             "claimed_attributes": listing.claimed_attributes,
         }
 
-    async def load_listing_binding(self, *, listing_id):
-        return SimpleNamespace(
-            site_id=SITE,
-            physical_resource_id=RESOURCE,
-            binding=SimpleNamespace(offering_mode="bare_metal"),
-            capacity_backing="backed",
-        )
-
     async def load_bare_metal_fulfillment_context(self, *, negotiation_id):
         return dict(self.context)
 
-    async def verified_evidence(self, *, negotiation_id, buyer_principal, **_):
-        return SettlementEvidence(
-            negotiation_id=negotiation_id,
-            mechanism="alkahest.v1",
-            settlement_ref="escrow-a",
-            status="settlement_verified",
-            evidence=EvidencePayload(
-                agreement_sha256="a" * 64,
-                delivery=DeliveryInput(
-                    site_id=SITE,
-                    physical_resource_id=RESOURCE,
-                    pool_id=POOL,
-                    terms=self.terms,
-                ),
-            ).model_dump(mode="json"),
-        )
-
-    async def ensure_bare_metal_fulfillment_lifecycle(self, **identity):
-        if self.lifecycle is None:
-            self.lifecycle = {**identity, "state": "planning"}
+    async def load_bare_metal_fulfillment_lifecycle(self, *, negotiation_id):
         return dict(self.lifecycle)
-
-    async def update_bare_metal_fulfillment_lifecycle(self, *, negotiation_id, state, **ids):
-        assert self.lifecycle is not None
-        self.lifecycle["state"] = state
-        self.lifecycle.update({key: value for key, value in ids.items() if value is not None})
-        return dict(self.lifecycle)
-
-    async def load_bare_metal_materialization(self, *, negotiation_id):
-        return self.materialization
-
-    async def save_bare_metal_materialization(self, *, negotiation_id, materialization):
-        self.materialization = materialization
-
-
-class Provisioning:
-    """Schedules the reserved machine and accepts its fulfillment."""
-
-    async def schedule_resource(self, request):
-        """The reserved machine as a schedule response names it: its
-        declaration's host, and its machine among its top-level attributes."""
-        return SimpleNamespace(
-            settlement_resource_id="settlement-resource-a",
-            pool_id=POOL,
-            resource_kind="compute.bare-metal",
-            provider="bare_metal.ansible",
-            host_id=HOST,
-            attributes={"physical_host_id": PHYSICAL_HOST},
-        )
-
-    async def begin_fulfillment(self, body):
-        return SimpleNamespace(
-            fulfillment_id="fulfillment-a",
-            capacity_reservation_id=body.capacity_reservation_id,
-            state="dispatch_pending",
-        )
 
 
 @pytest.fixture
@@ -253,7 +181,8 @@ def site() -> tuple[FastAPI, CapacityLedgerService]:
 async def test_a_machine_without_gpus_is_reserved_and_leased_at_the_site(site) -> None:
     """A listing whose shape states no attribute claims one unit of its
     Physical Resource with no attribute, which the site admits, holds against
-    that machine, and leases at commit."""
+    that machine, and leases at commit; a replay under the deal's placement key
+    finds the same reservation."""
     app, ledger = site
     listing = BareMetalListing(
         capacity_backing="backed",
@@ -277,26 +206,34 @@ async def test_a_machine_without_gpus_is_reserved_and_leased_at_the_site(site) -
             )
         }
     )
-    service = BareMetalFulfillmentService(
-        db=deal,
-        capacity_client=capacity,
-        fulfillment_client=Provisioning(),
-        read_verified_evidence=deal.verified_evidence,
+    claim = await BareMetalDeliveryDomain(deal, lifecycle=None, fulfillment=None).reserve_claim("neg-a")
+    binding = PublicationBinding(
+        site_id=SITE, offering_mode="bare_metal", source_id=RESOURCE, backing=BACKED,
     )
+    effects = CapacityEffects(capacity)
+    start = datetime.now(timezone.utc).replace(microsecond=0)
+    deal_ref = {**claim.deal_ref, "negotiation_id": "neg-a", "placement_key": "neg-a:settlement"}
+    window = {"lease_start_utc": start.isoformat(), "lease_duration_seconds": 3600}
 
-    lifecycle = await service.begin(
-        negotiation_id="neg-a", settlement_ref="escrow-a", buyer_principal=BUYER
+    reserved = await effects.reserve(binding, claim=claim.claim, deal_ref=deal_ref, **window)
+    reservation_id = reserved["capacity_reservation_id"]
+    await effects.commit(
+        binding, resource_id=None, capacity_reservation_id=reservation_id,
+        lease_start_utc=start.isoformat(),
+        lease_end_utc=(start + timedelta(hours=1)).isoformat(),
+        deal_ref=claim.deal_ref,
     )
+    replayed = await effects.reserve(binding, claim=claim.claim, deal_ref=deal_ref, **window)
 
     assert listing.claimed_attributes == {}
-    reservation_id = lifecycle["capacity_reservation_id"]
+    assert replayed["capacity_reservation_id"] == reservation_id
     reservation = ledger.get_reservation(reservation_id)
     assert reservation["state"] == "leased"
     assert ledger.get_reservation_backing_resource_id(reservation_id) == RESOURCE
     assert reservation["host_id"] == HOST
     assert reservation["dimensions"] == {"units": 1}
     assert reservation["claim_attributes"] == {"resource_id": RESOURCE}
-    assert reservation["deal_ref"] == {"escrow_uid": "escrow-a", "negotiation_id": "neg-a"}
+    assert reservation["deal_ref"] == deal_ref
     (row,) = ledger.snapshot()
     assert row["available"]["units"] == 0
     # The scalar figure mirrors `gpu_count`, which this machine does not declare.

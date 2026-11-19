@@ -8,6 +8,7 @@ from market_identity import Ed25519Signer
 
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndService, EndSession, SellerDeal, SellerServicing, SellerSession,
+    create_page_position, create_payment_observations, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -29,6 +30,10 @@ def rig(tmp_path):
         buyer=buyer.identity, payment=PaymentSelector("fixture.payment.v1"), dispute=authority, once_only=True,
     )
     with transaction(path) as conn:
+        # The storefront chain's migrations, which a session does not run.
+        create_schema(conn)
+        create_payment_observations(conn)
+        create_page_position(conn)
         EndSession(conn).register(DeliveryRecord(
             negotiation_id="deal", commitment_ref="commitment", seller=seller.identity,
             start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
@@ -39,11 +44,12 @@ def rig(tmp_path):
     dispute.read.return_value = AuthorityView(outcome=Accepted())
     credentials = [True]
 
-    def watch(deal=deal, payment=payment, dispute=dispute):
+    def watch(deal=deal, payment=payment, dispute=dispute, **options):
         return DealWatch(
             path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
             seller_account="seller-account", actor=lambda _: authority_signer.identity, clock=lambda: clock[0],
+            **options,
         )
 
     def service():

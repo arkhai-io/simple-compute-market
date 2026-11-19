@@ -197,8 +197,12 @@ scenario whose lease ends another way, such as by the buyer's teardown, runs its
 ending stage, which ends in the state teardown completion starts from. A shared stage
 from fulfillment onwards MUST read each input it checks from state an earlier stage
 wrote independently of the lease under check: the expected host from the Alkahest
-settlement preview or from the driver's declared host, and the teardown's fulfillment
-from whichever ending ran.
+settlement preview or from the driver's declared host, the Agreement window from
+accepted terms, and the teardown's fulfillment from whichever ending ran. The
+late-settlement-only stage additionally checks the submitting stage's recorded
+settlement instant; paid purchases do not supply that input. Every shared lease
+check MUST compare activation against both ends of the independently supplied
+Agreement window, allowing its documented clock tolerance at the start.
 
 A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
 its result, releasing it, and evaluating a mock rule are mock gates: they are stages of
@@ -317,7 +321,7 @@ not restart services.
 
 ### Requirement: A configured bare-metal payment purchase is qualified end to end
 
-With a ready payments target configured, the bare-metal lane MUST qualify one fixed-term whole-host purchase settled through `arkhai.payments.v1`: discovery, negotiation, payment approval, receipt-gated mock delivery, re-drive of the original run's settlement, the buyer's physical teardown through `market bare-metal teardown`, and seller refund, with the teardown and the refund as separate operations. Its discovery, purchase, correlation, delivery and teardown steps MUST be the shared buyer-purchase stages, and its re-drive and refund its own inserted stages. In the bare-metal lane the target is the lane's payments double, whose result is never hosted-ledger evidence. Mock access is evidence of composition, never of real SSH access or revocation. The scenario MUST leave no payment hold, allocated host, mock rule, or held loop behind, whether it passes or fails, except a payment it cannot refund, which it MUST report by its negotiation and transaction together with any host its seller may still deliver for it, and a host whose fulfillment it cannot read or tear down, which it MUST report as a failed cleanup step. Without a configured target, or with an unready external one, it MUST report a named blocked prerequisite; an unready lane-owned target MUST fail setup by name. It MUST never fall back to Alkahest or count an unrun purchase as qualification.
+With a ready payments target configured, the bare-metal lane MUST qualify one fixed-term whole-host purchase settled through `arkhai.payments.v1`: discovery, negotiation, payment approval, receipt-gated mock delivery, re-drive of the original run's settlement, the buyer's physical teardown through `market bare-metal end`, and seller refund, with the teardown and the refund as separate operations. Its discovery, purchase, correlation, delivery and teardown steps MUST be the shared buyer-purchase stages, and its re-drive and refund its own inserted stages. In the bare-metal lane the target is the lane's payments double, whose result is never hosted-ledger evidence. Mock access is evidence of composition, never of real SSH access or revocation. The scenario MUST leave no payment hold, allocated host, mock rule, or held loop behind, whether it passes or fails, except a payment it cannot refund, which it MUST report by its negotiation and transaction together with any host its seller may still deliver for it, and a host whose fulfillment it cannot read or tear down, which it MUST report as a failed cleanup step. Without a configured target, or with an unready external one, it MUST report a named blocked prerequisite; an unready lane-owned target MUST fail setup by name. It MUST never fall back to Alkahest or count an unrun purchase as qualification.
 
 #### Scenario: Bare-metal payment purchase is qualified
 
@@ -328,7 +332,7 @@ With a ready payments target configured, the bare-metal lane MUST qualify one fi
 - **AND** recovery reads the original run and resolves its retained signer, repeats the
   canonical lifecycle commit for the same negotiation, and requires the original
   transaction, fulfillment identity, and durable result
-- **AND** the buyer requests physical teardown through `market bare-metal teardown`,
+- **AND** the buyer requests physical teardown through `market bare-metal end`,
   converging mock reclaim, then the pinned seller separately refunds the payment, still
   held, before selected-site capacity release is confirmed
 
@@ -527,6 +531,30 @@ SSH host public key. A relay named by a host is resolved in the provisioning ser
 that host's scenario runs against. The section MUST NOT carry the private key the
 provisioning service reaches hosts with, nor any relay token or key.
 
+A VM target MAY name its capacity declaration through `resource_id`. The real
+VM deal, purchase, qualification and reapply scenarios MUST use that identifier
+for registration, listing adoption and capacity checks. Omitted, it MUST retain
+`compute-e2e-real-001`. Each real VM purchase MUST refresh its site projections
+before discovery, including with background lifecycle loops held, so host
+diagnostics do not age out its source confirmation. Before a real purchase
+approves payment, its region query MUST select its intended listing alone; an
+empty, different or ambiguous result MUST refuse the purchase. Selecting a declaration MUST NOT bypass the site's
+single-declaration-per-host invariant.
+
+A bare-metal target MAY name its existing pool and capacity declaration through
+`pool_id` and `resource_id`. When stated, the real deal, purchase, cleanup
+qualification and reapply scenarios MUST reconcile those identifiers. Omitted,
+they MUST retain their default scenario identifiers. Selecting an existing
+declaration MUST NOT bypass refusal of another declaration for the same host or
+physical machine.
+
+#### Scenario: Qualification adopts a registered bare-metal declaration
+
+- **WHEN** the target names the pool and resource already declared for its machine
+- **THEN** registration reconciles that resource rather than creating another
+  declaration, and reapply reports the selected resource
+- **AND** a different declaration for the same host or physical machine is refused
+
 #### Scenario: A field is misspelled
 
 - **WHEN** the target section names a field the model does not define, or omits one it
@@ -662,49 +690,6 @@ An alternative payment-specific qualification method MUST retain the original ph
 - **WHEN** registrations and listings are reconciled for another qualified cycle
 - **THEN** canonical identities are retained, no duplicate allocator is created, and consumed UIDs and unexpired relay quarantine remain protected
 
-### Requirement: Lanes run payment scenarios against an in-lane payments double
-
-The VM, bare-metal and API-credit lanes MUST each run a payments double that wraps the payments kit's `PaymentsAuthority` engine and mirrors the payments service's HTTP API: its routes, bearer authentication, approval admission, read authorization, idempotency and error codes. The double MUST always sign `livemode: false`, MUST be reached over HTTPS under a lane CA the lane's callers trust through their payments configuration's CA bundle path, and MUST hold only labelled public development fixtures. Its suite and documentation MUST claim only the once-only surface; passing against it MUST NOT be reported as hosted-ledger, funding or live evidence.
-
-#### Scenario: A lane's once-only payment scenario runs
-
-- **WHEN** the bare-metal or API-credit lane runs its payment scenario
-- **THEN** the scenario approves, receives a verified receipt and is refunded through the double, and does not skip
-
-#### Scenario: The VM payment scenario's once-only stages run
-
-- **WHEN** the VM lane runs its payment scenario's once-only stages
-- **THEN** they approve, receive a verified receipt, deliver, replay the commit and reach servicing through the double without skipping, and the held payment stays in the double until the lane ends
-
-#### Scenario: An approval is retried after its mandate expires
-
-- **WHEN** a payer repeats an approval the double has already made, after the mandate's expiry
-- **THEN** the double returns the original receipt rather than refusing the mandate as expired
-
-#### Scenario: The double mirrors a refusal
-
-- **WHEN** a caller approves a mandate it is not the payer of, or reads a transaction or balance it may not read
-- **THEN** the double refuses it with the payments service's status and error code
-
-#### Scenario: The pinned dispute authority cannot answer
-
-- **WHEN** a lane's registries recommend the lane's dispute authority
-- **THEN** its origin is under `.invalid`, its record key has no usable private half, and its account has no bearer token at the double
-
-#### Scenario: A result against the double is reported
-
-- **WHEN** a lane's payment scenario passes against the double
-- **THEN** the result establishes SCM's use of the payments boundary, not the payments service's ledger, funding or availability
-
-### Requirement: The VM payment scenario's case stages need a mediation target
-
-The VM payment scenario's stages that need a dispute authority to accept a filed case MUST report a blocked skip naming the missing mediation target when none is configured, while its once-only stages run against the configured payments target. The VM lane's storefront MUST hold an identity-bound dispute credential for the pinned dispute authority, a labelled public development value, so that servicing reports the deal `running` while that authority cannot be reached.
-
-#### Scenario: The VM lane has no mediation target
-
-- **WHEN** the VM lane runs its payment scenario with the lane's payments double and no mediation target
-- **THEN** the commit, delivery, replay and servicing stages run, servicing reporting the deal `running`, and the operator-end case and refund stages report a blocked skip naming the mediation target
-
 ### Requirement: A lane's runner reads committed lane profiles
 
 Each lane MUST run its test runner under committed profiles: a shared payments profile holding the lane double's target, accounts, CA bundle path and buyer credentials, then a profile of the lane's own holding only what differs by lane, selected by the lane target's choice of profiles. The runner's environment MUST carry no payments setting or credential. The buyer's payments token MUST reach the buyer process under the variable the payments settings name, written by the harness from its resolved settings. Every value a lane profile restates from a fixture or identity file MUST be held to it by a test.
@@ -754,53 +739,6 @@ scenario.
 
 - **WHEN** an external-topology payment scenario runs and the payer cannot approve
 - **THEN** the scenario fails or skips naming the payer, and performs no funding itself
-
-### Requirement: A compute buyer purchase settled through Arkhai payments runs in each compute lane
-
-The VM and bare-metal lanes MUST each run a buyer purchase that discovers, negotiates and
-pays through the shipped buyer CLI (`market buy`, `market bare-metal buy`) in
-`arkhai.payments.v1` against the lane's payments double, delivers through mock
-provisioning, and ends: the VM lease through back-dating and a stepped lease-watchdog
-cycle, the bare-metal lease through the buyer's `market bare-metal teardown`. The
-purchase stages MUST be defined once and shared by every scenario that buys this way,
-and each stage MUST log the identifiers it reads. The bare-metal lane's purchase is its
-qualified payment purchase, which runs the shared stages and inserts its own; the VM
-lane's purchase lists a resource of its own on a registered host, since a listing's
-binding to its resource outlives the listing.
-
-#### Scenario: A VM lane purchase completes
-
-- **WHEN** the VM lane runs its buyer purchase
-- **THEN** `market buy` approves the payment, the seller delivers after a verified
-  receipt, and back-dating the lease and stepping one watchdog cycle tears the guest down
-  and releases its capacity
-
-#### Scenario: A bare-metal lane purchase ends by the buyer
-
-- **WHEN** the bare-metal lane runs its buyer purchase and the buyer runs
-  `market bare-metal teardown`
-- **THEN** the reclaim runs and the whole host's capacity is restored
-
-#### Scenario: The bare-metal purchase's steps change
-
-- **WHEN** a discovery, purchase, correlation, delivery or buyer-teardown step of the
-  bare-metal lane's purchase changes
-- **THEN** it changes in the shared stage, and the observation 4 and 5 module runs the
-  changed stage without an edit of its own
-
-#### Scenario: A purchase is checked against its payment records
-
-- **WHEN** a buyer purchase completes
-- **THEN** each transaction is bound to its Agreement, its receipt covers that mandate,
-  its snapshot names the configured payer and payee with gross equal to the Agreement's
-  price, and the payer's available balance fell by exactly the scenario's own debits
-
-#### Scenario: The buyer's delivery-end filing reaches no authority
-
-- **WHEN** the bare-metal buyer's teardown files a delivery-end case with a pinned
-  dispute authority that does not answer
-- **THEN** the scenario neither fails on the filing nor reads it as delivery, access-end
-  or refund evidence
 
 ### Requirement: Real-provisioning qualification scenarios make the owed observations
 
@@ -867,6 +805,9 @@ cannot end. A purchase the module ended itself is left as it is.
 - **THEN** existing listings are adopted with identities, states and pauses intact, no
   duplicate host, pool, resource, allocator or listing appears, unexpired relay
   quarantine is retained, and the consumed-UID history is unchanged
+- **AND** the listing comparison preserves the entire existing history, including
+  closed listings; adding, dropping, replacing, reopening or changing the pause of
+  any historical listing fails the observation
 
 #### Scenario: A qualification stage fails after the payment is approved
 
@@ -903,6 +844,41 @@ naming the listing and its options, changing nothing.
 
 - **WHEN** a module finds the resource's listing offering no option of its mechanism
 - **THEN** it fails naming the listing and its options before any deal
+
+#### Scenario: Closed listing history accompanies an open target listing
+
+- **WHEN** the target resource has closed historical listings and exactly one open
+  listing of the required shape offering the module's mechanism
+- **THEN** the module adopts that open listing, preserves the closed history, and
+  creates or reopens no listing
+
+#### Scenario: No unique open target listing exists
+
+- **WHEN** the resource has only closed listings, multiple open listings, or a
+  listing with an unknown status
+- **THEN** the module refuses before any deal, naming the listings and changing
+  none of them; closed history does not permit replacement creation
+
+### Requirement: VM payment scenarios declare their configured delivery allowance
+
+VM payment scenario listings and purchase option checks MUST use
+`PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, defaulting to 300 seconds. A named value
+MUST be a positive integer or decimal integer string; malformed values MUST fail
+before publication. The CLI wait MUST be at least that allowance. Configured
+dispute coverage MUST cover it, with authority minimum coverage still validated
+by the service. Accepted Agreement deadlines and late-delivery checks MUST remain
+unchanged by the setting.
+
+#### Scenario: A run declares a longer setup allowance
+
+- **WHEN** the run names a delivery allowance and sufficient dispute coverage
+- **THEN** publication states that allowance, the purchase requires it, and the CLI
+  waits at least that long without changing an existing Agreement
+
+#### Scenario: Delivery allowance is invalid or differs from an existing option
+
+- **WHEN** the setting is malformed, nonpositive, or differs from the option
+- **THEN** publication or the purchase's option check fails before payment
 
 ### Requirement: The real-provisioning target names diagnostics and admission inputs
 
@@ -946,3 +922,386 @@ rather than poll for it.
   introduction retention sweep
 - **THEN** no pipeline stage waits for it; a test at the level that can drive the clock
   proves it
+
+### Requirement: Lanes run a mediation double that answers from programmed rules
+
+Every lane MUST run a mediation double, recommended by the lane's registries, that reproduces the dispute authority's API mechanics — authentication, idempotency, the filing's admission checks, signed per-agreement records and cursors, the respondent listing, the closed-case refusal, extensions at the payments double, execution of a ruling's per-part `reverse` effects and the record of its delivery end — and takes every ruling from a scenario-programmed rule. It MUST NOT compute a ruling, and with no matching rule it MUST rule nothing. It MUST refuse at install, and install nothing for, a rule whose ruling carries a `stop` or `penalty` effect, which act on rate parts no lane running the double has, or an `award`, which the contract makes unexecutable on `arkhai.payments.v1`.
+
+#### Scenario: A case is filed with no rule installed
+
+- **WHEN** a party files a case and no rule matches it
+- **THEN** the double accepts the filing, sends `extend` for each part to the payments double as the authority's own account, and reports each part `held` with its reference, or, when payments refuses it as nothing held, `not_held` with a reason classified from the part's signed amounts: `paid_out` when any money was released, otherwise `reversed` when any was reversed or refunded, otherwise `nothing_held`
+- **AND** the case stays open and unruled, unless every part is `not_held`, when the contract's automatic dismissal closes it with nothing held
+
+#### Scenario: A filing's Agreement is not the payment's
+
+- **WHEN** a party files a case whose Agreement's JCS SHA-256 differs from the `deal` in the transaction's signed payment receipt
+- **THEN** the double rejects the filing with `agreement_hash_mismatch`, reserves no case, and extends no part
+
+#### Scenario: Protection cannot be established
+
+- **WHEN** the payments double refuses an extend for any reason but nothing held, or cannot be reached
+- **THEN** the filing is answered `error` with `protection_incomplete`, no part is reported `not_held`, and a retry under the same key completes the filing once payments answers
+
+#### Scenario: A programmed ruling is applied
+
+- **WHEN** a rule supplies a ruling's basis, delivery end and per-part effects for a matching case
+- **THEN** the double records the ruling in the signed per-agreement record, applies each effect at the payments double with a stable effect key and the case reference, and then lifts only that case's extensions
+
+#### Scenario: A ruling waits at its gate
+
+- **WHEN** a rule's ruling with a delivery end and a reverse is held at its gate
+- **THEN** the double records the ruled entry with the delivery end and the reverse `prepared`, sends nothing to payments, and applies both, lifts the case's extensions and closes the case only once the rule is resumed
+
+#### Scenario: Payments fails between two effects
+
+- **WHEN** the payments double refuses or drops a ruling's second effect after the first committed
+- **THEN** the ruling is recorded as incompletely applied, and resuming applies the remaining effect without applying the first twice
+
+#### Scenario: Closing a case still applying its ruling is refused
+
+- **WHEN** a scenario closes a case whose ruling has an effect payments has not applied
+- **THEN** the double refuses the close, lifts nothing, and the case stays applying with its effect prepared
+
+#### Scenario: Appends follow the contract
+
+- **WHEN** either party appends evidence to an open case, or the payer appends concurrence, or anyone appends to a closed case
+- **THEN** the evidence is recorded under its actor and idempotency key, the payer's concurrence is refused because only `mandate.to` may concur, and the closed case refuses the append
+
+#### Scenario: A party reads after an absence
+
+- **WHEN** a party reads an agreement's record from its retained cursor
+- **THEN** it receives the signed entries after that cursor in sequence, an authorized party reading an agreement with no cases receives an empty signed page, and an unknown agreement or unauthorized reader receives the contract's refusal
+
+#### Scenario: The double's deviation is stated
+
+- **WHEN** a payee files, or concurs in, a `delivery_end` claim that the dispute authority would rule mechanically
+- **THEN** the double rules it only when a rule says so, and its README and this specification state that deviation from its producer
+
+### Requirement: Lane double controls are typed deterministic steps
+
+Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding, receipt-signer rotation and rate-part reservation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it. The payments double MUST reserve a started rate part's further periods only when its reservation control is called, never on its own: the control reserves each of the transaction's running rate parts — started and not stopped — through the instant the scenario names, as far as the part's end and the payer's balance allow, and answers, for each such part, the instant it is then reserved through. The control MUST refuse a transaction with no running rate part with a typed code and change nothing. Transport faults MUST apply only to the contract's API routes, never to the control routes. Every rule MUST state its `match`, and an unavailable rule MUST state `match: {}` and covers every contract API route. A control MUST refuse an unknown or malformed target with a typed code and install nothing. Each control the VM controls scenarios do not exercise — funding, signer rotation, refusal with a published code, the filing-answer override, close without ruling and the rule listing — MUST be proven by its double's suite through the typed client over HTTP, and so MUST the reservation control.
+
+#### Scenario: A response is lost after commit
+
+- **WHEN** a drop-after-commit rule matches a request
+- **THEN** the double commits the request and abandons its response, the caller sees a transport error, and a retry under the same key returns the original result without a second effect
+
+#### Scenario: A double is unavailable
+
+- **WHEN** an unavailable rule with `match: {}` is installed on a double
+- **THEN** every API request's response is abandoned and its callers see a transport error, never an HTTP error status
+- **AND** the control routes still answer, and removing the rule restores the API
+
+#### Scenario: An unavailable rule is scoped
+
+- **WHEN** a scenario installs an unavailable rule whose `match` is not empty
+- **THEN** the double refuses it as an invalid request and installs nothing
+
+#### Scenario: A rule states no scope
+
+- **WHEN** a scenario installs a rule without `match`
+- **THEN** the double refuses it as an invalid request and installs nothing
+
+#### Scenario: A finaliser removes rules
+
+- **WHEN** a scenario deletes a rule that has matched or completed, and then deletes a rule that does not exist
+- **THEN** the first is removed from the listing, and the second is reported not found
+
+#### Scenario: A call is refused with a published code
+
+- **WHEN** the payments double's suite installs a refusal rule and calls the matching route through the payments kit's client
+- **THEN** the client receives the rule's published status and code, and the rule listing counts the match
+
+#### Scenario: An account is funded
+
+- **WHEN** the payments double's suite funds an account through the typed client
+- **THEN** the account's balance read through the payments kit's client shows the funding
+
+#### Scenario: A rate part's further periods are reserved
+
+- **GIVEN** a started rate part whose payer's balance funds one period beyond its first reservation
+- **WHEN** the payments double's suite calls the reservation control through the typed client, naming the Agreement's end
+- **THEN** the control answers the part reserved through one period past its first reservation, and the transaction's signed snapshot through the payments kit's client shows that instant as its funded boundary
+- **AND** with injected time set to that boundary, the next read shows the part's `terms` stop there
+
+#### Scenario: A reservation is refused when no rate part runs
+
+- **WHEN** the payments double's suite calls the reservation control through the typed client for a transaction whose rate part has not started, then for one whose only part is once-only, then for one whose rate part has stopped
+- **THEN** each call is refused with the code `no_running_rate_part`, and the transaction's signed snapshot through the payments kit's client is unchanged
+
+#### Scenario: A rate part is not reserved unasked
+
+- **WHEN** the payments double's injected time is set past a started rate part's first reservation and no reservation control was called
+- **THEN** the next read shows the part's `terms` stop at its first reservation's end, whatever the payer's balance
+
+#### Scenario: A scenario leaves a rule behind
+
+- **WHEN** a module ends with a rule still installed
+- **THEN** the rule listing shows it with its matched and waiting counts
+
+### Requirement: A lane-owned mediation target fails rather than skips
+
+Each lane's runner MUST read its mediation target, CA bundle path, the buyer's mediation token and the control token from its committed lane profile, and the buyer MUST receive its token under the variable its dispute credential names. An unready lane-owned mediation target MUST fail setup by name; an unready external one MUST report a blocked skip.
+
+#### Scenario: The lane's mediation double is not ready
+
+- **WHEN** a lane's mediation target is marked its own and does not report itself ready
+- **THEN** setup fails naming it, before any scenario stage
+
+### Requirement: Controls scenarios prove the lane's dispute wiring in the VM lane
+
+The VM lane MUST run exactly six controls scenarios, each a module of its own on its own once-only deal, that prove, end to end through the storefront's dispute servicing: a programmed ruling with a delivery end, an operator decision without one, a lost filing response, an unavailable mediation double, payments losing an effect's answer and then unavailable while a ruling is applied, and lane time set past a hold. Each stage MUST advance one side effect through the services' typed clients, the doubles' control client, or the mediation kit's dispute adapter, never a raw HTTP call; where a scenario needs a case on a delivering deal, the harness MUST file it as the buyer through that adapter. A stage MUST NOT step the storefront's servicing while a ruling waits at its gate.
+
+#### Scenario: A programmed ruling ends delivery
+
+- **WHEN** the buyer files on a delivering deal, a gated rule's ruling with a delivery end and a reverse is resumed, and the storefront then steps its servicing
+- **THEN** the payments double shows the reverse, and the storefront records the end with cause `ruling` and begins teardown
+
+#### Scenario: An operator discount leaves the deal running
+
+- **WHEN** the buyer files on a delivering deal, the storefront answers the case, and an operator decision reverses part of the held money with no delivery end
+- **THEN** the reverse lands, the case's extensions are lifted, and delivery stays active
+
+#### Scenario: A filing response is lost
+
+- **WHEN** the response to the storefront's filing is dropped after commit and the storefront files again
+- **THEN** the dispute adapter adopts the one filed case and no second case exists
+
+#### Scenario: Mediation is unavailable while a deal runs
+
+- **WHEN** mediation is unavailable while the storefront steps the servicing of a delivering deal with a case on record
+- **THEN** it reports the authority unreachable and delivery stays active, and once the outage is removed its next step reads the authority again
+
+#### Scenario: Payments holds a ruling before it completes
+
+- **WHEN** payments loses its answer to the first of two reverses an operator decision rules, and is then unavailable while the decision is repeated
+- **THEN** the storefront shows the ruling unapplied and the case not closed, and once payments answers, repeating the decision completes the ruling with exactly one reverse per effect
+
+### Requirement: The in-lane payments double mirrors the service and proves its engine's surface
+
+The VM, bare-metal and API-credit lanes MUST each run a payments double that wraps the payments kit's `PaymentsAuthority` engine and mirrors the payments service's HTTP API: its routes, bearer authentication, approval admission, read authorization, idempotency and error codes. The double MUST always sign `livemode: false`, MUST be reached over HTTPS under a lane CA the lane's callers trust through their configured CA bundle paths, and MUST hold only labelled public development fixtures. Its suite MUST prove the rate and hold surface its engine serves through the kit's real client. A lane result MUST be labelled lane-double evidence, never hosted-ledger, funding or live evidence.
+
+#### Scenario: A lane's once-only payment scenario runs
+
+- **WHEN** the bare-metal or API-credit lane runs its payment scenario
+- **THEN** the scenario approves, receives a verified receipt and is refunded through the double, and does not skip
+
+#### Scenario: The VM payment scenario runs
+
+- **WHEN** the VM lane runs its payment scenario
+- **THEN** it approves, receives a verified receipt, delivers, replays the commit and reaches servicing through the double, and its operator-end case and refund stages run against the lane's mediation double, without skipping
+
+#### Scenario: An approval is retried after its mandate expires
+
+- **WHEN** a payer repeats an approval the double has already made, after the mandate's expiry
+- **THEN** the double returns the original receipt rather than refusing the mandate as expired
+
+#### Scenario: The double mirrors a refusal
+
+- **WHEN** a caller approves a mandate it is not the payer of, or reads a transaction or balance it may not read
+- **THEN** the double refuses it with the payments service's status and error code
+
+#### Scenario: The rate and hold surface is proven
+
+- **WHEN** the double's suite drives rate parts, stops with notice, per-part ends, exhaustion, `afterStop` holds, partial reverses and `extend` and `lift` through the payments kit's client over HTTP
+- **THEN** each answer and refusal is the engine's, and the earliest pending stop takes effect when the double's injected time reaches it
+
+#### Scenario: A result against the double is reported
+
+- **WHEN** a lane's payment scenario passes against the doubles
+- **THEN** it is labelled lane-double evidence with each double's installed contract hashes, and establishes SCM's use of the boundaries, not either service's ledger, funding, adjudication or availability
+
+### Requirement: A compute buyer purchase settled through Arkhai payments runs in each compute lane against the lane doubles
+
+The VM and bare-metal lanes MUST each run a buyer purchase that discovers, negotiates and
+pays through the shipped buyer CLI (`market buy`, `market bare-metal buy`) in
+`arkhai.payments.v1` against the lane's payments double, delivers through mock
+provisioning, and ends: the VM lease through back-dating and a stepped lease-watchdog
+cycle, the bare-metal lease through the buyer's `market bare-metal end`. The
+purchase stages MUST be defined once and shared by every scenario that buys this way,
+and each stage MUST log the identifiers it reads. The bare-metal lane's purchase is its
+qualified payment purchase, which runs the shared stages and inserts its own; the VM
+lane's purchase lists a resource of its own on a registered host, since a listing's
+binding to its resource outlives the listing.
+
+#### Scenario: A VM lane purchase completes
+
+- **WHEN** the VM lane runs its buyer purchase
+- **THEN** `market buy` approves the payment, the seller delivers after a verified
+  receipt, and back-dating the lease and stepping one watchdog cycle tears the guest down
+  and releases its capacity
+
+#### Scenario: A bare-metal lane purchase ends by the buyer
+
+- **WHEN** the bare-metal lane runs its buyer purchase and the buyer runs
+  `market bare-metal end`
+- **THEN** the reclaim runs and the whole host's capacity is restored
+
+#### Scenario: The bare-metal purchase's steps change
+
+- **WHEN** a discovery, purchase, correlation, delivery or buyer-teardown step of the
+  bare-metal lane's purchase changes
+- **THEN** it changes in the shared stage, and the observation 4 and 5 module runs the
+  changed stage without an edit of its own
+
+#### Scenario: A purchase is checked against its payment records
+
+- **WHEN** a buyer purchase completes
+- **THEN** each transaction is bound to its Agreement, its receipt covers that mandate,
+  its snapshot names the configured payer and payee with gross equal to the Agreement's
+  price, and the payer's available balance fell by exactly the scenario's own debits
+
+#### Scenario: The buyer's delivery-end filing reaches the mediation double
+
+- **WHEN** the bare-metal buyer's end files a delivery-end case with the lane's
+  mediation double and no rule matches it
+- **THEN** the case is filed and each part reported held or not held, nothing is ruled,
+  and the scenario does not read the filing as a ruling or refund
+
+### Requirement: Rate mechanics qualification consumes the shared lane contract
+Rate mechanics qualification MUST follow "External payment qualification names its target" and label each result lane-double evidence or live evidence, as "The in-lane payments double mirrors the service and proves its engine's surface" does. It MUST retain kit/vector evidence production, while the rate lane rows consume the lane's shared lane time. It MUST NOT add an evidence label or claim live behavior from a double.
+
+#### Scenario: Mechanics run against the lane double
+- **WHEN** rate adapter mechanics pass against contract fakes or the lane double
+- **THEN** evidence is labelled lane-double evidence with the installed contract hashes and makes no hosted-readiness or live-authority claim
+
+#### Scenario: Required authority vectors are absent
+- **WHEN** producer-published signed pre-start/post-start snapshot, start or partial reversal vectors are unavailable
+- **THEN** the corresponding authority-conformance claim remains unproven
+- **AND** double-generated traces do not replace producer evidence
+
+#### Scenario: The adapter is tested without lane services
+- **WHEN** kit rate integration tests run
+- **THEN** they exercise the shared clock-injected payments authority engine and verified vector fixtures without starting lane HTTP tooling
+
+#### Scenario: Fixtures use the shipped presets with default buyers
+- **WHEN** a spot or on-demand command fixture is prepared
+- **THEN** it uses the shipped presets under a lane declaration listing returned, with a default buyer
+- **AND** a charged variant is a separate observation whose buyer waives each charged term through its per-term waiver
+
+### Requirement: Every party in a lane shares one lane time the scenario sets
+
+Each Compose lane MUST run every party on injected time: every storefront, provisioning service, registry, the API-credits service and the sample app where the lane runs them, both doubles, and the buyer, with the harness's own signing clients reading its process source. One harness fixture MUST set every party at the session's start to the wall instant at that moment, or to the latest instant a party already holds when that is later, so the start never sets a party back — a party whose instant the start cannot read holds none, and one that then refuses the instant set fails the setup naming it — and its set MUST move, in order, the harness's own source, each service, both doubles and the sample app, the chain and the buyer's lane-time file to one instant, then read every party's status and fail naming any that does not report it, a party whose status has no time section among them. Lane time MUST only move forward and MUST never be reset; a stage MAY set any forward instant, and a backward set MUST fail naming the party and both instants. A party the run's profile names but cannot reach MUST fail the setup rather than skip.
+
+#### Scenario: Funds run out without waiting
+
+- **WHEN** a rate deal's funding reaches its boundary at 1794823200 and a stage sets lane time to 1794823200, then steps the storefront's servicing and the lease watchdog
+- **THEN** the storefront records the exhaustion stop, the site ends the lease at 1794823200, and teardown follows, with no wait on wall time
+
+#### Scenario: A party misses a set
+
+- **WHEN** a lane-time set leaves one registry at its previous instant
+- **THEN** the fixture fails naming that registry and the instant it reports
+
+#### Scenario: An older image ignores the setting
+
+- **WHEN** a lane configures injected time for a service image that predates the setting, which boots on wall time
+- **THEN** the session fixture fails naming that service, since its status has no time section
+
+#### Scenario: A module follows an advanced one
+
+- **WHEN** a module ends with lane time at 1794830000
+- **THEN** the next module starts at 1794830000 or later, with every party reporting the same instant
+
+### Requirement: The chain follows lane time
+
+At the session's start and at every lane-time set, the fixture MUST set the lane chain's next block timestamp to the lane instant and mine a block, and MUST freeze the chain's block time between sets where the chain supports it.
+
+#### Scenario: An escrow created after an advance
+
+- **WHEN** lane time is set 3600 s forward and a buyer creates an escrow expiring one hour after the lane instant
+- **THEN** the chain accepts it as unexpired
+
+### Requirement: A run uses one time source throughout
+
+A run MUST be injected or wall time throughout, and the session fixture MUST read the status of every party the run's profile names and fail naming a mix. Each Compose lane's profile MUST name every party the lane runs; the local Helm release's MUST name its storefront, provisioning service and registry, each credential named by the setting of the run's secrets profile that holds it. External-topology runs and runs against the local Helm release MUST run on wall time: there the lane-time helper MUST reach only an instant the Agreement fixes, by waiting for it, and a stage needing any other instant MUST be a blocked skip naming the wall-time target, or naming that the run has no lane time where its profile names none. Shared stages MUST reach instants only through that helper.
+
+#### Scenario: A time-driven module against a hosted target
+
+- **WHEN** a module that sets lane time to a funding boundary runs against hosted authorities
+- **THEN** its stage is a blocked skip naming the wall-time target, never a wait
+
+#### Scenario: A service in the local Helm release runs injected time
+
+- **WHEN** the local Helm release's validation runs its scenarios and its storefront, provisioning service or registry reports injected time
+- **THEN** the session fixture fails naming that service, before any scenario runs
+
+### Requirement: Each lane double reads injected time the scenario sets
+
+Each double MUST read time from the shared time component's injected source, set through `POST /test/time` with `{"now": <Unix seconds>}` behind its control bearer token, answering `{"source": "injected", "now": …}` and refusing an earlier instant with `time_moves_forward`; each double's status MUST report its source and now. Due authority state MUST become visible at the next read, with no background work. A lane's time MUST live only in that lane's parties.
+
+#### Scenario: A once part's hold is passed
+
+- **WHEN** a scenario sets lane time past a once part's release instant
+- **THEN** the next read shows the part paid out, and a case the buyer files afterwards reports that part `not_held` with `paid_out` and is dismissed with nothing held
+
+#### Scenario: Lanes run side by side
+
+- **WHEN** two lanes run at once, in separate Compose projects or separate Helm validation namespaces, and one sets its lane time
+- **THEN** the other lane's parties still report their own instant
+
+### Requirement: The sample app follows lane time through a test control
+
+The API-credits sample app MUST install its process time source from `APICREDITS_SAMPLE_APP_TIME_SOURCE`, `"wall"` by default or `"injected"`, and its metering middleware MUST read that source for every timestamp it signs and every response it verifies. Under injected time the app MUST serve `POST /test/time` with `{"now": <Unix seconds>}` and a status reporting its source and now, behind a control bearer token from its environment, with the doubles' answers and refusals, through `lane-double-controls`' models and client; the metering gate MUST exclude those routes. The metering middleware MUST offer no time control of its own.
+
+#### Scenario: Metered calls continue after an advance
+
+- **WHEN** lane time is set 3600 s forward in the API-credits lane and the buyer calls `/api/forecast` with a funded key
+- **THEN** the middleware's signed consume request is accepted by the credits service and the call is charged one credit
+
+#### Scenario: The control is not metered
+
+- **WHEN** the harness sets the sample app's time with its control token
+- **THEN** the gate does not charge or refuse the request
+
+### Requirement: A recurring purchase is delivered end to end in each compute lane
+Each compute lane MUST run one recurring-purchase scenario from a lane-only servicing declaration listing charged and returned, through the shipped buyer's approval and commit against the payments double, to a delivered deal the buyer ends by its own stop, labelled lane-double evidence. It MUST reach each instant by setting lane time and MUST leave no payment hold, mock rule or held loop behind.
+
+#### Scenario: A buyer approves a recurring option
+- **WHEN** a buyer selects a seller's recurring option in a compute lane and approves its mandate
+- **THEN** the scenario asserts the published per-period price, the accepted Agreement's per-period charge, setup, initial reserve and maximum term as the buyer displays them, and the approved mandate's single rate part charging one period's price
+- **AND** that the buyer displays them before its settlement stage approves is proved by each buyer's own application tests, not by the lane scenario
+
+#### Scenario: The deal is delivered and billing starts
+- **WHEN** the scenario sets lane time to the Agreement's start and steps delivery recovery
+- **THEN** the site activates the lease, the payments double records the rate part's start after that activation, and the deal becomes available to the buyer
+
+#### Scenario: The buyer's stop ends the delivered deal
+- **WHEN** the scenario's buyer ends the delivered deal through its canonical `end` and the scenario steps `deal-servicing`
+- **THEN** the payer's stop is accepted at the payments double, the started period is charged, the storefront records the buyer's entitled stop and tears the deal down, and the seller's list shows the deal `ended` once the release is proven
+
+### Requirement: Rate deals are qualified in both compute lanes on lane time
+Each compute lane MUST run, each on its own deal, under the shipped presets with a default buyer and a lane declaration listing charged and returned: funds running out, where the rate part's `terms` stop ends delivery at its effective time and is classified exhaustion; a spot seller's preemption, where the payments double holds the pending stop and the deal ends when it takes effect with the unstarted period returned; and the maximum term, where the rate part ends at the Agreement's end with `returned` and is classified the term end. Each row MUST reach its instants by setting lane time, never by waiting, and MUST be labelled lane-double evidence. A row that sets lane time past its deal's first reservation MUST first program the payments double's further reservation through its control, as the payments service's own scheduler would have reserved, in a stage of its own declared only where the double runs.
+
+#### Scenario: Funds run out
+- **GIVEN** a delivered on-demand deal whose payer balance funds one period beyond the part's first reservation
+- **WHEN** the scenario reserves the part through the Agreement's end, sets lane time to the funded boundary the payments double then reports, and steps `deal-servicing`
+- **THEN** the payments double records a `terms` stop at that boundary, after the first reservation's end and before the Agreement's end, the storefront classifies it exhaustion and tears the deal down at that instant, and the buyer's read says a top-up cannot revive it
+
+#### Scenario: A spot seller preempts with notice
+- **GIVEN** a delivered spot deal
+- **WHEN** the seller runs `deals preempt`, the scenario sets lane time to the request's time plus the Agreement's seller notice and steps `deal-servicing`
+- **THEN** the payments double held the pending stop until then, the storefront records the seller's entitled stop at its effective time and tears the deal down, and the unstarted period is returned
+
+#### Scenario: The maximum term ends
+- **GIVEN** a delivered on-demand deal whose payer balance funds the whole term
+- **WHEN** the scenario reserves the part through the Agreement's end, sets lane time to the Agreement's end and steps `deal-servicing`
+- **THEN** the rate part ends with `returned`, the storefront classifies the end as the term end, not exhaustion, and tears the deal down
+
+### Requirement: The buyer's watchdog is qualified against a delivered deal
+Each compute lane MUST run the buyer's watchdog against a delivered rate deal: the shipped `buy` with the opt-in monitoring from `available`; a killed command whose read shows `unmonitored` once lane time passes its last probe's staleness bound; the resumed run whose read shows `monitored`; and the disclosed endpoint ceasing to accept connections while the storefront's loops are paused, which yields one buyer stop. The shipped `buy`, its resume and the buyer's read MUST run in the harness's process, the deal's probe answering and every wait `buy` makes — its commit, its wait for the deal to become available and the watchdog's — stepped as the harness programs them through each buyer CLI's own probe and wait-clock factories, so that no probe leaves the harness, no case waits on real time, and nothing test-only ships with the CLI. Staleness MUST be reached by setting lane time. Each case MUST be labelled lane-double evidence.
+
+#### Scenario: A watched purchase is monitored, goes stale when killed, and resumes
+- **GIVEN** a rate deal whose `buy` runs in the harness's process with the watchdog opted in, waiting at the harness's gate for the deal to become available, its probe programmed to answer reachable
+- **WHEN** the scenario sets lane time to the Agreement's start and steps delivery recovery, and the harness releases `buy`'s wait and steps one probe interval
+- **THEN** the same command enters its watchdog, the buyer's read shows `monitored`, and the probe was built for the endpoint the deal disclosed
+- **AND** after the harness interrupts the command and sets lane time past one interval, the probe timeout and the grace after its last probe, the read shows `unmonitored`
+- **AND** after the buyer resumes the run and the harness steps one probe interval, the read shows `monitored`
+
+#### Scenario: Access is lost while the storefront is paused
+- **GIVEN** the resumed run of a delivered rate deal, and the storefront's loops paused
+- **WHEN** the probe answers unreachable for the threshold of stepped intervals
+- **THEN** the watchdog sends one payer stop and hint, which the payments double accepts, and the command exits with the outcome `stopped`
+- **AND** the payments double's events for the transaction are the storefront's `start` and then the payer's stop, with nothing from the storefront between
+- **AND** the storefront records the buyer's stop with no filing, and once the scenario steps `deal-servicing` the deal's teardown has begun

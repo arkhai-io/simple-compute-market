@@ -199,7 +199,7 @@ evidence. Task 5.3 is intentionally unrun in this delegated lane.
 
 ## 6. Closeout
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
 - [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
       the comments this change added for any that narrate the review or migration that
@@ -212,7 +212,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       against `openspec/README.md`'s placement rules, and the permanent documents
       against the code they describe: the per-domain deal path in
       `test-compatibility`, the stack requirement in `deployment-state`, and
-      `TESTING.md`'s statement of what an end-to-end deal path proves.
+      `docs/guidance/repository/deal-scenarios.md`'s statement of what an end-to-end
+      deal path proves.
 - [ ] 6.4 **Narrative compression.** Compress completed-task notes to final behavior,
       material validation evidence (including whether the live run happened),
       unresolved or deferred work, and permanent-documentation destinations, moving
@@ -233,7 +234,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       naming its cause and the change that owns it, with the validations it gates
       treated as unrun.
 - [ ] 6.9 **Promotion.** Write the permanent documents this change owes —
-      `docs/development/TESTING.md` (what an end-to-end deal path proves) — and
+      `docs/guidance/repository/deal-scenarios.md` (what an end-to-end deal path
+      proves) — and
       complete the design-promotion record below. A `spec.md` the deltas cover — here
       `test-compatibility`, `deployment-state`, `negotiation-protocol`, and
       `buyer-orchestration` — is written by the archive in 6.11, not by hand; the
@@ -252,7 +254,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 |---|---|
 | An end-to-end deal path is proven per domain, exercising shared fixtures rather than copied scenarios | `openspec/specs/test-compatibility/spec.md` — "Per-domain end-to-end deal path" |
 | Every domain intended for deployment has a stack definition | `openspec/specs/deployment-state/spec.md` — "Deployable stack per market domain" |
-| What an end-to-end deal path proves | `docs/development/TESTING.md` |
+| What an end-to-end deal path proves | `docs/guidance/repository/deal-scenarios.md` |
 | Why API credits is recomposed rather than merely made to pass, and why fixtures generalize instead of scenarios copying | This change's `design.md` |
 | A bare-metal opening carries only buyer-owned demand; resume is transcript-exact | `openspec/specs/negotiation-protocol/spec.md` — "Bare-metal negotiation preserves demand and authority ownership" |
 | The bare-metal buyer ships as a clean wheel and addresses independently configured authorities | `openspec/specs/deployment-state/spec.md` — "Bare-metal buyer ships as a clean wheel contribution" |

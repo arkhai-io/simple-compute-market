@@ -27,6 +27,8 @@ from market_resource_pools_contracts.hints import (
 )
 from .pool_config_handler import PoolConfigHandler
 from market_resource_pools_contracts import (
+    CAPACITY_BOUNDS_POLICY_TAG,
+    validate_capacity_bounds,
     PoolCreate,
     PoolImportDiff,
     PoolReplace,
@@ -575,6 +577,15 @@ class ResourcePoolService:
                             path=f"{base}.policy_tags.{ASKING_RATES_POLICY_TAG}",
                             code="invalid_asking_rates",
                             message=rate_problem,
+                        )
+                    )
+                    entry_valid = False
+                for bound_problem in validate_capacity_bounds(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{CAPACITY_BOUNDS_POLICY_TAG}",
+                            code="invalid_capacity_bounds",
+                            message=bound_problem,
                         )
                     )
                     entry_valid = False

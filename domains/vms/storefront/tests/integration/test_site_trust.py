@@ -79,6 +79,7 @@ from market_storefront.middleware.service_peer_auth import (
 )
 from market_storefront.services import capacity_client
 from market_storefront.services.fulfillment_service import terminate_vm_lease
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fake_site import FakeSite
@@ -189,6 +190,7 @@ _CONTAINER_FIELDS = (
 
 @pytest.fixture
 async def world(tmp_path) -> AsyncIterator[World]:
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(
         db_path=str(tmp_path / "storefront.db"),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),

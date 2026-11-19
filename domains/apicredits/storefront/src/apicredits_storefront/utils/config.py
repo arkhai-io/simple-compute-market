@@ -36,28 +36,19 @@ from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_config.config_loader import (
     ChainConfig,
     chains_from_config,
-    storefront_config_files,
 )
 from market_config.setting_types import positive_seconds
+from market_storefront_kit import configured_time_source as kit_configured_time_source
+
+from apicredits_storefront.settings_source import settings_source
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_ID = "root_agent"
-_DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "settings.toml"
 
 
 def _build_settings() -> Dynaconf:
-    overlays = [str(p) for p in storefront_config_files() if Path(p).exists()]
-    s = Dynaconf(
-        settings_file=[str(_DEFAULTS_FILE)],
-        includes=overlays,
-        envvar_prefix="APICREDITS_STOREFRONT",
-        envvar_separator="__",
-        load_dotenv=False,
-        environments=False,
-        merge_enabled=True,
-    )
-    return s
+    return settings_source()
 
 
 def seller_wallet_address() -> str:
@@ -103,6 +94,11 @@ def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Settlement must be a table")
     return value
+
+
+def configured_time_source(source: Dynaconf | None = None) -> Any:
+    """The value ``[Time] source`` states, or ``None`` when unset."""
+    return kit_configured_time_source(source or settings)
 
 
 def settlement_publication_defaults(

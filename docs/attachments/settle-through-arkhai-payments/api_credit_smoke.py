@@ -179,7 +179,7 @@ async def main(directory, phase, authority):
         )
         await db.commit_agreed_terms(
             negotiation_id=identifier,
-            agreed_price=100,
+            negotiated_scalar=100,
             agreed_duration_seconds=0,
             agreement_bytes=raw,
             accepted_at=accepted.accepted_at,

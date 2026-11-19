@@ -4,7 +4,7 @@ A pool's `listing_shapes` hint states the shape its listings are sold in. This
 scenario proves the cross-service path from that declaration to discovery:
 
 1. A pool states a 1-GPU, 8-vCPU, 32 GiB, 100 GiB shape; its one declaration has
-   2 GPUs, 16 vCPUs, 64 GiB, and 200 GiB.
+   3 GPUs, 16 vCPUs, 64 GiB, and 200 GiB.
 2. The provisioning service projects the hint verbatim, and one publication
    cycle publishes exactly that shape, with every declared quantity, and no
    default GPU-only shapes.
@@ -26,6 +26,9 @@ scenario proves the cross-service path from that declaration to discovery:
    rate composed from its shape -- 1 GPU, 8 vCPUs, 32 GiB, and 100 GiB at the
    override's per-unit rates -- which the registry carries in the existing
    option fields, while the family rates are served only by the storefront.
+   While the listing is shape-priced, `market buy --shape` opens with a smaller
+   shape -- 1 GPU, 4 vCPUs, 16 GiB, and 50 GiB -- and the site's reservation
+   and the provisioning job hold exactly that agreed shape, not the listing's.
    Deleting the override restores the hint's flat rate.
 8. The pool restates its shape with inline constraints -- `gpu.count`
    `{offer: 1, max: 4}` and a `memory.gib` maximum but no memory offer. One
@@ -49,9 +52,9 @@ hints, so the scenario does not depend on the storefront's configured defaults.
 The region is stated twice on purpose: a listing advertises its pool's region
 hint, and a reservation matches that region against the declaration's own
 `region` attribute, so a pool whose members did not declare it would publish
-nothing. How many of the shape
-fit, and whether a reservation will be admitted, stay the site's: publication
-judges only that the declaration can serve the shape.
+nothing. How many of the shape fit, and whether a reservation will be admitted,
+stay the site's. Publication judges a shape against the pool's backing, which
+for this backed pool is the capacity still available.
 """
 
 from __future__ import annotations
@@ -100,7 +103,11 @@ pytestmark = [
 GPU_MODEL = "L40S"
 REGION = "California, US"
 RESOURCE_ID = "compute-e2e-listing-shapes-001"
-DECLARED = {"gpu_count": 2, "vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
+#: Three GPUs, so one stays available once stages 04 and 07a2 have each bought
+#: one: their VMs are delivered, and the site frees a delivered reservation only
+#: once its VM is torn down, which no stage here drives. Stage 08's restated
+#: shape is a new listing, judged against what is available.
+DECLARED = {"gpu_count": 3, "vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
 SHAPE = {
     "gpu": {"count": 1, "model": GPU_MODEL},
     "cpu": {"count": 8},
@@ -150,6 +157,12 @@ FAMILY_RATES = {
 }
 SHAPE_PRICED_RATE = str(11 * 10**18)
 FLAT_RATE = str(10 * 10**18)
+#: The shape stage 07 buys from the shape-priced listing: no quantity above the
+#: listing's, which a seller refuses. At FAMILY_RATES it composes to
+#: 1 x 6 + 4 x 0.25 + 16 x 0.0625 + 50 x 0.01 = 8.5 tokens an hour, inside the
+#: buyer's ceiling.
+SMALLER = {"gpu_count": 1, "vcpu_count": 4, "ram_gb": 16, "disk_gb": 50}
+SMALLER_OPTION = ",".join(f"{key}={value}" for key, value in SMALLER.items())
 #: The hint's clause without its rate: a shape-priced clause names how the buyer
 #: pays, and its rate comes from the family rates.
 RATELESS_CLAUSE = {
@@ -191,6 +204,8 @@ class ShapeState:
     site_id: str | None = None
     overridden: bool = False
     shape_priced: bool = False
+    smaller_negotiation_id: str | None = None
+    smaller_reservation_ids: tuple[str, ...] = ()
     override_cleared: bool = False
     constrained: bool = False
     cpu_declared: bool = False
@@ -241,17 +256,27 @@ class TestStage00_Setup:
         shape_state.declared = True
 
 
+def _pool_actions(cycle: dict, pool_id: str) -> list[dict]:
+    """The publication cycle's actions naming one pool, so a failure says why.
+
+    A ``publish`` or ``fail`` names its pool under ``source``; a ``hold``,
+    ``refuse`` or ``report``, such as an infeasible shape, names it at the
+    action's top level. A ``close`` or ``refresh`` names only its listing and is
+    not included.
+    """
+    return [
+        action for action in cycle.get("actions") or []
+        if pool_id in (action.get("pool_id"), (action.get("source") or {}).get("pool_id"))
+    ]
+
+
 class TestStage01_Publication:
     def test_01a_one_cycle_publishes_exactly_the_stated_shape(
         self, storefront_admin_client, shape_state
     ):
         require_state(shape_state, "declared")
         cycle = advance_storefront(storefront_admin_client, "publication")
-        # What the cycle did with this pool's candidates, so a failure says why.
-        this_pool = [
-            action for action in cycle.get("actions") or []
-            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
-        ]
+        this_pool = _pool_actions(cycle, E2E_LISTING_SHAPES_POOL_ID)
 
         page = storefront_admin_client.list_listings(status="open", limit=200)
         shaped = []
@@ -344,43 +369,50 @@ class TestStage04_Buy:
         shape_state.negotiation_id = str(terminal["negotiation_id"])
 
 
+def _reservations_holding(site_capacity, negotiation_id: str, dimensions: dict) -> tuple[str, ...]:
+    """The negotiation's reservations, each holding exactly ``dimensions``."""
+    reservations = site_capacity.reservations_for_negotiation(negotiation_id)
+    assert reservations, f"no reservation for negotiation {negotiation_id}"
+    # The claim requests exactly the shape's quantities: no more, and no
+    # dimension the shape omits.
+    assert {r["dimensions"] == dimensions for r in reservations} == {True}, reservations
+    return tuple(str(r["capacity_reservation_id"]) for r in reservations)
+
+
+def _vm_sizing(provisioning_client, reservation_ids: tuple[str, ...]) -> tuple:
+    """GPUs, vCPUs, memory in MiB, and disk the reservations' create job sizes."""
+    # A fulfillment's jobs are listed by the capacity reservation they serve.
+    jobs = [
+        job
+        for reservation_id in reservation_ids
+        for job in provisioning_client.list_jobs(capacity_reservation_id=reservation_id).jobs
+    ]
+    creates = [job for job in jobs if job.params.get("vm_action") == "create"]
+    assert creates, f"no create job for reservations {reservation_ids}: {jobs}"
+    params = creates[0].params
+    return (
+        params.get("vm_gpu_count"),
+        params.get("vm_vcpus"),
+        params.get("vm_ram"),
+        params.get("vm_disk_size"),
+    ), params
+
+
 class TestStage05_Commitment:
     def test_05a_the_reservation_holds_every_declared_quantity(
         self, site_capacity, shape_state
     ):
         require_state(shape_state, "negotiation_id")
-        reservations = site_capacity.reservations_for_negotiation(shape_state.negotiation_id)
-        assert reservations, f"no reservation for negotiation {shape_state.negotiation_id}"
-        # The claim requests exactly the shape's quantities: no more, and no
-        # dimension the shape omits.
-        assert {r["dimensions"] == PUBLISHED for r in reservations} == {True}, reservations
-        shape_state.reservation_ids = tuple(
-            str(r["capacity_reservation_id"]) for r in reservations
+        shape_state.reservation_ids = _reservations_holding(
+            site_capacity, shape_state.negotiation_id, PUBLISHED
         )
 
     def test_05b_the_vm_is_sized_from_the_shape_not_pool_defaults(
         self, provisioning_client, shape_state
     ):
         require_state(shape_state, "reservation_ids")
-        # A fulfillment's jobs are listed by the capacity reservation they serve.
-        jobs = [
-            job
-            for reservation_id in shape_state.reservation_ids
-            for job in provisioning_client.list_jobs(
-                capacity_reservation_id=reservation_id
-            ).jobs
-        ]
-        creates = [job for job in jobs if job.params.get("vm_action") == "create"]
-        assert creates, (
-            f"no create job for reservations {shape_state.reservation_ids}: {jobs}"
-        )
-        params = creates[0].params
-        assert (
-            params.get("vm_gpu_count"),
-            params.get("vm_vcpus"),
-            params.get("vm_ram"),
-            params.get("vm_disk_size"),
-        ) == (1, 8, 32 * 1024, "100G"), params
+        sizing, params = _vm_sizing(provisioning_client, shape_state.reservation_ids)
+        assert sizing == (1, 8, 32 * 1024, "100G"), params
 
 
 def _pool_listings(
@@ -490,6 +522,55 @@ class TestStage07_ShapePricing:
         )
         log.info("[07a] %s is shape-priced at %s", listing_id, SHAPE_PRICED_RATE)
 
+    def test_07a2_market_buy_buys_a_smaller_shape_and_reaches_ready(
+        self, buyer_cli, storefront_admin_client, storefront_client,
+        provisioning_client, provisioning_test_client, shape_state,
+    ):
+        require_state(shape_state, "shape_priced", "provisioning_armed")
+        (listing_id,) = _pool_listings(storefront_admin_client)
+        _, terminal = buy_to_ready(
+            buyer_cli,
+            [
+                "--resource", f'gpu_model="{GPU_MODEL}" ram_gb>=32',
+                "--settlement", f"mechanism=alkahest.v1 asset={TOKEN}",
+                "--shape", SMALLER_OPTION,
+                "--initial-price", str(BUYER_INITIAL_PRICE),
+                "--max-price", str(BUYER_MAX_PRICE),
+                "--duration-hours", str(DURATION_HOURS),
+                "--max-matches", "5",
+                "--max-rounds", "10",
+                "--poll-interval", "1.0",
+                "--settlement-timeout", "300",
+                "--expiration", "3600",
+                "--yes",
+            ],
+            storefront_admin_client=storefront_admin_client,
+            storefront_client=storefront_client,
+            provisioning_client=provisioning_client,
+            provisioning_test_client=provisioning_test_client,
+        )
+        assert terminal.get("status") == "ready", terminal
+        assert terminal.get("listing_id") in (None, listing_id)
+        shape_state.smaller_negotiation_id = str(terminal["negotiation_id"])
+
+    def test_07a3_the_reservation_holds_the_agreed_smaller_shape(
+        self, site_capacity, shape_state
+    ):
+        require_state(shape_state, "smaller_negotiation_id")
+        shape_state.smaller_reservation_ids = _reservations_holding(
+            site_capacity, shape_state.smaller_negotiation_id, SMALLER
+        )
+
+    def test_07a4_the_vm_is_sized_from_the_agreed_smaller_shape(
+        self, provisioning_client, shape_state
+    ):
+        require_state(shape_state, "smaller_reservation_ids")
+        sizing, params = _vm_sizing(provisioning_client, shape_state.smaller_reservation_ids)
+        assert sizing == (
+            SMALLER["gpu_count"], SMALLER["vcpu_count"],
+            SMALLER["ram_gb"] * 1024, f"{SMALLER['disk_gb']}G",
+        ), params
+
     def test_07b_deleting_the_override_restores_the_flat_rate(
         self, storefront_admin_client, shape_state
     ):
@@ -551,10 +632,7 @@ class TestStage08_ShapeConstraints:
     ):
         require_state(shape_state, "constrained")
         cycle = advance_storefront(storefront_admin_client, "publication")
-        this_pool = [
-            action for action in cycle.get("actions") or []
-            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
-        ]
+        this_pool = _pool_actions(cycle, E2E_LISTING_SHAPES_POOL_ID)
 
         listings = _pool_listings(storefront_admin_client)
         assert len(listings) == 1, (
@@ -621,10 +699,7 @@ class TestStage09_ShapeWithoutGpus:
     ):
         require_state(shape_state, "cpu_declared")
         cycle = advance_storefront(storefront_admin_client, "publication")
-        this_pool = [
-            action for action in cycle.get("actions") or []
-            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_CPU_POOL_ID
-        ]
+        this_pool = _pool_actions(cycle, E2E_LISTING_SHAPES_CPU_POOL_ID)
 
         listings = _pool_listings(storefront_admin_client, E2E_LISTING_SHAPES_CPU_POOL_ID)
         assert len(listings) == 1, (

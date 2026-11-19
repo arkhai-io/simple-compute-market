@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mediation-lane-double.serviceName" . }}
+  labels:
+    {{- include "mediation-lane-double.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "mediation-lane-double.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+      protocol: TCP

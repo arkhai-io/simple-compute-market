@@ -12,6 +12,10 @@ dependencies = [
   # now authenticates every route against a signed envelope; without the
   # extra the gate raises a configuration error naming the missing install.
   "arkhai-apicredits-middleware[signed]",
+  # The process's time source, which the gate signs by, and the lane doubles'
+  # time control the app serves under injected time.
+  "arkhai-injected-time>=0.1.0",
+  "lane-double-controls>=0.1.0",
 ]
 
 [project.scripts]
@@ -29,6 +33,9 @@ dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
   "httpx>=0.27",
+  # The time-control suite's stand-in credits service verifies and signs as the
+  # service does.
+  "arkhai-kit-identity>=0.5.0",
 ]
 
 [build-system]

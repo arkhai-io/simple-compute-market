@@ -6,22 +6,19 @@ import httpx
 
 from market_deal_lifecycle.adapters import DeliveryEndIntent
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
-from test_adapter import Scenario
+from .test_adapter import Scenario
 
 
 def test_online_recovery_and_reconstructed_caller_adopt_one_semantic_case():
     async def drive():
+        # The peer answers a read of the Agreement 404 invalid_request until the
+        # first filing makes it known, as the authority does.
         peer = MediationContractFake()
-        def handle(request):
-            if request.url.path == "/record" and not peer.cases:
-                return httpx.Response(404, json={
-                    "status": "error", "code": "invalid_request", "message": "Agreement not found",
-                })
-            return peer.handle(request)
-        s = Scenario(peer=peer, transport=httpx.MockTransport(handle))
+        s = Scenario(peer=peer)
         intent = DeliveryEndIntent(ended_at=1800000000, delivered=False, cause="payee")
         try:
-            assert (await s.adapter.read()).outcome.status == "rejected"
+            unfiled = await s.adapter.read()
+            assert unfiled.outcome.status == "accepted" and unfiled.cases == []
             first = await s.submit("delivery_end", "online", intent.model_dump(mode="json"))
             second = await s.submit("delivery_end", "operator", intent.model_dump(mode="json"))
             assert first.status == second.status == "accepted"

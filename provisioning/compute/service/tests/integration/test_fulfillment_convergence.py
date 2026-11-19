@@ -6,10 +6,13 @@ _with_owned_record provides.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import injected_time
 import pytest
+from injected_time import InjectedTime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -56,6 +59,18 @@ def session_factory():
 @pytest.fixture
 def repo():
     return SettlementRepository()
+
+
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, injected at the wall instant it is installed and
+    held there, so a claim's lease, which the watchdog stamps from it in whole
+    seconds, is measured from the instant it was taken."""
+    before = injected_time.installed()
+    installed = InjectedTime()
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
 
 
 def _requirement(**dimensions):
@@ -1118,14 +1133,13 @@ async def test_worker_death_leaves_a_reclaimable_teardown_row_not_a_stuck_one(
 
 
 async def test_transient_dispatch_failure_grows_backoff_without_reaching_a_terminal_state(
-    session_factory, repo
+    session_factory, repo, source
 ):
     """Exercises the actual
     watchdog dispatch path against a failing provider (not just the claim
-    primitive in isolation), and checks real deltas against a baseline
-    captured immediately before each claim -- not just that later
-    timestamps are larger, which wall-clock drift alone could satisfy even
-    with a broken (constant) lease length."""
+    primitive in isolation), and checks each lease's length against the
+    instant it was claimed at -- not just that later expiries are larger,
+    which a broken (constant) lease length could also satisfy."""
 
     _accepted_row(repo, session_factory)
     backoff = Backoff(initial_seconds=1.0, multiplier=2.0, max_seconds=60.0, jitter_fraction=0.0)
@@ -1149,17 +1163,16 @@ async def test_transient_dispatch_failure_grows_backoff_without_reaching_a_termi
             record.claim_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
             db.commit()
 
-        baseline = datetime.now(timezone.utc).replace(tzinfo=None)
+        baseline = injected_time.now_datetime().replace(tzinfo=None)
         await watchdog.dispatch_pending_creates()
 
         with session_factory() as db:
             record = repo.get(db, "cr-1")
             assert record.state == SettlementRecordState.dispatch_pending.value
             actual_delta = (record.claim_expires_at - baseline).total_seconds()
-            # Real wall-clock time elapsed during the call too, so allow a
-            # small tolerance rather than requiring an exact match.
-            assert abs(actual_delta - expected_delta) < 0.5, (
-                f"expected ~{expected_delta}s lease, got {actual_delta}s"
+            # The source is held, so the lease is measured exactly.
+            assert actual_delta == expected_delta, (
+                f"expected {expected_delta}s lease, got {actual_delta}s"
             )
 
     with session_factory() as db:
@@ -1722,9 +1735,11 @@ def _time_passes(session_factory, seconds: float) -> None:
 
 
 def _claim(session_factory, repo):
+    """The row's state, owner, attempt count, and how long its claim is held
+    past the process source's instant, which the watchdog stamped it from."""
     with session_factory() as db:
         record = repo.get(db, "cr-1")
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = injected_time.now_datetime().replace(tzinfo=None)
         held = (
             None if record.claim_expires_at is None
             else (record.claim_expires_at - now).total_seconds()
@@ -1743,7 +1758,7 @@ def _claim(session_factory, repo):
     ids=["teardown", "create"],
 )
 async def test_a_healthy_pending_poll_after_a_long_create_is_repeated_within_one_cycle(
-    session_factory, repo, state, converge, done
+    session_factory, repo, state, converge, done, source
 ):
     """Nine earlier claims must not space the next poll of a healthy operation.
 
@@ -1777,7 +1792,7 @@ async def test_a_healthy_pending_poll_after_a_long_create_is_repeated_within_one
 
 
 async def test_an_operation_still_pending_stays_pending_and_is_polled_each_interval(
-    session_factory, repo
+    session_factory, repo, source
 ):
     _row_after_a_long_create(repo, session_factory, SettlementRecordState.tearing_down.value)
     provider = _ScriptedStatusProvider(ProviderOperationState.pending)
@@ -1793,7 +1808,9 @@ async def test_an_operation_still_pending_stays_pending_and_is_polled_each_inter
     assert provider.reads == 4
 
 
-async def test_failed_status_reads_still_back_off_until_a_healthy_read(session_factory, repo):
+async def test_failed_status_reads_still_back_off_until_a_healthy_read(
+    session_factory, repo, source
+):
     """Consecutive failures grow the lease; the first healthy read clears the count."""
     _row_after_a_long_create(
         repo, session_factory, SettlementRecordState.tearing_down.value, attempts=0
@@ -1849,7 +1866,7 @@ async def test_a_pending_read_never_touches_a_claim_another_worker_took_meanwhil
         assert record.state == SettlementRecordState.tearing_down.value
 
 
-async def test_a_dispatched_teardown_starts_its_attempts_afresh(session_factory, repo):
+async def test_a_dispatched_teardown_starts_its_attempts_afresh(session_factory, repo, source):
     """A phase's outcome clears the count, so a teardown's first status read is
     not leased for the backoff its create accumulated."""
     _active_row_ready_for_teardown(repo, session_factory)

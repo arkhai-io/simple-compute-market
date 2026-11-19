@@ -83,10 +83,16 @@ def test_archive_cleanup_after_assignment(repository: Path) -> None:
                          "old-change", "older-change"]
 
 
+def test_merge_offers_active_and_archived_names(repository: Path) -> None:
+    assert _complete(repository, "make merge CHANGE=o",
+                     ["make", "merge", "CHANGE", "=", "o"]) == [
+                         "old-change", "older-change", "orch-one", "orch-two", "other"]
+
+
 def test_review_kinds(repository: Path) -> None:
     assert _complete(repository, "make review KIND=",
                      ["make", "review", "KIND", "=", ""]) == [
-                         "closeout", "design", "implementation", "pre-closeout"]
+                         "closeout", "design", "implementation", "merge", "pre-closeout"]
     assert _complete(repository, "make review KIND=pre",
                      ["make", "review", "KIND", "=", "pre"]) == ["pre-closeout"]
 
@@ -115,7 +121,7 @@ def test_the_fragments_targets_complete(including: Path) -> None:
     assert _complete(including, "make round-", ["make", "round-"]) == [
         "round-done", "round-view", "round-view-closed"]
     assert _complete(including, "make check-ch", ["make", "check-ch"]) == [
-        "check-change", "check-change-index"]
+        "check-change", "check-change-index", "check-change-workflow-config"]
 
 
 def test_change_names_complete_on_the_fragments_targets(including: Path) -> None:

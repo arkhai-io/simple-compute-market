@@ -1,0 +1,34 @@
+# The mediation lane double (tools/mediation-lane-double): a stand-in for an
+# arkhai.mediation.v1 dispute authority that answers from programmed rules, for a
+# local release only. Its image carries the double's committed fixtures and TLS
+# files, public development values never for a public network, so it needs no
+# configuration. It reaches the payments double as `payments-double`, trusting
+# the image's lane CA, so it runs in the namespace whose release runs that double.
+# Its cases live in the pod's memory and are lost when the pod restarts.
+#
+# The umbrella enables it in helm/local-values.yaml, never in release values. Its
+# Service is named `mediation-double` in every release, the name its certificate
+# is issued for, so one namespace runs one double: the local two-release topology
+# enables it in release 1 alone.
+
+global:
+  imageRepository: ""
+
+image:
+  repository: ""
+  name: arkhai
+  tag: mediation-lane-double
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# The double's server certificate and key. Empty serves the image's committed
+# leaf, issued under the committed lane CA for `mediation-double`. A release
+# naming an existing kubernetes.io/tls Secret serves its `tls.crt` and `tls.key`
+# instead, mounted over the image's files.
+tls:
+  existingSecret: ""
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

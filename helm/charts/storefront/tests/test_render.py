@@ -186,10 +186,34 @@ RENDERING_FIXTURES = tuple(
 )
 
 
+def _pod_containers(deployment: str) -> tuple[str, str]:
+    """The Deployment's rendered init containers and containers, each block whole."""
+    init = re.search(r"\n      initContainers:\n(.*?)\n      containers:\n", deployment, re.S)
+    assert init, "no initContainers precede the containers"
+    main = re.search(r"\n      containers:\n(.*?)\n      volumes:\n", deployment, re.S)
+    assert main, "no containers"
+    return init.group(1), main.group(1)
+
+
+def _container_field(container: str, key: str) -> list[str]:
+    """The lines of one of a container's fields, its key line and everything under it."""
+    lines = container.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"          {key}:"))
+    end = next(
+        (i for i in range(start + 1, len(lines)) if not lines[i].startswith("           ")),
+        len(lines),
+    )
+    return lines[start:end]
+
+
 def test_no_release_waits_on_a_dependency_and_every_agent_has_a_startup_probe() -> None:
-    """The storefront starts while its registry, chain, or site is unreachable
-    and reports them degraded, so no init container waits on one; the startup
-    probe holds the liveness and readiness probes off a slow start instead."""
+    """Spec scenario "A storefront chart renders". The storefront starts while
+    its registry, chain, or site is unreachable and reports them degraded, so no
+    init container waits on one; its one init container is its own migration,
+    from the application's image, without the ZeroTier entrypoint, with the
+    application's environment, configuration mounts and data volume, ahead of
+    the application. The startup probe holds the liveness and readiness probes
+    off a slow start."""
     manifests = {"defaults": _ok(_render()), "local release": _ok(_render_local())}
     for fixture in RENDERING_FIXTURES:
         manifests[fixture] = _ok(_render(files=(fixture,), release=LOCAL_RELEASE))
@@ -198,9 +222,24 @@ def test_no_release_waits_on_a_dependency_and_every_agent_has_a_startup_probe() 
         deployments = _documents(manifest, "deployment.yaml")
         assert deployments, label
         for deployment in deployments:
-            assert "initContainers" not in deployment, label
             assert "wait-for-" not in deployment, label
-            probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", deployment)
+            init, main = _pod_containers(deployment)
+            assert len(re.findall(r"^        - name: ", init, re.M)) == 1, label
+            assert "        - name: migrate" in init, label
+            assert _container_field(init, "command") == [
+                "          command:",
+                "            - market-storefront-migrate",
+            ], label
+            assert "entrypoint.sh" not in init, label
+            assert "tun-device" not in init and "capabilities" not in init, label
+            assert _container_field(init, "image") == _container_field(main, "image"), label
+            assert _container_field(init, "env") == _container_field(main, "env"), label
+            mounts = _container_field(init, "volumeMounts")
+            assert set(mounts) <= set(_container_field(main, "volumeMounts")), label
+            assert "            - name: arkhai-data" in mounts, label
+            assert '              mountPath: "/var/lib/arkhai"' in mounts, label
+            assert any("storefront.json" in line for line in mounts), label
+            probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", main)
             assert probe, f"{label}: no startupProbe on /health"
             assert "initialDelaySeconds" not in deployment, label
 
@@ -1114,6 +1153,17 @@ def test_a_payments_key_named_by_variable_is_refused() -> None:
         assert _names_path(rendered.stderr, dotted), rendered.stderr
 
 
+def test_the_time_source_is_admitted_as_wall_or_injected_and_refused_otherwise() -> None:
+    """An agent's `[Time] source` is one of the storefront's two sources; the
+    generated definition refuses any other, naming the key."""
+    for source in ("wall", "injected"):
+        rendered = _render(agent=_with_config(Time={"source": source}))
+        assert rendered.returncode == 0, rendered.stderr
+    refused = _render(agent=_with_config(Time={"source": "injectd"}))
+    assert refused.returncode != 0
+    assert _names_path(refused.stderr, "agents.bob.config.Time.source"), refused.stderr
+
+
 def test_a_dispute_credential_is_refused_in_public_configuration() -> None:
     """The deployment-state scenario "The public configuration states a dispute
     credential": the whole entry belongs in the Secret overlay, so `config`
@@ -1209,10 +1259,12 @@ def _payments_check_pods(manifest: str) -> list[str]:
 
 def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_access() -> None:
     """The pod's environment, configuration mounts, and their volumes are the
-    Deployment's, less the data volume and the ZeroTier device; it runs the CLI
-    directly, with no probes or capabilities, and carries no workload selector."""
+    Deployment's application container's, less the data volume and the ZeroTier
+    device; it runs the CLI directly, with no probes or capabilities, and
+    carries no workload selector."""
     manifest = _ok(_render_local())
     deployment = _source(manifest, "deployment.yaml")
+    application = _pod_containers(deployment)[1]
     (pod,) = _payments_check_pods(manifest)
     lines = {line.strip() for line in pod.splitlines()}
 
@@ -1221,11 +1273,11 @@ def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_a
         "- market-storefront", "- check-payments", "- --account", '- "00000000-0000-4000-8000-0000000000b2"'
     ]
     assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
-        r"^ +image: (\S+)$", deployment, re.MULTILINE
+        r"^ +image: (\S+)$", application, re.MULTILINE
     ).group(1)
-    assert _yaml_block(pod, "env") == _yaml_block(deployment, "env")
+    assert _yaml_block(pod, "env") == _yaml_block(application, "env")
     unshared = {"tun-device", "arkhai-data"}
-    deployment_mounts = _items(_yaml_block(deployment, "volumeMounts"))
+    deployment_mounts = _items(_yaml_block(application, "volumeMounts"))
     deployment_volumes = _items(_yaml_block(deployment, "volumes"))
     assert unshared <= set(deployment_mounts) and unshared <= set(deployment_volumes)
     assert _items(_yaml_block(pod, "volumeMounts")) == {
@@ -1260,6 +1312,64 @@ def test_the_payments_check_pod_renders_only_with_payments_and_an_account() -> N
     assert '- "acct"' in pod
     removed = _render_layers(_bob(tests={"paymentsAccount": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
     assert not _payments_check_pods(_ok(removed))
+
+
+def _mediation_check_pods(manifest: str) -> list[str]:
+    return _documents(manifest, "tests/mediation-check-test.yaml")
+
+
+def test_the_mediation_check_pod_runs_the_command_with_the_deployments_mediation_access() -> None:
+    """The pod's environment, configuration mounts, and their volumes are the
+    Deployment's application container's, less the data volume and the ZeroTier
+    device; it runs the CLI directly with the local release's origin, with no
+    probes or capabilities, and carries no workload selector. That the origin is
+    the mediation double's Service is the umbrella's topology test."""
+    manifest = _ok(_render_local())
+    deployment = _source(manifest, "deployment.yaml")
+    application = _pod_containers(deployment)[1]
+    (pod,) = _mediation_check_pods(manifest)
+    lines = {line.strip() for line in pod.splitlines()}
+
+    assert f"name: {LOCAL_RELEASE}-storefront-bob-mediation-check" in lines
+    assert _yaml_block(pod, "command").splitlines() == [
+        "- market-storefront", "- check-mediation", "- --origin", '- "https://mediation-double:8443"'
+    ]
+    assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
+        r"^ +image: (\S+)$", application, re.MULTILINE
+    ).group(1)
+    assert _yaml_block(pod, "env") == _yaml_block(application, "env")
+    unshared = {"tun-device", "arkhai-data"}
+    deployment_mounts = _items(_yaml_block(application, "volumeMounts"))
+    deployment_volumes = _items(_yaml_block(deployment, "volumes"))
+    assert unshared <= set(deployment_mounts) and unshared <= set(deployment_volumes)
+    assert _items(_yaml_block(pod, "volumeMounts")) == {
+        name: item for name, item in deployment_mounts.items() if name not in unshared
+    }
+    assert _items(_yaml_block(pod, "volumes")) == {
+        name: item for name, item in deployment_volumes.items() if name not in unshared
+    }
+    assert "persistentVolumeClaim" in deployment and "persistentVolumeClaim" not in pod
+    assert "/var/lib/arkhai" not in pod
+    for absent in ("Probe", "NET_ADMIN", "SYS_MODULE", "/dev/net/tun", "entrypoint.sh", "securityContext"):
+        assert absent not in pod, absent
+    assert {'"helm.sh/hook": test', "app.kubernetes.io/component: test", "enableServiceLinks: false"} <= lines
+    assert not any(line.startswith("app.kubernetes.io/name:") for line in lines)
+    # Every piece the check reads is present, so the comparison above is not
+    # between two empty lists: the CA bundle mount at the chart's CA file, which
+    # topology-secrets writes as the copied dispute credential's ca_bundle_path,
+    # the Secret overlay holding that credential, and the configuration.
+    assert _ca_bundle(pod, _config(manifest)) == ("configMap", "payments-ca-bundle", "ca-bundle.pem")
+    assert {"arkhai-config", "arkhai-secrets"} <= set(_items(_yaml_block(pod, "volumes")))
+
+
+def test_the_mediation_check_pod_renders_only_with_an_origin() -> None:
+    assert not _mediation_check_pods(_ok(_render()))
+    (pod,) = _mediation_check_pods(
+        _ok(_render(agent=_agent(tests={"mediationOrigin": "https://mediation.example"})))
+    )
+    assert '- "https://mediation.example"' in pod
+    removed = _render_layers(_bob(tests={"mediationOrigin": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+    assert not _mediation_check_pods(_ok(removed))
 
 
 _PROBE = """

@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -87,7 +87,9 @@ class PublicationRepository(Protocol):
         status: str,
         registry_assigned_id: str | None,
         last_error: str | None,
+        published_payload: Any = None,
     ) -> Any: ...
+    async def open_listing_ids(self) -> Collection[str]: ...
 
 
 class PublicationDomainHooks(Protocol[PayloadT]):
@@ -99,6 +101,27 @@ class PublicationDomainHooks(Protocol[PayloadT]):
         self, listing_id: str
     ) -> PublicationBinding | None: ...
 
+    async def publication_candidate(
+        self, listing: dict[str, Any]
+    ) -> PublicationCandidate[PayloadT]:
+        """The stored ``listing`` as the domain publishes it, with its binding.
+
+        Registry repair republishes this rather than the stored row: a stored
+        view may hold local-only fields or lack derived listing terms, and
+        republication replaces a registry's whole document, so a repair built
+        any other way would publish different terms from the listing's first
+        publication.
+        """
+        ...
+
+    def registry_publisher(self) -> Any:
+        """The principal the storefront publishes under at every registry."""
+        ...
+
+    def served_offering_modes(self) -> Collection[str]:
+        """Every offering mode the storefront publishes listings of."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class RegistryDivergence:
@@ -107,6 +130,28 @@ class RegistryDivergence:
     listing_id: str
     listing_status: str
     registry_urls: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class UnheldListingClose:
+    """One registry listing the storefront does not hold open, and its close.
+
+    ``status`` is ``planned`` in a preview, ``closed`` once the registry took
+    the close, and ``failed`` when it did not, with the registry's ``error``.
+    """
+
+    listing_id: str
+    registry_url: str
+    status: str
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrySweep:
+    """What one sweep closed, or would close, and which registries it could not read."""
+
+    closes: tuple[UnheldListingClose, ...] = ()
+    unreachable: tuple[str, ...] = ()
 
 
 RegistryClientFactory = Callable[[], Any]
@@ -231,7 +276,7 @@ class PublicationRuntime(Generic[PayloadT]):
             registry_client_factory=self._open_registry_client,
             update_listing_request_factory=self._update_listing_request_factory,
             select_target_registries=self._registries_to_target,
-            record_publications=self._record_publications,
+            record_publications=self._record_reopens,
         )
         if reopened.get("status") == "error":
             return reopened
@@ -381,8 +426,8 @@ class PublicationRuntime(Generic[PayloadT]):
 
         The local listing is the durable decision, so the repair resends only
         what it implies, and only to the registries that diverged: a close for a
-        closed listing; for an open one, the stored listing republished and then
-        reopened. Results are recorded as every publication records them, so a
+        closed listing; for an open one, the domain's publication candidate for
+        the stored listing republished and then reopened. Results are recorded as every publication records them, so a
         registry still unreachable stays diverged for the next pass. Returns the
         listings ``repaired`` and those still ``unrepaired``.
         """
@@ -410,6 +455,78 @@ class PublicationRuntime(Generic[PayloadT]):
             ),
         }
 
+    async def retire_unheld(self, *, dry_run: bool = False) -> RegistrySweep:
+        """Close at each registry the listings this storefront does not hold open.
+
+        Convergence repairs only listings with a publication record at a
+        registry, so a listing open at a registry with none -- its record lost,
+        published before records were kept, or recorded against another URL for
+        the registry -- stays open there however the storefront closed it, or
+        though it never knew it. This sweep reads, at every configured registry,
+        the open listings published under the storefront's principal and closes
+        each of an offering mode it serves that it does not hold open. A listing
+        of another offering mode is left alone, so two storefronts of different
+        modes may share a principal.
+
+        A registry is read to its last page before anything there is closed,
+        since closing while paging by offset would shift the pages still to be
+        read; one that cannot be read to the end is reported unreachable and
+        nothing is closed there until a later sweep reads it. Closes go through
+        the per-registry update and are not recorded as publications, so a close
+        that fails is simply found again by the next sweep. A ``dry_run``
+        reports each close it would make and makes none.
+        """
+        if not self._enabled:
+            return RegistrySweep()
+        publisher = self._hooks.registry_publisher()
+        modes = frozenset(self._hooks.served_offering_modes())
+        async with self._open_registry_client() as client:
+            reads = await client.list_publisher_listings_per_registry(publisher)
+            # Read after the registries, never before: a listing is recorded open
+            # locally before any registry is told of it, so a listing this
+            # storefront published that a read found is already in this set.
+            held = frozenset(await self._repository.open_listing_ids())
+            unreachable: list[str] = []
+            targets: dict[str, list[str]] = {}
+            for read in reads:
+                if read.listings is None:
+                    unreachable.append(read.registry_url)
+                    continue
+                for listing in read.listings:
+                    listing_id = "" if listing.id is None else str(listing.id)
+                    if not listing_id or listing_id in held:
+                        continue
+                    resource = listing.listing_resource or {}
+                    if resource.get("offering_mode") not in modes:
+                        continue
+                    urls = targets.setdefault(listing_id, [])
+                    if read.registry_url not in urls:
+                        urls.append(read.registry_url)
+            closes: list[UnheldListingClose] = []
+            for listing_id, urls in targets.items():
+                if dry_run:
+                    closes.extend(
+                        UnheldListingClose(listing_id, url, "planned") for url in urls
+                    )
+                    continue
+                request = self._update_listing_request_factory(
+                    updates={"status": "closed"}
+                )
+                results = await client.update_listing_per_registry(
+                    listing_id=listing_id,
+                    payloads={url: request for url in urls},
+                )
+                for result in results:
+                    closes.append(
+                        UnheldListingClose(
+                            listing_id,
+                            result["registry_url"],
+                            "closed" if result.get("success") else "failed",
+                            None if result.get("success") else result.get("error"),
+                        )
+                    )
+        return RegistrySweep(closes=tuple(closes), unreachable=tuple(unreachable))
+
     async def _converge_one(self, divergence: RegistryDivergence) -> None:
         targets = frozenset(divergence.registry_urls)
 
@@ -429,8 +546,11 @@ class PublicationRuntime(Generic[PayloadT]):
         listing = await self._repository.load_listing(listing_id=divergence.listing_id)
         if listing is None:
             return
+        candidate = await self._hooks.publication_candidate(listing)
+        await self._require_persisted_binding(candidate.listing_id, candidate.binding)
+        self._hooks.validate_candidate(candidate)
         published = await publish_listing_to_registries(
-            listing,
+            candidate.payload,
             enabled=self._enabled,
             registry_client_factory=self._open_registry_client,
             listing_request_factory=self._listing_request_factory,
@@ -446,10 +566,20 @@ class PublicationRuntime(Generic[PayloadT]):
             registry_client_factory=self._open_registry_client,
             update_listing_request_factory=self._update_listing_request_factory,
             select_target_registries=diverged,
-            record_publications=self._record_publications,
+            record_publications=self._record_reopens,
         )
 
     async def _record_publications(
+        self, listing_id: str, results: list[dict[str, Any]]
+    ) -> None:
+        await self._record_results(
+            listing_id,
+            results,
+            success_status="published",
+            publishes_payload=True,
+        )
+
+    async def _record_reopens(
         self, listing_id: str, results: list[dict[str, Any]]
     ) -> None:
         await self._record_results(
@@ -464,16 +594,29 @@ class PublicationRuntime(Generic[PayloadT]):
         results: list[dict[str, Any]],
         *,
         success_status: str,
+        publishes_payload: bool = False,
     ) -> None:
+        """Record each registry's outcome of one fan-out.
+
+        Only a publish the registry accepted replaces the payload it last
+        accepted: the seller prices and pins negotiations from that payload, so
+        a failed attempt, or a status update carrying no listing document, must
+        leave it as it was.
+        """
         for result in results:
+            succeeded = bool(result.get("success"))
+            payload = result.get("payload") or {}
             try:
                 await self._repository.upsert_publication(
                     listing_id=listing_id,
                     registry_url=result["registry_url"],
-                    payload=result.get("payload") or {},
-                    status=success_status if result.get("success") else "failed",
+                    payload=payload,
+                    status=success_status if succeeded else "failed",
                     registry_assigned_id=result.get("registry_assigned_id"),
                     last_error=result.get("error"),
+                    published_payload=(
+                        payload if succeeded and publishes_payload else None
+                    ),
                 )
             except Exception as exc:
                 logger.warning(

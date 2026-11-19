@@ -1,4 +1,4 @@
-"""Interpret site ends from retained compute command and Agreement evidence.
+"""Interpret site ends and payment stops from retained compute command and Agreement evidence.
 
 The caller supplies journal facts; this module owns no storage, authority client
 or delivery effects. A site cause alone never establishes financial entitlement.
@@ -54,6 +54,11 @@ class ClassifiedEvidence(Protocol):
     evidence_refs: list[str]
 
 
+class PaymentStop(Protocol):
+    cause: str
+    at: int
+
+
 RequestT = TypeVar("RequestT", bound=EndRequest)
 ActorT = TypeVar("ActorT")
 
@@ -107,6 +112,28 @@ def payment_actor(
     if authority_account is not None and value == authority_account and authority is not None:
         return authority
     raise ValueError("unrecognized payment actor")
+
+
+def classify_payment_stop(
+    event: PaymentStop, *, entitlements: Mapping[str, object], term_end: int,
+) -> str | None:
+    """Classify a verified payment final stop by its cause, or ``None`` while pending.
+
+    A party's stop is lawful only when the accepted entitlements name that
+    party; otherwise it waits for evidence, never assumed a seller failure. The
+    payments service records funds running out and the term end under one
+    cause, ``terms``, so the stop's effective instant against the Agreement's
+    end (its start plus its duration, whole seconds) tells them apart. See
+    openspec/specs/deal-lifecycle/spec.md, "Cause classification is owned by
+    end service".
+    """
+    if event.cause in {"payer", "payee"}:
+        return "entitled_stop" if event.cause in entitlements else None
+    if event.cause == "authority":
+        return "ruling"
+    if event.cause == "terms":
+        return "terms" if event.at >= term_end else "exhaustion"
+    return None
 
 
 def classify_site_end(

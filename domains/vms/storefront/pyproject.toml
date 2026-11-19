@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-storefront"
-version = "0.27.0"
+version = "0.29.0"
 license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
@@ -8,42 +8,46 @@ authors = [
 ]
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-compute>=0.2.0",
-    "arkhai-kit-arkhai-mediation>=0.2.0",
-    "arkhai-kit-deal-servicing>=0.1.0",
-    "arkhai-kit-deal-lifecycle>=0.2.0",
-    "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
+    "arkhai-compute>=0.3.0",
+    "arkhai-compute-delivery>=0.2.0",
+    "arkhai-injected-time>=0.1.0",
+    "arkhai-kit-arkhai-mediation>=0.3.1",
+    "arkhai-kit-deal-servicing>=0.4.0",
+    "arkhai-kit-deal-lifecycle>=0.5.0",
+    "arkhai-kit-deal-lifecycle-contracts>=0.3.0",
+    "arkhai-kit-deal-lifecycle-client>=0.2.0",
     "arkhai-compute-provisioning-contracts>=0.11.0",
-    "arkhai-kit-resource-pools-contracts>=0.2.0",
-    "arkhai-core-registry-client>=0.12.1",
-    "arkhai-core-storefront-client>=0.27.0",
-    "arkhai-core-storefront>=0.17.0",
-    "arkhai-kit-capacity-publication==0.11.0",
-    "arkhai-kit-pool-overrides==0.2.1",
+    "arkhai-kit-resource-pools-contracts>=0.4.0",
+    "arkhai-core-registry-client>=0.13.0",
+    "arkhai-core-storefront-client>=0.30.0",
+    "arkhai-core-storefront>=0.18.0",
+    "arkhai-kit-capacity-publication==0.12.0",
+    "arkhai-kit-pool-overrides==0.3.0",
     "arkhai-kit-site-client>=0.9.0",
     "arkhai-kit-resource-pools>=0.7.0",
-    "arkhai-core>=0.4.0",
-    "arkhai-kit-identity==0.4.0",
-    "arkhai-kit-alkahest>=0.11.0",
-    "arkhai-kit-config>=0.5.0",
+    "arkhai-core>=0.6.0",
+    "arkhai-kit-identity==0.5.0",
+    "arkhai-kit-alkahest>=0.13.0",
+    "arkhai-kit-config>=0.6.0",
     "arkhai-kit-policy>=0.6.0",
-    "arkhai-kit-settlement-runtime>=0.7.0",
-    "arkhai-kit-storefront==0.10.0",
-    "arkhai-kit-negotiation-runtime==0.5.2",
-    "arkhai-kit-contact-exchange==0.4.1",
-    "arkhai-kit-delivery==0.2.1",
-    "arkhai-kit-delivery-apprise==0.1.1",
+    "arkhai-kit-settlement-runtime>=0.8.0",
+    "arkhai-kit-schema-migrations>=0.1.0",
+    "arkhai-kit-storefront==0.11.0",
+    "arkhai-kit-negotiation-runtime==0.6.0",
+    "arkhai-kit-contact-exchange==0.5.1",
+    "arkhai-kit-delivery==0.2.2",
+    "arkhai-kit-delivery-apprise==0.1.2",
     "arkhai-kit-site>=0.10.0",
     "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-bare-metal>=0.10.0",
-    "arkhai-bare-metal-storefront==0.27.0",
-    "arkhai-vms>=0.8.0",
-    "arkhai-vms-listings[pools,overrides]>=0.8.0",
-    "arkhai-vms-negotiation>=0.6.0",
+    "arkhai-bare-metal-storefront==0.29.0",
+    "arkhai-vms>=0.9.0",
+    "arkhai-vms-listings[pools,overrides]>=0.9.0",
+    "arkhai-vms-negotiation>=0.7.0",
     "arkhai-vms-settlement>=0.5.0",
     "arkhai-compute-provisioning-client>=0.6.0",
     "arkhai-kit-fulfillment>=0.6.0",
-    "arkhai-kit-arkhai-payments>=0.6.0",
+    "arkhai-kit-arkhai-payments>=0.8.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
@@ -65,6 +69,7 @@ dependencies = [
 
 [project.scripts]
 market-storefront = "market_storefront.cli:app"
+market-storefront-migrate = "market_storefront.migrate:main"
 
 [project.entry-points."market.storefront_contributions"]
 vms = "market_storefront.domain_runtime:VM_STOREFRONT_CONTRIBUTION"
@@ -75,14 +80,21 @@ dev = [
     "pytest-asyncio>=0.23.8,<1.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
     "wandb>=0.23.0",
-    # The production VM buyer and its introduction client, which the
-    # introduction integration tests drive over loopback.
-    "arkhai-vms-buyer>=0.9.0",
-    # The canonical lifecycle client the lifecycle integration tests read and
-    # commit deals through.
-    "arkhai-kit-deal-lifecycle-client>=0.1.0",
-    # Validates documents against the generated Helm values schema.
+    # The production VM buyer, its introduction client and its acceptance-bound
+    # pricing checks, which the introduction and buyer-selection integration
+    # tests drive over loopback.
+    "arkhai-vms-buyer>=0.11.0",
+    # The buyer core those tests compose with: its settlement selection and its
+    # profile root, under which the VM buyer keeps its evidence.
+    "arkhai-core-buyer>=0.6.0",
+    # The buyer half the VM buyer composes, whose evidence store and watchdog
+    # journal the buyer-command tests read back. Test-only.
+    "arkhai-kit-deal-lifecycle-buyer>=0.2.0",
+    # Validates documents against the generated Helm values schema, and
+    # published listings against the compute registry's listing schema.
     "jsonschema>=4.0",
+    # Reads the Helm values and the registry's filter specification.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

@@ -75,6 +75,9 @@ services:
 
   seller-storefront:
     image: arkhai:storefront
+    # entrypoint.sh starts ZeroTier, then the migration command runs before
+    # the storefront, which refuses a database it has not migrated.
+    command: ["./entrypoint.sh", "sh", "-c", "market-storefront-migrate && exec market-storefront serve"]
     ports:
       - "8001:8001"
     # cap_add / devices / zerotier-seller volume below are for optional

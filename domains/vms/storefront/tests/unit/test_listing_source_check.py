@@ -23,6 +23,7 @@ from market_storefront.utils.config import (
     site_projection_poll_interval,
     source_confirmation_seconds,
 )
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 from tests.fake_site import (
@@ -77,6 +78,7 @@ class _Capacity:
 
 @pytest.fixture
 def repository(tmp_path):
+    migrate_storefront_database(tmp_path / "check.db")
     return SQLiteClient(
         db_path=str(tmp_path / "check.db"),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),

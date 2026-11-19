@@ -6,13 +6,42 @@ import runpy
 import time
 from pathlib import Path
 
+from unittest.mock import AsyncMock, MagicMock, call
+
 import httpx
-from market_deal_lifecycle_client import LifecycleClient
+from market_deal_lifecycle_client import LifecycleClient, SellerLifecycleClient, SyncSellerLifecycleClient
+from market_deal_lifecycle_contracts.models import ENDING_TEXT, ListDealsRequest
+from market_deal_lifecycle_contracts.routes import lifecycle_route
 from market_identity import Ed25519Signer, ResponseEnvelope, TrustedIdentitySet, canonical_body_hash, canonical_json, sign_response
+
+# A storefront's decoded answer to the seller list: one deal still ending.
+ENDING_PAGE = {"deals": [{
+    "negotiation_id": "deal", "commitment_ref": "tx", "domain": "vms", "mechanism": "arkhai.payments.v1",
+    "entitlements": {"payer": {"notice_seconds": 0}}, "state": "ending",
+    "ending": ["payment_running", "case_open"], "deadline": 100, "parts": [],
+    "has_open_extension": False, "open_cases": ["case"], "filings": [],
+}], "continuation": "deal"}
 
 
 def test_signed_commit_hint_read_and_capture_first_use():
     runpy.run_path(str(Path(__file__).parents[1] / "examples" / "first_use.py"))
+
+
+def test_a_listed_ending_deal_yields_its_codes_and_their_text():
+    route = lifecycle_route("lifecycle_list")
+    request = ListDealsRequest(limit=10, continuation="after")
+    expected = call(route["method"], route["path"], role="admin", operation="lifecycle_list",
+                    resource="?continuation=after&limit=10", params={"continuation": "after", "limit": "10"})
+    sync = MagicMock(authenticated_request=MagicMock(return_value=ENDING_PAGE))
+    asynchronous = MagicMock(authenticated_request=AsyncMock(return_value=ENDING_PAGE))
+    pages = [SyncSellerLifecycleClient(sync).list(request),
+             asyncio.run(SellerLifecycleClient(asynchronous).list(request))]
+    assert sync.authenticated_request.call_args_list == [expected]
+    assert asynchronous.authenticated_request.call_args_list == [expected]
+    for page in pages:
+        [deal] = page.deals
+        assert page.continuation == "deal" and deal.ending == ["payment_running", "case_open"]
+        assert [text for _, text in deal.ending_reasons] == [ENDING_TEXT["payment_running"], ENDING_TEXT["case_open"]]
 
 
 def test_retry_can_withdraw_concurrence_for_a_newly_selected_earlier_end():

@@ -37,7 +37,18 @@ RESERVATION = "fixture-vm-reservation"
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure,site_first", [(False, True), (True, True), (True, False)])
 async def test_site_failure_and_delayed_lawful_evidence_drive_one_physical_end(make, failure, site_first):
-    h = await make()
+    # The end service's physical end, over a site holding the deal's leased
+    # reservation; delivered capacity is never released before its callback.
+    site = SimpleNamespace(list_reservations=AsyncMock(return_value=[{
+        "capacity_reservation_id": RESERVATION,
+        "deal_ref": {"negotiation_id": NEGOTIATION}, "state": "leased",
+    }]))
+    capacity = SimpleNamespace(
+        client=lambda: SimpleNamespace(_sites={SITE_ID: site}),
+        release=AsyncMock(side_effect=AssertionError("delivered capacity must await its callback")),
+    )
+    fulfillment = SimpleNamespace(terminate_lease=AsyncMock())
+    h = await make(physical=lambda db, _: VmPhysicalEnd(db, capacity=capacity, fulfillment=fulfillment))
     try:
         await h.db.update_listing(listing_id=LISTING, listing_resource={
             "gpu_model": "H200", "gpu_count": 1, "offering_mode": "vm",
@@ -47,6 +58,15 @@ async def test_site_failure_and_delayed_lawful_evidence_drive_one_physical_end(m
         h.serve()
         await h.settle()
         await h.delivered()
+        # The controlled hook stands in for delivery, so the availability the
+        # delivery path records for a delivered VM is recorded here.
+        with transaction(h.db.db_path) as conn:
+            end = EndSession(conn)
+            delivered_at = h.lifecycle.clock()
+            end.available(
+                NEGOTIATION, at=delivered_at, expected_revision=end.read(NEGOTIATION).revision,
+                now=delivered_at,
+            )
         await h.db.save_capacity_hold(
             negotiation_id=NEGOTIATION, listing_id=LISTING, capacity_reservation_id=RESERVATION,
         )
@@ -56,16 +76,6 @@ async def test_site_failure_and_delayed_lawful_evidence_drive_one_physical_end(m
         })
         trust.seed()
         container.resolved_service_peer_trust = trust
-        site = SimpleNamespace(list_reservations=AsyncMock(return_value=[{
-            "capacity_reservation_id": RESERVATION,
-            "deal_ref": {"negotiation_id": NEGOTIATION}, "state": "leased",
-        }]))
-        capacity = SimpleNamespace(
-            client=lambda: SimpleNamespace(_sites={SITE_ID: site}),
-            release=AsyncMock(side_effect=AssertionError("delivered capacity must await its callback")),
-        )
-        fulfillment = SimpleNamespace(terminate_lease=AsyncMock())
-        h.lifecycle.end.physical = VmPhysicalEnd(h.db, capacity=capacity, fulfillment=fulfillment)
         now = h.lifecycle.clock()
         ref = "site-event:fixture-end"
         event = LeaseEndedEvent(
@@ -127,3 +137,38 @@ async def test_site_failure_and_delayed_lawful_evidence_drive_one_physical_end(m
 
     finally:
         container.resolved_service_peer_trust = None
+
+
+@pytest.mark.asyncio
+async def test_the_release_policy_adopts_the_failure_the_delivery_path_recorded(make):
+    """The delivery path records the failure it observed with its own
+    classification and filing; the configured release then drives that end and
+    records no second one."""
+    h = await make()
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    now = h.lifecycle.clock()
+    source = "delivery:fulfillment-failed:fixture-fulfillment"
+    with transaction(h.db.db_path) as conn:
+        end = EndSession(conn)
+        request = FinalRequest(
+            negotiation_id=NEGOTIATION, source_ref=source, ended_at=now, observed_at=now,
+            actor=SELLER.identity, cause="provisioning_failed", source="delivery", evidence_refs=[source],
+        )
+        end.record_end(
+            request, now=now,
+            classification=Classification(kind="provisioning_failure", evidence_refs=[source]),
+            filing_intent=end.failure_filing(request, now=now, delivered=False),
+        )
+
+    with settings_overrides(**{"fulfillment.failure_policy.actions": ["release_capacity"]}):
+        await apply_fulfillment_failure_policy(h.db, FulfillmentFailureContext(
+            negotiation_id=NEGOTIATION, listing_id=LISTING, reason="provisioning_failed",
+            source="compute_delivery",
+        ))
+
+    with transaction(h.db.db_path) as conn:
+        end = EndSession(conn)
+        assert [request.source_ref for request in end.requests(NEGOTIATION)] == [source]
+        assert len([intent for intent in end.intents(NEGOTIATION) if intent.kind == "filing"]) == 1

@@ -156,7 +156,8 @@ def released_too_early(module: dict, finalisers: dict[str, bool]) -> list[str]:
 
 
 def _scenario_modules() -> list[Path]:
-    return [path for lane in LANES for path in sorted((SCENARIOS / lane).glob("test_*.py"))]
+    # A lane's modules may sit in a package of their own under its directory.
+    return [path for lane in LANES for path in sorted((SCENARIOS / lane).rglob("test_*.py"))]
 
 
 @pytest.fixture(scope="module")
@@ -188,8 +189,8 @@ def test_holds_are_released_after_the_modules_other_cleanup(path, plans, finalis
 
 @pytest.mark.parametrize(
     "path",
-    sorted(path for path in (SCENARIOS / "vms").glob("test_*.py") if path not in REAL_VM_MODULES),
-    ids=lambda path: path.name,
+    sorted(path for path in (SCENARIOS / "vms").rglob("test_*.py") if path not in REAL_VM_MODULES),
+    ids=lambda path: str(path.relative_to(SCENARIOS)),
 )
 def test_every_vm_module_still_runs_the_lane_cleanup(path, plans):
     set_up = {name for name, _ in plans[str(path.relative_to(PROJECT))]["setup"]}

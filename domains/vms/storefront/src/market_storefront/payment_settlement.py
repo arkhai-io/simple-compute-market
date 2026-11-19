@@ -4,7 +4,7 @@ Refund state lives on the deal's settlement evidence. Delivery start is the
 insert of the deal's delivery record, which requires ``verified`` evidence;
 refund intent moves the evidence from ``verified`` to ``refunding``. Each is one
 serialized write. Refund completion records the final end in that same write;
-subsequent reservation, dispatch and credential checkpoints lose admission.
+every protected delivery step after it loses admission in the delivery path.
 The per-negotiation lock only keeps one
 process's settlement and refund calls from interleaving.
 """
@@ -15,10 +15,11 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
 
+import injected_time
 from market_core.schemas import settlement_option_schema
 from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
@@ -47,10 +48,7 @@ from market_identity import Identity
 from market_arkhai_payments.models import SignedReceipt
 
 from market_storefront.payment_repository import VmSettlementEvidenceConflict
-from market_storefront.delivery_records import DeliveryEnded
-from market_storefront.services.fulfillment_resume_runtime import (
-    resume_incomplete_fulfillments_once,
-)
+from market_storefront.services.vm_job_spec_service import settlement_vm_order
 from market_storefront.settlement_stages import (
     PaymentSettleResult,
     PaymentSettlementError,
@@ -72,10 +70,19 @@ __all__ = [
 
 
 class VmPaymentsCoordinator:
-    def __init__(self, *, domain: Any, db: Any, stage: PaymentSellerStage) -> None:
+    """``capacity`` and ``fulfillment`` are the guarded capacity effects and the
+    per-site fulfillment client delivery runs over; each is built from the
+    storefront's runtime when absent."""
+
+    def __init__(
+        self, *, domain: Any, db: Any, stage: PaymentSellerStage,
+        capacity: Any = None, fulfillment: Any = None,
+    ) -> None:
         self.domain = domain
         self.db = db
         self.stage = stage
+        self.capacity = capacity
+        self.fulfillment = fulfillment
         self.tasks: dict[str, asyncio.Task] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         self.owner = f"payments:{uuid.uuid4()}"
@@ -113,12 +120,14 @@ class VmPaymentsCoordinator:
             provision = normalize_vm_provision_terms(agreement.get("provision_terms"))
         except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
             raise PaymentSettlementError(409, "accepted payment state is invalid") from exc
+        # The stored Agreement and its bound mandate carry the payment amount;
+        # negotiated_scalar is the negotiation's policy scalar and may be
+        # basis points.
         if (
             agreement["negotiation_id"] != negotiation_id
             or agreement["listing_id"] != thread["our_listing_id"]
             or agreement["buyer"] != buyer.model_dump(mode="json")
             or agreement["seller"] != seller.model_dump(mode="json")
-            or str(agreement["amount"]) != str(thread["agreed_price"])
             or agreement["duration_seconds"] != thread["agreed_duration_seconds"]
             or not provision.ssh_public_key.strip()
         ):
@@ -161,8 +170,10 @@ class VmPaymentsCoordinator:
         listing = await self.db.load_listing(listing_id=agreement["listing_id"])
         if not isinstance(listing, dict):
             raise PaymentSettlementError(409, "accepted listing is unavailable")
+        thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        order = settlement_vm_order(thread, listing, agreement["provision_terms"])
         record = self._entry(agreement).verified_evidence(
-            raw=raw, order=listing, receipt=receipt, data=data
+            raw=raw, order=order, receipt=receipt, data=data
         )
         await self._save(record)
         if self.lifecycle is not None:
@@ -273,7 +284,7 @@ class VmPaymentsCoordinator:
     async def reconcile_once(self, *, limit: int = 100) -> ReconciliationPass:
         """Advance accepted payment deals a buyer has not settled, without the buyer.
 
-        A deal with a delivery record belongs to the fulfillment resume sweep;
+        A deal with a delivery record belongs to the delivery-recovery loop;
         this pass takes the deals before that point and refunds left
         ``refunding``.
         """
@@ -397,7 +408,7 @@ class VmPaymentsCoordinator:
         delivery = self.db
         entry = self._entry(agreement)
         start = datetime.fromisoformat(agreement["start_utc"].replace("Z", "+00:00"))
-        until = max(start, datetime.now(timezone.utc)) + timedelta(
+        until = max(start, injected_time.now_datetime()) + timedelta(
             seconds=float(config.settings.provisioning.timeout) + 60
         )
         claimed = await delivery.claim_vm_delivery(
@@ -406,14 +417,8 @@ class VmPaymentsCoordinator:
         if not claimed:
             return
         try:
-            row = await delivery.load_vm_delivery(negotiation_id=negotiation_id)
-            if row.get("fulfillment_context"):
-                # Resume the durable request instead of allocating a second VM.
-                await delivery.release_vm_delivery(
-                    negotiation_id=negotiation_id, owner=owner
-                )
-                await resume_incomplete_fulfillments_once(sqlite_client=self.db)
-                return
+            # The delivery path resumes whatever an earlier attempt recorded,
+            # so a second settle never allocates a second VM.
             result = await fulfill_domain(
                 self.domain,
                 StorefrontFulfillmentContext(
@@ -422,8 +427,8 @@ class VmPaymentsCoordinator:
                     buyer_principal=Identity.model_validate(agreement["buyer"]),
                     ports=StorefrontFulfillmentPorts(
                         repository=delivery,
-                        capacity_client=None,
-                        fulfillment_client=None,
+                        capacity_client=self.capacity,
+                        fulfillment_client=self.fulfillment,
                     ),
                     domain_input={
                         "failure_policy": partial(
@@ -432,40 +437,17 @@ class VmPaymentsCoordinator:
                     },
                 ),
             )
-            private = dict(result.domain_result or {})
-            if result.state == "deferred":
-                # The VM exists and a step after it is pending; the delivery
-                # stays open for the fulfillment resume pass.
-                return
-            fulfillment_uid = None
-            if result.state == "fulfilled":
-                if result.fulfillment_id:
-                    await delivery.update_vm_delivery(
-                        negotiation_id=negotiation_id,
-                        fulfillment_id=result.fulfillment_id,
-                    )
-                row = await delivery.load_vm_delivery(negotiation_id=negotiation_id)
-                fulfillment_uid = await entry.continue_delivery(
-                    evidence=evidence,
-                    db=delivery,
-                    delivery=row,
-                    connection_json=private.get("connection_details"),
+            pending = (result.domain_result or {}).get("outcome") == "available"
+            if result.state != "deferred" and not pending:
+                # The delivery path recorded its own outcome; this records the
+                # hook's, which a terminal status already recorded leaves
+                # alone. An available deal whose continuation is pending stays
+                # open for the resume pass to converge.
+                await delivery.record_vm_delivery_outcome(
+                    negotiation_id=negotiation_id,
+                    status="ready" if result.state == "fulfilled" else "failed",
+                    reason=result.failure_reason,
                 )
-            # The checkpoint and final-request admission share one write, so
-            # a concurrent end cannot disclose the result of an in-flight VM.
-            await delivery.update_vm_delivery(
-                negotiation_id=negotiation_id,
-                status="ready" if result.state == "fulfilled" else "failed",
-                fulfillment_uid=fulfillment_uid,
-                connection_details=private.get("connection_details"),
-                tenant_credentials=json.dumps(private["tenant_credentials"])
-                if private.get("tenant_credentials") is not None
-                else None,
-                reason=result.failure_reason,
-            )
-        except DeliveryEnded:
-            if self.lifecycle is not None:
-                await self.lifecycle.end.drive_physical(negotiation_id)
         except asyncio.CancelledError:
             raise
         except Exception:

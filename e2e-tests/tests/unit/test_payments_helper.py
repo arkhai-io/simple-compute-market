@@ -23,8 +23,8 @@ from market_identity import IdentityScheme
 from tests.e2e.roles.buyer_cli import create_profiled_buyer_cli
 from tests.e2e.roles.helpers import payments
 
-# The payments lane double's CA, a public development certificate.
-_LANE_CA = Path(__file__).resolve().parents[3] / "tools/payments-lane-double/tls/lane-ca.pem"
+# The lane doubles' CA, a public development certificate.
+_LANE_CA = Path(__file__).resolve().parents[3] / "tools/lane-double-controls/tls/lane-ca.pem"
 
 Failed = pytest.fail.Exception
 Skipped = pytest.skip.Exception
@@ -110,6 +110,7 @@ def test_flags_written_as_text_parse_as_booleans(configure, flag, text, expected
     if flag == "DEVELOPMENT_AUTH" and not expected:
         # Without development authentication, the run names its API key instead.
         values["API_KEY_ENV"] = "ARKHAI_PAYMENTS_API_KEY"
+        values["BUYER_API_KEY"] = "payments-helper-test-buyer-key"
     configure(**values)
     config = payments.configured_payments(ready=lambda _url: True)
     assert getattr(config, flag.lower()) is expected
@@ -264,7 +265,6 @@ def test_the_buyer_key_reaches_the_market_process_environment(configure, tmp_pat
 
 
 @pytest.mark.parametrize("values", [
-    {"BUYER_API_KEY": ""},
     {"DEVELOPMENT_AUTH": True, "API_KEY_ENV": ""},
 ])
 def test_no_key_is_handed_over_without_one_or_with_development_authentication(
@@ -294,6 +294,35 @@ def test_an_in_process_buyer_client_authenticates_with_the_handed_over_key(
     ) as client:
         client.get_balance(account)
     assert seen == [f"Bearer {_BUYER_KEY}"]
+
+
+_RATE_PAYER = "33333333-3333-4333-8333-333333333333"
+_RATE_PAYER_KEY = "payments-helper-test-rate-payer-key"
+
+
+def test_the_rate_payer_is_handed_its_own_key_and_every_other_payer_the_buyers(
+    configure, monkeypatch,
+) -> None:
+    monkeypatch.delenv("PAYMENTS_BUYER_API_KEY", raising=False)
+    configure(**{**_KEYED, "SERVICE_URL": "https://127.0.0.1",
+                 "RATE_PAYER_ACCOUNT": _RATE_PAYER, "RATE_PAYER_API_KEY": _RATE_PAYER_KEY})
+    config = payments.configured_payments(ready=lambda _url: True)
+    assert payments.buyer_payments_environment(config, _RATE_PAYER) == {
+        "PAYMENTS_BUYER_API_KEY": _RATE_PAYER_KEY}
+    assert payments.buyer_payments_environment(config, _COMPLETE["BUYER_ACCOUNT"]) == {
+        "PAYMENTS_BUYER_API_KEY": _BUYER_KEY}
+    assert payments.buyer_payments_environment(config) == {"PAYMENTS_BUYER_API_KEY": _BUYER_KEY}
+    seen: list[str | None] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"available": {}, "held": []})
+
+    with payments.buyer_payments_client(
+        config, _RATE_PAYER, transport=httpx.MockTransport(answer)
+    ) as client:
+        client.get_balance(_RATE_PAYER)
+    assert seen == [f"Bearer {_RATE_PAYER_KEY}"]
 
 
 def test_the_buyer_configuration_trusts_the_configured_bundle(configure) -> None:
@@ -335,3 +364,19 @@ def test_a_flag_that_is_not_a_boolean_fails(configure, flag) -> None:
     outcome = _outcome(ready=lambda _url: True)
     assert isinstance(outcome, Failed)
     assert f"PAYMENTS.{flag} must be true or false" in str(outcome)
+
+
+@pytest.mark.parametrize("token", [None, "", " ", "public-test-token\n", "public\rtest-token"])
+def test_an_unusable_buyer_token_fails_before_readiness_without_exposing_it(configure, token) -> None:
+    configure(**{**_KEYED, "BUYER_API_KEY": token})
+    outcome = _outcome(ready=_never_asked)
+    assert isinstance(outcome, Failed)
+    assert "PAYMENTS.BUYER_API_KEY" in str(outcome)
+    assert "public-test-token" not in str(outcome)
+    assert "public\rtest-token" not in str(outcome)
+
+
+def test_development_authentication_needs_no_buyer_token(configure) -> None:
+    configure(**{**_COMPLETE, "BUYER_API_KEY": "", "API_KEY_ENV": ""})
+    config = payments.configured_payments(ready=lambda _url: True)
+    assert payments.buyer_payments_environment(config) == {}

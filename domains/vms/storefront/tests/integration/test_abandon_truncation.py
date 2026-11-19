@@ -22,6 +22,7 @@ from market_storefront.domain_runtime import (
 from market_storefront.settlement_composition import (
     truncate_lease_for_terminal_settlement,
 )
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import FakeSite, capacity_runtime_over
 from tests.fulfillment_fixtures import make_vm_lifecycle_fixture
@@ -63,6 +64,7 @@ async def _persist_reservation_identity(
 
 @pytest.fixture
 def db(tmp_path):
+    migrate_storefront_database(tmp_path / "abandon-test.db")
     return SQLiteClient(db_path=str(tmp_path / "abandon-test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 

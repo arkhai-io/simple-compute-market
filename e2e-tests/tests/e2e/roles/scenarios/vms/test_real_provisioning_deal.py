@@ -52,9 +52,8 @@ return to the market while its guest may still run.
 from __future__ import annotations
 
 import logging
-import time
-from datetime import datetime, timezone
 
+import injected_time
 import pytest
 from market_alkahest.plans import ALKAHEST_MECHANISM
 
@@ -87,6 +86,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage08b_SettlementSubmittedAndJobQueued,
     Stage09a_FulfillmentConvergesToActive,
     Stage09b_SettlementReadyAndCredentials,
+    Stage09c1_LateSettlementKeepsTheWindow,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
     Stage10b_LeaseCycleBeginsTeardown,
@@ -111,7 +111,6 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     step_listing_reconciliation,
 )
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
-    REAL_RESOURCE_ID,
     JobWatch,
     RealVmComputeDealDriver,
     RealVmDealState,
@@ -478,6 +477,10 @@ class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
     pass
 
 
+class TestStage09c1_LateSettlementKeepsTheWindow(Stage09c1_LateSettlementKeepsTheWindow):
+    pass
+
+
 class TestStage09c3_LeaseNamesTheCreateJob:
     def test_09c3_the_lease_names_the_create_job_found(self, deal_state: RealVmDealState):
         """The lease's create job is the one 08b3 found through the reservation."""
@@ -555,7 +558,7 @@ class TestStage09g_SecondDealAccepted:
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "open", "the first guest left no sellable second shape"
         option, escrow = alkahest_opening(registry_client.get_listing(deal_state.seller_listing_id))
-        deal_state._second_escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+        deal_state._second_escrow_expiration_unix = injected_time.now() + ESCROW_TTL_SECONDS
         opened = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
             initial_amount=BUYER_INITIAL_PRICE,
@@ -653,7 +656,7 @@ class TestStage09l_SecondLeaseCutShort:
         require_state(deal_state, "second_fulfillment_id", "second_create_job_id", "_second_create_preserved_session")
         deal_driver.assert_management_connected()
         reservation, _state = deal_driver.reservation_of(deal_state.second_fulfillment_id)
-        end = datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+        end = injected_time.now_datetime() - E2E_LEASE_EXPIRY_BACKDATE
         assert deal_driver.site_capacity.truncate_lease(reservation, end.isoformat().replace("+00:00", "Z")) is not None
         provisioning_client.check_leases()
         lease = provisioning_client.get_lease(reservation)
@@ -684,7 +687,7 @@ class TestStage09m_SecondGuestReleased:
         # Reserve only the returned guest shape: the first guest still owns its
         # slice, so asking for the whole host would incorrectly report failure.
         capacity = storefront_admin_client.admin_reserve_capacity(
-            required_attributes={"resource_id": REAL_RESOURCE_ID,
+            required_attributes={"resource_id": deal_driver.reserved_resource_id,
                                  "dimensions": deal_driver.target.listing_shape.model_dump()},
             listing_id=deal_state.seller_listing_id,
             escrow_uid=f"{deal_state.second_escrow_uid}-reuse",

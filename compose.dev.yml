@@ -19,7 +19,7 @@ services:
     environment:
       - ANVIL_IP_ADDR=0.0.0.0
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' | grep -q result || exit 1"]
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://localhost:8545"]
       interval: 5s
       timeout: 3s
       retries: 10

@@ -83,6 +83,16 @@ class BareMetalDealDriverBase:
     def listing_status_after_first_fulfillment(self) -> str:
         return "closed"
 
+    def recorded_fulfillment(self, deal_state: Any) -> str | None:
+        """The fulfillment the buyer's status read reports for the deal."""
+        fulfillment_id = self.fulfillment.status(deal_state.negotiation_id).get("fulfillment_id")
+        return str(fulfillment_id) if fulfillment_id else None
+
+    def deal_reservations(self, deal_state: Any) -> list[dict]:
+        """Every reservation the site holds for the deal, in any state: delivery
+        names the negotiation on each placement it makes."""
+        return self.site_capacity.reservations_for_negotiation(deal_state.negotiation_id)
+
     def _held_generation(self) -> tuple[Any, Any]:
         """The resource-pool generation the storefront holds for the lane's site."""
         health = self.storefront_admin_client.get_health()

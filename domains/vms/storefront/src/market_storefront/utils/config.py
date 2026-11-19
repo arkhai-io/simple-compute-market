@@ -16,9 +16,9 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from pathlib import Path
 from typing import Any
 
+from arkhai_vms_negotiation.amounts import BASIS_POINTS, multiplier_floor
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
@@ -32,7 +32,6 @@ from market_alkahest import (
 from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
     chains_from_config,
-    storefront_config_files,
 )
 from market_config.registry_url import normalize_registry_url
 from market_config.setting_types import PositiveSeconds, SiteAuthorityUrl
@@ -41,8 +40,15 @@ from market_settlement_runtime import (
     compile_settlement_publication_clause,
     parse_settlement_publication_clause,
 )
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    PenaltyPeriods,
+)
+from market_storefront_kit import TimeSourceSetting
+from market_storefront_kit import configured_time_source as kit_configured_time_source
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from ..settings_source import DEFAULTS_FILE, settings_source
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
 logger = logging.getLogger(__name__)
@@ -50,22 +56,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_ID = "root_agent"
 IDENTITY_CREDENTIAL_ENV = "ARKHAI_IDENTITY_CREDENTIAL"
-_DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "settings.toml"
+_DEFAULTS_FILE = DEFAULTS_FILE
 
 
 def _build_settings() -> Dynaconf:
-    overlays = [str(p) for p in storefront_config_files() if Path(p).exists()]
-    s = Dynaconf(
-        settings_file=[str(_DEFAULTS_FILE)],
-        includes=overlays,
-        envvar_prefix="STOREFRONT",
-        envvar_separator="__",
-        load_dotenv=False,
-        environments=False,
-        merge_enabled=True,
-    )
-
-    return s
+    return settings_source()
 
 
 def _coerce_chains_table(raw: Any) -> dict[str, dict[str, Any]]:
@@ -293,6 +288,44 @@ def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
     )
 
 
+def payment_reconciliation_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between the advances of accepted payment deals:
+    `fulfillment_resume_sweep_interval`, thirty unless stated, refused by key
+    unless it is positive seconds, as bare metal's
+    `payment_reconciliation_interval` is."""
+
+    active = settings if source is None else source
+    return _positive_seconds(
+        active.get("fulfillment_resume_sweep_interval", 30), key="fulfillment_resume_sweep_interval",
+    )
+
+
+def deal_servicing_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between the kit's servicing cycles: `deal_servicing_interval_seconds`,
+    refused by key unless it is positive seconds; unstated, the settlement
+    servicing interval, so a configuration stating only that key services its
+    deals at it."""
+
+    active = settings if source is None else source
+    stated = active.get("deal_servicing_interval_seconds")
+    if stated is None:
+        return settlement_servicing_interval(active)
+    return _positive_seconds(stated, key="deal_servicing_interval_seconds")
+
+
+def delivery_recovery_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between re-drives of unfinished deliveries:
+    `delivery_recovery_interval_seconds`, refused by key unless it is positive
+    seconds; unstated, `fulfillment_resume_sweep_interval`, so a configuration
+    stating only that key re-drives its deliveries at it."""
+
+    active = settings if source is None else source
+    stated = active.get("delivery_recovery_interval_seconds")
+    if stated is None:
+        return payment_reconciliation_interval(active)
+    return _positive_seconds(stated, key="delivery_recovery_interval_seconds")
+
+
 def introduction_retention_sweep_interval(seconds: Any) -> float:
     """The introduction retention sweep's interval,
     `[Settlement.contact].retention_sweep_interval_seconds`, refused by key
@@ -304,6 +337,7 @@ def introduction_retention_sweep_interval(seconds: Any) -> float:
 
 _POSITIVE_SECONDS: TypeAdapter[float] = TypeAdapter(PositiveSeconds)
 _SITE_AUTHORITY_URL: TypeAdapter[str] = TypeAdapter(SiteAuthorityUrl)
+_PENALTY_PERIODS: TypeAdapter[int] = TypeAdapter(PenaltyPeriods)
 
 
 def _validated_setting(adapter: TypeAdapter[Any], value: Any) -> tuple[Any, str | None]:
@@ -398,6 +432,50 @@ def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
     return window
 
 
+def negotiation_multiplier_floor(source: Dynaconf | None = None) -> int:
+    """`[negotiation].multiplier_floor_bps`: the lowest multiplier, in basis
+    points, the storefront accepts over a shape-priced listing's advertised
+    rates; 10,000 (the advertised rates themselves) unless stated.
+
+    Refused by key unless it is an integer from 0 to 10,000. A floor above the
+    advertised rates would make them a price the storefront refuses, so a buyer
+    reading them from the registry could never accept what was published.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("negotiation.multiplier_floor_bps", BASIS_POINTS)
+    try:
+        return multiplier_floor({"multiplier_floor_bps": stated})
+    except ValueError:
+        raise ValueError(
+            "[negotiation].multiplier_floor_bps must be an integer from 0 to "
+            f"{BASIS_POINTS}: the advertised rates are the most a buyer is asked to pay"
+        ) from None
+
+
+def default_premature_stop_penalty_periods(source: Dynaconf | None = None) -> int:
+    """`[pricing].default_premature_stop_penalty_periods`: how many periods'
+    price an on-demand option's premature-stop penalty is when its clause
+    states none; 24 unless stated. A clause's own penalty, even ``"0"``, wins.
+
+    Refused by key unless it is a positive integer: a seller who means no
+    default penalty states ``"0"`` on the clause, where a buyer reads it.
+    """
+
+    active = settings if source is None else source
+    stated = active.get(
+        "pricing.default_premature_stop_penalty_periods",
+        DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    )
+    periods, reason = _validated_setting(_PENALTY_PERIODS, stated)
+    if reason is not None:
+        raise ValueError(
+            "[pricing].default_premature_stop_penalty_periods must be a positive "
+            f"integer: {reason}"
+        )
+    return periods
+
+
 def _positive_seconds(value: Any, *, key: str) -> float:
     """A stated duration, refused by key unless it is a positive, finite number
     of seconds that can be applied to an instant without leaving `datetime`'s
@@ -460,6 +538,24 @@ class WalletConfigDeclaration(BaseModel):
     address: str = ""
     ssh_public_key: str = ""
     private_key: str = Field(default="", json_schema_extra={"secret": True})
+
+
+class TimeConfigDeclaration(BaseModel):
+    """``[Time]``: the process's time source, ``"wall"`` unless set ``"injected"``.
+
+    Declares the section for a chart's generated values schema, which refuses
+    any other source; startup reads it through :func:`configured_time_source`
+    and refuses any other value naming it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: TimeSourceSetting = "wall"
+
+
+def configured_time_source(source: Dynaconf | None = None) -> Any:
+    """The value ``[Time] source`` states, or ``None`` when unset."""
+    return kit_configured_time_source(source or settings)
 
 
 class RegistryConfigDeclaration(BaseModel):

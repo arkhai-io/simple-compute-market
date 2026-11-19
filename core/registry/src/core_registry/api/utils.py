@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from market_core.listing_details import supplied_listing_details
-
 import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
 
+import injected_time
 from fastapi import HTTPException
 from market_identity import Identity, TrustedIdentitySet
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core_registry.db.models import Listing, OrderStatusEnum, Publisher, PublisherIdentity
+from core_registry.db.models import (
+    Listing,
+    OrderStatusEnum,
+    Publisher,
+    PublisherIdentity,
+    utcnow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +40,19 @@ def find_identity_binding(
     )
 
 
+def instant_comparable_with(stored: datetime | None) -> datetime:
+    """The process time source's instant in the form ``stored`` takes.
+
+    A deadline is written as naive UTC, which SQLite returns as written, while a
+    database may return a timezone-aware column's value aware: it is compared
+    with the instant in its own form, since naive and aware values do not
+    compare.
+    """
+    if stored is not None and stored.tzinfo is not None:
+        return injected_time.now_datetime().astimezone(stored.tzinfo)
+    return utcnow()
+
+
 def effective_identity_status(
     binding: PublisherIdentity,
     *,
@@ -47,11 +65,7 @@ def effective_identity_status(
     if binding.retired_at is not None or binding.status == "retired":
         return "retired"
     deadline = binding.active_until
-    instant = now or (
-        datetime.now(deadline.tzinfo)
-        if deadline is not None and deadline.tzinfo is not None
-        else datetime.utcnow()
-    )
+    instant = now or instant_comparable_with(deadline)
     if binding.status == "overlap" and deadline is not None and deadline <= instant:
         return "retired"
     return binding.status
@@ -236,24 +250,30 @@ def order_to_dict(listing: Listing) -> dict[str, Any]:
 
     publisher = listing.publisher
     owners = active_identities(publisher) if publisher is not None else None
+    document = _as_json_obj(listing.published_document, None)
+    if document is None:
+        document = {
+            "storefront_url": publisher.storefront_url if publisher else None,
+            "listing_resource": _as_json_obj(listing.listing_resource, {}),
+            "accepted_escrows": _as_json_obj(listing.accepted_escrows, []),
+            "settlement_options": _as_json_obj(listing.settlement_options, []),
+            "demands": _as_json_obj(listing.demands, []),
+            "max_duration_seconds": listing.max_duration_seconds,
+            "oracle_address": listing.oracle_address,
+        }
+    document = dict(document)
+    updates = _as_json_obj(listing.publisher_updates, {})
+    if "oracle_address" in updates:
+        document["oracle_address"] = listing.oracle_address
     return {
-        **supplied_listing_details({
-            "title": listing.title,
-            "description": listing.description,
-            "metadata": listing.listing_metadata,
-        }),
+        **document,
+        "publisher_publication": _as_json_obj(listing.publisher_publication, None),
+        "publisher_updates": updates,
         "listing_id": listing.listing_id,
         "publisher_id": listing.publisher_id,
         "publisher_principals": (
             owners.model_dump(mode="json") if owners is not None else None
         ),
-        "storefront_url": publisher.storefront_url if publisher else None,
-        "listing_resource": _as_json_obj(listing.listing_resource, {}),
-        "accepted_escrows": _as_json_obj(listing.accepted_escrows, []),
-        "settlement_options": _as_json_obj(listing.settlement_options, []),
-        "demands": _as_json_obj(listing.demands, []),
-        "max_duration_seconds": listing.max_duration_seconds,
-        "oracle_address": listing.oracle_address,
         "status": listing.status.value,
         "created_at": listing.created_at.isoformat(),
         "updated_at": listing.updated_at.isoformat(),

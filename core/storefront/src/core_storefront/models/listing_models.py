@@ -62,6 +62,7 @@ class CreateListingRequest(BaseModel):
         ),
     )
     max_duration_seconds: int | None = None
+    available_until_utc: str | None = None
     # Seller-authored claims published beside the envelope, under the limits
     # the registry serves in its listing_shape: a short title, prose, and
     # flat string-key to scalar-value facts.
@@ -143,10 +144,11 @@ class ListingResponse(BaseModel):
     accepted_escrows: list[dict[str, Any]] | None = None
     demands: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
+    available_until_utc: str | None = None
     storefront_url: str
     seller_principal: Identity
     # Domain-owned resolved rates a listing's prices derive from, when its
-    # domain records them; served here and never published to a registry.
+    # domain records them; also published, in the listing's pricing.
     rate_structure: dict[str, Any] | None = None
     model_config = ConfigDict(extra="allow")
 

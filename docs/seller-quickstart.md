@@ -39,9 +39,9 @@ cd simple-compute-market
 make build-seller
 ```
 
-`build-seller` builds the two images you need (`arkhai:storefront`,
-`arkhai:compute-provisioning`) and the wheels they consume — ~3 minutes on a
-warm machine. Build on Linux; macOS hits a known cross-platform
+`build-seller` builds the images you need (`arkhai:storefront`,
+`arkhai:bare-metal-storefront`, `arkhai:compute-provisioning`) and the release's
+wheels they are built from — ~3 minutes on a warm machine. Build on Linux; macOS hits a known cross-platform
 `uv sync` issue.
 
 ## 2. Configure
@@ -165,7 +165,7 @@ The receipt-signing identity and fee policy are trusted service configuration.
 Dispute authorities are root `[[Dispute]]` preferences followed by the registry's
 recommendations (enabled by default for a storefront), not a payments-service
 setting; an empty resolved list is reported at startup. See
-[dispute authority preferences](development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
+[dispute authority preferences](../openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences).
 The accepted option fixes its dispute authority for settlement and refunds.
 The API key is a secret setting: state it as `[Settlement.arkhai_payments]`
 `api_key` in the Secret overlay `storefront.secrets.toml`, never in the public
@@ -174,7 +174,12 @@ payments client, and nothing else in the process, trust a private CA for the
 service. Once the storefront runs, `market-storefront check-payments --account
 <YOUR_PAYEE_ACCOUNT>` reads that account's balance with exactly the client the
 storefront builds, and reports the first step that failed (see
-[settlement consumer configuration](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover)).
+[settlement consumer configuration](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)).
+A seller holding a `[[DisputeCredential]]` in the same overlay — with its own
+`ca_bundle_path` when the authority's certificate chains to a private CA — runs
+`market-storefront check-mediation --origin <the authority's origin>` the same
+way: one authenticated read at that authority with exactly the credential the
+storefront would use.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
@@ -204,7 +209,8 @@ Region is a physical fact, so only the pool states it; no override does. A
 pool that states no region publishes nothing new and leaves the listings it
 already published unrefreshed; system status reports it among its site's
 `publication_derivation` holds as `pool_region_missing`.
-`DEPLOYMENT_AND_CONFIG.md`'s "Storefront listing shapes and pool overrides"
+`storefront-publication`'s
+["Storefront listing shapes and pool overrides"](../openspec/specs/storefront-publication/configuration.md#storefront-listing-shapes-and-pool-overrides)
 describes each term. Capacity admission, physical selection, prepared
 execution, and teardown are owned by the selected provisioning site.
 
@@ -477,54 +483,37 @@ and receive the connection details of a VM created on one of your hosts.
 
 ## Upgrading from CSV inventory
 
-Earlier storefronts could hold their own inventory: a resource CSV seeded at
-startup (`resources_csv_path`, `resources_csv_inline`, or a file at
-`/app/resources.csv`) or imported through
-`POST /api/v1/admin/portfolio/resources/import`, with per-row prices drawn from
-`[escrow_templates]`. A storefront now reads inventory only from its sites'
-provisioning services, and nothing warns when the old source is still
-configured: an unmigrated storefront starts, finds no pools, and publishes
-nothing. The upgrade is one-way; there is no supported downgrade.
+A storefront reads inventory only from its sites' provisioning services; it
+holds no inventory of its own, and no setting replaces the retired resource CSV
+(`resources_csv_path`, `resources_csv_inline`), its pricing templates
+(`[escrow_templates]`), or `capacity.use_site_projection_for_listings`. Remove
+them from every storefront configuration file, and the chart's
+`secret.resourcesCsvInline` value: the chart refuses to render with any of them,
+and `market-storefront config set` refuses to write them. A storefront that
+still states them starts, finds no pools, and publishes nothing.
 
-Before upgrading, declare at provisioning everything the CSV described:
+Declare at provisioning what such a CSV described:
 
 1. **Hosts and capacity.** Register each host with the provisioning service, in
    its host definitions document or through the host API, and declare what it
-   sells as capacity, as "Declaring
-   capacity" above describes. A CSV row's `attribute.vm_host` names the host,
-   and its `value` and `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become
-   the declaration's `capacity`.
+   sells as capacity, as "Declaring capacity" above describes. A CSV row's
+   `attribute.vm_host` names the host, and its `value` and
+   `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become the declaration's
+   `capacity`.
 2. **Pools and their terms.** Put each resource in a pool, and declare the
    pool's `region` in its `policy_tags`, with its `listing_shapes` and
    `asking_rates` where you state them. Region can only be declared there, and
-   a pool without it is held until it states one. A
-   pool's `sla` hint is read only by a storefront with
-   `[pricing].accept_pool_declared_sla` on; otherwise state the SLA as an
-   override term.
-3. **Storefront terms.** Re-enter, with `market-storefront pool-override set`,
-   any pool term the storefront itself supplied. System status on the release
-   you are upgrading from lists, under `publication_derivation`, each field a
-   pool still took from the storefront's own pool record
-   (`legacy_overrides_in_effect`): `sla`, `max_duration_seconds`, and pricing
-   left there fall through to the pool's hint and then to the configured
-   default once you upgrade. A per-row `accepted_escrows` value has no
-   equivalent; state the clauses it priced as a `settlements` clause list in
-   the override or in `[pricing].settlements`.
-4. **Configuration.** Remove `resources_csv_path`, `resources_csv_inline`,
-   `[escrow_templates]`, and `capacity.use_site_projection_for_listings` from
-   every storefront configuration file, and the chart's
-   `secret.resourcesCsvInline` value. The chart refuses to render with any of
-   them, and `market-storefront config set` refuses to write them.
+   a pool without it is held until it states one. A pool's `sla` hint is read
+   only by a storefront with `[pricing].accept_pool_declared_sla` on; otherwise
+   state the SLA as an override term.
+3. **Storefront terms.** State, with `market-storefront pool-override set`, any
+   pool term the storefront itself supplies. A per-row `accepted_escrows` value
+   has no equivalent; state the clauses it priced as a `settlements` clause list
+   in the override or in `[pricing].settlements`.
 
-After upgrading, the storefront's database keeps the tables the old inventory
-lived in (`resources`, `hosts`, `resource_transition_events`,
-`compute_capacity_pools`, and `compute_pool_members`) exactly as they were. The
-storefront never reads or writes them again; they remain so you can extract
-anything you did not declare beforehand. Their rows are history, not current
-state: reconcile each against what the provisioning service already holds
-before declaring it there, through the provisioning service's own
-administration API or definition documents. Nothing copies them across
-automatically, and nothing should overwrite a declaration that is already live.
+The storefront's database keeps none of the tables a storefront-held inventory
+lived in: the migration after its v0.3.0 baseline drops them
+([operator handbook, "Upgrading a deployment"](operator-handbook.md#upgrading-a-deployment)).
 
 ## Common pitfalls
 

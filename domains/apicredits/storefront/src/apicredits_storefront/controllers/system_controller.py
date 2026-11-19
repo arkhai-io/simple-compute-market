@@ -8,7 +8,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
-from market_storefront_kit import DealControlRouteError, StageEventRouteService
+from market_storefront_kit import (
+    DealControlRouteError,
+    StageEventRouteService,
+    StorefrontTimeRouteService,
+)
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.middleware.admin_auth import authenticate_admin
@@ -72,6 +76,7 @@ class SystemController:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = _container.trading_pause.paused
         body["lifecycle"] = _lifecycle_status()
+        body["time"] = StorefrontTimeRouteService().status()
         return HealthResponse(**body)
 
     @router.get(

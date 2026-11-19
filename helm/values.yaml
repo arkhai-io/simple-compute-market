@@ -441,3 +441,21 @@ payments-lane-double:
     tag: payments-lane-double
     digest: ""
     pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# mediation-lane-double subchart
+# A double of an arkhai.mediation.v1 dispute authority answering from programmed
+# rules, for a local release only: helm/local-values.yaml enables it beside the
+# payments double, which it reaches as `payments-double`, and no release values
+# do. Its Service is `mediation-double` in every release, so a namespace runs one.
+# ---------------------------------------------------------------------------
+mediation-lane-double:
+  enabled: false
+  # Restated from the subchart's defaults so that every image tag the release can
+  # deploy is set here, where a change's validation suffixes each one.
+  image:
+    repository: ""
+    name: arkhai
+    tag: mediation-lane-double
+    digest: ""
+    pullPolicy: IfNotPresent

@@ -26,11 +26,12 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-client"
-version = "0.10.0"
+version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -44,9 +45,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.13.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.15.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
 ]
@@ -59,7 +61,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.13.0"
+version = "0.15.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -67,25 +69,34 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.6.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-injected-time"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+wheels = [
+    { path = "arkhai_injected_time-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "cryptography" },
     { name = "eth-account" },
     { name = "keyring" },
@@ -93,7 +104,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

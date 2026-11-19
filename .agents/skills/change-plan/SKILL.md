@@ -107,6 +107,27 @@ even once the status says `ready for implementation`: only the plan's outcome
 carries its exit and its `rounds`, so the computation names planning again, to be
 resumed, or its outcome recorded with the command above.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-plan` hook, and kept
+what it did in the run's inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook, in full. Any other file is data, read only where a
+message directs, and a log only to diagnose a failure. A failing hook prevented
+nothing: say in your report what its failure means for the plan, and stop, as
+section 1 stops, when the plan cannot be written soundly with it. Interactively,
+with no wrapper, run `scripts/change-workflow run before plan <change>` first; its
+last line names the directory. Once the plan is committed, run
+`scripts/change-workflow run after plan <change>` before `record`, and, when it
+fails, fix what it found if planning can, and run it again, or tell the owner.
+Unattended, an after-hook that fails resumes this session once with its failure; a
+second failure goes to the owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## 1. Check that planning may start
 
 Read the evidence from the files and the workflow log, even if this session held
@@ -141,13 +162,19 @@ you have seen it before —
 the files are what the implementer will see:
 
 - the change's `proposal.md`, `design.md`, `specs/`, and current `tasks.md`;
-- `openspec/README.md#plan-closeout-requirements`, and `openspec/config.yaml`'s
-  rules for tasks;
+- `docs/guidance/workflow/closeout.md`, and the repository's own closeout parts, in
+  the section the root guidance names;
 - `scripts/change-workflow openspec instructions tasks --change <change>` for the
-  tasks template; every OpenSpec command runs so, through the command the
-  repository's configuration names;
+  tasks template and the repository's rules for tasks, which OpenSpec prints with
+  it; every OpenSpec command runs so, through the command the repository's
+  configuration names;
+- the evidence kinds the repository declares, from `scripts/change-workflow config
+  --json` — each kind's requirement, `always` or `owed`, and its guide — and the
+  guide of each kind: what a section's verification names for it, where the
+  end-to-end scenarios it runs are named, and what may be owed;
 - the permanent spec and architecture companion of every capability the change
-  touches, and `openspec/specs/README.md`;
+  touches, every other Markdown file in its directory but its `index.md` — the
+  capability's own guidance — and the repository's capability index;
 - the code each decision changes: enough to name the files, the package
   boundaries, and the existing tests a section extends;
 - another change's records, where a section rests on them — a dependency's
@@ -174,7 +201,7 @@ plan on an answer the design review did not cover.
    `design.md`.
 3. Ask the owner whether the change needs another design review for it, or whether
    they waive the review, recommending the waiver when a criterion of
-   `docs/agents/change-workflow.md`'s "Waivers" holds — the decision is confined to
+   `change-workflow`'s CW-q3dm holds — the decision is confined to
    one requirement's wording, or to a choice the design review already weighed —
    naming it, and none otherwise. A waiver is the owner's call. Record it as a
    ledger entry with `"review": "plan"`, the decision as `finding`, lens
@@ -204,7 +231,9 @@ or change its completion state. When the reviewed design changes what follows fr
 a completed task, amend it with a correction note, or append a task that carries
 the correction. An unchecked task the reviewed design superseded may be replaced;
 say at the top of the replaced section that it was replanned against the reviewed
-design.
+design. An unchecked task whose work moves to another section is checked where it
+stood, its text beginning "(Moved to section N.)", so the section it leaves reads
+complete and the next-step computation does not name it again.
 
 **Sections are slices.** Each section:
 
@@ -218,39 +247,37 @@ design.
   planning reports its mapping onto the sections in its outcome (section 7),
   never in the plan, which is agnostic of whether a coding harness implements it;
 - ends at a verification point — the focused suites that prove it, each named with
-  its level as `docs/development/TESTING.md` defines them (unit, library
-  integration, application integration through the typed client, system), at the
-  lowest level that can prove the behavior; and the repository's functional
+  its level as `docs/guidance/engineering/test-levels.md` defines them (unit,
+  library integration, application integration through the typed client, system),
+  at the lowest level that can prove the behavior; and the repository's functional
   checks, which `scripts/change-workflow run pre-commit` runs before a commit
   changing a path outside the inert paths. A section whose title promises a behavior
   of the running application — publication, a write refused — includes at least one
   application-integration case for it, not only lower-level evidence of its parts;
-- names the end-to-end scenarios (pytest markers in `e2e-tests/`) that exercise
-  the section's behaviour once deployed, or says that none does and whether one is
-  owed. Validation runs the Helm checks and the pipeline on every commit; it reads
-  this list to report whether the pipeline's result is evidence for the section;
+- names, on an `End-to-end:` line, the end-to-end scenarios that exercise the
+  section's behaviour once deployed, as the guide of the evidence kind that runs
+  them names them, or says that none does and whether one is owed. Validation
+  gathers every required evidence kind on every commit; it reads this list to report
+  whether the end-to-end result is evidence for the section;
 - names in its verification only evidence an implementation session can produce.
-  Evidence only a push produces — a CI workflow run such as `tests.yml`'s, which a
-  change branch's push does not trigger — goes on its own `Owed by validation:`
-  line of the verification task, beside `End-to-end:`, giving the workflow, the
-  job, and what the job must show:
+  Evidence only a push produces — a CI workflow's run, which a change branch's push
+  does not trigger — is owed to validation by the kind declared `owed` that produces
+  it, on its own line of the verification task, beside `End-to-end:`, naming the
+  kind and its argument, then what must be shown, as the kind's guide gives it:
 
   ```
-  Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
-  `azure/setup-helm` installs v4.3.0, and `make -C helm test-render` prints
-  `helm v4.3.0` before the first render and passes.
+  Owed by validation (<kind> <argument>): <what must be shown, and where>.
   ```
 
-  It gates no task: once the section is complete, every validation of the change
-  dispatches the workflow and judges the job, and a round advances only on a
-  passing validation. Only a workflow `scripts/ci_evidence.py` lists can be owed,
-  since validation dispatches no other; owing another is a design question
-  (section 3).
+  The argument is one path segment: not empty, `.`, or `..`, and holding no `/`,
+  whitespace, or glob character. It gates no task: once the section is complete,
+  every validation of the change gathers the kind for it and judges what it shows,
+  and a round advances only on a passing validation. What may be owed is the kind's
+  guide's; owing anything else is a design question (section 3).
 
 **Order by real dependencies, then by the cadence.** Lower layers before the layers
-composing them — foundation kit before kit before domain before composition root —
-and focused behavioral verification before documentation work, per the task rules
-in `openspec/config.yaml`. Within that, number the sections in the order of the
+composing them, as the repository's architecture document draws them, and focused behavioral verification before documentation work, per the repository's
+rules for tasks. Within that, number the sections in the order of the
 implementation cadence `design.md` records, each round's sections before the
 next round's, so each round is a run of consecutive sections. When the sections
 cannot be cut that way — a round's work depends on a later round's — the design
@@ -260,8 +287,9 @@ and say so in the report; the owner is asked for each round as it starts.
 
 **Every task is traceable.** Each names what it answers to — a design decision, a
 delta requirement, or a repository obligation such as the verification, packaging,
-promotion, and closeout work `openspec/README.md` and `openspec/config.yaml` require,
-cited — and the evidence that proves it. A feature task with nothing to trace to is
+promotion, and closeout work the workflow's guidance (`docs/guidance/workflow/changes.md`,
+`docs/guidance/workflow/closeout.md`), the repository's guidance, and its rules for
+tasks require, cited — and the evidence that proves it. A feature task with nothing to trace to is
 either missing from the design or not part of this change.
 
 **Give edits under `.claude/` to the orchestrator.** Every step is denied edits
@@ -272,18 +300,33 @@ rest of the section stays the implementer's.
 
 **Name the permanent destinations.** For every entry under the proposal's
 `Knowledge to promote`, confirm or correct its destination and name it exactly —
-file and heading — including `openspec/specs/README.md` for a new capability or
-companion, and `docs/development/ARCHITECTURE.md` where the design says so.
+file and heading — including the repository's capability index for a new capability
+or companion, and its architecture document where the design says so.
 Provisional destinations the design delegated to planning are settled here; tell
 the owner which you moved and why.
 
-**End with the closeout task**, its eleven parts from
-`openspec/README.md#plan-closeout-requirements` in that order, each made specific
-to this change:
+**End with the closeout task**, its parts from `docs/guidance/workflow/closeout.md`
+in that order, the repository's own parts, in the section the root guidance names,
+at the position it gives them, each named by its heading and made specific to this
+change:
 the roadmap goal and gap row it closes, its index row, the end-to-end scenarios
 that exercise it, the permanent documents it promotes, and the archive's merge or
 `--skip-specs`. Dependents are released at archive cleanup, not by a closeout
-task.
+task. Its heading is `## N. Closeout`, exactly, and it is the list's last section:
+the next-step computation knows the closeout section by that title alone, so any
+other section, whatever its title says of closeout, is implemented by a round. An
+amended plan adds each new section before it, numbered after the section it
+follows with a letter (`6a` after section 6), so the closeout section and its
+tasks keep the numbers other documents cite;
+`scripts/change-workflow check tasks <change>` fails a list whose closeout section
+is missing, repeated, or followed by another.
+
+**A return from closeout** for more implementation is amended the same way and no
+further: add one section before the closeout section for the work the return
+names, ending at its verification point, map it as one round of one session, and
+leave every other section, the closeout's checked tasks included, as it stands.
+Once that round's triage advances, the change goes on as after any last round:
+the pre-closeout review, then closeout.
 
 ## 5. Check the plan
 
@@ -293,7 +336,7 @@ Before presenting it:
   task, and every task maps back to a decision, a requirement, or a cited
   repository obligation;
 - no open question has its answer prescribed by a task
-  (`openspec/README.md#open-questions-and-prescribed-tasks`);
+  (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`);
 - every section has a verification point, its covering end-to-end scenarios or a
   statement that none covers it, and a size its verification point can prove;
 - `scripts/change-workflow run pre-commit <change>` reports no failure but its

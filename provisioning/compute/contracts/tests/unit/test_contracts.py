@@ -11,6 +11,7 @@ from compute_provisioning_contracts import (
     HostUpdate,
     LeaseTermination,
     RelayGrantKeyStage,
+    RelayResponse,
     resolve_provisioning_route,
 )
 
@@ -184,6 +185,46 @@ def test_a_relay_id_never_matches_an_action_path(method, path, operation):
     assert resolved == operation
 
 
+#: A relay read as a service from ``marketplace-v0.3.0`` answers it: no
+#: ``active_lease_count`` and no ``drained``. Documentation values only.
+_RELAY_READ_WITHOUT_THE_DRAIN = {
+    "id": "site-a",
+    "label": "Site A buyers",
+    "relay_addr": "relay.example.com",
+    "relay_port": 7000,
+    "vm_port_range_start": 6100,
+    "vm_port_range_count": 100,
+    "enabled": False,
+    "token_configured": True,
+    "grant_keys": {"active": None, "staged": None, "retired": []},
+}
+
+
+@pytest.mark.parametrize("missing", ["active_lease_count", "drained", "both"])
+def test_a_relay_read_that_does_not_report_the_drain_is_refused(missing):
+    """Both fields are required: a client reading a service that does not
+    report them fails to parse, rather than reading an unknown as drained or
+    not drained, since ``drained`` gates the removal of a relay server."""
+    body = dict(_RELAY_READ_WITHOUT_THE_DRAIN, active_lease_count=0, drained=True)
+    for field in (["active_lease_count", "drained"] if missing == "both" else [missing]):
+        del body[field]
+
+    with pytest.raises(ValidationError) as excinfo:
+        RelayResponse.model_validate(body)
+
+    assert {error["loc"] for error in excinfo.value.errors()} == {
+        (field,) for field in ("active_lease_count", "drained") if field not in body
+    }
+
+
+def test_a_relay_read_reporting_the_drain_is_accepted():
+    relay = RelayResponse.model_validate(
+        dict(_RELAY_READ_WITHOUT_THE_DRAIN, active_lease_count=0, drained=True)
+    )
+
+    assert (relay.active_lease_count, relay.drained) == (0, True)
+
+
 def test_a_staged_private_key_is_masked_in_the_model():
     """The request holds the key as a secret value: neither its repr nor its
     serialization shows it, so logging the model discloses nothing."""
@@ -246,7 +287,24 @@ def test_a_lease_view_without_the_field_reads_as_no_activation_recorded():
 
 
 _GPU_FIELDS = {"gpu_count": 8, "gpu_model": "H200"}
-_CONNECTION = {"kind": "ssh", "public": {"ssh_host": "192.0.2.1"}}
+_CONNECTION = {"kind": "ssh", "version": 2, "public": {"ssh_host": "192.0.2.1"}}
+
+
+@pytest.mark.parametrize("model", [HostCreate, HostUpdate])
+def test_a_connection_stating_no_version_is_refused_naming_version(model):
+    """A connection's version is required: nothing reads an unversioned
+    submission as some default version."""
+    unversioned = {key: value for key, value in _CONNECTION.items() if key != "version"}
+    body = {"connection": unversioned}
+    if model is HostCreate:
+        body["host_id"] = "kvm1"
+
+    with pytest.raises(ValidationError) as refused:
+        model.model_validate(body)
+
+    assert [(error["loc"], error["type"]) for error in refused.value.errors()] == [
+        (("connection", "version"), "missing")
+    ]
 
 
 @pytest.mark.parametrize(

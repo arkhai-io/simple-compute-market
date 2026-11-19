@@ -91,6 +91,27 @@ makes. When `record` refuses, correct what it names and run it again. A session
 closed before it records leaves design in progress: the computation names it
 again, to be resumed, or its outcome recorded with the command above.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-design` hook, and kept
+what it did in the run's inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook, in full. Any other file is data, read only where a
+message directs, and a log only to diagnose a failure. A failing hook prevented
+nothing: tell the owner what its failure means for the design discussion, and ask
+before going on when the design cannot be settled soundly with it. Interactively,
+with no wrapper, run `scripts/change-workflow run before design <change>` first; its
+last line names the directory. Once the design is recorded, run
+`scripts/change-workflow run after design <change>` before `record`, and, when it
+fails, fix what it found if the design step can, and run it again, or tell the
+owner. Unattended, an after-hook that fails resumes this session once with its
+failure; a second failure goes to the owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## 1. Load everything before saying anything
 
 Answers given from a partial picture are confidently wrong in exactly the
@@ -106,7 +127,9 @@ places that matter, so read all of this first, in full:
   are design input).
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
   and its companion when one exists — `README.md` where the capability has an
-  `index.md`, which you read too, and `architecture.md` elsewhere.
+  `index.md`, which you read too, and `architecture.md` elsewhere — and every
+  other Markdown file in its directory but its `index.md`: the capability's own
+  guidance.
 - The code the design cites, and the code it would change. Read enough of it to
   check every factual claim the design makes about the current system.
 - Each change listed in the row's `Depends on`, at least its `proposal.md` and
@@ -116,11 +139,21 @@ places that matter, so read all of this first, in full:
   are where that change was worked: `scripts/change-workflow find --records
   <change>` prints where, this checkout's or, from a change's clone, the owner's
   workspace's, which holds the history of every cleaned-up change.
+- The repository's record of what has been deployed, where the change alters a
+  form a deployment may run — a record, a message, a configuration key's use.
+  Fetch the remote first, then read the record where the repository's guidance
+  names it: the compatibility the design owes is measured against what it says
+  was deployed, not against the branch the change lands on
+  (`docs/guidance/engineering/versioning.md#compatibility-is-owed-to-what-has-been-deployed`).
+  Where the guidance names no record, or the record is unclear, ask the owner for
+  the release policy before designing or leaving out any migration or
+  compatibility path.
 
 If a dependency gates `design` and has not reached `archived`, stop and tell
 the owner: designing now risks designing work the
 dependency may make unnecessary. If it is archived on this branch — it landed on
-dev, and dev was merged in — the dependency is released on the owner's word
+the branch this change lands on, and that branch was merged in — the dependency is
+released on the owner's word
 (section 4, "When the design needs another change first").
 
 When the change has been through design before, find what has moved since:
@@ -181,8 +214,11 @@ an answer to one often reshapes the next. In full, a decision has:
   decide without rereading the change.
 - **Alternatives.** Each option actually available, including doing nothing
   and deferring, with its trade-offs: what it costs, what it constrains later,
-  which layer or authority boundary it touches (`ARCHITECTURE.md` vocabulary),
-  and what it does to wire, persistence, and deployment compatibility.
+  which layer or authority boundary it touches, in the vocabulary of the
+  repository's architecture document,
+  and what it does to wire, persistence, and compatibility with what the record
+  of deployment says was deployed. An option leaving out a migration or
+  compatibility path names the release it read.
 - **Recommendation.** Which option you recommend and why, and what would change
   your mind.
 
@@ -201,9 +237,10 @@ of the owner's attention:
 - **Judgement** — the options trade real values against each other and no
   written principle or precedent picks one. Present these one at a time, in full.
 - **Consequence** — the answer follows from a decision already settled, or from
-  a principle in `ARCHITECTURE.md`. Name what it follows from.
+  a principle in the repository's architecture document or
+  `docs/guidance/engineering/`. Name what it follows from.
 - **Convention** — the answer follows from how the nearest existing precedent
-  does the same thing (a sibling hint, kit, or configuration key). Cite the
+  does the same thing (a sibling hint, library, or configuration key). Cite the
   precedent.
 
 Present consequences and conventions together, once the judgements they depend
@@ -213,12 +250,13 @@ so the owner can confirm the batch or pull one out for discussion.
 Never ask the owner where documentation should live, at which test level a
 behaviour is proven, or which evidence a section records: state each as a
 provisional answer — the documentation destination in `proposal.md`, the test
-level from `TESTING.md` — for planning and review to confirm or move.
+level from `docs/guidance/engineering/test-levels.md` — for planning and review to
+confirm or move.
 
 ### Do not argue from absence of a caller alone
 
 "No planned change uses it" is not on its own a reason to leave a capability
-out. Check `docs/development/ROADMAP.md` and the dependent changes for where
+out. Check the roadmap `config load design` names and the dependent changes for where
 the work is heading, and when you recommend against building something for the
 future, ask the owner whether that future is anticipated. The owner often knows
 direction the documents do not yet record.
@@ -236,7 +274,7 @@ judges representations by looking at them.
 
 ### Walk every caller through a new interface
 
-When a decision creates or changes an interface — a kit's operations, a
+When a decision creates or changes an interface — a library's operations, a
 declaration format, a report — list every caller it will have, in this change
 and in changes that depend on it, and what each must do with it. Then confirm
 each caller can do that through the interface alone. A caller that would have
@@ -262,8 +300,9 @@ rationale.
 
 When the owner states a principle that settles a decision, apply it to the
 remaining open decisions before presenting them, and say where it applied.
-Principles the owner states that no document records are candidates for
-`ARCHITECTURE.md`; list them for the owner when the design is settled.
+Principles the owner states that no document records are candidates for the
+repository's architecture document, or for `docs/guidance/engineering/` where one holds in any
+repository; list them for the owner when the design is settled.
 
 When the owner's input changes or reverses your recommendation, append one line
 to the change's `interventions.jsonl` with the decision as the finding:
@@ -281,12 +320,15 @@ prerequisite's proposal, below.
 When the discussion shows the design cannot proceed until another change lands,
 that change is a prerequisite, and its workflow is the owner's to start. One change
 is worked per branch, so the prerequisite's proposal reaches this branch only
-through dev, never written here:
+through the branch this change lands on — `base` in `scripts/change-workflow find
+--json <change>` — never written here:
 
 1. With the owner, shape the prerequisite: its requirements and an initial
    `proposal.md` only. Its design is its own workflow's, started by the owner.
-2. Write it in a worktree on a new branch from dev, never on this branch:
-   `git worktree add ../<prerequisite>-proposal -b propose-<prerequisite> origin/dev`,
+2. Write it in a worktree on a new branch from that landing branch as its remote
+   holds it, never on this branch: `git worktree add ../<prerequisite>-proposal -b
+   propose-<prerequisite> <remote>/<landing>`, the remote being this branch's
+   upstream's,
    then, in that worktree, its directory under `openspec/changes/` and its
    `ready for design` row in that worktree's `openspec/changes/README.md`. Run
    `make -C ../<prerequisite>-proposal check-change-index`.
@@ -294,13 +336,14 @@ through dev, never written here:
    its pull request. Leave this change `in design`; do not record the dependency
    yet, since the index check refuses a `Depends on` entry naming a change this
    branch does not list. The design halts here.
-4. Once the proposal has merged to dev and dev has been merged into this branch,
+4. Once the proposal has merged to the landing branch and that branch has been
+   merged into this one,
    record the dependency: add the prerequisite to this change's `Depends on`
    gating `design` (`` `<prerequisite>` (design) ``), name it in `Notes`, keep the
    status `in design`, and run `scripts/change-workflow check index`. `blocked in design` is
    for reasons that are not another change; the dependency itself holds design,
    through section 1's entry check, and the design halts again until it lands.
-5. Once the prerequisite is archived and dev is merged in again, the index check
+5. Once the prerequisite is archived and the landing branch is merged in again, the index check
    refuses this change's dependency on an archived change. On the owner's word,
    drop only that dependency, leaving the status `in design`, run
    `scripts/change-workflow check index`, and resume the discussion.
@@ -319,13 +362,15 @@ When every decision is settled, and before writing anything:
   decisions added it, and whether any of it gives the change a new prerequisite
   or a second domain, subsystem, or acceptance boundary. Ask the owner
   explicitly whether any of it should be split into its own change, as
-  `openspec/README.md#defects-found-during-a-change` frames it: a small,
+  `docs/guidance/workflow/changes.md#defects-found-during-a-change` frames it: a small,
   understood defect fix, or unification the architecture favours, belongs in the
   change; work that is large, or not understood well enough to fix without a
   design of its own, is split. A change that can close out on its own is
   preferred to one waiting on another.
 - **List the principles the owner stated** that no permanent document records,
-  for promotion to `ARCHITECTURE.md`.
+  for promotion to the repository's architecture document, or to
+  `docs/guidance/engineering/` where one
+  holds in any repository.
 - **Settle the implementation cadence** with the owner, as a decision like any
   other: how many rounds implement the work, what each round covers before its
   review, and how many sessions implement each — in terms of the work, since the
@@ -349,7 +394,7 @@ Only when the owner says the design is settled:
   change's implementation cadence.
 - Keep under `## Open Questions` only what is genuinely deferred, each with what
   would trigger revisiting it. A question may not stay open while a task
-  prescribes its answer (`openspec/README.md#open-questions-and-prescribed-tasks`).
+  prescribes its answer (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`).
 - Amend `proposal.md` when scope, non-goals, capabilities, or impact moved, and
   keep its `## Permanent documentation impact` and `### Knowledge to promote`
   naming the permanent destination of every material decision: a bullet starting
@@ -378,7 +423,7 @@ once the design review's triage records that the change advances.
 The design phase ends with a design review, not with this skill. Tell the owner
 the design is ready for review and leave the status `in design`. Finishing after a
 return to design, recommend that the owner waive another design review when a
-criterion of `docs/agents/change-workflow.md`'s "Waivers" holds — what this session
+criterion of `change-workflow`'s CW-q3dm holds — what this session
 settled is confined to one requirement's wording, or to a choice the design review
 already weighed — naming the criterion and its evidence; with none holding,
 recommend none. Only the owner waives, and the orchestrating session writes the

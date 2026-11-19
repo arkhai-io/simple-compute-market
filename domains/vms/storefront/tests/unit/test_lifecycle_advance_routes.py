@@ -32,8 +32,10 @@ def _loop_names() -> set[str]:
     """Every name the lifecycle module defines for a loop."""
     return {
         lifecycle.NEGOTIATION_WATCHDOG,
+        lifecycle.DEAL_SERVICING,
+        lifecycle.DELIVERY_RECOVERY,
+        lifecycle.PAYMENT_RECONCILIATION,
         lifecycle.SETTLEMENT_SERVICING,
-        lifecycle.FULFILLMENT_RESUME,
         lifecycle.CAPACITY_EVENTS_POLLER,
         lifecycle.SITE_PROJECTION_POLLER,
         lifecycle.PUBLICATION,
@@ -48,24 +50,60 @@ async def _advance(route: str):
 
 class TestStepsReportRegisteredNames:
     async def test_settlement_servicing(self, monkeypatch):
-        swept = {"n": 0}
+        """The step runs the settlement worker alone, never the servicing cycle."""
+        calls: list[str] = []
 
         class _Worker:
             async def run_once(self):
-                swept["n"] += 1
+                calls.append("worker")
                 return 3
+
+        class _Lifecycle:
+            async def cycle(self):
+                calls.append("cycle")
+                return 1
 
         import market_storefront.container as container
 
         monkeypatch.setattr(
             container, "resolved_settlement_composition",
-            SimpleNamespace(worker=_Worker()), raising=False,
+            SimpleNamespace(worker=_Worker(), lifecycle=_Lifecycle()), raising=False,
         )
         result = await _advance("settlement-servicing")
 
         assert result["loop"] == lifecycle.SETTLEMENT_SERVICING
         assert result["processed"] == 3, "the sweep's own count must reach the caller"
-        assert swept["n"] == 1, "the advance must run exactly one cycle"
+        assert calls == ["worker"], "the advance must run exactly one worker sweep"
+
+    async def test_deal_servicing(self, monkeypatch):
+        """The step runs one page of the servicing cycle, and neither the worker
+        nor the delivery re-drive."""
+        calls: list[str] = []
+
+        class _Worker:
+            async def run_once(self):
+                calls.append("worker")
+                return 0
+
+        class _Lifecycle:
+            async def cycle(self):
+                calls.append("cycle")
+                return 2
+
+        class _Deliveries:
+            async def list_incomplete_vm_deliveries(self, *, limit):
+                calls.append("re-drive")
+                return []
+
+        monkeypatch.setattr(container, "resolved_sqlite_client", _Deliveries())
+        monkeypatch.setattr(
+            container, "resolved_settlement_composition",
+            SimpleNamespace(worker=_Worker(), lifecycle=_Lifecycle()),
+        )
+        result = await _advance("deal-servicing")
+
+        assert result == {"loop": lifecycle.DEAL_SERVICING, "processed": 2}
+        assert calls == ["cycle"]
 
     async def test_settlement_servicing_before_composition_is_unavailable(self, monkeypatch):
         from market_storefront_kit import LifecycleRouteError
@@ -77,14 +115,14 @@ class TestStepsReportRegisteredNames:
             await _advance("settlement-servicing")
         assert raised.value.status_code == 503
 
-    async def test_fulfillment_resume(self, monkeypatch):
-        """The step is the timer's whole cycle: it resumes unfinished
-        deliveries, then advances accepted payment deals."""
+    async def test_delivery_recovery(self, monkeypatch):
+        """The step re-drives unfinished deliveries alone; accepted payment
+        deals are the payment-reconciliation loop's."""
         calls: list[str] = []
 
         class _Deliveries:
             async def list_incomplete_vm_deliveries(self, *, limit):
-                calls.append("resume")
+                calls.append("re-drive")
                 return []
 
         class _Payments:
@@ -97,10 +135,35 @@ class TestStepsReportRegisteredNames:
             "resolved_settlement_composition",
             SimpleNamespace(payments_coordinator=_Payments()),
         )
-        result = await _advance("fulfillment-resume")
+        result = await _advance("delivery-recovery")
 
-        assert result["loop"] == lifecycle.FULFILLMENT_RESUME
-        assert calls == ["resume", "payments"]
+        assert result == {"loop": lifecycle.DELIVERY_RECOVERY, "redriven": 0}
+        assert calls == ["re-drive"]
+
+    async def test_payment_reconciliation(self, monkeypatch):
+        """The step advances accepted payment deals alone."""
+        calls: list[str] = []
+
+        class _Deliveries:
+            async def list_incomplete_vm_deliveries(self, *, limit):
+                calls.append("re-drive")
+                return []
+
+        class _Payments:
+            async def reconcile_once(self):
+                calls.append("payments")
+                return SimpleNamespace(attempted=2, failed=1)
+
+        monkeypatch.setattr(container, "resolved_sqlite_client", _Deliveries())
+        monkeypatch.setattr(
+            container,
+            "resolved_settlement_composition",
+            SimpleNamespace(payments_coordinator=_Payments()),
+        )
+        result = await _advance("payment-reconciliation")
+
+        assert result == {"loop": lifecycle.PAYMENT_RECONCILIATION, "attempted": 2, "failed": 1}
+        assert calls == ["payments"]
 
     async def test_site_projections(self, monkeypatch):
         """The step runs the poller's cycle on the injected state: every family
@@ -154,8 +217,10 @@ class TestEveryRouteNamesARegisteredLoop:
         """The route names are part of the wire contract callers already use."""
         assert set(lifecycle.controller().step_routes()) == {
             "negotiation-watchdog",
+            "deal-servicing",
+            "delivery-recovery",
+            "payment-reconciliation",
             "settlement-servicing",
-            "fulfillment-resume",
             "site-projections",
             "capacity-events",
             "publication",

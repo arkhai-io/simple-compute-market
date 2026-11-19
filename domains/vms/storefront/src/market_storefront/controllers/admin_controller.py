@@ -8,14 +8,13 @@ routes to return 404.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
-import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 from arkhai_vms_listings.reconciler import (
     ReconciliationScope,
     closed_available_listing_ids,
@@ -38,8 +37,9 @@ from core_storefront.models.system_models import (
 )
 from core_storefront.stage_log import stage_event
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
-from market_identity import RotationRequest, canonical_json
+from market_identity import RotationRequest
 
 import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
@@ -62,7 +62,10 @@ from market_storefront import lifecycle_steps as _lifecycle_steps  # noqa: F401 
 from market_storefront_kit import (
     LifecycleRouteError,
     StorefrontLifecycleRouteService,
+    StorefrontTimeRouteService,
+    TimeRouteError,
     TradingPauseRouteService,
+    time_refusal_body,
 )
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
@@ -98,6 +101,23 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 # `POOL_OVERRIDES_PATH`, the path the kit's client signs and the administrator
 # middleware binds, so the three name one path by construction.
 pool_overrides_router = APIRouter(tags=["admin"])
+
+# The time-setting route, a router of its own because the application mounts it
+# only while the process's source is injected; the administrator middleware
+# authenticates it as `admin_time`, without its timestamp's freshness.
+time_router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+@time_router.post("/time")
+async def set_time(request: Request) -> JSONResponse:
+    """Set the storefront's injected time to the instant the body carries."""
+    try:
+        answer = StorefrontTimeRouteService().set_time(await request.body())
+    except TimeRouteError as error:
+        return JSONResponse(
+            status_code=error.status_code, content=time_refusal_body(error)
+        )
+    return JSONResponse(content=answer)
 
 
 #: Route alias -> the loop's registered name. Aliases are hyphenated where loop
@@ -211,7 +231,7 @@ class AdminController:
                 self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
-                now=int(time.time()),
+                now=injected_time.now(),
             )
         except IdentityAuthorityError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -234,7 +254,7 @@ class AdminController:
                 StorefrontIdentityAuthority(self._db.db_path),
                 authority=authority,
                 subject=subject,
-                now=int(time.time()),
+                now=injected_time.now(),
             )
         except IdentityAuthorityError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -256,7 +276,7 @@ class AdminController:
                 self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
-                now=int(time.time()),
+                now=injected_time.now(),
             )
         except IdentityAuthorityError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -290,8 +310,8 @@ class AdminController:
     ) -> InterruptDealResponse:
         """Interrupt a hosted negotiation or a splitter-backed escrow.
 
-        Hosted notice rights come from the accepted option. Without a right,
-        delivery ends locally while the authority handles the correction.
+        Hosted callers select preemption or failure explicitly. Preemption
+        requires the accepted right; failure ends delivery and files a case.
         Splitter-backed escrows retain their separate on-chain declaration.
         """
         thread = await self._db.load_negotiation_thread_row(negotiation_id=escrow_uid)
@@ -302,25 +322,20 @@ class AdminController:
                 if agreement["settlement"]["settlement"]["schema"] == "arkhai.payments.v1":
                     if body.interrupted_at_utc is not None or body.seller_amount is not None or body.refund_amount is not None:
                         raise HTTPException(status_code=400, detail="Hosted interruption accepts no at or payout amounts")
-                    actor = self._operator(request).principal
-                    key = body.operation_key or hashlib.sha256(canonical_json({
-                        "negotiation_id": escrow_uid, "administrator": actor.model_dump(mode="json"),
-                        "reason": body.reason,
-                    })).hexdigest()
                     try:
-                        kind, outcome, delivery = await lifecycle.interrupt(
-                            escrow_uid, actor=actor, operation_key=key,
-                            reason=body.reason, dry_run=body.dry_run,
+                        result = await lifecycle.interrupt(
+                            escrow_uid, actor=self._operator(request).principal, operation_key=body.operation_key,
+                            reason=body.reason, interruption_kind=body.interruption_kind, dry_run=body.dry_run,
                         )
                     except (KeyError, ValueError) as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
                     return InterruptDealResponse(
                         escrow_uid=escrow_uid, listing_id=agreement["listing_id"],
-                        status="dry_run" if body.dry_run else outcome.status,
+                        status="dry_run" if body.dry_run else result.outcome.status,
                         interrupted_at_utc=self._interrupt_time(None),
-                        settlement_action="notice_stop" if kind == "stop" else "delivery_end_filing",
-                        lifecycle_outcome=outcome.model_dump(mode="json"),
-                        delivery=delivery.model_dump(mode="json"),
+                        settlement_action=result.settlement_action,
+                        lifecycle_outcome=result.outcome.model_dump(mode="json"),
+                        delivery=result.delivery.model_dump(mode="json"),
                     )
         escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
         if escrow is None:
@@ -543,7 +558,7 @@ class AdminController:
     @staticmethod
     def _interrupt_time(value: str | None) -> str:
         if not value:
-            dt = datetime.now(timezone.utc)
+            dt = injected_time.now_datetime()
         else:
             raw = value.strip()
             if raw.endswith("Z"):

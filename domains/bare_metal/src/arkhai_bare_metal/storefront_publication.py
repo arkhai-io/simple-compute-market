@@ -251,7 +251,6 @@ IDENTITY_FIELDS = (
 TERM_RESOURCE_FIELDS = (
     "access_methods",
     "min_duration_seconds",
-    "max_duration_seconds",
     # A price change refreshes the listing in place; the rate is outside the
     # shape digest, so it can never change a listing's identity.
     "asking_rate",
@@ -261,6 +260,7 @@ TERM_LISTING_FIELDS = (
     "settlement_options",
     "demands",
     "max_duration_seconds",
+    "available_until_utc",
     "title",
     "description",
     "metadata",
@@ -322,7 +322,7 @@ def compare_bare_metal_listing(
 
 def _normalized(value: Any, name: str) -> Any:
     # A list-valued term stored as absent and published as empty is one term.
-    if name != "max_duration_seconds" and value is None:
+    if name in ("accepted_escrows", "settlement_options", "demands", "access_methods") and value is None:
         return []
     return value
 
@@ -330,3 +330,19 @@ def _normalized(value: Any, name: str) -> Any:
 def listing_terms(record: Mapping[str, Any]) -> dict[str, Any]:
     """The term fields of a stored or fresh listing record."""
     return {name: record.get(name) for name in TERM_LISTING_FIELDS}
+
+
+def published_listing_resource(
+    listing_resource: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """A stored listing resource as a registry publication carries it.
+
+    Returns the machine's description and the listing's ``pricing`` object,
+    ``None`` when it states no price. The asking rate is stored beside the
+    shape it prices, but published in ``pricing``: a price is a term of sale,
+    not an attribute of the machine, and the compute schema's rate filters
+    read it there.
+    """
+    resource = dict(listing_resource)
+    rate = resource.pop("asking_rate", None)
+    return resource, ({"asking_rate": dict(rate)} if rate is not None else None)

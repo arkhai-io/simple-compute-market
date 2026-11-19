@@ -17,6 +17,7 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.negotiation_runtime import lookup_pool_policy_tags
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
@@ -30,7 +31,7 @@ _VM_REGISTRY = build_vm_storefront_registry(build_vm_storefront_domain())
 @pytest.fixture
 def db_path(tmp_path) -> str:
     path = str(tmp_path / "hold_cap_test.db")
-    SQLiteClient(db_path=path, registry=_VM_REGISTRY)
+    migrate_storefront_database(path)
     return path
 
 

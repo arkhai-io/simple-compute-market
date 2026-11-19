@@ -1,10 +1,10 @@
 """Round-trip the service's Alkahest escrow codecs against compose Anvil."""
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Any
 
+import injected_time
 import pytest
 from market_alkahest.dev_chain import anvil_address_book_path
 from alkahest_py import AlkahestClient
@@ -397,7 +397,7 @@ async def _build_obligation_data(
             address_config=address_config,
         )
         seed_uid = await seed_codec.create_obligation(
-            client, seed_data, expiration_unix=int(time.time()) + 3600
+            client, seed_data, expiration_unix=injected_time.now() + 3600
         )
         return {
             **common,
@@ -462,7 +462,7 @@ async def test_alkahest_escrow_codec_create_read(case_index: int, case: CodecCas
 
     obligation_data = await _build_obligation_data(case, w3, case_index)
     uid = await case.codec.create_obligation(
-        client, obligation_data, expiration_unix=int(time.time()) + 3600
+        client, obligation_data, expiration_unix=injected_time.now() + 3600
     )
     assert uid.startswith("0x")
     assert len(uid) == 66

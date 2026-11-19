@@ -143,8 +143,9 @@ def test_once_delivery_requires_validated_commitment_and_activation_for_noop_sta
         assert (await policy.authorize(DeliveryPhase.COMMIT, evidence)).status == "allow"
         assert (await policy.authorize(DeliveryPhase.COMMIT,
                 evidence.model_copy(update={"commitment_ref": "unverified"}))).status == "refuse"
-        assert (await policy.start_billing("op", evidence)).outcome.status == "rejected"
+        keys = OperationKeys("n", "op")
+        assert (await policy.start_billing(keys, evidence)).outcome.status == "rejected"
         activated = evidence.model_copy(update={"activated_delivery": ActivatedDeliveryRef(record_ref="a", activated_at=100)})
-        result = await policy.start_billing("op", activated)
+        result = await policy.start_billing(keys, activated)
         assert result.outcome.status == "accepted" and result.no_op
     asyncio.run(drive())

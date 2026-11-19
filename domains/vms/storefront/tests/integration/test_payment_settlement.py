@@ -41,6 +41,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.lifecycle_steps import payment_reconciliation_step
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -49,10 +50,9 @@ from market_storefront.middleware.seller_auth import listing_lifecycle_middlewar
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.deal_lifecycle import VmDealLifecycle
 from market_deal_servicing import create_lifecycle_router, PhysicalResult
-from market_deal_lifecycle_client import LifecycleClient
-from market_deal_lifecycle_contracts.models import CommitMessage
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 
@@ -73,6 +73,8 @@ class Delivery:
     def __init__(self) -> None:
         self.starts: list[str] = []
         self.fail = False
+        # When set, the deal is available with its continuation pending.
+        self.available = False
         # When set, delivery pauses after starting until ``release`` is set.
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
@@ -106,7 +108,10 @@ class Delivery:
         return result | {
             "state": "fulfilled",
             "fulfillment_id": "vm-fulfillment-1",
-            "domain_result": {"connection_details": "controlled VM"},
+            "domain_result": {
+                "connection_details": "controlled VM",
+                "outcome": "available" if self.available else "converged",
+            },
         }
 
 
@@ -137,8 +142,15 @@ def _option(*, deposit: bool, authority: dict | None = None) -> SettlementOption
 
 async def _seed(
     db: SQLiteClient, stage: PaymentSellerStage, *, deposit: bool, authority: dict | None = None,
+    start: datetime | None = None,
 ):
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    """``start`` is the Agreement start, by default the acceptance instant; an
+    earlier start is also when the deal was accepted, which settles late."""
+    accepted = datetime.now(timezone.utc)
+    if start is not None and start < accepted:
+        accepted = start
+    now = accepted.isoformat().replace("+00:00", "Z")
+    start_utc = start.isoformat().replace("+00:00", "Z") if start is not None else now
     provision = make_vm_provision_terms(
         duration_seconds=3600, ssh_public_key="ssh-ed25519 test"
     ).model_dump(mode="json")
@@ -153,7 +165,7 @@ async def _seed(
         amount=100,
         asset="USD/2",
         duration_seconds=3600,
-        start_utc=now,
+        start_utc=start_utc,
         accepted_at=now,
         provision_terms=provision,
     )
@@ -177,6 +189,8 @@ async def _seed(
         listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
+            "sla": 99.0,
+            "region": "test-region",
             "offering_mode": "vm",
             "pool_id": "pool-test",
             "resource_id": "resource-test",
@@ -206,11 +220,11 @@ async def _seed(
     )
     await db.commit_agreed_terms(
         negotiation_id=NEGOTIATION,
-        agreed_price=100,
+        negotiated_scalar=100,
         agreed_duration_seconds=3600,
         agreement_bytes=raw,
         accepted_at=now,
-        agreed_start_utc=now,
+        agreed_start_utc=start_utc,
         settlement_data=data.to_wire(),
     )
     await db.update_negotiation_thread_terminal(
@@ -248,28 +262,31 @@ class Harness(SimpleNamespace):
 
 async def _harness(
     tmp_path, *, deposit=False, actions=("emit_event",), authority=None, disputes=None,
-    mediation_transport=None,
+    mediation_transport=None, payments=None, physical=None,
 ):
     """``authority`` replaces the Agreement's dispute authority, ``disputes`` is
-    the storefront's dispute configuration document, and ``mediation_transport``
-    the network under every mediation client."""
+    the storefront's dispute configuration document, ``mediation_transport``
+    the network under every mediation client, and ``physical`` builds the end
+    service's physical end from the database and the harness's delivery, the
+    delivery itself by default."""
     delivery = Delivery()
     domain = replace(
         build_vm_storefront_domain(),
         fulfillment=ImmutableFulfillmentCapability(fulfill=delivery),
     )
     registry = build_vm_storefront_registry(domain)
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), registry=registry)
-    payments = FakePaymentsClient()
+    payments = payments or FakePaymentsClient()
     stage = PaymentSellerStage(_config(), client_for_owner=payments)
     data = await _seed(db, stage, deposit=deposit, authority=authority)
     coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
     lifecycle = VmDealLifecycle(
         db, SELLER, coordinator, RegistryDisputePolicy.from_document(disputes or {}),
         mediation_transport=mediation_transport,
+        physical=physical(db, delivery) if physical is not None else delivery,
     )
     coordinator.lifecycle = lifecycle
-    lifecycle.end.physical = delivery
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = registry
     _container.resolved_marketplace_signer = SELLER
@@ -338,6 +355,11 @@ async def _status_code(call) -> int:
 @pytest.mark.asyncio
 async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once(make):
     h = await make()
+    with sqlite3.connect(h.db.db_path) as conn:
+        conn.execute(
+            "UPDATE negotiation_threads SET negotiated_scalar = ? WHERE negotiation_id = ?",
+            ("10000", NEGOTIATION),
+        )
     pending = await h.settle()
     assert pending.pending and pending.retryable
     assert pending.settlement_ref == h.data.transaction_id
@@ -496,6 +518,18 @@ async def test_the_refund_failure_action_reverses_a_failed_payment_deal(make):
 
 
 @pytest.mark.asyncio
+async def test_an_available_deal_whose_continuation_is_pending_stays_open(make):
+    """Available with its continuation pending is fulfilled to the hook but not
+    finished: the delivery stays open for the resume pass to converge."""
+    h = await make()
+    h.delivery.available = True
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    assert (await h.db.load_vm_delivery(negotiation_id=NEGOTIATION))["status"] == "provisioning"
+
+
+@pytest.mark.asyncio
 async def test_without_the_refund_action_a_failed_deal_keeps_its_payment(make):
     h = await make()
     h.delivery.fail = True
@@ -646,13 +680,11 @@ async def _restart(h, tmp_path, *, approved: bool):
 @pytest.mark.asyncio
 async def test_an_approved_payment_converges_after_restart_without_the_buyer(make, tmp_path):
     """The buyer approved, never settled, and the storefront restarted: the seller delivers."""
-    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
-
     h = await make()
     restarted = await _restart(h, tmp_path, approved=True)
 
-    # What the fulfillment resume loop runs each sweep; no buyer request is made.
-    await _reconcile_payment_deals()
+    # What the payment-reconciliation loop runs each cycle; no buyer request is made.
+    await payment_reconciliation_step()
     task = restarted.coordinator.tasks.get(NEGOTIATION)
     assert task is not None
     await task
@@ -665,18 +697,16 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(mak
     assert delivery["status"] == "ready"
 
     # A later pass finds nothing left to do.
-    await _reconcile_payment_deals()
+    await payment_reconciliation_step()
     assert restarted.delivery.starts == [NEGOTIATION]
 
 
 @pytest.mark.asyncio
 async def test_reconciliation_leaves_an_unapproved_payment_pending(make, tmp_path):
-    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
-
     h = await make()
     restarted = await _restart(h, tmp_path, approved=False)
 
-    await _reconcile_payment_deals()
+    await payment_reconciliation_step()
 
     assert restarted.delivery.starts == []
     assert await restarted.db.load_vm_delivery(negotiation_id=NEGOTIATION) is None
@@ -754,22 +784,4 @@ async def test_a_malformed_agreement_never_stops_reconciliation(make):
 
     assert (done.attempted, done.failed) == (1, 0)
     await h.delivered()
-    assert h.delivery.starts == [NEGOTIATION]
-
-
-@pytest.mark.asyncio
-async def test_commit_reaches_available_without_buyer_settlement_status_poll(make):
-    h = await make()
-    h.serve()
-    async with LifecycleClient(
-        "http://test", BUYER, TrustedIdentitySet(identities=(SELLER.identity,)),
-        transport=h.transport,
-    ) as buyer:
-        committed = await buyer.commit(CommitMessage(
-            negotiation_id=NEGOTIATION, commitment_ref=h.data.transaction_id,
-            operation_key="commit",
-        ))
-        assert committed.outcome.status == "accepted"
-        await h.delivered()
-        assert (await buyer.read(NEGOTIATION)).delivery.progress == "active"
     assert h.delivery.starts == [NEGOTIATION]

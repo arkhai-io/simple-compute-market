@@ -646,7 +646,7 @@ Rendered inventories MUST emit `ansible_port` for every host, including hosts on
 
 An `ansible_port` supplied through the INI input format MUST be preserved rather than discarded. A value that is not a port number between 1 and 65535 MUST cause its entry to be rejected rather than replaced with a default, because a substituted port produces an unreachable host whose failure resembles a network fault rather than a bad inventory line.
 
-The registry MAY also record a tenant-facing port, `public_port`, for a host. The port belongs to version 2 of the `ssh` connection, which is version 1 with that one optional field, and version 2 is the only version of the kind the registry serves: every `ssh` connection is submitted and stored at version 2, whether it states a tenant-facing port, states none, or states it as null. A rendered inventory MUST emit `public_port` for a host whose record states one, and MUST NOT emit it for a host whose record states none. A host whose record states no tenant-facing port MUST be stored with no `public_port` field, not even a null one. A `public_port` supplied through the INI input format MUST be preserved, and a value that is not a port number between 1 and 65535 MUST cause its entry to be rejected, as for `ansible_port`. A connection built from the INI format or the typed connection factory MUST be submitted at version 2.
+The registry MAY also record a tenant-facing port, `public_port`, for a host. The port belongs to version 2 of the `ssh` connection, which is version 1 with that one optional field, and version 2 is the only version of the kind the registry serves: every `ssh` connection is submitted and stored at version 2, whether it states a tenant-facing port, states none, or states it as null. A connection submission MUST state its version; the host contract carries no default. A rendered inventory MUST emit `public_port` for a host whose record states one, and MUST NOT emit it for a host whose record states none. A host whose record states no tenant-facing port MUST be stored with no `public_port` field, not even a null one. A `public_port` supplied through the INI input format MUST be preserved, and a value that is not a port number between 1 and 65535 MUST cause its entry to be rejected, as for `ansible_port`. A connection built from the INI format or the typed connection factory MUST be submitted at version 2.
 
 #### Scenario: A host is registered on a tunnel port
 
@@ -686,7 +686,9 @@ The registry MAY also record a tenant-facing port, `public_port`, for a host. Th
 #### Scenario: A version-1 or unversioned connection is submitted
 
 - **WHEN** a host is submitted with an `ssh` connection at version 1, or stating no version
-- **THEN** the submission is refused naming version 2, the version served, and nothing is stored
+- **THEN** a version-1 submission is refused naming version 2, the version served; an
+  unversioned submission is refused as missing its required `version`; and nothing is
+  stored
 
 ### Requirement: Relays are administered resources
 
@@ -752,7 +754,7 @@ A pool's relay reference determines which relay a newly created delivery receive
 
 A host's pool assignment, a pool's relay reference, and a relay's address or port MUST NOT change while any affected host holds an active lease, unless the relay is the same on both sides of the change. The buyer holds a rendezvous address and a port; both are delivered, and a remote port is not portable between relays, so a rebinding that moved existing deliveries would strand every buyer on the affected hosts and request ports the new relay may already have leased.
 
-Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating existing workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables.
+Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating existing workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables. A change on the relay's side — its address or port, or its token — drains the relay instead, since it affects every pool referencing it: the operator disables the relay, waits until it reports drained, makes the change, and re-enables it. A refusal under this rule MUST state the drain at the scope that clears it: the pool for a pool's relay reference or a host's pool, the relay for a relay's address, port, or token.
 
 #### Scenario: A pool's relay reference is changed while VMs are running
 
@@ -777,7 +779,12 @@ Rebinding is therefore drain-then-change: disabling a pool already excludes it f
 #### Scenario: A relay is repointed while it carries leases
 
 - **WHEN** a relay's address or port is updated and it holds an active lease
-- **THEN** the update is rejected
+- **THEN** the update is rejected, and the refusal tells the operator to disable the relay, wait until it reports drained, make the change, and re-enable it
+
+#### Scenario: A pool's relay reference change is refused
+
+- **WHEN** a change to a pool's relay reference is rejected because a host in the pool holds an active lease
+- **THEN** the refusal tells the operator to disable the pool, wait for its leases to be released, make the change, and re-enable it
 
 #### Scenario: A VM is torn down after its pool was rebound
 
@@ -790,7 +797,7 @@ A relay's admission token MUST NOT be written into an accepted operation's persi
 
 An accepted operation MUST carry the relay reference and the leased remote port. The relay's address and admission token MUST be resolved immediately before the job's variables are written, so that a token rotated after acceptance takes effect on the next execution, including a retry of a job accepted before the rotation.
 
-A relay that is absent, disabled, or holds no token at execution MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically.
+A relay that is absent, or holds no token at execution, MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically. A disabled relay MUST NOT fail a job that holds a lease on it, whether the job adds the delivery's proxy or removes it: disabling a relay drains it, and a drain lets every leased delivery run to its end.
 
 The rendered variables file holds the decrypted token and MUST have the same lifetime and access restrictions as other decrypted secret material on the execution path.
 
@@ -811,8 +818,13 @@ The rendered variables file holds the decrypted token and MUST have the same lif
 
 #### Scenario: A relay becomes unusable between acceptance and execution
 
-- **WHEN** the referenced relay is disabled or its token cleared before the job executes
+- **WHEN** the referenced relay is absent or holds no token when the job executes
 - **THEN** the job fails as a configuration error and is not retried
+
+#### Scenario: A relay is disabled between acceptance and execution
+
+- **WHEN** the relay a job's lease names is disabled after the job is accepted and before it executes
+- **THEN** the job executes, whether it creates the delivery or tears it down
 
 ### Requirement: Relay port leases are unique per relay
 
@@ -1002,88 +1014,6 @@ hosts is a distinct concept and MUST keep its own name.
 - **THEN** each has its own `host_id`, and both declarations carry the same
   `physical_host_id` so cross-mode accounting sees one machine
 
-### Requirement: Existing host identities migrate without loss
-
-A compute provisioner MUST migrate every persisted host identity to `host_id` in one
-transaction before serving requests. It MUST read and validate every affected row
-before its first write, and the transaction MUST cover its schema changes as well as
-its data, so a failure leaves both unchanged. A declaration whose host spellings
-disagree, whose cross-mode accounting fields disagree between locations, or that
-names a host another declaration names, MUST abort the migration, naming the row.
-The migration MUST rewrite only the locations that carry a host identity; values an
-operator supplied, such as provider variables, MUST NOT be rewritten whatever their
-names.
-
-#### Scenario: A declaration carries both legacy spellings with one value
-
-- **WHEN** a declaration's `vm_host` and its publication `machine_id` name the same host
-- **THEN** the migration records that host as the declaration's `host_id` and removes
-  both legacy spellings
-
-#### Scenario: A declaration carries conflicting spellings
-
-- **WHEN** a declaration's `vm_host` and its publication `machine_id` name different hosts
-- **THEN** the migration aborts, names the declaration, and leaves the database's
-  schema and rows unchanged
-
-#### Scenario: An operator variable shares a retired key's name
-
-- **WHEN** a stored operation's provider variables include one named `machine_id`
-- **THEN** the migration rewrites the operation's host identity and leaves that
-  variable as it was
-
-### Requirement: A bare-metal storefront refuses state written under a retired listing kind
-
-A bare-metal storefront MUST refuse to start against a database whose persisted state
-was written under a listing kind it no longer decodes, and the refusal MUST name the
-operator procedure that resolves it. It MUST NOT start and then fail when a retired
-record is first decoded.
-
-#### Scenario: The storefront starts against a pre-rename database
-
-- **WHEN** a bare-metal storefront starts against a database written under
-  `bare_metal.v1`
-- **THEN** startup fails before serving requests, naming the reset procedure, and no
-  record is decoded or rewritten
-
-#### Scenario: The storefront starts against a fresh database
-
-- **WHEN** a bare-metal storefront starts against an empty database
-- **THEN** it creates its schema under the current listing kind and serves requests
-
-### Requirement: Host inventory is connection identity
-
-Host inventory records MUST describe how to reach and dispatch work to a machine —
-addressing, credentials, machine alias, pool membership, and enabled state — and
-MUST NOT be the authoritative source of a Physical Resource's sellable capacity.
-Capacity projection MUST NOT read host inventory records for capacity,
-attributes, or connection identity, and MUST NOT project a host that no capacity
-declaration names. A host record is joined to a capacity declaration only where
-its connection is used: at dispatch. Site admission, settlement scheduling, and
-capacity projection MUST learn of hosts only the identifiers of those taking new
-delivery, as the compute composition reports them.
-
-#### Scenario: Host record carries a legacy capacity column
-
-- **WHEN** a database still holds host capacity values from before capacity declarations
-  existed
-- **THEN** capacity projection does not read them, the projected capacity comes from the
-  declared capacity resource for that Physical Resource, and the ordered migrations drop the
-  values
-
-#### Scenario: Host inventory is inspected for capacity authority
-
-- **WHEN** the projection path is traced from host inventory to published capacity
-- **THEN** no host inventory record contributes capacity or attributes to the
-  projection, and the projection reads of hosts only the identifiers of those
-  taking new delivery
-
-#### Scenario: A host has no capacity declaration
-
-- **WHEN** no capacity declaration names a registered host
-- **THEN** the projection contains no entry for that host
-- **AND** no entry with empty or omitted capacity is published in its place
-
 ### Requirement: Execution inventory comes only from the registered host record
 
 The inventory an execution path hands to its executor SHALL be rendered from the
@@ -1144,53 +1074,6 @@ its host's tenant-facing address and port with the tenant account its job create
 - **WHEN** a tenant's connection details are produced for a host whose record names a
   tenant-facing address and no tenant-facing port
 - **THEN** they carry the tenant-facing address and the connection port
-
-### Requirement: Host writes declare no capacity
-
-A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when a host definitions document is applied, at startup or through its import API, not when an INI inventory is submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
-
-A host MUST be treated as already declared when any declaration names it as its
-`host_id`, which is also the only rule the capacity projection uses to correlate
-declarations to hosts.
-
-#### Scenario: Deployment configured only through host inventory
-
-- **WHEN** a provisioner applies a host definitions document, at startup or through its
-  import API, or an INI inventory through the host import API, and no capacity
-  declarations exist
-- **THEN** the hosts are registered, no capacity declaration is created for them, and
-  the capacity projection contains no entry for them
-
-#### Scenario: Existing hosts at upgrade
-
-- **WHEN** the ordered migration runs against a database holding hosts with legacy
-  GPU counts and no correlated declarations
-- **THEN** each such host receives a derived declaration before the service serves
-  requests
-
-#### Scenario: Operator declaration and legacy host value disagree
-
-- **WHEN** a host held a legacy GPU count and an operator has declared different capacity
-  for the same Physical Resource
-- **THEN** the operator's declaration is retained unchanged, and dropping the host's GPU
-  columns does not affect it
-
-#### Scenario: A host has no GPUs
-
-- **WHEN** a host is registered for a machine without GPUs
-- **THEN** no declaration is created for it, as for any host
-
-#### Scenario: A declaration's resource id differs from its host
-
-- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
-  host as its `host_id`
-- **THEN** the host is treated as declared
-
-#### Scenario: A host is created through the individual host API
-
-- **WHEN** an operator creates a host through the individual host API
-- **THEN** no declaration is created, and the host's capacity is declared through the
-  capacity administration surface
 
 ### Requirement: Capacity definitions are imported from a mounted document
 
@@ -1459,9 +1342,13 @@ and version before reading its fields, and MUST refuse a version it does not ser
 rather than read it as another, so a host stored at a version no longer served runs no
 work until it is submitted again at the served version. Such a submission MUST carry
 forward a protected value it still needs and does not resubmit, whatever the previous
-connection's version, as opaque material it neither reads nor decrypts. A stored connection MUST NOT
-be rewritten to another version except by a submission that states that version, and
-nothing upgrades a stored connection on its own.
+connection's version, as opaque material it neither reads nor decrypts. A stored
+connection MUST NOT be rewritten to another version except by a submission that states
+that version or by a recorded migration whose mapping from the stored version is exact;
+no reader upgrades a stored connection. The provisioning migration chain MUST rewrite
+every host's `ssh` connection stored at version 1 to version 2 with the same public
+fields and protected values; a job holds no copy of a connection, reading its host's
+when it is dispatched.
 
 #### Scenario: A compute domain needs another connection kind
 
@@ -1484,7 +1371,7 @@ nothing upgrades a stored connection on its own.
 #### Scenario: A stored connection is at an unsupported version
 
 - **WHEN** an execution path reads a stored connection whose version its codec does not
-  serve, such as a host stored at `ssh` version 1
+  serve
 - **THEN** it refuses the connection before any playbook runs, rather than reading it
   under another version's fields
 
@@ -1507,6 +1394,20 @@ nothing upgrades a stored connection on its own.
 
 - **WHEN** an inventory naming a host stored at `ssh` version 1 is imported
 - **THEN** the host is stored at version 2 with the connection and key its entry names
+
+#### Scenario: A provisioning database holding version-1 connections is migrated
+
+- **WHEN** the provisioning migration command runs against a database with hosts stored
+  at `ssh` version 1 and a queued create job and a queued teardown job naming those hosts
+- **THEN** the hosts are stored at `ssh` version 2 with the same public fields and
+  protected values, the jobs are unchanged, and the create and the teardown run against
+  version-2 connections when they are dispatched
+
+#### Scenario: A version-1 connection's fields are not valid at version 2
+
+- **WHEN** the provisioning migration finds a host's stored `ssh` version 1 connection
+  whose public fields the version-2 codec refuses
+- **THEN** the migration fails naming the host, and nothing is rewritten
 
 ### Requirement: Connection secrets stay protected
 
@@ -2299,27 +2200,6 @@ periodic watchdog processing MUST reconcile missed transitions.
 - **THEN** the assignment becomes abandoned and its held capacity is released
   atomically
 
-### Requirement: Active fulfillment migration
-
-The migration MUST place existing hosts into a default resource pool and MUST
-backfill settlement/fulfillment records for every active or releasing VM
-capacity reservation. It MUST infer the selected resource, provider, and
-versioned teardown input from durable fields used by the existing release
-path. Historical create input MAY be absent for already-active fulfillments.
-The migration MUST fail when an active reservation cannot be mapped
-unambiguously.
-
-#### Scenario: Existing active VM
-- **WHEN** the migration encounters an active VM with resolvable host, target,
-  and executor metadata
-- **THEN** it creates a backfilled fulfillment record capable of durable
-  teardown without a legacy release branch
-
-#### Scenario: Ambiguous active VM mapping
-- **WHEN** an active VM cannot be mapped unambiguously to a resource and
-  teardown input
-- **THEN** migration fails visibly rather than creating a partial record
-
 ### Requirement: The provisioning service answers an unroutable request by what failed to match
 
 The provisioning service's authentication middleware MUST answer a request that resolves to
@@ -2403,37 +2283,6 @@ letters and digits, is not at most 32 characters starting with a letter.
 
 - **WHEN** an operator creates a VM named so that its login exceeds 32 characters
 - **THEN** the request is refused with 422 naming the rule, and no job is submitted
-
-### Requirement: A host record describes no hardware
-
-A host record MUST NOT carry a GPU count, a GPU model, or any other description of the
-machine's hardware: a Physical Resource's hardware is stated only by its capacity
-declaration. The host API's create, update, and response models MUST NOT define such a field,
-and a request carrying `gpu_count` or `gpu_model` MUST be accepted with those fields ignored,
-as any field the models do not define is. The INI inventory format MUST NOT read `gpus=` or
-`gpu_model=`; like any variable it does not read, they are ignored without a warning. The
-provisioning service's ordered migrations MUST drop the host table's GPU columns after the
-migration that derived declarations from them.
-
-#### Scenario: A host is created with GPU fields
-
-- **WHEN** an operator creates a host through the host API with a body carrying `gpu_count`
-  and `gpu_model`
-- **THEN** the host is created, and neither its stored record nor its response carries a GPU
-  field
-
-#### Scenario: An inventory line carries GPU variables
-
-- **WHEN** host inventory is applied from an INI line carrying `gpus=8 gpu_model=H200`
-- **THEN** the host is registered from its connection fields and its pool, and nothing is
-  recorded or reported for the GPU variables
-
-#### Scenario: An existing database is upgraded
-
-- **WHEN** the ordered migrations run against a database whose hosts carry GPU counts and
-  models
-- **THEN** every host keeps its identity, connection, pool, and enabled state, and the host
-  table has no GPU column
 
 ### Requirement: VM hosts must provide hardware virtualization
 
@@ -2821,7 +2670,7 @@ Every proxy the buyer-facing tunnel client registers MUST carry, in its own meta
 
 ### Requirement: Each relay holds its own grant-signing key
 
-Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. A profile key's value MUST be the single-line standard base64 of an Ed25519 key's PKCS#8 DER, read after stripping surrounding whitespace; a value that is not MUST fail the import before any relay is created, naming the relay and the profile key and not disclosing the value. A key's identifier MUST be its RFC 7638 JWK thumbprint, the identifier the admission plugin derives from the public key. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until, each public half as the single-line base64 of its DER SubjectPublicKeyInfo, the form the plugin's configuration takes. Rotation MUST be two explicit operations: staging takes a private key supplied in the request, in the profile's form and under the same checks, or generates one when none is supplied, and returns its public half without signing with it; activating makes the staged key sign every later grant. A supplied private key MUST NOT appear in an access log, an error body, or the response. A retired key's grants MUST be reported valid until the latest grant expiry among the relay's unreleased leases allocated before the key was retired, since a lease whose job was retried across a rotation may hold grants signed by more than one key.
+Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. A profile key's value MUST be the single-line standard base64 of an Ed25519 key's PKCS#8 DER, read after stripping surrounding whitespace; a value that is not MUST fail the import before any relay is created, naming the relay and the profile key and not disclosing the value. A key's identifier MUST be its RFC 7638 JWK thumbprint, the identifier the admission plugin derives from the public key. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until, each public half as the single-line base64 of its DER SubjectPublicKeyInfo, the form the plugin's configuration takes. Rotation MUST be two explicit operations: staging takes a private key supplied in the request, in the profile's form and under the same checks, or generates one when none is supplied, and returns its public half without signing with it; activating makes the staged key sign every later grant. A supplied private key MUST NOT appear in an access log, an error body, or the response. A retired key's grants MUST be reported valid until the latest grant expiry among the relay's unreleased leases allocated before, or in the same second as, the key's retirement, since a lease whose job was retried across a rotation may hold grants signed by more than one key, and whole-second times cannot tell a lease allocated just before the retirement from one just after it.
 
 #### Scenario: A relay is read
 
@@ -2837,6 +2686,11 @@ Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at res
 
 - **WHEN** a job's attempt installs a grant signed with key A, key B is then activated, and a retry of the job signs its grant with B
 - **THEN** the relay read reports A's grants valid until that lease is released or its grant expires, whichever is first
+
+#### Scenario: A lease is allocated in the second its key is retired
+
+- **WHEN** a lease is allocated in the same second as key A's retirement
+- **THEN** the relay read reports A's grants valid at least until that lease's grant expiry while the lease is unreleased, and a lease allocated a second later does not extend it
 
 #### Scenario: A definition entry names a malformed grant key
 
@@ -3310,11 +3164,13 @@ already placed on it MUST be unaffected: an assignment made before the host was
 disabled keeps the host, its create waits at dispatch until the host is enabled
 again, and teardown and operator jobs run against the host. Enabling the host MUST
 lift that restriction: its declarations are then offered as any other declaration
-is, subject to their own `enabled`, their pool, fit, and availability. The host
-authority MUST report the hosts taking new
-delivery, as the identifiers of registered, enabled hosts, to the compute
-composition, which supplies the report to the site authority, for admission and
-its projections, and to settlement scheduling.
+is, subject to their own `enabled`, their pool and its relay, fit, and
+availability. The host authority MUST report the hosts it registers and has
+enabled, as their identifiers, to the compute composition. The composition MUST
+supply the site authority, for admission and its projections, and settlement
+scheduling the hosts taking new delivery: those hosts, less every host placed in,
+or with a declaration in, a pool referencing a disabled relay ("Disabling a relay
+drains it").
 
 #### Scenario: A host is disabled
 
@@ -3383,6 +3239,20 @@ When an `ssh` connection's protected private key cannot be decrypted with the co
 - **WHEN** system status is read while that host is enabled and an Ansible executor is real
 - **THEN** the `ansible` component is not ready, its reasons naming the host, and its key is reported as not existing, while every other enabled host's key is reported as it would be without it
 
+### Requirement: Bare-metal delivery enters through the core fulfillment hook
+
+Bare-metal payment settlement and the Alkahest ready continuation MUST start delivery by calling core's `fulfill_domain` with a `StorefrontFulfillmentContext`, never by calling the bare-metal fulfillment service directly. The registered bare-metal hook MUST build its service and the compute delivery path from the clients in the context's `ports` and the storefront's lifecycle in its `domain_input`, so every bare-metal delivery passes end-service admission and core's check that the result keeps the deal's negotiation, settlement reference and site.
+
+#### Scenario: A bare-metal payment deal settles
+
+- **WHEN** a bare-metal buyer's payment receipt verifies
+- **THEN** settlement calls `fulfill_domain`, the hook runs the delivery path with admission, and core validates the returned identities
+
+#### Scenario: The hook is called without the storefront's lifecycle
+
+- **WHEN** the bare-metal hook is invoked with no lifecycle in `domain_input`
+- **THEN** it refuses before any capacity or fulfillment call
+
 ### Requirement: A VM host's diagnostics are read through an operator job
 
 The VM operator surface MUST offer a host diagnostics action that runs as a job on a
@@ -3420,6 +3290,169 @@ parameters.
 - **WHEN** the provisioning service runs its mock profile
 - **THEN** the diagnostics job succeeds with default output the typed result parses
 
+### Requirement: Host inventory is connection identity, not capacity
+
+Host inventory records MUST describe how to reach and dispatch work to a machine —
+addressing, credentials, machine alias, pool membership, and enabled state — and
+MUST NOT be the authoritative source of a Physical Resource's sellable capacity.
+Capacity projection MUST NOT read host inventory records for capacity,
+attributes, or connection identity, and MUST NOT project a host that no capacity
+declaration names. A host record is joined to a capacity declaration only where
+its connection is used: at dispatch. Site admission, settlement scheduling, and
+capacity projection MUST learn of hosts only the identifiers of those taking new
+delivery, as the compute composition reports them.
+
+#### Scenario: Host inventory is inspected for capacity authority
+
+- **WHEN** the projection path is traced from host inventory to published capacity
+- **THEN** no host inventory record contributes capacity or attributes to the
+  projection, and the projection reads of hosts only the identifiers of those
+  taking new delivery
+
+#### Scenario: A host has no capacity declaration
+
+- **WHEN** no capacity declaration names a registered host
+- **THEN** the projection contains no entry for that host
+- **AND** no entry with empty or omitted capacity is published in its place
+
+### Requirement: Host writes create no capacity declaration
+
+A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when a host definitions document is applied, at startup or through its import API, not when an INI inventory is submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import.
+
+A host MUST be treated as already declared when any declaration names it as its
+`host_id`, which is also the only rule the capacity projection uses to correlate
+declarations to hosts.
+
+#### Scenario: Deployment configured only through host inventory
+
+- **WHEN** a provisioner applies a host definitions document, at startup or through its
+  import API, or an INI inventory through the host import API, and no capacity
+  declarations exist
+- **THEN** the hosts are registered, no capacity declaration is created for them, and
+  the capacity projection contains no entry for them
+
+#### Scenario: A host has no GPUs
+
+- **WHEN** a host is registered for a machine without GPUs
+- **THEN** no declaration is created for it, as for any host
+
+#### Scenario: A declaration's resource id differs from its host
+
+- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
+  host as its `host_id`
+- **THEN** the host is treated as declared
+
+#### Scenario: A host is created through the individual host API
+
+- **WHEN** an operator creates a host through the individual host API
+- **THEN** no declaration is created, and the host's capacity is declared through the
+  capacity administration surface
+
+### Requirement: A host record carries no hardware description
+
+A host record MUST NOT carry a GPU count, a GPU model, or any other description of the
+machine's hardware: a Physical Resource's hardware is stated only by its capacity
+declaration. The host API's create, update, and response models MUST NOT define such a field,
+and a request carrying `gpu_count` or `gpu_model` MUST be accepted with those fields ignored,
+as any field the models do not define is. The INI inventory format MUST NOT read `gpus=` or
+`gpu_model=`; like any variable it does not read, they are ignored without a warning.
+
+#### Scenario: A host is created with GPU fields
+
+- **WHEN** an operator creates a host through the host API with a body carrying `gpu_count`
+  and `gpu_model`
+- **THEN** the host is created, and neither its stored record nor its response carries a GPU
+  field
+
+#### Scenario: An inventory line carries GPU variables
+
+- **WHEN** host inventory is applied from an INI line carrying `gpus=8 gpu_model=H200`
+- **THEN** the host is registered from its connection fields and its pool, and nothing is
+  recorded or reported for the GPU variables
+
+### Requirement: Provisioning time is configured and set on its system surface
+
+The compute provisioning service MUST install its process time source from `time.source`, `"wall"` by default or `"injected"`. Under injected time it MUST serve `POST /api/v1/system/time` behind its administrator authentication, taking `{"now": <Unix seconds>}`, answering `{"source": "injected", "now": <Unix seconds>}` and refusing an earlier instant with `409 time_moves_forward` and an invalid body with `422 invalid_time`; its system status, `GET /api/v1/system/status`, MUST carry the time section. Its lease watchdog, lease termination and job engine MUST read the process time source for every instant they record or compare. The provisioning client MUST offer the setting call.
+
+#### Scenario: A truncated lease ends at the set instant
+
+- **WHEN** a lease truncated to 1794822300 is held by the paused lease watchdog, provisioning is set to 1794822300, and one watchdog cycle is stepped
+- **THEN** the lease ends by expiry with effective instant and claimed deadline 1794822300
+
+#### Scenario: A termination is stamped in lane time
+
+- **WHEN** an injected provisioning service at 1794822300 terminates a lease
+- **THEN** the lease-ended report states effective instant 1794822300
+
+### Requirement: Disabling a relay drains it
+
+Disabling a relay MUST drain it: it stops new work on the relay and lets the work already holding a lease on it run to its end, for a VM guest and a bare-metal grant alike. While a relay is disabled, no host in a pool referencing it MAY be among the hosts taking new delivery that the compute composition reports to the site authority, so no claim is admitted against, placed on, or projected enabled for those hosts' declarations; and fulfillment preparation MUST refuse to lease a port on it. A create whose lease was allocated before the disable, and every teardown and reclaim of a delivery leased on the relay, MUST run.
+
+Once a relay is disabled, no lease MUST be allocated on it, whoever asks: the allocator MUST refuse a new owner on a disabled relay, reading the relay under a lock that a concurrent disable cannot pass, so that a disable committed while an acceptance is in flight either waits for it or is seen by it. An owner already holding an active lease on the relay MUST still receive that lease when allocation is repeated. The set of a disabled relay's active leases therefore only shrinks.
+
+Disabling MUST be reversible. Enabling the relay again MUST return its pools' hosts to new delivery and allow allocation on it, whether or not it has drained; disabling removes no proxy, releases no lease, and changes neither the token nor a grant key.
+
+Removing the relay server is its operator's, outside this repository, once the relay has drained. Nothing in the provisioning service deletes a relay: a drained relay's row is kept, disabled, as the record its leases, retired keys, and pool references point at, and it keeps holding its rendezvous, so a server later reinstated at the same rendezvous is the same relay, enabled again.
+
+#### Scenario: A relay is disabled while it carries deliveries
+
+- **GIVEN** a relay holding active leases for a VM guest and a bare-metal grant
+- **WHEN** an operator disables the relay
+- **THEN** no new claim is admitted against or placed on a declaration of a host in a pool referencing it, those declarations are projected not enabled, and the guest's teardown and the grant's reclaim run when their leases end and release their ports
+
+#### Scenario: A claim reaches fulfillment on a disabled relay
+
+- **WHEN** fulfillment preparation runs for a pool whose relay is disabled
+- **THEN** it refuses before leasing a port, naming the relay
+
+#### Scenario: A new owner asks the allocator for a port on a disabled relay
+
+- **GIVEN** a disabled relay, and an owner already holding an active lease on it
+- **WHEN** allocation is requested on the relay for a new owner, standalone or in a caller's transaction, and again for the existing owner
+- **THEN** the new owner is refused and no lease is recorded for it, and the existing owner receives the lease it already holds
+
+#### Scenario: A relay is disabled while an acceptance is in flight
+
+- **WHEN** a relay's disable commits while a fulfillment acceptance that read the relay enabled has not yet committed
+- **THEN** either the disable waits until the acceptance commits, its lease among the relay's active leases, or the acceptance is refused and the relay holds no lease from it; the relay is never reported drained and then holds a new lease
+
+#### Scenario: A relay disabled by mistake is enabled again before it drains
+
+- **GIVEN** a disabled relay still holding active leases
+- **WHEN** an operator enables it again
+- **THEN** its pools' hosts take new delivery again, allocation on it resumes, and the deliveries it carried were never interrupted
+
+#### Scenario: The definition document stops listing a drained relay
+
+- **WHEN** a relay definition document that listed a relay is reconciled without it
+- **THEN** the relay is left as it is, neither deleted nor changed
+
+### Requirement: A relay reports whether it has drained
+
+Every relay read the administrator receives MUST report the relay's number of active leases as `active_lease_count`, and whether it has drained as `drained`: true exactly when the relay is disabled and holds no active lease. An enabled relay MUST NOT be reported drained. Whether a released lease's grant has expired MUST NOT bear on it: a released lease has no proxy left to admit, and once the relay's server, or on a shared relay its keys, is removed, no grant it signed admits anything. The relay's operator relies on `drained` to know the relay may be removed.
+
+Both fields MUST be required in the typed relay response, with no default, so that a client reading a service that does not report them fails to parse the response rather than reading an unknown as drained or not drained.
+
+#### Scenario: A disabled relay still carries a lease
+
+- **WHEN** the administrator reads a disabled relay holding one active lease
+- **THEN** the read reports `active_lease_count` 1 and `drained` false
+
+#### Scenario: A disabled relay's last lease is released
+
+- **WHEN** the administrator reads a disabled relay after its last active lease is released, while that lease's grant has not yet expired
+- **THEN** the read reports `active_lease_count` 0 and `drained` true
+
+#### Scenario: An enabled relay holds no lease
+
+- **WHEN** the administrator reads an enabled relay holding no active lease
+- **THEN** the read reports `drained` false
+
+#### Scenario: A client reads a service that does not report the drain
+
+- **WHEN** the typed relay response parses a relay read carrying neither `active_lease_count` nor `drained`
+- **THEN** parsing fails, and no drained value is reported
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
@@ -3429,12 +3462,12 @@ parameters.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
 - VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
-- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over the family's own schema; VM's pool configuration's relay reference, `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer and migrations, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_relay_migrations.py`, plus `provisioning/compute/service/tests/unit/services/test_definition_document_restart_safety.py`.
+- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over the family's own schema; VM's pool configuration's relay reference, `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_definition_document_restart_safety.py`.
 - Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
-- Host writes declaring no capacity — an INI import, a host definitions document applied at startup and through its import route, placed and unplaced, an inventory line carrying `gpus=` and `gpu_model=`, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- Host writes declaring no capacity — an INI import, a host definitions document applied at startup and through its import route, placed and unplaced, an inventory line carrying `gpus=` and `gpu_model=`, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`.
 - Host definitions documents — structural validation: `provisioning/compute/tests/unit/test_host_definitions.py`; stored-state evaluation, whole-entry replacement, codec-normalized equality, retention, the export and its round trip, and an import meeting a concurrent registration: `provisioning/compute/tests/integration/test_host_definitions.py`; the import and export routes through the typed client, a refused hook move, validate-only, and a quoted SSH port: `provisioning/compute/service/tests/integration/test_host_definitions_api.py`; the startup import, its order, a missing or refused document, the first document on a site with registered hosts, and a bare-metal pool binding: `provisioning/compute/service/tests/integration/test_host_definitions_startup.py`; the `hosts` digest kind: `provisioning/compute/service/tests/integration/test_definition_document_digest.py`; the retired inventory settings: `provisioning/compute/service/tests/unit/test_config.py` and `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's `definitions.hosts`: `helm/charts/provisioning/tests/test_render.py`.
-- A host record describing no hardware — the host models ignoring `gpu_count` and `gpu_model` and serializing neither: `provisioning/compute/contracts/tests/unit/test_contracts.py`; the INI parser ignoring `gpus=` and `gpu_model=`: `provisioning/compute/ansible/tests/unit/test_inventory.py`; no write recording a GPU field: `provisioning/compute/tests/integration/test_host_authority.py`; a host created and updated with GPU fields through the typed client, its stored row holding no GPU column: `provisioning/compute/service/tests/integration/test_hosts_api.py`; the column drop keeping every other value, leaving declarations and a fresh database alone, and rerunning as a no-op: `provisioning/compute/service/tests/integration/test_host_gpu_columns_drop_migration.py`.
-- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`; the `ansible_pool_configs` rebuild: `provisioning/compute/service/tests/integration/test_vm_pool_config_migration.py`.
+- A host record describing no hardware — the host models ignoring `gpu_count` and `gpu_model` and serializing neither: `provisioning/compute/contracts/tests/unit/test_contracts.py`; the INI parser ignoring `gpus=` and `gpu_model=`: `provisioning/compute/ansible/tests/unit/test_inventory.py`; no write recording a GPU field: `provisioning/compute/tests/integration/test_host_authority.py`; a host created and updated with GPU fields through the typed client, its stored row holding no GPU column: `provisioning/compute/service/tests/integration/test_hosts_api.py`.
+- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`.
 - A bare-metal grant and reclaim carrying the configured playbook, and the codec passing it to the plan: `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_plan.py` and `test_bare_metal_codec.py`; through the composed service: `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`.
 - `vm_playbook_path` resolution and refusal of the retired `playbook_path` in a profile and the environment layer: `provisioning/compute/service/tests/unit/test_config.py` and `test_worker.py`; through the app's lifespan: `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's renamed value and refused key: `helm/charts/provisioning/tests/test_render.py`.
 

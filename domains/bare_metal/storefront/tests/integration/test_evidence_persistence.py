@@ -8,6 +8,7 @@ import pytest
 
 from arkhai_bare_metal import BareMetalLeaseReadyEvidenceDocument, bare_metal_digest
 from arkhai_bare_metal.evidence import canonical_bare_metal_json
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 
@@ -61,6 +62,7 @@ def stored(client):
 
 async def test_first_document_wins_and_survives_a_repository_restart(tmp_path):
     path = str(tmp_path / "storefront.db")
+    migrate_storefront_database(path)
     client = SQLiteClient(path)
     seed(client)
     first = document()
@@ -95,6 +97,7 @@ async def test_first_document_wins_and_survives_a_repository_restart(tmp_path):
 async def test_corruption_is_refused_without_replacing_the_stored_content(
     tmp_path, corruption
 ):
+    migrate_storefront_database(tmp_path / "storefront.db")
     client = SQLiteClient(str(tmp_path / "storefront.db"))
     seed(client)
     first = document()

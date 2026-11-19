@@ -8,13 +8,14 @@ below is a development fixture and must never be used on a public network.
 from __future__ import annotations
 
 import pytest
-from market_arkhai_payments import resolve_payments_api_key
+from market_arkhai_payments import payments_livemode, resolve_payments_api_key
 from market_identity import Ed25519Signer
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
 from arkhai_bare_metal_storefront.config import (
     IDENTITY_CREDENTIAL_ENV,
     BareMetalConfigurationError,
+    configured_time_source,
     identity_credential,
     load_storefront_settings,
 )
@@ -68,6 +69,9 @@ def test_the_payments_mode_in_the_files_reaches_the_composed_stage(
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(settings.settlement)
 
     assert composition.arkhai_payments_stage().config.livemode is expected
+    # The mode the runtime's builder reads, which startup warns of beside an
+    # injected time source.
+    assert payments_livemode(settings.settlement) is expected
 
 
 def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
@@ -86,8 +90,11 @@ def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
     assert settings.capacity.publication_interval_seconds == 30
     assert settings.capacity.confirmation_window_seconds == 15
     assert settings.capacity.placement == "fill_first"
-    # No lease bound is shipped: a pool that resolves none is held, not refused.
+    # No lease bound is shipped: a pool that resolves none publishes with no
+    # relative limit, and startup is not refused.
     assert settings.pricing.default_max_duration_seconds is None
+    assert settings.pricing.default_premature_stop_penalty_periods == 24
+    assert settings.pricing.defaults.gpu == {}
     assert settings.registry.urls == []
     assert settings.settlement == {"schema_version": 1, "priority": []}
 
@@ -108,6 +115,35 @@ def test_each_file_layers_over_the_one_before(monkeypatch, tmp_path):
     assert settings.capacity.poll_interval == 2
     assert settings.capacity.publication_interval_seconds == 30
     assert settings.pricing.default_max_duration_seconds == 7200
+
+
+def test_a_configured_penalty_multiple_replaces_the_packaged_default(monkeypatch, tmp_path):
+    write_configuration(
+        monkeypatch, tmp_path, toml="[pricing]\ndefault_premature_stop_penalty_periods = 6\n",
+    )
+
+    assert load_storefront_settings().pricing.default_premature_stop_penalty_periods == 6
+
+
+def test_per_model_clauses_are_read_under_the_models_own_spelling(monkeypatch, tmp_path):
+    """``[pricing.defaults.gpu.<model>]`` keeps the model as a machine's shape
+    names it, its clauses read in any case like ``[pricing].settlements``; a
+    model stating no clauses defers to them."""
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        toml=(
+            "[pricing.defaults.gpu.H100]\n"
+            'settlements = [{ Mechanism = "alkahest.v1", asset = "USDC" }]\n'
+            "[pricing.defaults.gpu.A100]\n"
+        ),
+    )
+
+    gpu = load_storefront_settings().pricing.defaults.gpu
+
+    assert set(gpu) == {"H100", "A100"}
+    assert gpu["H100"].settlements == [{"mechanism": "alkahest.v1", "asset": "USDC"}]
+    assert gpu["A100"].settlements is None
 
 
 def test_the_secret_overlay_wins_on_a_conflicting_key(monkeypatch, tmp_path):
@@ -302,6 +338,12 @@ def test_section_and_key_names_are_read_in_any_case(monkeypatch, tmp_path):
                      "negotiation_watchdog_interval", id="a boolean interval"),
         pytest.param({"pricing": {"default_max_duration_seconds": "86400"}},
                      "pricing.default_max_duration_seconds", id="a bound as text"),
+        pytest.param({"pricing": {"default_premature_stop_penalty_periods": 0}},
+                     "pricing.default_premature_stop_penalty_periods", id="no penalty periods"),
+        pytest.param({"pricing": {"default_premature_stop_penalty_periods": -3}},
+                     "pricing.default_premature_stop_penalty_periods", id="negative penalty periods"),
+        pytest.param({"pricing": {"default_premature_stop_penalty_periods": 1.5}},
+                     "pricing.default_premature_stop_penalty_periods", id="fractional penalty periods"),
         pytest.param({"Identity": {"principal": {"scheme": "eip191", "identifier": "x"}}},
                      "identity.principal", id="a malformed principal"),
     ],
@@ -445,3 +487,26 @@ def test_administrators_are_every_subjects_principals(monkeypatch, tmp_path):
     principals = load_storefront_settings().administrator_principals()
 
     assert principals.identities == (ADMIN.identity, SELLER.identity)
+
+
+def test_the_time_source_is_wall_unless_set(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path)
+
+    assert configured_time_source() is None
+    assert load_storefront_settings().time.source == "wall"
+
+
+def test_an_injected_time_source_is_read_in_any_case(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path, toml='[Time]\nSOURCE = "injected"\n')
+
+    assert configured_time_source() == "injected"
+    assert load_storefront_settings().time.source == "injected"
+
+
+def test_a_misspelled_time_source_is_refused_naming_it(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path, toml='[Time]\nsource = "injectd"\n')
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert "[Time] source" in str(refused.value) and "injectd" in str(refused.value)

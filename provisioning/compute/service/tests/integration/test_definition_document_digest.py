@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
@@ -39,7 +39,7 @@ def session_factory():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(engine)
+    migrate_database(engine)
     return sessionmaker(bind=engine)
 
 

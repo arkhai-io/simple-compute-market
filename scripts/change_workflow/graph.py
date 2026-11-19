@@ -36,8 +36,9 @@ refuses every entry while it is not met (`entry_refusal`); a waivable one takes 
 owner's direction as its override.
 
 Beside the graph, `HOOK_STEPS` holds which steps may run each of the repository's
-hooks through `scripts/change-workflow run`; like the graph, no repository changes
-it (CW-u4pc).
+hooks through `scripts/change-workflow run`, and `STEP_ACTIONS` the engine's own
+actions before and after each step's session; like the graph, no repository changes
+either (CW-u4pc, CW-g6th, CW-ikmm).
 
 The change-workflow architecture shows the table as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
@@ -81,6 +82,12 @@ RETURN = "a return"
 OUT_OF_ORDER = "sections out of the plan's order"
 
 
+# A node named for no step of its own, by the step that runs it: its result names
+# that step, so a caller runs the step's target and the step's own route check reads
+# the result as naming it; the node is in the result's reason.
+_RUN_BY = {"late-merge": "merge"}
+
+
 @dataclass(frozen=True)
 class Node:
     """A step, with the kind of review it is or triages where it has one."""
@@ -96,7 +103,10 @@ class Node:
 
     def result(self, reason: str, **extra: Any) -> Result:
         """The computation's result naming this node's step: a review with its kind,
-        a triage with the kind of review it triages."""
+        a triage with the kind of review it triages, the merge after the archive as
+        the merge step, its reason naming the node."""
+        if (step := _RUN_BY.get(self.step)) is not None:
+            return {"step": step, "reason": f"{self.label}: {reason}", **extra}
         kind = {"kind": self.kind} if self.kind else {}
         return {"step": self.step, **kind, "reason": reason, **extra}
 
@@ -114,6 +124,8 @@ class Readings(Protocol):
     def changed_outside_inert(self, review: Any) -> str | None: ...
 
     def return_confirmed(self, run: Mapping[str, Any]) -> bool: ...
+
+    def landing_moved(self, run: Mapping[str, Any]) -> bool: ...
 
 
 Check = Callable[[Readings, Context], "Result | None"]
@@ -154,11 +166,14 @@ class Exit:
 
 @dataclass(frozen=True)
 class Standing:
-    """What the entry guards read of the change: whether it is archived, and the
-    kinds of review awaiting triage."""
+    """What the entry guards read of the change: whether it is archived, the kinds of
+    review awaiting triage, whether an archive cleanup run has finished, and whether
+    the change's index row says `archived`."""
 
     archived: bool
     awaiting: frozenset[str]
+    cleaned_up: bool = False
+    row_archived: bool = False
 
 
 # Why an entry guard is not met for an entry to `target`, the entry a direction
@@ -216,6 +231,13 @@ CLOSEOUT = Node("closeout")
 CLOSEOUT_REVIEW = Node("review", "closeout")
 CLOSEOUT_TRIAGE = Node("triage", "closeout")
 ARCHIVE_CLEANUP = Node("archive-cleanup")
+# Brings the branch the change lands on into an archived change's branch again, once
+# archive cleanup has run, with the merge step's skill and rules.
+LATE_MERGE = Node("late-merge")
+# Reads what the merge after the archive resolved and reconciled; its triage fixes
+# what it accepts.
+MERGE_REVIEW = Node("review", "merge")
+MERGE_TRIAGE = Node("triage", "merge")
 # The change is done: no step runs, and nothing leads on.
 DONE = Node("done")
 
@@ -249,8 +271,8 @@ def _fix_validated(exempt: str) -> Check:
         review = context["review"]
         if not readings.fixed_since(review, exempt):
             return None
-        return readings.validated(f"{review.triage.name} records another round, and the "
-                                  "fix committed since needs validating", exempt)
+        return readings.validated(f"{review.triage.name} records a fix committed since its "
+                                  "review read HEAD, which needs validating", exempt)
     return check
 
 
@@ -277,8 +299,24 @@ def _correction_validated(readings: Readings, context: Context) -> Result | None
                               "archive, so it is validated before archive cleanup")
 
 
+def _landing_contained(readings: Readings, context: Context) -> Result | None:
+    """The landing commit the first archive cleanup run recorded, contained in that
+    run's commit, as the log's writer decided as it wrote the line; otherwise the
+    branch moved while the change was closed out, and the merge after the archive
+    brings it in. Only the line is read, never a ref, so no fetch after it was
+    written changes the exit."""
+    run = context["run"]
+    if not readings.landing_moved(run):
+        return None
+    return LATE_MERGE.result(f"the archive cleanup run at seq {run.get('seq')} fetched "
+                             f"{(run.get('landing') or {}).get('branch')}, which its commit "
+                             "does not contain: the branch the change lands on moved during "
+                             "closeout, and the merge after the archive brings it in")
+
+
 VALIDATION_FAILED = "failed or inconclusive: owner"
 MERGE_VALIDATION_FAILED = "failed: merge, inconclusive: owner"
+LATE_MERGE_VALIDATION_FAILED = "failed: late-merge, inconclusive: owner"
 
 PLANNING_RELEASED = Guard("a dependency gating planning released", OWNER)
 IMPLEMENTATION_RELEASED = Guard("a dependency gating implementation released", OWNER)
@@ -309,6 +347,24 @@ DOCUMENTED_FIX_VALIDATED = Guard("a fix outside the inert paths validated", VALI
 CORRECTION_VALIDATED = Guard("a path outside the inert paths changed since the first "
                              "closeout review: HEAD validated", VALIDATE, VALIDATION_FAILED,
                              _correction_validated)
+# The merged `HEAD` after the archive, as before closeout: a failed validation names
+# the merge after the archive, which repairs what it found.
+LATE_MERGE_VALIDATED = Guard("the merged HEAD validated, inert paths exempt", VALIDATE,
+                             LATE_MERGE_VALIDATION_FAILED,
+                             _validated("archive cleanup needs a passing validation of the "
+                                        "HEAD merged after the archive", INERT,
+                                        failed=LATE_MERGE))
+LATE_MERGE_REVIEW_VALIDATED = Guard("the merged HEAD validated, records exempt", VALIDATE,
+                                    LATE_MERGE_VALIDATION_FAILED,
+                                    _validated("a merge review needs a passing validation of "
+                                               "the HEAD merged after the archive",
+                                               failed=LATE_MERGE))
+# On archive cleanup's exit to `done`: only the first archive cleanup run's, before
+# the pull request opens, is checked, so moving nothing under the owner's review; a
+# line recording no landing, written before the record existed or for a change with
+# nothing to fetch, reads as checked.
+LANDING_CONTAINED = Guard("the first archive cleanup's landing commit contained in its "
+                          "commit", LATE_MERGE, check=_landing_contained)
 
 # The entry guards. The archive is the boundary no entry crosses: an archived change
 # is not returned to an earlier phase, since its deltas are merged into the
@@ -342,12 +398,27 @@ def _never_directed(_: Standing, __: Mapping[str, Any], directed: bool) -> str |
     return "the change is done only once archive cleanup has run" if directed else None
 
 
+def _cleaned_up(standing: Standing, _: Mapping[str, Any], __: bool) -> str | None:
+    return None if standing.cleaned_up else "no archive cleanup run has finished"
+
+
+def _row_archived(standing: Standing, _: Mapping[str, Any], __: bool) -> str | None:
+    return None if standing.row_archived else (
+        "the change index has no row for the change saying archived: restore the row as "
+        "archive cleanup left it")
+
+
 NOT_ARCHIVED = EntryGuard("the change is not archived", check=_not_archived)
 ARCHIVED = EntryGuard("the change is archived", check=_archived)
 AWAITS_TRIAGE = EntryGuard("a review of its kind, or a validation after it, awaits triage",
                            check=_awaits_triage)
 CARRIES_TARGET = EntryGuard("it carries a target that is a node", check=_carries_target)
 NEVER_DIRECTED = EntryGuard("reached only by archive cleanup's exit", check=_never_directed)
+# Archive cleanup run again tells itself from a first run by the change's row saying
+# `archived`, so the merge after the archive, which archive cleanup follows, is not
+# entered without that row.
+CLEANED_UP = EntryGuard("archive cleanup has run", check=_cleaned_up)
+ROW_ARCHIVED = EntryGuard("the change's index row says archived", check=_row_archived)
 # The review checks it itself as it starts (`change_workflow.review`), taking the
 # owner's direction to it, or `--unvalidated`, as the override.
 REVIEW_VALIDATED = EntryGuard("the latest validation passed for HEAD, or for an ancestor it "
@@ -413,8 +484,22 @@ _STEPS = (
     _declare(CLOSEOUT_TRIAGE, ("closeout",),
              Exit(ARCHIVE_CLEANUP, (CORRECTION_VALIDATED,), ADVANCE),
              Exit(CLOSEOUT_REVIEW, when=ANOTHER_ROUND), entry=(ARCHIVED, AWAITS_TRIAGE)),
-    _declare(ARCHIVE_CLEANUP, ("closeout",), Exit(DONE), entry=(ARCHIVED,)),
+    _declare(ARCHIVE_CLEANUP, ("closeout",), Exit(DONE, (LANDING_CONTAINED,)),
+             entry=(ARCHIVED,)),
     Declaration(DONE, (), ("closeout",), None, (NEVER_DIRECTED,)),
+    # After the archive no exit returns: the archive's merge of the deltas into the
+    # specifications cannot be undone, so neither the merge after the archive nor its
+    # review's triage declares a return, and what cannot be resolved so that both
+    # sides hold is the owner's. Which of its exits the merge takes is its judgement.
+    _declare(LATE_MERGE, ("closeout",),
+             Exit(ARCHIVE_CLEANUP, (LATE_MERGE_VALIDATED,), ADVANCE),
+             Exit(MERGE_REVIEW, (LATE_MERGE_REVIEW_VALIDATED,), "a review"),
+             runs="merge", entry=(ARCHIVED, CLEANED_UP, ROW_ARCHIVED)),
+    _declare(MERGE_REVIEW, ("closeout",), Exit(MERGE_TRIAGE), entry=(ARCHIVED,)),
+    _declare(MERGE_TRIAGE, ("closeout",),
+             Exit(ARCHIVE_CLEANUP, (DOCUMENTED_FIX_VALIDATED,), ADVANCE),
+             Exit(MERGE_REVIEW, (DOCUMENTED_FIX_VALIDATED,), ANOTHER_ROUND),
+             entry=(ARCHIVED, AWAITS_TRIAGE)),
 )
 
 
@@ -452,23 +537,41 @@ STEPS: tuple[str, ...] = tuple(dict.fromkeys(d.runs for d in TABLE if d.runs))
 KINDS: tuple[str, ...] = tuple(dict.fromkeys(node.kind for node in NODES
                                              if node.step == "review" and node.kind))
 
-# Which steps may run each hook through `scripts/change-workflow run`: the workflow's
-# structure, which no repository changes. Only implementation, triage, and the merge
-# make functional changes, so only they relock or run the functional checks;
-# validation changes nothing it validates (CW-af15), and so runs only its own parts.
-# A `pre-commit` reports and changes nothing, so a review may run it. `validation`
-# is the preflight and every part's commands, `cleanup` every part's cleanup as one
-# list. `pre-push` and `post-clone` are run by the engine's own push and clone, by
-# no step.
+# Which steps may run each hook through `scripts/change-workflow run`, and the
+# gathering through `gather`: the workflow's structure, which no repository changes.
+# Only implementation, triage, and the merge make functional changes, so only they
+# relock or run the functional checks; validation changes nothing it validates
+# (CW-af15), and so only gathers evidence. A `pre-commit` reports and changes
+# nothing, so a review may run it. `gather` is the preflight and every kind's
+# commands, `cleanup` every kind's cleanup as one list. `pre-push` and `post-clone`
+# are run by the engine's own push and clone, by no step.
 HOOK_STEPS: dict[str, frozenset[str]] = {
     "after-functional-change": frozenset({"implement", "triage", "merge"}),
     "pre-commit-functional": frozenset({"implement", "triage", "merge"}),
     "pre-commit": frozenset({"design", "plan", "implement", "triage", "merge", "closeout",
                              "archive-cleanup", "review"}),
     "pre-archive": frozenset({"closeout"}),
-    "validation": frozenset({"validate"}),
+    "gather": frozenset({"validate"}),
     "cleanup": frozenset({"archive-cleanup"}),
+    "test-before": frozenset({"implement", "triage"}),
 }
+
+# When an action or a hook runs around a step's session.
+BEFORE, AFTER = "before", "after"
+# The engine's own actions around each step's session, by when they run and the
+# step, each a name of `HOOK_STEPS` run as that step: the gathering of the evidence
+# `HEAD` lacks before validation, and every kind's cleanup before archive cleanup.
+# Deterministic work belongs here, judgement to the step's skill. A repository's
+# `before-<step>` or `after-<step>` hook runs after the action of the same moment.
+STEP_ACTIONS: dict[tuple[str, str], tuple[str, ...]] = {
+    (BEFORE, "validate"): ("gather",),
+    (BEFORE, "archive-cleanup"): ("cleanup",),
+}
+
+
+def step_actions(when: str, step: str) -> tuple[str, ...]:
+    """The engine's actions `when` the step's session runs, before or after it."""
+    return STEP_ACTIONS.get((when, step), ())
 
 
 class TargetError(StepError):

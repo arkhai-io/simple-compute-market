@@ -268,6 +268,30 @@ def test_an_unchanged_registration_has_no_fault():
     assert registration_faults("bare_metal", _snapshot(), _snapshot(), now=NOW) == []
 
 
+@pytest.mark.parametrize("name", ["vm", "bare_metal"])
+@pytest.mark.parametrize("listings", [
+    (("current", "open", True), ("historical", "closed", True)),
+    (("current", "open", False), ("old-1", "closed", False), ("old-2", "closed", True)),
+    (("old-1", "closed", False), ("old-2", "closed", True)),
+])
+def test_reapply_preserves_unchanged_listing_history(name, listings):
+    before = _snapshot(listings=listings)
+    assert registration_faults(name, before, _snapshot(listings=listings), now=NOW) == []
+
+
+@pytest.mark.parametrize("listings", [
+    (("current", "open", True),),
+    (("current", "open", True), ("historical", "closed", True), ("extra", "closed", True)),
+    (("current", "open", True), ("replacement", "closed", True)),
+    (("current", "open", True), ("historical", "open", True)),
+    (("current", "open", True), ("historical", "closed", False)),
+], ids=["dropped", "added", "replaced", "reopened", "pause changed"])
+def test_reapply_rejects_a_changed_historical_listing(listings):
+    before = _snapshot(listings=(("current", "open", True), ("historical", "closed", True)))
+    faults = registration_faults("vm", before, _snapshot(listings=listings), now=NOW)
+    assert any("listings changed" in fault for fault in faults), faults
+
+
 @pytest.mark.parametrize(("after", "named"), [
     (_snapshot(listings=(("listing-1", "open", False), ("listing-2", "open", True))), "2 listings"),
     (_snapshot(listings=(("listing-1", "open", True),)), "listings changed"),

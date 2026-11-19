@@ -7,6 +7,8 @@ and never letting a protected value reach a response.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from market_resource_pools.db import Base as PoolsBase
 from market_resource_pools.db import ResourcePool
@@ -51,7 +53,13 @@ class _Codec:
 
 
 def _connection(address: str = "192.0.2.10", **secrets: str) -> ConnectionSubmission:
-    return ConnectionSubmission(kind="fake", public={"address": address}, secrets=secrets)
+    return ConnectionSubmission(kind="fake", version=1, public={"address": address}, secrets=secrets)
+
+
+def _instant(value: datetime) -> int:
+    """A stored time as Unix seconds: SQLite returns it naive, in UTC."""
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return int(aware.timestamp())
 
 
 @pytest.fixture
@@ -120,6 +128,22 @@ def test_no_ordinary_read_carries_a_protected_value(authority) -> None:
         assert set(view.connection.protected.values()) == {"reverse-v1"}
 
 
+def test_a_host_s_view_reports_the_process_source_s_instants(authority, source) -> None:
+    """A host's creation and last change are returned on its view, so they are
+    the source's instants, never the database's clock."""
+    registered_at = source.now() + 3600
+    source.set(registered_at)
+    registered = authority.register_host(HostCreate(host_id="h1", connection=_connection()))
+    assert _instant(registered.created_at) == registered_at
+    assert _instant(registered.updated_at) == registered_at
+
+    source.set(registered_at + 60)
+    authority.update_host("h1", HostUpdate(enabled=False))
+    updated = authority.get_host("h1")
+    assert _instant(updated.created_at) == registered_at
+    assert _instant(updated.updated_at) == registered_at + 60
+
+
 def test_lookup_hands_executors_the_protected_envelope(authority) -> None:
     authority.register_host(HostCreate(host_id="h1", connection=_connection(token="s3cret")))
 
@@ -136,7 +160,7 @@ def test_execution_hosts_carry_each_enabled_hosts_full_envelope_in_id_order(auth
         HostCreate(
             host_id="h1",
             connection=ConnectionSubmission(
-                kind="fake", public={"address": "192.0.2.11", "key_path": "/keys/h1"}
+                kind="fake", version=1, public={"address": "192.0.2.11", "key_path": "/keys/h1"}
             ),
         )
     )
@@ -169,11 +193,15 @@ def test_execution_hosts_of_an_empty_registry_are_none(authority) -> None:
 def test_a_connection_its_codec_refuses_is_not_stored(authority) -> None:
     with pytest.raises(ValueError, match="needs an address"):
         authority.register_host(
-            HostCreate(host_id="h1", connection=ConnectionSubmission(kind="fake", public={}))
+            HostCreate(
+                host_id="h1", connection=ConnectionSubmission(kind="fake", version=1, public={})
+            )
         )
     with pytest.raises(ValueError, match="not supported"):
         authority.register_host(
-            HostCreate(host_id="h1", connection=ConnectionSubmission(kind="ssh", public={}))
+            HostCreate(
+                host_id="h1", connection=ConnectionSubmission(kind="ssh", version=2, public={})
+            )
         )
     assert authority.get_host("h1") is None
 

@@ -25,7 +25,7 @@ from core_storefront.service_peers import (
     require_one_service_peer_per_site,
     seed_service_peers,
 )
-from core_storefront.sqlite_client import SQLiteClient
+from core_database import core_database
 
 # Deterministic development keys from fixed seeds; never use them on a public network.
 _CURRENT = Ed25519Signer(b"\x41" * 32)
@@ -47,7 +47,7 @@ def _peers(*signers: Ed25519Signer):
 @pytest.fixture
 def db_path(tmp_path) -> str:
     path = str(tmp_path / "storefront.db")
-    SQLiteClient(path)
+    core_database(path)
     return path
 
 

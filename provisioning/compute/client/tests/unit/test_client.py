@@ -36,6 +36,7 @@ from compute_provisioning_contracts import (
     HostUpdate,
     LeaseCheckResponse,
     PrincipalRotationResponse,
+    TimeSettingResponse,
     resolve_provisioning_route,
 )
 
@@ -615,6 +616,32 @@ async def test_each_worker_control_answers_its_model(variant, call, answer, mode
         await _close(client)
 
     assert result == model.model_validate(answer)
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_the_time_setting_answers_its_model(variant):
+    admin = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+    answer = {"source": "injected", "now": 1794822300}
+    client_type = (
+        ComputeProvisioningClient if variant == "async" else SyncComputeProvisioningClient
+    )
+    client = client_type(
+        "http://provisioner",
+        signer=admin,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),
+        transport=_signed_transport(admin, authority, expected_role="admin", answer=answer),
+    )
+    try:
+        result = client.set_time(1794822300)
+        if variant == "async":
+            result = await result
+    finally:
+        await _close(client)
+
+    assert result == TimeSettingResponse.model_validate(answer)
 
 
 _LEASE_GET = {

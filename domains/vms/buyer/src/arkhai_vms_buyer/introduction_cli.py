@@ -12,9 +12,9 @@ from __future__ import annotations
 from .evidence import evidence_store
 
 import json
-import time
 from typing import Any
 
+import injected_time
 import typer
 from arkhai_vms import make_vm_provision_terms
 from core_buyer import (
@@ -165,7 +165,7 @@ def request_introduction(
     selection = SettlementSelection(
         option_id=selected.option_id,
         settlement={"schema": selected.settlement_schema},
-        expiration_unix=int(time.time()) + expiration_seconds,
+        expiration_unix=injected_time.now() + expiration_seconds,
     )
     run_log = RunLog.start(
         command="market vm request-introduction",

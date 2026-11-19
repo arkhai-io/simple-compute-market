@@ -1,12 +1,17 @@
 """Signed site reports and surrender through the composed bare-metal app."""
 
 import asyncio
+import json
+import sqlite3
 import threading
+import time
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from compute_provisioning_contracts.lease_ends import LEASE_ENDED_CALLBACK, LeaseEndedEvent, sign_lease_end
+from market_arkhai_payments import PaymentSettlementData
+from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage
 from market_deal_servicing import EndSession
@@ -17,6 +22,10 @@ from site_trust import seeded_sites
 from storefront_client import StorefrontClient
 
 from integration.test_payment_settlement_client import BUYER, SELLER, harness, enabled, _runtime
+from integration.test_rate_delivery import PAYER as RATE_PAYER
+from integration.test_rate_delivery import accepted_recurring_deal, approve
+from recurring_world import MECHANISM, PAYMENTS_SERVICE, recurring_world
+from test_http_system import SELLER_SIGNER
 
 # Public deterministic development identity; never use on a public network.
 SITE = Ed25519Signer(bytes.fromhex("44" * 32))
@@ -136,3 +145,143 @@ async def test_ambiguous_release_waits_for_lawful_controlling_evidence(harness):
         assert not [intent for intent in end.intents(h.negotiation_id) if intent.kind == "filing"]
     # Replay preserves the original immutable request even after its correction.
     lifecycle.ingress.site_report(h.negotiation_id, body=body, headers={})
+
+
+def recorded_end(path, negotiation_id):
+    """The deal's selected end and its classification, ``None`` while pending."""
+    with transaction(path) as conn:
+        end = EndSession(conn)
+        selected = end.selected_end(negotiation_id)
+        return selected, end.classification(negotiation_id, selected.source_ref)
+
+
+def filings(path, negotiation_id):
+    with transaction(path) as conn:
+        return [intent for intent in EndSession(conn).intents(negotiation_id) if intent.kind == "filing"]
+
+
+async def withdraw(world, negotiation_id, *, at):
+    """The world's site withdraws the deal's reservation at ``at``, pushing its
+    signed report to the app's lease-ended callback; returns the report's source."""
+    with sqlite3.connect(world.db.db_path) as conn:
+        reservation, site_id = conn.execute(
+            "SELECT capacity_reservation_id, site_id FROM bare_metal_fulfillment_lifecycle WHERE negotiation_id=?",
+            (negotiation_id,),
+        ).fetchone()
+    bindings, peers = seeded_sites(world.db.db_path, {site_id: SITE.identity})
+    object.__setattr__(world.runtime, "site_bindings", bindings)
+    object.__setattr__(world.runtime, "service_peer_trust", peers)
+    report = sign_lease_end(LeaseEndedEvent(
+        event_id="site-withdrawal", capacity_reservation_id=reservation, site_id=site_id,
+        effective_at=at, cause="force_release", source_state="leased",
+        reason="site withdrawal", caller=SITE.identity,
+    ), SITE)
+    async with StorefrontClient(
+        "http://test", signer=SITE, caller_role="service",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=httpx.ASGITransport(app=world.app),
+    ) as site:
+        await site.authenticated_request(
+            "POST", LEASE_ENDED_CALLBACK["path"].format(capacity_reservation_id=reservation),
+            role="service", operation="lease_ended", resource=reservation, body=report.model_dump(mode="json"),
+        )
+    return "site-event:site-withdrawal"
+
+
+async def accepted_once_deal(world):
+    """Publish, then negotiate the once-only payments option to acceptance through the buyer's typed client."""
+    report = await world.publish()
+    (listing_id,) = [item["listing_id"] for item in report["actions"] if item["action"] == "publish"]
+    options = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
+    once = next(
+        option for option in options
+        if option["settlement"]["schema"] == MECHANISM and "period" not in option["settlement"]
+    )
+    reply = await world.buyer.negotiate_new(
+        listing_id=listing_id,
+        # The whole hour at the clause's 2.5 an hour, in base units.
+        initial_amount=2_500_000,
+        provision_terms={"kind": "bare_metal.v2", "version": 1, "payload": {
+            "duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 fixture", "access_method": "ssh",
+        }},
+        settlement_selection={
+            "option_id": once["option_id"],
+            "settlement": {"schema": MECHANISM, "payer_account": RATE_PAYER},
+        },
+        selection_only=True,
+    )
+    assert reply["action"] == "accept"
+    negotiation_id = reply["agreement"]["negotiation_id"]
+    thread = await world.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    raw = thread["settlement_data"]
+    return negotiation_id, PaymentSettlementData.parse(json.loads(raw) if isinstance(raw, str) else raw)
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_rate_deal_buyer_stop_is_an_entitled_stop_that_discharges_a_later_withdrawal(tmp_path):
+    payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
+    async with recurring_world(tmp_path, payments=payments) as world:
+        negotiation_id, data = await accepted_recurring_deal(world)
+        approve(payments, data)
+        await world.buyer.settle_agreement(negotiation_id)
+
+        # The on-demand buyer stops at the payment authority; the servicing
+        # cycle reads it there and records the stop.
+        payments.observed_at = int(time.time())
+        payments.engine.submit(data.transaction_id, {
+            "account": RATE_PAYER, "requestId": "buyer-stop", "event": {"kind": "stop"},
+        })
+        await world.admin.admin_run_lifecycle_cycle("deal-servicing")
+        stop, classification = recorded_end(world.db.db_path, negotiation_id)
+        assert stop.cause == "payer"
+        assert classification.kind == "entitled_stop"
+
+        # The site then withdraws the reservation: the seller failure is
+        # recorded after the buyer's classified end, which discharges its filing.
+        source = await withdraw(world, negotiation_id, at=world.runtime.lifecycle.clock())
+        with transaction(world.db.db_path) as conn:
+            end = EndSession(conn)
+            assert end.classification(negotiation_id, source).kind == "unentitled_withdrawal"
+            assert end.selected_end(negotiation_id) == stop
+        assert filings(world.db.db_path, negotiation_id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_once_only_deal_payment_term_end_is_the_term_end_and_a_later_withdrawal_files_nothing(tmp_path):
+    payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
+    async with recurring_world(tmp_path, payments=payments) as world:
+        negotiation_id, data = await accepted_once_deal(world)
+        assert all(part.root.kind == "once" for part in data.mandate.parts)
+        approve(payments, data)
+        await world.buyer.settle_agreement(negotiation_id)
+        with transaction(world.db.db_path) as conn:
+            record = EndSession(conn).read(negotiation_id)
+    assert record.available_at is not None
+
+    # Past the Agreement's end the payments service records the part's term
+    # end; the app, restarted then, reads it in its servicing cycle.
+    at = record.term_end + 60
+    payments.observed_at = at
+    async with recurring_world(tmp_path, payments=payments, clock=lambda: at) as world:
+        await world.admin.admin_run_lifecycle_cycle("deal-servicing")
+        with transaction(world.db.db_path) as conn:
+            end = EndSession(conn)
+            ends = {request.source_ref: (request, end.classification(negotiation_id, request.source_ref))
+                    for request in end.requests(negotiation_id)}
+        # The site withdraws after the term end: the seller failure follows a
+        # classified end, so its filing is discharged.
+        source = await withdraw(world, negotiation_id, at=record.term_end + 30)
+        with transaction(world.db.db_path) as conn:
+            withdrawal = EndSession(conn).classification(negotiation_id, source)
+        withdrawn = filings(world.db.db_path, negotiation_id)
+    [(stop, classification)] = [value for ref, value in ends.items() if ref.startswith("payment-stop:")]
+    assert (stop.cause, classification.kind) == ("terms", "terms"), ends
+    assert stop.ended_at >= record.term_end
+    # The storefront records its own term end at the Agreement's end, as every
+    # compute storefront's servicing cycle does.
+    own, own_classification = ends["term-end"]
+    assert (own.ended_at, own.cause, own.source, own_classification.kind) == (
+        record.term_end, "terms", "agreement", "terms",
+    )
+    assert withdrawal.kind == "unentitled_withdrawal"
+    assert withdrawn == []

@@ -22,8 +22,8 @@ from market_pool_overrides import (
     PoolOverrideService,
     ShapeFeasibility,
     SQLitePoolOverrideStore,
-    pool_override_migrations,
 )
+from market_pool_overrides.migrations import BASELINE
 
 SHAPE = {"gpu": {"count": 1, "model": "H100"}}
 LIVE = {"revision": 7, "digest": "live-7", "resource_pools": [{"pool_id": "gpu"}]}
@@ -49,6 +49,9 @@ class _Contribution:
         self.feasible = feasible
         self.judged = []
 
+    def projection_problems(self, site_pools, *, record):
+        return []
+
     def vocabulary_problems(self, record):
         return self.problems
 
@@ -62,8 +65,7 @@ class _World:
     def __init__(self, db_path, *, answer=LIVE, contribution=None, compile_error=None,
                  refresh_error=None, projection=None):
         conn = sqlite3.connect(db_path)
-        for migration in pool_override_migrations():
-            migration.apply(conn)
+        BASELINE.apply(conn)
         conn.commit()
         conn.close()
         self.events: list[str] = []

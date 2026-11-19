@@ -27,19 +27,17 @@ the agent skills, and the strict OpenSpec validation of the change, or of every
 specification for an archived change — run before its declared commands, each
 skipped only when `defaults.disable` names it; `check change <change>` runs them
 alone. A `pre-commit`, its defaults included, only reports, so a review may run it
-and the worktree is as it was.
+and the worktree is as it was. `after-functional-change` and `pre-commit-functional`
+may name `{tree}`, the worktree's tree as the hook starts, and `{commit}`, `HEAD`'s,
+so a functional check can leave evidence for the tree it checks.
 
-`run validation <change> preflight` runs the preflight, and `run validation <change>
-<part> run|start|collect` a part's command, an owed part's with `--owed <workflow>`,
-the workflow its run is for, which any other part refuses. A `start` is a dispatch
-that returns at once, promising its last line of standard output is the marker its
-`collect` waits past: the engine keeps that marker in the checkout's Git directory,
-for the commit, the part, and the owed workflow, so owed runs dispatched side by
-side never share one, and a retried `start` replaces it, so a collect always waits
-past the newest dispatch. It fills the collect's `{after}` from it; with none kept
-the collect refuses, naming the start to run. Each part ends with the closing line,
-which also names the part's evidence directory. `run cleanup <change>` runs every
-part's cleanup in declaration order, as one list.
+A kind's `start` is a dispatch that returns at once, promising its last line of
+standard output is the marker its `collect` waits past: the engine keeps that
+marker in the checkout's Git directory (`start`, `keep_marker`, `kept_marker`), for
+the tree or commit the kind's evidence describes, the kind, and an owed argument
+(`marker_key`). The gathering (`gather`) runs a kind's commands through this
+runner. `run cleanup <change>` runs every kind's cleanup in declaration order, as
+one list.
 
 Whatever ran is kept, naming its change, for the line of the session it ran in
 (`keep`), the session named by `CLAUDE_CODE_SESSION_ID`: the wrapper adds it to an
@@ -47,8 +45,7 @@ unattended run's line as `invoked`, the review to a Claude review's, and `record
 to an interactive run's. Outside a session nothing is kept.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-b2xr, CW-k9vd, CW-u4pc, CW-y6mj,
-CW-e1sg, CW-c8lw, CW-v2dq, CW-i2we, CW-t5hz, CW-g4oz, CW-x9bt, CW-zkhs, CW-ikmm, and
-CW-q5fy.
+CW-e1sg, CW-c8lw, CW-v2dq, CW-i2we, CW-t5hz, CW-x9bt, CW-ikmm, and CW-q5fy.
 """
 
 from __future__ import annotations
@@ -57,8 +54,10 @@ import fcntl
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,8 +65,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import index, skills, tasks
 from .common import SESSION_ID, UNATTENDED_RUN, Clock, Entry, StepError, utc_now
-from .config import (DEFAULT_CHECKS, PRE_COMMIT_FUNCTIONAL, Configuration, fill, placeholders,
-                     require)
+from .config import (COMMIT, DEFAULT_CHECKS, PRE_COMMIT_FUNCTIONAL, TREE, Configuration, fill,
+                     placeholders, require)
+from .evidence import worktree_tree
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import HOOK_STEPS, STEPS
 from .records import git_head, inert
@@ -75,14 +75,15 @@ from .running import git_state, invocations_directory, keep_invocations
 
 # The hooks `run` runs by name.
 NAMED = ("after-functional-change", "pre-commit", "pre-commit-functional", "pre-archive")
-# Validation's preflight and parts, `run validation <change> …`, and every part's
-# cleanup, `run cleanup <change>`.
-VALIDATION, CLEANUP, PREFLIGHT = "validation", "cleanup", "preflight"
-PHASES = ("run", "start", "collect")
+# The hooks whose commands may name the worktree's tree and `HEAD`'s commit.
+FUNCTIONAL_HOOKS = ("after-functional-change", "pre-commit-functional")
+# Every kind's cleanup, `run cleanup <change>`.
+CLEANUP = "cleanup"
+TEST_BEFORE = "test-before"
 # The prefix of every line the engine writes about a hook, so a reader tells it from
 # the commands' own output.
 PREFIX = "[change-workflow]"
-# Where a checkout keeps each change's started parts' markers, under its Git
+# Where a checkout keeps each change's started kinds' markers, under its Git
 # directory.
 MARKERS = "change-validation"
 
@@ -110,7 +111,7 @@ _MAKE_RECURSION = ("MAKELEVEL", "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES")
 
 
 def command_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
-    """The environment a hook's or a part's command runs in: the caller's, without
+    """The environment a hook's or a kind's command runs in: the caller's, without
     make's recursion state, so the command runs as a fresh invocation from the
     repository's root. A variable given to the outer make on its command line stays,
     since make exports it, but as an environment variable: a Makefile's `?=` takes
@@ -164,15 +165,18 @@ class Invoked:
     exit_status: int | None
     started: str
     seconds: float
-    part: str | None = None
+    kind: str | None = None
     owed: str | None = None
     phase: str | None = None
     check: str | None = None
     skipped: str | None = None
+    # Why a waived kind was gathered: its waiver lapsed.
+    lapsed: str | None = None
 
     def entry(self) -> Entry:
         found: Entry = {"hook": self.hook}
-        for key in ("part", "owed", "phase", "check", "command", "exit_status", "skipped"):
+        for key in ("kind", "owed", "phase", "lapsed", "check", "command", "exit_status",
+                    "skipped"):
             if (value := getattr(self, key)) is not None:
                 found[key] = value
         return {**found, "started": self.started, "seconds": round(self.seconds, 3)}
@@ -186,23 +190,23 @@ class Invoked:
         return self.command or f"the {self.check} check"
 
 
-def closing_line(name: str, invoked: Sequence[Invoked], commit: str | None,
-                 evidence: str | None = None, part: bool = False) -> str:
-    """The line the engine ends a hook or a part with, whatever its commands
-    printed: `<prefix> <name> at <commit>: passed, exit 0`, or `failed, exit <n>:`
-    and each failed command with its exit status, `<n>` the first's; a hook with
-    nothing to run says it was skipped, and why. A part's line ends `; evidence
-    <directory>`, or `none`."""
-    where = f"{PREFIX} {name} at {commit or 'no commit'}"
+def result(invoked: Sequence[Invoked]) -> str:
+    """What `invoked` came to: `passed, exit 0`, or `failed, exit <n>:` and each failed
+    command with its exit status, `<n>` the first's; nothing run but skipped,
+    `skipped, <why>`."""
     failed = [i for i in invoked if i.failed]
     if invoked and all(i.skipped for i in invoked):
-        result = f"skipped, {invoked[0].skipped}"
-    elif not failed:
-        result = "passed, exit 0"
-    else:
-        result = f"failed, exit {failed[0].exit_status}: " + "; ".join(
-            f"{i.shown} (exit {i.exit_status})" for i in failed)
-    return f"{where}: {result}" + (f"; evidence {evidence or 'none'}" if part else "")
+        return f"skipped, {invoked[0].skipped}"
+    if not failed:
+        return "passed, exit 0"
+    return f"failed, exit {failed[0].exit_status}: " + "; ".join(
+        f"{i.shown} (exit {i.exit_status})" for i in failed)
+
+
+def closing_line(name: str, invoked: Sequence[Invoked], commit: str | None) -> str:
+    """The line the engine ends a hook with, whatever its commands printed:
+    `<prefix> <name> at <commit>: <result>`."""
+    return f"{PREFIX} {name} at {commit or 'no commit'}: {result(invoked)}"
 
 
 @dataclass
@@ -217,9 +221,11 @@ class Hooks:
     clock: Clock = utc_now
     timer: Callable[[], float] = time.monotonic
     head: Callable[[Path], str | None] = git_head
+    # The tree of the worktree as it stands, which a functional hook checks.
+    tree: Callable[[Path], str] = worktree_tree
     echo: Callable[[str], None] = lambda shown: print(shown, flush=True)
     capture: Capture = capture
-    # Where the change's started parts' markers are kept, and where a session's
+    # Where the change's started kinds' markers are kept, and where a session's
     # invocations wait for its line; None outside a Git checkout.
     markers: Callable[[Path], Path | None] = lambda root: git_state(root, MARKERS)
     invocations: Callable[[Path], Path | None] = invocations_directory
@@ -246,6 +252,17 @@ class Hooks:
 
     def values(self, change: str, base: str | None, **more: str) -> dict[str, str]:
         return {"change": change, **({"base": base} if base is not None else {}), **more}
+
+    def identities(self, commands: Sequence[str]) -> dict[str, str]:
+        """The worktree's tree and `HEAD`'s commit, each only where one of `commands`
+        names it, since the tree is written through Git as the worktree stands now."""
+        named = {name for command in commands for name in placeholders(command)}
+        found: dict[str, str] = {}
+        if TREE in named:
+            found[TREE] = self.tree(self.root)
+        if COMMIT in named and (commit := self.head(self.root)) is not None:
+            found[COMMIT] = commit
+        return found
 
     def needs(self, commands: Sequence[str], values: Mapping[str, str], where: str) -> None:
         """Refuse, before anything runs, a command naming a value this run lacks."""
@@ -320,10 +337,14 @@ class Hooks:
 
     def hook(self, name: str, change: str, base: str | None) -> list[Invoked]:
         """One named hook: `pre-commit` its defaults and then its commands; any
-        other its commands, or skipped, saying so, when it is not declared."""
+        other its commands, or skipped, saying so, when it is not declared. A
+        functional hook's `{tree}` is the worktree's as the hook starts, after any
+        hook before it changed it, so it names the tree the hook checks."""
         commands = self.configuration.hook(name)
         values = self.values(change, base)
         if commands is not None:
+            if name in FUNCTIONAL_HOOKS:
+                values.update(self.identities(commands))
             self.needs(commands, values, f"hooks.{name}")
         ran = self.defaults(change) if name == "pre-commit" else []
         if commands is None:
@@ -338,7 +359,7 @@ class Hooks:
         """The hooks a commit of `changed` runs: the functional tier when any path
         lies outside the inert paths, `pre-commit` alone otherwise."""
         functional = [path for path in changed
-                      if not inert(path, self.configuration.inert_paths)]
+                      if not inert(path, self.configuration.repository_inert_paths())]
         tier = (["after-functional-change", "pre-commit-functional", "pre-commit"]
                 if functional else ["pre-commit"])
         if functional:
@@ -355,7 +376,10 @@ class Hooks:
         for name in tier:
             commands = self.configuration.hook(name)
             if commands is not None:
-                self.needs(commands, self.values(change, base), f"hooks.{name}")
+                # The identities are read as each hook starts; here only that a
+                # functional hook may name them.
+                given = dict.fromkeys((TREE, COMMIT), "") if name in FUNCTIONAL_HOOKS else {}
+                self.needs(commands, self.values(change, base, **given), f"hooks.{name}")
         passed = [self.finish(name, self.hook(name, change, base)) for name in tier]
         return all(passed)
 
@@ -381,69 +405,56 @@ class Hooks:
         """The default checks alone, as `check change` runs them."""
         return self.finish("default checks", self.defaults(change))
 
-    # Validation's preflight and parts, and their cleanup.
+    def test_before(self, change: str, base: str | None, commit: str | None,
+                    tests: Sequence[str]) -> bool:
+        """`run test-before <change> --test <path>…`: each test file as `HEAD` holds
+        it, run against the code at `commit`, in a detached worktree of its own that
+        is removed however the run ends, so the change's worktree is never touched.
+        A test that fails there and passes at `HEAD` shows the change made it pass.
+        It passes when every test ran, whatever the tests found: what each found is
+        its own line."""
+        self.allow(TEST_BEFORE)
+        commands = self.configuration.hook(TEST_BEFORE)
+        if not commands:
+            raise HookError("hooks.test-before is not declared, so no test can be run "
+                            "against an earlier commit")
+        if not commit:
+            raise HookError("test-before runs against a commit: give it with --at <commit>; "
+                            "with no round recorded there is no round base to default to")
+        if not tests:
+            raise HookError("test-before names the test files it runs, with --test <path>")
+        for test in tests:
+            if not (self.root / test).is_file() or Path(test).is_absolute() \
+                    or ".." in Path(test).parts:
+                raise HookError(f"{test} is no file of this checkout")
+        values = self.values(change, base, test=tests[0])
+        self.needs(commands, values, f"hooks.{TEST_BEFORE}")
+        scratch = Path(tempfile.mkdtemp(prefix="change-workflow-test-before-"))
+        tree = scratch / "tree"
+        added = subprocess.run(["git", "-C", str(self.root), "worktree", "add", "--detach",
+                                "--quiet", str(tree), commit], capture_output=True, text=True)
+        try:
+            if added.returncode != 0:
+                raise HookError(f"no worktree at {commit}: {added.stderr.strip()}")
+            for test in tests:
+                (tree / test).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(self.root / test, tree / test)
+            for test in tests:
+                filled = {**values, "test": test}
+                ran = [self._timed(lambda command=fill(c, filled): self.shell(command, tree),
+                                   hook=TEST_BEFORE, command=fill(c, filled))
+                       for c in commands]
+                self.echo(closing_line(f"{TEST_BEFORE} {test}", ran, commit))
+        finally:
+            subprocess.run(["git", "-C", str(self.root), "worktree", "remove", "--force",
+                            str(tree)], capture_output=True)
+            shutil.rmtree(scratch, ignore_errors=True)
+        return True
 
-    def validation(self, change: str, base: str | None, part_name: str,
-                   phase: str | None = None, owed: str | None = None) -> bool:
-        """`run validation <change> preflight`, or a part's `run`, `start`, or
-        `collect`, held to the hook table. An owed part takes the workflow it is
-        owed for, and any other refuses one. A `start`'s last line of standard
-        output is kept as its marker, for the commit, the part, and the workflow,
-        replacing any kept before; the matching `collect` fills `{after}` with it,
-        and refuses with none kept."""
-        self.allow(VALIDATION)
-        commit = self.head(self.root)
-        if commit is None:
-            raise HookError("validation reads the commit at HEAD, and none could be read")
-        if part_name == PREFLIGHT:
-            if phase is not None or owed is not None:
-                raise HookError("the preflight takes no phase and no --owed")
-            name = f"{VALIDATION} {PREFLIGHT}"
-            commands = self.configuration.preflight
-            values = self.values(change, base)
-            if commands is None:
-                return self.finish(name, self.skip(VALIDATION, "not declared",
-                                                   phase=PREFLIGHT))
-            self.needs(commands, values, "validation.preflight")
-            return self.finish(name, self.run_commands(VALIDATION, commands, values,
-                                                       phase=PREFLIGHT))
-        part = self.configuration.part(part_name)
-        if phase not in PHASES:
-            raise HookError(f"a part is run with one of {', '.join(PHASES)}; got {phase!r}")
-        if (phase == "run") != (part.run is not None):
-            raise HookError(f"validation.parts.{part.name} declares {part.shape}, so it is "
-                            f"run with {' or '.join(part.shape.split(', '))}, not {phase}")
-        if part.owed and owed is None:
-            raise HookError(f"validation.parts.{part.name} is owed: give the workflow its run "
-                            "is for with --owed <workflow>")
-        if owed is not None and not part.owed:
-            raise HookError(f"validation.parts.{part.name} is not owed, so it takes no --owed")
-        values = self.values(change, base, **({"owed": owed} if owed is not None else {}))
-        key = _marker_key(commit, part.name, owed)
-        if phase == "collect":
-            after = self._kept(change).get(key)
-            if after is None:
-                raise HookError(f"no start of {part.name}{f' for {owed}' if owed else ''} at "
-                                f"{commit} has kept a marker; run `scripts/change-workflow "
-                                f"run validation {change} {part.name} start"
-                                f"{f' --owed {owed}' if owed else ''}` first")
-            values["after"] = after
-        commands = getattr(part, phase)
-        self.needs(commands, values, f"validation.parts.{part.name}.{phase}")
-        labels = {"part": part.name, "owed": owed, "phase": phase}
-        if phase == "start":
-            ran, marker = self._start(commands, values, labels)
-            self._keep_marker(change, key, marker if not any(i.failed for i in ran) else None)
-        else:
-            ran = self.run_commands(VALIDATION, commands, values, **labels)
-        name = " ".join([VALIDATION, part.name, *([owed] if owed else []), phase])
-        self.echo(closing_line(name, ran, commit, part.evidence, part=True))
-        return not any(i.failed for i in ran)
-
-    def _start(self, commands: Sequence[str], values: Mapping[str, str],
-               labels: Mapping[str, str | None]) -> tuple[list[Invoked], str | None]:
+    def start(self, hook: str, commands: Sequence[str], values: Mapping[str, str],
+              labels: Mapping[str, str | None]) -> tuple[list[Invoked], str | None]:
         """Run a `start`'s commands, and return them and the last line its last
-        command printed."""
+        command printed: the marker its `collect` waits past."""
         ran, marker = [], None
         for command in commands:
             resolved = fill(command, values)
@@ -455,7 +466,7 @@ class Hooks:
                 printed.append(last)
                 return status
 
-            ran.append(self._timed(call, hook=VALIDATION, command=resolved, **labels))
+            ran.append(self._timed(call, hook=hook, command=resolved, **labels))
             marker = printed[0]
         return ran, marker
 
@@ -464,6 +475,10 @@ class Hooks:
         if directory is None:
             raise HookError(f"{self.root} is no Git checkout, so no start's marker can be kept")
         return directory / f"{change}.json"
+
+    def kept_marker(self, change: str, key: str) -> str | None:
+        """The marker kept for `key`, or None."""
+        return self._kept(change).get(key)
 
     def _kept(self, change: str) -> dict[str, str]:
         path = self._markers_file(change)
@@ -474,7 +489,7 @@ class Hooks:
         except FileNotFoundError:
             return {}
 
-    def _keep_marker(self, change: str, key: str, marker: str | None) -> None:
+    def keep_marker(self, change: str, key: str, marker: str | None) -> None:
         """Keep `marker` for `key`, replacing any kept before; a start that failed,
         or printed nothing, keeps none, so its collect refuses."""
         path = self._markers_file(change)
@@ -494,18 +509,20 @@ class Hooks:
             kept.write(json.dumps(markers, ensure_ascii=False, indent=1, sort_keys=True))
 
     def cleanup(self, change: str, base: str | None) -> bool:
-        """`run cleanup <change>`: every part's cleanup, in declaration order, as one
-        list, each command run whatever an earlier one reported."""
+        """`run cleanup <change>`: every kind's cleanup, in declaration order, as one
+        list, each command run whatever an earlier one reported; `{tree}` and
+        `{commit}` are the checkout's as the cleanup starts."""
         self.allow(CLEANUP)
-        parts = [part for part in self.configuration.parts or () if part.cleanup]
-        values = self.values(change, base)
-        for part in parts:
-            self.needs(part.cleanup or (), values, f"validation.parts.{part.name}.cleanup")
-        if not parts:
-            return self.finish(CLEANUP, self.skip(CLEANUP, "no part declares a cleanup"))
-        ran = [invoked for part in parts
-               for invoked in self.run_commands(CLEANUP, part.cleanup or (), values,
-                                                part=part.name, phase=CLEANUP)]
+        kinds = [kind for kind in self.configuration.kinds or () if kind.cleanup]
+        values = self.values(change, base, **self.identities(
+            [command for kind in kinds for command in kind.cleanup or ()]))
+        for kind in kinds:
+            self.needs(kind.cleanup or (), values, f"validation.evidence.{kind.name}.cleanup")
+        if not kinds:
+            return self.finish(CLEANUP, self.skip(CLEANUP, "no kind declares a cleanup"))
+        ran = [invoked for kind in kinds
+               for invoked in self.run_commands(CLEANUP, kind.cleanup or (), values,
+                                                kind=kind.name, phase=CLEANUP)]
         return self.finish(CLEANUP, ran)
 
     def keep(self, change: str) -> None:
@@ -521,8 +538,11 @@ class Hooks:
                   f"line: {exc}", file=sys.stderr)
 
 
-def _marker_key(commit: str, part: str, owed: str | None) -> str:
-    return " ".join([commit, part, *([owed] if owed else [])])
+def marker_key(identity: str, kind: str, owed: str | None) -> str:
+    """A start's marker is kept for the tree or commit its kind's evidence describes,
+    the kind, and an owed kind's argument, so owed runs started side by side never
+    share one and a later start of the same key replaces it."""
+    return " ".join([identity, kind, *([owed] if owed else [])])
 
 
 def worktree_changes(root: Path) -> list[str]:
@@ -561,20 +581,19 @@ def run_openspec(configuration: Configuration, arguments: Sequence[str], root: P
 
 
 def main(hook: str, change: str, *, root: Path, configuration: Configuration,
-         environ: Mapping[str, str], base: str | None = None, part: str | None = None,
-         phase: str | None = None, owed: str | None = None,
+         environ: Mapping[str, str], base: str | None = None,
+         commit: str | None = None, tests: Sequence[str] = (),
          hooks: Hooks | None = None) -> int:
-    """`run <hook> <change>`, `run validation <change> preflight|<part> <phase>`, or
-    `run cleanup <change>`: 0 when it passed, 1 when it failed or was refused, its
-    reason on standard error. What ran is kept for the session's line, however it
-    ended."""
+    """`run <hook> <change>`, `run cleanup <change>`, or `run test-before <change>`:
+    0 when it passed, 1 when it failed or was refused, its reason on standard error.
+    What ran is kept for the session's line, however it ended."""
     runner = hooks or Hooks(root, configuration, environ)
     try:
         change_directory(root, change)
-        if hook == VALIDATION:
-            passed = runner.validation(change, base, part or "", phase, owed)
-        elif hook == CLEANUP:
+        if hook == CLEANUP:
             passed = runner.cleanup(change, base)
+        elif hook == TEST_BEFORE:
+            passed = runner.test_before(change, base, commit, tests)
         else:
             passed = runner.named(hook, change, base, lambda: worktree_changes(root))
     except (ChangeNotFound, StepError) as exc:

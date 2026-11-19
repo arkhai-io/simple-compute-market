@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
+import injected_time
 from arkhai_apicredits.settlement.issuance_evidence import (
     ApiCreditsIssuanceEvidenceBodyV1,
     ExpectedApiCreditsIssuanceEvidenceV1,
@@ -116,7 +115,7 @@ class IssuanceEvidenceRepository:
                     digest,
                     fulfillment_id,
                     canonical,
-                    datetime.now(timezone.utc).isoformat(),
+                    injected_time.now_datetime().isoformat(),
                 ),
             )
             connection.commit()
@@ -223,7 +222,7 @@ class ApiCreditPrivateResultRepository:
                         owner.identifier,
                         key_id,
                         secret,
-                        datetime.now(timezone.utc).isoformat(),
+                        injected_time.now_datetime().isoformat(),
                     ),
                 )
             elif row is not None and row[4] != secret:
@@ -284,7 +283,7 @@ class ApiCreditsIssuanceEvidenceService:
         *,
         signer: Signer,
         trusted_issuers: TrustedIdentitySet,
-        clock: Callable[[], int] = lambda: int(time.time()),
+        clock: Callable[[], int] = injected_time.now,
         max_future_skew_seconds: int = 30,
     ) -> None:
         if signer.identity not in trusted_issuers:

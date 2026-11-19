@@ -46,6 +46,25 @@ architecture](../market-composition/architecture.md#settlement-runtime-compositi
 There is no required convention protocol or speculative adapter dependency,
 including for seller-first or fused stages.
 
+What an accepted option means in money is the installed mechanism's to say, so
+neutral code never parses a mechanism's payment fields. A registration's
+`project_billing` labels an accepted option's money `total` or `per_period`, with the
+period, and core's `agreed_price` dispatches to it through the registry; its
+`present_payment` gives a buyer the quote, a separate setup charge and the initial
+reserve to display, and the registry refuses a presentation that changes accepted
+money. A missing hook refuses rather than guessing a total. Reading an accepted option
+needs only the installed code, not current enablement or readiness, since a deal
+accepted under a mechanism since disabled must still be read. A composition likewise
+maps each mechanism to the term timing its recurring options need at acceptance —
+period, approval window and lifecycle context — and refuses an option whose mechanism
+supplies none. Whether a composition services recurring options at all is its
+`[Settlement.rate_servicing]` declaration, which publication, acceptance and
+materialization read as one object and accepted-deal continuation never reads (see the
+[storefront publication architecture](../storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors)).
+The installed payments adapter projects and presents once-only options and refuses rate
+parameters, and Alkahest projects totals, so no recurring option is serviceable until a
+mechanism supplies its projections.
+
 ## Readiness, publication, and selection
 
 Preflight normalizes mechanism-owned checks into a public-safe result: canonical ID, configured, enabled, ready, blocker codes and messages, capabilities, and contract/schema versions. Mechanism detail is allowlisted. Status is observational: it does not publish, create transient browser actions, submit transactions, or mutate provider or settlement state.
@@ -95,13 +114,13 @@ Mechanism subcommands remain asymmetric. Arkhai payments has no marketplace paye
 
 Resolution order is explicit CLI override, environment or Secret overlay, role/user configuration files — for a storefront, `storefront.toml` then a chart-rendered `storefront.json` — then committed defaults. Lists replace lower-layer lists in full. Typed metadata drives role templates, dotted-path validation, environment schema fragments, each storefront chart's generated values-schema definition, and reference output so these surfaces drift together. That definition refuses secret-marked and role-inapplicable fields and closes typed sections; it carries no defaults, because a chart passes the configuration through and the storefront owns them.
 
-Public principals, payment receipt trust pins, fee/dispute policy, account references, assets, condition profiles, chain names, and deployed addresses may be ordinary configuration. Private identity, wallet, or request credentials cross only approved Secret or environment boundaries. A service's secrets are settings in its secret overlay: a storefront's payments key is `[Settlement.arkhai_payments].api_key` and its dispute credentials are `[[DisputeCredential]]` entries with an `api_key`, both there, while a buyer's payments key is named by `api_key_env` for the provider that reads it. Each form has one resolution, and the mediation client receives the resolved token. A private payments CA is the payments section's `ca_bundle_path`, trusted by the payments client alone. Payment-provider, administrator, webhook, ledger database, and service-migration configuration belongs to the payments service and is rejected by marketplace schemas.
+Public principals, payment receipt trust pins, fee/dispute policy, account references, assets, condition profiles, chain names, and deployed addresses may be ordinary configuration. Private identity, wallet, or request credentials cross only approved Secret or environment boundaries. A service's secrets are settings in its secret overlay: a storefront's payments key is `[Settlement.arkhai_payments].api_key` and its dispute credentials are `[[DisputeCredential]]` entries with an `api_key`, both there, while a buyer's payments key is named by `api_key_env` for the provider that reads it. Each form has one resolution, and the mediation client receives the resolved token. A private CA is configured beside the client that trusts it, never as a process trust store: a private payments CA is the payments section's `ca_bundle_path`, trusted by the payments client alone, and a dispute authority's is its `[[DisputeCredential]]`'s `ca_bundle_path`, trusted by that authority's mediation client alone. The credential carries it because it is bound to the authority's identity and present in every role that talks to the authority, including a lane's, which takes its authority from the registry and has no `[[Dispute]]` entry. A bundle the client cannot load leaves the credential unusable, as an unresolvable token does: a storefront logs a warning naming the authority, the exception's type and the configured path, and reports the deal repair required, and a buyer's filing reads the authority as unreachable. Payment-provider, administrator, webhook, ledger database, and service-migration configuration belongs to the payments service and is rejected by marketplace schemas.
 
 ## Configuration migration and recovery
 
 Settlement configuration migration is explicit, previewable, conflict-rejecting, validated, backed up with restrictive permissions, and atomically replaced. Storefront publication migration separately converts legacy scalar pricing in storefront configuration into complete typed clauses. A source that would require one ambiguous price to construct multiple mechanism options is rejected for manual resolution. Both migrations preserve unrelated TOML bytes where possible, require an explicit backup before writing, and are no-ops when repeated. Runtime accepts only the typed hierarchy and publication inputs. Legacy Stripe settings are rejected with removal diagnostics, not mapped to a payment account, credential, mandate, or transaction.
 
-Deployment stages migration tooling before the rejecting runtime, previews and backs up every role file, publication config, and inventory, quiesces publication and config automation, migrates all surfaces, validates them, and then activates the clean-cutover release. Before activation, rollback restores matching configuration, inventories, and artifacts together. After new publication or settlement effects begin, recovery rolls forward.
+Deployment stages migration tooling before the rejecting runtime, previews and backs up every storefront and buyer configuration file, publication config, and inventory, quiesces publication and config automation, migrates all surfaces, validates them, and then activates the clean-cutover release. Before activation, rollback restores matching configuration, inventories, and artifacts together. After new publication or settlement effects begin, recovery rolls forward.
 
 Run logs may retain the public configuration schema version and mechanism-set fingerprint, but exact accepted Agreement bytes, settlement data, and domain/obligation progress remain authoritative. Recovery uses the accepted canonical mechanism and stable operation identities even when that mechanism is disabled for new deals.
 

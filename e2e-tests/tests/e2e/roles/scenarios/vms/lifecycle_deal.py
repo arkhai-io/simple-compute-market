@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time
 from dataclasses import dataclass
 
+import injected_time
 from compute_provisioning_contracts import MockRuleCreate
 from compute_provisioning_contracts.lease_ends import SignedLeaseEndedReport, verify_lease_end
 from market_deal_lifecycle_client import LifecycleClient
@@ -51,7 +51,7 @@ class TypedLifecycleBuyer:
         self.buyer, self.seller_wallet, self.site_capacity = buyer, seller_wallet, site_capacity
 
     def purchase(self, listing_id, provisioning, test_client):
-        expiration = int(time.time()) + ESCROW_TTL_SECONDS
+        expiration = injected_time.now() + ESCROW_TTL_SECONDS
         option, escrow = alkahest_opening(self.registry.get_listing(listing_id))
         opened = self.client.negotiate_new(
             listing_id=listing_id, initial_amount=BUYER_INITIAL_PRICE,
@@ -184,7 +184,7 @@ class Stage12b_BuyerSurrendersTwice:
         for name in ("negotiation_id", "operation_key", "receipt_at", "selected_end"):
             assert again[name] == first[name], (name, first, again)
         assert first["delivery"]["progress"] == "tearing_down", first
-        advance_storefront(storefront_admin_client, "settlement-servicing")
+        advance_storefront(storefront_admin_client, "deal-servicing")
         delivery = vm_lifecycle_buyer.read(purchase)
         assert delivery["progress"] == "tearing_down", delivery
         assert len(delivery["site_reports"]) == 1, delivery

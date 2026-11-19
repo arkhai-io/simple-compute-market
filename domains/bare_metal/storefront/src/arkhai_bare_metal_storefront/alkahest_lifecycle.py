@@ -1,8 +1,8 @@
 """Deliver an Alkahest-settled bare-metal deal from the servicing worker.
 
 Settle verify adopts the escrow's obligation; this step, the worker's ready
-hook for Alkahest, then starts or resumes the fulfillment, waits for the lease
-to become active, and binds a fulfillment the worker can check and collect: an
+hook for Alkahest, then drives the deal's delivery through the fulfillment hook
+until it is available, and binds a fulfillment the worker can check and collect: an
 on-chain string obligation whose data is the digest of the deal's lease-ready
 evidence. The body stays with the storefront, since it names the deal's parties
 and a chain is public and permanent.
@@ -60,8 +60,6 @@ REJECTION_BOUND = 3
 
 # Settlement outcomes that end a deal without paying for it.
 _UNCOLLECTED_ENDS = frozenset({"expired", "reclaimed", "failed"})
-# Physical states in which the fulfillment will not become active on its own.
-_FAILED_STATES = frozenset({"failed", "teardown_failed", "torn_down", "released"})
 
 
 class BareMetalAlkahestFulfillmentError(RuntimeError):
@@ -220,31 +218,31 @@ class BareMetalAlkahestLifecycle:
     async def _lease_ready_evidence(
         self, record: SettlementObligationRecord
     ) -> BareMetalLeaseReadyEvidenceDocument | None:
-        """Start or resume delivery; return the evidence once the lease is active."""
+        """Drive delivery; return the evidence once the deal is available.
+
+        Publication is the continuation of a delivered deal, so it runs once
+        availability is recorded even when an end has fallen due since: the
+        claim settles service already delivered. A deal ended before it was
+        available is refused for the worker to retry.
+        """
 
         negotiation_id = record.agreement_ref
         escrow_uid = self._escrow_uid(record)
-        service = self.fulfillment_service()
-        await service.begin(
-            negotiation_id=negotiation_id,
-            settlement_ref=escrow_uid,
-            buyer_principal=record.payer_principal,
-        )
-        lifecycle = await service.status(
+        delivered = await self.fulfillment_service().deliver(
             negotiation_id=negotiation_id,
             buyer_principal=record.payer_principal,
         )
-        state = str(lifecycle.get("state") or "")
-        if state in _FAILED_STATES:
+        if delivered.settlement_ref != escrow_uid:
             raise BareMetalAlkahestFulfillmentError(
-                f"bare-metal fulfillment is {state}"
-                + (
-                    f": {lifecycle['failure_reason']}"
-                    if lifecycle.get("failure_reason")
-                    else ""
-                )
+                "the delivered settlement is not the obligation's escrow"
             )
-        if state != "active":
+        lifecycle = dict(delivered.domain_result or {})
+        if not delivered.public_result.get("available"):
+            if delivered.public_result.get("outcome") == "ended":
+                raise BareMetalAlkahestFulfillmentError(
+                    f"bare-metal delivery ended before it was available ({delivered.state})"
+                    + (f": {delivered.failure_reason}" if delivered.failure_reason else "")
+                )
             return None
         if (
             lifecycle.get("lease_ready_evidence_json") is not None

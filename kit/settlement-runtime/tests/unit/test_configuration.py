@@ -199,6 +199,22 @@ def test_registration_and_priority_fail_deterministically() -> None:
         registry.resolve({"priority": [], "demo": {"enabled": True}}, role="buyer")
 
 
+def test_a_seller_root_declares_rate_servicing_and_a_buyer_root_cannot() -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    raw = {"priority": [], "rate_servicing": {"demo": {"treatments": ["charged"], "setup": True}}}
+
+    declared = registry.resolve(raw, role="seller").rate_servicing.select("demo.pay.v1")
+
+    assert (declared.treatments, declared.setup) == (frozenset({"charged"}), True)
+    assert registry.resolve({"priority": []}, role="seller").rate_servicing.declarations == {}
+    with pytest.raises(SettlementConfigurationError, match="unknown Settlement keys: rate_servicing"):
+        registry.resolve(raw, role="buyer")
+    with pytest.raises(SettlementConfigurationError, match="names no installed mechanism"):
+        registry.resolve({"rate_servicing": {"ghost": {"treatments": []}}}, role="seller")
+    with pytest.raises(SettlementConfigurationError, match="rate_servicing must be a table"):
+        registry.resolve({"rate_servicing": ["demo"]}, role="seller")
+
+
 def test_registration_rejects_unqualified_duplicate_and_sensitive_fields() -> None:
     base = _registration()
 

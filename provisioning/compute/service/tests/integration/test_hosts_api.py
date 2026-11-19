@@ -782,16 +782,19 @@ class TestConnectionVersions:
     _PUBLIC = {"ssh_host": "198.51.100.1", "ssh_user": "ubuntu", "key_path": "/home/appuser/.ssh/id_ed25519"}
 
     async def test_a_registration_stating_no_version_is_refused(self, client_and_queue):
-        """A submission that states no version is read as version 1, which is
-        not served: it is refused rather than read as version 2."""
+        """Rejection-path test: the typed client refuses to build a connection
+        without its required ``version``, so the body is written here by hand
+        and signed through the family transport under the route's declaration.
+        It asserts the status and the stored hosts only: the submission is
+        refused, never read as some default version."""
         client, _ = client_and_queue
         with pytest.raises(ComputeProvisioningError) as refused:
-            await client.family.register_host(HostCreate(
-                host_id="unversioned",
-                connection=ConnectionSubmission(kind="ssh", public=self._PUBLIC),
-            ))
-        assert refused.value.status_code == 400
-        assert "is at version 2, not 1" in str(refused.value)
+            await client.family.authenticated_request(
+                "POST",
+                "/api/v1/hosts/",
+                {"host_id": "unversioned", "connection": {"kind": "ssh", "public": self._PUBLIC}},
+            )
+        assert refused.value.status_code == 422
         with pytest.raises(ComputeProvisioningError) as missing:
             await client.family.get_host("unversioned")
         assert missing.value.status_code == 404

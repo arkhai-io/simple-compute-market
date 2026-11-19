@@ -55,16 +55,16 @@ from market_identity import (
 )
 
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from compute_provisioning.relays import RelayExecutionResolver, RelayService
-from compute_provisioning.relays.db import Base as RelaysBase
+from compute_provisioning.relays import (
+    RelayDeliverableHosts,
+    RelayExecutionResolver,
+    RelayService,
+)
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 from compute_provisioning.executor_leases import ExecutorLeaseService
-from compute_provisioning.hosts.db import Base as HostsBase
-from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.leases import LeaseRouteService
@@ -81,9 +81,6 @@ from market_fulfillment import (
     SqlAlchemyFulfillmentUnitOfWork,
     SqlAlchemySchedulingUnitOfWork,
 )
-from market_fulfillment.db import Base as FulfillmentBase
-from market_resource_pools.db import Base as PoolsBase
-from market_site.db import Base as SiteBase
 from vm_provisioning_operator import VM_MOCK_ROUTE_MOUNT, VmOperatorClient
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
@@ -96,9 +93,8 @@ from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler imp
 from compute_provisioning_service.db.database import (
     create_db_engine,
     create_session_factory,
+    migrate_database,
 )
-
-from compute_provisioning_service.db.models import Base
 
 from compute_provisioning_ansible.host_import import AnsibleHostImportClient
 from compute_provisioning_client import ComputeProvisioningClient, MockRuleClient
@@ -470,23 +466,9 @@ FAKE_CREATE_STDOUT = fake_create_stdout("agent-vm-01")
 
 
 def _initialize_test_database(engine, *, default_pool: bool = True):
-    # resource_pools and relays must exist before VM's ansible_pool_configs
-    # foreign keys resolve.
-    PoolsBase.metadata.create_all(bind=engine)
-    # The relay tables ride the family's relay metadata.
-    RelaysBase.metadata.create_all(bind=engine)
-    # VM's pool-configuration table rides VM's own metadata.
-    VmBase.metadata.create_all(bind=engine)
-    # The host registry rides the host authority's own metadata.
-    HostsBase.metadata.create_all(bind=engine)
-    # So do the job authority's tables.
-    JobsBase.metadata.create_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    # Site-ledger tables ride market_site's own metadata.
-    SiteBase.metadata.create_all(bind=engine)
-    # Durable fulfillment tables (settlement_records, provisioned_resources,
-    # scheduling_cursors) ride market_fulfillment's own metadata.
-    FulfillmentBase.metadata.create_all(bind=engine)
+    # The schema is the migration chain's, as the deployed service's is: the
+    # models are read against it and never create it.
+    migrate_database(engine)
     # Migration creates no pool. The suite's tests place hosts and declare
     # capacity in a pool named "default", so the harness stores one, serving
     # both compute modes, unless a module asks for a site with no pool.
@@ -705,16 +687,18 @@ async def client_and_queue(
             connection_codecs
         ),
     )
+    # The hosts taking new delivery as the production container reports them:
+    # the host authority's, less the hosts of every pool on a disabled relay.
+    deliverable_hosts = RelayDeliverableHosts(host_authority)
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         site_id=identity_context.storefront_site_id,
         lease_end_effect=lease_end_reports.record,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
-        # The hosts taking new delivery, reported by the host authority as the
-        # production container wires it, so a declaration naming a disabled or
-        # unregistered host is refused and not offered here as it is there.
-        deliverable_hosts=host_authority,
+        # So a declaration naming a disabled or unregistered host, or a host
+        # on a disabled relay, is refused and not offered here as it is there.
+        deliverable_hosts=deliverable_hosts,
         # The release guard exactly as the production container composes it,
         # so capacity is freed here only on the proof it needs there.
         release_guard=FulfillmentReleaseGuard(SettlementRepository()),
@@ -775,7 +759,7 @@ async def client_and_queue(
             session_factory,
             resource_pool_service,
             capacity_ledger_service,
-            deliverable_hosts=host_authority,
+            deliverable_hosts=deliverable_hosts,
         ),
     )
 

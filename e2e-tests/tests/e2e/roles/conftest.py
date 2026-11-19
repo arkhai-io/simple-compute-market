@@ -7,6 +7,12 @@ consume them:
   - registry_layer : marketplace operator's registry service
   - seller_node    : one seller's machine (agent + provisioning)
   - buyer_cli      : a buyer's `market` CLI invoked as a subprocess
+  - lane_doubles_evidence : a payment scenario's lane-double evidence label
+                            and the doubles' contract hashes
+  - lane_double_rules     : a module's rules on the lane's doubles, undone
+                            when the module ends
+  - lane_time             : the run's lane time across every party its
+                            profile names, started with the session
 
 There is no buyer_node fixture because the buyer doesn't run a server.
 Instead ``buyer_cli`` spawns the same ``market`` binary they would run
@@ -21,6 +27,10 @@ from tests.e2e.roles.layers.test_external import external_world  # noqa: F401
 from tests.e2e.roles.layers.test_registry import registry_layer  # noqa: F401
 from tests.e2e.roles.layers.test_seller import seller_node  # noqa: F401
 from tests.e2e.roles.buyer_cli import buyer_cli, buyer_cli_binary  # noqa: F401
+from tests.e2e.roles.helpers.lane_doubles import (  # noqa: F401
+    lane_double_rules, lane_doubles_evidence,
+)
+from tests.e2e.roles.helpers.lane_time import lane_time  # noqa: F401
 from tests.e2e.roles.helpers.qualification import log_unlogged_outcomes, record_report
 
 

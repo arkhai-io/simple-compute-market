@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 from types import SimpleNamespace
 from copy import deepcopy
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,7 +27,9 @@ from unittest.mock import patch
 
 import httpx
 from core_storefront import multi_registry_client
+from core_storefront.multi_registry_client import RegistryListings
 from fastapi import FastAPI
+from registry_client.models import ListingSummary
 from market_config.config_loader import ChainConfig
 from market_capacity_publication import SiteDerivationLog
 from market_capacity_publication.capacity_remote import reset_site_event_cursors
@@ -42,6 +44,7 @@ from market_core.schemas import RateValue, derive_settlement_option_id
 from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_settlement_runtime import (
     MechanismReadiness,
     ReadinessBlocker,
@@ -85,6 +88,7 @@ from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
 from market_storefront.utils import config as storefront_config
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fake_site import (
@@ -215,6 +219,8 @@ class SettlementCompositionDouble:
     alkahest_blockers: tuple[ReadinessBlocker, ...] = ()
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
+        self.rate_servicing = RateServicing()
+        self.rate_term_projections = {}
         self.configuration_registry = build_storefront_settlement_registry()
         self.settlement_config = self.configuration_registry.resolve(
             storefront_config.settlement_config_mapping(), role="seller"
@@ -362,6 +368,11 @@ class RecordingRegistries:
     every registry answers success. ``sent`` holds, in order,
     ``(operation, registry_url, listing_id, request)`` with each request as the
     JSON the client would serialize.
+
+    A registry's read of the storefront's open listings returns only what a
+    test planted there with :meth:`plant` -- a listing the storefront did not
+    publish through this double -- and a close it is sent removes it.
+    ``publisher_reads`` records the principal each read named.
     """
 
     def __init__(self) -> None:
@@ -370,6 +381,22 @@ class RecordingRegistries:
         # (operation, registry_url) pairs that fail until removed; an update's
         # operation is the status it sets.
         self.failing: set[tuple[str, str]] = set()
+        self.planted: dict[str, list[ListingSummary]] = {url: [] for url in REGISTRY_URLS}
+        self.publisher_reads: list[Any] = []
+
+    def plant(self, url: str, listing_id: str, *, offering_mode: str) -> None:
+        """An open listing at ``url``, under the storefront's principal."""
+        self.planted[url].append(
+            ListingSummary(
+                id=listing_id,
+                status="open",
+                listing_resource={"offering_mode": offering_mode},
+            )
+        )
+
+    async def list_publisher_listings_per_registry(self, principal):
+        self.publisher_reads.append(principal)
+        return [RegistryListings(url, tuple(self.planted[url])) for url in self.urls]
 
     def __call__(self, *_args: Any, **_kwargs: Any) -> "RecordingRegistries":
         return self
@@ -394,7 +421,8 @@ class RecordingRegistries:
         for url, request in payloads.items():
             body = self._json(request)
             self.sent.append(("publish", url, str(body.get("listing_id")), body))
-            results.append(self._result("publish", url))
+            # Each result carries the payload sent, as the real client's does.
+            results.append({**self._result("publish", url), "payload": body})
         return results
 
     async def update_listing_per_registry(self, *, listing_id, payloads):
@@ -402,7 +430,12 @@ class RecordingRegistries:
         for url, request in payloads.items():
             body = self._json(request)
             self.sent.append(("update", url, listing_id, body))
-            results.append(self._result(str(body.get("status")), url))
+            result = self._result(str(body.get("status")), url)
+            if result["success"] and body.get("status") == "closed":
+                self.planted[url] = [
+                    item for item in self.planted[url] if item.id != listing_id
+                ]
+            results.append(result)
         return results
 
     def to(self, operation: str, listing_id: str) -> list[tuple[str, dict[str, Any]]]:
@@ -557,10 +590,13 @@ async def publication_app(
     *,
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
+    negotiation_options: Mapping[str, Any] | None = None,
     second_site: bool = False,
     contacts: Mapping[str, Mapping[str, str]] | None = None,
     admissibility_default: Mapping[str, Any] | None = None,
     unreachable_sites: Collection[str] = (),
+    settlement_configuration: Mapping[str, Any] | None = None,
+    settlement_composition_factory: Callable[[Mapping[str, bool]], Any] = SettlementCompositionDouble,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -607,7 +643,8 @@ async def publication_app(
         stack.enter_context(
             replaced_setting(
                 "settlement",
-                contact_settlement(contacts) if contacts is not None else SETTLEMENT,
+                settlement_configuration if settlement_configuration is not None
+                else contact_settlement(contacts) if contacts is not None else SETTLEMENT,
             )
         )
 
@@ -631,8 +668,11 @@ async def publication_app(
             )
         )
         registry = storefront_config.storefront_domain_registry()
+        # A second app over the same path finds the database migrated and
+        # applies nothing.
+        migrate_storefront_database(tmp_path / "storefront.db")
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
-        composition = SettlementCompositionDouble(
+        composition = settlement_composition_factory(
             mechanism_fulfillment
             if mechanism_fulfillment is not None
             else {"alkahest.v1": True, "arkhai.payments.v1": True}
@@ -733,17 +773,24 @@ async def publication_app(
                     binding=registration.binding,
                     capacity_runtime=capacity,
                     site_projections=site_projections,
-                    accepted_obligation_dispatch=(
-                        composition.accepted_obligation_dispatch()
-                        if contacts is not None
-                        else None
-                    ),
+                    rate_servicing=composition.rate_servicing,
+                    rate_term_projections=composition.rate_term_projections,
+                    **{
+                        "accepted_obligation_dispatch": (
+                            composition.accepted_obligation_dispatch()
+                            if contacts is not None else None
+                        ),
+                        # The composition's stage, as the composition root hands
+                        # it; the double composes none.
+                        "arkhai_payments_stage": getattr(composition, "arkhai_payments_stage", None),
+                        **(negotiation_options or {}),
+                    },
                 )
             )
             routers = (negotiate_router,)
         contact_exchange = None
         if contacts is not None:
-            repository = SettlementSQLiteRepository(db.db_path, apply_migrations=False)
+            repository = SettlementSQLiteRepository(db.db_path)
             composition.repository = repository
             composition.runtime = SettlementRuntime(
                 repository, {CONTACT_MECHANISM: ContactExchangeClient()}

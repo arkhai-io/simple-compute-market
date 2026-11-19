@@ -10,12 +10,12 @@ each response's verification.
 from __future__ import annotations
 
 import re
-import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, TypeAlias
 
 import httpx
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedResponse,
@@ -307,7 +307,7 @@ class _AuthenticatedSiteClient:
                 operation=operation,
                 resource=resource,
                 request_id=request_id,
-                timestamp=int(time.time()),
+                timestamp=injected_time.now(),
                 body_hash=context[3],
             ),
         )
@@ -392,7 +392,7 @@ class _AuthenticatedSiteClient:
         result = verify_response(
             authenticated,
             body=body,
-            now=int(time.time()),
+            now=injected_time.now(),
             max_skew=self._max_timestamp_skew,
             expected_role="service",
             expected_principals=self._current_authorities(response.status_code),

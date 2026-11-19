@@ -63,6 +63,6 @@ async def test_non_scalar_selection_reaches_acceptance_without_amount() -> None:
     )
 
     assert response["accepted_artifact"]["amount"] == 0
-    assert repository.agreements[0]["agreed_price"] == 0
+    assert repository.agreements[0]["negotiated_scalar"] == 0
     assert repository.threads["neg-fixed"]["terminal_state"] == "success"
     assert repository.effects[-1][0] == "artifacts"

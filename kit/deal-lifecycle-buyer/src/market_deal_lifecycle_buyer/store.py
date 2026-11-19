@@ -14,6 +14,7 @@ from market_deal_lifecycle_contracts.models import EvidenceItem
 from market_identity import AuthenticatedResponse, CapturedEnvelope
 
 from .ending import BuyerEndJournal
+from .watchdog import WatchdogJournal
 
 
 class FileEvidenceStore:
@@ -23,6 +24,7 @@ class FileEvidenceStore:
         self.path = self.root / "evidence.sqlite3"
         self.path.touch(mode=0o600, exist_ok=True)
         self.end_journal = BuyerEndJournal(self.path)
+        self.watchdog = WatchdogJournal(self.path)
         with self._connection() as db:
             db.execute("CREATE TABLE IF NOT EXISTS evidence (negotiation_id TEXT PRIMARY KEY, record TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS operations (negotiation_id TEXT, operation_key TEXT, digest TEXT NOT NULL, PRIMARY KEY (negotiation_id, operation_key))")
@@ -180,6 +182,7 @@ class FileEvidenceStore:
             if self._read(db, expected.negotiation_id) != expected:
                 return False
             db.execute("DELETE FROM buyer_delivery_ends WHERE negotiation_id = ?", (expected.negotiation_id,))
+            self.watchdog.delete(db, expected.negotiation_id)
             db.execute("DELETE FROM evidence WHERE negotiation_id = ?", (expected.negotiation_id,))
             db.execute("DELETE FROM requests WHERE negotiation_id = ?", (expected.negotiation_id,))
             db.execute("DELETE FROM commitments WHERE negotiation_id = ?", (expected.negotiation_id,))
@@ -188,6 +191,7 @@ class FileEvidenceStore:
     async def delete(self, negotiation_id: str) -> None:
         with self._connection() as db:
             db.execute("DELETE FROM buyer_delivery_ends WHERE negotiation_id = ?", (negotiation_id,))
+            self.watchdog.delete(db, negotiation_id)
             db.execute("DELETE FROM evidence WHERE negotiation_id = ?", (negotiation_id,))
             db.execute("DELETE FROM requests WHERE negotiation_id = ?", (negotiation_id,))
             db.execute("DELETE FROM commitments WHERE negotiation_id = ?", (negotiation_id,))

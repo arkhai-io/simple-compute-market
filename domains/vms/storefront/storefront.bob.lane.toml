@@ -102,7 +102,16 @@ service_url = "https://payments-double:8443"
 service_identity = { scheme = "ed25519", identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo" }
 fee_bps = 250
 livemode = false
-ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"
+ca_bundle_path = "/run/lane-doubles/lane-ca.pem"
+
+# A lane fixture, never a shipped default: no shipped configuration declares
+# rate servicing, which is declared only once qualified against the deployed
+# payment authority. It lets publication and acceptance admit the shipped
+# recurring presets on a listing whose clauses select one, as the recurring
+# purchase scenario's does, so the lane approves, commits and delivers a
+# per-period Agreement against the payments double.
+[Settlement.rate_servicing.arkhai_payments]
+treatments = ["charged", "returned"]
 
 # Seller-side delivery of each revealed buyer contact. Mailpit receives it in
 # this lane; scenarios read it back through Mailpit's API.
@@ -199,3 +208,8 @@ settlements = [
 # default_max_duration_seconds = 0 (or omitted) means "unlimited".
 default_min_price            = "100"
 default_max_duration_seconds = 0
+
+# Every party of the lane runs one injected time, which the lane-time fixture
+# sets.
+[Time]
+source = "injected"

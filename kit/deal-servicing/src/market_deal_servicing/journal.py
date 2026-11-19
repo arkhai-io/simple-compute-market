@@ -17,7 +17,8 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import Identity, frame_fields
 from pydantic import Field, model_validator
 
-from .evidence import EvidenceSession, create_schema as create_evidence_schema
+from .evidence import EvidenceSession
+from .projection import read_seller_deal
 
 Revision = Annotated[int, Field(strict=True, ge=0)]
 ClassificationKind = Literal[
@@ -80,7 +81,16 @@ class DeliveryRecord(WireModel):
 
 
 class Admission(WireModel):
-    status: Literal["admitted", "ended", "retry"]
+    """Admission's answer for a protected phase.
+
+    ``admitted`` admits it; ``ended`` reports an end due by now; ``retry``
+    reports a stale expected revision. ``awaiting_observation`` admits nothing
+    and records nothing: the delivery deadline has passed undelivered for a
+    deal that is not once-only, and no payment observation made at or after it
+    has yet shown whether an earlier end wins (``EndSession.admit``).
+    """
+
+    status: Literal["admitted", "ended", "retry", "awaiting_observation"]
     revision: Revision
     ended_at: Instant | None = None
 
@@ -123,50 +133,15 @@ def atomic(conn: sqlite3.Connection) -> Iterator[None]:
         conn.execute(f"RELEASE {name}")
 
 
-def create_schema(conn: sqlite3.Connection) -> None:
-    create_evidence_schema(conn)
-    for statement in (
-        """CREATE TABLE IF NOT EXISTS servicing_delivery (
-            negotiation_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_final_requests (
-            negotiation_id TEXT NOT NULL, source_ref TEXT NOT NULL, ended_at INTEGER NOT NULL,
-            request TEXT NOT NULL, classification TEXT, correction_basis INTEGER NOT NULL,
-            PRIMARY KEY (negotiation_id,source_ref)
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_intents (
-            intent_ref TEXT PRIMARY KEY, negotiation_id TEXT NOT NULL,
-            kind TEXT NOT NULL, operation_key TEXT NOT NULL, intent TEXT NOT NULL,
-            UNIQUE (negotiation_id,kind,operation_key)
-        )""",
-        """CREATE UNIQUE INDEX IF NOT EXISTS servicing_one_billing_intent
-            ON servicing_intents(negotiation_id) WHERE kind='billing'""",
-        """CREATE TABLE IF NOT EXISTS servicing_end_receipts (
-            negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL,
-            request_digest TEXT NOT NULL, receipt_at INTEGER NOT NULL,
-            PRIMARY KEY (negotiation_id,operation_key)
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_receipt_claims (
-            negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL, claim TEXT NOT NULL,
-            PRIMARY KEY (negotiation_id,operation_key)
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_seller_deals (
-            negotiation_id TEXT PRIMARY KEY, deal TEXT NOT NULL
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_operations (
-            negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL, digest TEXT NOT NULL,
-            PRIMARY KEY (negotiation_id,operation_key)
-        )""",
-    ):
-        conn.execute(statement)
-
-
 class EndSession:
-    """All ordering writes share the caller's delivery/Agreement transaction."""
+    """All ordering writes share the caller's delivery/Agreement transaction.
+
+    The session issues no DDL: its tables are the storefront chain's
+    (``market_deal_servicing.schema``).
+    """
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
-        create_schema(conn)
 
     def register(self, record: DeliveryRecord) -> None:
         with atomic(self.conn):
@@ -219,6 +194,16 @@ class EndSession:
             """SELECT request FROM servicing_final_requests WHERE negotiation_id=?
                ORDER BY ended_at, source_ref COLLATE BINARY""", (negotiation_id,),
         )]
+
+    def classification(self, negotiation_id: str, source_ref: str) -> Classification | None:
+        """A recorded final request's classification; ``None`` while its slot is pending."""
+        row = self.conn.execute(
+            "SELECT classification FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
+            (negotiation_id, source_ref),
+        ).fetchone()
+        if row is None:
+            raise KeyError(source_ref)
+        return Classification.model_validate_json(row[0]) if row[0] is not None else None
 
     def selected_end(self, negotiation_id: str) -> FinalRequest | None:
         requests = self.requests(negotiation_id)
@@ -460,6 +445,35 @@ class EndSession:
             filing_intent=self.failure_filing(request, now=now, delivered=False),
         )
 
+    def payment_observed_at(self, negotiation_id: str, commitment_ref: str) -> int | None:
+        """The instant of the latest successful payment observation of the commitment."""
+        row = self.conn.execute(
+            """SELECT observed_at FROM servicing_payment_observations
+               WHERE negotiation_id=? AND commitment_ref=?""", (negotiation_id, commitment_ref),
+        ).fetchone()
+        return row[0] if row else None
+
+    def _deadline_unobserved(self, record: DeliveryRecord) -> bool:
+        """Whether a missed deadline waits for a payment observation made at or after it.
+
+        A rate buyer ends at the payment authority, and its hint to the
+        storefront is lost while the storefront is down, so its stop reaches
+        this journal only through a later payment observation. A recorded seller
+        non-delivery is never reclassified, so for a deal that is not once-only
+        the deadline is recorded only once an observation made at or after it
+        has had the chance to record an earlier end; until then, an authority
+        outage included, nothing is recorded or filed. A once-only buyer ends at
+        the storefront, and a deal with no seller projection has no payment
+        watch, so both keep the deadline rule. See
+        openspec/specs/deal-lifecycle/spec.md, "Delivery authorization
+        delegates payment interpretation".
+        """
+        deal = read_seller_deal(self.conn, record.negotiation_id)
+        if deal is None or deal.once_only:
+            return False
+        observed_at = self.payment_observed_at(record.negotiation_id, record.commitment_ref)
+        return observed_at is None or observed_at < record.deadline
+
     def admit(
         self, negotiation_id: str, phase: DeliveryPhase, expected_revision: int, *, now: int,
     ) -> Admission:
@@ -477,6 +491,8 @@ class EndSession:
             ):
                 return Admission(status="ended", revision=record.revision, ended_at=selected.ended_at)
             if missed_deadline:
+                if self._deadline_unobserved(record):
+                    return Admission(status="awaiting_observation", revision=record.revision)
                 self._deadline_failure(record, now=now)
                 return Admission(status="ended", revision=self.read(negotiation_id).revision, ended_at=record.deadline)
             if now >= record.term_end:

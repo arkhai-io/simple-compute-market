@@ -14,6 +14,7 @@ from __future__ import annotations
 import enum
 import uuid
 
+import injected_time
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Session, declarative_base, relationship
 from sqlalchemy.sql import func
@@ -68,7 +69,15 @@ class JobRecord(Base):
     # runs ``destroy``).
     executor_action = Column(String, nullable=True)
     idempotency_key = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Jobs are listed in creation order, so creation is stamped from the
+    # process's time source rather than the database's clock; `updated_at` is
+    # audit-only and keeps the database default.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

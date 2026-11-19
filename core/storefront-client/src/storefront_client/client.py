@@ -43,11 +43,11 @@ from __future__ import annotations
 from market_identity import EnvelopeCapture, capture_envelope
 
 import logging
-import time
 import urllib.parse
 from typing import Any
 
 import httpx
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     Identity,
@@ -90,9 +90,14 @@ from storefront_client.models import (
     SettleWaitResponse,
     StageEvent,
     StageEventListResponse,
+    TimeSettingResponse,
 )
 
 logger = logging.getLogger(__name__)
+
+#: The signed operation and resource of every storefront's time-setting route.
+ADMIN_TIME_OPERATION = "admin_time"
+ADMIN_TIME_RESOURCE = "time"
 
 
 class StorefrontClientError(Exception):
@@ -225,7 +230,7 @@ def _negotiate_new_proposal(
         "escrow_address": escrow_address,
         "fields": fields,
         "literal_fields": literals,
-        "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
+        "expiration_unix": escrow_expiration_unix or (injected_time.now() + 3600),
     }
     if rates is not None:
         proposal["rates"] = rates
@@ -928,6 +933,32 @@ class StorefrontClient(_StorefrontClientBase):
             )
         )
 
+    async def set_time(
+        self,
+        now: int,
+        *,
+        request_id: str | None = None,
+    ) -> TimeSettingResponse:
+        """POST /api/v1/admin/time: set an injected storefront to ``now``.
+
+        ``now`` is sent as given, Unix seconds; the storefront refuses anything
+        but an integer instant (422 ``invalid_time``) and an instant earlier
+        than its own (409 ``time_moves_forward``), raised as
+        :class:`StorefrontClientError`. A wall-time storefront serves no such
+        route. The request is signed at this process's instant, which the
+        storefront admits outside the signing skew for this operation alone.
+        """
+        return TimeSettingResponse.from_dict(
+            await self._authenticated_post(
+                "/api/v1/admin/time",
+                {"now": now},
+                role="admin",
+                operation=ADMIN_TIME_OPERATION,
+                resource=ADMIN_TIME_RESOURCE,
+                request_id=request_id,
+            )
+        )
+
     async def admin_pause_lifecycle_loops(
         self,
         *,
@@ -975,9 +1006,9 @@ class StorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
 
         Run one cycle of a paused loop and return what that cycle reports.
-        `loop` is the loop's route name -- `settlement-servicing`,
-        `fulfillment-resume`, `site-projections`, `capacity-events`,
-        `publication`. The route
+        `loop` is the loop's route name -- `deal-servicing`,
+        `delivery-recovery`, `payment-reconciliation`, `settlement-servicing`,
+        `site-projections`, `capacity-events`, `publication`. The route
         calls the operation the timer was already invoking, so a caller
         advances production behaviour rather than a test-only path.
 
@@ -1159,11 +1190,17 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         reason: str = "operator_interruption",
         interrupted_at_utc: str | None = None,
+        interruption_kind: str | None = None,
+        operation_key: str | None = None,
         dry_run: bool = False,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         """Interrupt an active interruptible deal through the admin control plane."""
         body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interruption_kind is not None:
+            body["interruption_kind"] = interruption_kind
+        if operation_key is not None:
+            body["operation_key"] = operation_key
         if interrupted_at_utc is not None:
             body["interrupted_at_utc"] = interrupted_at_utc
         return await self._authenticated_post(
@@ -2183,6 +2220,27 @@ class SyncStorefrontClient(_StorefrontClientBase):
             )
         )
 
+    def set_time(
+        self,
+        now: int,
+        *,
+        request_id: str | None = None,
+    ) -> TimeSettingResponse:
+        """POST /api/v1/admin/time: set an injected storefront to ``now``.
+
+        The synchronous form of :meth:`StorefrontClient.set_time`.
+        """
+        return TimeSettingResponse.from_dict(
+            self._authenticated_post(
+                "/api/v1/admin/time",
+                {"now": now},
+                role="admin",
+                operation=ADMIN_TIME_OPERATION,
+                resource=ADMIN_TIME_RESOURCE,
+                request_id=request_id,
+            )
+        )
+
     def admin_pause_lifecycle_loops(
         self,
         *,
@@ -2230,9 +2288,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
 
         Run one cycle of a paused loop and return what that cycle reports.
-        `loop` is the loop's route name -- `settlement-servicing`,
-        `fulfillment-resume`, `site-projections`, `capacity-events`,
-        `publication`. The route
+        `loop` is the loop's route name -- `deal-servicing`,
+        `delivery-recovery`, `payment-reconciliation`, `settlement-servicing`,
+        `site-projections`, `capacity-events`, `publication`. The route
         calls the operation the timer was already invoking, so a caller
         advances production behaviour rather than a test-only path.
 
@@ -2414,11 +2472,17 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         reason: str = "operator_interruption",
         interrupted_at_utc: str | None = None,
+        interruption_kind: str | None = None,
+        operation_key: str | None = None,
         dry_run: bool = False,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         """Interrupt an active interruptible deal through the admin control plane."""
         body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interruption_kind is not None:
+            body["interruption_kind"] = interruption_kind
+        if operation_key is not None:
+            body["operation_key"] = operation_key
         if interrupted_at_utc is not None:
             body["interrupted_at_utc"] = interrupted_at_utc
         return self._authenticated_post(

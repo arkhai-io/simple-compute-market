@@ -4,16 +4,20 @@ The stages in ``helpers/buyer_purchase_stages.py`` hold the purchase's control
 flow and every assertion that is not bare metal's. ``BareMetalPurchaseParts``
 is what every bare-metal purchase adds to its canonical deal's driver, mock or
 real: the listing as the buyer's purchase profile reads it and the payments
-option it states; ``market bare-metal buy`` and ``market bare-metal teardown``
+option it states; ``market bare-metal buy`` and ``market bare-metal end``
 with the buyer's configuration; the deal's fulfillment as the seller reports it
 to the buyer; and the lease view, which finds the purchase's hold by its
 negotiation. ``BareMetalPurchaseDriver`` is the lane's, over
 ``BareMetalComputeDealDriver``: a storefront pool override offering the lane's
-whole host in ``arkhai.payments.v1`` alone.
+whole host in ``arkhai.payments.v1`` alone. ``BareMetalRecurringPurchaseDriver``
+is the lane's recurring purchase, whose pool override's one settlement is a
+recurring option, on-demand or spot, and ``BareMetalRateWatchdogDriver`` that
+purchase opting into the buyer's watchdog.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,17 +26,28 @@ from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.run_log import read_run_identity
 from market_core.schemas import SettlementOption, compute_rate_total
+from market_deal_lifecycle_contracts.models import LifecycleRead
 from market_identity import IdentityScheme, ProfileRepository, TrustedIdentitySet, create_signer
 from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
 
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
+from tests.e2e.roles.helpers.mediation import (
+    buyer_dispute_credential_toml,
+    buyer_mediation_environment,
+    mediation_if_configured,
+)
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_environment,
     dispute_window_seconds,
     payment_config_toml,
     payment_setting,
+)
+from tests.e2e.roles.helpers.rate_watchdog_stages import WATCHDOG_OPT_IN
+from tests.e2e.roles.helpers.recurring_purchase_stages import (
+    check_recurring_option,
+    recurring_settlement,
 )
 from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
@@ -51,10 +66,17 @@ DELIVERY_DEADLINE_SECONDS = 300
 PAYMENT_TIMEOUT_SECONDS = 300
 
 
-def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
+def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
+                            payer: str | None = None, lane_time_file: bool = True) -> BuyerCli:
     """A profiled Ed25519 buyer with no wallet (``PAYMENTS``'s buyer), under
-    ``base``, buying through Arkhai payments. Each profile keeps its own run
-    logs, so a purchase's compensation finds that purchase alone."""
+    ``base``, buying through Arkhai payments from ``payer``, the run's buyer
+    account unless named, with its dispute credential for the run's mediation
+    target when the run names one, which its teardown files with. Each profile
+    keeps its own run logs, so a purchase's compensation finds that purchase
+    alone. A buyer run in the harness's process names no lane time file
+    (``create_profiled_buyer_cli``)."""
+    mediation = mediation_if_configured()
+    payer = payer or str(payment_setting("BUYER_ACCOUNT"))
     url = lane_setting("registry_url")
     scheme = lane_setting("registry_scheme")
     identifier = lane_setting("registry_identifier")
@@ -65,9 +87,11 @@ def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> Bu
         f"registry_authority = {_toml_quote(authority)}",
         "registry_principals = [{ scheme = " + _toml_quote(scheme)
         + ", identifier = " + _toml_quote(identifier) + " }]",
-        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
+        f"payer_account = {_toml_quote(payer)}",
         "",
         *payment_config_toml(payments_config, table="bare_metal.arkhai_payments"),
+        "",
+        *buyer_dispute_credential_toml(mediation),
     )
     return create_profiled_buyer_cli(
         binary=binary,
@@ -78,8 +102,12 @@ def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> Bu
         registries=(url,),
         registry_authorities={url: {"authority": authority,
                                    "identities": [{"scheme": scheme, "identifier": identifier}]}},
-        credential_environment=buyer_payments_environment(payments_config),
+        credential_environment={
+            **buyer_payments_environment(payments_config, payer),
+            **buyer_mediation_environment(mediation),
+        },
         toml_sections=sections,
+        lane_time_file=lane_time_file,
     )
 
 
@@ -143,7 +171,7 @@ class BareMetalPurchaseParts:
     """
 
     buy_command = "market bare-metal buy (arkhai.payments.v1)"
-    teardown_command = "market bare-metal teardown"
+    teardown_command = "market bare-metal end"
     buy_timeout_seconds = PAYMENT_TIMEOUT_SECONDS + 30.0
     # After its approval, ``market bare-metal buy`` records its end only once
     # the seller has accepted its commit; a failed commit ends it unrecorded.
@@ -172,7 +200,7 @@ class BareMetalPurchaseParts:
         ]
 
     def teardown_arguments(self, run_id: str) -> list[str]:
-        return ["bare-metal", "teardown", "--run-id", run_id, "--config", self.config_path]
+        return ["bare-metal", "end", "--run-id", run_id, "--config", self.config_path]
 
     def purchase_fulfillment(self, negotiation_id: str) -> dict[str, Any]:
         # The command ended after the seller accepted its commit, which
@@ -224,20 +252,25 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
         self.pool_overrides.put_pool_override({
             "site_id": self.site_id, "pool_id": self.pool_id,
             "offering_mode": BARE_METAL,
-            "settlements": [{
-                "mechanism": "arkhai.payments.v1", "asset": "USD/6",
-                "rate": "1.00", "per": "hour",
-                "mechanism_input": {
-                    "payee_account": self.seller_account,
-                    "asset": "USD/6", "window": self.dispute_window,
-                    "dispute_window_seconds": dispute_window_seconds(
-                        delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
-                    ),
-                    "case_hold_max_seconds": None,
-                    "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
-                },
-            }],
+            "settlements": [self.pool_settlement()],
         })
+
+    def pool_settlement(self) -> dict[str, Any]:
+        """The pool override's one settlement: an hour of the whole host at
+        USD 1.00, under the seller's dispute window."""
+        return {
+            "mechanism": "arkhai.payments.v1", "asset": "USD/6",
+            "rate": "1.00", "per": "hour",
+            "mechanism_input": {
+                "payee_account": self.seller_account,
+                "asset": "USD/6", "window": self.dispute_window,
+                "dispute_window_seconds": dispute_window_seconds(
+                    delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+                ),
+                "case_hold_max_seconds": None,
+                "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
+            },
+        }
 
     def remove_pool_override(self) -> None:
         self.pool_overrides.delete_pool_override(self.site_id, self.pool_id, BARE_METAL)
@@ -281,3 +314,72 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
         row = next(row for row in self.site_capacity.snapshot()
                    if row["resource_id"] == self.reserved_resource_id)
         return int(row["available"]["units"])
+
+
+@dataclass(kw_only=True)
+class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
+    """Bare metal's ``RecurringPurchaseDriver``, for the lane's purchase of a
+    recurring on-demand option on a whole host through ``market bare-metal
+    buy``."""
+
+    #: The storefront loop whose servicing cycle reads its committed deals'
+    #: payments and carries out their recorded ends at the site.
+    servicing_loop = "deal-servicing"
+    #: The seller's notice a spot option states; none for on-demand.
+    payee_notice_seconds: int | None = None
+
+    def pool_settlement(self) -> dict[str, Any]:
+        """The pool override's one settlement: a recurring option, on-demand or
+        spot, on the whole host."""
+        return recurring_settlement(
+            seller_account=self.seller_account,
+            delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+            payee_notice_seconds=self.payee_notice_seconds,
+        )
+
+    def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
+        # The pool override offers the recurring payments option alone.
+        assert len(listing.settlement_options) == 1, listing.settlement_options
+        self.check_payments_listing(listing, option)
+        check_recurring_option(option, delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+                               payee_notice_seconds=self.payee_notice_seconds)
+
+    def read_arguments(self, run_id: str) -> list[str]:
+        return ["bare-metal", "delivery", "--run-id", run_id, "--config", self.config_path]
+
+    def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
+        return LifecycleRead.model_validate(self.fulfillment.delivery(negotiation_id))
+
+
+#: How often the watched purchase's ``buy`` reads its deal while it waits for it.
+WATCH_POLL_SECONDS = 5
+
+
+def _ssh_endpoint(access: Mapping[str, Any]) -> tuple[str, int]:
+    return str(access["host"]), int(access["port"])
+
+
+@dataclass(kw_only=True)
+class BareMetalRateWatchdogDriver(BareMetalRecurringPurchaseDriver):
+    """Bare metal's ``RateWatchdogDriver``: the lane's recurring purchase, its
+    ``market bare-metal buy`` opting into the watchdog, whose probe bare metal
+    builds from the access its caller read from the storefront."""
+
+    def _watch_arguments(self) -> list[str]:
+        return ["--delivery-timeout-seconds", str(DELIVERY_DEADLINE_SECONDS),
+                "--poll-interval", str(WATCH_POLL_SECONDS)]
+
+    def buy_arguments(self, listing_id: str, option_id: str) -> list[str]:
+        return [*super().buy_arguments(listing_id, option_id), *WATCHDOG_OPT_IN,
+                *self._watch_arguments()]
+
+    def resume_arguments(self, run_id: str) -> list[str]:
+        return ["bare-metal", "buy", "--from", run_id, "--config", self.config_path,
+                *self._watch_arguments()]
+
+    def disclosed_endpoint(self, negotiation_id: str) -> tuple[str, int]:
+        # The purchase profile's own read of the deal's live access.
+        return _ssh_endpoint(self.fulfillment.access(negotiation_id))
+
+    def probed_endpoint(self, built_for: Any) -> tuple[str, int]:
+        return _ssh_endpoint(built_for)

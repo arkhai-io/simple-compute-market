@@ -243,7 +243,7 @@ def _propose(lines: Sequence[Entry], triaged: Sequence[Triaged],
             node = node_of(decision["next"])
         except TargetError as exc:
             return Proposal(None, f"{directed}, which names no node: {exc}")
-        if not any(e["seq"] > decision["seq"] and ran(node, e) for e in lines):
+        if not any(e["seq"] > decision["seq"] and ran(node, e, lines) for e in lines):
             return _checked(Proposal(dict(decision["next"]),
                                      f"{directed}, and no run of it is logged since: "
                                      f"{decision.get('decision', '')}"), computation)

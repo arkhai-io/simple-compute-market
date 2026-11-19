@@ -22,9 +22,6 @@ charts/registry/templates/_helpers.tpl
 {{- define "registry.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{ include "registry.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
@@ -41,9 +38,6 @@ labels but never that one: selecting a workload's pods by its selector, as
 */}}
 {{- define "registry.testLabels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: test
@@ -135,6 +129,37 @@ when one is named, which therefore overrides a setting both state.
 {{- $profiles = append $profiles (include "registry.secretProfileName" .) -}}
 {{- end -}}
 {{- join "," $profiles -}}
+{{- end }}
+
+{{/*
+The pod variables of the registry and its migration: only the resolver
+variables, since every setting is in a profile file under the configuration
+directory and a pod variable would override it.
+*/}}
+{{- define "registry.resolverEnv" -}}
+- name: CONFIG_DIRECTORY
+  value: "/app/config"
+- name: ACTIVE_PROFILES
+  value: {{ include "registry.activeProfiles" . | quote }}
+{{- end }}
+
+{{/*
+The profile files the registry and its migration read: the rendered profile,
+and the secretProfile's when one is named.
+*/}}
+{{- define "registry.profileMounts" -}}
+- name: config
+  mountPath: /app/config/config-production.env
+  subPath: config-production.env
+  readOnly: true
+{{- $secretProfile := .Values.secretProfile | default dict }}
+{{- if $secretProfile.secretName }}
+{{- $profile := include "registry.secretProfileName" . }}
+- name: secret-profile
+  mountPath: {{ printf "/app/config/config-%s.env" $profile | quote }}
+  subPath: {{ printf "config-%s.env" $profile | quote }}
+  readOnly: true
+{{- end }}
 {{- end }}
 
 {{/*
@@ -241,13 +266,13 @@ not expose root helper templates reliably inside dependency charts. */}}
 {{- $config := $smoke.config | default dict -}}
 {{- if $config.profileFiles -}}
 {{- range $profile := keys $config.profileFiles | sortAlpha }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $profile }}.yml
   subPath: config-{{ $profile }}.yml
   readOnly: true
 {{- end -}}
 {{- else if $config.profile }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $config.profile }}.yml
   subPath: config-{{ $config.profile }}.yml
   readOnly: true

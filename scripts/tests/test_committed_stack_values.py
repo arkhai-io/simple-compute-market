@@ -4,10 +4,10 @@ The development stacks take their configuration from committed overlays,
 registry and site profiles, and secret overlays, and several of those restate a
 value whose source is another file: a registry's or site's pinned identity, the
 key that signs as it; a storefront's payments key, the payments double's
-fixtures; the lanes' recommended dispute authority, the double's pinned one; a
-storefront's CA bundle path, where its overlay binds the lane CA. Each test here
-fails naming both sides when one drifts. Every value involved is a public
-development value, never for a public network.
+fixtures; the lanes' recommended dispute authority and each compute lane
+storefront's credential toward it, the mediation double's fixture; a CA bundle path, where its overlay binds
+the lane CA. Each test here fails naming both sides when one drifts. Every value
+involved is a public development value, never for a public network.
 """
 
 from __future__ import annotations
@@ -26,10 +26,17 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOUBLE_FIXTURES = REPO_ROOT / "tools/payments-lane-double/fixtures"
+MEDIATION_AUTHORITY = REPO_ROOT / "tools/mediation-lane-double/fixtures/authority.toml"
+# The mediation double's fixture keys a registry recommends: the authority's
+# identity, params and advertisement. The rest are the double's own seeds and
+# tokens.
+RECOMMENDED_KEYS = ("interface", "origin", "account", "record_key", "params", "advertisement")
+# The keys binding a dispute credential to its authority's identity.
+IDENTITY_KEYS = ("interface", "origin", "account", "record_key")
 IDENTITIES = REPO_ROOT / "dev-env/identities"
 REGISTRY_PROFILES = REPO_ROOT / "dev-env/registry"
 RUNNER_PINS = REPO_ROOT / "e2e-tests/config/config-docker.yml"
-LANE_CA = REPO_ROOT / "tools/payments-lane-double/tls/lane-ca.pem"
+LANE_CA = REPO_ROOT / "tools/lane-double-controls/tls/lane-ca.pem"
 
 # Each stack's files, in the order e2e-tests/Makefile layers them.
 STACKS = {
@@ -56,10 +63,16 @@ def _render(stack: str) -> dict:
     binary = os.environ.get("E2E_COMPOSE_BINARY")
     command = [binary] if binary else ["docker", "compose"]
     if not shutil.which(command[0]):
+        # CI's packaging job sets COMPOSE_REQUIRED=1, where a skip is a failure.
+        if os.environ.get("COMPOSE_REQUIRED") == "1":
+            pytest.fail("Docker Compose is required for deployment rendering")
         pytest.skip("Docker Compose is required for deployment rendering")
     for name in STACKS[stack]:
         command += ["-f", name]
-    env = {key: value for key, value in os.environ.items() if key != "PROVISIONING_MODE"}
+    # Each stack is read as its committed files give it, not as a lane run's mode
+    # or a release candidate's image suffix would.
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("PROVISIONING_MODE", "IMAGE_SUFFIX")}
     result = subprocess.run(
         [*command, "-p", f"values-{stack}", "--profile", "buyer", "config", "--format", "json"],
         cwd=REPO_ROOT, capture_output=True, text=True, env=env,
@@ -148,13 +161,25 @@ def test_the_private_registry_bootstrap_key_is_the_one_its_clients_hold() -> Non
     assert held == dict.fromkeys(held, seeded)
 
 
-def test_the_lane_profile_recommends_the_double_pinned_authority() -> None:
+def test_the_lane_profile_recommends_the_mediation_double() -> None:
     recommended = _dotenv(REGISTRY_PROFILES / "config-payments-lane.env")
-    authority = _toml(DOUBLE_FIXTURES / "dispute-authority.toml")
-    assert set(recommended) == {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"}
+    authority = _toml(MEDIATION_AUTHORITY)
+    # Beside the recommendation, the lanes' injected time, which the full local
+    # stack, never loading this profile, does not run.
+    assert set(recommended) == {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES",
+                                "TIME_SOURCE"}
+    assert recommended["TIME_SOURCE"] == "injected"
     assert json.loads(recommended["REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"]) == [
-        authority
+        {key: authority[key] for key in RECOMMENDED_KEYS}
     ]
+
+
+def test_the_mediation_double_acts_at_the_payments_double_as_the_authority_account() -> None:
+    """The mediation double extends, reverses and lifts with the token the
+    payments double gives the authority's account."""
+    authority = _toml(MEDIATION_AUTHORITY)
+    at_payments = _toml(DOUBLE_FIXTURES / "accounts.toml")["accounts"]["dispute_authority"]
+    assert at_payments == {"account": authority["account"], "token": authority["payments_token"]}
 
 
 # --- provisioning site profiles ------------------------------------------------
@@ -249,13 +274,31 @@ def test_each_storefront_secret_overlay_fits_the_configuration_beside_it(stack: 
             assert not {"api_key", "api_key_env", "development_auth"} & set(stated), name
 
 
-def test_the_vm_lane_dispute_credential_names_the_pinned_authority() -> None:
-    authority = _toml(DOUBLE_FIXTURES / "dispute-authority.toml")
-    (credential,) = _toml(IDENTITIES / "bob.storefront.secrets.toml")["DisputeCredential"]
-    identity = ("interface", "origin", "account", "record_key")
-    assert {key: credential[key] for key in identity} == {key: authority[key] for key in identity}
-    assert credential["api_key"]
+# Each compute lane's payment storefront, by the secret overlay holding its
+# dispute credential.
+_DISPUTE_CREDENTIALS = {
+    "bob.storefront.secrets.toml": ("vm", "bob-storefront"),
+    "bare-metal.storefront.secrets.toml": ("bare-metal", "bare-metal-storefront"),
+}
+
+
+@pytest.mark.parametrize(("overlay", "lane"), sorted(_DISPUTE_CREDENTIALS.items()))
+def test_each_compute_lane_dispute_credential_is_the_sellers_at_the_mediation_double(
+    overlay: str, lane: tuple[str, str],
+) -> None:
+    """Each compute lane storefront's credential is bound to the mediation
+    double's identity, holds the seller's token there, and trusts the lane CA
+    where its lane mounts it."""
+    stack, service = lane
+    authority = _toml(MEDIATION_AUTHORITY)
+    (credential,) = _toml(IDENTITIES / overlay)["DisputeCredential"]
+    assert {key: credential[key] for key in IDENTITY_KEYS} == {
+        key: authority[key] for key in IDENTITY_KEYS
+    }
+    assert credential["api_key"] == authority["accounts"]["seller"]["token"]
     assert "api_key_env" not in credential
+    mounts = _mounts(_render(stack)[service])
+    assert mounts.get(credential["ca_bundle_path"]) == str(LANE_CA), credential["ca_bundle_path"]
 
 
 # Each lane's payment storefront, the configuration its overlay mounts, and its

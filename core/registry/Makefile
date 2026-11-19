@@ -1,7 +1,7 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
 
-GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)
 # Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
 # is tagged per change alone: a commit tag would keep one image per validated commit.
 IMAGE_SUFFIX ?=
@@ -27,8 +27,10 @@ init-uv:
 
 build: reinit build-images
 
+# The image records the wheelhouse's digest, which a missing declared wheel refuses.
 build-images:
-	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry$(IMAGE_SUFFIX) ../..
+	digest=$$(python3 ../../scripts/wheelhouse_digest.py) && \
+	docker build --ulimit nofile=65536:65536 -f Dockerfile --build-arg WHEELHOUSE_DIGEST=$$digest -t arkhai:registry$(IMAGE_SUFFIX) ../..
 	$(if $(IMAGE_SUFFIX),,docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX))
 
 deploy:
@@ -97,9 +99,10 @@ serve:
 # Database Management
 # ==============================================================================
 
-# Run database migrations
+# Adopt a v0.3.0 database and upgrade to the script head; the registry refuses
+# to start on a database this has not migrated.
 migrate:
-	uv run alembic upgrade head
+	uv run registry-migrate
 
 # Create a new migration
 # Usage: make create-migration MESSAGE="description"

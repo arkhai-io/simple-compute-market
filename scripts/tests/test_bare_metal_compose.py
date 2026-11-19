@@ -45,13 +45,14 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
         "bare-metal-storefront",
     }
     assert set(services) == expected | (
-        {"anvil", "mailpit", "payments-double", "bare-metal-buyer"} if development else set()
+        {"anvil", "mailpit", "payments-double", "mediation-double", "bare-metal-buyer"}
+        if development else set()
     )
     provisioning = services["bare-metal-provisioning"]
     # The base file runs real provisioning; the development overlay appends the
-    # site's profile and the run's mode.
+    # site's profile, the lanes' injected time and the run's mode.
     assert provisioning["environment"]["ACTIVE_PROFILES"] == (
-        f"docker,bare-metal-site,{mode}" if development else "docker"
+        f"docker,bare-metal-site,lane-time,{mode}" if development else "docker"
     )
     mounts = {v["target"]: v["source"] for v in provisioning["volumes"]}
     # Bare metal's stack needs nothing from another domain's tree.

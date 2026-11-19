@@ -32,6 +32,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x61" * 32).identity
@@ -83,6 +84,7 @@ async def make_vm_lifecycle_fixture(
     """Persist the exact VM listing, thread, site, and escrow authority."""
 
     domain = build_vm_storefront_domain()
+    migrate_storefront_database(db_path)
     db = SQLiteClient(
         db_path=str(db_path),
         registry=build_vm_storefront_registry(domain),
@@ -208,7 +210,7 @@ async def make_vm_lifecycle_fixture(
     )
     raw = agreement.model_dump_json(exclude_none=True).encode()
     await db.commit_agreed_terms(
-        negotiation_id=negotiation_id, agreed_price=100, agreed_duration_seconds=facts["duration_seconds"],
+        negotiation_id=negotiation_id, negotiated_scalar=100, agreed_duration_seconds=facts["duration_seconds"],
         agreement_bytes=raw, accepted_at=agreement.accepted_at, agreed_start_utc=start,
     )
     evidence = replace(evidence, evidence={**evidence.evidence, "agreement_sha256": hashlib.sha256(raw).hexdigest()})
@@ -270,7 +272,9 @@ def vm_delivery_evidence(
         evidence={
             "schema": "vm.settlement-evidence.v1",
             "agreement_sha256": "1" * 64,
-            "source": {"escrow_uid": settlement_ref, "obligation_ref": "obligation-1"},
+            "source": {
+                "escrow_uid": settlement_ref, "obligation_ref": "obligation-1", "chain_name": "anvil",
+            },
             "delivery": {
                 "kind": "vm.delivery-facts",
                 "schema_version": 1,

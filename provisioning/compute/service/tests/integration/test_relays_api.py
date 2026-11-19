@@ -1,9 +1,9 @@
 """Relay administration over the real API, through the canonical client.
 
-Level 2, per `docs/development/TESTING.md`: the real in-process application, a
-real database, and the client production code actually uses. Not a helper built
-inside the test — a private wrapper and the shipped client drift independently,
-and the test stays green while they do.
+Integration level, per `docs/guidance/engineering/test-levels.md`: the real
+in-process application, a real database, and the client production code
+actually uses. Not a helper built inside the test — a private wrapper and the
+shipped client drift independently, and the test stays green while they do.
 
 What this covers that the library tests cannot: that the binding, its routes,
 its status codes, and the client's serialization agree. The relay service
@@ -48,6 +48,14 @@ def _client(transport):
         expected_authorities=SERVICE_AUTHORITIES,
         transport=transport,
     )
+
+
+def _names_the_relays_drain(message: str) -> None:
+    """A refusal of a change on the relay's side tells the operator to drain
+    the relay, not each pool on it."""
+    assert "Disable the relay" in message
+    assert "wait until the relay reads drained" in message
+    assert "Disable the pool" not in message
 
 
 def _relay(**overrides) -> RelayCreate:
@@ -130,6 +138,63 @@ class TestRelayAdministrationOverTheApi:
     async def test_an_unusable_window_is_refused(self, relays):
         with pytest.raises(ComputeProvisioningError):
             await relays.create_relay(_relay(vm_port_range_count=0))
+
+
+class TestTheDrainReportOverTheApi:
+    """Every relay response reports ``active_lease_count`` and ``drained``,
+    which the canonical client parses as required fields. The rule behind
+    them is asserted in the family kit's suite; what this adds is that every
+    route's serialization carries them, a held lease's count included."""
+
+    def _lease(self, owner_id: str = "cr-1") -> None:
+        with _container_module.resolved_session_factory() as db, db.begin():
+            db.add(
+                RelayPortLease(
+                    id=f"lease-{owner_id}",
+                    relay_id="site-a",
+                    remote_port=6100,
+                    host_id="kvm1",
+                    owner_kind="fulfillment",
+                    owner_id=owner_id,
+                )
+            )
+
+    async def test_every_relay_route_reports_the_drain(self, relays):
+        reported = {
+            "create": await relays.create_relay(_relay(token="admission-token")),
+            "update": await relays.update_relay("site-a", RelayUpdate(label="renamed")),
+            "rotate": await relays.rotate_relay_token(
+                "site-a", RelayTokenRotate(token="rotated")
+            ),
+        }
+        await relays.stage_relay_grant_key("site-a")
+        reported["activate"] = await relays.activate_relay_grant_key("site-a")
+        reported["disable"] = await relays.set_relay_enabled("site-a", False)
+        reported["read"] = await relays.get_relay("site-a")
+        (reported["list"],) = (await relays.list_relays()).relays
+        reported["enable"] = await relays.set_relay_enabled("site-a", True)
+
+        assert {route: (r.active_lease_count, r.drained) for route, r in reported.items()} == {
+            "create": (0, False),
+            "update": (0, False),
+            "rotate": (0, False),
+            "activate": (0, False),
+            "disable": (0, True),
+            "read": (0, True),
+            "list": (0, True),
+            "enable": (0, False),
+        }
+
+    async def test_a_disabled_relay_holding_a_lease_is_not_drained(self, relays):
+        await relays.create_relay(_relay())
+        self._lease()
+
+        disabled = await relays.set_relay_enabled("site-a", False)
+        fetched = await relays.get_relay("site-a")
+        (listed,) = (await relays.list_relays()).relays
+
+        for response in (disabled, fetched, listed):
+            assert (response.active_lease_count, response.drained) == (1, False)
 
 
 class TestGrantKeysOverTheApi:
@@ -325,9 +390,10 @@ class TestRebindingOverTheApi:
                 "site-a", RelayUpdate(relay_addr="203.0.113.20")
             )
 
+        assert excinfo.value.status_code == 409
         message = str(excinfo.value)
         assert "kvm1:6100" in message
-        assert "Disable the pool" in message
+        _names_the_relays_drain(message)
 
     async def test_the_same_relay_moves_once_drained(self, relays):
         await relays.create_relay(_relay())
@@ -374,4 +440,5 @@ class TestRebindingOverTheApi:
 
         assert excinfo.value.status_code == 409
         assert "kvm1:6100" in str(excinfo.value)
+        _names_the_relays_drain(str(excinfo.value))
 

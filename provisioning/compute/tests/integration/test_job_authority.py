@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -145,6 +146,36 @@ async def test_the_executor_decides_whether_a_failure_is_retried() -> None:
     failed = engine.get_job(job.job_id)
     assert failed.status == "failed"
     assert failed.error == "Job failed (non-retryable error): boom"
+
+
+@pytest.mark.asyncio
+async def test_a_job_s_creation_and_retry_are_the_process_source_s_instants(source) -> None:
+    """A job is stamped, its retry scheduled and the retry found due by the
+    process's time source: the retry is due only once the source reaches it."""
+    engine, factory = _engine(_Executor(JobFailure(
+        error=ProvisioningErrorEnvelope(code="x", message="boom", retryable=True),
+        logs="failed",
+    )))
+    start = source.now()
+    job = await _submit(engine, _Queue())
+    await engine.process_job(job.job_id)
+
+    with factory() as db:
+        row = db.get(JobRecord, job.job_id)
+        assert row.created_at == _naive_utc(start)
+        assert row.next_retry_at == _naive_utc(start + 60)
+
+    queue = _Queue()
+    source.set(start + 59)
+    assert await engine.requeue_due_retries(queue) == 0
+    source.set(start + 60)
+    assert await engine.requeue_due_retries(queue) == 1
+    assert queue.enqueued == [job.job_id]
+
+
+def _naive_utc(instant: int) -> datetime:
+    """An instant as SQLite returns a stored time: UTC with no zone."""
+    return datetime.fromtimestamp(instant, timezone.utc).replace(tzinfo=None)
 
 
 @pytest.mark.asyncio

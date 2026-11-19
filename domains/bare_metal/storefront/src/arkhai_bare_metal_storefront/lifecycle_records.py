@@ -9,7 +9,7 @@ from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentSettlementD
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_lifecycle.terms import decode_terms
-from market_deal_servicing import DeliveryRecord, EndSession, EvidenceSession, SellerDeal, SellerSession, create_schema
+from market_deal_servicing import DeliveryRecord, EndSession, EvidenceSession, SellerDeal, SellerSession
 from market_identity import CapturedEnvelope, Identity, canonical_json
 
 
@@ -18,21 +18,31 @@ from market_identity import CapturedEnvelope, Identity, canonical_json
 acceptance_envelope: ContextVar[CapturedEnvelope | None] = ContextVar("bare_metal_acceptance", default=None)
 
 
+def commitment_ref(agreement_bytes: bytes, settlement_data=None) -> str:
+    """The commitment an accepted Agreement's servicing record is registered under.
+
+    A payment deal commits to its mandate's transaction; any other deal to the
+    digest of its canonical Agreement.
+    """
+    agreement = Agreement.model_validate_json(agreement_bytes)
+    if agreement.settlement is not None and agreement.settlement.settlement_schema == ARKHAI_PAYMENTS_MECHANISM:
+        data = PaymentSettlementData.parse(settlement_data)
+        data.require_bound_to(json.loads(agreement_bytes))
+        return data.transaction_id
+    return hashlib.sha256(canonical_json(json.loads(agreement_bytes))).hexdigest()
+
+
 def register_agreement(conn, agreement_bytes: bytes, settlement_data=None, *, capture=False) -> None:
     agreement = Agreement.model_validate_json(agreement_bytes)
     option = agreement.settlement
     if option is None:
         return
     terms = decode_terms(option.lifecycle)
-    commitment = hashlib.sha256(canonical_json(json.loads(agreement_bytes))).hexdigest()
+    commitment = commitment_ref(agreement_bytes, settlement_data)
     expiry = None
     if option.settlement_schema == ARKHAI_PAYMENTS_MECHANISM:
-        data = PaymentSettlementData.parse(settlement_data)
-        data.require_bound_to(json.loads(agreement_bytes))
-        commitment = data.transaction_id
-        expiry = data.mandate.expires
+        expiry = PaymentSettlementData.parse(settlement_data).mandate.expires
     start = int(datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00")).timestamp())
-    create_schema(conn)
     captured = acceptance_envelope.get() if capture else None
     if captured is not None:
         envelope = captured.envelope
@@ -60,5 +70,6 @@ def register_agreement(conn, agreement_bytes: bytes, settlement_data=None, *, ca
         dispute=terms.adjudication.dispute if terms else None,
         entitlements=(terms.early_termination.model_dump(mode="json")["entitlements"]
                       if terms and terms.early_termination else {}),
-        once_only=True,
+        once_only=(option.settlement_schema != ARKHAI_PAYMENTS_MECHANISM
+                   or all(part.root.kind == "once" for part in PaymentSettlementData.parse(settlement_data).mandate.parts)),
     ))

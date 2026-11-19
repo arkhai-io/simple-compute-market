@@ -1,0 +1,115 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "lifecycles": [
+      {
+        "phase": "post-build"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "marketplace",
+      "name": "marketplace",
+      "version": "0.4.0",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/arkhai-io/simple-compute-market"
+        }
+      ],
+      "properties": [
+        {
+          "name": "arkhai:bom-layout",
+          "value": "1"
+        },
+        {
+          "name": "arkhai:source-revision",
+          "value": "0123456789abcdef0123456789abcdef01234567"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "application",
+      "bom-ref": "binary/market",
+      "name": "market",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      ],
+      "properties": [
+        {
+          "name": "arkhai:platform",
+          "value": "linux/amd64"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "bom-ref": "chart/arkhai-node-operator",
+      "name": "arkhai-node-operator",
+      "version": "0.5.0",
+      "properties": [
+        {
+          "name": "arkhai:content-digest",
+          "value": "4444444444444444444444444444444444444444444444444444444444444444"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "bom-ref": "image/provisioning",
+      "name": "provisioning",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3333333333333333333333333333333333333333333333333333333333333333"
+        }
+      ],
+      "purl": "pkg:oci/arkhai@sha256%3A3333333333333333333333333333333333333333333333333333333333333333?tag=provisioning-012345678"
+    },
+    {
+      "type": "container",
+      "bom-ref": "image/registry",
+      "name": "registry",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      ],
+      "purl": "pkg:oci/arkhai@sha256%3A2222222222222222222222222222222222222222222222222222222222222222?tag=registry-012345678"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core",
+      "name": "arkhai-core",
+      "version": "0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core@0.9.0?file_name=arkhai_core-0.9.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core-buyer",
+      "name": "arkhai-core-buyer",
+      "version": "0.12.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1212121212121212121212121212121212121212121212121212121212121212"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core-buyer@0.12.0?file_name=arkhai_core_buyer-0.12.0-py3-none-any.whl"
+    }
+  ]
+}

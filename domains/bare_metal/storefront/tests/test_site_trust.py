@@ -28,6 +28,7 @@ from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import build_runtime_from_configuration
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -137,6 +138,7 @@ async def test_a_rotation_through_the_routes_moves_responses_and_callbacks(
     """Spec scenario "A site's responses follow its rotation"."""
     database = tmp_path / "storefront.db"
     write_configuration(monkeypatch, tmp_path, publishable_configuration(database))
+    migrate_storefront_database(database)
     site = SignedSite(SITE)
     sites = SignedSites({"site-a.test": site})
     domain = get_market_domain_contract()

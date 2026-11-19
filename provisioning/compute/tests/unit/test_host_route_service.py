@@ -18,7 +18,9 @@ from compute_provisioning.hosts.route_service import HostRouteService
 from compute_provisioning.hosts.service import HostNotFoundError, PoolChangeRefusedError
 from compute_provisioning.route_errors import ProvisioningRouteError
 
-_CREATE = HostCreate(host_id="node-1", connection={"kind": "ssh", "public": {"ssh_host": "192.0.2.1"}})
+_CREATE = HostCreate(
+    host_id="node-1", connection={"kind": "ssh", "version": 2, "public": {"ssh_host": "192.0.2.1"}}
+)
 
 
 def _execution_host(kind: str = "ssh") -> ExecutionHost:

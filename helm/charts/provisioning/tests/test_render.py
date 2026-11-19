@@ -10,7 +10,8 @@ file renders and mounts with no meaning the chart knows, under any name the
 chart and the service do not read themselves. The schema also refuses every
 definition document's path and the retired VM playbook and inventory settings
 the service refuses at startup, and the smoke hook selects the smoke checks
-that write nothing.
+that write nothing. The service's migration is the pod's one init container,
+over the application's image, data volume, and profile.
 Standard library only: values are written as JSON, which is YAML.
 """
 
@@ -239,6 +240,63 @@ def test_the_smoke_hook_selects_the_read_only_and_security_checks() -> None:
     )
 
 
+def _deployment(manifest: str) -> str:
+    (deployment,) = [
+        document
+        for document in manifest.split("\n---")
+        if "# Source: provisioning/templates/deployment.yaml" in document
+    ]
+    return deployment
+
+
+def _containers(deployment: str, key: str) -> list[str]:
+    """Each container under the pod spec's ``key``, as its rendered text."""
+    following = deployment.split(f"\n      {key}:\n", 1)
+    assert len(following) == 2, f"the Deployment renders no {key}"
+    lines = []
+    for line in following[1].splitlines():
+        if line.strip() and not line.startswith("        "):
+            break
+        lines.append(line)
+    return ("\n" + "\n".join(lines)).split("\n        - name: ")[1:]
+
+
+def _field(container: str, name: str) -> str:
+    (line,) = [
+        line for line in container.splitlines() if line.strip().startswith(f"{name}:")
+    ]
+    return line.split(":", 1)[1].strip()
+
+
+def test_the_migration_runs_first_from_the_application_image_over_its_database() -> None:
+    """The service refuses a database its migration has not brought to its
+    chain, so the migration runs as the pod's one init container, from the
+    application's image, on the same data volume and configuration profile,
+    which is where the database URL is set."""
+    for values in ({}, {"mockMode": True, "persistence": {"enabled": True}}):
+        rendered = _render(values)
+        assert rendered.returncode == 0, rendered.stderr
+        deployment = _deployment(rendered.stdout)
+        assert deployment.index("\n      initContainers:\n") < deployment.index(
+            "\n      containers:\n"
+        )
+        (migration,) = _containers(deployment, "initContainers")
+        (application,) = _containers(deployment, "containers")
+        assert migration.startswith("provisioning-migrate\n")
+        assert _field(migration, "command") == '["compute-provisioning-migrate"]'
+        assert _field(migration, "image") == _field(application, "image")
+        data_mount = "- name: data\n              mountPath: /app/data\n"
+        profile_mount = (
+            "- name: config\n"
+            "              mountPath: /app/config/config-production.yml\n"
+            "              subPath: config-production.yml\n"
+        )
+        for container in (migration, application):
+            assert data_mount in container
+            assert profile_mount in container
+        assert '"database_url": "sqlite:////app/data/provisioning.db"' in rendered.stdout
+
+
 def test_the_retired_playbook_setting_is_refused() -> None:
     """The service refuses ``playbook_path`` at startup; the schema refuses it
     before anything renders, so a stale values file never reaches a pod."""
@@ -261,5 +319,6 @@ if __name__ == "__main__":
     test_an_operator_file_may_not_take_a_name_the_service_or_chart_reads()
     test_the_profile_carries_the_vm_playbook_under_its_domain_name()
     test_the_smoke_hook_selects_the_read_only_and_security_checks()
+    test_the_migration_runs_first_from_the_application_image_over_its_database()
     test_the_retired_playbook_setting_is_refused()
     print("provisioning chart render checks passed")

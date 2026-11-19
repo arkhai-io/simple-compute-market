@@ -2,8 +2,9 @@
 
 A Helm validation runs its scenarios inside the release's namespace, as the
 e2e-scenarios test pod, with `e2e-tests.scenarios.markers` naming them. The pod
-must read the configuration the deal test reads — the shared test-config's `helm`
-profile and the e2e-tests Secret — and mount its credential and volumes, so each
+must read the configuration the deal test reads — the umbrella's shared `helm`
+profile, the e2e-tests chart's own profile and its Secret — and mount its
+credential and volumes, so each
 test here renders the local release and compares the two pods. Standard library
 only.
 """

@@ -1,6 +1,6 @@
 """The migration command's result depends on the database alone.
 
-Two copies of one database are migrated by the real
+Two copies of one v0.3.0 database are migrated by the real
 ``compute-provisioning-migrate`` entry point under two configurations that
 differ in every setting that could decide a site's pools or a job's host: the
 VM and bare-metal playbooks, a default host, an inventory group, and the pool
@@ -26,7 +26,9 @@ from sqlalchemy import create_engine, text
 from compute_provisioning_service import config as config_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db import migrate
-from compute_provisioning_service.db.migrations import MIGRATIONS
+from compute_provisioning_service.db.migrations import CHAIN
+
+from .floor_database import create_floor_database
 
 _POOL_DOCUMENT = """
 pools:
@@ -42,20 +44,15 @@ pools:
 
 
 def _source_database(path: Path) -> None:
-    """No host and no pool; one VM job from before job envelopes whose
+    """A v0.3.0 database with no host and no pool; one queued VM job whose
     parameters name no host and no target."""
+    create_floor_database(path)
     engine = create_engine(f"sqlite:///{path}")
     with engine.begin() as connection:
         connection.execute(text(
-            "CREATE TABLE ansible_jobs (id VARCHAR PRIMARY KEY, status VARCHAR NOT NULL, "
-            "params JSON NOT NULL, result JSON, logs TEXT, error TEXT, process_id VARCHAR, "
-            "retry_count INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL DEFAULT 3, "
-            "next_retry_at DATETIME, created_at DATETIME NOT NULL, "
-            "updated_at DATETIME NOT NULL)"
-        ))
-        connection.execute(text(
-            "INSERT INTO ansible_jobs (id, status, params, created_at, updated_at) VALUES "
-            "('job-untargeted', 'queued', '{\"vm_action\": \"create\"}', "
+            "INSERT INTO ansible_jobs (id, status, params, retry_count, max_retries, "
+            "created_at, updated_at) VALUES "
+            "('job-untargeted', 'queued', '{\"vm_action\": \"create\"}', 0, 3, "
             "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"
         ))
     engine.dispose()
@@ -70,7 +67,7 @@ def _migrate_under(monkeypatch: pytest.MonkeyPatch, database: Path, **configurat
     monkeypatch.setattr(
         settings, "_source", config_module._load_bootstrap(os.environ).settings
     )
-    migrate.main()
+    migrate.main([])
 
 
 def _contents(database: Path) -> tuple[list, dict]:
@@ -161,4 +158,4 @@ def test_the_migration_command_migrates_with_the_retired_playbook_setting_stated
             ))}
     finally:
         engine.dispose()
-    assert applied == {migration.id for migration in MIGRATIONS}
+    assert applied == set(CHAIN.ids)

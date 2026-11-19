@@ -63,7 +63,8 @@ None expected. `.openspec.yaml` sets `skip_specs`.
 ## Dependencies and Related Changes
 
 - Opened by `resolve-compute-family-findings`, which removes the material in
-  `removed-tooling.md` from `kit/policy`, `RELEASING.md`, and the training README.
+  `removed-tooling.md` from `kit/policy`, the release document (its example now in
+  `docs/guidance/repository/published-packages.md`), and the training README.
   Neither change depends on the other: if this one lands first, that one has nothing
   left to remove.
 

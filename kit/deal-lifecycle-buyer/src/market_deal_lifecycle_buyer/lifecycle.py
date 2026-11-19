@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+import injected_time
 from market_deal_lifecycle.adapters import (
     DisputeAdapterTable, DisputeBinding, PaymentAdapterTable, PaymentBinding,
     submit_dispute, submit_payment,
@@ -16,11 +16,12 @@ from market_deal_lifecycle.evidence import EvidenceStore
 from market_deal_lifecycle.operations import OperationStore
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CommitMessage, EndDeliveryAcknowledgement, SignedEndDeliveryReceipt, EvidenceItem, HintMessage, LifecycleCommand,
-    LifecycleOutcome, LifecycleRead, Rejected, SubmitResponse, Unknown,
+    LifecycleOutcome, LifecycleRead, PaymentEvent, Rejected, SubmitResponse, Unknown,
 )
 from market_identity import Identity, canonical_json
 
-from .ending import BuyerEndJournal, EndDeliveryProgress, end_delivery
+from .ending import BuyerEndJournal, EndDeliveryProgress, end_delivery, end_rate
+from .watchdog import WatchdogJournal, watchdog_view
 
 
 class BuyerPeer(Protocol):
@@ -41,6 +42,7 @@ class BuyerDeal:
     dispute: DisputeBinding | None = None
     buyer: Identity | None = None
     seller: Identity | None = None
+    rate: bool = False
 
     def __post_init__(self) -> None:
         if not self.negotiation_id or not self.commitment_ref:
@@ -55,6 +57,15 @@ class BuyerDeal:
 
 
 HintObserver = Callable[[HintMessage, LifecycleOutcome], Awaitable[None]]
+#: A domain's classification of a payment final stop, ``None`` while pending;
+#: ``exhaustion`` is funds running out. The kit interprets no mechanism's causes.
+PaymentStopClassifier = Callable[[PaymentEvent], str | None]
+
+#: What the buyer is told when a rate part's final stop is funds running out.
+FUNDING_STOP = (
+    "The deal stopped because its balance could not reserve the next period; "
+    "a top-up cannot revive it, and a new deal is needed."
+)
 
 
 class BuyerLifecycle:
@@ -63,7 +74,9 @@ class BuyerLifecycle:
         disputes: DisputeAdapterTable, operations: OperationStore, peer: BuyerPeer,
         observe_hint: HintObserver | None = None,
         end_journal: BuyerEndJournal | None = None, evidence: EvidenceStore | None = None,
-        clock: Callable[[], int] = lambda: int(time.time()),
+        watchdog: WatchdogJournal | None = None,
+        clock: Callable[[], int] = injected_time.now,
+        classify_payment_stop: PaymentStopClassifier | None = None,
     ) -> None:
         self._resolve = deal
         self.payments = payments
@@ -73,13 +86,28 @@ class BuyerLifecycle:
         self.observe_hint = observe_hint
         self.end_journal = end_journal
         self.evidence = evidence
+        self.watchdog = watchdog
         self.clock = clock
+        self.classify_payment_stop = classify_payment_stop
+
+    def funding_stopped(self, view: AuthorityView) -> bool:
+        """Whether a part's final stop in ``view`` is funds running out, as the
+        domain's classifier reads it; with no classifier, never."""
+        classify = self.classify_payment_stop
+        return classify is not None and any(
+            part.final_stop is not None and classify(part.final_stop) == "exhaustion" for part in view.parts
+        )
 
     def _deal(self, negotiation_id: str) -> BuyerDeal:
         deal = self._resolve(negotiation_id)
         if deal.negotiation_id != negotiation_id:
             raise ValueError("buyer resolver returned another negotiation")
         return deal
+
+    async def end(self, negotiation_id: str, *, surrender: bool = False) -> EndDeliveryProgress:
+        if self._deal(negotiation_id).rate and not surrender:
+            return await end_rate(self, negotiation_id)
+        return await self.end_delivery(negotiation_id)
 
     async def end_delivery(self, negotiation_id: str) -> EndDeliveryProgress:
         return await end_delivery(self, negotiation_id)
@@ -117,7 +145,7 @@ class BuyerLifecycle:
             negotiation_id=negotiation_id, kind="append", operation_key=operation_key, payload=payload,
         ))
 
-    async def _hint(self, command: LifecycleCommand, outcome: LifecycleOutcome) -> None:
+    async def _hint(self, command: LifecycleCommand, outcome: LifecycleOutcome) -> LifecycleOutcome:
         # The peer key is stable across retries, separate from authority keys.
         operation_key = hashlib.sha256(canonical_json({
             "peer": "hint", "command": command.model_dump(mode="json"),
@@ -133,7 +161,12 @@ class BuyerLifecycle:
             # into an unknown filing. Its acknowledgement is observed separately.
             hint = Unknown(reason="storefront hint was not acknowledged")
         if self.observe_hint is not None:
-            await self.observe_hint(message, hint)
+            try:
+                await self.observe_hint(message, hint)
+            except Exception:
+                # A diagnostic observer cannot change an authority outcome.
+                pass
+        return hint
 
     async def read(self, negotiation_id: str) -> LifecycleRead:
         deal = self._deal(negotiation_id)
@@ -157,10 +190,26 @@ class BuyerLifecycle:
                             if not isinstance(view.outcome, Accepted)), financial.outcome)
             authority = AuthorityView(
                 outcome=outcome, state=financial.state, events=financial.events,
-                extensions=financial.extensions, deadline=financial.deadline,
+                parts=financial.parts, extensions=financial.extensions, deadline=financial.deadline,
                 disputes=cases.disputes, cases=cases.cases,
             )
         return LifecycleRead(
             negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
             authority=authority, delivery=delivery.delivery,
         )
+
+    async def buyer_read(self, negotiation_id: str) -> dict:
+        """The buyer's read of the deal: its lifecycle read, the watchdog's status,
+        and, when a rate part stopped because funds ran out, why the stop is final.
+
+        Both are the buyer's own knowledge, composed here and never a field of
+        ``LifecycleRead`` or any lifecycle wire model, so the storefront neither
+        sees nor reports them; the funding stop is read from the payment
+        authority's record in the read, not from the seller.
+        """
+        read = await self.read(negotiation_id)
+        state = self.watchdog.state(negotiation_id) if self.watchdog is not None else None
+        return {
+            **read.model_dump(mode="json"), "watchdog": watchdog_view(state, self.clock()),
+            "funding_stop": FUNDING_STOP if self.funding_stopped(read.authority) else None,
+        }

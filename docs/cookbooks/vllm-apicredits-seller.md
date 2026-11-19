@@ -46,7 +46,7 @@ vLLM gateway.
 
 ## Services
 
-Run these services as separate roles even if they share one Compose
+Run these as separate services even if they share one Compose
 project:
 
 - `registry`: a federated listing registry filtered for the

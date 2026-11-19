@@ -4,11 +4,16 @@ import io
 import os
 import shutil
 import subprocess
+import tomllib
 import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "package-review-wheelhouse.sh"
+IDENTITY_PROJECT = Path("kit") / "identity" / "pyproject.toml"
+# The identity kit's version, which the script reads from the same project.
+IDENTITY_VERSION = tomllib.loads((REPO_ROOT / IDENTITY_PROJECT).read_text())["project"]["version"]
+IDENTITY_WHEEL = f"arkhai_kit_identity-{IDENTITY_VERSION}-py3-none-any.whl"
 
 
 def _write_wheel_member(
@@ -28,8 +33,8 @@ def _identity_wheel() -> bytes:
         _write_wheel_member(archive, "market_identity/__init__.py", "")
         _write_wheel_member(
             archive,
-            "arkhai_kit_identity-0.4.0.dist-info/METADATA",
-            "Name: arkhai-kit-identity\nVersion: 0.4.0\n",
+            f"arkhai_kit_identity-{IDENTITY_VERSION}.dist-info/METADATA",
+            f"Name: arkhai-kit-identity\nVersion: {IDENTITY_VERSION}\n",
         )
     return buffer.getvalue()
 
@@ -70,10 +75,10 @@ def _stage_root(
     (root / ".dist").mkdir()
     (root / "project").mkdir()
     shutil.copy2(SCRIPT, root / "scripts" / SCRIPT.name)
+    (root / IDENTITY_PROJECT).parent.mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / IDENTITY_PROJECT, root / IDENTITY_PROJECT)
 
-    (root / ".dist" / "arkhai_kit_identity-0.4.0-py3-none-any.whl").write_bytes(
-        _identity_wheel()
-    )
+    (root / ".dist" / IDENTITY_WHEEL).write_bytes(_identity_wheel())
     (root / "project" / "pyproject.toml").write_text(
         """[project]
 name = "fixture-project"
@@ -122,13 +127,38 @@ def _run(root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 def test_wheelhouse_requires_exact_identity_release_filename(tmp_path: Path) -> None:
     root, env = _stage_root(tmp_path)
-    exact = root / ".dist" / "arkhai_kit_identity-0.4.0-py3-none-any.whl"
+    exact = root / ".dist" / IDENTITY_WHEEL
     exact.rename(root / ".dist" / "arkhai_kit_identity-0.1.0-py3-none-any.whl")
 
     result = _run(root, env)
 
     assert result.returncode == 2
-    assert "arkhai_kit_identity-0.4.0-py3-none-any.whl" in result.stderr
+    assert IDENTITY_WHEEL in result.stderr
+
+
+def test_wheelhouse_requires_the_wheel_of_the_version_the_kit_states(tmp_path: Path) -> None:
+    root, env = _stage_root(tmp_path)
+    project = root / IDENTITY_PROJECT
+    project.write_text(
+        project.read_text(encoding="utf-8").replace(
+            f'version = "{IDENTITY_VERSION}"', 'version = "9.9.9"'),
+        encoding="utf-8",
+    )
+
+    result = _run(root, env)
+
+    assert result.returncode == 2
+    assert "arkhai_kit_identity-9.9.9-py3-none-any.whl" in result.stderr
+
+
+def test_wheelhouse_refuses_an_identity_kit_stating_no_version(tmp_path: Path) -> None:
+    root, env = _stage_root(tmp_path)
+    (root / IDENTITY_PROJECT).unlink()
+
+    result = _run(root, env)
+
+    assert result.returncode == 2
+    assert "states no version" in result.stderr
 
 
 def test_wheelhouse_rejects_portable_lock_source_leakage(tmp_path: Path) -> None:
@@ -180,14 +210,14 @@ def test_wheelhouse_checks_identity_package_record_not_dependency_reference(
 ) -> None:
     root, env = _stage_root(
         tmp_path,
-        lock_extra="""
+        lock_extra=f"""
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.4.0"
-source = { registry = "../.dist" }
+version = "{IDENTITY_VERSION}"
+source = {{ registry = "../.dist" }}
 wheels = [
-    { path = "../.dist/arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+    {{ path = "../.dist/{IDENTITY_WHEEL}" }},
 ]
 """,
     )

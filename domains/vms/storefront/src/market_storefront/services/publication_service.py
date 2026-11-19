@@ -6,8 +6,10 @@ from collections.abc import Callable, Collection
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_identity import Identity
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.reconciler import (
+    VM_OFFERING_MODE,
     ReconciliationScope,
     closed_available_listing_ids,
     stale_open_listing_ids,
@@ -35,9 +37,10 @@ class VmPublicationHooks:
         self._db = sqlite_client
 
     def validate_candidate(
-        self, candidate: PublicationCandidate[Listing]
+        self, candidate: PublicationCandidate[dict[str, Any]]
     ) -> None:
-        mode = candidate.payload.listing_resource.offering_mode
+        listing = Listing.model_validate(candidate.payload)
+        mode = listing.listing_resource.offering_mode
         offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
         if offering_mode != candidate.binding.offering_mode:
             raise CapacityBindingError(
@@ -51,6 +54,24 @@ class VmPublicationHooks:
             return await capacity_binding_for_listing(self._db, listing_id)
         except RuntimeError:
             return None
+
+    async def publication_candidate(
+        self, listing: dict[str, Any]
+    ) -> PublicationCandidate[dict[str, Any]]:
+        return await _candidate(self._db, listing)
+
+    def registry_publisher(self) -> Identity:
+        signer = container.resolved_marketplace_signer
+        if signer is None:
+            raise RuntimeError("marketplace signer is not initialized")
+        return signer.identity
+
+    def served_offering_modes(self) -> Collection[str]:
+        """The VM mode alone: the VM publication loop builds only the VM
+        source, and a bare-metal registration this storefront composes is
+        published by the bare-metal storefront, which may share its principal
+        and whose listings this storefront must leave open."""
+        return (VM_OFFERING_MODE,)
 
 
 def _make_registry_client():
@@ -74,7 +95,7 @@ def build_publication_runtime(
     sqlite_client: Any,
     *,
     registry_client_factory: Callable[[], Any],
-) -> PublicationRuntime[Listing]:
+) -> PublicationRuntime[dict[str, Any]]:
     """Compose VM schema/persistence hooks with the injected registry transport."""
     return PublicationRuntime(
         repository=sqlite_client,
@@ -91,7 +112,7 @@ def build_publication_runtime(
     )
 
 
-async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCandidate[Listing]:
+async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCandidate[dict[str, Any]]:
     listing = Listing.model_validate(
         value.model_dump(mode="python") if isinstance(value, Listing) else value
     )
@@ -100,7 +121,15 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
     # publishes, so a listing never discloses a category its binding does not
     # record and no stored payload can be republished without one.
     listing.listing_resource.capacity_backing = binding.backing.label
-    return PublicationCandidate(listing.listing_id, binding, listing)
+    payload = listing.model_dump(mode="json")
+    payload["listing_resource"] = listing.published_listing_resource()
+    pricing = listing.published_pricing()
+    # Carried opaquely by core publication as top-level terms beside the
+    # common fields, so no registry or core code names a price or a bound.
+    payload["publication_terms"] = {"pricing": pricing} if pricing is not None else {}
+    if listing.available_until_utc is not None:
+        payload["publication_terms"]["available_until_utc"] = listing.available_until_utc
+    return PublicationCandidate(listing.listing_id, binding, payload)
 
 
 async def publish_order_to_registry(
@@ -204,7 +233,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         configured_sites=configured_sites,
         admissibility_default=container.resolved_admissibility_default,
     )
-    candidates: list[PublicationCandidate[Listing]] = []
+    candidates: list[PublicationCandidate[dict[str, Any]]] = []
     for listing_id in ids:
         row = await sqlite_client.load_listing(listing_id=listing_id)
         if row is None:

@@ -1,28 +1,39 @@
 #!/usr/bin/env python3
-"""Validate the committed slice at HEAD without changing the checkout.
+"""Gather validation's evidence of a tree or a commit without changing the checkout.
 
-Validation describes one commit, so it must leave the worktree exactly as it found
-it: a step that rewrote a tracked file would validate a tree that is not the
-commit. Each part asserts a clean worktree, untracked files included, before it
-starts, and after every step checks that `HEAD` is still the commit it recorded and
-the worktree is still clean; on any change it stops, because every later step
-would describe a different tree. It fails rather than repairs. A step can change
-the tree — `make test` and the end-to-end image build both sync project
-environments, which may rewrite a lock — and so can something outside it, such as a
-commit or a branch switch in the same checkout.
+Each part gathers one evidence kind, which describes what it ran on: `local` and
+`helm` describe the worktree's tree as it stands — `HEAD`'s tree when the worktree
+is clean, so the functional checks before a commit leave `local` evidence for the
+commit that then holds exactly what they tested — and `ci` describes the commit,
+since its run is dispatched for it and its baseline chosen by its ancestry. A tree
+is the worktree's changes, staged, unstaged, and untracked but not ignored, added
+to a copy of the checkout's index and written as a tree (`worktree_tree`), the
+identity the change workflow's engine fills `{tree}` with; a commit is `HEAD`'s.
+Given the identity (`--tree` or `--commit`), a part refuses to start when it is not
+what the checkout holds, so its evidence never names a tree or commit it did not
+run on.
+
+A part must leave what it describes as it found it: a step that rewrote a tracked
+file would leave evidence of a tree nothing was tested on. Each part checks its
+identity before it starts and after every step — the worktree's tree for `local`
+and `helm`, `HEAD` for `ci` — and on any change it stops, because every later step
+would describe something else. It fails rather than repairs. A step can change the
+tree — `make test` and the end-to-end image build both sync project environments,
+which may rewrite a lock — and so can something outside it, such as a branch
+switch in the same checkout.
 
 The local and Helm parts start with `make dist-clean`; the `ci` part builds
 nothing. The wheelhouse in `.dist` is shared by
 every branch built in the checkout, and environments sync internal packages with an
 upgrade, so a higher version another branch left there would be installed in place
-of the one this commit builds. Removing it makes every wheel tested come from the
-commit; it is untracked, so the checkout is unchanged.
+of the one this tree builds. Removing it makes every wheel tested come from the
+tree; it is ignored, so the tree is unchanged.
 
 - `local` runs `make check-packaging`, then `make test`.
 - `helm` runs in the change's own namespace (`--change`, else `default`), so two
   changes' validations never touch each other's release, volumes, or Secrets. It
   builds the images under the change's own tags, runs the chart render checks
-  with the chart-to-loader check able to run against this commit's code, then
+  with the chart-to-loader check able to run against this tree's code, then
   replaces the change's release: its workloads scaled to zero if a crashed run
   left any up, its volumes deleted, the namespace's Secrets created, and the
   release upgraded in place from zero, so every pod starts new on the images just
@@ -40,9 +51,10 @@ commit; it is untracked, so the checkout is unchanged.
 
 `capacity` validates nothing. Archive cleanup runs it to record, in
 `helm/validation-capacity.toml`, the memory the change's latest validation
-measured, which the capacity preflight compares with the node; when that
-validation measured none, no metrics source answering, it leaves any recorded
-figure as it is and says so.
+measured — the current Helm attempt of the tree its validated commit holds —
+which the capacity preflight compares with the node; when that validation measured
+none, no metrics source answering, it leaves any recorded figure as it is and says
+so.
 
 Validation has full control of the environment it runs in: it scales, deletes,
 and replaces whatever its change's namespace holds without asking. What it never
@@ -51,25 +63,32 @@ changes is the commit, or another namespace.
 Each part stops at its first failure, except that the `ci` part goes on past a
 baseline it could not read, since the run's own evidence is still worth keeping.
 Each part keeps each attempt's output apart, under
-`.snapshot/validation/<short commit>/<part>/<attempt>/`, so a rerun never overwrites
-the evidence of the run before it. It prints one line as each step starts and one
-as it ends, so a part can be watched while it runs, then a summary, which it also
-writes as `summary.json` beside the logs for the validation report. A step's
-result is `passed`, `failed`, or `warning`; a warning does not fail the part.
+`.snapshot/evidence/<tree>/<kind>/<attempt>/` — `<commit>/ci-<workflow>/` for the
+`ci` part, one directory per workflow owed — so a rerun never overwrites the
+evidence of the run before it. An attempt is named by the UTC time it started, to
+the microsecond and of fixed width, so path order is time order and the last
+attempt in path order is the current one, as the engine's `evidence` reads it.
+A part prints one line as each step starts and one as it ends, so it can be
+watched while it runs, then a summary, which it also writes as `summary.json`
+beside the logs: the evidence the kind's pattern matches. A step's result is
+`passed`, `failed`, or `warning`; a warning does not fail the part.
 
-Contract: openspec/specs/change-workflow/spec.md, CW-a7dw, CW-af15, and CW-zkhs;
-openspec/specs/market-change-workflow/spec.md, MCW-v3tf, MCW-qeja, MCW-8h0r,
-MCW-2lzw, MCW-fnuh, MCW-a0hu, MCW-notv, MCW-7bia, MCW-epkd, and MCW-7ts3.
+Contract: openspec/specs/change-workflow/spec.md, CW-a7dw, CW-af15, CW-zkhs, and
+CW-t3ev; openspec/specs/market-change-workflow/spec.md, MCW-r4tx, MCW-v3tf, MCW-qeja,
+MCW-8h0r, MCW-2lzw, MCW-fnuh, MCW-a0hu, MCW-notv, MCW-7bia, MCW-epkd, and MCW-7ts3.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -77,14 +96,23 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Iterator, Sequence
 
 import change_namespace
 import ci_evidence
 from workflow_command import WorkflowRefused, found_change
 
 ROOT = Path(__file__).resolve().parents[1]
-LOG_ROOT = Path(".snapshot/validation")
+# Where every kind's evidence is kept, under its tree or commit; Git ignores it, so
+# no attempt changes the tree it describes.
+EVIDENCE_ROOT = Path(".snapshot/evidence")
+TREE, COMMIT = "tree", "commit"
+# What each part's evidence describes, as its kind's pattern in
+# .agents/workflow.toml keys it.
+IDENTITY = {"local": TREE, "helm": TREE, "ci": COMMIT}
+# An attempt's directory: the UTC time it started, of fixed width, so that path
+# order is time order.
+ATTEMPT_FORMAT = "%Y%m%dT%H%M%S.%fZ"
 DEFAULT_HELM_CONTEXT = "docker-desktop"
 DEFAULT_NAMESPACE = "default"
 STOREFRONT_PROJECT = "domains/vms/storefront"
@@ -123,7 +151,32 @@ SCENARIO_TIMEOUT = "30m"
 # key, the only proof of a deployed storefront's payments access, since readiness
 # never contacts the payments service.
 PAYMENTS_CHECK_SUFFIX = "-payments-check"
-PAYMENTS_CHECK_TIMEOUT = "5m"
+# The VM storefront chart's mediation-check test pods end in this: each runs the
+# storefront's `check-mediation` with its dispute credential and CA mount, the only
+# proof before a payment deal's dispute servicing that the storefront reaches its
+# dispute authority, since it builds its mediation client only when a deal needs it.
+MEDIATION_CHECK_SUFFIX = "-mediation-check"
+CHECK_POD_TIMEOUT = "5m"
+
+
+@dataclass(frozen=True)
+class CheckPods:
+    """One kind of storefront check test pod Helm validation runs after the scenarios.
+
+    ``name`` names its steps, ``suffix`` ends its pods' names, ``evidence`` is
+    the summary's key for its records, and ``access`` what a pod of it shows.
+    """
+
+    name: str
+    suffix: str
+    evidence: str
+    access: str
+
+
+CHECK_PODS = (
+    CheckPods("payments check", PAYMENTS_CHECK_SUFFIX, "payments_checks", "payments access"),
+    CheckPods("mediation check", MEDIATION_CHECK_SUFFIX, "mediation_checks", "dispute authority access"),
+)
 _HOOK_POD = re.compile(r"^kind: Pod$", re.M)
 _HOOK_NAME = re.compile(r"^  name: (\S+)$", re.M)
 READY_TIMEOUT = "600s"
@@ -186,9 +239,13 @@ class Step:
 
 @dataclass
 class Summary:
-    part: str
+    # The kind, and what its evidence describes: the tree for `local` and `helm`,
+    # the commit for `ci`. `commit` is `HEAD` as the attempt started, which a tree
+    # kind's run before a commit names only as the commit it builds on.
+    kind: str
     commit: str
-    attempt: int = 1
+    tree: str | None = None
+    attempt: str = ""
     passed: bool = True
     steps: list[Step] = field(default_factory=list)
     not_run: dict[str, str] = field(default_factory=dict)
@@ -228,9 +285,9 @@ def _run_logged(command: Sequence[str], log: Path) -> int:
             return 127
 
 
-def _read(command: Sequence[str]) -> str:
+def _read(command: Sequence[str], cwd: Path = ROOT) -> str:
     try:
-        return subprocess.run(list(command), cwd=ROOT, capture_output=True, text=True,
+        return subprocess.run(list(command), cwd=cwd, capture_output=True, text=True,
                               check=True, timeout=READ_TIMEOUT_SECONDS).stdout
     except FileNotFoundError as exc:
         raise ValidationError(f"{command[0]} is required but was not found") from exc
@@ -274,6 +331,33 @@ def dirty_paths(read: Reader) -> list[str]:
     """Every tracked change and untracked file Git reports; ignored files excluded."""
     status = read(["git", "status", "--porcelain", "--untracked-files=all"])
     return [line for line in status.splitlines() if line.strip()]
+
+
+def worktree_tree(root: Path) -> str:
+    """The tree of the worktree at `root` as it stands: every change to it — staged,
+    unstaged, and untracked, but not what Git ignores — added to a copy of the
+    checkout's index, which is written as a tree. The checkout's own index is never
+    touched, so a commit being prepared keeps its staging."""
+    index = root / _read(["git", "rev-parse", "--git-path", "index"], cwd=root).strip()
+    with tempfile.TemporaryDirectory(prefix="validate-tree-") as scratch:
+        copy = Path(scratch) / "index"
+        # The copy keeps the index's modification time: Git rereads a file changed in
+        # the same second as the index was written only by comparing the two, so a
+        # copy dated now would pass such a change over as unchanged.
+        if index.is_file():
+            shutil.copy2(index, copy)
+        environment = {**os.environ, "GIT_INDEX_FILE": str(copy)}
+        written = ""
+        for command in (["git", "add", "--all"], ["git", "write-tree"]):
+            try:
+                done = subprocess.run(command, cwd=root, env=environment, capture_output=True,
+                                      text=True, timeout=READ_TIMEOUT_SECONDS)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise ValidationError(f"{' '.join(command)} could not run: {exc}") from exc
+            if done.returncode != 0:
+                raise ValidationError(f"{' '.join(command)} failed: {done.stderr.strip()}")
+            written = done.stdout.strip()
+        return written
 
 
 def pipeline_markers(read: Reader) -> list[str]:
@@ -352,8 +436,9 @@ _RECORD_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{12,40})\b", re.M)
 
 
 def latest_helm_summary(root: Path, change: str) -> tuple[Path | None, str]:
-    """The `summary.json` of the latest Helm attempt of the commit the change's latest
-    validation record names, or None with why there is none."""
+    """The `summary.json` of the current Helm attempt — the last in path order — of the
+    tree the commit the change's latest validation record names holds, or None with
+    why there is none."""
     try:
         records = found_change(root, change)["records"]
     except WorkflowRefused as exc:
@@ -367,12 +452,20 @@ def latest_helm_summary(root: Path, change: str) -> tuple[Path | None, str]:
     commit = _RECORD_COMMIT.search(record.read_text("utf-8"))
     if not commit:
         return None, f"{record.relative_to(root)} names no validated commit"
-    attempts = sorted((int(entry.name), entry) for entry in
-                      (root / LOG_ROOT / commit[1][:12] / "helm").glob("*")
-                      if entry.name.isdigit() and (entry / "summary.json").is_file())
+    # The Helm kind's evidence describes a tree, the one the validated commit holds.
+    try:
+        tree = _read(["git", "rev-parse", "--verify", "--quiet", f"{commit[1]}^{{tree}}"],
+                     cwd=root).strip()
+    except ValidationError:
+        tree = ""
+    if not tree:
+        return None, (f"the commit {record.name} validated, {commit[1][:12]}, cannot be read "
+                      "in this checkout")
+    attempts = sorted(entry for entry in (root / EVIDENCE_ROOT / tree / "helm").glob("*")
+                      if (entry / "summary.json").is_file())
     if not attempts:
         return None, f"the latest validation of {change}, {record.name}, ran no Helm part"
-    summary = attempts[-1][1] / "summary.json"
+    summary = attempts[-1] / "summary.json"
     return summary, f"from {summary.relative_to(root)}"
 
 
@@ -428,23 +521,51 @@ def _utc_now() -> datetime:
 
 
 class Validation:
-    def __init__(self, part: str, *, root: Path = ROOT, runner: Runner = _run_logged,
-                 read: Reader = _read, clock: Callable[[], float] = time.monotonic,
+    """One attempt of one kind: where it keeps its evidence, and what it describes.
+
+    `given` is the tree or commit the caller says the checkout holds — the engine's
+    `{tree}` or `{commit}` — refused when it is not; without it, the attempt
+    describes what the checkout holds. `owed` names the `ci` part's workflow, whose
+    attempts are kept apart from another workflow's. `tree` computes the worktree's
+    tree; by default `worktree_tree` of `root`.
+    """
+
+    def __init__(self, kind: str, *, given: str | None = None, owed: str | None = None,
+                 root: Path = ROOT, runner: Runner = _run_logged, read: Reader = _read,
+                 tree: Callable[[], str] | None = None,
+                 clock: Callable[[], float] = time.monotonic,
                  echo: Callable[[str], None] = _say,
                  now: Callable[[], datetime] = _utc_now) -> None:
         self.root = root
         self.run = runner
         self.read = read
+        self.tree = tree or partial(worktree_tree, root)
         self.clock = clock
         self.echo = echo
         self.now = now
+        self.identity = IDENTITY[kind]
         commit = read(["git", "rev-parse", "HEAD"]).strip()
-        part_dir = root / LOG_ROOT / commit[:12] / part
-        earlier = [int(entry.name) for entry in part_dir.glob("*")
-                   if entry.is_dir() and entry.name.isdigit()]
-        attempt = max(earlier, default=0) + 1
-        self.summary = Summary(part=part, commit=commit, attempt=attempt)
-        self.log_dir = part_dir / str(attempt)
+        self.summary = Summary(kind=kind, commit=commit)
+        if self.identity == TREE:
+            self.summary.tree = self.tree()
+        described = self.described
+        if given is not None and given != described:
+            raise ValidationError(f"the checkout holds the {self.identity} {described}, not "
+                                  f"the {self.identity} given, {given}")
+        if owed is not None and (owed in ("", ".", "..") or "/" in owed or "\\" in owed):
+            # The workflow names a directory, which must not reach another's.
+            raise ValidationError(f"{owed!r} is not a workflow's file name")
+        directory = f"{kind}-{owed}" if owed else kind
+        self.summary.attempt = self.now().astimezone(timezone.utc).strftime(ATTEMPT_FORMAT)
+        self.log_dir = root / EVIDENCE_ROOT / described / directory / self.summary.attempt
+        if self.log_dir.exists():
+            raise ValidationError(f"{self.log_dir.relative_to(root)} already holds an attempt "
+                                  "started at the same instant")
+
+    @property
+    def described(self) -> str:
+        """The tree or commit this attempt's evidence describes."""
+        return self.summary.tree if self.identity == TREE else self.summary.commit
 
     @property
     def failed(self) -> bool:
@@ -460,16 +581,15 @@ class Validation:
     def warn(self, name: str, detail: str) -> None:
         self.summary.steps.append(Step(name, "warning", detail=detail))
 
-    def clean(self, name: str) -> bool:
-        try:
-            dirty = dirty_paths(self.read)
-        except ValidationError as exc:
-            self.fail(name, str(exc))
+    def unchanged(self, when: str) -> bool:
+        """Whether the checkout still holds what the attempt describes, as a step
+        named by the identity and `when`, such as `tree before`."""
+        name = f"{self.identity} {when}"
+        if changed := self.identity_changed():
+            self.fail(name, changed)
             return False
-        if dirty:
-            self.fail(name, "the worktree is not clean:\n" + "\n".join(dirty))
-            return False
-        self.note(name, "the worktree is clean")
+        self.note(name, f"the {'worktree' if self.identity == TREE else 'checkout'} holds "
+                        f"the {self.identity} {self.described}")
         return True
 
     def step(self, name: str, command: Sequence[str]) -> Step:
@@ -485,9 +605,9 @@ class Validation:
             step.detail = f"{' '.join(command)} exited {status}"
             step.tail = _tail(log)
             self.summary.passed = False
-        if changed := self.commit_changed():
+        if changed := self.identity_changed():
             # Whatever the command reported, the evidence after it no longer
-            # describes the commit; the caller stops at a step that did not pass.
+            # describes what it names; the caller stops at a step that did not pass.
             step.result = "failed"
             step.detail = "\n".join(filter(None, [step.detail, changed]))
             self.summary.passed = False
@@ -495,19 +615,26 @@ class Validation:
         self.echo(f"{name}: {step.result} in {step.seconds}s")
         return step
 
-    def commit_changed(self) -> str | None:
-        """How the checkout no longer is the recorded commit, clean; None while it is."""
+    def identity_changed(self) -> str | None:
+        """What the checkout holds in place of what the attempt describes; None while
+        it holds that. A tree kind reads the worktree's tree, which a commit of exactly
+        what was tested leaves as it was; a commit kind reads `HEAD`."""
         try:
-            head = self.read(["git", "rev-parse", "HEAD"]).strip()
-            dirty = dirty_paths(self.read)
+            if self.identity == COMMIT:
+                head = self.read(["git", "rev-parse", "HEAD"]).strip()
+                if head == self.summary.commit:
+                    return None
+                return (f"HEAD is now {head[:12]}, not the validated commit "
+                        f"{self.summary.commit[:12]}: a commit or branch switch happened")
+            tree = self.tree()
+            if tree == self.summary.tree:
+                return None
+            holds = dirty_paths(self.read)
         except ValidationError as exc:
             return f"could not check the checkout: {exc}"
-        if head != self.summary.commit:
-            return (f"HEAD is now {head[:12]}, not the validated commit "
-                    f"{self.summary.commit[:12]}: a commit or branch switch happened")
-        if dirty:
-            return "the worktree changed:\n" + "\n".join(dirty)
-        return None
+        return (f"the worktree changed: its tree is now {tree[:12]}, not the tree under "
+                f"validation {self.summary.tree[:12]}; against HEAD it holds:\n"
+                + ("\n".join(holds) or "no change"))
 
     def finish(self) -> Summary:
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -523,14 +650,14 @@ def _tail(log: Path) -> list[str]:
 
 
 def validate_local(validation: Validation) -> Summary:
-    if not validation.clean("clean before"):
+    if not validation.unchanged("before"):
         return validation.finish()
     for name, command in (DIST_CLEAN,
                           ("check-packaging", ["make", "check-packaging"]),
                           ("test", ["make", "test"])):
         if validation.step(name, command).result != "passed":
             break
-    validation.clean("clean after")
+    validation.unchanged("after")
     return validation.finish()
 
 
@@ -547,7 +674,7 @@ def validate_ci(validation: Validation, *, workflow: str, after_run: int,
     evidence = validation.summary.evidence
     evidence.update(workflow=workflow, run=None, baseline=None, jobs=[], classes={},
                     no_evidence=None)
-    if not validation.clean("clean before"):
+    if not validation.unchanged("before"):
         return validation.finish()
     try:
         ci_evidence.refuse_unlisted(workflow)
@@ -560,7 +687,7 @@ def validate_ci(validation: Validation, *, workflow: str, after_run: int,
     # merge of the branch, not the commit.
     if validation.step("fetch", _ci_fetch(workflow, runs, "--after-run", str(after_run),
                                           "--event", "workflow_dispatch")).result != "passed":
-        if validation.commit_changed():
+        if validation.identity_changed():
             return _after_part(validation)
         return _no_ci_evidence(validation, f"no {workflow} run of {commit[:12]} newer than "
                                f"run {after_run} was listed, or its log was not fetched; "
@@ -596,7 +723,7 @@ def validate_ci(validation: Validation, *, workflow: str, after_run: int,
     baseline_jobs, no_baseline = _ci_baseline(
         validation, workflow, runs, contains,
         needed=any(job.failed for job in run_jobs.values()))
-    if changed := validation.commit_changed():
+    if changed := validation.identity_changed():
         validation.fail("checkout", changed)
         return _after_part(validation)
     compared = ci_evidence.compare(run_jobs, baseline_jobs, no_baseline)
@@ -773,11 +900,22 @@ def validate_helm(validation: Validation, *, change: str | None = None,
                   credentials: CredentialProbe = _credential_helper_warning,
                   capacity: Path | None = None,
                   sample_interval: float = SAMPLE_SECONDS) -> Summary:
-    run = HelmRun.of(change)
-    validation.summary.namespace = run.namespace
-    if not validation.clean("clean before") or not _helm_preflight(validation, context,
-                                                                   credentials):
+    validation.summary.namespace = HelmRun.of(change).namespace
+    if not validation.unchanged("before"):
         return validation.finish()
+    with _pinned_context(validation, context) as pinned:
+        if not pinned or not _helm_preflight(validation, credentials):
+            return validation.finish()
+        return _validate_helm(validation, change=change, scenarios=scenarios, sleep=sleep,
+                              volume_wait=volume_wait, capacity=capacity,
+                              sample_interval=sample_interval)
+
+
+def _validate_helm(validation: Validation, *, change: str | None,
+                   scenarios: Sequence[str] | None, sleep: Callable[[float], None],
+                   volume_wait: float, capacity: Path | None,
+                   sample_interval: float) -> Summary:
+    run = HelmRun.of(change)
     try:
         run.release = _helm_setting(validation, run, "RELEASE")
         run.test_volumes = tuple(_helm_setting(validation, run, "TEST_VOLUMES").split())
@@ -802,8 +940,8 @@ def validate_helm(validation: Validation, *, change: str | None = None,
 
     # Each loader check runs in its storefront's own environment, which holds the
     # internal wheels it last synced. The images are built first, rebuilding the
-    # wheelhouse from this commit, and each environment is then reinstalled from
-    # it, so the checks load the commit's code rather than another branch's.
+    # wheelhouse from this tree, and each environment is then reinstalled from
+    # it, so the checks load the tree's code rather than another branch's.
     for name, command in (DIST_CLEAN,
                           ("build-dev", ["make", "build-dev",
                                          f"IMAGE_SUFFIX={run.image_suffix}"]),
@@ -830,15 +968,17 @@ def validate_helm(validation: Validation, *, change: str | None = None,
                 _run_scenarios(validation, run, sample_interval)
             else:
                 validation.note("e2e", "no scenario is selected for the Helm run")
-            if not validation.commit_changed():
-                _run_payments_checks(validation, run)
+            for check in CHECK_PODS:
+                if validation.identity_changed():
+                    break
+                _run_check_pods(validation, run, check)
     finally:
         _after_scenarios(validation, run)
     return _after_part(validation)
 
 
 def _after_part(validation: Validation) -> Summary:
-    validation.clean("clean after")
+    validation.unchanged("after")
     return validation.finish()
 
 
@@ -878,19 +1018,50 @@ def _scale_to_zero(validation: Validation, run: HelmRun, name: str,
                                   "--replicas=0", *(w.name for w in workloads)])
 
 
-def _helm_preflight(validation: Validation, context: str,
-                    credentials: CredentialProbe) -> bool:
+@contextlib.contextmanager
+def _pinned_context(validation: Validation, context: str) -> Iterator[bool]:
+    """Point every kubectl and helm the part runs at ``context`` alone.
+
+    The part deploys unattended, so it never follows the context the machine has
+    selected, which may be a production cluster: it writes a kubeconfig holding
+    ``context`` only to a private temporary file and sets ``KUBECONFIG`` to it for
+    the part's commands, which inherit the environment. The file is removed and
+    ``KUBECONFIG`` restored when the part ends.
+    """
     try:
-        current = validation.read(["kubectl", "config", "current-context"]).strip()
+        known = validation.read(["kubectl", "config", "get-contexts", "--output", "name"]).split()
+        if context not in known:
+            validation.fail("kube context",
+                            f"the kubeconfig has no context {context!r}; the Helm part "
+                            "deploys unattended, so it runs only against HELM_CONTEXT")
+            yield False
+            return
+        selected = validation.read(["kubectl", "config", "current-context"]).strip()
+        config = validation.read(["kubectl", "config", "view", "--raw", "--minify",
+                                  "--flatten", "--context", context])
     except ValidationError as exc:
         validation.fail("kube context", str(exc))
-        return False
-    if current != context:
-        validation.fail("kube context",
-                        f"the current kube context is {current!r}, not {context!r}; the Helm "
-                        "part deploys unattended, so it runs only against HELM_CONTEXT")
-        return False
-    validation.note("kube context", current)
+        yield False
+        return
+    descriptor, name = tempfile.mkstemp(prefix="validate-helm-", suffix=".kubeconfig")
+    earlier = os.environ.get("KUBECONFIG")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(config)
+        os.environ["KUBECONFIG"] = name
+        validation.note("kube context", context if selected == context else
+                        f"{context}, pinned for this part; the selected context, "
+                        f"{selected!r}, is left alone")
+        yield True
+    finally:
+        if earlier is None:
+            os.environ.pop("KUBECONFIG", None)
+        else:
+            os.environ["KUBECONFIG"] = earlier
+        Path(name).unlink(missing_ok=True)
+
+
+def _helm_preflight(validation: Validation, credentials: CredentialProbe) -> bool:
     for step, project, target in LOADER_ENVIRONMENTS:
         python = Path(project, ".venv/bin/python")
         if not os.access(validation.root / python, os.X_OK):
@@ -1105,7 +1276,7 @@ def _replace_release(validation: Validation, run: HelmRun, overlay: Sequence[str
 
 def _refusal(validation: Validation, deploy: Step) -> str | None:
     """The line saying the chart refused the upgrade, when that is why it failed."""
-    if not deploy.log or validation.commit_changed():
+    if not deploy.log or validation.identity_changed():
         return None
     text = (validation.root / deploy.log).read_text("utf-8", errors="replace")
     for line in text.splitlines():
@@ -1199,8 +1370,9 @@ def _run_scenarios(validation: Validation, run: HelmRun, sample_interval: float)
                                        "--timeout", SCENARIO_TIMEOUT])
     record: dict = {"pod": pod, "log": None, "exit_code": None}
     validation.summary.evidence["scenarios"] = record
-    if validation.commit_changed():
-        # No evidence describes the commit now, but validation stops what it started.
+    if validation.identity_changed():
+        # What follows would describe another tree, but validation stops what it
+        # started.
         _stop_scenario_pod(validation, run, pod)
         return
     record["log"] = _kept(validation, "the scenario pod's log", [
@@ -1233,45 +1405,46 @@ def _stop_scenario_pod(validation: Validation, run: HelmRun, pod: str) -> None:
                                           run.namespace, "--ignore-not-found", "--wait=false"])
 
 
-def payments_check_pods(hooks: str) -> list[str]:
-    """The payments-check test pods among a release's rendered hooks."""
+def check_pods(hooks: str, suffix: str) -> list[str]:
+    """The test pods among a release's rendered hooks whose names end in ``suffix``."""
     names = []
     for document in hooks.split("\n---"):
         name = _HOOK_NAME.search(document)
-        if _HOOK_POD.search(document) and name and name[1].endswith(PAYMENTS_CHECK_SUFFIX):
+        if _HOOK_POD.search(document) and name and name[1].endswith(suffix):
             names.append(name[1])
     return sorted(names)
 
 
-def _run_payments_checks(validation: Validation, run: HelmRun) -> None:
-    """Run each payments-check pod the release renders, as its own step.
+def _run_check_pods(validation: Validation, run: HelmRun, check: CheckPods) -> None:
+    """Run each of the release's check pods of one kind, as its own step.
 
     As with the scenario pod, `helm test` passes when its filter matches nothing,
     so a check counts as passed only with its pod's own exit status of 0. A
     release that renders none is warned, never passed: nothing then shows its
-    storefronts can use their payments service.
+    storefronts have the access the check shows.
     """
     try:
-        pods = payments_check_pods(validation.read(
-            ["helm", "get", "hooks", run.release, "--namespace", run.namespace]))
+        pods = check_pods(validation.read(
+            ["helm", "get", "hooks", run.release, "--namespace", run.namespace]), check.suffix)
     except ValidationError as exc:
-        validation.fail("payments check", f"could not read the release's test hooks: {exc}")
+        validation.fail(check.name, f"could not read the release's test hooks: {exc}")
         return
     records: list[dict] = []
-    validation.summary.evidence["payments_checks"] = records
+    validation.summary.evidence[check.evidence] = records
     if not pods:
-        validation.warn("payments check", f"{run.release} renders no payments-check pod, so no "
-                        "storefront's payments access is shown")
+        validation.warn(check.name, f"{run.release} renders no {check.suffix.lstrip('-')} pod, "
+                        f"so no storefront's {check.access} is shown")
         return
     for pod in pods:
-        step = validation.step(f"payments check {pod}", [
+        step = validation.step(f"{check.name} {pod}", [
             "helm", "test", run.release, "--namespace", run.namespace,
-            "--filter", f"name={pod}", "--timeout", PAYMENTS_CHECK_TIMEOUT])
+            "--filter", f"name={pod}", "--timeout", CHECK_POD_TIMEOUT])
         record: dict = {"pod": pod, "log": None, "exit_code": None}
         records.append(record)
-        if validation.commit_changed():
-            # No evidence describes the commit now, but validation stops what it started.
-            _stop_payments_check(validation, run, pod)
+        if validation.identity_changed():
+            # What follows would describe another tree, but validation stops what it
+            # started.
+            _stop_check_pod(validation, run, check, pod)
             return
         record["log"] = _kept(validation, f"{pod}'s log", [
             "kubectl", "logs", "--namespace", run.namespace, pod],
@@ -1282,20 +1455,20 @@ def _run_payments_checks(validation: Validation, run: HelmRun) -> None:
                                     ".state.terminated.exitCode}"]).strip()
             record["exit_code"] = int(code) if code else None
         except (ValidationError, ValueError) as exc:
-            validation.warn("payments check", f"could not read {pod}'s exit status: {exc}")
+            validation.warn(check.name, f"could not read {pod}'s exit status: {exc}")
         if step.result == "passed" and record["exit_code"] != 0:
             step.result = "failed"
             step.detail = (f"{pod} exited {record['exit_code']}" if record["exit_code"] is not None
                            else f"{pod} has no exit status, so its check is not shown to have run")
             validation.summary.passed = False
         if record["exit_code"] is None:
-            _stop_payments_check(validation, run, pod)
+            _stop_check_pod(validation, run, check, pod)
 
 
-def _stop_payments_check(validation: Validation, run: HelmRun, pod: str) -> None:
+def _stop_check_pod(validation: Validation, run: HelmRun, check: CheckPods, pod: str) -> None:
     # A pod with no exit status may still be running, which scaling the workloads
     # down would not stop.
-    validation.step(f"stop payments check {pod}", [
+    validation.step(f"stop {check.name} {pod}", [
         "kubectl", "delete", "pod", pod, "--namespace", run.namespace,
         "--ignore-not-found", "--wait=false"])
 
@@ -1326,11 +1499,11 @@ def _sample_memory(validation: Validation, run: HelmRun, *, warn: bool = True) -
 def _after_scenarios(validation: Validation, run: HelmRun) -> None:
     """Keep the namespace's evidence, then scale the release to zero, whatever happened.
 
-    Evidence is collected only while the checkout is still the commit, and memory
-    only once the release came up; the release is scaled down even then, since
-    validation stops what it started.
+    Evidence is collected only while the worktree holds the tree under validation,
+    and memory only once the release came up; the release is scaled down whatever
+    the worktree holds, since validation stops what it started.
     """
-    if not validation.commit_changed():
+    if not validation.identity_changed():
         try:
             if run.ready:
                 _sample_memory(validation, run)
@@ -1424,9 +1597,11 @@ def _keep_evidence(validation: Validation, run: HelmRun) -> None:
 
 
 def _previous_resources(validation: Validation, run: HelmRun) -> Path | None:
-    """The rendered resources the latest earlier validation in this namespace kept."""
+    """The rendered resources the latest earlier validation in this namespace kept, of
+    whichever tree; attempts are named by the UTC time they started, so the latest is
+    the one whose name sorts last."""
     candidates = []
-    for summary in (validation.root / LOG_ROOT).glob("*/helm/*/summary.json"):
+    for summary in (validation.root / EVIDENCE_ROOT).glob("*/helm/*/summary.json"):
         if summary.parent == validation.log_dir:
             continue
         try:
@@ -1434,13 +1609,16 @@ def _previous_resources(validation: Validation, run: HelmRun) -> Path | None:
         except (OSError, ValueError):
             continue
         resources = summary.parent / "resources.txt"
-        if recorded.get("namespace") == run.namespace and resources.is_file():
+        if (isinstance(recorded, dict) and recorded.get("namespace") == run.namespace
+                and resources.is_file()):
             candidates.append(resources)
-    return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
+    return max(candidates, key=lambda path: path.parent.name, default=None)
 
 
 def render(summary: Summary) -> str:
-    lines = [f"{summary.part} validation of {summary.commit[:12]}, attempt "
+    identity = IDENTITY[summary.kind]
+    described = summary.tree if identity == TREE else summary.commit
+    lines = [f"{summary.kind} evidence for the {identity} {(described or '')[:12]}, attempt "
              f"{summary.attempt}: {'PASSED' if summary.passed else 'FAILED'}"]
     if summary.namespace:
         lines.append(f"  namespace {summary.namespace}")
@@ -1461,10 +1639,11 @@ def render(summary: Summary) -> str:
     if scenarios:
         lines.append(f"  scenarios pod {scenarios['pod']}: exit {scenarios['exit_code']}, "
                      f"log {scenarios['log']}")
-    for check in summary.evidence.get("payments_checks") or ():
-        lines.append(f"  payments check pod {check['pod']}: exit {check['exit_code']}, "
-                     f"log {check['log']}")
-    if summary.part == "ci":
+    for kind in CHECK_PODS:
+        for check in summary.evidence.get(kind.evidence) or ():
+            lines.append(f"  {kind.name} pod {check['pod']}: exit {check['exit_code']}, "
+                         f"log {check['log']}")
+    if summary.kind == "ci":
         lines += _render_ci(summary.evidence)
     return "\n".join(lines)
 
@@ -1504,7 +1683,20 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     parser.add_argument("--all-scenarios", action="store_true",
                         help="run every pipeline scenario on Helm as well as the ones the "
                              "default charts serve; for establishing which those are")
+    parser.add_argument("--tree",
+                        help="the tree the worktree holds, which the `local` and `helm` "
+                             "parts' evidence describes; refused when it holds another. "
+                             "Without it, the tree the worktree holds")
+    parser.add_argument("--commit",
+                        help="the commit HEAD is, which the `ci` part's evidence describes; "
+                             "refused when HEAD is another. Without it, HEAD")
     args = parser.parse_args(argv)
+    given = {TREE: args.tree, COMMIT: args.commit}
+    if args.part != "capacity":
+        identity = IDENTITY[args.part]
+        if given[COMMIT if identity == TREE else TREE]:
+            parser.error(f"the {args.part} part's evidence describes the {identity}, so it "
+                         f"takes --{identity} alone")
     if args.part == "capacity":
         if not args.change:
             parser.error("capacity needs --change")
@@ -1520,7 +1712,9 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     try:
         if args.change:
             change_namespace.namespace(args.change)
-        validation = Validation(args.part)
+        validation = Validation(args.part, given=given[IDENTITY[args.part]],
+                                owed=args.workflow if args.part == "ci" else None, root=root,
+                                read=partial(_read, cwd=root))
         if args.part == "local":
             summary = validate_local(validation)
         elif args.part == "ci":
@@ -1535,7 +1729,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
         return 1
     print(render(summary))
     print(f"Attempt {summary.attempt} logs and summary.json: "
-          f"{validation.log_dir.relative_to(ROOT)}")
+          f"{validation.log_dir.relative_to(root)}")
     return 0 if summary.passed else 1
 
 

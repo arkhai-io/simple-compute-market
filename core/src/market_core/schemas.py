@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 
 from typing import Annotated, Any, Literal, cast
@@ -766,6 +766,78 @@ class Agreement(BaseModel):
         if self.settlement is not None and self.asset != self.settlement.price_asset:
             raise ValueError("Agreement asset must match its selected settlement option")
         return self
+
+
+class PriceBasis(BaseModel):
+    """A mechanism's projection of an accepted option's billing unit.
+
+    Period parsing and support belong to the mechanism. Both its exact display
+    value and its validated whole-second length accompany a recurring quote.
+    """
+
+    model_config = {"extra": "forbid", "frozen": True, "strict": True}
+
+    unit: Literal["total", "per_period"]
+    period: str | None = Field(default=None, min_length=1)
+    period_seconds: int | None = Field(default=None, gt=0, le=JSON_SAFE_INT_MAX)
+
+    @model_validator(mode="after")
+    def _period_matches_unit(self) -> "PriceBasis":
+        if self.unit == "per_period":
+            if self.period is None or self.period_seconds is None:
+                raise ValueError("per_period pricing requires a period and its length")
+        elif self.period is not None or self.period_seconds is not None:
+            raise ValueError("total pricing must not carry a period")
+        return self
+
+
+class AgreedPrice(PriceBasis):
+    """An accepted monetary quote, never a negotiation multiplier."""
+
+    amount: Uint256Amount = Field(ge=0, le=2**256 - 1)
+    asset: str | None = None
+
+
+BillingProjection = Callable[[SettlementOption], PriceBasis]
+
+
+def agreed_price(
+    agreement: Agreement | Mapping[str, Any],
+    listing: Mapping[str, Any] | None = None,
+    *,
+    project_billing: BillingProjection | None = None,
+) -> AgreedPrice:
+    """Label the accepted money without recalculating or reinterpreting it.
+
+    A supplied listing is the acceptance-bound snapshot, not a fresh offer.
+    The caller authenticates its publication and verifies the transcript price
+    before using it for recovery or mandate approval. Core checks correspondence
+    here but cannot authenticate publishers or interpret mechanism parameters.
+
+    Every selected mechanism must explicitly project its billing kind; an
+    unknown mechanism must not silently become prepaid. Agreements without a
+    selected option retain their absolute-amount interpretation.
+    """
+    accepted = Agreement.model_validate(agreement)
+    selected = accepted.settlement
+    if listing is not None:
+        if listing.get("listing_id", listing.get("id")) != accepted.listing_id:
+            raise ValueError("accepted pricing listing identity differs from Agreement")
+        if selected is not None:
+            options = listing.get("settlement_options")
+            if not isinstance(options, list) or selected not in [
+                SettlementOption.model_validate(option) for option in options
+            ]:
+                raise ValueError("accepted pricing listing does not contain the exact selected option")
+    if selected is None:
+        basis = PriceBasis(unit="total")
+    else:
+        if project_billing is None:
+            raise ValueError("selected settlement mechanism requires a billing projection")
+        basis = PriceBasis.model_validate(project_billing(selected))
+    return AgreedPrice(
+        **basis.model_dump(), amount=accepted.amount, asset=accepted.asset,
+    )
 
 
 def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:

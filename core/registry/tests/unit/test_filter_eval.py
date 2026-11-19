@@ -480,7 +480,7 @@ def _rate_spec(*extra_filters: FilterDecl) -> FilterSpec:
         filters=[
             FilterDecl(
                 name="asking_rate_max",
-                path="$.listing_resource.asking_rate.amount",
+                path="$.pricing.asking_rate.amount",
                 query_name="asking_rate",
                 op="range",
                 value_type="decimal_text",
@@ -490,7 +490,7 @@ def _rate_spec(*extra_filters: FilterDecl) -> FilterSpec:
             ),
             FilterDecl(
                 name="asking_rate_min",
-                path="$.listing_resource.asking_rate.amount",
+                path="$.pricing.asking_rate.amount",
                 op="range",
                 value_type="decimal_text",
                 alias_kind="lower_bound",
@@ -499,14 +499,14 @@ def _rate_spec(*extra_filters: FilterDecl) -> FilterSpec:
             ),
             FilterDecl(
                 name="asking_rate_asset",
-                path="$.listing_resource.asking_rate.asset",
+                path="$.pricing.asking_rate.asset",
                 op="in",
                 value_type="string",
                 on_missing="fail",
             ),
             FilterDecl(
                 name="asking_rate_period",
-                path="$.listing_resource.asking_rate.period",
+                path="$.pricing.asking_rate.period",
                 op="in",
                 value_type="string",
                 on_missing="fail",
@@ -518,7 +518,7 @@ def _rate_spec(*extra_filters: FilterDecl) -> FilterSpec:
 
 def _rate_listing(amount: str, asset: str = "usd", period: str = "hour") -> dict:
     return {
-        "listing_resource": {
+        "pricing": {
             "asking_rate": {"amount": amount, "asset": asset, "period": period},
         }
     }
@@ -553,7 +553,7 @@ def test_decimal_text_resolved_value_of_wrong_shape_excluded() -> None:
         spec,
         {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
     )
-    listing = {"listing_resource": {"asking_rate": {"amount": 16, "asset": "usd", "period": "hour"}}}
+    listing = {"pricing": {"asking_rate": {"amount": 16, "asset": "usd", "period": "hour"}}}
     # amount is a JSON number, not decimal text — on_missing: fail applies,
     # since the field doesn't resolve to a decimal-text value at all.
     assert not evaluate_all(listing, criteria)

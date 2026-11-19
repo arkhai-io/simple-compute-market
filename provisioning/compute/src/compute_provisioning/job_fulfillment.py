@@ -270,9 +270,8 @@ def teardown_operation(
 ) -> VersionedEnvelope[Any]:
     """A prepared teardown, as the fulfillment kit freezes it before dispatch.
 
-    For a caller that already holds the teardown job, such as a backfill
-    recording one for a fulfillment created before this provider existed. Its
-    dispatch reads no job: only preparing a teardown reads the create job.
+    For a caller that already holds the teardown job. Its dispatch reads no
+    job: only preparing a teardown reads the create job.
     """
     return _envelope(
         PreparedJobOperation(

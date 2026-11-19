@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from core_storefront import StorefrontFulfillmentLifecycle
 from market_arkhai_payments import (
     PaymentSellerStage,
     ReconciliationPass,
@@ -16,8 +17,9 @@ from market_arkhai_payments import (
 from market_core import SettlementEvidence, SettlementStageTable
 from market_core.schemas import Agreement
 from market_identity import Identity
-from market_settlement_runtime import SettlementRuntime
+from market_settlement_runtime import SettlementConfigurationRegistry, SettlementRuntime
 
+from .delivery_ports import DISPATCH_STATE
 from .fulfillment_service import BareMetalFulfillmentError
 from .models import (
     BareMetalSettleRequest,
@@ -32,7 +34,7 @@ from .sqlite_client import SQLiteClient
 logger = logging.getLogger(__name__)
 
 VerifyEscrow = Callable[..., Awaitable[int]]
-BeginFulfillment = Callable[..., Awaitable[dict[str, Any]]]
+BeginFulfillment = Callable[..., Awaitable[StorefrontFulfillmentLifecycle]]
 
 # Evidence statuses a seller refund may move verified evidence through. The
 # verified facts stay unchanged; only delivery that had already started may
@@ -60,6 +62,10 @@ def accepted_seller_stage(
         raise SettlementRequestError("negotiation is not accepted")
     try:
         agreement = Agreement.model_validate_json(thread["agreement_bytes"])
+        registry = SettlementConfigurationRegistry(tuple(
+            stage.registration_factory() for stage in stages.values()
+        ))
+        quote = registry.agreed_price(agreement)
         if (
             agreement.negotiation_id != negotiation_id
             or agreement.listing_id != thread["our_listing_id"]
@@ -67,7 +73,7 @@ def accepted_seller_stage(
             != Identity.model_validate(thread["buyer_principal"])
             or Identity.model_validate(agreement.seller)
             != Identity.model_validate(thread["seller_principal"])
-            or agreement.amount != thread["agreed_price"]
+            or quote.amount != thread["negotiated_scalar"]
             or agreement.duration_seconds != thread["agreed_duration_seconds"]
         ):
             raise ValueError("Agreement differs from accepted negotiation")
@@ -298,10 +304,10 @@ class BareMetalSettlementService:
 
     async def start_delivery(
         self, *, negotiation_id: str, buyer_principal: Identity
-    ) -> dict[str, Any]:
-        """Start fulfillment for a deal whose settlement stage verifies and delivers.
+    ) -> StorefrontFulfillmentLifecycle:
+        """Drive delivery for a deal whose settlement stage verifies and delivers.
 
-        Fulfillment re-reads the verified evidence and orders its start against
+        Delivery revalidates the verified evidence and orders its start against
         refund intent, so a deal refunded first is never delivered.
         """
         if self.begin_fulfillment is None:
@@ -309,11 +315,21 @@ class BareMetalSettlementService:
                 "bare-metal fulfillment authorities are unavailable", status_code=503
             )
         try:
-            return await self.begin_fulfillment(
+            delivered = await self.begin_fulfillment(
                 negotiation_id=negotiation_id, buyer_principal=buyer_principal
             )
         except BareMetalFulfillmentError as exc:
             raise SettlementRequestError(exc.detail, status_code=exc.status_code) from exc
+        # An end that won before anything was dispatched refuses the settle;
+        # dispatched work is adopted and ended under the delivery it began.
+        if (
+            delivered.public_result.get("outcome") == "ended"
+            and not delivered.public_result.get("available")
+            and delivered.fulfillment_id is None
+            and delivered.state != DISPATCH_STATE
+        ):
+            raise SettlementRequestError("delivery ended before it was dispatched")
+        return delivered
 
     async def verify(
         self,

@@ -23,7 +23,7 @@ from market_arkhai_mediation.contract import INTERFACE, vectors, wire
 from market_arkhai_mediation.fixtures.traces import RulingTraceFake
 from market_arkhai_mediation.models import Append, DeliveryEndClaim, Filing, ReadAfter, SignedDeliveryEndClaim
 
-from test_adapter import Operations
+from .test_adapter import Operations
 
 
 DATA = vectors()

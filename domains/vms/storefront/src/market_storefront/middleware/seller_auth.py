@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from core_storefront.auth import (
@@ -16,9 +18,30 @@ from core_storefront.auth import (
 from fastapi import Request
 from market_identity import EMPTY_BODY, Identity
 from starlette.responses import JSONResponse, Response
-from storefront_client.settlement_routes import REFUND, bind_settlement_route
+from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS, bind_settlement_route
 
 import market_storefront.container as _container
+
+#: The buyer routes whose answer can carry access material, by operation, each
+#: with the response members that hold it. Such a route's outcome is recorded
+#: without those members, and an exact retry runs the route again, which reads
+#: the material afresh under current admission and is refused after an end,
+#: rather than replaying a recorded body. Request reservation, first-use skew,
+#: changed-request refusal and response signing are as for every route. See
+#: openspec/specs/marketplace-identity/spec.md, "Body-bound authenticated
+#: request and response version".
+CREDENTIAL_CAPABLE_ROUTES: Mapping[str, frozenset[str]] = MappingProxyType({
+    SETTLE.operation: frozenset({"tenant_credentials"}),
+    SETTLE_STATUS.operation: frozenset({"tenant_credentials"}),
+})
+
+
+def without_access_material(operation: str, body: Any) -> Any:
+    """``body`` as a credential-capable route's outcome is recorded: without its access material."""
+    members = CREDENTIAL_CAPABLE_ROUTES.get(operation)
+    if not members or not isinstance(body, dict):
+        return body
+    return {key: value for key, value in body.items() if key not in members}
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,7 +443,7 @@ async def _signed_buyer_response(
             authenticated.reservation,
             attempt_token=authenticated.attempt_token,
             status=response.status_code,
-            body=body,
+            body=without_access_material(operation, body),
         )
     headers = dict(response.headers)
     headers.update(
@@ -482,7 +505,13 @@ async def listing_lifecycle_middleware(request: Request, call_next):
                 body=body,
             )
             try:
-                if auth is not None and auth.exact_retry:
+                # A credential-capable route resolves its own exact retry by
+                # running again; every other route replays its recorded outcome.
+                if (
+                    auth is not None
+                    and auth.exact_retry
+                    and operation not in CREDENTIAL_CAPABLE_ROUTES
+                ):
                     if auth.recorded_outcome is None:
                         raise AuthError(
                             "Exact retry outcome is not available",

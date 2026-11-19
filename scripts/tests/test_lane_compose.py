@@ -15,7 +15,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOUBLE_FIXTURES = REPO_ROOT / "tools/payments-lane-double/fixtures"
-LANE_CA = REPO_ROOT / "tools/payments-lane-double/tls/lane-ca.pem"
+LANE_CA = REPO_ROOT / "tools/lane-double-controls/tls/lane-ca.pem"
 REGISTRY_PROFILES = REPO_ROOT / "dev-env/registry"
 
 # Each stack: its compose project and its files, in the order e2e-tests/Makefile
@@ -72,7 +72,6 @@ PROVISIONING_MODE_NAMES = {
     "PROVISIONING_MODE",
 }
 
-
 def _compose() -> list[str]:
     binary = os.environ.get("E2E_COMPOSE_BINARY")
     command = [binary] if binary else ["docker", "compose"]
@@ -121,7 +120,9 @@ def test_the_vm_lane_composes_no_api_credit_service() -> None:
 
 def test_the_api_credit_lane_composes_its_own_compute_registry() -> None:
     services = _render("apicredits")["services"]
-    assert set(services) == API_CREDIT_SERVICES | {"anvil", "compute-registry", "payments-double"}
+    assert set(services) == API_CREDIT_SERVICES | {
+        "anvil", "compute-registry", "payments-double", "mediation-double",
+    }
     registry = services["compute-registry"]
     environment = registry["environment"]
     assert environment["CONFIG_DIRECTORY"] == "/etc/arkhai/registry"
@@ -173,10 +174,26 @@ def test_vm_provisioning_takes_its_site_profile_then_the_run_mode(
     for name, site in (("provisioning", "vms-bob-site"), ("alice-provisioning", "vms-alice-site")):
         environment = services[name]["environment"]
         assert environment["CONFIG_DIRECTORY"] == "/app/config"
-        assert environment["ACTIVE_PROFILES"] == f"docker,{site},{last}"
+        # The lane's injected time is its own profile, between the site's and
+        # the run's mode; the full local stack never loads it.
+        lane = "lane-time," if stack == "vm" else ""
+        assert environment["ACTIVE_PROFILES"] == f"docker,{site},{lane}{last}"
+        assert ("/app/config/config-lane-time.yml" in _mounts(services[name])) == bool(lane)
         assert not {key for key in environment if key.startswith("PROVISIONING_")} - {
             "PROVISIONING_DATABASE_URL", "PROVISIONING_STOREFRONT_URL",
         }, name
+
+
+def test_the_full_local_stack_runs_wall_time() -> None:
+    """Only the lanes inject time: the full local stack loads no lane profile,
+    mounts no lane configuration, and states no injected source."""
+    for name, service in _render("full")["services"].items():
+        environment = service.get("environment") or {}
+        assert "injected" not in environment.values(), name
+        assert "lane-time" not in environment.get("ACTIVE_PROFILES", ""), name
+        assert "payments-lane" not in environment.get("ACTIVE_PROFILES", ""), name
+        assert not [source for source in _mounts(service).values()
+                    if source.endswith((".lane.toml", "config-lane-time.yml"))], name
 
 
 @pytest.mark.parametrize("stack", sorted(STACKS))
@@ -221,11 +238,26 @@ PAYMENT_LANES = {
 
 
 @pytest.mark.parametrize("stack", sorted(PAYMENT_LANES))
+def test_each_lane_runs_the_mediation_double_after_the_payments_double(stack: str) -> None:
+    """The lane runs the mediation double with no host port, started once the
+    payments double it extends at answers, and healthy only on a probe that
+    trusts the lane CA alone."""
+    services = _render(stack)["services"]
+    double = services["mediation-double"]
+    assert double["image"] == "arkhai:mediation-lane-double"
+    assert not double.get("ports")
+    assert double["depends_on"]["payments-double"]["condition"] == "service_healthy"
+    probe = double["healthcheck"]["test"]
+    assert probe[probe.index("--cacert") + 1] == "/opt/mediation-lane-double/tls/lane-ca.pem"
+    assert probe[-1] == "https://localhost:8443/health"
+
+
+@pytest.mark.parametrize("stack", sorted(PAYMENT_LANES))
 def test_each_lane_settles_against_its_payments_double(stack: str) -> None:
     """The lane runs the double with no host port; its payment storefront mounts
     its lane configuration and the lane CA at the path that configuration trusts;
-    and its registries layer the lane profile recommending the pinned dispute
-    authority."""
+    and its registries layer the lane profile recommending the mediation
+    double."""
     services = _render(stack)["services"]
     storefront_name, configuration, settlement, registries = PAYMENT_LANES[stack]
     double = services["payments-double"]
@@ -251,6 +283,7 @@ def test_each_lane_settles_against_its_payments_double(stack: str) -> None:
 def test_the_full_stack_runs_no_payments_double() -> None:
     services = _render("full")["services"]
     assert "payments-double" not in services
+    assert "mediation-double" not in services
     for name, configuration in (
         ("bob-storefront", "domains/vms/storefront/storefront.bob.toml"),
         ("credits-storefront", "domains/apicredits/storefront/storefront.credits.toml"),
@@ -329,13 +362,15 @@ def test_a_lane_target_names_only_its_files_and_runner_profiles(target: str) -> 
 
 def test_the_runner_reads_its_profiles_and_the_lane_ca_where_they_name_it() -> None:
     """test-buyer-machine selects the profiles it is given, and mounts the lane
-    CA at the path the shared payments profile trusts."""
-    payments = yaml.safe_load(
+    CA at the path the shared profile's payments and mediation sections both
+    trust."""
+    profile = yaml.safe_load(
         (REPO_ROOT / "e2e-tests/config/config-payments-lane.yml").read_text(encoding="utf-8")
-    )["payments"]
+    )
     produced = _dry_run("test-buyer-machine", RUNNER_PROFILES="docker,payments-lane,vms-lane")
     assert produced.returncode == 0, produced.stderr
     assert "-e ACTIVE_PROFILES=docker,payments-lane,vms-lane " in produced.stdout
-    assert f"{LANE_CA}:{payments['ca_bundle_path']}:ro" in produced.stdout
+    assert profile["mediation"]["ca_bundle_path"] == profile["payments"]["ca_bundle_path"]
+    assert f"{LANE_CA}:{profile['payments']['ca_bundle_path']}:ro" in produced.stdout
     assert "--env-file" not in produced.stdout
     assert "-e ACTIVE_PROFILES=docker " in _dry_run("test-buyer-machine").stdout

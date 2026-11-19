@@ -170,17 +170,15 @@ def test_each_committing_step_pushes_only_through_the_guarded_push() -> None:
 
 def test_only_validation_dispatches_a_ci_workflow() -> None:
     """No step's rules name a dispatch's make target: validation dispatches through
-    `run`, which the engine's hook table holds to the validate step (CW-u4pc)."""
+    `gather`, which the engine's hook table holds to the validate step (CW-u4pc)."""
     for name, rules in load_steps().items():
         assert not _allows(rules, "make run-ci WORKFLOW=tests.yml"), name
-    assert _allows(load_steps()["validate"],
-                   f"scripts/change-workflow run validation {CHANGE} ci start --owed tests.yml")
-    assert HOOK_STEPS["validation"] == {"validate"}
+    assert HOOK_STEPS["gather"] == {"validate"}
 
 
 HOOK_COMMANDS = {
-    "validate": [f"validation {CHANGE} preflight", f"validation {CHANGE} local run",
-                 f"validation {CHANGE} pipeline start", f"validation {CHANGE} pipeline collect"],
+    # Validation runs no hook through `run`: it gathers evidence through `gather`.
+    "validate": [],
     "archive-cleanup": [f"cleanup {CHANGE}", f"pre-commit {CHANGE}"],
     "closeout": [f"pre-archive {CHANGE}", f"pre-commit {CHANGE}"],
     "implement": [f"pre-commit {CHANGE}", f"after-functional-change {CHANGE}"],
@@ -208,11 +206,39 @@ def test_every_step_runs_the_repositorys_hooks_through_the_command() -> None:
             assert _allows(steps[name], command), (name, command)
 
 
+READS_EVIDENCE = {"validate", "review", "triage", "merge", "closeout", "archive-cleanup"}
+
+
+def test_validation_gathers_and_the_steps_reading_a_validation_read_the_evidence() -> None:
+    """Validation gathers what is missing, a new attempt of a kind, or a lapsed waiver's
+    kind; every step that reads a validation record may list the evidence it names,
+    and none but validation gathers (CW-e2vd, CW-g6th)."""
+    for name, rules in load_steps().items():
+        for command in (f"evidence {CHANGE}", f"evidence {CHANGE} --json"):
+            assert _allows(rules, f"scripts/change-workflow {command}") \
+                == (name in READS_EVIDENCE), (name, command)
+        for command in (f"gather {CHANGE}", f"gather {CHANGE} --kind helm",
+                        f"gather {CHANGE} --kind ci --owed tests.yml",
+                        f"gather {CHANGE} --kind pipeline --lapsed"):
+            assert _allows(rules, f"scripts/change-workflow {command}") \
+                == (name == "validate"), (name, command)
+
+
+def test_no_rule_names_validation_through_run_or_config() -> None:
+    """Validation's evidence is reached through `gather` and `evidence`: `run` takes no
+    `validation` form and `config` no `parts`, so no rule names either, while `run *`
+    serves the hooks the engine's table admits."""
+    for name, rules in load_steps().items():
+        for rule in (*rules.allow, *rules.deny):
+            assert "run validation" not in rule and "config parts" not in rule, (name, rule)
+
+
 def test_openspec_runs_through_the_configured_command() -> None:
     """The steps that validate or archive a change run OpenSpec through the command,
-    which runs the configured `openspec.command` (CW-i2we); no rule pins a version."""
+    which runs the configured `openspec.command` (CW-i2we); no rule pins a version.
+    Implementation and the merge check a change's deltas as they change them."""
     for name, rules in load_steps().items():
-        runs = name in ("design", "plan", "triage", "closeout")
+        runs = name in ("design", "plan", "implement", "triage", "merge", "closeout")
         assert _allows(rules, f"scripts/change-workflow openspec validate {CHANGE} --strict") \
             == runs, name
         for pinned in (f"bunx @fission-ai/openspec@1.14.0 validate {CHANGE} --strict",
@@ -222,7 +248,7 @@ def test_openspec_runs_through_the_configured_command() -> None:
 
 def test_every_step_may_read_the_configurations_resolution() -> None:
     for name, rules in load_steps().items():
-        for command in ("config load design", f"config parts {CHANGE}", "config --json"):
+        for command in ("config load design", "config --json"):
             assert _allows(rules, f"scripts/change-workflow {command}"), (name, command)
 
 
@@ -353,14 +379,14 @@ def test_the_merge_merges_a_fetched_branch_and_never_abandons_a_merge() -> None:
 
 def test_every_step_may_reach_the_workflow_through_its_command() -> None:
     """Every step computes the next step, reads the log, finds a change's records,
-    records an interactive outcome, and checks the index and the round view, through
-    the command; none opens or closes a round view, which is the owner's."""
+    records an interactive outcome, and checks the index, the task list, and the round
+    view, through the command; none opens or closes a round view, which is the owner's."""
     for name, rules in load_steps().items():
         for command in (f"next {CHANGE}", f"log {CHANGE} --last 3",
                         f"log {CHANGE} --branch feat/x", f"find --records {CHANGE}",
                         f"find --json {CHANGE}", f"cost {CHANGE}",
                         f"record {CHANGE} plan --outcome '{{}}'", "check index",
-                        "check round-view"):
+                        "check round-view", "check tasks", f"check tasks {CHANGE}"):
             assert _allows(rules, f"scripts/change-workflow {command}"), (name, command)
         assert {"Bash(scripts/change-workflow round-view*)",
                 "Bash(scripts/change-workflow round-done*)"} <= set(rules.deny), name
@@ -380,13 +406,9 @@ def test_a_steps_own_workflow_commands_are_the_ones_its_skill_runs() -> None:
     assert _allows(steps["closeout"], f"scripts/change-workflow check tasks {CHANGE}")
     assert _allows(steps["closeout"], "scripts/change-workflow check push")
     assert _allows(steps["archive-cleanup"], f"scripts/change-workflow history {CHANGE}")
-    # Planning checks the task list it writes.
-    assert _allows(steps["plan"], f"scripts/change-workflow check tasks {CHANGE}")
     for name in ("design", "plan", "implement", "triage", "merge", "archive-cleanup",
                  "review"):
         assert not _allows(steps[name], "scripts/change-workflow check push"), name
-    for name in ("design", "implement", "triage", "merge", "archive-cleanup", "review"):
-        assert not _allows(steps[name], f"scripts/change-workflow check tasks {CHANGE}"), name
     for name in ("design", "plan", "implement", "triage", "merge", "validate", "closeout",
                  "review"):
         assert not _allows(steps[name], f"scripts/change-workflow history {CHANGE}"), name

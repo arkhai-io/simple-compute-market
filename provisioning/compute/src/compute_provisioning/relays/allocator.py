@@ -18,6 +18,11 @@ One allocator serves every domain: pools on one relay draw from its one window,
 whatever their provider, so two allocators over that namespace would issue one
 port twice.
 
+The allocator is also the one place a lease is created, so it is where a
+disabled relay's drain is enforced: no new owner is given a port on a disabled
+relay, whoever asks, so the set of its active leases only shrinks, and once
+none remains none appears.
+
 Each lease records when the grants for it expire, and a released port is not
 reissued until that expiry plus a reuse margin has passed. A relay admits a
 proxy carrying an unexpired grant for its port, so a grant copied from a host
@@ -35,6 +40,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+import injected_time
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 from market_site.db import CapacityReservation
 from market_site.ledger import parse_utc
@@ -61,6 +67,14 @@ DEFAULT_PORT_REUSE_MARGIN = timedelta(seconds=300)
 
 class RelayWindowExhaustedError(RuntimeError):
     """Every port in a relay's configured window is currently leased."""
+
+
+class RelayDisabledError(RuntimeError):
+    """The relay is disabled, so it leases no port to a new owner.
+
+    Disabling a relay drains it: deliveries already holding a lease on it run
+    to their end, and no new delivery is leased a port on it.
+    """
 
 
 @dataclass(frozen=True)
@@ -172,6 +186,11 @@ class RelayPortAllocator:
         caller's other writes. The caller owns the outer write transaction and
         its commit; fulfillment acceptance reserves SQLite's writer slot before
         calling this method.
+
+        A new owner is refused on a disabled relay with ``RelayDisabledError``.
+        An owner already holding a lease receives it whether or not the relay
+        is disabled, since it is the same lease, and its delivery is among the
+        work a drain lets finish.
         """
         # Idempotent for one owner: retrying dispatch must not orphan a port.
         existing = (
@@ -189,10 +208,24 @@ class RelayPortAllocator:
                 relay_id=existing.relay_id,
                 remote_port=existing.remote_port,
             )
-        relay = db.get(Relay, relay_id)
+        # Locked, so a disable cannot commit between this read and the claim's
+        # commit: on PostgreSQL the disable waits for this transaction, and a
+        # disable already committed is seen here. An unlocked read could see
+        # the relay enabled, let the disable commit, and then commit a lease
+        # on a relay already disabled and holding none. Read afresh rather than
+        # from the session's identity map, where preparation's earlier read of
+        # this relay may hold a value from before the disable. SQLite ignores
+        # the lock; there the caller holds the database's one writer slot, so
+        # the disable's write waits all the same.
+        relay = db.get(Relay, relay_id, with_for_update=True, populate_existing=True)
         if relay is None:
             raise RelayWindowExhaustedError(
                 f"relay '{relay_id}' does not exist, so no port can be leased on it"
+            )
+        if not relay.enabled:
+            raise RelayDisabledError(
+                f"relay '{relay_id}' ({relay.relay_addr}:{relay.relay_port}) is "
+                "disabled: it is draining, and leases no port to a new delivery"
             )
         window = range(
             relay.vm_port_range_start,
@@ -264,7 +297,7 @@ class RelayPortAllocator:
             existing.host_id = host_id
             existing.pool_id = pool_id
             existing.released_at = None
-            existing.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            existing.created_at = injected_time.now_datetime().replace(tzinfo=None)
             existing.grant_expires_at = grant_expires_at
             existing.grant_key_id = None
             return existing
@@ -276,9 +309,10 @@ class RelayPortAllocator:
             pool_id=pool_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
-            # Set here rather than by the database's clock, so it is UTC as
-            # every time a retired key's validity is compared against is.
-            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            # Set here, from the process's time source, rather than by the
+            # database's clock: the reconciliation's grace and a retired key's
+            # validity are compared with it, in UTC.
+            created_at=injected_time.now_datetime().replace(tzinfo=None),
             grant_expires_at=grant_expires_at,
         )
         db.add(lease)
@@ -302,7 +336,7 @@ class RelayPortAllocator:
             )
             .all()
         )
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         for lease in held:
             lease.released_at = now
         return len(held)
@@ -362,7 +396,7 @@ class RelayPortAllocator:
         release effect decides, so this never returns a port that decision
         would hold.
         """
-        cutoff = datetime.now(timezone.utc) - grace
+        cutoff = injected_time.now_datetime() - grace
         released = 0
         with self._session_factory() as db, db.begin():
             candidates: Iterable[RelayPortLease] = (
@@ -373,7 +407,7 @@ class RelayPortAllocator:
                 )
                 .all()
             )
-            now = datetime.now(timezone.utc)
+            now = injected_time.now_datetime()
             for lease in candidates:
                 if not is_owner_released(lease.owner_kind, lease.owner_id):
                     continue
@@ -438,7 +472,7 @@ class RelayPortAllocator:
         the reuse margin, read now rather than when it was released.
         """
         reusable_before = (
-            datetime.now(timezone.utc).replace(tzinfo=None) - self._reuse_margin
+            injected_time.now_datetime().replace(tzinfo=None) - self._reuse_margin
         )
         held = {
             row.remote_port
@@ -580,6 +614,7 @@ __all__ = [
     "DEFAULT_PORT_REUSE_MARGIN",
     "FULFILLMENT_OWNER_KIND",
     "PortLease",
+    "RelayDisabledError",
     "RelayPortAllocator",
     "RelayWindowExhaustedError",
     "fulfillment_lease_owner_is_released",

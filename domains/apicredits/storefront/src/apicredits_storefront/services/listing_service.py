@@ -12,10 +12,10 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 
 from market_core.schemas import settlement_option_schema
+from core_storefront.sqlite_client import store_timestamp
 from core_storefront.stage_log import stage_event
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from market_identity import Identity
@@ -339,7 +339,7 @@ class ListingService:
             }
         )
         listing_id = str(uuid.uuid4())
-        now_iso = datetime.now().isoformat()
+        now_iso = store_timestamp()
         await self._db.upsert_listing_with_binding(
             binding=prepare_api_credit_listing_binding(
                 listing_id=listing_id,
