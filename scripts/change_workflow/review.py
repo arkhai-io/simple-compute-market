@@ -77,8 +77,9 @@ from .common import Clock, Entry, StepError, repository_root, utc_now
 from .cost import review_cost
 from .find import ChangeNotFound, change_directory, is_archived, landing_branch
 from .graph import AFTER, ARCHIVED, BEFORE, KINDS, NODES, Node
-from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_command,
-                      codex_command, missing_program, resume_command, run_claude, run_codex,
+from . import claude_code, codex
+from .adapters import HARNESSES
+from .harness import (NETWORK_RETRIES, CodexRunner, Model, Reached, Runner, missing_program,
                       unreachable)
 from .invariants import Invariants, Violation, broken
 from .log import LOG, log_path, read_log, record_outcome, unused_direction
@@ -86,7 +87,7 @@ from .records import (TRANSCRIPTS, ChangedSince, changed_since, exempting, is_re
                       next_number, validation_problem)
 from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
                       runs_directory, termination_deferred, termination_ends_the_run)
-from .steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
+from .steps import STEP_TABLE, StepRules, load_steps
 from .stream import Stream, transcript_denials
 
 SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
@@ -372,8 +373,8 @@ def _codex_attempt(model: Model, prompt: str, continuing: str | None, draft: Pat
                    root: Path, runner: CodexRunner) -> tuple[int | None, Reached, str | None]:
     """One run of the review in Codex: its exit status, whether its model could not
     be reached, and its session."""
-    command = (resume_command(continuing, prompt, draft, model.model, model.effort) if continuing
-               else codex_command(prompt, draft, root, model.model, model.effort))
+    command = (codex.resume_command(continuing, prompt, draft, model.model, model.effort)
+               if continuing else codex.command(prompt, draft, root, model.model, model.effort))
     start = log.stat().st_size if log.is_file() else 0
     try:
         with termination_ends_the_run():
@@ -398,8 +399,8 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
     """One run of the review on Claude, its final message written to `draft`, as
     Codex writes its own."""
     stream = Stream(log, log.with_suffix(".progress"), clock, echo)
-    command = claude_command(prompt, rules, None, model, root=root, session=continuing,
-                             system=REVIEW_UNATTENDED)
+    command = claude_code.table_command(prompt, rules, None, model, root=root,
+                                        session=continuing, system=REVIEW_UNATTENDED)
     try:
         with termination_ends_the_run():
             status = runner(command, root, stream.feed, "review")
@@ -457,7 +458,7 @@ def _marker_text(text: str) -> str:
 
 def run_review(change: str, kind: str, *, base: str | None = None, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path | None = None,
-               runner: CodexRunner = run_codex, claude: Runner = run_claude,
+               runner: CodexRunner = codex.run, claude: Runner = claude_code.run,
                unvalidated: bool = False, direction: str | None = None,
                head: Callable[[Path], str] = _reviewed_head,
                changed_since: ChangedSince = changed_since, steps_path: Path | None = None,

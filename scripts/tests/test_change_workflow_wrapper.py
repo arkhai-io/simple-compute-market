@@ -16,11 +16,12 @@ from pathlib import Path
 import pytest
 
 from change_workflow.common import StepError
-from change_workflow.harness import anchored
+from change_workflow.claude_code import anchored
+from change_workflow.harness import Model
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
 from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
-from change_workflow.steps import Model, load_steps
+from change_workflow.steps import load_steps
 from change_workflow.wrapper import Wrapper, triage_kind, validation_target
 from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT, MODELS,
                                       NETWORK, OPUS, SESSION, VALID, FakeClaude, clock,

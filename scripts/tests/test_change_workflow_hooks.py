@@ -18,7 +18,7 @@ from change_workflow import config, find, hooks, records
 from change_workflow.cli import main
 from change_workflow.common import SESSION_ID, StepError
 from change_workflow.graph import HOOK_STEPS, STEPS
-from change_workflow.harness import run_codex
+from change_workflow.codex import run as run_codex
 from change_workflow.hooks import Hooks
 from change_workflow.log import read_log
 from change_workflow.review import review_and_log, run_review

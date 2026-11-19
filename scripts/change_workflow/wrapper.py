@@ -83,8 +83,8 @@ from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_
 from .find import landing_branch
 from .graph import AFTER, BEFORE
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
-from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
-                      unreachable)
+from . import claude_code
+from .harness import NETWORK_RETRIES, Model, Runner, missing_program, unreachable
 from .invariants import Invariants, Violation, stopped
 from .log import (Checkout, git_checkout, landing_problems, last_run, log_path, read_log,
                   record_outcome, revisit_direction, revisit_refusal)
@@ -93,7 +93,7 @@ from .push import set_upstreams
 from .records import git_head, next_transcript
 from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
                       runs_directory, termination_deferred, termination_ends_the_run)
-from .steps import Model, StepRules, load_steps
+from .steps import StepRules, load_steps
 from .stream import Stream
 from .subagents import subagent_denials
 
@@ -247,7 +247,7 @@ class Wrapper:
     """Runs steps of changes under one repository root, through injected seams."""
 
     root: Path = field(default_factory=repository_root)
-    runner: Runner = run_claude
+    runner: Runner = claude_code.run
     head: Callable[[Path], str | None] = git_head
     clock: Clock = utc_now
     # Progress goes to stderr: stdout carries only the outcome line a caller parses.
@@ -606,8 +606,9 @@ class Wrapper:
                 # Each attempt is read alone; the transcript keeps them all.
                 stream = Stream(transcript, progress, self.clock, self.echo)
                 attempts.append(stream)
-                command = claude_command(prompt, rules, schema, model, root=self.root,
-                                         session=session, granted=granted)
+                command = claude_code.table_command(prompt, rules, schema, model,
+                                                    root=self.root, session=session,
+                                                    granted=granted)
                 failure, status, reached = None, None, None
                 try:
                     with termination_ends_the_run():

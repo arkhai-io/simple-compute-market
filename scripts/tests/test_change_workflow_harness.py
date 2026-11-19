@@ -1,22 +1,29 @@
-"""Codex's plain output is condensed into a readable progress stream, a run on
-Claude is marked as the wrapper's in its environment, and its file-tool rules are
-anchored at the checkout it starts in."""
+"""Each harness's adapter: Claude Code's unattended command and Codex's, the state
+each harness writes and the settings it loads, the steps each runs, the refusals
+each reads, Codex's plain output condensed into progress, a run marked as the
+wrapper's in its environment, and the step table's file-tool rules anchored at the
+checkout it starts in."""
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from change_workflow.harness import (UNATTENDED_RUN, Progress, anchored, claude_command,
-                                     run_claude, run_codex)
+from change_workflow import adapters, claude_code, codex
+from change_workflow.common import UNATTENDED_RUN
+from change_workflow.graph import STEPS
+from change_workflow.harness import UNATTENDED, Model, refused
 from change_workflow.running import Terminated, termination_ends_the_run
-from change_workflow.steps import Model, StepRules
+from change_workflow.steps import StepRules
+from change_workflow_fixtures import OPUS, option, option_rules
 
 
 _MARKER = f"import os; print(os.environ.get({UNATTENDED_RUN!r}))"
+_SCHEMA = {"type": "object", "properties": {"outcome": {"type": "string"}}}
 
 
 def test_the_process_a_claude_run_starts_sees_the_step_it_is_the_run_of(
@@ -25,7 +32,7 @@ def test_the_process_a_claude_run_starts_sees_the_step_it_is_the_run_of(
     # environment.
     said: list[str] = []
 
-    status = run_claude([sys.executable, "-c", _MARKER], tmp_path, said.append, "validate")
+    status = claude_code.run([sys.executable, "-c", _MARKER], tmp_path, said.append, "validate")
 
     assert (status, said) == (0, ["validate\n"])
 
@@ -33,7 +40,7 @@ def test_the_process_a_claude_run_starts_sees_the_step_it_is_the_run_of(
 def test_the_process_a_codex_review_starts_sees_it_is_the_reviews(tmp_path: Path) -> None:
     log = tmp_path / "review.log"
 
-    assert run_codex([sys.executable, "-c", _MARKER], log) == 0
+    assert codex.run([sys.executable, "-c", _MARKER], log) == 0
 
     assert log.read_text("utf-8") == "review\n"
 
@@ -58,7 +65,7 @@ def test_a_terminated_codex_run_ends_its_reviewer(tmp_path: Path) -> None:
     started = tmp_path / "reviewer.pid"
 
     with pytest.raises(Terminated), termination_ends_the_run():
-        run_codex([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path / "review.log")
+        codex.run([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path / "review.log")
 
     assert _gone(int(started.read_text("utf-8")))
 
@@ -68,10 +75,106 @@ def test_a_terminated_claude_run_ends_its_agent(tmp_path: Path) -> None:
     started = tmp_path / "agent.pid"
 
     with pytest.raises(Terminated), termination_ends_the_run():
-        run_claude([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path, lambda _: None,
-                   "implement")
+        claude_code.run([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path,
+                        lambda _: None, "implement")
 
     assert _gone(int(started.read_text("utf-8")))
+
+
+def test_claude_codes_command_for_a_fresh_run_allows_every_tool_but_its_rule() -> None:
+    command = claude_code.command("go", _SCHEMA, OPUS)
+
+    assert command[:5] == ["claude", "-p", "go", "--model", "claude-opus-5-5"]
+    assert option(command, "--effort") == "high"
+    assert option(command, "--session-id")
+    assert "--resume" not in command
+    assert option(command, "--permission-mode") == "dontAsk"
+    assert option(command, "--setting-sources") == "project"
+    assert json.loads(option(command, "--settings")) == {"sandbox": {"enabled": False}}
+    assert option(command, "--append-system-prompt") == UNATTENDED
+    assert json.loads(option(command, "--json-schema"))["type"] == "object"
+    assert option_rules(command, "--allowedTools") == list(claude_code.TOOLS)
+    assert {"Bash", "Edit", "Write", "Read", "Agent"} <= set(claude_code.TOOLS)
+    assert option_rules(command, "--disallowedTools") == ["Bash(git push*)"]
+
+
+def test_claude_codes_command_for_a_resumed_run_names_no_session_of_its_own() -> None:
+    command = claude_code.command("The owner's answer: A.", None, Model("claude", "m"),
+                                  session="s-1", system="review")
+
+    assert option(command, "--resume") == "s-1"
+    assert "--session-id" not in command
+    assert "--effort" not in command
+    assert "--json-schema" not in command
+    assert option(command, "--append-system-prompt") == "review"
+
+
+def test_claude_codes_adapter_declares_its_state_settings_and_steps() -> None:
+    adapter = adapters.ADAPTERS["claude"]
+
+    assert (adapter.state, adapter.state_files) == (("~/.claude",), ("~/.claude.json",))
+    assert adapter.protected == (".claude/settings.json", ".claude/settings.local.json",
+                                 "~/.claude/settings.json")
+    assert all(adapter.runs(step) for step in STEPS)
+    assert adapter.rules == ("Bash(git push*)",)
+
+
+def test_codexs_commands_keep_its_own_read_only_sandbox(tmp_path: Path) -> None:
+    draft = tmp_path / "draft.md"
+
+    fresh = codex.command("review it", draft, tmp_path, "gpt-6", "high")
+    resumed = codex.resume_command("abc", "again", draft, "gpt-6")
+
+    assert fresh == ["codex", "exec", "--sandbox", "read-only", "--cd", str(tmp_path),
+                     "--output-last-message", str(draft), "--model", "gpt-6",
+                     "--config", 'model_reasoning_effort="high"', "review it"]
+    assert resumed == ["codex", "exec", "resume", "abc", "--config", 'sandbox_mode="read-only"',
+                       "--output-last-message", str(draft), "--model", "gpt-6", "again"]
+
+
+def test_codexs_adapter_declares_its_state_settings_and_the_review_alone() -> None:
+    adapter = adapters.ADAPTERS["codex"]
+
+    assert (adapter.state, adapter.state_files) == (("~/.codex",), ())
+    assert adapter.protected == ("~/.codex/config.toml",)
+    assert [step for step in STEPS if adapter.runs(step)] == ["review"]
+    assert adapter.rules == ()
+
+
+def test_every_adapters_settings_are_protected_whichever_harness_runs() -> None:
+    assert adapters.HARNESSES == ("claude", "codex")
+    assert set(adapters.PROTECTED) == {".claude/settings.json", ".claude/settings.local.json",
+                                       "~/.claude/settings.json", "~/.codex/config.toml"}
+
+
+def test_a_refused_write_is_found_by_either_error() -> None:
+    assert refused("touch: cannot touch 'x': Read-only file system") == (
+        "touch: cannot touch 'x': Read-only file system")
+    assert refused("ok\nmv: cannot move: Device or resource busy\n") == (
+        "mv: cannot move: Device or resource busy")
+    assert refused("Permission denied") is None
+
+
+CODEX_REFUSED = """session id: abc
+--------
+exec
+/bin/bash -lc 'make check-comment-hygiene' in /repo
+ exited 2 in 40ms:
+mkdir: cannot create directory '.cache': Read-only file system
+make: *** Error 1
+exec
+/bin/bash -lc 'rg "Read-only file system" scripts' in /repo
+ succeeded in 3ms:
+scripts/change_workflow/harness.py: read-only file system
+codex
+The check could not write its cache: Read-only file system.
+"""
+
+
+def test_codex_reads_a_refusal_from_a_failed_commands_output_alone() -> None:
+    assert codex.refusals(CODEX_REFUSED) == [
+        {"tool": "exec", "command": "make check-comment-hygiene",
+         "error": "mkdir: cannot create directory '.cache': Read-only file system"}]
 
 
 def test_relative_file_rules_are_anchored_at_the_checkout(tmp_path: Path) -> None:
@@ -80,10 +183,10 @@ def test_relative_file_rules_are_anchored_at_the_checkout(tmp_path: Path) -> Non
     # working directory.
     root = tmp_path.resolve().as_posix()
 
-    assert anchored("Edit(openspec/changes/README.md)", tmp_path) == \
+    assert claude_code.anchored("Edit(openspec/changes/README.md)", tmp_path) == \
         f"Edit(/{root}/openspec/changes/README.md)"
-    assert anchored("Write(./docs/**)", tmp_path) == f"Write(/{root}/docs/**)"
-    assert anchored("Read(**/*.py)", tmp_path) == f"Read(/{root}/**/*.py)"
+    assert claude_code.anchored("Write(./docs/**)", tmp_path) == f"Write(/{root}/docs/**)"
+    assert claude_code.anchored("Read(**/*.py)", tmp_path) == f"Read(/{root}/**/*.py)"
 
 
 def test_a_rule_reaching_above_the_checkout_is_anchored_without_dot_dot(tmp_path: Path) -> None:
@@ -93,25 +196,26 @@ def test_a_rule_reaching_above_the_checkout_is_anchored_without_dot_dot(tmp_path
     checkout.mkdir(parents=True)
     parent = (tmp_path / "changes").resolve().as_posix()
 
-    assert anchored("Edit(../*-proposal/openspec/**)", checkout) == \
+    assert claude_code.anchored("Edit(../*-proposal/openspec/**)", checkout) == \
         f"Edit(/{parent}/*-proposal/openspec/**)"
-    assert anchored("Read(../*-proposal/**)", checkout) == f"Read(/{parent}/*-proposal/**)"
+    assert claude_code.anchored("Read(../*-proposal/**)", checkout) == \
+        f"Read(/{parent}/*-proposal/**)"
 
 
 def test_other_rules_pass_unchanged(tmp_path: Path) -> None:
     for rule in ("Read", "Grep", "Bash(make check-*)", "Edit(//etc/hosts)",
                  "Edit(~/notes.md)", "Edit(/openspec/**)", "WebFetch(domain:github.com)"):
-        assert anchored(rule, tmp_path) == rule
+        assert claude_code.anchored(rule, tmp_path) == rule
 
 
-def test_the_command_anchors_table_granted_and_deny_rules(tmp_path: Path) -> None:
+def test_the_table_command_anchors_table_granted_and_deny_rules(tmp_path: Path) -> None:
     rules = StepRules(skill="change-validate", allow=("Read", "Edit(openspec/**)"),
                       deny=("Edit(.claude/**)",))
     model = Model(harness="claude", model="claude-sonnet-5-5", effort=None)
     root = tmp_path.resolve().as_posix()
 
-    command = claude_command("go", rules, None, model, root=tmp_path,
-                             granted=("Edit(docs/x.md)",))
+    command = claude_code.table_command("go", rules, None, model, root=tmp_path,
+                                        granted=("Edit(docs/x.md)",))
 
     allowed = command[command.index("--allowedTools") + 1:command.index("--disallowedTools")]
     assert allowed == ["Read", f"Edit(/{root}/openspec/**)", f"Edit(/{root}/docs/x.md)"]
@@ -151,7 +255,7 @@ tokens used
 
 
 def _shown(text: str) -> list[str]:
-    progress = Progress()
+    progress = codex.Progress()
     shown = [out for line in text.splitlines(keepends=True) for out in progress.feed(line)]
     return shown + progress.close()
 
@@ -174,7 +278,7 @@ def test_progress_cuts_long_messages_short() -> None:
     review = [line for line in shown if line.startswith("» ") and "load the guidance" not in line]
     assert review[0] == "» # Design review — shape-bounds"
     assert review[-1] == "» … (2 more lines in the transcript)"
-    assert len(review) == Progress.MESSAGE_LINES + 1
+    assert len(review) == codex.Progress.MESSAGE_LINES + 1
 
 
 def test_progress_always_shows_errors() -> None:

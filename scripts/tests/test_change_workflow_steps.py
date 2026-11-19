@@ -11,7 +11,8 @@ import pytest
 from change_workflow import config, steps
 from change_workflow.common import StepError
 from change_workflow.graph import HOOK_STEPS, STEPS
-from change_workflow.steps import Model, load_steps
+from change_workflow.harness import Model
+from change_workflow.steps import load_steps
 from change_workflow_fixtures import CHANGE, OPUS, SONNET
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,31 +102,6 @@ def test_no_rule_names_a_make_target_the_command_stands_behind() -> None:
         for command in (f"make change-cost CHANGE={CHANGE}", "make round-view-closed",
                         "make push-branch", f"make change-history CHANGE={CHANGE}"):
             assert not _allows(rules, command), (name, command)
-
-
-@pytest.mark.parametrize("models,problem", [
-    ("[]", "must be a list of one or more models"),
-    ('[{ harness = "claude", model = "claude-opus-5-5" }, '
-     '{ harness = "claude", model = "claude-sonnet-5-5" }]', "two models of one vendor"),
-    ('[{ harness = "claude", effort = "high" }]', r"models.triage\[0\].model must be"),
-    ('[{ harness = "codex", model = "gpt-6-sol" }]', "Codex runs only the review"),
-    ('[{ harness = "gemini", model = "g" }]', r"harness must be one of claude, codex"),
-    ('[{ harness = "claude", model = "m", speed = "fast" }]', "speed is no field"),
-])
-def test_models_the_policy_forbids_are_refused_naming_the_step(models: str,
-                                                                problem: str) -> None:
-    """CW-zq4h: the configuration's models are held to the policy as it is read."""
-    with pytest.raises(StepError, match=problem) as refused:
-        config.check(f"[models]\ntriage = {models}\n", Path("workflow.toml"))
-
-    assert "models.triage" in str(refused.value)
-
-
-def test_a_row_names_two_models_of_one_vendor() -> None:
-    """CW-zq4h's scenario: the engine refuses the configuration, naming the step."""
-    with pytest.raises(StepError, match="for the review step"):
-        config.check('[models]\nreview = [{ harness = "codex", model = "gpt-6-sol" }, '
-                     '{ harness = "codex", model = "gpt-6-luna" }]\n', Path("workflow.toml"))
 
 
 def test_the_step_table_holds_no_models() -> None:

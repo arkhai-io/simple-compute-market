@@ -734,7 +734,7 @@ moved to the adapters, `config.py`'s models check, `scope.py`,
 `scripts/tests/test_change_workflow_harness.py`, `test_change_workflow_stream.py`,
 `test_change_workflow_config.py`.
 
-- [ ] 6.1 The Claude Code adapter: its unattended command — `dontAsk` with every tool
+- [x] 6.1 The Claude Code adapter: its unattended command — `dontAsk` with every tool
   allowed, project settings only, its own sandbox off, the schema, the system prompt,
   a fresh session's id, and, as its optional rule, `git push` denied (D13, D2); its
   writable state `~/.claude` and `~/.claude.json`; its protected paths
@@ -742,28 +742,155 @@ moved to the adapters, `config.py`'s models check, `scope.py`,
   `~/.claude/settings.json`; every step. Rules anchored at the checkout (`anchored`)
   go with the step table. Verify: unit tests of the command for a fresh and a resumed
   run, and of the declared paths.
-- [ ] 6.2 The Codex adapter: the review's commands as today, `--sandbox read-only` kept
+  Done. The adapters are three modules beside `harness.py`:
+  - `claude_code.py` and `codex.py`, one per harness, each with its `ADAPTER`;
+  - `adapters.py`, holding them by harness;
+  - `harness.py` keeps what they share: `Model`, `Adapter`, `Runner`,
+    `unreachable`, `missing_program`, `UNATTENDED`, and `refused`.
+
+  `Adapter` holds the harness, its `steps`, its `state` directories, its
+  `state_files`, its `protected` paths, and its `rules`.
+  `claude_code.command(prompt, schema, model, *, session, system)` gives:
+  - `--permission-mode dontAsk --setting-sources project`;
+  - `--settings '{"sandbox": {"enabled": false}}'`;
+  - the schema, the system prompt, and `--session-id` or `--resume`;
+  - `--allowedTools`, then `--disallowedTools "Bash(git push*)"`.
+
+  Departures, for the triage:
+  - "Every tool allowed" is `claude_code.TOOLS`, each built-in tool a step works
+    with allowed whole. Tools that wait for a later turn stay denied: Monitor,
+    ScheduleWakeup, and the cron tools. Claude Code takes no wildcard rule this
+    session could confirm.
+  - `~/.claude.json` is mounted alone, not as its directory. D5a's directory mount
+    would make all of `~` writable, against P3. That is section 2's handoff. A
+    `ScopedPath` gains `alone`, `scope.resolve` gains `adapter_files`, and
+    `sandbox.prepare` creates an absent one as `{}`. This session could not run
+    Claude Code under bubblewrap: the call was denied. Claude Code replaces the
+    file by rename, which fails inside the sandbox. The only evidence of what
+    follows is the strings of its binary: a failed config save is logged ("Failed
+    to save config with lock") and caught. If so, the cost is lost state, not a
+    stopped run. The first unattended run after section 7 shows it. This departs
+    from CW-m8wq's "A file or pattern entry MUST mount each match's directory" and
+    D5a, which the triage should amend or overrule.
+  - Nothing calls `command` yet; section 7 moves the wrapper onto it. Until then
+    the step table's form is `claude_code.table_command`, with `anchored`.
+  Unit tests in `test_change_workflow_harness.py`, all passing:
+  - the command for a fresh run;
+  - the command for a resumed run;
+  - the declared state, settings, steps, and rule.
+  `claude_code.run` and `codex.run` keep their earlier library-integration tests.
+- [x] 6.2 The Codex adapter: the review's commands as today, `--sandbox read-only` kept
   inside the engine's sandbox; its writable state `~/.codex`; its protected path
   `~/.codex/config.toml`; the review only (D13). Verify: unit tests of the commands
   and paths; a library-integration test launching `codex --version` through real
   bubblewrap in the review's scope, where Codex is installed, else skipped saying so;
   if the two sandboxes cannot nest, the adapter drops `--sandbox read-only`, and the
   task's note records it.
-- [ ] 6.3 Each adapter reads refusals from its run's events: Claude Code's tool results
+  Done. `codex.command`, `codex.resume_command`, `Progress`, and `run` moved from
+  `harness.py` unchanged. The two sandboxes nest, so `--sandbox read-only` stays.
+  Tests, all passing:
+  - unit tests in `test_change_workflow_harness.py` of both commands, and of the
+    state, settings, review-only steps, and no rules;
+  - in `test_change_workflow_sandbox.py`, external-process integration, not library
+    integration as planned: it runs bwrap and codex. It ran here, not skipped. In
+    the review's scope with Codex's adapter paths and a test home:
+    - `codex --version` runs;
+    - `codex sandbox -- cat src/main.py` starts Codex's own sandbox inside the
+      engine's and reads through it. That is the sandbox `codex exec --sandbox
+      read-only` starts. `codex exec` itself, which needs a model, is not run;
+    - a write under `~/.codex` succeeds, and one to `~/.codex/config.toml` fails as
+      a read-only file system.
+  - Found here: Codex's sandbox keeps a lock under `/tmp`, so it needs the system's
+    temporary directory writable, which the review's baseline gives.
+  - As 3.3 and 4.2 flagged, no gate fails on this test's skip where Codex or
+    bubblewrap is missing.
+- [x] 6.3 Each adapter reads refusals from its run's events: Claude Code's tool results
   in its stream, Codex's command output, each matching "Read-only file system" or
   "Device or resource busy", recorded with its tool, command or path, and error;
   Claude Code's denials stay read as today (D7; CW-w3oa, CW-k5mk). Verify: unit tests
   on recorded stream fixtures for CW-w3oa's scenario, a busy protected file, a denial,
   and a tool result with neither.
-- [ ] 6.4 Move `Model` and `HARNESSES` out of `steps.py` to the adapters, and check the
+  Done. `harness.refused(text)` finds the first line with either error. It also
+  matches Node.js's "resource busy or locked", which Claude Code's file tools would
+  print for a busy file.
+  - `Stream.refusals`, and `transcript_refusals`, read Claude Code's failed tool
+    results (`is_error`), once per call. Each gives `{tool, command | path, error}`.
+  - `codex.refusals(text)` reads only the output of a command Codex says exited
+    non-zero.
+  - A search or a read that quotes the error succeeded, and is no refusal.
+  Unit tests, all passing, on events built by hand in Claude Code's stream shape,
+  not recorded from a run:
+  - in `test_change_workflow_stream.py`: CW-w3oa's scenario, a busy protected file
+    whose result repeats, read once, a denial that stays a denial, results with
+    neither, and a transcript read back;
+  - in `test_change_workflow_harness.py`: `refused`, and Codex's refusal from a failed
+    command, a succeeded search's output passed over.
+- [x] 6.4 Move `Model` and `HARNESSES` out of `steps.py` to the adapters, and check the
   configuration's models against each adapter's steps: a model only for a step its
   harness's adapter can run, refused naming the step (CW-zq4h). Verify: unit tests for
   CW-zq4h's two scenarios.
-- [ ] 6.5 A step's resolved scope takes the adapter of its first model's harness, and
+  Done. `Model` is `harness.Model`, and `HARNESSES` is `adapters.HARNESSES`.
+  `config._models` refuses a model for a step its adapter cannot run, naming the step,
+  the harness, and the steps it runs.
+  - Outside the task: the configuration's check now refuses a writable path under any
+    adapter's protected path (`adapters.PROTECTED`), whichever harness runs the step.
+  Unit tests, moved from `test_change_workflow_steps.py` to
+  `test_change_workflow_config.py`, which section 11 keeps. All passing:
+  - the policy's refusals;
+  - CW-zq4h's two scenarios;
+  - an adapter's settings file refused as a writable path.
+- [x] 6.5 A step's resolved scope takes the adapter of its first model's harness, and
   `config`/`config --json` list the adapter's paths with their source (CW-o6kc).
   Verify: the library-integration test of 2.4 extended to CW-o6kc's scenario whole.
-- [ ] 6.6 Verification point: the harness, stream, and config tests (unit, library
+  Done. `Configuration.scope(step, root, harness=None, …)` adds the paths of the
+  adapter of `harness`. By default that is the step's first model's harness, and none
+  where the configuration names no models. `config --json` marks a file mounted alone
+  `"file": true`.
+  `test_config_lists_each_steps_scope_with_each_paths_source` passes, library
+  integration on a real Git checkout through `cli.main`. It finds:
+  - planning's `openspec/` and `.git/` from the engine, `docs/` from the repository,
+    and `~/.claude` and `~/.claude.json` from the adapter;
+  - the adapter's three settings files protected;
+  - Codex's `~/.codex` and its protected `config.toml` in the review's scope, and no
+    Claude path, writable or protected.
+  A unit test in `test_change_workflow_sandbox.py` renders a file mounted alone as
+  its own `--bind` and creates it `{}`. An external-process test writes it in place
+  through real bubblewrap, while the home directory beside it stays read-only.
+- [x] 6.6 Verification point: the harness, stream, and config tests (unit, library
   integration); `run pre-commit` passes. End-to-end: none.
+  Done:
+  - `make test-release-tooling` on the harness, stream, config, sandbox, scope, and
+    steps tests: all passing, none skipped (`-rs`). The wrapper, review, CLI, hooks,
+    assumptions, graph, push, and invariants tests: 707 passed.
+  - `run pre-commit`: its functional hooks pass, the relock, packaging, and every
+    suite. Its `pre-commit` failed two checks. `check-doc-citations` is expected: it
+    names `propose.py`, which section 9 creates. `check-history-wording` was real,
+    "no longer" in a comment moved into `claude_code.py`, and is fixed. The rerun,
+    after the check's fixes, passed every hook and suite, and failed only
+    `check-doc-citations` on `propose.py`. The relock left the locks as committed.
+  - Fresh-context check fixes:
+    - Codex's refusal reading named in `harness`;
+    - Node.js's busy text matched;
+    - the state file's rename test made real;
+    - the Codex test isolated from the owner's home, its configuration asserted;
+    - the notes' claims narrowed;
+    - `scope.py`'s claim about Claude Code dropped;
+    - 12.9 names the companion's harness row.
+
+    Declined: its reading that `claude_code`'s, `codex`'s, and `stream`'s
+    docstrings describe the launch section 7 wires. Section 7 lands in this
+    session, before the round is reviewed, and section 4 declined the same.
+  Handoff:
+  - The check observed that `~/.claude`, writable whole, holds what the owner's
+    interactive sessions load: `CLAUDE.md`, agents, commands, skills, and hook
+    scripts. Only `~/.claude/settings.json` is protected. CW-r6kd asks no more, but
+    a step's mistake there reaches the owner's own sessions. For the triage.
+  - Section 7: the wrapper and review move from `table_command` to `command`, and
+    `table_command` and `anchored` go then. Section 9's `propose.py` citation is the
+    one `check-doc-citations` failure to expect until then.
+  - A protected placeholder like `.claude/settings.local.json` is created in the
+    checkout. This repository ignores it. A repository that does not would see an
+    untracked file, which dirties the worktree for the guarded push.
 
 ## 7. Launching every unattended run in the sandbox
 
@@ -1012,7 +1139,8 @@ its seventh position.
     "History lives in the owner's workspace" (the engine's copy); "A repository's
     configuration" (D12); "The command and its tiers" (`propose`, `--write`); "A
     change's records carry one format version" (P9, D16); "The engine's own
-    assumptions" (the step table's row removed, `bwrap` and the sandbox `git` added);
+    assumptions" (the step table's row removed, `bwrap` and the sandbox `git` added,
+    the harnesses' commands named in `claude_code` and `codex`);
     "Current limits" — the unchecked configuration and the step table's place removed
     as closed, the forgeable marker and Read reaching any file removed as retired.
   - `openspec/specs/market-change-workflow/README.md`: "Current limits" (the container

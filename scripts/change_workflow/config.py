@@ -39,18 +39,20 @@ deliberately, but an evidence kind always names a command.
 
 Each step's models, in order of preference, and the orchestrating session's model
 are held to the workflow's model policy as they are read: no step names two models
-of one vendor, and only the review names a Codex model. No model is forbidden: a
-repository that never wants one does not list it.
+of one vendor, and a model appears only for a step its harness's adapter can run
+(`adapters`). No model is forbidden: a repository that never wants one does not list
+it.
 
 A review's draft the format check refuses is sent back to the reviewer that wrote
 it, for correction, as many times as `review.format-retries` says: once when the
 field is absent, never when it is 0.
 
-`[sandbox]` adds to each step's scope, which the engine's baseline holds
-(`scope`): `writable.common` paths every step but the review writes,
-`writable.<step>` paths one step writes, and `protected` paths no step writes. A
-repository only adds: the check refuses a writable path that is or lies under a
-protected one, the engine's or its own, and any writable path for the review.
+`[sandbox]` adds to each step's scope, which the engine's baseline and the adapter
+of the harness running the step hold (`scope`): `writable.common` paths every step
+but the review writes, `writable.<step>` paths one step writes, and `protected` paths
+no step writes. A repository only adds: the check refuses a writable path that is or
+lies under a protected one, the engine's, any adapter's, or its own, and any writable
+path for the review.
 
 `config` lists every field and how it resolved, each kind's guide among them, and
 each step's resolved scope, every path with its source; `config load <step>` the
@@ -77,9 +79,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .common import ORCHESTRATOR, StepError, repository_root
 from .graph import STEPS
+from .adapters import ADAPTERS, HARNESSES
+from .adapters import PROTECTED as ADAPTER_PROTECTED
+from .harness import Model
 from .records import is_pattern
 from .scope import PROTECTED, Scope, protected_by, resolve
-from .steps import HARNESSES, Model
 
 # The configuration's place in the repository the command acts on.
 CONFIGURATION = Path(".agents/workflow.toml")
@@ -259,10 +263,19 @@ class Configuration:
         common = () if step == "review" else self.sandbox_writable.get(COMMON_WRITABLE, ())
         return tuple(dict.fromkeys((*common, *self.sandbox_writable.get(step, ()))))
 
-    def scope(self, step: str, root: Path, **launch: Any) -> Scope:
-        """A step's scope in the checkout at `root`, with the repository's additions and
-        inert paths; `launch` gives what a run adds — its adapter's paths and its
-        grants — and where its home and temporary directories are."""
+    def scope(self, step: str, root: Path, harness: str | None = None,
+              **launch: Any) -> Scope:
+        """A step's scope in the checkout at `root`, with the paths of the adapter of
+        `harness` — by default the harness of the step's first model, and no adapter's
+        where the configuration names none — and the repository's additions and inert
+        paths; `launch` gives what a run adds, its grants, and where its home and
+        temporary directories are."""
+        if harness is None and self.models.get(step):
+            harness = self.models[step][0]["harness"]
+        adapter = ADAPTERS.get(harness) if harness else None
+        if adapter is not None:
+            launch = {"adapter_writable": adapter.state, "adapter_files": adapter.state_files,
+                      "adapter_protected": adapter.protected, **launch}
         return resolve(step, root, inert_paths=self.repository_inert_paths(),
                        writable=self.repository_writable(step),
                        protected=self.sandbox_protected or (), **launch)
@@ -420,8 +433,7 @@ def _models(table: dict[str, Any]) -> dict[str, Any]:
 
     A harness is one vendor's, so two entries of one harness are two models of one
     vendor: an outage or a usage limit takes both down, and the second is no
-    fallback. Codex runs only the review, the one step its read-only sandbox can
-    hold to its limits; a writing sandbox cannot refuse a commit or a relock.
+    fallback. A model is named only for a step its harness's adapter can run.
     """
     models: dict[str, Any] = {}
     for key, value in table.items():
@@ -437,9 +449,11 @@ def _models(table: dict[str, Any]) -> dict[str, Any]:
         if len(set(harnesses)) != len(harnesses):
             raise ConfigError(f"{where} names two models of one vendor for the {key} step, "
                               "which an outage or a usage limit takes down together")
-        if "codex" in harnesses and key != "review":
-            raise ConfigError(f"{where} names a Codex model for the {key} step; Codex runs "
-                              "only the review")
+        for harness in harnesses:
+            if key in STEPS and not ADAPTERS[harness].runs(key):
+                raise ConfigError(f"{where} names a {harness} model for the {key} step, "
+                                  f"which the {harness} adapter cannot run; it runs only: "
+                                  + ", ".join(sorted(ADAPTERS[harness].steps)))
         models[key] = entries
     return models
 
@@ -619,8 +633,9 @@ def _sandbox(table: dict[str, Any], root: Path,
     is matched against the checkout's files; a protected pattern, since a protected
     path is mounted read-only whole; and a writable path that is or lies under a
     protected one, the engine's or the repository's, which the sandbox could not
-    honour. A writable directory containing a protected path is admitted: the
-    protected path stays read-only inside it."""
+    honour; the protected paths are the engine's, every adapter's, whichever harness
+    runs the step, and the repository's. A writable directory containing a protected
+    path is admitted: the protected path stays read-only inside it."""
     protected = (_strings("sandbox.protected", table["protected"])
                  if "protected" in table else None)
     for entry in protected or ():
@@ -646,7 +661,8 @@ def _sandbox(table: dict[str, Any], root: Path,
             if is_pattern(entry) and entry.startswith(("~", "/")):
                 raise ConfigError(f"{where} names {entry}, a pattern outside the checkout; "
                                   "only a path from the checkout's root may be a pattern")
-            if guarded := protected_by(entry, root, home, (*PROTECTED, *(protected or ()))):
+            if guarded := protected_by(entry, root, home,
+                                       (*PROTECTED, *ADAPTER_PROTECTED, *(protected or ()))):
                 raise ConfigError(f"{where} names {entry}, which is or lies under the "
                                   f"protected path {guarded}")
         writable[key] = entries
@@ -880,8 +896,9 @@ def _shown_value(value: Any) -> str:
 
 
 def scopes(configuration: Configuration, root: Path) -> dict[str, Scope]:
-    """Each step's scope in the checkout at `root` as a run of it would start now,
-    before its harness's adapter and any grant add their paths."""
+    """Each step's scope in the checkout at `root` as a run of it on its first model
+    would start now, with that model's adapter's paths, before any grant adds its
+    own."""
     return {step: configuration.scope(step, root) for step in STEPS}
 
 

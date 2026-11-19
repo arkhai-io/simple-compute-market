@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Sequence
 
 from change_workflow.around import inputs_note
+from change_workflow.harness import Model
 from change_workflow.log import Checkout
-from change_workflow.steps import Model
 from change_workflow.wrapper import Wrapper
 
 CHANGE = "shape-bounds"

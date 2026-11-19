@@ -643,34 +643,34 @@ time.sleep(120)
 """
 
 # A step run through the real wrapper, which starts the stand-in through
-# `run_claude`.
+# Claude Code's adapter's `run`.
 _STEP = """
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 root, runs, started = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
-from change_workflow.harness import run_claude
+from change_workflow.claude_code import run
 from change_workflow.wrapper import Wrapper
 def runner(command, cwd, feed, step):
-    return run_claude([sys.executable, "-c", sys.argv[5], started], cwd, feed, step)
+    return run([sys.executable, "-c", sys.argv[5], started], cwd, feed, step)
 Wrapper(root=root, runner=runner, head=lambda _: "c0ffee", echo=None,
         conversation=lambda _, session: root / "conversations" / f"{session}.jsonl",
         runs=lambda _: runs).run("validate", sys.argv[6])
 """
 
 # A review run through the real review runner, which starts the stand-in through
-# `run_codex`; the reviewer's finished review is written as it starts, so only the
+# Codex's adapter's `run`; the reviewer's finished review is written as it starts, so only the
 # stop keeps it from being published.
 _REVIEW = """
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 root, runs, started = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
-from change_workflow.harness import run_codex
+from change_workflow.codex import run
 from change_workflow.review import review_and_log
 def runner(command, log):
     Path(command[command.index("--output-last-message") + 1]).write_text(sys.argv[7])
-    return run_codex([sys.executable, "-c", sys.argv[5], started], log)
+    return run([sys.executable, "-c", sys.argv[5], started], log)
 review_and_log(sys.argv[6], "design", root=root, runner=runner,
                head=lambda _: "c0ffee", runs=lambda _: runs)
 """

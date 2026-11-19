@@ -38,12 +38,18 @@ siblings by relative import:
 - `gather` — gathering the evidence a change's `HEAD` lacks, or a new attempt of one
   kind (`gather`);
 - `steps` — the step table: each step's skill and the permission rules an
-  unattended run of it is held to, and what a model a step runs on is; which models
-  it runs on are the configuration's;
-- `stream` — a Claude Code run's event stream, transcript, progress, and denials;
+  unattended run of it is held to;
+- `stream` — a Claude Code run's event stream, transcript, progress, denials, and
+  refusals;
 - `subagents` — the denials a run's subagents met, read from their transcripts;
-- `harness` — the Claude Code and Codex commands, and how each harness says it
-  cannot serve a model;
+- `harness` — what the engine needs of a harness, which each adapter states, a model
+  a step runs on, how a harness says it cannot serve one, and the error a refused
+  write fails with;
+- `claude_code` — Claude Code's adapter: a step's headless command, the state and
+  settings its harness writes and loads, and its run;
+- `codex` — Codex's adapter: a review's commands, its state and settings, its
+  progress, its refusals, and its run;
+- `adapters` — each harness's adapter, by harness;
 - `cost` — what each run cost;
 - `cost_report` — what a change's runs cost, by step and by round;
 - `running` — the record of each run in progress in a checkout, held locked while

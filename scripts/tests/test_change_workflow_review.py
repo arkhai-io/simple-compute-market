@@ -18,7 +18,8 @@ from change_workflow.log import log_path, note_orchestrator, read_log
 from change_workflow.review import (ReviewError, check_review, claim_record, prior_session,
                                     review_and_log, review_models, run_review)
 from change_workflow.running import Terminated, live_runs
-from change_workflow.steps import Model, load_steps
+from change_workflow.harness import Model
+from change_workflow.steps import load_steps
 from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
                                       RECORDS, VALIDATED, FakeClaude, claude_review, clock,
                                       codex_missing, codex_saying, configured, ignore_evidence,

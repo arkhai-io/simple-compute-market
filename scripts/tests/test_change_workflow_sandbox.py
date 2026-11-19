@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import select
+import shutil
 import signal
 import socket
 import subprocess
@@ -21,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import sandbox, scope
+from change_workflow import adapters, sandbox, scope
 from change_workflow.sandbox import BWRAP, Launch
 from change_workflow.scope import ADAPTER, ENGINE, GRANT, Scope, ScopedPath
 
@@ -98,6 +99,19 @@ def test_absent_paths_are_created_in_their_empty_forms(tmp_path: Path) -> None:
     assert (root / ".claude/notes").read_text("utf-8") == ""
     assert (root / "secrets").is_dir()
     assert (root / "build/cache").is_dir()
+
+
+def test_an_absent_state_file_mounted_alone_is_created_as_a_file(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    found = Scope("design", (ScopedPath(home / ".claude.json", ADAPTER, "~/.claude.json",
+                                        create=True, alone=True),), ())
+
+    sandbox.prepare(found)
+    command = sandbox.arguments(found, ["true"], git=(7, 8))
+
+    assert json.loads((home / ".claude.json").read_text("utf-8")) == {}
+    assert command[len(BASE):len(BASE) + 3] == ["--bind", str(home / ".claude.json"),
+                                                str(home / ".claude.json")]
 
 
 def test_a_protected_path_outside_every_writable_one_is_not_created(tmp_path: Path) -> None:
@@ -257,6 +271,57 @@ def test_a_step_cannot_create_an_absent_settings_file(checkout: Path) -> None:
     assert created.returncode != 0
     assert "Read-only file system" in created.stderr
     assert (checkout / ".claude/settings.local.json").read_text("utf-8") == "{}"
+
+
+@needs_bwrap
+def test_an_adapters_state_file_is_written_in_place_and_its_directory_is_not(
+        checkout: Path) -> None:
+    """Claude Code's `~/.claude.json` is mounted alone: written in place it changes,
+    while the home directory beside it stays read-only, and a file moved over it from
+    another directory, which crosses a mount, fails and leaves it as it was."""
+    home, temporary = checkout.parent / "home", checkout.parent / "tmp"
+    found = _scope("design", checkout, adapter_files=("~/.claude.json",))
+
+    written = _run(found, f"echo '{{\"n\": 1}}' > {home}/.claude.json", checkout)
+    beside = _run(found, f"echo x > {home}/other", checkout)
+    renamed = _run(found, f"echo x > {temporary}/state.json && "
+                          f"mv {temporary}/state.json {home}/.claude.json", checkout)
+
+    assert written.returncode == 0, written.stderr
+    assert "Read-only file system" in beside.stderr
+    assert renamed.returncode != 0
+    assert "Read-only file system" in renamed.stderr, renamed.stderr
+    assert (home / ".claude.json").read_text("utf-8") == '{"n": 1}\n'
+
+
+CODEX = shutil.which("codex")
+needs_codex = pytest.mark.skipif(CODEX is None, reason="Codex is not installed here")
+
+
+@needs_bwrap
+@needs_codex
+def test_codex_runs_in_the_reviews_scope_and_its_own_sandbox_nests(checkout: Path) -> None:
+    """Codex starts in the review's scope, its state writable but its configuration,
+    and Codex's own sandbox, which `codex sandbox` starts as `codex exec --sandbox`
+    does, starts inside the engine's and runs a command there. The home directory is
+    the test's own; the temporary directory is the system's, as a review's is, since
+    Codex's sandbox keeps a lock there."""
+    home = checkout.parent / "home"
+    adapter = adapters.ADAPTERS["codex"]
+    found = scope.resolve("review", checkout, inert_paths=INERT, home=home,
+                          adapter_writable=adapter.state, adapter_protected=adapter.protected)
+
+    version = _run(found, "codex --version", checkout)
+    nested = _run(found, "codex sandbox -- cat src/main.py", checkout)
+    state = _run(found, f"echo x > {home}/.codex/session.json", checkout)
+    configuration = _run(found, f"echo x > {home}/.codex/config.toml", checkout)
+
+    assert version.returncode == 0, version.stderr
+    assert version.stdout.startswith("codex"), version.stdout
+    assert (nested.returncode, nested.stdout) == (0, "x\n"), nested.stderr
+    assert state.returncode == 0, state.stderr
+    assert "Read-only file system" in configuration.stderr
+    assert (home / ".codex/config.toml").read_text("utf-8") == ""
 
 
 @needs_bwrap

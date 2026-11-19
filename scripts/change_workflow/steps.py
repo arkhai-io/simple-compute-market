@@ -1,5 +1,5 @@
 """The step table: each step's skill and the permission rules an unattended run of it
-is held to, and what a model a step runs on is.
+is held to.
 
 The table is `.claude/change-steps.toml`, the workflow's policy. Each step's rules
 are its own plus `common`'s. The models each step runs on, and the orchestrating
@@ -17,26 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .common import ORCHESTRATOR, Entry, StepError, repository_root
+from .common import ORCHESTRATOR, StepError, repository_root
 from .graph import STEPS
 
 # The table's place in the repository the command acts on.
 STEP_TABLE = Path(".claude/change-steps.toml")
-HARNESSES = ("claude", "codex")
-
-
-@dataclass(frozen=True)
-class Model:
-    """One model a step may run on: its harness, its name, and its effort."""
-
-    harness: str
-    model: str
-    effort: str | None = None
-
-    def entry(self) -> Entry:
-        """The model as a log line records it."""
-        return {"harness": self.harness, "model": self.model,
-                **({"effort": self.effort} if self.effort else {})}
 
 
 @dataclass(frozen=True)

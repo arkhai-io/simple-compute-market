@@ -31,8 +31,9 @@ from a `Launch` inherits its descriptors (`fds`), which the launcher may close o
 that process has started.
 
 A mount needs something to mount, so before launch each absent writable path is
-created as a directory, and each absent protected path inside a writable one as the
-empty form of what its harness loads: `{}` for a JSON file, an empty file otherwise,
+created as a directory, and each absent file an adapter's state mounts alone, and
+each absent protected path inside a writable one, as the empty form of what its
+harness loads: `{}` for a JSON file, an empty file otherwise,
 and a directory where its entry ends in `/`. A protected path created so is mounted
 like any other, so it cannot be created during the run either, and stays afterwards.
 
@@ -145,7 +146,8 @@ def _readable(data: bytes) -> int:
 
 
 def _empty_form(path: ScopedPath) -> None:
-    """Create an absent protected path as the empty form its harness loads."""
+    """Create an absent file the sandbox mounts on its own as the empty form its
+    harness loads."""
     if path.entry.endswith("/"):
         path.path.mkdir(parents=True, exist_ok=True)
         return
@@ -155,9 +157,14 @@ def _empty_form(path: ScopedPath) -> None:
 
 def prepare(scope: Scope) -> None:
     """Create what the sandbox mounts and does not exist: each absent writable path as
-    a directory, and each absent protected path it mounts in its empty form."""
+    a directory, or, a file mounted alone, in its empty form; and each absent protected
+    path it mounts in its empty form."""
     for path in scope.writable:
-        if not path.path.exists():
+        if path.path.exists():
+            continue
+        if path.alone:
+            _empty_form(path)
+        else:
             path.path.mkdir(parents=True, exist_ok=True)
     for path in mounted_protected(scope):
         if not path.path.exists():

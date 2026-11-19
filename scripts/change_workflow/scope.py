@@ -10,7 +10,7 @@ starts, from four sources:
   and the system's two Git executables, so no step replaces the Git its pushes go
   through (CW-r6kd, CW-j4cs);
 - the adapter of the harness that runs the step: the state its harness writes and the
-  settings files it loads, which the caller passes in;
+  settings files it loads, which the caller passes in (`adapters`);
 - the repository: its configuration's `[sandbox]`, `writable.common` for every step
   but the review, `writable.<step>` for one, and `protected` (CW-h2zt);
 - a grant: a path the owner gives one run (CW-tl5v).
@@ -27,7 +27,10 @@ A scope is made of directories, never a single writable file: a tool replaces a 
 by writing another and renaming it over the first, which a file bound on its own
 refuses. So a file entry, and each file a pattern matches, makes its directory
 writable. A writable path absent as the run starts is marked to be created as a
-directory before launch, since a mount needs something to mount. A protected path
+directory before launch, since a mount needs something to mount. The one exception
+is a state file an adapter names, which is mounted alone, since its directory is the
+home directory, which no step writes whole: it can be written in place, though not
+replaced by rename. A protected path
 stays read-only inside any writable directory that contains it, so a path is refused
 only where it is, or lies under, a protected one; the configuration's check and a
 grant's both ask `protected_by`, so the two cannot disagree.
@@ -63,16 +66,19 @@ class ScopeError(StepError):
 @dataclass(frozen=True)
 class ScopedPath:
     """One path of a scope, absolute, with its source and the entry it resolved from;
-    `create` when it is absent, to be created as a directory before launch."""
+    `create` when it is absent, to be created before launch, as a directory unless it
+    is a file mounted `alone`."""
 
     path: Path
     source: str
     entry: str
     create: bool = False
+    alone: bool = False
 
     def shown(self) -> dict[str, Any]:
         return {"path": str(self.path), "source": self.source, "entry": self.entry,
-                **({"absent": True} if self.create else {})}
+                **({"absent": True} if self.create else {}),
+                **({"file": True} if self.alone else {})}
 
 
 @dataclass(frozen=True)
@@ -236,14 +242,15 @@ def granted(values: Sequence[str], checkout: _Checkout,
 
 def resolve(step: str, root: Path, *, inert_paths: Sequence[str],
             writable: Sequence[str] = (), protected: Sequence[str] = (),
-            adapter_writable: Sequence[str] = (), adapter_protected: Sequence[str] = (),
-            grants: Sequence[str] = (), home: Path | None = None,
-            temporary: Path | None = None) -> Scope:
+            adapter_writable: Sequence[str] = (), adapter_files: Sequence[str] = (),
+            adapter_protected: Sequence[str] = (), grants: Sequence[str] = (),
+            home: Path | None = None, temporary: Path | None = None) -> Scope:
     """The scope of one run of `step` in the checkout at `root`, as absolute paths:
-    its baseline, the adapter's state and protected paths, the repository's writable
-    paths for the step and its protected ones, and the run's grants, each grant
-    refused before anything launches where the scope cannot hold it (`granted`).
-    `inert_paths` are the repository's, which closeout's baseline names."""
+    its baseline, the adapter's state — its directories, and its files mounted alone —
+    and protected paths, the repository's writable paths for the step and its
+    protected ones, and the run's grants, each grant refused before anything launches
+    where the scope cannot hold it (`granted`). `inert_paths` are the repository's,
+    which closeout's baseline names."""
     definition = STEP_DEFINITIONS[step]
     checkout = _Checkout(root, Path.home() if home is None else home)
     temporary = Path(tempfile.gettempdir()) if temporary is None else temporary
@@ -259,6 +266,8 @@ def resolve(step: str, root: Path, *, inert_paths: Sequence[str],
                          for path in checkout.writable(inert_path, ENGINE))
         else:
             paths.extend(checkout.writable(entry, ENGINE))
+    paths.extend(ScopedPath(path, ADAPTER, entry, create=not path.exists(), alone=True)
+                 for entry in adapter_files for path in checkout.paths(entry))
     for source, entries in ((ADAPTER, adapter_writable), (REPOSITORY, writable)):
         paths.extend(path for entry in entries for path in checkout.writable(entry, source))
     every_protected = [entry for _, entries in sources for entry in entries]
