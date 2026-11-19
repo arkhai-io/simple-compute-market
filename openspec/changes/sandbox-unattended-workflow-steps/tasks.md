@@ -246,7 +246,7 @@ told when the sandbox cannot run (D3, D4, D10, D5b's mount; CW-x3pf, CW-r6kd,
 CW-m8wq, CW-v5ny). Files: a new `scripts/change_workflow/sandbox.py`, a new
 `scripts/tests/test_change_workflow_sandbox.py`.
 
-- [ ] 3.1 `sandbox.py` renders a scope as `bwrap` arguments: the root filesystem
+- [x] 3.1 `sandbox.py` renders a scope as `bwrap` arguments: the root filesystem
   read-only, `/dev` and `/proc`, the temporary directory, each writable path
   `--bind` over it, each protected path `--ro-bind` after them, any further read-only
   file binds a caller adds (section 4 adds the engine's `git`), the network and
@@ -256,13 +256,58 @@ CW-m8wq, CW-v5ny). Files: a new `scripts/change_workflow/sandbox.py`, a new
   launch is created as a directory (D4, D8; CW-r6kd). Verify: unit tests of the
   rendered arguments' order for a design scope, and of the creation of an absent
   `.claude/settings.local.json` as `{}`.
-- [ ] 3.2 The probe: one trivial program run under `bwrap` before a launch, its
+  Done: `sandbox.arguments(scope, program, binds)` renders the command in this order:
+  - `bwrap --unshare-pid --ro-bind / / --dev /dev --proc /proc`;
+  - each writable path `--bind`, shallower first, so none hides one inside it;
+  - each protected path `--ro-bind`;
+  - the caller's read-only `binds`, as source and destination pairs, which section
+    4's `git` uses;
+  - `--die-with-parent --`, then the program.
+
+  `prepare(scope)` creates absent writable paths as directories. It creates absent
+  protected paths as `{}` for `.json`, an empty file otherwise, or a directory for an
+  entry ending in `/`.
+
+  Two departures from the task's wording, for the triage to read:
+  - Only protected paths inside a writable path are mounted, and created
+    (`mounted_protected`). One outside every writable path is read-only under the
+    root already. So design's scope mounts `.git/config` but not
+    `.agents/workflow.toml`, and the review's creates no placeholder in a checkout
+    it cannot write. Git's executables are left to section 4's binds.
+  - `--unshare-pid` is added to D4's flags. With `--die-with-parent` alone, a
+    background process the harness started outlives the launcher, against CW-x3pf's
+    "end the session when the wrapper ends". With its own process namespace,
+    bubblewrap's death ends the whole tree.
+
+  Unit tests, on scopes built by hand, all passing:
+  - the order for a design scope;
+  - a checkout-wide scope mounting the configuration after the checkout;
+  - each empty form, `.claude/settings.local.json` as `{}` among them;
+  - no placeholder outside the writable paths.
+- [x] 3.2 The probe: one trivial program run under `bwrap` before a launch, its
   failure — `bwrap` missing, user namespaces refused — returning the reason, and the
   launch then the program unconfined, with the reason for the wrapper's warning and
   `unconfined: true` (section 7 records it) (D10; CW-v5ny). Verify: unit tests with
   the probe doubled for both failures; a library-integration test that the real probe
   passes on this machine.
-- [ ] 3.3 Library-integration tests through real bubblewrap, a shell program standing
+  Done: `probe(run)` runs `true` in the base sandbox. Its failure returns the reason:
+  - not installed;
+  - bwrap's own message, such as the uid map refusal;
+  - another `OSError`;
+  - an exit with no message.
+
+  `launch(scope, program, binds, probing)` returns a `Launch` of the bwrap command,
+  its mounts created. Where the probe fails, it returns the program alone with
+  `unconfined` holding the reason, and creates nothing.
+
+  Unit tests, all passing:
+  - the probe's runner doubled for all four failures, and its command;
+  - `launch` with the probe doubled both ways.
+
+  A test of the real probe was dropped, since it could not fail: it was skipped
+  exactly when the probe fails. The evidence that the real probe passes here is that
+  3.3's tests ran and none was skipped (`PYTEST_ARGS=-rs`).
+- [x] 3.3 Library-integration tests through real bubblewrap, a shell program standing
   in for the harness: a write inside the scope succeeds; a write outside it fails as a
   read-only file system; a write to a protected file fails, and a rename over it fails
   busy (CW-r6kd's `git config core.hooksPath` scenario, on a real repository); an
@@ -271,10 +316,59 @@ CW-m8wq, CW-v5ny). Files: a new `scripts/change_workflow/sandbox.py`, a new
   its parent dies (`--die-with-parent`); and the program reads a file outside its
   scope (P3; CW-x3pf's reads). Verify: these tests pass here, each skipped elsewhere
   with the probe's reason.
-- [ ] 3.4 Verification point: `test_change_workflow_sandbox.py` (unit, library
+  Done: these launch real external processes (bwrap, sh, git), so they are
+  external-process integration (`test-levels.md`), not library integration. Each runs
+  a shell program in a scope resolved on a real Git checkout. All pass here, none
+  skipped:
+  - a write inside design's scope succeeds, and one outside fails "Read-only file
+    system";
+  - a write to `.agents/workflow.toml` fails read-only, and a rename over it fails
+    "Device or resource busy";
+  - CW-r6kd's `git config core.hooksPath` exits non-zero, "Device or resource
+    busy", with `.git/config` unchanged;
+  - CW-r6kd's absent `.claude/settings.local.json` cannot be written, and stays
+    `{}`;
+  - a file outside the review's scope is read;
+  - the Docker socket carries traffic from inside: `GET /_ping` answers `OK`;
+  - once the launcher is killed, every process inside dies, a background `sleep`
+    included. This is waited on through the end of a pipe they all hold, not a
+    pause. Run without `--unshare-pid` as a check, the test failed: the background
+    `sleep` survived.
+
+  `test-levels.md` puts such tests in a gate that fails on a skip. None exists, so
+  on a machine without bubblewrap they skip silently under `make test`. Flagged for
+  the triage: a gate, or a recorded exception.
+- [x] 3.4 Verification point: `test_change_workflow_sandbox.py` (unit, library
   integration through real bubblewrap); `run pre-commit` passes. The note records
   whether a native Ubuntu install was at hand to run the probe on; where none was,
   `design.md`'s open question on AppArmor stays open. End-to-end: none.
+  Done:
+  - `make test-release-tooling` on the sandbox and scope tests: 43 passed, none
+    skipped.
+  - `run pre-commit`: its functional hooks pass, the relock, packaging, and every
+    suite. The scripts suite runs the bubblewrap tests here. Its `pre-commit` fails
+    only `check-doc-citations`, on the four files sections 4, 5, and 9 create.
+  - No native Ubuntu install was at hand, only this WSL2 machine, so `design.md`'s
+    open question on AppArmor stays open.
+  - Fresh-context check fixes:
+    - the probe described as what it is;
+    - `--unshare-pid`;
+    - real unit tests over hand-built scopes;
+    - the tautological probe test dropped;
+    - an event-driven death test;
+    - Docker traffic;
+    - the busy reason asserted;
+    - the untested branches covered.
+  Handoff:
+  - Section 4 passes the engine's `git` as `binds`, over `scope.GIT_EXECUTABLES`.
+  - Gaps the check named, outside P1 or for a later section:
+    - Renaming the directory holding a protected mount, then writing a new file
+      there, defeats the mount. Nothing after the run checks the configuration.
+    - A protected settings file that is a symlink inside a writable directory
+      mounts the symlink's target.
+    - `[sandbox]` admits a protected directory containing a baseline writable path
+      (`protected = ["~"]`), and the inner path stays writable. Section 2's check
+      could refuse it.
 
 ## 4. The sandbox's `git`, the guarded push's record, and the upstream after a run
 
