@@ -681,6 +681,12 @@ expectations", "Each live verification scenario states its topology requirements
 `helpers/payments.py`, a new `e2e-tests/tests/e2e/roles/scenarios/vms/live/` (conftest
 and four modules), `e2e-tests/pyproject.toml`'s markers and `e2e-tests/README.md`.
 
+Replanned after the section's return (the notes below): 5.5 and 5.6 no longer run the
+live modules against the local Helm release, which serves no payment scenario and whose
+payments target is lane-owned, so 5.2 refuses it by design; the deployment's run in
+section 8 is the only run of the live modules, and the in-repository evidence is the
+unit checks, the lane twins, and each live module refusing the lane's double.
+
 - [ ] 5.1 Give `LaneTime.reach` its admitted wall-time case: an instant an authority
       recorded as the effect of the scenario's own request, read from a signed record —
       a pending stop's effective instant, the snapshot's funded boundary — waited for
@@ -712,15 +718,21 @@ and four modules), `e2e-tests/pyproject.toml`'s markers and `e2e-tests/README.md
       and starting balances, the run settings it reads, and the balance reset and
       cleanup its caller owes between runs; naming no infrastructure (D13). Verify:
       `make check-doc-citations CHANGE=switch-on-hosted-per-period-vm` passes.
-- [ ] 5.5 Run each module against the local Helm release on wall time, its payments
-      double standing in for the producer, where it can serve the module, recording
-      which observations it made there and which it could not and why (the double
-      reserves only through its control, so funds running out cannot complete there);
-      this is not live evidence (D4, D6). Verify (system, the local Helm release): the
-      buyer's stop, preemption and term-end modules make their observations with short
-      period settings.
-- [ ] 5.6 Verification point: the `e2e-tests` unit suite passes, 5.5's runs are recorded,
-      and the VM lane still passes with the live modules collected and skipped.
+- [ ] 5.5 Show the live modules inert on a lane: collected in the VM lane, each refusing
+      the lane's payments double at its first live fixture with a blocked skip naming
+      the lane-owned target, logging its observation unproven with that reason, and
+      running no stage after; the lane twins on the shared stages passing beside them
+      (D6; `test-compatibility`, "A live verification scenario compares a producer's
+      outputs with a lane's expectations": a double yields no live evidence). Verify
+      (system, the VM lane's Compose stack): `make -C e2e-tests test-e2e-vm
+      "E2E_MODULE=e2e_vm_recurring_purchase or e2e_vm_rate_servicing or
+      e2e_vm_rate_dispute or e2e_vm_live_rate_servicing"` passes, every skip a live
+      module's refusal naming the lane-owned target; the bare-metal lane's recurring and
+      rate rows pass on the shared stages the section changed.
+- [ ] 5.6 Verification point: the `e2e-tests` unit suite passes, 5.5 holds, the whole VM
+      lane passes, and `scripts/change-workflow run pre-commit
+      switch-on-hosted-per-period-vm` reports no failure but the citation of section 8's
+      summary.
       End-to-end: none in the pipeline — `e2e_vm_live_rate_servicing` belongs to no lane,
       and its evidence is the deployment's (section 8); the lane twins are
       `e2e_vm_recurring_purchase` and `e2e_vm_rate_servicing`.
@@ -839,6 +851,10 @@ verification scenario states its topology requirements" (`test-compatibility`, a
 Touches `e2e-tests/tests/e2e/roles/scenarios/vms/live/` (two modules),
 `e2e-tests/pyproject.toml` and `e2e-tests/README.md`.
 
+Replanned after section 5's return: 6.4 and 6.5 no longer run the modules against the
+local Helm release, for section 5's reasons and because the release's e2e pods hold no
+control token for its mediation double; section 8 is their only run.
+
 - [ ] 6.1 The seller's filing module: the storefront's own payee filing on a running
       rate deal, sent by its journal through the mediation kit's adapter as in 3.1; read,
       by bounded polls of the public record and snapshot reads, the per-part protection,
@@ -861,13 +877,17 @@ Touches `e2e-tests/tests/e2e/roles/scenarios/vms/live/` (two modules),
       awaiting an operator and resetting balances (D13). Verify:
       `make check-doc-citations CHANGE=switch-on-hosted-per-period-vm` and
       `make -C e2e-tests test-unit` pass.
-- [ ] 6.4 Run both modules against the local Helm release on wall time, its doubles
-      standing in, recording which observations they made there: the filing and its
-      protection, and the contest; the rulings are unproven there, since the double
-      rules only on a rule (D6). Verify (system, the local Helm release): the filing
-      observations are made.
-- [ ] 6.5 Verification point: the `e2e-tests` unit suite passes, 6.4's runs are recorded,
-      and the VM lane still passes with the live modules collected and skipped.
+- [ ] 6.4 Show both modules inert on a lane, as 5.5 does: collected in the VM lane, each
+      refusing the lane's doubles at its first live fixture with a blocked skip naming
+      the lane-owned target, logging its observations unproven with that reason, and
+      running no stage after; the lane twin `e2e_vm_rate_dispute` passing beside them
+      (D6). Verify (system, the VM lane's Compose stack): `make -C e2e-tests test-e2e-vm
+      "E2E_MODULE=e2e_vm_rate_dispute or e2e_vm_live_dispute"` passes, every skip a live
+      module's refusal naming the lane-owned target.
+- [ ] 6.5 Verification point: the `e2e-tests` unit suite passes, 6.4 holds, the whole VM
+      lane passes, and `scripts/change-workflow run pre-commit
+      switch-on-hosted-per-period-vm` reports no failure but the citation of section 8's
+      summary.
       End-to-end: none in the pipeline — `e2e_vm_live_dispute` belongs to no lane; its
       lane twin is `e2e_vm_rate_dispute`.
       Nothing is owed to validation.
