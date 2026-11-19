@@ -81,7 +81,7 @@ service and the storefronts calling it upgrade together.
 
 | Open gap | Owned by |
 |---|---|
-| An embedded host credential crosses the operator-to-provisioning hop in plaintext, protected only by the authenticated transport, and `fernet-v1` is one service-held symmetric key. Sealed submission to the service's public key, references to a secret authority, or managed envelope encryption each need only a new protected-value scheme and its codec | [`harden-provisioning-trust-boundaries`](../../openspec/changes/harden-provisioning-trust-boundaries/) |
+| An embedded host credential crosses the operator-to-provisioning hop in plaintext, protected only by the authenticated transport, and `fernet-v1` is one service-held symmetric key. Sealed submission to the service's public key, references to a secret authority, or managed envelope encryption each need only a new protected-value scheme and its codec | Unowned — recorded in the change index |
 | VM guests attach to libvirt's `default` NAT network, one bridge per host with no isolation rule, so guests on one host, including different buyers', share a layer-2 segment | [`harden-provisioning-trust-boundaries`](../../openspec/changes/harden-provisioning-trust-boundaries/) |
 | The provisioning service's Ansible configuration disables SSH host-key checking, so a man-in-the-middle can impersonate a host | [`harden-provisioning-trust-boundaries`](../../openspec/changes/harden-provisioning-trust-boundaries/) |
 | Every provisioning route admits the administrator; whether every other service should take the same stance has not been decided | [`harden-provisioning-trust-boundaries`](../../openspec/changes/harden-provisioning-trust-boundaries/) |
