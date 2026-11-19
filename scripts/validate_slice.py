@@ -1085,7 +1085,9 @@ def _helm_preflight(validation: Validation, credentials: CredentialProbe) -> boo
             return False
         validation.note(step, str(python))
     try:
-        validation.read(["docker", "info", "--format", "{{.ServerVersion}}"])
+        # Its exit status alone: a format names fields of Docker's report that
+        # Podman's `docker` does not have.
+        validation.read(["docker", "info"])
     except ValidationError as exc:
         validation.fail("docker", f"the Docker daemon is not reachable: {exc}")
         return False
