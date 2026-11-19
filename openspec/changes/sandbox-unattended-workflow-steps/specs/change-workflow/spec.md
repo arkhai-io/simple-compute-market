@@ -6,7 +6,8 @@ The engine MUST start every unattended step's harness process inside an OS sandb
 it owns, on Linux bubblewrap, so that the harness's own file tools, its shell, and
 every process they start are confined alike. The sandbox MUST leave the network,
 the environment, and every file the owner can read as they are, and MUST end the
-session when the wrapper ends.
+session when the wrapper ends. The workflow's guarantees on what a step writes hold
+for the runs the sandbox confines (CW-v5ny).
 
 #### Scenario: A step's file tool writes outside its scope
 
@@ -22,32 +23,45 @@ session when the wrapper ends.
 
 ### Requirement: CW-m8wq Each step writes only its scope
 
-Each step's scope MUST be the paths its sandbox may write: review none; design and
-planning `openspec/` and `.git/`; implementation, triage, the merge, and validation
-the checkout; closeout its inert paths and `.git/`; archive cleanup
-`openspec/changes/` and `.git/`. Every step but the review MUST also write a
-temporary directory, `~/.cache`, its adapter's state, and the repository's
-additions. A file or pattern entry MUST mount each match's directory.
+Each step's scope MUST be the paths its sandbox may write: review, in its checkout,
+only the engine's record of what a session invoked, `.git/change-invocations/`;
+design and planning `openspec/` and `.git/`; implementation, triage, the merge, and
+validation the checkout; closeout its inert paths and `.git/`; archive cleanup
+`openspec/changes/` and `.git/`. Every step, the review included, MUST also write a
+temporary directory and its adapter's state; every step but the review MUST also
+write `~/.cache` and the repository's additions. A file or pattern entry MUST mount
+each match's directory.
 
 #### Scenario: Closeout edits a README beside code
 
 - **WHEN** closeout's inert paths include `**/README.md` and a package's README
   sits at the package's root
 - **THEN** that package's directory is writable to closeout, and an edit of its code
-  is for the closeout review to see
+  stops the run at its checks (CW-q7ub)
 
 #### Scenario: A review tries to write
 
-- **WHEN** an unattended review run writes any file in the checkout
-- **THEN** the write fails, since the review's scope is empty
+- **WHEN** an unattended review run writes any file it reviews in the checkout
+- **THEN** the write fails, since the review's scope in the checkout is only the
+  engine's invocation record
+
+#### Scenario: A review runs the checks before a commit
+
+- **WHEN** an unattended review run on Claude Code runs `scripts/change-workflow run
+  pre-commit <change>` for evidence
+- **THEN** the engine records what the session invoked under
+  `.git/change-invocations/`, and the harness keeps its session state under
+  `~/.claude`
 
 ### Requirement: CW-r6kd No step writes the protected paths
 
 The sandbox MUST mount read-only, inside every step's scope, the workflow's
-configuration, `.git/config`, the engine's hook directory, and the paths the
+configuration, `.git/config`, the engine's `git` (CW-j4cs), and the paths the
 harness's adapter and the repository protect, so no step changes what its hooks run,
-how its pushes are checked, or its harness's settings. A protected path MUST NOT be
-granted.
+how its pushes are checked, or its harness's settings. A harness's adapter MUST
+protect every settings file its harness loads. A protected path absent at launch
+MUST be created first, a settings file in its harness's empty form, and mounted
+read-only like any other. A protected path MUST NOT be granted.
 
 #### Scenario: An implementation run edits the configuration
 
@@ -58,6 +72,19 @@ granted.
 
 - **WHEN** an unattended run runs `git config core.hooksPath /tmp/hooks`
 - **THEN** Git cannot replace `.git/config`, and the command fails
+
+#### Scenario: A step creates an absent settings file
+
+- **WHEN** a checkout has no `.claude/settings.local.json`, and an unattended
+  implementation run on Claude Code writes one
+- **THEN** the write fails, since the engine created the file as `{}` before launch
+  and mounted it read-only
+
+#### Scenario: A review on Codex edits Codex's configuration
+
+- **WHEN** an unattended review run on Codex writes `~/.codex/config.toml`
+- **THEN** the write fails, though the rest of `~/.codex` is writable as the
+  adapter's state
 
 ### Requirement: CW-h2zt A repository extends a step's scope in its configuration
 
@@ -83,7 +110,8 @@ The configuration's check MUST refuse a writable path under a protected one, a
 Before launching an unattended step the engine MUST probe the sandbox. Where it
 cannot run, the engine MUST run the step unconfined, warn, and record
 `unconfined: true` on the run's line, and the orchestrating session MUST tell the
-owner. The checks after the session MUST run either way.
+owner. The checks after the session MUST run either way. An unconfined run is held
+by those checks alone: no scope, protected path, or sandbox `git` binds it.
 
 #### Scenario: A machine without bubblewrap
 
@@ -94,23 +122,29 @@ owner. The checks after the session MUST run either way.
 
 ### Requirement: CW-j4cs Only the guarded push leaves a checkout during an unattended run
 
-Before each unattended run the engine MUST point the checkout's `core.hooksPath` at
-its own hook directory under `.git/`, whose pre-push hook refuses a push while the
-unattended-run marker is set and the guarded push's marker is not, and otherwise
-runs the repository's own hooks. An adapter MAY also refuse `git push` and
-`--no-verify` by its harness's command rules.
+The sandbox MUST mount the engine's own `git` read-only over the system's. It MUST
+refuse a `push` while the unattended-run marker is set and the guarded push's marker
+is not, whatever the push's options, and otherwise run the system's `git`. The
+engine MUST leave the checkout's hooks and `core.hooksPath` as they are. An adapter
+MAY also refuse `git push` by its harness's command rules.
 
 #### Scenario: A step pushes directly
 
 - **WHEN** an unattended implementation run runs `git push origin HEAD:dev`
-- **THEN** Git's pre-push hook refuses it, and nothing is pushed
+- **THEN** the sandbox's `git` refuses it, and nothing is pushed
+
+#### Scenario: A step skips the hooks
+
+- **WHEN** an unattended implementation run, its push refused by the repository's
+  pre-push hook, runs `git push --no-verify origin HEAD:dev`, or `git -c
+  core.hooksPath=/dev/null push origin HEAD:dev`
+- **THEN** the sandbox's `git` refuses it, and nothing is pushed
 
 #### Scenario: The owner pushes from the workspace
 
-- **WHEN** the owner pushes a branch from a checkout whose hook the engine installed,
-  outside any unattended run
-- **THEN** the engine's hook runs the repository's own hooks and refuses nothing of
-  its own
+- **WHEN** the owner pushes a branch from the workspace, outside any unattended run
+- **THEN** the system's `git` pushes it, running the repository's own hooks, and
+  nothing of the engine's is in its way
 
 ### Requirement: CW-q7ub The engine checks a run's invariants after its session
 
@@ -118,8 +152,9 @@ After every unattended session, whatever its outcome, the engine MUST check agai
 the state it recorded at the start: `HEAD` is on the change's branch and descends
 from the start commit; for validation and review, `HEAD` and every tracked file are
 unchanged; the workflow log and the ledger were only appended to; each review record
-is unchanged; `refs/stash` is unchanged; and the remote moved only by the guarded
-push.
+is unchanged; `refs/stash` is unchanged; the remote moved only by the guarded push;
+and, for closeout, every path changed since the start, committed or not, is one
+closeout may change (CW-pkug).
 
 #### Scenario: A step amends an earlier commit
 
@@ -137,6 +172,13 @@ push.
 
 - **WHEN** a commit made during an unattended run is on the remote's `dev` after it
 - **THEN** the check finds the remote moved other than by the guarded push
+
+#### Scenario: Closeout edits code beside a README
+
+- **WHEN** an unattended closeout run, whose scope mounts a package's directory for
+  its README, commits an edit of that package's code
+- **THEN** the check finds a path closeout may not change, and the run is logged
+  stopped naming it
 
 ### Requirement: CW-f9le An invariant violation stops the run
 
@@ -190,8 +232,9 @@ rules it adds. The engine MUST reach a harness only through its adapter.
 #### Scenario: Codex runs a review
 
 - **WHEN** a review runs on Codex
-- **THEN** the engine launches it through Codex's adapter inside the read-only
-  profile, with `~/.codex` writable and Codex's own read-only sandbox inside it
+- **THEN** the engine launches it through Codex's adapter inside the review's scope,
+  with `~/.codex` writable but its `config.toml`, the checkout read-only but the
+  engine's invocation record, and Codex's own read-only sandbox inside it
 
 ### Requirement: CW-g5ry Interactive runs are not confined
 
@@ -378,8 +421,14 @@ command rule denies, MUST NOT be granted.
 ### Requirement: CW-tl5v A grant holds for one run
 
 A grant MUST be a writable path passed on that run's command line, `--write <path>`,
-for a fresh run through `start`, recorded as `writes_granted` on the run's log line,
-and never kept, so the step's next run is held to its scope again.
+for a fresh run through `start` or a resumed one through `resume`, recorded as
+`writes_granted` on the run's log line, and never kept, so the step's next run is
+held to its scope again. Each value MUST be split on `;`, each part trimmed and empty
+parts dropped, and each path resolved as a `[sandbox]` entry is (CW-h2zt). A grant
+MUST name a path: the engine MUST refuse a value with a glob character, and a path
+under a protected path, naming the value, before it launches anything. A file MUST
+mount its directory, and a path absent at launch MUST be created as a directory
+before it is mounted.
 
 #### Scenario: The owner grants rules before a fresh run
 
@@ -387,6 +436,21 @@ and never kept, so the step's next run is held to its scope again.
 - **THEN** the orchestrating session starts the run as `scripts/change-workflow start
   <step> <change> --unattended --write <path> --write <path>`, its line records both
   as `writes_granted`, and the step's run after it is held to its scope alone
+
+#### Scenario: The owner grants a path to a stopped run
+
+- **WHEN** a run stopped naming a refused write under `kit/site/.venv`, and the owner
+  grants that path for its resumption
+- **THEN** the orchestrating session resumes it as `scripts/change-workflow resume
+  <change> --seq <its line> --answer <the owner's words> --write kit/site/.venv`, the
+  path resolved from the checkout's
+  root and created if absent, and the resumed run's line records it as
+  `writes_granted`
+
+#### Scenario: A grant names a pattern
+
+- **WHEN** a run is started with `--write 'kit/*/.venv'`
+- **THEN** the engine refuses it, naming the value, and launches nothing
 
 ### Requirement: CW-b5cf An unattended step waits on a background command through wait
 
@@ -476,6 +540,43 @@ same as structured output.
 - **WHEN** the orchestrating session reads planning's scope from `config --json`
 - **THEN** it finds `openspec/` and `.git/` from the engine, the adapter's state
   paths, and `docs/` from the repository
+
+### Requirement: CW-59c7 The guarded push of a change branch
+
+An agent MAY push a change's own branch without separate approval, only after a
+check confirms that `HEAD` is attached, the worktree is clean, the branch is none of
+the configured protected branches, and its upstream has the same name. The push MUST
+send exactly `HEAD` to the upstream's remote, or a remote given as an argument, and
+MUST NOT be forced. The check MUST report a refused state and MUST NOT repair it.
+Under an unattended run, a push to a given remote of a branch with no upstream MUST
+NOT set one, since `.git/config` is protected (CW-r6kd); once the session ends, the
+engine MUST set the branch's upstream, outside the sandbox, to the remote that push
+recorded.
+
+#### Scenario: The worktree is dirty
+
+- **WHEN** validation is about to push and the worktree has uncommitted changes
+- **THEN** the push check fails, nothing is pushed, and nothing is committed or
+  discarded to make it pass
+
+#### Scenario: A new change branch is pushed first
+
+- **WHEN** a change's clone was made for a new branch from a landing branch tracking
+  `origin`
+- **THEN** the clone gave the new branch an upstream of its own name on `origin`, and
+  its first push goes there
+
+#### Scenario: A branch with no upstream
+
+- **WHEN** the guarded push runs on a branch with no upstream and no remote is given
+- **THEN** it refuses, naming the argument that gives the remote, and pushes nothing
+
+#### Scenario: An unattended run pushes a branch with no upstream
+
+- **WHEN** an unattended design run pushes, through the guarded push with a remote
+  given, a branch with no upstream
+- **THEN** the push sends `HEAD` without setting an upstream, and once the session
+  ends the engine sets the branch's upstream to that remote's branch of its name
 
 ## REMOVED Requirements
 

@@ -1,8 +1,9 @@
 # Design: sandbox unattended workflow steps
 
-Status: design settled 2026-11-19. Some decisions are expected to be reconsidered
-when `extract-change-workflow-repository` moves the workflow out of this repository;
-each stands until then.
+Status: design settled 2026-11-19; revised the same day on the triage of design
+review 19 (D2, D4, D5, D5a, D6, D8, D10, D13). Some decisions are expected to be
+reconsidered when `extract-change-workflow-repository` moves the workflow out of this
+repository; each stands until then.
 
 ## Context
 
@@ -44,7 +45,7 @@ The owner stated these in design; none was recorded before.
 
 - **P1.** Restrictions on unattended steps guard against mistakes, not a malicious
   agent: they give the owner categorical guarantees about what a step can and cannot
-  change on their machine.
+  change on their machine, for every run the sandbox confines (D10).
 - **P2.** Steps keep their ambient credentials — GitHub, GCP, kube; the workflow
   does not withhold them.
 - **P3.** An orchestrator and its sessions may read every change's checkout and write
@@ -81,21 +82,35 @@ keeping the guarantee at the rule level — it cannot travel; deferring — it b
 extraction and the adapters. A Docker socket, reachable by every writing step, is a
 way out of any local sandbox; under P1 it is accepted.
 
-### D2 — The push stays in the session, refused otherwise by a Git hook
+### D2 — The push stays in the session, refused otherwise by the sandbox's `git`
 
-Steps keep pushing through `scripts/change-workflow push`. Before each unattended
-run the engine points the checkout's `core.hooksPath` at its own hook directory under
-`.git/`, which the sandbox protects (D4, D5). Its pre-push hook refuses a push while
-the unattended-run marker is set and the guarded push's marker is not; otherwise it
-runs the repository's own hooks, so the owner's pushes are untouched. An adapter may
-add its harness's command rules refusing `git push` and `--no-verify` (P6). The check
-after the run (D6, check 6) is the backstop.
+Steps keep pushing through `scripts/change-workflow push`. The sandbox binds the
+engine's own `git` read-only over the system's (D4): it refuses a `push` while the
+unattended-run marker is set and the guarded push's marker is not, whatever its
+options — `--no-verify` and `-c core.hooksPath=…` among them — and otherwise runs the
+real `git`. The checkout's hooks and `core.hooksPath` are left as they are, so the
+guarded push runs the repository's pre-push as it does today (CW-p7kq), and the
+owner's pushes, outside any sandbox, are untouched. An adapter may add its harness's
+command rules refusing `git push` (P6). The check after the run (D6, check 6) is the
+backstop, and in an unconfined run (D10) the only guard.
+
+The guarded push sets no upstream under a run, since `.git/config` is protected:
+where the branch has none and a remote is given, it pushes without
+`--set-upstream`, and once the session ends the engine sets the branch's upstream,
+outside the sandbox, to the remote the push recorded among the session's
+invocations.
 
 Rejected: the engine pushing at the run's edge — once the step holds the credential
-it buys nothing, and loses the per-section pushes; a command rule alone —
-harness-specific; detection alone — the mistake reaches the remote first. The hook
-installed only in clones and refusing unconditionally was restated: it would refuse
-the owner's own pushes wherever installed.
+it buys nothing, and loses the per-section pushes; a command rule alone, or an
+adapter's rule made mandatory for every writing step — harness-specific, against P5,
+and Codex has none; detection alone — the mistake reaches the remote first. A
+pre-push hook the engine wired through `core.hooksPath` was restated (19 F1): Git
+skips it on `git push --no-verify`, and a command-line `-c core.hooksPath` overrides
+it without writing `.git/config`, so an agent retrying a push its hook refused
+reaches the remote; keeping the hook beside the wrapper for unconfined runs — two
+mechanisms. For the upstream: setting a missing one before the run — the engine
+would choose the remote for the step; refusing a push without one — it stops the
+step for the owner.
 
 ### D3 — Enforcement below the harness
 
@@ -115,11 +130,13 @@ real case; deferring.
 
 The engine launches `bwrap` with the root filesystem read-only, the step's writable
 paths bound read-write over it, each protected path bound read-only over those, the
-network shared, and `--die-with-parent`. A write to a protected file fails as a
-read-only file system; replacing one by rename fails busy, so `git config
-core.hooksPath …` cannot rewire D2's hook. A Unix socket on a read-only mount stays
-connectable, so Docker needs no setting. A protected path absent at launch is
-created first or left to the checks.
+engine's `git` bound read-only over the system's (D2), the network shared, and
+`--die-with-parent`. A write to a protected file fails as a read-only file system;
+replacing one by rename fails busy, so `git config` cannot rewrite `.git/config`. A
+Unix socket on a read-only mount stays connectable, so Docker needs no setting. A
+protected path absent at launch is created first — a settings file in its harness's
+empty form, `{}` for JSON and an empty file otherwise — and bound read-only like any
+other, so it cannot be created during the run (19 F3); the placeholder stays.
 
 Rejected: Landlock — its rights only add up per tree, so `.git/config` cannot be
 protected while Git creates its lock files in `.git/`, and D2 would rest on
@@ -134,16 +151,20 @@ Each step writes only its scope, stopped rather than caught:
 
 | Step | Writable |
 |---|---|
-| review | nothing |
+| review | in the checkout, only `.git/change-invocations/` |
 | design, plan | `openspec/`, `.git/`; the repository adds `docs/`; design also each registered `../*-proposal` worktree (D5b) |
 | implement, triage, merge, validate | the checkout |
 | closeout | its inert paths and `.git/` |
 | archive cleanup | `openspec/changes/`, `.git/` |
 
-Every step but the review also writes a temporary directory, `~/.cache`, its
-adapter's state paths, and the repository's additions (D12). Protected in every
-scope: `.agents/workflow.toml`, `.git/config`, the engine's hook directory, and the
-adapter's and the repository's protected paths. Reads are open everywhere (P3).
+Every step, the review included, also writes a temporary directory and its adapter's
+state paths, without which its harness cannot run; every step but the review also
+writes `~/.cache` and the repository's additions (D12). The review's one path in the
+checkout is where `run` keeps what a session invoked, so the checks the review skill
+lets it run for evidence (`run pre-commit`) can record themselves; every file it
+reviews stays read-only (19 F2). Protected in every scope: `.agents/workflow.toml`,
+`.git/config`, the engine's `git`, and the adapter's and the repository's protected
+paths. Reads are open everywhere (P3).
 
 The change's log is not mount-protected: closeout's archive moves its directory. It
 is guarded by D6. Archive cleanup's history copy becomes an engine action after its
@@ -151,15 +172,22 @@ session (CW-hak6), so no step writes the owner's workspace.
 
 Rejected: two coarse profiles with each step's finer scope checked after the run
 (the agent's recommendation) — the owner wants a step stopped; a narrower validation
-— see D5c; one profile for every step — a review could write what it reviews.
+— see D5c; one profile for every step — a review could write what it reviews. A
+review writing nothing at all was restated (19 F2): its harness keeps its session
+state in its adapter's paths, Codex in `~/.codex` and Claude Code, the review's
+fallback, in `~/.claude`; rejected for it are a writable checkout held by check 2 —
+detection where prevention is cheap — and the harnesses' state redirected outside
+the sandbox — redirection each adapter would have to know how to make.
 
 ### D5a — A file or pattern entry mounts its directory
 
 A file or pattern entry in a step's scope — closeout's `**/README.md` and
 `AGENTS.md` — mounts each match's directory writable. Tools replace files by rename,
 so a single file cannot be bound writable. Where that exposes code beside a README,
-or, for files at the root, the whole checkout, closeout's review sees any code edit
-and it is handled there (P8).
+or, for files at the root, the whole checkout, D6's check 7 stops the run on any path
+changed outside what closeout may change (CW-pkug). The closeout review reads only
+documentation, so it cannot be relied on to see a code edit: the premise that it
+would, on which this decision was first settled, was restated (19 F4).
 
 Rejected: binding every other entry of such a directory read-only, with a check for
 new files (the agent's recommendation) — complexity and a thousand mounts for what
@@ -193,7 +221,7 @@ directories; moving new attempts out of the session through an outcome field —
 prevention at the cost of the outcome contract and the skill's loop; read-only
 validation.
 
-### D6 — Six checks after every run; a violation stops it
+### D6 — Seven checks after every run; a violation stops it
 
 After every unattended session, whatever its outcome, before any action or hook
 after it, the wrapper checks against the state it recorded at the start:
@@ -205,7 +233,10 @@ after it, the wrapper checks against the state it recorded at the start:
 4. each existing review record is unchanged, and the ledger only grew at its end;
 5. `refs/stash` is unchanged;
 6. the remote's change branch is the last guarded push or unchanged, and no
-   protected branch on the remote gained a commit made in the run (one fetch).
+   protected branch on the remote gained a commit made in the run (one fetch);
+7. for closeout, every path changed since the start, committed or not, is one
+   closeout may change (CW-pkug): the repository's inert paths, changes' records,
+   and the archive's own writes.
 
 A violation logs the run `stopped`, its reason and an `invariants` field naming each,
 the step's message kept ahead, as `triage_outcome` and `landed_outcome` do; the
@@ -216,7 +247,8 @@ Rejected: fewer checks — 4 and 5 would rest on a review's luck, and 6 is the o
 backstop for a push to a protected branch; recording a violation beside a standing
 outcome — a rewritten history would route as if nothing happened; a question — a
 resumed session rarely helps. Check 3 as byte-identical was restated: it would fire
-on a parallel review's line.
+on a parallel review's line. Check 7 was added (19 F4): D5a's mounts let closeout
+reach code, and neither its review nor any validation reads closeout's own commit.
 
 ### D7 — Refusals come from the run's events
 
@@ -236,13 +268,22 @@ special handling — "a run that cannot go on says so" would no longer hold.
 
 ### D8 — A grant is a writable path for one run
 
-`start` and `resume` take `--write <path>`, the make targets `WRITE=` (`;`-separated);
-the line records `writes_granted`; nothing is kept. The engine refuses a path under a
-protected path. `--allow` and `ALLOW=` go.
+`start` and `resume` take `--write <path>`, the make targets `WRITE=`; the line
+records `writes_granted`; nothing is kept. Each value is split on `;`, each part
+trimmed and empty parts dropped, as `--allow`'s are today. Each path resolves as a
+`[sandbox]` entry does (D12): relative from the checkout's root, `~` the home
+directory. A grant names a path, never a pattern — a value with a glob character is
+refused — since a gap is answered with the narrowest path (D7). A file mounts its
+directory (D5a); a path absent at launch is created as a directory before it is
+mounted. The engine refuses, naming the value, a path under a protected path, before
+launching anything (19 F7). `--allow` and `ALLOW=` go.
 
 Rejected: no grants — a round could not be widened without moving `HEAD`; running a
 step under another step's scope — broader than any gap. A new key rather than
 reusing `granted` keeps a newer reader from mistaking an old line's rules for paths.
+Grants for a fresh run only — a stopped session could not be widened as it resumes,
+which is the case a refused write produces; patterns, as the configuration takes —
+broader than the gap they answer.
 
 ### D9 — Interactive runs stay unconfined
 
@@ -260,10 +301,18 @@ on its line, which the orchestrating session relays to the owner. The checks aft
 the session run either way. The sandbox guards against mistakes; it never gates the
 workflow (P1).
 
+The guarantees hold for runs logged confined. An unconfined run has no file bound at
+all — Claude Code runs with every tool allowed (D13) and the step table is gone — and
+no `git` wrapper (D2): only the checks after it. Containerizing the harness (P7)
+remedies this; no further control is added for the interval (19 F5).
+
 Rejected: refusing to start, with an owner-only override (the agent's
 recommendation) — the owner prefers the workflow never block on the sandbox;
 refusing outright; falling back to the allowlist — two systems and the coupling P6
-removes.
+removes. Restated on design review 19's F5, which challenged this decision: refusing
+by default with a one-run override, and refusing unless the owner's environment
+accepts unconfined runs on that machine (the agent's recommendation) — the container
+remedies the gap, and this intermediate state needs no control of its own.
 
 ### D11 — Each step's definition lives in the engine
 
@@ -299,9 +348,12 @@ propose the narrowest path for a gap (CW-o6kc).
 Each harness gets an internal adapter module stating its unattended launch inside
 the sandbox with its prompts off — Claude Code in `dontAsk` with every tool allowed,
 its own sandbox off, which keeps its denial records meaningful for the extras — its
-writable state (`~/.claude`, `~/.claude.json`; `~/.codex`), its protected paths
-(`.claude/settings.json`, `~/.claude/settings.json`), its reading of refusals and
-denials from its events, the steps it can run, and its optional command rules.
+writable state (`~/.claude`, `~/.claude.json`; `~/.codex`), its protected paths —
+every settings file its harness loads, present or absent at launch (D4): Claude
+Code's `.claude/settings.json`, `.claude/settings.local.json` and
+`~/.claude/settings.json`, Codex's `~/.codex/config.toml`, inside its writable state
+(19 F3) — its reading of refusals and denials from its events, the steps it can run,
+and its optional command rules.
 Codex keeps `--sandbox read-only` inside the engine's sandbox, dropping it if the
 two cannot nest. CW-zq4h's harness clause becomes "only for steps its adapter can
 run", so Codex stays review-only until `add-workflow-harness-adapters`, which makes
@@ -311,7 +363,7 @@ the interface public and owner-supplied (P6).
 
 History, branch and stash rules give way to checks 1 and 5; validation's relock and
 commit to check 2; edits of `.claude/` and the configuration to the protected
-mounts; `git push` to D2's hook and an adapter's rule; the write-steering rules
+mounts; `git push` to D2's `git` and an adapter's rule; the write-steering rules
 vanish. `tail -f` remains skill text: waiting through `wait` avoids a hang
 (CW-b5cf). `round-view` and `round-done` refuse under the unattended marker
 (CW-p3vz). `git clean`, `gh pr create`, `make run-e2e`, `validate-parallel`, `git
@@ -335,9 +387,9 @@ cleanup stops running `history`; design's section 4 uses `propose`.
 
 `change-workflow` removes CW-2lvd, CW-2h9t and CW-56zq; renames and modifies CW-qu42,
 CW-4yhk, CW-k5mk, CW-svng, CW-5rmh, CW-vdqj, CW-jqi7, CW-drf6, CW-b5cf and CW-hak6;
-modifies CW-tl5v, CW-z5me, CW-zq4h, CW-dtpz and CW-o6kc; and adds CW-x3pf, CW-m8wq,
-CW-r6kd, CW-h2zt, CW-v5ny, CW-j4cs, CW-q7ub, CW-f9le, CW-w3oa, CW-k8dn, CW-t6mb,
-CW-g5ry and CW-p3vz. `market-change-workflow` modifies MCW-5tgp (the step table no
+modifies CW-tl5v, CW-z5me, CW-zq4h, CW-dtpz, CW-o6kc and CW-59c7; and adds CW-x3pf,
+CW-m8wq, CW-r6kd, CW-h2zt, CW-v5ny, CW-j4cs, CW-q7ub, CW-f9le, CW-w3oa, CW-k8dn,
+CW-t6mb, CW-g5ry and CW-p3vz. `market-change-workflow` modifies MCW-5tgp (the step table no
 longer names targets) and adds MCW-s4bx (this repository's `[sandbox]`). The new
 log fields — `invariants`, `refusals`, `writes_granted`, `unconfined` — are additive
 and need no format version (P9, CW-x7jd). Both companions and indexes follow at
@@ -355,8 +407,9 @@ One round, three sessions, then closeout:
    protected paths, refusals, optional rules); the wrapper's and review's launch
    through them; grants as `--write`; refusals recorded and routed; the step table
    and `steps.py` removed; the skills' unattended paragraph and the three exemptions.
-3. **The guarantees around it.** The six checks and the stopped outcome; the
-   pre-push hook with its marker condition; `propose` and design's section 4; the
+3. **The guarantees around it.** The seven checks and the stopped outcome; the
+   sandbox's `git` with its marker condition, and the upstream set after the run;
+   `propose` and design's section 4; the
    history copy as an engine action and archive cleanup's skill; `round-view` and
    `round-done` refused under the marker; MCW-s4bx's declaration.
 

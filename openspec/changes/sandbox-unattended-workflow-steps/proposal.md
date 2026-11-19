@@ -34,18 +34,20 @@ harness, as categorical bounds on what a step can change on the owner's machine.
   (bubblewrap on Linux), confining the harness's file tools, shell, and subagents
   alike. Inside it, a step may run any command; the network, the environment, and
   reads are left as they are.
-- **Each step writes only its scope.** Review writes nothing; design and planning
+- **Each step writes only its scope.** Review writes nothing it reviews, only its
+  harness's state and the engine's record of what it invoked; design and planning
   `openspec/`, `.git/`, and what the repository adds (`docs/` here); closeout its
   inert paths; archive cleanup `openspec/changes/`; implementation, triage, the
   merge, and validation the checkout. A file or pattern entry mounts its directory.
 - **Protected paths no step writes:** the workflow's configuration, `.git/config`,
-  the engine's hook directory, and the harness's settings.
-- **Only the guarded push leaves a checkout during an unattended run,** refused
-  otherwise by an engine pre-push hook the protected paths keep wired.
-- **Six checks after every run** — history only extended, validation and review
+  the engine's `git`, and every settings file the harness loads, present or absent.
+- **Only the guarded push leaves a checkout during an unattended run,** any other
+  push refused by the engine's `git`, which the sandbox mounts over the system's,
+  whatever the push's options.
+- **Seven checks after every run** — history only extended, validation and review
   changing nothing, the log and ledger only appended to, review records
-  unchanged, no stash, the remote moved only by the guarded push. A violation
-  stops the run.
+  unchanged, no stash, the remote moved only by the guarded push, closeout
+  changing only what closeout may. A violation stops the run.
 - **Refusals are recorded** from the run's events, and grants become writable
   paths for one run.
 - **Repositories extend the baseline** in `[sandbox]` of the workflow's
@@ -54,7 +56,9 @@ harness, as categorical bounds on what a step can change on the owner's machine.
   refusal reading. This change builds internal adapters for Claude Code and Codex.
 - **The engine creates a prerequisite's worktree** (`propose`), and copies archive
   cleanup's history into the workspace, so no step writes outside its change.
-- **Where the sandbox cannot run, a step runs unconfined and says so.**
+- **Where the sandbox cannot run, a step runs unconfined and says so;** the
+  guarantees hold for the runs the sandbox confines, until the harness runs in a
+  container.
 - **The step table and every deny rule go.** Each step's skill, `resume_from`,
   and baseline scope live in the engine beside the graph.
 
@@ -68,9 +72,10 @@ harness, as categorical bounds on what a step can change on the owner's machine.
 
 - `change-workflow`: the unattended-run requirements (CW-qu42, CW-4yhk, CW-k5mk,
   CW-svng, CW-5rmh, CW-vdqj, CW-jqi7, CW-drf6, CW-tl5v, CW-b5cf, CW-z5me, CW-zq4h),
-  history's copy (CW-hak6), a blocked design (CW-dtpz), and the configuration's
-  listing (CW-o6kc) change; CW-2lvd, CW-2h9t, and CW-56zq are removed; the sandbox,
-  scopes, protected paths, extension, fallback, pre-push hook, checks, refusals,
+  history's copy (CW-hak6), a blocked design (CW-dtpz), the configuration's
+  listing (CW-o6kc), and the guarded push's upstream (CW-59c7) change; CW-2lvd,
+  CW-2h9t, and CW-56zq are removed; the sandbox, scopes, protected paths,
+  extension, fallback, the sandbox's `git`, checks, refusals,
   `propose`, adapters, interactive runs, and the round view's refusal are added.
 - `market-change-workflow`: MCW-5tgp no longer reads targets from a step table, and
   this repository's `[sandbox]` declaration is added.
@@ -97,8 +102,9 @@ harness, as categorical bounds on what a step can change on the owner's machine.
   step's definition moves into the engine beside `graph.py`.
 - `scripts/change_workflow/harness.py`, reorganized into internal adapters, and a
   new sandbox launcher; `wrapper.py` and `review.py`, which launch through them;
-  `config.py` for `[sandbox]` and the scope listing; `push.py` and `clone.py` for the
-  pre-push hook; `log.py` and `next_step.py` for `refusals`, `invariants`,
+  `config.py` for `[sandbox]` and the scope listing; the sandbox's `git`, and
+  `push.py` and the wrapper for the upstream under a run; `log.py` and
+  `next_step.py` for `refusals`, `invariants`,
   `writes_granted`, and `unconfined`; `around.py` for the history action; a new
   `propose` subcommand; `round_view.py` for its refusal; `cli.py` and `workflow.mk`
   for `--write` and `WRITE=`.
@@ -113,6 +119,27 @@ harness, as categorical bounds on what a step can change on the owner's machine.
 
 The step table's file and its deny rules stop existing, so a change in flight that
 still runs the old engine keeps its own copy until it merges the landing branch.
+
+## Compatibility
+
+Each public interface of the engine this change changes, judged as CW-c2tw judges
+it. The engine carries no version of its own, so its incompatible changes are
+declared here.
+
+| Interface | Change | Judgement |
+|---|---|---|
+| `start`, `resume` | `--allow` removed | incompatible: a grant is now a path, `--write` |
+| `start`, `resume` | `--write <path>` added | compatible |
+| the make targets | `ALLOW=` removed; `WRITE=` added | incompatible; compatible |
+| `propose <change> <prerequisite>` | added | compatible |
+| `config`, `config --json` | each step's resolved scope, each path's source | compatible: an output gains a field |
+| `round-view`, `round-done` | refuse under the unattended marker | compatible: unattended steps were already denied them |
+| the guarded push | under a run, sets no upstream; the engine sets it after the session | compatible for the owner |
+| `.agents/workflow.toml` | `[sandbox]` added | compatible where undeclared. An older engine refuses a configuration declaring it (CW-w8ne), so a repository declares it with the engine that reads it; here both land together, and a change in flight gets both by merging the landing branch |
+| a role an adopting repository provides | `.claude/change-steps.toml`, the step table, removed | incompatible: its rules are no longer read; what a repository added there moves to `[sandbox]`, here MCW-s4bx |
+| the record set | lines gain `invariants`, `refusals`, `writes_granted`, `unconfined`; `granted` is no longer written | compatible for a newer reader of older lines (P9); no format version (CW-x7jd) |
+| the next-step computation | a line with refusals routes as one with denials | compatible |
+| `change-archive-cleanup` | no longer runs `history`; the engine copies after its session | compatible: the skill's argument form is unchanged |
 
 ## Dependencies and Related Changes
 
