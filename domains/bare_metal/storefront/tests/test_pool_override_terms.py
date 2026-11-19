@@ -1,12 +1,14 @@
-"""How an override's lease bounds combine with configuration.
+"""What an override's terms admit, and how its lease bounds combine with configuration.
 
-Each bound replaces its configured counterpart, as configuration overlays do;
-the effective pair must be ordered.
+Seller details are the shared listing-details model. Each bound
+replaces its configured counterpart, as configuration overlays do; the
+effective pair must be ordered.
 """
 
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from arkhai_bare_metal_storefront.pool_overrides import (
     BareMetalPoolOverrideTerms,
@@ -35,6 +37,34 @@ def test_the_effective_pair_must_be_ordered(terms, configured, conflict):
         BareMetalPoolOverrideTerms.model_validate(terms), configured
     )
     assert bool(problems) is conflict
+
+
+def test_stated_details_are_terms():
+    details = {
+        "title": "A whole H100 machine",
+        "description": "Dedicated host; no oversubscription.",
+        "metadata": {"acme.tier": "gold", "nvlink": True, "max_jobs": 4},
+    }
+
+    terms = BareMetalPoolOverrideTerms.model_validate({"details": details})
+
+    assert terms.details is not None and terms.details.model_dump() == details
+
+
+@pytest.mark.parametrize(
+    ("details", "location"),
+    [
+        ({"description": "d" * 100_000}, ("details", "description")),
+        ({"metadata": {"acme.tier": None}}, ("details", "metadata", "acme.tier")),
+    ],
+)
+def test_details_the_shared_model_refuses_are_refused(details, location):
+    """The term is the shared listing-details model, whose limits are tested
+    at their edges with it; these show only that an override refuses through it."""
+    with pytest.raises(ValidationError) as refused:
+        BareMetalPoolOverrideTerms.model_validate({"details": details})
+
+    assert {error["loc"][: len(location)] for error in refused.value.errors()} == {location}
 
 
 @pytest.mark.parametrize(

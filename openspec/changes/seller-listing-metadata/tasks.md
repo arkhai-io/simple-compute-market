@@ -473,7 +473,7 @@ D4; ADDED "A compute listing derives its details from the pool override". Touche
 `domains/bare_metal/storefront` (`pool_overrides.py`, `publication.py`,
 `publication_composition.py`, `settlement_composition.py`, `sqlite_client.py`).
 
-- [ ] 5.1 VM publication-cycle integration in
+- [x] 5.1 VM publication-cycle integration in
   `domains/vms/storefront/tests/integration/test_publication_loop.py`, overrides
   written through the storefront's override surface: a pool override stating
   `details` publishes its listing with them; changing them refreshes the same
@@ -481,12 +481,56 @@ D4; ADDED "A compute listing derives its details from the pool override". Touche
   republishes that `listing_id` with no detail key and leaves the local row's
   columns null (F1, F3). A VM storefront unit test shows `VmPoolOverrideTerms`
   refusing details over a limit.
-- [ ] 5.2 Bare-metal publication-cycle integration in
+  Application integration,
+  `test_an_overrides_details_publish_refresh_in_place_and_clear_when_withdrawn`:
+  the app `tests.publication_app` builds, its real routers and container, each
+  override written through the typed `PoolOverrideClient` over the storefront
+  client, each cycle the `publication` lifecycle step after `site-projections`,
+  and the two registries replaced where `MultiRegistryClient` wraps them. One
+  unbacked listing publishes the three details to both registries and reads them
+  back through `get_listing`; a changed title is one `refresh`, republished to
+  both with no status update; the override replaced with none is another
+  `refresh`, again with no status update, both registries sent no detail key,
+  and `get_listing` reads the three as null. That read is the local row: the
+  storefront serves its listing from it, and its client reads a null and an
+  absent detail alike. The override must state something (the pool-override kit
+  refuses an empty one, 422), so each version keeps `max_duration_seconds: 7200`.
+  Unit, `tests/unit/test_vm_pool_override_contribution.py`: the contribution's
+  `vocabulary_problems`, which validates through `VmPoolOverrideTerms`, reads
+  stated details beside the other terms and names a description far past its
+  limit under `terms.details.description` and a null metadata value under
+  `terms.details.metadata.acme.tier`. Correction: those two show the term is the
+  shared model; each limit's edges stay 3.1's alone, so a limit changed in
+  `market_core` changes one suite (`test-levels.md`, "Coverage between the
+  levels"). `make -C domains/vms/storefront test`: 1201 unit passed, 1 skipped,
+  and 638 integration passed.
+- [x] 5.2 Bare-metal publication-cycle integration in
   `domains/bare_metal/storefront/tests/test_publication_cycle.py`, the same add,
   change and withdraw sequence on one listing; a bare-metal storefront unit test
   shows `BareMetalPoolOverrideTerms` refusing details over a limit; the term-field
   projection in `domains/bare_metal/tests/test_storefront_publication.py` holds.
-- [ ] 5.3 Verification point: VM listings, VM storefront unit and integration,
+  Correction: the case is a new `tests/integration/test_pool_override_details.py`,
+  not `test_publication_cycle.py`, whose docstring says its tests prove
+  orchestration and persistence and are not integration evidence; there it is
+  application integration, as 5.3 calls it, and it imports the flat root's site
+  double and runtime as the other integration modules do. Application
+  integration,
+  `test_an_overrides_details_publish_refresh_in_place_and_clear_when_withdrawn`:
+  the running app over `test_http_system.py`'s `_derivation_runtime`, each cycle
+  composed as production composes it under the real Alkahest composition, each
+  override written through the typed `PoolOverrideClient` over the
+  administrator's `StorefrontClient`, each cycle the `publication` step, and the
+  site and registry doubled where this codebase wraps them. The add, change
+  (`refresh` naming `listing.title`) and withdraw (`refresh` naming the three)
+  sequence on one `listing_id`, each cycle a single publish and no status update,
+  read back through `get_listing` after each, open each time: the three stated,
+  the changed title, then all three null, the withdrawn body carrying no detail
+  key. Unit, `tests/test_pool_override_terms.py`: the model admits stated details
+  and refuses the same two as 5.1, each error located under its field; the module
+  stays in the flat root the unowned gap below records. The term-field projection
+  holds: `make -C domains/bare_metal test`, 226 passed. `make -C
+  domains/bare_metal/storefront test`: 680 passed.
+- [x] 5.3 Verification point: VM listings, VM storefront unit and integration,
   bare-metal domain and bare-metal storefront suites pass, 5.1 and 5.2 being the
   application-integration cases; `scripts/change-workflow run pre-commit
   seller-listing-metadata` and `make check-packaging` pass.
@@ -494,6 +538,42 @@ D4; ADDED "A compute listing derives its details from the pool override". Touche
   overrides and a real registry with no details stated, evidence for the unchanged
   path only; no scenario is owed, since withdrawal at the registry is proved by 3.2
   and the storefront's withdrawn payload by 5.1 and 5.2.
+  `scripts/change-workflow run pre-commit seller-listing-metadata --base
+  origin/dev` passes every hook: its `make lock` rewrote no lock, its `make
+  validate-local` passed `make check-packaging` and the whole `make test`, and
+  the `pre-commit` checks passed. That `make test` gave the counts above.
+  VM listings has no suite of its own; its reconciler and comparison run under the
+  VM storefront's. `run test-before` cannot collect the new terms test at the
+  round's base: its `--no-project` environment has no `pydantic`. End-to-end
+  confirmed: no scenario states `details`; every scenario and driver writing a
+  pool override (`e2e_bare_metal_publication`, the VM lane's `e2e_listing_shapes`
+  and `e2e_compute_dynamic_listings`, both domains' introduction drivers, the
+  bare-metal purchase driver) states none, evidence for the unchanged path only.
+
+Handoff from section 5:
+
+- Section 5 changed no behaviour: sections 1 and 2 had already carried the
+  override's `details` through both cycles, and every new test passed on the code
+  as it stood once the test itself was right.
+- `uv run --directory <package> pytest …` fails to resolve until `make dist`
+  rebuilds the wheelhouse with section 4's versions; the VM and bare-metal
+  storefronts need `--find-links ../../../.dist` beside it. `make -C <package>
+  test` reinstalls from the wheelhouse without rebuilding it, so it too reads the
+  wheels `make dist` last built.
+- The bare-metal cycle's report names a refreshed term as `listing.<field>`; the
+  VM report's counts are what 5.1 asserts.
+- The bare-metal storefront's application-integration harness for publication
+  is `test_http_system.py`'s `_derivation_runtime` (production cycle composition,
+  Alkahest, a recorded registry at `runtime.registry_configuration.recording`);
+  a new integration module goes in `tests/integration/` and imports it and the
+  flat root's doubles by name. `test_publication_cycle.py` builds the cycle by
+  hand and is not integration evidence. An override write judged against the
+  site's live hints needs `capacity_client=_Sites(site)`.
+- Outside the plan: the bare-metal `pool_overrides.py` module and
+  `BareMetalPoolOverrideTerms` docstrings named only the lease bounds and the
+  other terms, missing `details`, which sections 1 and 2 added; both now name
+  it. The bare-metal storefront's flat test root is recorded as an unowned gap in
+  `openspec/changes/README.md`, "Unowned work with no campaign".
 
 ## 6. API-credit prose under the shared limit
 

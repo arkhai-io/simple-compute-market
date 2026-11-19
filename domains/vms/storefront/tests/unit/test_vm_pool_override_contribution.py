@@ -51,6 +51,11 @@ def test_complete_vm_terms_and_shapes_are_readable():
                 "gpu": {"H100": {"rates": [{"asset": "usd", "rate": "2", "per": "hour"}]}},
                 "memory": {"rates": [{"asset": "usd", "rate": "0.01", "per": "hour"}]},
             },
+            "details": {
+                "title": "Two H100s in us-west",
+                "description": "Dedicated hosts; no oversubscription.",
+                "metadata": {"acme.tier": "gold", "nvlink": True, "max_jobs": 4},
+            },
         },
     ) == []
 
@@ -76,6 +81,21 @@ def test_terms_outside_the_vm_vocabulary_are_named(terms, field):
     (problem,) = _problems(terms=terms)
 
     assert problem.startswith(f"terms.{field}")
+
+
+@pytest.mark.parametrize(
+    ("details", "path"),
+    [
+        ({"description": "d" * 100_000}, "terms.details.description"),
+        ({"metadata": {"acme.tier": None}}, "terms.details.metadata.acme.tier"),
+    ],
+)
+def test_details_the_shared_model_refuses_are_named(details, path):
+    """The term is the shared listing-details model, whose limits are tested
+    at their edges with it; these show only that an override refuses through it."""
+    problems = _problems(terms={"details": details})
+
+    assert problems and all(problem.startswith(path) for problem in problems)
 
 
 def test_a_shape_outside_the_vm_vocabulary_is_named_by_index():

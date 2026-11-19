@@ -1,8 +1,9 @@
 """Storefront pool overrides for the ``bare_metal`` offering mode.
 
 The pool-override kit stores, checks, and reports overrides for any market. For
-bare metal an override may state settlement clauses, lease-duration bounds, and
-asking rates. It states no shapes: a whole machine has no shape to choose, so a
+bare metal an override may state settlement clauses, lease-duration bounds,
+asking rates, and the seller details every listing of the pool publishes. It
+states no shapes: a whole machine has no shape to choose, so a
 record stating ``listing_shapes`` is refused. Region and capacity backing remain
 the site's. An override's clauses replace the configured publication clauses for
 that pool as a whole, and each bound replaces its configured counterpart, as
@@ -43,7 +44,7 @@ from .site_reading import resolve_bare_metal_asking_rates
 
 
 class BareMetalPoolOverrideTerms(BaseModel):
-    """What a bare-metal override may say about a pool's lease bounds."""
+    """What a bare-metal override may say about a pool's lease bounds and seller details."""
 
     model_config = ConfigDict(extra="forbid")
 
