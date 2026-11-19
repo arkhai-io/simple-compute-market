@@ -1150,3 +1150,110 @@ def _unreadable(*_) -> dict:
 def test_a_triages_kind_is_the_one_the_computation_names(tmp_path: Path, compute,
                                                          kind: str | None) -> None:
     assert triage_kind(tmp_path, CHANGE, compute=compute) == kind
+
+
+# The run's invariants, checked after its session: library integration on a real Git
+# checkout, the harness doubled by a fake whose session writes the checkout.
+
+class Writing(FakeClaude):
+    """A session that writes `writes[index]`, a path of the checkout, as its run of that
+    index starts; None writes nothing."""
+
+    def __init__(self, root: Path, writes: list[str | None], *runs) -> None:
+        super().__init__(*runs)
+        self.root, self.writes = root, writes
+
+    def __call__(self, command, cwd, feed, step) -> int:
+        if (path := self.writes[len(self.commands)]) is not None:
+            (self.root / path).write_text("written in the session\n", "utf-8")
+        return super().__call__(command, cwd, feed, step)
+
+
+def _checked(tmp_path: Path, hooks: str) -> Path:
+    """`tmp_path` as a Git checkout on the change's branch, tracking one source file,
+    its configuration declaring `hooks`, and holding a review record; the configuration
+    and the change's directory ignored, as a checkout's records are."""
+    env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "init", "-q", "-b", "feat/change", str(tmp_path)], check=True)
+    (tmp_path / ".git/info/exclude").write_text("/.agents/\n/openspec/\n/.snapshot/\n/ran\n",
+                                                "utf-8")
+    (tmp_path / "src.py").write_text("code\n", "utf-8")
+    for args in (("add", "src.py"), ("commit", "-qm", "base")):
+        subprocess.run(["git", *args], cwd=tmp_path, env=env, check=True)
+    configured(tmp_path, CONFIGURED.replace("[hooks]\n", f"[hooks]\n{hooks}\n"))
+    reviews = tmp_path / "openspec/changes" / CHANGE / "reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "01-implementation.md").write_text("# Implementation review\n", "utf-8")
+    return tmp_path
+
+
+def test_a_validation_that_edits_a_source_file_is_stopped_before_its_hooks(
+        tmp_path: Path) -> None:
+    """CW-f9le's "Validation edits a source file": the run finished, and is logged
+    stopped, naming the file, its message keeping the validation's report, and the
+    hook after it does not run."""
+    root = _checked(tmp_path, "after-validate = 'touch ran'")
+    claude = Writing(root, ["src.py"], (event_lines(VALID["finished"]), 0))
+
+    line = make_wrapper(root, claude).run("validate", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["invariants"] == [{"check": "unchanged", "found": "tracked files changed: src.py"}]
+    assert line["message"].startswith(VALID["finished"]["message"] + "\n\n")
+    assert line["reason"] == "the run broke its invariants: unchanged: tracked files changed: src.py"
+    assert not (root / "ran").exists()
+    assert read_log(log_path(root, CHANGE))[-1] == line
+
+
+def test_a_run_that_breaks_nothing_carries_no_invariants(tmp_path: Path) -> None:
+    root = _checked(tmp_path, "after-validate = 'touch ran'")
+    claude = Writing(root, [None], (event_lines(VALID["finished"]), 0))
+
+    line = make_wrapper(root, claude).run("validate", CHANGE)
+
+    assert line["outcome"] == "finished" and "invariants" not in line
+    assert (root / "ran").exists()
+
+
+def test_a_session_resumed_after_its_hook_failed_is_checked_again(tmp_path: Path) -> None:
+    """The first session passes its checks and its hook fails; the session resumed with
+    the failure rewrites a review record, and is stopped before the hook runs again."""
+    root = _checked(tmp_path, "after-implement = 'exit 4'")
+    record = f"openspec/changes/{CHANGE}/reviews/01-implementation.md"
+    claude = Writing(root, [None, record], (event_lines(VALID["finished"]), 0),
+                     (event_lines(VALID["finished"]), 0))
+
+    line = make_wrapper(root, claude).run("implement", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["invariants"] == [{"check": "records", "found": "review records changed or "
+                                                                "removed: 01-implementation.md"}]
+    assert [entry["hook"] for entry in line["invoked"]] == ["after-implement"]
+
+
+def test_a_closeout_that_edits_code_is_logged_stopped_naming_it(tmp_path: Path) -> None:
+    """CW-q7ub's "Closeout edits code beside a README": the run is logged stopped
+    naming the path closeout may not change."""
+    root = _checked(tmp_path, "")
+    claude = Writing(root, ["src.py"], (event_lines(VALID["finished"]), 0))
+
+    line = make_wrapper(root, claude).run("closeout", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["invariants"] == [{"check": "closeout", "found": "paths closeout may not "
+                                                                 "change were changed: src.py"}]
+
+
+def test_a_run_that_did_not_finish_is_checked_too(tmp_path: Path) -> None:
+    """Whatever the outcome: a run that crashed after editing what it reads is logged
+    with the violation beside its own reason."""
+    root = _checked(tmp_path, "")
+    claude = Writing(root, ["src.py"], (event_lines(None), 3))
+
+    line = make_wrapper(root, claude).run("validate", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert [entry["check"] for entry in line["invariants"]] == ["unchanged"]
+    assert line["message"].startswith("exit 3")

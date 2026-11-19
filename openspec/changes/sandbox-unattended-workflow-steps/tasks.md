@@ -550,12 +550,34 @@ CW-4yhk's relock scenario). Files: a new `scripts/change_workflow/invariants.py`
 `wrapper.py`, `review.py`, `log.py`, a new `scripts/tests/test_change_workflow_invariants.py`,
 `scripts/tests/test_change_workflow_wrapper.py`, `test_change_workflow_review.py`.
 
-- [ ] 5.1 `invariants.py` records at a session's start the commit, the branch, the
+- [x] 5.1 `invariants.py` records at a session's start the commit, the branch, the
   workflow log's and the ledger's lengths and the hash of their contents up to them,
   each review record's hash, `refs/stash`, and the remote's change branch and
   protected branches (D6). Verify: unit tests of the recorded state on a fixture
   repository.
-- [ ] 5.2 The checks against it after the session: (1) `HEAD` on the change's branch
+  Done. `invariants.record(root, step, change, *, inert_paths, protected_branches)`
+  returns a `Start` holding:
+  - the commit and the branch;
+  - the worktree as a tree object (`worktree_tree`) and the tracked paths, for
+    checks 2 and 7;
+  - the log's and the ledger's (`interventions.jsonl`) `Prefix`, a length and a
+    SHA-256;
+  - each `records.RECORD` file's digest;
+  - `refs/stash`;
+  - how many entries `HEAD`'s reflog holds, to tell a commit made in the run;
+  - each remote's change branch and protected branches, from one `ls-remote`;
+  - the change's delta capabilities, and the configuration's inert paths and
+    protected branches.
+
+  `worktree_tree` runs `git add --all` and `write-tree` through a copy of the index
+  under `GIT_INDEX_FILE`, so the checkout's own index is untouched.
+
+  Tests, library integration (the plan said unit) on a real checkout with a bare
+  `origin`, both passing:
+  - `test_the_state_a_session_starts_from_is_recorded`;
+  - `test_reading_the_worktree_as_a_tree_leaves_the_checkouts_index_alone`: an edit
+    and a new file are in the tree, and nothing is staged.
+- [x] 5.2 The checks against it after the session: (1) `HEAD` on the change's branch
   and descending from the start commit; (2) for validation and review, `HEAD` and
   every tracked file unchanged; (3) the log only appended to; (4) each review record
   unchanged and the ledger only grown at its end; (5) `refs/stash` unchanged; (6)
@@ -566,7 +588,44 @@ CW-4yhk's relock scenario). Files: a new `scripts/change_workflow/invariants.py`
   (CW-pkug) (D6; CW-q7ub). Verify: library-integration tests on real Git for CW-q7ub's
   four scenarios, CW-4yhk's relock scenario, a stash, a rewritten review record, a
   ledger edited mid-file, and each check passing on an ordinary run.
-- [ ] 5.3 The wrapper records the state before every unattended session and runs the
+  Done. `invariants.check(root, start, invoked)` returns a `Violation(check, found)`
+  per failure. The checks are named `history`, `unchanged`, `log`, `records`,
+  `stash`, `remote`, and `closeout`.
+  - Checks 2 and 7 diff the start tree against the tree at the end (`--no-renames`),
+    so what is compared is what the run leaves, committed or not.
+  - Check 6 reads every remote of the checkout with `ls-remote`, at the start and
+    after. A remote unreadable at either end is skipped. This departs from the
+    task's "after one fetch": a listing writes nothing to the checkout. The cost is
+    that a protected branch is judged by its tip alone, so a commit of the run that
+    another party has since built on is missed.
+  - A protected branch's new tip counts as the run's when `HEAD`'s reflog gained it
+    during the run. That holds whether the commit sits on a branch since deleted or
+    on a detached `HEAD`. A commit someone else pushed, which a step fetched, is not
+    the run's. A run that checks out such a commit would make it count, but check 1
+    already stops that run.
+  - Check 7 admits `records.inert`, `records.is_record`, and `archive_writes`: the
+    change's own directory, active or archived; `openspec/changes/README.md`; and
+    `openspec/specs/<capability>/spec.md` for each capability the change has a delta
+    of.
+
+  Library-integration tests in `test_change_workflow_invariants.py`, on a real
+  checkout with a bare `origin`, all passing (22 with 5.1's two and the outcome's
+  unit test):
+  - CW-q7ub's four scenarios: an amend (`history`), a review's log line during a
+    validation (passes), a run's commit pushed to `dev` (`remote`), and closeout's
+    code edit beside a README (`closeout`, naming `src/main.py`). That such a
+    closeout is logged stopped is a wrapper test, under 5.3;
+  - a commit pushed to `dev` from a branch since deleted (`remote`);
+  - CW-4yhk's relock (`unchanged`, naming `uv.lock`), and a validation that commits;
+  - a stash, a rewritten record, a ledger edited mid-file, and a rewritten log;
+  - a branch switched;
+  - the change branch moved without a push record, or after a failed one;
+  - another party's commit on `dev` fetched in;
+  - an unreachable remote;
+  - closeout's own writes and the archive's move (passes), and another change's
+    documents or specification (`closeout`);
+  - an ordinary implementation run passes every check.
+- [x] 5.3 The wrapper records the state before every unattended session and runs the
   checks after it, whatever its outcome, before any action or hook after it; a
   violation logs the run `stopped`, its reason and `invariants` naming each, the
   step's message kept ahead, as `triage_outcome` and `landed_outcome` do, and the
@@ -574,9 +633,94 @@ CW-4yhk's relock scenario). Files: a new `scripts/change_workflow/invariants.py`
   CW-f9le). `log.py` accepts `invariants`. Verify: library-integration tests with the
   harness doubled for CW-f9le's scenario and a passing run's line carrying no
   `invariants`.
-- [ ] 5.4 Verification point: `test_change_workflow_invariants.py`, the wrapper and
+  Done. `invariants.Invariants` holds one run's `begin()` and `violations(sessions)`.
+  It reads the guarded push's records from the sessions' kept invocations, through
+  the runner's own `invocations` seam. `Invariants.of(configuration, root, step,
+  change, invocations)` builds it, for the wrapper and the review alike.
+  - `_logged_turn` calls `begin()` after the before-actions, so their writes are not
+    the session's. It checks after the attempts, whatever the outcome, before
+    `_after_finished`.
+  - `_after_finished` checks again after a session resumed for a failed after-hook,
+    before the hooks run again.
+  - A violation makes `invariants.stopped(outcome, broken)` the outcome, with the
+    step's message ahead of the reason. It puts `invariants`, a list of `{check,
+    found}`, on the line.
+  - `run_review` takes `invariants`: `begin()` after `before-review`, and the check
+    once the reviewer ends. A violation publishes nothing and raises `ReviewError`
+    with `invariants` in its record. An interrupted reviewer's record carries any
+    violation, and `_review_and_log` adds it to the reason.
+  - `log.py`'s docstring names the field. The writer already takes any field beside
+    the outcome, so no code changed there.
+  - After a violation, the wrapper also skips setting the upstream (4.4). CW-f9le
+    lets no action run after such a session, and that rule is read here to override
+    CW-59c7's "once the session ends". A later push with `--remote` sets it. Flagged
+    for the triage.
+  - Outside the plan: `__init__.py`'s module list, which CW's "each module listed
+    with its role" requires, gains `scope`, `sandbox`, `sandbox_git`, and
+    `invariants`. Sections 2 and 3 had left the first two out.
+
+  Library-integration tests on a real Git checkout, the harness doubled, all passing.
+  In `test_change_workflow_wrapper.py`:
+  - CW-f9le's scenario: a finished validation that edited `src.py` is logged
+    stopped, `invariants` naming the file, the message starting with the
+    validation's, and `after-validate` not run;
+  - a passing run carries no `invariants`, and its hook runs;
+  - a session resumed after `after-implement` failed, which rewrites a review record,
+    is stopped before the hook runs again;
+  - a closeout editing `src.py` is logged stopped, `invariants` naming it;
+  - a run that exited 3 is checked too.
+
+  In `test_check_push_ready.py`: a design run that pushed and then stashed is
+  stopped, and no upstream is set.
+
+  In `test_change_workflow_review.py`:
+  - a reviewer editing a tracked file publishes nothing and is logged stopped with
+    `invariants`;
+  - one changing nothing is published.
+
+  No test drives an interrupted reviewer that also broke an invariant.
+- [x] 5.4 Verification point: `test_change_workflow_invariants.py`, the wrapper and
   review tests above (library integration); `run pre-commit` passes. End-to-end:
   none.
+  Done:
+  - `make test-release-tooling` on the invariants, wrapper, review, around, push,
+    sandbox `git`, and CLI tests: 478 passed.
+  - `run pre-commit`: its functional hooks pass, the relock, packaging, and every
+    suite. Its `pre-commit` fails only `check-doc-citations`, on `propose.py`, which
+    section 9 creates.
+  - A first run also failed `check-comment-hygiene`. Test fixtures named
+    `tasks.md` and `01-design.md`, which its pattern refuses even as fixture names.
+    They were renamed and the run repeated.
+  - Fresh-context check fixes:
+    - `__init__.py`'s module list;
+    - the runner's `invocations` seam passed through;
+    - `records.git_contains` and `git_remotes` reused;
+    - one `Invariants.of` for both runners, and the unused seams dropped;
+    - no upstream set after a violation;
+    - commits made in the run read from `HEAD`'s reflog;
+    - a real test that the index is untouched;
+    - closeout logged stopped through the wrapper;
+    - the departure from "one fetch" marked;
+    - the test levels named.
+
+    Declined:
+    - The detached-`HEAD` start, which skips the branch checks. It matches the
+      guarded push's own reading of "the change's branch", and no step starts
+      detached.
+    - Walking a protected branch's history to find a run's commit built over. That
+      needs the fetch this check does without.
+  Handoff:
+  - Every run in a Git checkout now lists each remote twice (`ls-remote`). Offline,
+    the remote check is skipped, and the run goes on.
+  - Check 6 knows only this run's sessions' pushes. A validation that pushes beside
+    a review would read, to the review, as the change branch moving without a push
+    record. Validation pushes only an unpushed `HEAD`, which is rare. If it appears,
+    give the review the validation's records or exempt the change branch for it.
+  - Section 7 launches the session inside the sandbox between `begin()` and
+    `violations()`. Nothing here depends on the launch.
+  - The test environment inherits `CHANGE_WORKFLOW_UNATTENDED` when this session runs
+    unattended. `push.main` tests that rely on the default `environ` then behave as
+    under a run. Those here pass either way.
 
 ## 6. The Claude Code and Codex adapters
 

@@ -47,8 +47,14 @@ review and who can fix nothing: the run ends as a question to the owner naming t
 hook, the published record standing, never published again. A review run
 interactively is no run, so it runs no hooks.
 
+The runner holds the reviewer to the run's invariants as the wrapper holds a step's
+session (`invariants`): the state is recorded once `before-review` has run, and
+checked once the reviewer has ended, before anything is published. A violation — a
+tracked file changed, say — publishes nothing and logs the run `stopped`, its reason
+naming each, with `invariants` on its line; `after-review` does not run.
+
 Contract: openspec/specs/change-workflow/spec.md, CW-p2b2, CW-2nb2, CW-5e24, CW-r9d2,
-CW-r8fb, CW-clhl, CW-d1sm, CW-gqav, CW-h3ks, CW-a4fl, and CW-i9np.
+CW-r8fb, CW-clhl, CW-d1sm, CW-gqav, CW-h3ks, CW-a4fl, CW-i9np, CW-q7ub, and CW-f9le.
 """
 
 from __future__ import annotations
@@ -74,6 +80,7 @@ from .graph import AFTER, ARCHIVED, BEFORE, KINDS, NODES, Node
 from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_command,
                       codex_command, missing_program, resume_command, run_claude, run_codex,
                       unreachable)
+from .invariants import Invariants, Violation, broken
 from .log import LOG, log_path, read_log, record_outcome, unused_direction
 from .records import (TRANSCRIPTS, ChangedSince, changed_since, exempting, is_record,
                       next_number, validation_problem)
@@ -459,12 +466,18 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
                    shown, file=sys.stderr, flush=True),
                interrupted: Callable[[Entry], None] = lambda _: None,
                sent_back: Callable[[list[str]], None] = lambda _: None,
-               hooks: ReviewHooks | None = None) -> Path:
+               hooks: ReviewHooks | None = None,
+               invariants: Invariants | None = None) -> Path:
     """Run the review on the first available of its models, and publish it.
 
     Given the run's `hooks`, the engine's actions and `before-review` run once every
     guard has passed and before the reviewer starts, and the reviewer's first prompt
     names their directory, which a read-only reviewer may read.
+
+    Given the run's `invariants`, the state the reviewer starts from is recorded once
+    those have run, and checked once the reviewer has ended, however it ended: a
+    violation publishes nothing, ending the run with a `ReviewError` whose record
+    names each in `invariants`, and an interrupted reviewer's record names any.
 
     A review continues the previous reviewer's session only on the same harness,
     since a session cannot move between harnesses; on another it starts fresh. A
@@ -536,6 +549,8 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     if hooks is not None:
         hooks.run_before()
         note = inputs_note(hooks.inputs / BEFORE, reviews)
+    if invariants is not None:
+        invariants.begin()
     transcripts = reviews / TRANSCRIPTS
     transcripts.mkdir(parents=True, exist_ok=True)
     provisional = f"pending-{kind}-{uuid.uuid4().hex[:12]}"
@@ -621,18 +636,26 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
             draft = draft.rename(transcripts / output.with_suffix(".rejected.md").name)
         if not finished:
             output.unlink()
+    violations = invariants.violations() if invariants is not None else []
+    found = {"invariants": [violation.entry() for violation in violations]} if violations else {}
     if interruption is not None:
         # The reviewer never returned its session, so it is read back from what
         # its attempt had written to the transcript. Whatever reading the record
         # meets, the interruption is passed on.
         try:
-            interrupted(_unpublished_record(
+            interrupted({**_unpublished_record(
                 log, reviews, ran,
                 _transcript_session(log, ran.harness, attempt_start) if ran else None,
-                passed_over, claude_ran, ran is not None, started))
+                passed_over, claude_ran, ran is not None, started), **found})
         except Exception:
-            interrupted({})
+            interrupted(found)
         raise interruption
+    if violations:
+        output.unlink()
+        raise ReviewError(broken(violations) + "; nothing was published"
+                          + (f"; see {log.relative_to(root)}" if log.is_file() else ""),
+                          {**_unpublished_record(log, reviews, ran, session, passed_over,
+                                                 claude_ran, ran is not None, started), **found})
     text = draft.read_text("utf-8") if draft.is_file() else ""
     format_refused = False
     if reached is not None and reached[0] == "unavailable" and sent:
@@ -765,6 +788,12 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     environ = options.pop("environ", None)
     hooks = review_hooks(root, change, kind, inputs, options.get("base"),
                          os.environ if environ is None else environ, invocations)
+    try:
+        watched = Invariants.of(config.load(root), root, "review", change, invocations)
+    except config.ConfigError:
+        # The runner refuses such a configuration before any reviewer starts, and the
+        # line says why: there is no session to check.
+        watched = None
 
     def logged(outcome: Entry, session: str | None, commit: str | None, extra: Entry) -> Entry:
         """The line, with what ran before the reviewer, what a reviewer on Claude
@@ -799,17 +828,20 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     try:
         path = run_review(change, kind, root=root, clock=clock,
                           interrupted=interrupted.append, sent_back=sent.append,
-                          hooks=hooks, **options)
+                          hooks=hooks, invariants=watched, **options)
     except ReviewError as exc:
         return stopped(str(exc), {**exc.record, **({"sent_back": sent} if sent else {})})
     except BaseException as exc:
         # A reviewer that could not start, or was interrupted, still ends with a
-        # line, recording what the reviewer had reported; an interrupt is passed
-        # on once it is written.
-        line = stopped(f"the review did not finish: {type(exc).__name__}"
-                       + (f": {exc}" if str(exc) else ""),
-                       {**(interrupted[0] if interrupted else {}),
-                        **({"sent_back": sent} if sent else {})})
+        # line, recording what the reviewer had reported and any invariant it broke;
+        # an interrupt is passed on once it is written.
+        record = {**(interrupted[0] if interrupted else {}),
+                  **({"sent_back": sent} if sent else {})}
+        reason = f"the review did not finish: {type(exc).__name__}" + (f": {exc}" if str(exc)
+                                                                      else "")
+        if found := record.get("invariants"):
+            reason += "; " + broken([Violation(**entry) for entry in found])
+        line = stopped(reason, record)
         if not isinstance(exc, Exception):
             raise
         return line

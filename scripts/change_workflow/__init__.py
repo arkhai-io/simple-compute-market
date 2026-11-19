@@ -52,6 +52,14 @@ siblings by relative import:
   run's `stopped` line while its agent or reviewer runs, and holds it for the rest
   of the run, for steps and reviews alike; and each session's invocations through
   `run` and the guarded push, kept until the session's log line records them;
+- `scope` — a step's scope for one run: the paths its sandbox lets it write and the
+  paths it keeps read-only inside them, each with its source;
+- `sandbox` — the bubblewrap sandbox a scope is rendered as around any program, its
+  probe, and the unconfined fallback;
+- `sandbox_git` — the engine's `git`, which the sandbox mounts over the system's to
+  refuse every push of an unattended run but the guarded push's;
+- `invariants` — the state a run's session starts from, and the seven checks
+  against it after the session, whose violation stops the run;
 - `wrapper` — running a step unattended, and resuming a waiting run;
 - `review` — a review run read-only and published as a numbered record;
 - `watch` — following the steps as they run, and a run's denials report;

@@ -20,7 +20,10 @@ through `run`, `gather`, the guarded push, or the actions and hooks around its
 session, with its owed argument and phase where it has them, the command it
 resolved to, its exit status, when it started, and how long it took; and `inputs`,
 its inputs directory relative to the change's records. Both fields are optional, so
-the record set's format does not depend on them.
+the record set's format does not depend on them. A run stopped because its checks
+after the session found a violation carries `invariants`: each check it failed, by
+name, and what it found (`invariants`). It too is optional, added beside the
+outcome as any field the writer is given is.
 
 A finished merge's or archive cleanup's outcome carries `landing`, the remote,
 branch, and commit the run fetched, which the writer checks against the checkout

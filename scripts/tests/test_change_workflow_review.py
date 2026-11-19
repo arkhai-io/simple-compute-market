@@ -1392,3 +1392,51 @@ def test_a_review_its_guard_refuses_runs_no_hook(tmp_path: Path) -> None:
 
     assert line["outcome"] == "stopped" and line["inputs"] == RUN
     assert not (root / "ran").exists()
+
+
+# The reviewer's invariants: library integration on a real Git checkout.
+
+def _tracking(root: Path) -> Path:
+    """`root` as a Git checkout tracking one source file, its configuration, the
+    change's directory, and evidence ignored."""
+    env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "init", "-q", "-b", "feat/change", str(root)], check=True)
+    (root / ".git/info/exclude").write_text("/.agents/\n/openspec/\n/.snapshot/\n/ran\n",
+                                            "utf-8")
+    (root / "src.py").write_text("code\n", "utf-8")
+    for args in (("add", "src.py"), ("commit", "-qm", "base")):
+        subprocess.run(["git", *args], cwd=root, env=env, check=True)
+    return root
+
+
+def test_a_reviewer_that_edits_what_it_reviews_publishes_nothing(tmp_path: Path) -> None:
+    """CW-f9le, for the review: its reviewer changed a tracked file, so the run is logged
+    stopped naming it, nothing is published, and the hook after it does not run."""
+    root = _tracking(_hooked(repository(tmp_path), "after-review = 'touch ran'"))
+    write = writing(review_text())
+
+    def editing(command: Sequence[str], log: Path) -> int:
+        (root / "src.py").write_text("reviewed and edited\n", "utf-8")
+        return write(command, log)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=editing,
+                          head=lambda _: HEAD)
+
+    assert line["outcome"] == "stopped"
+    assert line["invariants"] == [{"check": "unchanged", "found": "tracked files changed: src.py"}]
+    assert line["reason"].startswith(
+        "the run broke its invariants: unchanged: tracked files changed: src.py; nothing was "
+        "published")
+    assert not list(reviews_of(root).glob("[0-9]*.md"))
+    assert not (root / "ran").exists()
+
+
+def test_a_reviewer_that_changes_nothing_is_published(tmp_path: Path) -> None:
+    root = _tracking(repository(tmp_path))
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text()), head=lambda _: HEAD)
+
+    assert line["outcome"] == "finished" and "invariants" not in line, line.get("reason")

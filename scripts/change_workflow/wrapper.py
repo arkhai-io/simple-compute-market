@@ -19,7 +19,8 @@ its attempts' sessions invoked for the change through `run`, and through the
 guarded push, that no line has taken yet. Before the line is written, each branch the
 session's guarded push pushed with no upstream is given the upstream of its own
 name on the remote of its last successful push, outside the sandbox that kept
-`.git/config` from the session (CW-59c7). A run that crashes, ends without an outcome, or ends
+`.git/config` from the session (CW-59c7), unless the run broke an invariant. A run
+that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself, and so is
 a triage whose outcome does not name the records it triaged, and a finished merge
 or archive cleanup whose landing record the log's writer refuses. A step
@@ -53,9 +54,17 @@ outcome is logged and routing reads it. What the actions and hooks ran is on the
 line's `invoked`, before and after what the session invoked. A stop given while the
 actions run before the session ends the run as its session would start.
 
+Once the actions before it have run, the state the session starts from is recorded,
+and once the session ends, whatever its outcome, and before any action or hook after
+it, the run's invariants are checked against it (`invariants`); a session resumed
+because an action or hook after it failed is checked again as it ends. A violation
+logs the run `stopped`, its reason naming each, the step's own message kept ahead,
+and `invariants` on the line; nothing after the session runs, and nothing is repaired.
+
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
 CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, CW-q5fy, CW-5ldi,
-CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, and CW-i9np.
+CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np, CW-59c7, CW-q7ub, and
+CW-f9le.
 """
 
 from __future__ import annotations
@@ -76,6 +85,7 @@ from .graph import AFTER, BEFORE
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
 from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
                       unreachable)
+from .invariants import Invariants, Violation, stopped
 from .log import (Checkout, git_checkout, landing_problems, last_run, log_path, read_log,
                   record_outcome, revisit_direction, revisit_refusal)
 from .outcome import load_schema, outcome_problems, triage_outcome_problems
@@ -451,16 +461,27 @@ class Wrapper:
         behind: list[Entry] = []
         if before:
             ahead = self._actions(around.before, log.parent / inputs / BEFORE)
+        # Recorded once the actions before the session have run, so what they wrote is
+        # not taken for the session's.
+        watched = Invariants.of(config.load(self.root), self.root, step, change,
+                                self.invocations)
+        watched.begin()
         attempts: list[Stream] = []
         outcome, status, failure, model, stream, passed_over, logged = (
             self._attempt_models(step, rules, prompt, schema, models, session, granted,
                                  transcript, progress, attempts, target))
-        if failure is None and outcome.get("outcome") == "finished":
-            outcome, status, failure, stream, logged = self._after_finished(
+        broken = watched.violations(_sessions(session, attempts))
+        if not broken and failure is None and outcome.get("outcome") == "finished":
+            outcome, status, failure, stream, logged, broken = self._after_finished(
                 step, rules, change, log, inputs, around, behind, outcome, status, model,
                 stream, logged, schema, session, granted, transcript, progress, attempts,
-                target)
+                target, watched)
         extra = {**extra, **model.entry(), "exit_status": status, "transcript": shown}
+        if broken:
+            # The step's own outcome stands in the message; no action or hook after the
+            # session ran, and nothing is repaired.
+            outcome = stopped(outcome, broken)
+            extra["invariants"] = [violation.entry() for violation in broken]
         if passed_over:
             extra["unavailable"] = passed_over
         # Every attempt's turns: a retried attempt may have reported before it failed.
@@ -471,10 +492,12 @@ class Wrapper:
         directory = self.invocations(self.root)
         # Every attempt's session: a retried or passed-over attempt ran under a
         # session of its own, and what it invoked is this run's too.
-        sessions = list(dict.fromkeys(s for s in (session, *(a.session for a in attempts), ran)
-                                      if s))
+        sessions = _sessions(session, attempts)
         taken = {s: kept_invocations(directory, s, change) for s in sessions}
-        self._set_upstreams([entry for s in sessions for entry in taken[s]])
+        if not broken:
+            # An action after the session, which a run that broke an invariant does not
+            # take: a later push with the remote given sets the upstream then.
+            self._set_upstreams([entry for s in sessions for entry in taken[s]])
         if invoked := [*ahead, *(entry for s in sessions for entry in taken[s]), *behind]:
             extra["invoked"] = invoked
         try:
@@ -521,15 +544,18 @@ class Wrapper:
                         status: int | None, model: Model, stream: Stream,
                         logged: dict[str, Any] | None, schema: dict[str, Any],
                         session: str | None, granted: Sequence[str], transcript: Path,
-                        progress: Path, attempts: list[Stream], target: Entry | None
+                        progress: Path, attempts: list[Stream], target: Entry | None,
+                        watched: Invariants
                         ) -> tuple[Entry, int | None, BaseException | None, Stream,
-                                   dict[str, Any] | None]:
+                                   dict[str, Any] | None, list[Violation]]:
         """The actions and hook after a finished session, before its outcome is
         logged: the outcome as it stands when they pass; else the session resumed
         once with their failure, on its model, and when they fail again after it
         finished again, a question to the owner naming them. What they invoked is
         added to `behind`. Their directory is found where the change's records are
-        once the session ends, since closeout archives the change it runs for."""
+        once the session ends, since closeout archives the change it runs for. A
+        resumed session's invariants are checked as it ends, before anything runs
+        after it, and a violation, returned last, ends the run there."""
         failure: BaseException | None = None
         for again in (False, True):
             try:
@@ -550,9 +576,11 @@ class Wrapper:
             outcome, status, failure, _, stream, _, logged = self._attempt_models(
                 step, rules, after_failure_note(step, directory, reviews, ran), schema,
                 (model,), resumed, granted, transcript, progress, attempts, target)
+            if broken := watched.violations(_sessions(session, attempts)):
+                return outcome, status, failure, stream, logged, broken
             if failure is not None or outcome.get("outcome") != "finished":
                 break
-        return outcome, status, failure, stream, logged
+        return outcome, status, failure, stream, logged, []
 
     def _attempt_models(self, step: str, rules: StepRules, prompt: str, schema: dict[str, Any],
                         models: Sequence[Model], session: str | None,
@@ -657,6 +685,11 @@ class Wrapper:
                              before,
                              read_conversation(self.conversation(self.root, ran))
                              if ran else None)
+
+
+def _sessions(session: str | None, attempts: Sequence[Stream]) -> list[str]:
+    """Every session a turn ran under: the one it continued, and each attempt's own."""
+    return list(dict.fromkeys(s for s in (session, *(a.session for a in attempts)) if s))
 
 
 def continued_run(entries: Sequence[Entry], change: str, session: str) -> Entry:

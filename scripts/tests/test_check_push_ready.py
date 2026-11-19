@@ -467,6 +467,27 @@ def test_after_an_unattended_run_whose_push_failed_no_upstream_is_set(
     assert pushed["exit_status"] != 0
 
 
+def test_after_an_unattended_run_that_broke_an_invariant_no_upstream_is_set(
+        repo: Path) -> None:
+    """Nothing runs after a session whose checks found a violation: here the session
+    pushed, then stashed an edit."""
+    _designing(repo)
+    _untrack(repo)
+
+    class Stashing(_Pushing):
+        def __call__(self, command, cwd, feed, step) -> int:
+            status = super().__call__(command, cwd, feed, step)
+            (self.repo / "slice").write_text("half done", "utf-8")
+            _git(self.repo, "stash", "-q")
+            return status
+
+    line = make_wrapper(repo, Stashing(repo, (event_lines(VALID["blocked"]), 0))).run(
+        "design", CHANGE)
+
+    assert [entry["check"] for entry in line["invariants"]] == ["stash"]
+    assert _upstream(repo) == ("", "")
+
+
 def test_a_branch_with_an_upstream_keeps_it_after_an_unattended_push(repo: Path,
                                                                       tmp_path: Path) -> None:
     other = tmp_path / "other.git"
