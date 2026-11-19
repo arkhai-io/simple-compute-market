@@ -14,7 +14,13 @@ MetadataValue = (
     | Annotated[StrictFloat, Field(allow_inf_nan=False)]
     | StrictBool
 )
-ListingMetadata = Annotated[dict[MetadataKey, MetadataValue], Field(max_length=50, strict=True)]
+# A key's character class reaches JSON Schema as `patternProperties`, which
+# alone admits a key outside the class with any value; closing the object makes
+# the schema refuse the keys the model refuses.
+ListingMetadata = Annotated[
+    dict[MetadataKey, MetadataValue],
+    Field(max_length=50, strict=True, json_schema_extra={"additionalProperties": False}),
+]
 
 
 class ListingDetails(BaseModel):

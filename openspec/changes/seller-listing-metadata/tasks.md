@@ -121,6 +121,11 @@ Handoff from section 2:
   commit, with `make lock`. Left here because section 2's commit touches only inert
   paths, and a `pyproject.toml` edit would make it run the whole `make
   validate-local` matrix for a one-line fix those sections carry anyway.
+  Correction (section 3): `origin/dev`'s `arkhai-core` 0.6.0 has no
+  `market_core.listing_details` (`git show origin/dev:core/src/market_core/listing_details.py`
+  fails); the module exists only on this branch, which has not bumped
+  `arkhai-core`, so a `>=0.6.0` bound admits a published 0.6.0 without it. Section
+  3's handoff names the bump this needs.
 - The session's environment sets a SOCKS `ALL_PROXY` without `socksio`, and the
   implement step may not clear it; every test whose client builds an httpx transport
   then fails at construction. `uv run --directory <package> --with socksio pytest …`
@@ -143,13 +148,16 @@ validation" and ADDED "Seller details are discoverable through the filter spec".
 Touches `core/src/market_core`, `core/registry`, `core/registry-client`, and the
 change's `specs/registry-discovery/spec.md`.
 
-- [ ] 3.1 Unit-test the shared model (D2) in `core/tests/unit/test_listing_details.py`:
+- [x] 3.1 Unit-test the shared model (D2) in `core/tests/unit/test_listing_details.py`:
   each limit at and one past its bound (title 200, description 4000, 50 keys, key
   length 1–40 and its character class, string value 500); finite numbers and
   booleans admitted; null, array, object, NaN and infinity refused as metadata
   values; `supplied_listing_details` drops null and absent fields and keeps an empty
   string and an empty map. Passes under `core`'s unit target.
-- [ ] 3.2 Add `core/registry/tests/integration/test_listing_details.py`, through the
+  Unit, `make -C core test-core`: 161 passed, the file's 31 among them. The
+  file also holds the metadata JSON Schema closed (`additionalProperties: false`),
+  the fix recorded under 3.2.
+- [x] 3.2 Add `core/registry/tests/integration/test_listing_details.py`, through the
   canonical `RegistryClient` against the in-process registry (D1, D3, D5; both
   registry requirements): a listing stating all three reads back unchanged on
   `GET /listings` and `GET /listings/{id}` and inside its retained seller
@@ -166,11 +174,53 @@ change's `specs/registry-discovery/spec.md`.
   tests (`core/registry-client/tests/`) show `ListingRequest.to_dict` and
   `ValidatePublishRequest.to_dict` omit unstated fields and `ListingSummary` parses
   stated ones.
-- [ ] 3.3 Delete `docs/attachments/seller-listing-metadata/` (`roundtrip.py`,
+  Application integration, `make -C core/registry test`: 162 unit and 181
+  integration passed. The integration file runs the registry app in process over
+  `ASGITransport` with its real SQLite storage, every call through the canonical
+  `RegistryClient` signing as the maker; its 9 cases cover the round trip on
+  detail and search reads and inside the decoded `publisher_publication` body;
+  add, change and withdraw on one `listing_id` under a compute specification
+  extended with `$.metadata["acme.tier"]` (`on_missing: fail`), the withdrawn
+  listing then excluded and found again under `strict.acme_tier=false`; one
+  refusal (a null metadata value), 422 with the field named in its body, no
+  listing afterwards, and the dry run reporting errors that name the field and
+  each appear in the publication's refusal; a refused republication leaving the
+  stored details, evidence and `updated_at`; explicit nulls, admitted by the dry
+  run and publication and kept as nulls in the retained body (the typed client
+  reads a served null and an absent field alike, so the served null itself is not
+  asserted); the served `listing_shape` on both the compute and the API-credit
+  specification, each detail equal to the shared model's schema less its null and
+  the metadata object closed; and a listing stating none. No call is raw: the
+  typed client carries the details as plain values and leaves their limits to the
+  registry, so it builds every refused body itself, and an explicit null travels
+  in `ListingRequest.extra`, since the client omits an unstated detail.
+  Correction: 3.2 asks for each limit violation at this level, which
+  `test-levels.md`'s "Coverage between the levels" puts at unit level only; the
+  limits are 3.1's, and the registry's unit `tests/unit/test_listing_validation.py`
+  gains 7 cases for what `listing_validation_errors` adds — both its sources name
+  the field for a prose, key and value refusal, NaN and infinity refused though the
+  served schema admits them, and stated or null details reporting nothing.
+  Registry-client unit, `make -C core/registry-client test`: 37 passed,
+  `tests/test_listing_details.py`'s 6 among them. Outside the plan: pydantic
+  renders the metadata key's character class as `patternProperties`, which alone
+  admits a key outside the class with any value, so the served schema admitted
+  keys the publish boundary refuses; `ListingMetadata` in
+  `core/src/market_core/listing_details.py` now closes the object
+  (`json_schema_extra={"additionalProperties": False}`). What publication and the
+  dry run admit is unchanged; a key outside the class now also draws the served
+  schema's error beside the model's, and the served specification's ETag changes
+  with its `listing_shape`. The schema the registry served before the fix, read in
+  this session's first run of the served-shape case, had `patternProperties` and
+  no `additionalProperties`; `run test-before` cannot rerun that case at
+  `9fc81bbed`, as its `--no-project` environment has no `sqlalchemy` and
+  collection fails.
+- [x] 3.3 Delete `docs/attachments/seller-listing-metadata/` (`roundtrip.py`,
   `roundtrip-output.json`): 3.2 supersedes its round trip at the lowest level that
   proves it, and its function-level imports are the `make check-local-imports`
   failure the validation notes record. Verify: `make check-local-imports` passes.
-- [ ] 3.4 Bring the change's registry delta onto `dev`'s specification (D3): the
+  Removed with `git rm`; nothing else cited it but this change's notes.
+  `make check-local-imports` passes.
+- [x] 3.4 Bring the change's registry delta onto `dev`'s specification (D3): the
   MODIFIED "Schema-driven listing validation" in
   `openspec/changes/seller-listing-metadata/specs/registry-discovery/spec.md`
   carries `dev`'s current requirement text and both its scenarios, with the detail
@@ -180,7 +230,19 @@ change's `specs/registry-discovery/spec.md`.
   "envelope columns of their own". Verify:
   `scripts/change-workflow openspec validate seller-listing-metadata --strict`
   passes.
-- [ ] 3.5 Verification point: registry unit and integration (`make -C core/registry
+  The MODIFIED requirement keeps `dev`'s paragraph and both its scenarios word for
+  word; the details follow as a second paragraph, which now also requires the dry
+  run to refuse and says the served shape declares the details with their limits,
+  whatever specification is loaded, refusing all publication refuses but a
+  non-finite number (the closed metadata object of 3.2). Its detail scenarios read the seller's retained
+  publication, replace "no listing row is written" with `dev`'s "leaves prior
+  listing content unchanged", and add the dry run's matching errors and "A detail
+  is stated as null". The ADDED requirement keeps the details in the retained
+  publication document and gains "A seller withdraws its details by
+  republication". 3.2 exercises every scenario the change adds, "A listing without
+  seller details" by its parsed fields and its retained body. Strict validation
+  passes.
+- [x] 3.5 Verification point: registry unit and integration (`make -C core/registry
   test`), `core` unit, and registry-client suites pass, with 3.1 at unit level and
   3.2 at application-integration level through the typed client;
   `scripts/change-workflow run pre-commit seller-listing-metadata` and
@@ -189,6 +251,69 @@ change's `specs/registry-discovery/spec.md`.
   and `e2e_credits_deal` publish listings stating none through a real registry, so
   the pipeline is evidence for the unchanged path only; no scenario is owed, since
   3.2 proves the stated path against the real registry through its typed client.
+  After `make dist`: registry 162 unit and 181 integration passed; `core` unit
+  (`make -C core test-core`) 161; registry-client 37. `scripts/change-workflow run
+  pre-commit seller-listing-metadata --base origin/dev`: its `pre-commit` hook
+  passes (index, tasks, skills, strict OpenSpec validation, `make
+  check-repository` with the citations and local-import checks), its `make lock`
+  rewrote no lock, and its `make validate-local` passes `make check-packaging`
+  and fails `make test` on two tests of `make test-release-tooling` only, neither
+  this change's: `scripts/tests/test_multi_storefront_compose.py::test_storefront_authorities_are_isolated`,
+  as this session has no `docker` on its `PATH`, and
+  `scripts/tests/test_change_workflow_assumptions.py::test_every_target_and_path_the_step_table_and_the_fragment_name_is_provided_here`,
+  as `.claude/change-steps.toml` names `scripts/openspec` and
+  `openspec/specs/market-change-workflow/README.md`'s "How this repository
+  provides the workflow's roles" does not list it. That test was not run on
+  `origin/dev`; every file it reads is identical there (`033e799a6`, its workflow
+  maintenance), so, reading only the tree, it would fail there the same way. The
+  step table is the orchestrator's to edit. `make test`
+  stops at that target, so the targets after it ran on their own, all passing:
+  `make -C helm test-render`, and `make test-frp-grant-admission` (203 passed, 15
+  skipped), `test-injected-time` (81), `test-lane-double-controls` (149),
+  `test-payments-lane-double` (101) and `test-mediation-lane-double` (78).
+  Correction: 3.5 asks pre-commit to pass, which these two failures prevent here.
+  Outside the plan: two earlier runs failed only on
+  `e2e-tests/tests/unit/test_in_process_buyer.py::test_one_release_advances_the_clock_one_interval_and_lets_one_wait_return`,
+  at its final `assert run.exited`, and passed alone and in `make -C e2e-tests
+  test-unit` (1024 passed). The cause is read from the code, not reproduced: the
+  harness's `_settle` (`e2e-tests/tests/e2e/roles/helpers/in_process_buyer.py`)
+  returns once the command sets `ended`, which its thread does in its last
+  statements before finishing, so a caller can read `exited` false while the thread
+  unwinds, and `_streams_kept`, which reads `exited` too, can skip restoring the
+  streams. `_settle` now joins the ended thread. The run after the fix passed the
+  e2e unit target inside `make test`; one passing run is all that shows. This
+  branch changed nothing else under `e2e-tests`. End-to-end confirmed: no
+  committed scenario, stack configuration or storefront configuration states a
+  listing detail, so the three scenarios above publish none.
+
+Handoff from section 3:
+
+- `arkhai-core` needs its once-per-change bump, and the plan has no task for it.
+  `origin/dev` and this branch both hold 0.6.0, and only this branch has
+  `market_core.listing_details` (`versioning.md`, "One bump per unit of work";
+  `package-versions.md`, "A version changes when its contents change"), so the
+  `>=0.6.0` bound sections 4 and 6 plan cannot exclude a 0.6.0 without the module.
+  The bump is not small: `core/registry`, `core/registry-client`, `kit/alkahest`,
+  `kit/arkhai-payments`, `kit/contact-exchange`, `kit/policy` and
+  `kit/settlement-runtime` pin `arkhai-core==0.6.0`, so each pin moves, and each of
+  those packages bumps, with its own exact pinners (`core/buyer` and
+  `domains/bare_metal/buyer` pin `arkhai-core-registry-client==0.13.0`), then a
+  relock of every project. `core/registry` (0.6.1) and `core/registry-client`
+  (0.13.0) changed on this branch too and are unbumped. Left for the round's
+  triage to plan, since it reaches packages outside every section; once
+  `arkhai-core` is bumped, sections 4–6 raise their consumers' bounds to the bumped
+  version rather than `>=0.6.0`.
+- `ListingDetails`' JSON Schema closes the metadata object
+  (`additionalProperties: false`). A storefront or pool-override model that renders
+  the shared types into a schema of its own now carries that too; sections 4–6
+  touch those models and may see it in a generated schema or an OpenAPI snapshot.
+  Every registry's served filter specification changes with it, so its ETag does,
+  and a buyer holding the old ETag gets one `412` before it rereads the spec.
+- The typed `RegistryClient` reads a served `null` detail and an absent one alike
+  (`ListingSummary.from_dict`), so no typed-client test can tell them apart; the
+  retained `publisher_publication` body is where a test sees what was sent.
+- Do not edit the worktree while `scripts/change-workflow run pre-commit` runs: its
+  `make validate-local` validates one tree and fails when the tree changes under it.
 
 ## 4. A seller's create request carries details
 
@@ -344,10 +469,10 @@ currency.
 ## Validation notes
 
 - Returned to planning at the triage of `01-implementation`. The tasks above were implemented on a base older than `dev`'s retained signed document (`published_document`), so the registry columns and migration `019_listing_details` are replaced by that document (F1), the API-credit request takes the shared description limit (F2), and the storefront paths gain focused tests: a typed-client create and republish in each storefront, a compute cycle adding, changing and withdrawing an override's details on one listing, and the API-credit refusal (F3). The replanned work starts by merging `dev`.
-- `scripts/change-workflow run pre-commit seller-listing-metadata --base origin/dev` fails one check on the branch as implemented: `make check-local-imports` reports the function-level imports at `docs/attachments/seller-listing-metadata/roundtrip.py:92`, `:109` and `:115`. The replanned work moves them or gives each its reason.
+- `scripts/change-workflow run pre-commit seller-listing-metadata --base origin/dev` fails one check on the branch as implemented: `make check-local-imports` reports the function-level imports at lines 92, 109 and 115 of the round-trip script under `docs/attachments/`. The replanned work moves them or gives each its reason. Correction: 3.3 deleted the script instead, and the check passes.
 
 - Registry: 139 unit + 128 integration (full integration directory) passed. Storefront: 182 unit passed. VM storefront: 1215 unit + 530 integration passed, 1 pre-existing skip. Bare metal: 224 domain + 590 storefront passed. API credits: 255 passed. VM buyer: 215 passed. Clients: 25 + 68 passed. Registry-client mypy clean; the VM storefront's mypy reports pre-existing errors (145 on its base) and none in the touched files.
-- Signed publish → GET round trip with VM/bare-metal/API-credits resources carrying the fields: `docs/attachments/seller-listing-metadata/roundtrip.py`, output in `roundtrip-output.json` (run from `core/registry`). Covers refusal naming the field, the dry-run route, `$.metadata["acme.tier"]` filtering both by value and on missing, and unchanged reads for listings without the fields.
+- Signed publish → GET round trip with VM/bare-metal/API-credits resources carrying the fields: a round-trip script and its output under `docs/attachments/`, run from `core/registry`; 3.3 deleted both, and 3.2's `core/registry/tests/integration/test_listing_details.py` supersedes them. Covers refusal naming the field, the dry-run route, `$.metadata["acme.tier"]` filtering both by value and on missing, and unchanged reads for listings without the fields.
 - Migration 019 exercised by downgrade to 018 and re-upgrade on a stamped database; fresh databases create the columns through `create_all` and stamp head.
 - Tests that reach httpx fail on a machine with `ALL_PROXY` set to a SOCKS URL (`socksio` not installed); run suites with the proxy variables unset. Unrelated to this change.
 - Environments install internal packages as wheels from `.dist/`, so after editing a package run `make dist` and `make reinit` in every project that installs it before trusting a test run; a stale wheel fails as an extra-forbidden field.

@@ -375,6 +375,11 @@ class InProcessBuyer:
         if not self.gate.wait_until(lambda: self.gate.parked or run.ended, timeout):
             raise AssertionError(
                 f"the background command neither reached the gate nor ended within {timeout}s")
+        # `ended` is set in the command thread's last statements, before the
+        # thread itself finishes; joining it makes `exited` true for the caller,
+        # who otherwise could read the thread as alive while it unwinds.
+        if run.ended and run.thread is not None:
+            run.thread.join(timeout)
 
 
 @contextlib.contextmanager

@@ -3,12 +3,14 @@
 `listing_validation_errors` and `validate_listing_publication` are what both
 the publication route and the dry run apply to the complete received document.
 These cases cover their error paths over the deployed compute specification:
-which names are reserved, how a schema error names its field, and what the
-`pricing` object admits. The routes that apply them are exercised in the
-integration suite.
+which names are reserved, how a schema error names its field, what the
+`pricing` object admits, and how a seller-authored detail's refusal is reported.
+The routes that apply them are exercised in the integration suite.
 """
 
 from __future__ import annotations
+
+import math
 
 import pytest
 from fastapi import HTTPException
@@ -190,6 +192,51 @@ def test_the_dry_run_reports_a_price_at_its_earlier_location() -> None:
     )
 
     assert error.startswith("listing_resource: ")
+
+
+# The limits themselves are the shared model's, proven in `core`'s unit suite;
+# these cases cover what publication validation adds: both its sources, the
+# shared model and the served schema, name the field they refuse.
+@pytest.mark.parametrize(
+    ("details", "field"),
+    [
+        ({"title": "t" * 201}, "title"),
+        ({"metadata": {"has space": "v"}}, "metadata"),
+        ({"metadata": {"k": [1, 2]}}, "metadata.k"),
+    ],
+    ids=["prose", "metadata-key", "metadata-value"],
+)
+def test_a_detail_over_its_limit_is_reported_naming_the_field(details: dict, field: str) -> None:
+    errors = listing_validation_errors(_listing(**details))
+
+    assert errors
+    assert all(error.startswith(field) for error in errors), errors
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf], ids=["nan", "infinity"])
+def test_a_non_finite_metadata_value_is_reported_though_the_schema_admits_it(value) -> None:
+    """JSON Schema's `number` admits NaN and infinity, so the shared model's own
+    check is what refuses them: each error is the model's, naming the value
+    variant it failed, and none is the served schema's, which names the key
+    alone."""
+    errors = listing_validation_errors(_listing(metadata={"k": value}))
+
+    assert errors
+    assert all(error.startswith("metadata.k.") for error in errors), errors
+
+
+def test_stated_details_have_no_errors() -> None:
+    assert listing_validation_errors(
+        _listing(
+            title="Eight GPUs",
+            description="Dedicated hosts.",
+            metadata={"acme.tier": "gold", "count": 0, "ratio": 0.5, "ipv4": True},
+        )
+    ) == []
+
+
+def test_a_detail_stated_as_null_is_judged_unstated() -> None:
+    assert listing_validation_errors(_listing(title=None, description=None, metadata=None)) == []
 
 
 def test_publication_refuses_with_every_error() -> None:
