@@ -13,6 +13,7 @@ from typing import Sequence
 from change_workflow.around import inputs_note
 from change_workflow.harness import Model
 from change_workflow.log import Checkout
+from change_workflow.sandbox import Confinement, Launch
 from change_workflow.wrapper import Wrapper
 
 CHANGE = "shape-bounds"
@@ -130,6 +131,15 @@ class FakeClaude:
         return status
 
 
+def _as_given(scope, program, *, probing=None) -> Launch:
+    return Launch(tuple(program))
+
+
+# The sandbox stood in for: it confines nothing and creates nothing, so a test reads
+# the harness's own command, and the checkout as the test left it.
+NO_SANDBOX = Confinement(probe=lambda: None, prepare=lambda _: None, launch=_as_given)
+
+
 def conversations(tmp_path: Path) -> Path:
     """Where the tests keep Claude Code's conversation files, never the owner's own."""
     return tmp_path / "conversations"
@@ -143,7 +153,7 @@ def make_wrapper(tmp_path: Path, claude: FakeClaude) -> Wrapper:
                    echo=None,
                    conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl",
                    runs=lambda _: None, checkout=lambda *_: ACCEPTING,
-                   target=lambda *_: None, kind=lambda *_: None)
+                   target=lambda *_: None, kind=lambda *_: None, confinement=NO_SANDBOX)
 
 
 def prompted(invocation: str, step: str, number: int = 1) -> str:

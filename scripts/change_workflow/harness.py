@@ -85,31 +85,25 @@ CodexRunner = Callable[[Sequence[str], Path], int]
 # `network`, or None.
 Reached = tuple[str, str] | None
 
-# What an unattended run is told beside its skill: that nobody can answer it, and
-# how it ends a turn.
+# What an unattended run is told beside its skill, whatever its harness: that nobody
+# can answer it, that it runs in a sandbox scoped to its step, how it treats a write
+# the sandbox refuses, how it waits, and how it ends a turn (CW-4yhk, CW-b5cf).
 UNATTENDED = (
     "This step runs unattended through scripts/change-workflow: nobody can answer a "
-    "permission prompt or a question in this session. Follow your skill's instructions for "
-    "running unattended. End every turn with an outcome matching the JSON schema you were "
-    "given. Where your skill says to stop and ask the owner, end the turn with a `question` "
-    "outcome; the owner's answer resumes this session. Run one command per Bash call: a "
-    "chained command runs only when every command in it is allowed. If a chained command is "
-    "denied, run its commands one call at a time. If a single command or any other tool call "
-    "is denied, finish every part of the work that does not depend on it; if the step cannot "
-    "complete without that call, end with a `stopped` outcome whose `reason` names that exact "
-    "call, and otherwise go on and end as the step ends, since the denial is recorded on the "
-    "outcome whatever it is. One denied call is not a denied tool. A call a deny rule refused "
-    "is forbidden: no other tool does it, except where the rule exists only to keep file "
-    "writes on the Edit and Write tools (the step table's comments name those rules: sed's "
-    "in-place forms, find's deleting, running, and writing actions, and the diff family's "
-    "output-to-file forms), whose refused shell write may be made with the Edit or Write tool "
-    "your step's rules allow. A call denied because no rule allows it, which the "
-    "harness reports as don't ask mode, may be done instead by a tool your step's rules allow "
-    "for the same work, such as the Edit tool for a shell write or Read or Grep for a shell "
-    "read. Either way, name the substitute in your message. Never ask about a denial as a "
-    "question. Never end your turn, schedule a wake-up, or start a monitor to wait for a "
-    "background command or "
-    "subagent: run a subagent in the foreground, and wait for a command as your skill says. A turn that starts after you have reported ends the run in your report's place.")
+    "question in this session. Follow your skill's instructions for running unattended. "
+    "The step runs in a sandbox scoped to it, which lets it write only the paths its step "
+    "may change: a write that fails as a read-only file system, or as a device or resource "
+    "busy, is outside its scope. If the step cannot go on without that write, end with a "
+    "`stopped` outcome whose `reason` names the path; otherwise go on within the scope, and "
+    "say in your message what you did instead. The write is recorded on the run's line "
+    "whatever you say, as is any call the harness denies. Never ask about either as a "
+    "question. Wait on a background command with `scripts/change-workflow wait`, never by "
+    "following its output, and never end your turn, schedule a wake-up, or start a monitor "
+    "to wait for a background command or subagent: run a subagent in the foreground. End "
+    "every turn with an outcome matching the JSON schema you were given; where your skill "
+    "says to stop and ask the owner, end the turn with a `question` outcome, and the owner's "
+    "answer resumes this session. A turn that starts after you have reported ends the run "
+    "in your report's place.")
 
 # The retries a run is given after a network error, on the same model: a network
 # error says nothing of the model's availability, so it never falls to the next.

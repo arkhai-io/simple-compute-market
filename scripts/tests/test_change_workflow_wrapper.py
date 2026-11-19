@@ -15,13 +15,14 @@ from pathlib import Path
 
 import pytest
 
+from change_workflow import claude_code, sandbox
 from change_workflow.common import StepError
-from change_workflow.claude_code import anchored
+from change_workflow.claude_code import TOOLS
+from change_workflow.sandbox import BUBBLEWRAP, BWRAP, Confinement
 from change_workflow.harness import Model
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
 from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
-from change_workflow.steps import load_steps
 from change_workflow.wrapper import Wrapper, triage_kind, validation_target
 from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT, MODELS,
                                       NETWORK, OPUS, SESSION, VALID, FakeClaude, clock,
@@ -30,13 +31,13 @@ from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT,
                                       option, option_rules, prompted, without_session_id)
 
 
-def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path) -> None:
+def test_a_run_is_headless_through_its_adapter_and_given_the_schema(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
 
     make_wrapper(tmp_path, claude).run("design", CHANGE)
 
     command = claude.commands[0]
-    rules = load_steps()["design"]
+    # The skill is the engine's definition's, the command Claude Code's adapter's.
     assert command[:3] == ["claude", "-p", prompted(f"/change-design {CHANGE}", "design")]
     assert option(command, "--permission-mode") == "dontAsk"
     assert (option(command, "--model"), option(command, "--effort")) == (
@@ -45,9 +46,8 @@ def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path
     assert option(command, "--output-format") == "stream-json"
     assert "--verbose" in command
     assert json.loads(option(command, "--json-schema")) == harness_schema(load_schema())
-    assert option_rules(command, "--allowedTools") == [anchored(r, tmp_path) for r in rules.allow]
-    assert option_rules(command, "--disallowedTools") == [anchored(r, tmp_path)
-                                                          for r in rules.deny]
+    assert option_rules(command, "--allowedTools") == list(TOOLS)
+    assert option_rules(command, "--disallowedTools") == ["Bash(git push*)"]
     assert "--resume" not in command
     # Its own session, never one inherited from the environment it was started in.
     assert uuid.UUID(option(command, "--session-id")).version == 4
@@ -194,8 +194,6 @@ def test_planning_resumes_the_design_session(tmp_path: Path) -> None:
 
     assert option(claude.commands[1], "--resume") == "design-1"
     assert claude.commands[1][2] == prompted(f"/change-plan {CHANGE}", "plan")
-    assert option_rules(claude.commands[1], "--allowedTools") == [
-        anchored(r, tmp_path) for r in load_steps()["plan"].allow]
     assert (line["step"], line["session"]) == ("plan", "design-1")
 
 
@@ -208,7 +206,7 @@ def test_planning_without_a_design_session_starts_fresh(tmp_path: Path) -> None:
 
 
 def test_review_is_not_a_claude_step(tmp_path: Path) -> None:
-    with pytest.raises(StepError, match="no unattended Claude Code run"):
+    with pytest.raises(StepError, match="no unattended run of its own"):
         make_wrapper(tmp_path, FakeClaude()).run("review", CHANGE)
 
 
@@ -228,10 +226,8 @@ def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
     command = claude.commands[1]
     assert command[2] == "The owner's answer: Delete the volume."
     assert option(command, "--resume") == "v-1"
-    assert option_rules(command, "--allowedTools")[-1] == "Bash(kubectl delete pvc *)"
     assert (resumed["step"], resumed["session"], resumed["granted"]) == (
         "validate", "v-1", ["Bash(kubectl delete pvc *)"])
-    assert "Bash(kubectl delete pvc *)" not in claude.commands[2]
     assert "--resume" not in claude.commands[2]
     assert "granted" not in rerun
 
@@ -246,10 +242,7 @@ def test_a_fresh_run_granted_rules_holds_them_for_that_run_alone(tmp_path: Path)
     line = wrapper.run("validate", CHANGE, granted=granted)
     rerun = wrapper.run("validate", CHANGE)
 
-    table = [anchored(r, tmp_path) for r in load_steps()["validate"].allow]
-    assert option_rules(claude.commands[0], "--allowedTools") == [*table, *granted]
     assert line["granted"] == granted
-    assert option_rules(claude.commands[1], "--allowedTools") == table
     assert "granted" not in rerun
 
 
@@ -648,11 +641,12 @@ def test_an_unavailable_model_falls_to_the_next_in_order(tmp_path: Path) -> None
     Claude entries is proven on the wrapper's turn with the models given directly."""
     claude = FakeClaude((failed_run(LIMIT), 1), (event_lines(VALID["finished"]), 0))
     wrapper = make_wrapper(tmp_path, claude)
-    rules = load_steps()["validate"]
     second = Model("claude", "second-model", "low")
+    models = (OPUS, second)
 
-    line = wrapper._turn("validate", rules, CHANGE, log_path(tmp_path, CHANGE),
-                         "/change-validate x", (OPUS, second), session=None)
+    line = wrapper._turn("validate", CHANGE, log_path(tmp_path, CHANGE),
+                         "/change-validate x", models, wrapper._confine("validate", models),
+                         session=None)
 
     assert [option(command, "--model") for command in claude.commands] == [
         "claude-opus-5-5", "second-model"]
@@ -1258,3 +1252,136 @@ def test_a_run_that_did_not_finish_is_checked_too(tmp_path: Path) -> None:
     assert line["outcome"] == "stopped"
     assert [entry["check"] for entry in line["invariants"]] == ["unchanged"]
     assert line["message"].startswith("exit 3")
+
+
+# Runs launched as the sandbox confines them: external-process integration, the
+# wrapper launching a program that stands in for Claude Code, in a real Git checkout.
+# The tests launching real bubblewrap are skipped, saying why, where the engine's own
+# probe finds the sandbox cannot run; the last, its probe doubled to fail, launches
+# the stand-in unconfined wherever it runs.
+
+PROBED = sandbox.probe()
+needs_bwrap = pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
+
+# Claude Code stood in for: it runs each command it is given as a Bash call, in the
+# session's environment, streaming the call and its result as Claude Code does, then
+# ends its turn with the outcome it is given.
+_CLAUDE = r"""
+import json, os, subprocess, sys
+session, outcome = sys.argv[1], json.loads(sys.argv[2])
+def emit(event):
+    print(json.dumps({**event, "session_id": session}), flush=True)
+emit({"type": "system", "subtype": "init"})
+for number, command in enumerate(sys.argv[3:]):
+    call = f"t{number}"
+    emit({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": call, "name": "Bash", "input": {"command": command}}]}})
+    done = subprocess.run(["sh", "-c", command], capture_output=True, text=True,
+                          env={**os.environ, "CLAUDE_CODE_SESSION_ID": session})
+    emit({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": call, "content": done.stdout + done.stderr,
+         "is_error": done.returncode != 0}]}})
+emit({"type": "result", "subtype": "success", "is_error": False, "result": "done",
+      "permission_denials": [], "structured_output": outcome})
+"""
+
+
+class _StandIn:
+    """Claude Code's command replaced by `_CLAUDE` where the wrapper launched it, inside
+    the sandbox's command or alone, and run through the adapter's own runner."""
+
+    def __init__(self, outcome: dict, *commands: str) -> None:
+        self.outcome, self.commands, self.launched = outcome, commands, []
+
+    def __call__(self, command, cwd, feed, step) -> int:
+        self.launched.append(list(command))
+        start = command.index("--", command.index("--die-with-parent")) + 1 \
+            if command[0] == BWRAP else 0
+        stand_in = [*command[:start], sys.executable, "-c", _CLAUDE, SESSION,
+                    json.dumps(self.outcome), *self.commands]
+        return claude_code.run(stand_in, cwd, feed, step)
+
+
+def _confined(root: Path, harness: _StandIn,
+              confinement: Confinement = BUBBLEWRAP) -> Wrapper:
+    # The test's own home and temporary directories: the checkout lies in the system's
+    # temporary directory, which a scope would otherwise make writable whole.
+    (root.parent / "tmp").mkdir(exist_ok=True)
+    return replace(make_wrapper(root, FakeClaude()), runner=harness, confinement=confinement,
+                   home=root.parent / "home", temporary=root.parent / "tmp")
+
+
+@needs_bwrap
+def test_a_write_outside_a_steps_scope_fails_and_its_line_names_the_refusal(
+        tmp_path: Path) -> None:
+    """CW-x3pf's "A step's file tool writes outside its scope", for a shell write, and
+    CW-k5mk's "A step's message omits a refusal": a design run writes `openspec/` and
+    is refused `src.py`, goes on, and its line carries the refusal its message never
+    names."""
+    root = _checked(tmp_path / "work", "")
+    harness = _StandIn(VALID["finished"], "echo y > openspec/new.md", "echo y > src.py")
+
+    line = _confined(root, harness).run("design", CHANGE)
+
+    assert harness.launched[0][0] == BWRAP
+    assert (root / "openspec/new.md").read_text("utf-8") == "y\n"
+    assert (root / "src.py").read_text("utf-8") == "code\n"
+    assert line["outcome"] == "finished" and "refus" not in line["message"]
+    [refusal] = line["refusals"]
+    assert (refusal["tool"], refusal["command"]) == ("Bash", "echo y > src.py")
+    assert "Read-only file system" in refusal["error"]
+    assert "unconfined" not in line
+
+
+@needs_bwrap
+def test_a_refused_push_reaches_the_runs_line(tmp_path: Path) -> None:
+    """CW-j4cs's "A refused push reaches the run's record": an implementation run's
+    `git push --no-verify` is refused by the sandbox's `git`, the run goes on, and its
+    line carries the push among its refusals, with its command line; nothing reaches
+    the remote."""
+    root = _checked(tmp_path / "work", "")
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=root, check=True)
+    harness = _StandIn(VALID["finished"], "git push --no-verify origin HEAD:dev")
+
+    line = _confined(root, harness).run("implement", CHANGE)
+
+    assert line["refusals"] == [{"tool": "git", "command": "git push --no-verify origin HEAD:dev",
+                                 "error": line["refusals"][0]["error"]}]
+    assert "push" in line["refusals"][0]["error"]
+    assert subprocess.run(["git", "ls-remote", str(remote)], capture_output=True,
+                          text=True).stdout == ""
+
+
+def test_a_harness_whose_adapter_cannot_run_the_step_is_refused_before_anything(
+        tmp_path: Path) -> None:
+    """A resumed design whose line names a Codex model, whose adapter runs only the
+    review, is refused before any session starts."""
+    claude = FakeClaude()
+    wrapper = make_wrapper(tmp_path, claude)
+    asked = record_outcome(log_path(tmp_path, CHANGE), "design", VALID["question"],
+                           session="d-1", commit=COMMIT,
+                           extra={"harness": "codex", "model": "gpt-6-sol"})
+
+    with pytest.raises(StepError, match="the codex harness cannot run the design step"):
+        wrapper.resume(CHANGE, asked["seq"], "Yes.")
+    assert claude.commands == []
+
+
+def test_without_the_sandbox_a_run_is_unconfined_says_so_and_is_checked(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-v5ny's "A machine without bubblewrap": with the probe failing, a triage runs
+    unconfined, its line records `unconfined: true`, a warning says why, and its
+    invariants are checked as any run's — its stash stops it."""
+    root = _checked(tmp_path / "work", "")
+    harness = _StandIn(VALID["finished"], "git update-ref refs/stash HEAD")
+    missing_bwrap = Confinement(probe=lambda: "bwrap is not installed")
+
+    line = _confined(root, harness, missing_bwrap).run("triage", CHANGE)
+
+    assert harness.launched[0][0] == "claude"
+    assert line["unconfined"] is True
+    assert "unconfined: bwrap is not installed" in capsys.readouterr().err
+    assert (line["outcome"], [entry["check"] for entry in line["invariants"]]) == (
+        "stopped", ["stash"])

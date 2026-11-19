@@ -130,6 +130,11 @@ def refusals(text: str) -> list[Entry]:
     found: list[Entry] = []
     block, ran = "", ""
     for line in text.splitlines():
+        if line.startswith("{"):
+            # Another harness's event, in a transcript a review's attempts share: it
+            # ends whatever Codex block came before it.
+            block, ran = "", ""
+            continue
         label = line.strip()
         if label in ("codex", "exec", "user", "thinking", "tokens used") and line == label:
             block = label
@@ -150,7 +155,9 @@ def run(command: Sequence[str], log: Path) -> int:
     """Run a review in Codex, every command it starts seeing in its environment that
     it is the unattended run of the review (`UNATTENDED_RUN`). Codex names no
     session in its commands' environment, so the session of whatever started the
-    review is withheld: what the reviewer runs is no part of that session's line."""
+    review is withheld: what the reviewer runs is no part of that session's line. The
+    process keeps the descriptors the sandbox reads as it starts, the only inheritable
+    ones the engine opens (`sandbox.Launch`)."""
     progress = Progress()
     environment = {key: value for key, value in os.environ.items() if key != SESSION_ID}
     # Appended: a review's attempts on each of its models share one transcript.
@@ -158,6 +165,7 @@ def run(command: Sequence[str], log: Path) -> int:
         process = subprocess.Popen(list(command), cwd=repository_root(), stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    env={**environment, UNATTENDED_RUN: "review"},
+                                   close_fds=False,
                                    text=True, encoding="utf-8", errors="replace")
         assert process.stdout is not None
         try:

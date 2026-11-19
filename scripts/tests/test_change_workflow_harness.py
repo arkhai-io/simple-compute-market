@@ -1,13 +1,13 @@
 """Each harness's adapter: Claude Code's unattended command and Codex's, the state
 each harness writes and the settings it loads, the steps each runs, the refusals
-each reads, Codex's plain output condensed into progress, a run marked as the
-wrapper's in its environment, and the step table's file-tool rules anchored at the
-checkout it starts in."""
+each reads, Codex's plain output condensed into progress, and a run marked as the
+wrapper's in its environment."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -18,7 +18,7 @@ from change_workflow.common import UNATTENDED_RUN
 from change_workflow.graph import STEPS
 from change_workflow.harness import UNATTENDED, Model, refused
 from change_workflow.running import Terminated, termination_ends_the_run
-from change_workflow.steps import StepRules
+from change_workflow.sandbox import missing
 from change_workflow_fixtures import OPUS, option, option_rules
 
 
@@ -147,6 +147,29 @@ def test_every_adapters_settings_are_protected_whichever_harness_runs() -> None:
                                        "~/.claude/settings.json", "~/.codex/config.toml"}
 
 
+def test_the_unattended_prompt_is_one_harness_neutral_paragraph() -> None:
+    """D15: the prompt says the step runs in a sandbox scoped to it, what a refused
+    write means, how to stop or go on, and how to wait, and names no rule, no chain,
+    no harness's permission mode, and no `-C` form."""
+    lowered = UNATTENDED.lower()
+
+    for absent in ("rule", "chain", "don't ask mode", "bash call", "step table"):
+        assert absent not in lowered, absent
+    assert not re.search(r"-c\b", lowered)
+    for present in ("sandbox scoped to it", "read-only file system", "resource busy",
+                    "`stopped`", "names the path", "scripts/change-workflow wait"):
+        assert present in UNATTENDED, present
+    assert "\n" not in UNATTENDED
+
+
+def test_a_harness_not_installed_is_read_from_bubblewraps_own_line() -> None:
+    assert missing("bwrap: execvp claude: No such file or directory\n", ["claude", "-p"])
+    # A line the run's output quotes, from a file it read, is not bubblewrap's own.
+    assert not missing("cat notes.md\n> bwrap: execvp claude: No such file or directory\n",
+                       ["claude"])
+    assert not missing("bwrap: execvp codex: No such file or directory", ["claude"])
+
+
 def test_a_refused_write_is_found_by_either_error() -> None:
     assert refused("touch: cannot touch 'x': Read-only file system") == (
         "touch: cannot touch 'x': Read-only file system")
@@ -177,49 +200,13 @@ def test_codex_reads_a_refusal_from_a_failed_commands_output_alone() -> None:
          "error": "mkdir: cannot create directory '.cache': Read-only file system"}]
 
 
-def test_relative_file_rules_are_anchored_at_the_checkout(tmp_path: Path) -> None:
-    # A step that changes directory partway through must keep the files its table
-    # grants: a bare or ./ pattern would otherwise resolve against the new
-    # working directory.
-    root = tmp_path.resolve().as_posix()
+def test_another_harnesss_events_end_codexs_last_command() -> None:
+    # A review's attempts share a transcript: Claude Code's events after Codex's
+    # failed command are not that command's output.
+    failed = "exec\n/bin/bash -lc 'make check' in /repo\n exited 2 in 1ms:\nError 1\n"
+    event = json.dumps({"type": "user", "message": "touch: Read-only file system"})
 
-    assert claude_code.anchored("Edit(openspec/changes/README.md)", tmp_path) == \
-        f"Edit(/{root}/openspec/changes/README.md)"
-    assert claude_code.anchored("Write(./docs/**)", tmp_path) == f"Write(/{root}/docs/**)"
-    assert claude_code.anchored("Read(**/*.py)", tmp_path) == f"Read(/{root}/**/*.py)"
-
-
-def test_a_rule_reaching_above_the_checkout_is_anchored_without_dot_dot(tmp_path: Path) -> None:
-    # Claude Code never matches a pattern holding `..`, so a sibling worktree's
-    # rule must reach it by its resolved path.
-    checkout = tmp_path / "changes" / "a-change"
-    checkout.mkdir(parents=True)
-    parent = (tmp_path / "changes").resolve().as_posix()
-
-    assert claude_code.anchored("Edit(../*-proposal/openspec/**)", checkout) == \
-        f"Edit(/{parent}/*-proposal/openspec/**)"
-    assert claude_code.anchored("Read(../*-proposal/**)", checkout) == \
-        f"Read(/{parent}/*-proposal/**)"
-
-
-def test_other_rules_pass_unchanged(tmp_path: Path) -> None:
-    for rule in ("Read", "Grep", "Bash(make check-*)", "Edit(//etc/hosts)",
-                 "Edit(~/notes.md)", "Edit(/openspec/**)", "WebFetch(domain:github.com)"):
-        assert claude_code.anchored(rule, tmp_path) == rule
-
-
-def test_the_table_command_anchors_table_granted_and_deny_rules(tmp_path: Path) -> None:
-    rules = StepRules(skill="change-validate", allow=("Read", "Edit(openspec/**)"),
-                      deny=("Edit(.claude/**)",))
-    model = Model(harness="claude", model="claude-sonnet-5-5", effort=None)
-    root = tmp_path.resolve().as_posix()
-
-    command = claude_code.table_command("go", rules, None, model, root=tmp_path,
-                                        granted=("Edit(docs/x.md)",))
-
-    allowed = command[command.index("--allowedTools") + 1:command.index("--disallowedTools")]
-    assert allowed == ["Read", f"Edit(/{root}/openspec/**)", f"Edit(/{root}/docs/x.md)"]
-    assert command[command.index("--disallowedTools") + 1:] == [f"Edit(/{root}/.claude/**)"]
+    assert codex.refusals(failed + event + "\n") == []
 
 
 CODEX_SESSION = """Reading additional input from stdin...

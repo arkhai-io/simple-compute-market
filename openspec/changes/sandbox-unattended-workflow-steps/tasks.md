@@ -902,7 +902,7 @@ CW-jqi7, CW-qu42, CW-m8wq). Files: `wrapper.py`, `review.py`, `harness.py`'s
 `UNATTENDED`, `log.py`, `next_step.py`, `test_change_workflow_wrapper.py`,
 `test_change_workflow_review.py`, `scripts/tests/test_change_next_step.py`.
 
-- [ ] 7.1 The wrapper resolves the run's scope (section 2, with its adapter and
+- [x] 7.1 The wrapper resolves the run's scope (section 2, with its adapter and
   grants), probes, and launches the adapter's command inside the sandbox; when the
   probe fails it launches unconfined, prints the warning, and records `unconfined:
   true` on the line; it reads each step's skill and `resume_from` from the engine's
@@ -913,29 +913,178 @@ CW-jqi7, CW-qu42, CW-m8wq). Files: `wrapper.py`, `review.py`, `harness.py`'s
   the line names the refusal; a review's doubled reviewer cannot write the files it
   reviews but records its invocations (CW-m8wq's review scenarios); with the probe
   doubled to fail, the run is unconfined and its line says so (CW-v5ny's scenario).
-- [ ] 7.2 The line's `refusals` gather the adapter's (6.3) and each push the sandbox's
+  Done. In `sandbox.py`:
+  - `Confinement(probe, prepare, launch)` is the sandbox as a seam; `BUBBLEWRAP` is
+    the real one.
+  - `confine(confinement, harnesses, resolve, step)` resolves the run's scope for
+    each harness, before anything runs and whether or not the sandbox can run, so a
+    grant is refused either way. Then it probes once, and warns where the probe
+    fails. It returns `Confined(unconfined, scopes)`.
+  - `Confined.prepare` creates the mounts. `Confined.launch` gives each attempt's
+    command.
+  - `missing(said, program)` reads bubblewrap's own `bwrap: execvp … No such file`
+    line, a whole line, so a harness not installed is unavailable inside the sandbox
+    too, and a quoted line is not taken for it.
+  - The memfds are inheritable. `claude_code.run` and `codex.run` keep descriptors
+    open (`close_fds=False`), so no runner signature changed. The cost: a harness
+    also inherits any inheritable descriptor the engine itself inherited, such as a
+    make jobserver's pipes.
+
+  `Wrapper` gains `confinement`, `home`, and `temporary`, and drops `steps_path`.
+  - `run` and `resume` confine before `_turn`, refusing a harness whose adapter
+    cannot run the step.
+  - `_logged_turn` prepares the mounts after the before-actions and before
+    `begin()`, so a placeholder is no session change.
+  - Each attempt launches `claude_code.command` through `Confined.launch`. The skill
+    and `resume_from` come from `STEP_DEFINITIONS`. `unconfined: true` lands on the
+    line.
+
+  `run_review` and `review_and_log` take `confinement`, `home`, and `temporary`.
+  `review_and_log` confines first, so `unconfined` marks the line.
+  - Codex and its Claude fallback launch through `Confined.launch`. The fallback
+    runs `claude_code.command` with `REVIEW_UNATTENDED`, which drops "one command
+    per Bash call".
+  - Found while wiring: Codex writes `--output-last-message` itself, inside the
+    sandbox, and the review's checkout is read-only. So the draft lives in a
+    run-scoped `mkdtemp` in the scope's temporary directory, moved into
+    `transcripts/` with `shutil.move` and the directory removed.
+  - `claude_code.table_command` and `anchored` are removed, since nothing uses
+    them, and so are the wrapper's and review's `load_steps` and `steps_path`.
+  - Section 8's `granted` rules are still recorded but reach no command.
+
+  Tests, all passing, none skipped:
+  - external-process integration (bwrap, sh, git, the stand-in) in
+    `test_change_workflow_wrapper.py`, the harness doubled by a program streaming
+    Claude Code's events, through `claude_code.run`, home and temporary directories
+    the test's own: a design run writes a file under `openspec/`, is refused
+    `src.py`, and its line names the refusal;
+  - in `test_change_workflow_review.py`, the same level, Codex doubled through
+    `codex.run`: the reviewer's write of a reviewed file fails, its write under
+    `.git/change-invocations/` succeeds, its draft, written in the temporary
+    directory, is published, the line names the refusal, and the run's draft
+    directory is gone. That shows the invocation record writable. It does not run
+    CW-m8wq's "A review runs the checks before a commit", which needs Claude Code
+    running `run pre-commit`;
+  - external-process integration with the probe doubled to fail, the stand-in run
+    unconfined: a triage warns, records `unconfined: true`, and its stash still
+    stops it (`stash`);
+  - in `test_change_workflow_review.py`, library integration with the probe doubled
+    to fail: a review runs unconfined, warns, and records `unconfined: true`;
+  - library integration: a resumed design whose line names a Codex model is refused
+    before any session starts;
+  - a unit test of `missing`.
+
+  Not tested: the Claude fallback reviewer inside real bubblewrap; a harness not
+  installed inside it, past `missing`'s unit test.
+
+  The other wrapper and review tests stand the sandbox in with `NO_SANDBOX`, a
+  fixture `Confinement` that confines and creates nothing. The review tests take it
+  through module-level `partial`s.
+- [x] 7.2 The line's `refusals` gather the adapter's (6.3) and each push the sandbox's
   `git` refused (4.1), taken from the session's invocations, whatever the harness
   (D7; CW-w3oa, CW-j4cs's refused-push scenario); `denials` stay the harness's.
   Verify: library-integration tests for CW-j4cs's "A refused push reaches the run's
   record" and CW-k5mk's "A step's message omits a refusal".
-- [ ] 7.3 The next-step computation treats a line carrying `refusals` as one carrying
+  Done. `running.refused_pushes(invoked)` turns each `REFUSED_PUSH` entry into
+  `{tool: "git", command, error}`.
+  - The wrapper's line carries `refusals`: each attempt's `Stream.refusals`, then the
+    sessions' refused pushes. The entries stay in `invoked` too.
+  - The review's line carries the transcript's refusals, Codex's and Claude Code's
+    (`transcript_refusals_of_either`), on a published record and an unpublished one,
+    then the kept refused pushes. Only the published path is tested. Codex's reading
+    resets at a Claude Code event, since a review's attempts share one transcript,
+    and a unit test shows it.
+  - A Codex reviewer keeps no invocations, having no session id (section 4's
+    handoff), so its refused pushes reach no line. The review pushes nothing.
+  Tests, external-process integration through real bubblewrap, passing:
+  - CW-j4cs's scenario: an implementation run's `git push --no-verify origin HEAD:dev`
+    is refused by the sandbox's `git`, the line's `refusals` holds it with its command
+    line, and the bare remote holds nothing;
+  - CW-k5mk's scenario: in 7.1's design test, the outcome's message names no refusal
+    and the line carries it.
+- [x] 7.3 The next-step computation treats a line carrying `refusals` as one carrying
   `denials`: the owner reads it before the change moves on, and a waiting outcome
   waits for that reading (CW-jqi7). Verify: library-integration tests in
   `test_change_next_step.py` for CW-jqi7's two scenarios.
-- [ ] 7.4 Rewrite `UNATTENDED` as one harness-neutral paragraph: the step runs in a
+  Done. `next_step._unread(entry)` is denials or refusals.
+  - `_waiting` and the waiting list use it. The owner's result carries `refusals`
+    beside `denials`, and its reason counts both and asks for each to be read as a
+    finding or a gap.
+  - `log.decision_line` lets `--reads` name a run with refusals and no denials.
+  Tests in `test_change_next_step.py`, library integration on real log files, all
+  passing:
+  - CW-jqi7's "A question carries refusals";
+  - a finished run with refusals waits for its reading;
+  - "A question carries denials", existing.
+  Three tests' expected reason text was updated.
+- [x] 7.4 Rewrite `UNATTENDED` as one harness-neutral paragraph: the step runs in a
   sandbox scoped to it; a write refused as a read-only file system or busy is outside
   its scope; stop naming the path if it cannot go on, else say what it did instead;
   wait on background commands with `wait`; end every turn with its outcome (D15;
   CW-4yhk, CW-b5cf). Verify: a unit test that the prompt names no rule, chain,
   "don't ask mode", or `-C`.
-- [ ] 7.5 Interactive runs stay outside the sandbox and the checks: the make targets
+  Done. `harness.UNATTENDED` is one paragraph. It says a denied call is recorded too,
+  without naming a rule. A unit test in `test_change_workflow_harness.py` passes: no
+  "rule", "chain", "don't ask mode", "Bash call", or "step table", no `-C` as a word
+  (`-c\b` on the lowered text), and each of its points present.
+- [x] 7.5 Interactive runs stay outside the sandbox and the checks: the make targets
   without `UNATTENDED=1` open the owner's harness as today, and `run before`, `run
   after`, and `record` record no state and run no check (D9; CW-g5ry). Verify: the
   fragment's interactive command line (`make -n design CHANGE=<change>`) holds no
   `bwrap`, and a library-integration test of `record` on a run that rewrote history
   records its outcome with no `invariants`.
-- [ ] 7.6 Verification point: the wrapper, review, and next-step tests (library
+  Done; nothing in the interactive path changed. Tests in
+  `test_change_workflow_cli_steps.py`, passing:
+  - `make -n design CHANGE=X` prints the interactive start alone, and that start
+    opens `["claude", "/change-design …"]`, no `bwrap`;
+  - library integration on a real checkout: `record` of a triage after an amend
+    records it, with no `invariants` and no `unconfined`.
+  `run before` and `run after` were not tested: neither calls `invariants` or the
+  sandbox.
+- [x] 7.6 Verification point: the wrapper, review, and next-step tests (library
   integration through real bubblewrap); `run pre-commit` passes. End-to-end: none.
+  Done. The tests through real bubblewrap are external-process integration, not
+  library integration as the task says.
+  - `make test-release-tooling` on the review, wrapper, harness, sandbox, CLI, CLI
+    steps, hooks, push, cost, stream, next-step, log, invariants, around,
+    assumptions, graph, steps, and config tests: 1435 passed, none skipped (`-rs`).
+    After the check's fixes, the review, wrapper, harness, next-step, log, CLI, and
+    sandbox tests: 855 passed.
+  - `run pre-commit`: its functional hooks pass, the relock, packaging, and every
+    suite. Its `pre-commit` failed three checks:
+    - `check-doc-citations` on `propose.py`, expected;
+    - `check-doc-citations` on a file path in these notes, reworded;
+    - `check-comment-hygiene` on a literal `01-design.md` in a test, as section 5
+      met, now built from the kind.
+    The rerun, after the check's fixes, passed every hook and suite, and failed only
+    `check-doc-citations` on `propose.py`. The relock left the locks as committed.
+  - Fresh-context check fixes:
+    - `missing` reading bubblewrap's own line alone;
+    - Codex's refusal reading reset at another harness's event;
+    - the review's draft directory made last, so nothing before its removal raises;
+    - the owner's reason saying "refusal(s)", since pushes are refusals too;
+    - `Launch`'s, `log`'s, and `--reads`' wording;
+    - the test block's comment;
+    - the unconfined test relabelled;
+    - tests of the review unconfined, `missing`, and a harness refused;
+    - the prompt test's `-C` check;
+    - these notes narrowed.
+
+    Declined:
+    - The wrapper's and the CLI's wording of grants as rules, and the dead `granted`
+      parameters. Section 8 replaces them in this session.
+    - Dropping `prepare` from `sandbox.launch`. It is idempotent, and keeps
+      `launch` whole for section 3's tests, which call it alone.
+    - Recording the skip gate as deferred work. Sections 3, 4, and 6 flagged it for
+      the round's triage, which decides between a gate and a recorded exception.
+  Handoff:
+  - Every unattended run now launches in the sandbox. This round's validation,
+    review, and triage are its first real runs. Watch:
+    - Claude Code's `~/.claude.json` saves (6.1);
+    - Codex's lock under `/tmp`;
+    - the review's lack of `~/.cache`, which `uv` wants;
+    - the Python each Git call inside starts (section 4).
+  - Section 8: `--write` reaches `_confine` as grants. `granted` and `--allow` go.
 
 ## 8. Grants as writable paths
 

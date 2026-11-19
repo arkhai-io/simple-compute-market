@@ -8,12 +8,13 @@ run's session and commit: the wrapper's for an unattended run, and
 orchestrating session's own lines: a `round` line recording the implementation
 round the owner agreed, and an `orchestrator` line recording a decision — the
 orchestrating session's own routing or recovery, or the owner's — naming the run
-whose denials it reads, the run it resolves, and, for the owner's alone, the node
-it directs the change to next, so the next-step computation routes on it, or the
-finished triage it revisits, which the wrapper then resumes. Reading
-and resolving are distinct because a run can be denied a call and still end with a
-question or a proposed return: its denials are read first, and its outcome is
-answered or decided after. This module is the log's only writer.
+whose denials and refusals it reads, the run it resolves, and, for the owner's alone,
+the node it directs the change to next, so the next-step computation routes on it,
+or the finished triage it revisits, which the wrapper then resumes. Reading and
+resolving are distinct because a run can be denied a call, or refused a write, and
+still end with a question or a proposed return: its denials and refusals are read
+first, and its outcome is answered or decided after. This module is the log's only
+writer.
 
 A run's line may carry `invoked`: each hook, kind, and command the run invoked
 through `run`, `gather`, the guarded push, or the actions and hooks around its
@@ -22,8 +23,11 @@ resolved to, its exit status, when it started, and how long it took; and `inputs
 its inputs directory relative to the change's records. Both fields are optional, so
 the record set's format does not depend on them. A run stopped because its checks
 after the session found a violation carries `invariants`: each check it failed, by
-name, and what it found (`invariants`). It too is optional, added beside the
-outcome as any field the writer is given is.
+name, and what it found (`invariants`). A run carries `refusals`, each write its
+sandbox refused and each push its `git` refused, with its tool, command or path,
+and error, which a decision `reads` as it reads denials; and `unconfined: true`
+when the sandbox could not run. Each is optional, added beside the outcome as any
+field the writer is given is.
 
 A finished merge's or archive cleanup's outcome carries `landing`, the remote,
 branch, and commit the run fetched, which the writer checks against the checkout
@@ -809,8 +813,8 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
-    `reads` names the run (its `seq`) whose recorded denials the decision has
-    read against the step's rules; `resolves` names the run the decision
+    `reads` names the run (its `seq`) whose recorded denials and refusals the
+    decision has read, each as a finding or a gap; `resolves` names the run the decision
     settles, so that run alone stops waiting on the owner: a decision clears
     nothing it does not name. They differ because a run denied a call can still
     end with a question or a proposed return, whose denials are read before the
@@ -882,9 +886,9 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
         if reads not in runs:
             raise StepError(f"no run has seq {reads!r} in the workflow log; a decision "
                             "reads a step's run")
-        if not runs[reads].get("denials"):
-            raise StepError(f"the run at seq {reads} recorded no denial; a decision reads "
-                            "a run's denials")
+        if not (runs[reads].get("denials") or runs[reads].get("refusals")):
+            raise StepError(f"the run at seq {reads} recorded no denial or refusal; a "
+                            "decision reads a run's denials and refusals")
         line["reads"] = reads
     if resumes is not None:
         if by != "owner":

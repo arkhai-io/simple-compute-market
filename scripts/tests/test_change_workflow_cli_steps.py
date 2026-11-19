@@ -90,6 +90,26 @@ def test_an_interactive_triage_records_its_outcome(
     assert json.loads(capsys.readouterr().out) == line
 
 
+def test_an_interactive_run_that_rewrote_history_is_recorded_unchecked(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CW-g5ry: `record` records no state and checks no invariant, so an interactive
+    triage that amended the commit it started on is recorded as it ended, with no
+    `invariants`. Library integration: a real Git checkout."""
+    start = _committed(tmp_path, monkeypatch)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit",
+                    "-q", "--amend", "--allow-empty", "-m", "rewritten"], cwd=tmp_path,
+                   check=True)
+    log = log_file(tmp_path)
+    _triaged(log, "13-design")
+
+    assert main(["record", CHANGE, "triage", "--outcome", json.dumps(TRIAGED)], root=tmp_path,
+                environ=INTERACTIVE) == 0
+
+    (line,) = read_log(log)
+    assert line["outcome"] == "finished" and line["commit"] != start
+    assert "invariants" not in line and "unconfined" not in line
+
+
 DESIGNED = {**VALID["finished"], "next": {"step": "review", "kind": "design"}}
 
 
@@ -461,7 +481,6 @@ def test_a_fresh_run_is_granted_each_rule_its_allow_values_hold(tmp_path: Path) 
                 wrapper=make_wrapper(tmp_path, claude)) == 0
 
     rules = ["Bash(gh run download *)", "Bash(make lock)", "Bash(helm version)"]
-    assert option_rules(claude.commands[0], "--allowedTools")[-3:] == rules
     assert read_log(log_path(tmp_path, CHANGE))[-1]["granted"] == rules
 
 
@@ -476,7 +495,6 @@ def test_a_resumed_run_splits_its_allow_values_too(tmp_path: Path) -> None:
                 wrapper=wrapper) == 0
 
     rules = ["Bash(helm version)", "Bash(make lock)"]
-    assert option_rules(claude.commands[1], "--allowedTools")[-2:] == rules
     assert read_log(log_path(tmp_path, CHANGE))[-1]["granted"] == rules
 
 
@@ -812,6 +830,23 @@ def _make_n(*arguments: str) -> list[str]:
 def test_the_root_makefile_runs_the_command_through_the_fragment(
         target: str, variables: list[str], commands: list[str]) -> None:
     assert _make_n(target, "CHANGE=X", *variables) == commands
+
+
+def test_an_interactive_design_opens_the_owners_harness_unconfined(tmp_path: Path) -> None:
+    """CW-g5ry's "The owner runs a design interactively": the make target without
+    `UNATTENDED=1` starts the step interactively, and the interactive start opens the
+    owner's harness alone, with no sandbox around it."""
+    printed = _make_n("design", "CHANGE=X")
+    opened: list[list[str]] = []
+    _checkout(tmp_path)
+    log_file(tmp_path)
+
+    assert main(["start", "design", CHANGE], root=tmp_path,
+                launch=lambda command, root: opened.append(list(command)) or 0) == 0
+
+    assert printed == [f'{COMMAND} start design "X"']
+    assert not any("bwrap" in line for line in printed)
+    assert opened == [["claude", f"/change-design {CHANGE}"]]
 
 
 @pytest.mark.parametrize("target,variables,commands", [

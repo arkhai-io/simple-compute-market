@@ -7,29 +7,37 @@ import json
 import os
 import signal
 import subprocess
+import sys
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Sequence
 
 import pytest
 
-from change_workflow import config, find
+from change_workflow import codex, config, find, review, sandbox
+from change_workflow.claude_code import TOOLS
+from change_workflow.sandbox import BUBBLEWRAP, BWRAP
 from change_workflow.log import log_path, note_orchestrator, read_log
 from change_workflow.review import (ReviewError, check_review, claim_record, prior_session,
-                                    review_and_log, review_models, run_review)
+                                    review_models)
 from change_workflow.running import Terminated, live_runs
 from change_workflow.harness import Model
-from change_workflow.steps import load_steps
 from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
-                                      RECORDS, VALIDATED, FakeClaude, claude_review, clock,
-                                      codex_missing, codex_saying, configured, ignore_evidence,
-                                      not_installed,
+                                      NO_SANDBOX, RECORDS, VALIDATED, FakeClaude, claude_review,
+                                      clock, codex_missing, codex_saying, configured,
+                                      ignore_evidence, not_installed,
                                       option, option_rules, prompted, repository, review_text,
                                       reviews_of, validation_text, writing)
 
 # The branch the change lands on, given for each review run here: the change is
 # worked in place, with no clone to have recorded one.
 BASE = "dev"
+
+# The review runner with the sandbox stood in for, so each test reads the reviewer's
+# own command; the tests that confine a reviewer for real give the sandbox themselves.
+run_review = partial(review.run_review, confinement=NO_SANDBOX)
+review_and_log = partial(review.review_and_log, confinement=NO_SANDBOX)
 
 
 def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> None:
@@ -757,8 +765,10 @@ def test_a_review_falls_back_to_claude_when_codex_is_unavailable(
     assert "--json-schema" not in command
     assert (option(command, "--model"), option(command, "--effort")) == ("claude-opus-5-5",
                                                                          "high")
-    assert option_rules(command, "--allowedTools") == list(load_steps()["review"].allow)
-    assert "Edit" in option_rules(command, "--disallowedTools")
+    # Every tool is allowed: the review's sandbox, not a rule, keeps what it reviews
+    # read-only.
+    assert option_rules(command, "--allowedTools") == list(TOOLS)
+    assert option_rules(command, "--disallowedTools") == ["Bash(git push*)"]
     record = reviews_of(root) / "01-implementation.md"
     text = record.read_text("utf-8")
     assert "<!-- reviewer-session: claude:c-1 -->" in text
@@ -1441,3 +1451,85 @@ def test_a_reviewer_that_changes_nothing_is_published(tmp_path: Path) -> None:
                           runner=writing(review_text()), head=lambda _: HEAD)
 
     assert line["outcome"] == "finished" and "invariants" not in line, line.get("reason")
+
+
+# A reviewer launched in the review's sandbox: external-process integration, the
+# runner launching real bubblewrap around a program that stands in for Codex, in a
+# real Git checkout; skipped, saying why, where the engine's own probe finds the
+# sandbox cannot run.
+
+PROBED = sandbox.probe()
+
+# Codex stood in for: it runs each command it is given, printing it and its output as
+# Codex does, then writes its final message where Codex is told to.
+_CODEX = r"""
+import subprocess, sys
+draft, review, *commands = sys.argv[1:]
+print("session id: r-1")
+for command in commands:
+    done = subprocess.run(["sh", "-c", command], capture_output=True, text=True)
+    print("exec")
+    print(f"/bin/bash -lc '{command}' in /repo")
+    print(f" exited {done.returncode} in 1ms:" if done.returncode else " succeeded in 1ms:")
+    print(done.stdout + done.stderr, end="")
+open(draft, "w").write(review)
+"""
+
+
+def _confined_reviewer(text: str, *commands: str):
+    """Codex's command replaced by `_CODEX` inside the sandbox's command, run through
+    Codex's adapter's own runner."""
+    def runner(command: Sequence[str], log: Path) -> int:
+        assert command[0] == BWRAP
+        draft = command[command.index("--output-last-message") + 1]
+        start = command.index("--", command.index("--die-with-parent")) + 1
+        return codex.run([*command[:start], sys.executable, "-c", _CODEX, draft, text,
+                          *commands], log)
+    return runner
+
+
+@pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
+def test_a_confined_reviewer_cannot_write_what_it_reviews_but_records_its_invocations(
+        tmp_path: Path) -> None:
+    """CW-m8wq's "A review tries to write" and the engine's invocation record writable
+    beside it: the reviewer's write of a file it reviews fails, its write under
+    `.git/change-invocations/` succeeds, its final message, written outside the
+    checkout, is published, and the line names the refusal."""
+    root = _tracking(repository(tmp_path / "work"))
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    reviewed, invocations = root / "openspec/changes/x.md", root / ".git/change-invocations"
+    runner = _confined_reviewer(review_text(), f"echo y > {reviewed}",
+                                f"echo y > {invocations}/probe")
+
+    kind = "design"
+
+    line = review_and_log(CHANGE, kind, root=root, clock=clock, runner=runner,
+                          head=lambda _: HEAD, echo=None, confinement=BUBBLEWRAP,
+                          home=tmp_path / "home", temporary=temporary)
+
+    assert line["outcome"] == "finished", line.get("reason")
+    assert (reviews_of(root) / f"01-{kind}.md").is_file()
+    assert not reviewed.exists()
+    assert (invocations / "probe").read_text("utf-8") == "y\n"
+    [refusal] = line["refusals"]
+    assert (refusal["tool"], refusal["command"]) == ("exec", f"echo y > {reviewed}")
+    assert "Read-only file system" in refusal["error"]
+    assert not list(temporary.iterdir())
+
+
+def test_without_the_sandbox_a_review_is_unconfined_and_says_so(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-v5ny, for the review: with the probe failing, the reviewer runs unconfined,
+    a warning says why, and the line records `unconfined: true`."""
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+    missing_bwrap = sandbox.Confinement(probe=lambda: "bwrap is not installed")
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), calls=calls), head=lambda _: HEAD,
+                          echo=None, confinement=missing_bwrap)
+
+    assert calls[0][0] == "codex"
+    assert (line["outcome"], line["unconfined"]) == ("finished", True)
+    assert "review run is unconfined: bwrap is not installed" in capsys.readouterr().err

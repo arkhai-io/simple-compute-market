@@ -321,7 +321,8 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--resolves", type=int, default=None,
                           help="the seq of the run the decision settles")
     decision.add_argument("--reads", type=int, default=None,
-                          help="the seq of the run whose denials the decision has read")
+                          help="the seq of the run whose denials and refusals the decision "
+                               "has read")
     decision.add_argument("--next", dest="next_step", default=None,
                           help="the owner's direction: the step the change goes to next")
     decision.add_argument("--kind", default=None,

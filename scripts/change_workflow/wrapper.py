@@ -1,8 +1,14 @@
 """Running a step unattended, and resuming a waiting run with the owner's answer.
 
-`Wrapper.run` starts the step's skill as a headless Claude Code session on the first
-available of the step's models, which the repository's workflow configuration names
-in order of preference (`models.<step>`): a model whose harness is
+`Wrapper.run` starts the step's skill, which the engine's definition of the step
+names (`graph.STEP_DEFINITIONS`), as a headless session of the harness of the first
+available of the step's models, through that harness's adapter, inside the step's
+sandbox (CW-x3pf). The repository's workflow configuration names the models in order
+of preference (`models.<step>`). The run's scope — the step's baseline, the adapter's
+paths, the repository's additions, and its grants — is resolved before anything
+runs, and the sandbox probed once; where it cannot run, the session runs unconfined,
+with a warning, and the line records `unconfined: true` (CW-v5ny). A model whose
+harness is
 missing, not signed in, or at its usage limit is passed over, and the line names
 each one passed over and the model that ran; a network error is retried on the
 same model, never passed over. `Wrapper.resume` continues the session of a waiting
@@ -24,9 +30,12 @@ that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself, and so is
 a triage whose outcome does not name the records it triaged, and a finished merge
 or archive cleanup whose landing record the log's writer refuses. A step
-denied a tool ends `stopped` only when it cannot go on without it; one that went
-on is logged with the outcome it ended with, and the orchestrating session reads
-the recorded denials before the change moves on. A run whose session took further
+denied a tool, or refused a write, ends `stopped` only when it cannot go on
+without it; one that went on is logged with the outcome it ended with, and the
+orchestrating session reads the recorded denials and refusals before the change
+moves on. A line's `refusals` are the writes the sandbox refused, which the
+adapter reads from the run's events, then each push the sandbox's `git` refused,
+from the engine's own record of it (CW-w3oa, CW-j4cs). A run whose session took further
 turns after an outcome is logged with its last, the earlier ones kept beside it as
 `earlier`.
 
@@ -63,8 +72,8 @@ and `invariants` on the line; nothing after the session runs, and nothing is rep
 
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
 CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, CW-q5fy, CW-5ldi,
-CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np, CW-59c7, CW-q7ub, and
-CW-f9le.
+CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np, CW-59c7, CW-q7ub, CW-f9le,
+CW-x3pf, CW-m8wq, CW-v5ny, CW-w3oa, and CW-j4cs.
 """
 
 from __future__ import annotations
@@ -76,14 +85,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import config, next_step
+from . import claude_code, config, next_step
+from .adapters import ADAPTERS
 from .around import (Around, Ran, after_failure_note, after_question, claim_inputs, failures,
                      guarded, inputs_note, named)
 from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_now
-from .find import landing_branch
-from .graph import AFTER, BEFORE
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
-from . import claude_code
+from .find import landing_branch
+from .graph import AFTER, BEFORE, STEP_DEFINITIONS
 from .harness import NETWORK_RETRIES, Model, Runner, missing_program, unreachable
 from .invariants import Invariants, Violation, stopped
 from .log import (Checkout, git_checkout, landing_problems, last_run, log_path, read_log,
@@ -92,8 +101,9 @@ from .outcome import load_schema, outcome_problems, triage_outcome_problems
 from .push import set_upstreams
 from .records import git_head, next_transcript
 from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
-                      runs_directory, termination_deferred, termination_ends_the_run)
-from .steps import StepRules, load_steps
+                      refused_pushes, runs_directory, termination_deferred,
+                      termination_ends_the_run)
+from .sandbox import BUBBLEWRAP, Confined, Confinement, confine, missing
 from .stream import Stream
 from .subagents import subagent_denials
 
@@ -103,8 +113,8 @@ VALIDATE = "validate"
 _VALIDATING = ("validate", "validate-and-review")
 
 
-def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
-    return f"/{rules.skill} {change}" + (f" {arguments}" if arguments else "")
+def step_prompt(skill: str, change: str, arguments: str = "") -> str:
+    return f"/{skill} {change}" + (f" {arguments}" if arguments else "")
 
 
 def target_note(target: Entry) -> str:
@@ -252,9 +262,14 @@ class Wrapper:
     clock: Clock = utc_now
     # Progress goes to stderr: stdout carries only the outcome line a caller parses.
     echo: Callable[[str], None] | None = lambda shown: print(shown, file=sys.stderr, flush=True)
-    # The step table and the outcome schema; None reads the repository's own.
-    steps_path: Path | None = None
+    # The outcome schema; None reads the repository's own.
     schema_path: Path | None = None
+    # The sandbox each run's session is launched in, the home directory its scope's
+    # `~` paths name, and the temporary directory it writes; None is the user's, and
+    # the system's.
+    confinement: Confinement = BUBBLEWRAP
+    home: Path | None = None
+    temporary: Path | None = None
     # Where Claude Code keeps a session's conversation, read for the turns it gained
     # outside the wrapper and the time of its last turn.
     conversation: Callable[[Path, str], Path] = conversation_file
@@ -286,12 +301,11 @@ class Wrapper:
         change's implementation runs not waiting on the owner. A granted rule
         applies to this run alone, as it does to a resumed run.
         """
-        steps = load_steps(self.steps_path)
-        if step not in steps or step == "review":
-            raise StepError(f"{step!r} has no unattended Claude Code run; a review runs "
+        if step not in STEP_DEFINITIONS or step == "review":
+            raise StepError(f"{step!r} has no unattended run of its own; a review runs "
                             "through `review`, and the others are "
-                            + ", ".join(name for name in steps if name != "review"))
-        rules = steps[step]
+                            + ", ".join(name for name in STEP_DEFINITIONS if name != "review"))
+        definition = STEP_DEFINITIONS[step]
         log = log_path(self.root, change)
         if sections and step != "implement":
             raise StepError("only implementation takes sections")
@@ -306,8 +320,8 @@ class Wrapper:
             previous = continued_run(read_log(log), change, continuing)
             session, models = continuing, _session_models(previous, models)
             extra["continues"] = previous["seq"]
-        elif rules.resume_from and not fresh:
-            previous = last_run(log, [rules.resume_from, step])
+        elif definition.resume_from and not fresh:
+            previous = last_run(log, [definition.resume_from, step])
             if previous is not None and not previous.get("session"):
                 raise StepError(f"{change}'s last {previous['step']} run (seq "
                                 f"{previous['seq']}) recorded no session to resume; run "
@@ -323,9 +337,23 @@ class Wrapper:
         if target is not None:
             extra["target"] = target
             arguments = " ".join(part for part in (arguments, target_note(target)) if part)
-        return self._turn(step, rules, change, log, step_prompt(rules, change, arguments),
-                          models, session=session, granted=granted, extra=extra,
+        confined = self._confine(step, models)
+        return self._turn(step, change, log, step_prompt(definition.skill, change, arguments),
+                          models, confined, session=session, granted=granted, extra=extra,
                           target=target, before=True)
+
+    def _confine(self, step: str, models: Sequence[Model]) -> Confined:
+        """How a run of `step` on `models` is confined, its scope resolved for the
+        harness of each, before anything runs: refused, as any `StepError`, where the
+        configuration cannot be read or a harness's adapter cannot run the step."""
+        configuration = config.load(self.root)
+        for model in models:
+            if model.harness not in ADAPTERS or not ADAPTERS[model.harness].runs(step):
+                raise StepError(f"the {model.harness} harness cannot run the {step} step")
+        return confine(self.confinement, [model.harness for model in models],
+                       lambda harness: configuration.scope(step, self.root, harness=harness,
+                                                           home=self.home,
+                                                           temporary=self.temporary), step)
 
     def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
         """Resume the step session of the run at `seq` with the owner's answer.
@@ -349,14 +377,13 @@ class Wrapper:
         """
         if not answer:
             raise StepError("a resumed step needs the owner's answer")
-        steps = load_steps(self.steps_path)
         log = log_path(self.root, change)
         entries = read_log(log)
         previous = next((e for e in entries if e.get("seq") == seq), None)
         if previous is None:
             raise StepError(f"{change}'s workflow log has no seq {seq}")
         step = previous.get("step")
-        if step not in steps or step == "review":
+        if step not in STEP_DEFINITIONS or step == "review":
             raise StepError(f"seq {seq} is a {step} line, not the run of a step that can be "
                             "resumed")
         revisited = (previous.get("outcome") == "finished"
@@ -396,13 +423,13 @@ class Wrapper:
         if target is not None:
             extra["target"] = target
             prompt += f"\n\n{target_note(target)}"
-        return self._turn(step, steps[step], change, log, prompt,
-                          _session_models(previous, config.load(self.root).step_models(step)),
+        models = _session_models(previous, config.load(self.root).step_models(step))
+        return self._turn(step, change, log, prompt, models, self._confine(step, models),
                           session=previous["session"], granted=granted, extra=extra,
                           target=target)
 
-    def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
-              models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
+    def _turn(self, step: str, change: str, log: Path, prompt: str, models: Sequence[Model],
+              confined: Confined, *, session: str | None, granted: Sequence[str] = (),
               extra: Entry | None = None, target: Entry | None = None,
               before: bool = False) -> Entry:
         """Run one turn and log it, recorded as in progress in the checkout until its
@@ -413,7 +440,7 @@ class Wrapper:
         killed with its line unwritten."""
         with termination_deferred(), recorded_run(self.runs(self.root), step, change,
                                                   clock=self.clock):
-            return self._logged_turn(step, rules, change, log, prompt, models,
+            return self._logged_turn(step, change, log, prompt, models, confined,
                                      session=session, granted=granted, extra=extra,
                                      target=target, before=before)
 
@@ -425,8 +452,8 @@ class Wrapper:
                       base=landing_branch(self.root, change), environ=self.environ,
                       invocations=self.invocations)
 
-    def _logged_turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
-                     models: Sequence[Model], *, session: str | None,
+    def _logged_turn(self, step: str, change: str, log: Path, prompt: str,
+                     models: Sequence[Model], confined: Confined, *, session: str | None,
                      granted: Sequence[str] = (), extra: Entry | None = None,
                      target: Entry | None = None, before: bool = False) -> Entry:
         """Run one turn on the first of `models` that is available, and log it.
@@ -461,22 +488,26 @@ class Wrapper:
         behind: list[Entry] = []
         if before:
             ahead = self._actions(around.before, log.parent / inputs / BEFORE)
-        # Recorded once the actions before the session have run, so what they wrote is
-        # not taken for the session's.
+        # What the sandbox mounts is created, and the state the session starts from
+        # recorded, once the actions before the session have run, so neither the
+        # placeholders nor what the actions wrote is taken for the session's.
+        confined.prepare(self.confinement)
         watched = Invariants.of(config.load(self.root), self.root, step, change,
                                 self.invocations)
         watched.begin()
         attempts: list[Stream] = []
         outcome, status, failure, model, stream, passed_over, logged = (
-            self._attempt_models(step, rules, prompt, schema, models, session, granted,
+            self._attempt_models(step, prompt, schema, models, confined, session,
                                  transcript, progress, attempts, target))
         broken = watched.violations(_sessions(session, attempts))
         if not broken and failure is None and outcome.get("outcome") == "finished":
             outcome, status, failure, stream, logged, broken = self._after_finished(
-                step, rules, change, log, inputs, around, behind, outcome, status, model,
-                stream, logged, schema, session, granted, transcript, progress, attempts,
+                step, change, log, inputs, around, behind, outcome, status, model,
+                stream, logged, schema, session, confined, transcript, progress, attempts,
                 target, watched)
         extra = {**extra, **model.entry(), "exit_status": status, "transcript": shown}
+        if confined.unconfined is not None:
+            extra["unconfined"] = True
         if broken:
             # The step's own outcome stands in the message; no action or hook after the
             # session ran, and nothing is repaired.
@@ -500,6 +531,11 @@ class Wrapper:
             self._set_upstreams([entry for s in sessions for entry in taken[s]])
         if invoked := [*ahead, *(entry for s in sessions for entry in taken[s]), *behind]:
             extra["invoked"] = invoked
+        # The writes the sandbox refused, from the harness's events, then the pushes
+        # its `git` refused, from the engine's own record of them.
+        if refusals := [*(found for attempt in attempts for found in attempt.refusals),
+                        *refused_pushes([entry for s in sessions for entry in taken[s]])]:
+            extra["refusals"] = refusals
         try:
             log = log_path(self.root, change)
         except StepError:
@@ -539,11 +575,11 @@ class Wrapper:
         what they invoked."""
         return [entry for one in guarded(moment, directory, BEFORE) for entry in one.invoked]
 
-    def _after_finished(self, step: str, rules: StepRules, change: str, log: Path, inputs: str,
+    def _after_finished(self, step: str, change: str, log: Path, inputs: str,
                         around: Around, behind: list[Entry], outcome: Entry,
                         status: int | None, model: Model, stream: Stream,
                         logged: dict[str, Any] | None, schema: dict[str, Any],
-                        session: str | None, granted: Sequence[str], transcript: Path,
+                        session: str | None, confined: Confined, transcript: Path,
                         progress: Path, attempts: list[Stream], target: Entry | None,
                         watched: Invariants
                         ) -> tuple[Entry, int | None, BaseException | None, Stream,
@@ -574,25 +610,27 @@ class Wrapper:
                 logged = None
                 break
             outcome, status, failure, _, stream, _, logged = self._attempt_models(
-                step, rules, after_failure_note(step, directory, reviews, ran), schema,
-                (model,), resumed, granted, transcript, progress, attempts, target)
+                step, after_failure_note(step, directory, reviews, ran), schema,
+                (model,), confined, resumed, transcript, progress, attempts, target)
             if broken := watched.violations(_sessions(session, attempts)):
                 return outcome, status, failure, stream, logged, broken
             if failure is not None or outcome.get("outcome") != "finished":
                 break
         return outcome, status, failure, stream, logged, []
 
-    def _attempt_models(self, step: str, rules: StepRules, prompt: str, schema: dict[str, Any],
-                        models: Sequence[Model], session: str | None,
-                        granted: Sequence[str], transcript: Path, progress: Path,
+    def _attempt_models(self, step: str, prompt: str, schema: dict[str, Any],
+                        models: Sequence[Model], confined: Confined, session: str | None,
+                        transcript: Path, progress: Path,
                         attempts: list[Stream], target: Entry | None = None,
                         ) -> tuple[Entry, int | None, BaseException | None, Model, Stream,
                                    list[Entry], dict[str, Any] | None]:
         """Run the turn of `step` on the first available of `models`, marked as that
-        step's unattended run: its outcome, exit status, any failure, the model last
-        tried, its stream, the models passed over, and the result the outcome was
-        logged from, when the step gave one. Every attempt's stream is appended to
-        `attempts`. A finished outcome takes `target`, when given, as its exit."""
+        step's unattended run and launched as `confined` says: its outcome, exit
+        status, any failure, the model last tried, its stream, the models passed over,
+        and the result the outcome was logged from, when the step gave one. Every
+        attempt's stream is appended to `attempts`. A finished outcome takes `target`,
+        when given, as its exit. A harness that is not installed is unavailable whether
+        its launch fails or the sandbox's start of it does."""
         failure: BaseException | None = None
         passed_over: list[Entry] = []
         outcome: Entry = {}
@@ -606,14 +644,18 @@ class Wrapper:
                 # Each attempt is read alone; the transcript keeps them all.
                 stream = Stream(transcript, progress, self.clock, self.echo)
                 attempts.append(stream)
-                command = claude_code.table_command(prompt, rules, schema, model,
-                                                    root=self.root, session=session,
-                                                    granted=granted)
+                command = claude_code.command(prompt, schema, model, session=session)
                 failure, status, reached = None, None, None
                 try:
-                    with termination_ends_the_run():
-                        status = self.runner(command, self.root, stream.feed, step)
-                    reached = unreachable(stream.failure_text(status))
+                    with termination_ends_the_run(), \
+                            confined.launch(self.confinement, model.harness,
+                                            command) as launched:
+                        status = self.runner(list(launched.command), self.root, stream.feed,
+                                             step)
+                    said = stream.failure_text(status)
+                    reached = unreachable(said)
+                    if status and launched.unconfined is None and missing(said, command):
+                        reached = ("unavailable", f"{command[0]} is not installed")
                 except FileNotFoundError as exc:
                     if missing_program(exc, command):
                         reached = ("unavailable", f"{command[0]} is not installed")

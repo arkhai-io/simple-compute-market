@@ -27,8 +27,9 @@ engine's own directory, which a program mounted at `/usr/bin/git` could not find
 its own path. Bubblewrap copies the program in from a descriptor as the sandbox
 starts and gives the copy its mode, so it needs no executable file on disk; the module
 it runs is read from the engine's directory as each command runs. The process started
-from a `Launch` inherits its descriptors (`fds`), which the launcher may close once
-that process has started.
+from a `Launch` inherits its descriptors (`fds`), which are inheritable, so a runner
+that keeps its descriptors open across the start, as each adapter's does, passes them
+on, and which the launcher may close once that process has started.
 
 A mount needs something to mount, so before launch each absent writable path is
 created as a directory, and each absent file an adapter's state mounts alone, and
@@ -41,7 +42,12 @@ Before a launch the sandbox is probed: a trivial program run in the namespaces a
 under the base mounts every sandbox starts from, though not a scope's own. Where it
 cannot run — `bwrap` is not installed, or the kernel refuses it the user namespaces it
 needs — `launch` gives the program itself, unconfined, with the probe's reason: the
-sandbox guards against a step's mistakes and never stops the workflow (CW-v5ny).
+sandbox guards against a step's mistakes and never stops the workflow (CW-v5ny). A
+program that is not installed fails inside the sandbox as bubblewrap's own error
+(`missing`), not as the launch's.
+
+`Confinement` holds the three a runner of steps uses — the probe, the creation of a
+scope's mounts, and the launch — so a test may stand in for the sandbox.
 """
 
 from __future__ import annotations
@@ -52,7 +58,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .sandbox_git import REAL_GIT
 from .scope import GIT_EXECUTABLES, Scope, ScopedPath, within
@@ -79,9 +85,10 @@ Run = Callable[..., subprocess.CompletedProcess]
 @dataclass(frozen=True)
 class Launch:
     """The command a run launches; why it is unconfined, None when the sandbox confines
-    it; and the descriptors the command reads as it starts, which the process started
-    from it inherits (`pass_fds`), and which leaving the `with` block closes, any time
-    once that process has started."""
+    it; and the descriptors the command reads as it starts, inheritable, which the
+    process started from it keeps when its runner leaves descriptors open, or names
+    in `pass_fds`, and which leaving the `with` block closes, any time once that
+    process has started."""
 
     command: tuple[str, ...]
     unconfined: str | None = None
@@ -138,10 +145,11 @@ def arguments(scope: Scope, program: Sequence[str], *, git: Sequence[int]) -> li
 
 
 def _readable(data: bytes) -> int:
-    """A descriptor reading `data` from its start, in memory."""
+    """An inheritable descriptor reading `data` from its start, in memory."""
     fd = os.memfd_create("change-workflow-git")
     os.write(fd, data)
     os.lseek(fd, 0, os.SEEK_SET)
+    os.set_inheritable(fd, True)
     return fd
 
 
@@ -198,3 +206,60 @@ def launch(scope: Scope, program: Sequence[str], *,
     # One descriptor for each mount: bubblewrap reads each to its end.
     fds = tuple(_readable(program_text) for _ in GIT_EXECUTABLES)
     return Launch(tuple(arguments(scope, program, git=fds)), fds=fds)
+
+
+def missing(said: str, program: Sequence[str]) -> bool:
+    """Whether `said`, a confined run's output, holds bubblewrap's own line saying it
+    could not start `program`, which is not installed. Only a line bubblewrap begins
+    counts: the rest of a run's output may quote such a line from a file it read."""
+    failed = f"{BWRAP}: execvp {program[0]}: No such file or directory"
+    return any(line.strip() == failed for line in said.splitlines())
+
+
+@dataclass(frozen=True)
+class Confinement:
+    """The sandbox a runner of steps confines each run in: why it cannot run, or None
+    (`probe`); the creation of what a scope mounts, before the state a session starts
+    from is recorded (`prepare`); and the command a run launches (`launch`)."""
+
+    probe: Callable[[], str | None] = probe
+    prepare: Callable[[Scope], None] = prepare
+    launch: Callable[..., Launch] = launch
+
+
+BUBBLEWRAP = Confinement()
+
+
+@dataclass(frozen=True)
+class Confined:
+    """How one run is confined: why the sandbox cannot run, None when it confines the
+    run; and the run's scope for each harness its models name."""
+
+    unconfined: str | None
+    scopes: Mapping[str, Scope]
+
+    def launch(self, confinement: Confinement, harness: str,
+               program: Sequence[str]) -> Launch:
+        """The command that runs `program`, on `harness`, as this run is confined."""
+        return confinement.launch(self.scopes[harness], program,
+                                  probing=lambda: self.unconfined)
+
+    def prepare(self, confinement: Confinement) -> None:
+        """Create what each of the run's scopes mounts and does not exist, unless the
+        run is unconfined, when nothing is mounted."""
+        if self.unconfined is None:
+            for found in self.scopes.values():
+                confinement.prepare(found)
+
+
+def confine(confinement: Confinement, harnesses: Sequence[str],
+            resolve: Callable[[str], Scope], step: str) -> Confined:
+    """How a run of `step` on models of `harnesses` is confined: its scope resolved
+    for each harness by `resolve`, which refuses a grant the scope cannot hold, before
+    anything launches, whether or not the sandbox can run; then the sandbox probed
+    once, and, where it cannot run, the run unconfined, said as a warning."""
+    scopes = {harness: resolve(harness) for harness in dict.fromkeys(harnesses)}
+    if (reason := confinement.probe()) is not None:
+        print(f"WARNING: the sandbox cannot run, so this {step} run is unconfined: {reason}",
+              file=sys.stderr)
+    return Confined(reason, scopes)

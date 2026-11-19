@@ -506,7 +506,6 @@ def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -
                     wrapper=make_wrapper(root, claude)) == 0
     assert launched.commands == []
     assert claude.commands[0][2] == prompted(f"/change-merge {CHANGE} from dev", "merge")
-    assert option_rules(claude.commands[0], "--allowedTools")[-1] == "Bash(make lock)"
 
 
 class Recorded(Launched):

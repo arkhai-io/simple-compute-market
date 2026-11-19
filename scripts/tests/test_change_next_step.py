@@ -2274,7 +2274,7 @@ def test_a_run_that_went_on_past_a_denial_waits_for_its_reading(tmp_path: Path) 
     _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
     read = _next(root)
 
-    assert unread["step"] == "owner" and "denied 1 tool call" in unread["reason"]
+    assert unread["step"] == "owner" and "1 denied tool call(s)" in unread["reason"]
     assert unread["denials"] == [{"tool_name": "Bash"}]
     assert read["step"] == "implement"
 
@@ -2312,6 +2312,43 @@ def test_a_question_with_denials_waits_for_its_reading_then_its_answer(tmp_path:
     assert (read["step"], read["resume"], read["awaiting"]) == (
         "owner", "validate", "environmental remedy")
     assert (answered["step"], answered["kind"]) == ("review", "implementation")
+
+
+REFUSED = [{"tool": "Bash", "command": "make check", "error": "Read-only file system"}]
+
+
+def test_a_question_with_refusals_waits_for_their_reading_then_its_answer(
+        tmp_path: Path) -> None:
+    """CW-jqi7's "A question carries refusals": a line carrying refusals is read as one
+    carrying denials, and the question waits for its answer after the reading."""
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "01-implementation-owner.md")
+    run = _log(root, "validate", {**QUESTION, "awaiting": "environmental remedy",
+                                  "denials": []}, refusals=REFUSED)
+
+    unread = _next(root)
+    _decide(root, "gap: proposed --write kit/site/.venv", reads=run["seq"])
+    read = _next(root)
+
+    assert unread["step"] == "owner" and "its question waits after that" in unread["reason"]
+    assert "1 refusal(s)" in unread["reason"]
+    assert (unread["refusals"], unread["outcome"], unread["seq"]) == (
+        REFUSED, "question", run["seq"])
+    assert (read["step"], read["resume"], read["awaiting"]) == (
+        "owner", "validate", "environmental remedy")
+
+
+def test_a_finished_run_with_refusals_waits_for_their_reading(tmp_path: Path) -> None:
+    """A run that went on past a refused write and finished is read before the change
+    moves on, as one that went on past a denial is."""
+    root = _repository(tmp_path, "in implementation")
+    run = _log(root, "implement", _done(ROUND_TRIAGE), refusals=REFUSED)
+
+    unread = _next(root)
+    _decide(root, "finding: the step wrote outside its job", reads=run["seq"])
+
+    assert (unread["step"], unread["seq"], unread["refusals"]) == ("owner", run["seq"], REFUSED)
+    assert _next(root)["step"] != "owner"
 
 
 def test_a_return_with_denials_waits_for_its_reading_then_its_confirmation(
@@ -2471,7 +2508,7 @@ def test_a_design_triages_denials_are_read_before_planning_starts(tmp_path: Path
 
     assert (unread["step"], unread["seq"], unread["denials"]) == (
         "owner", run["seq"], [{"tool_name": "Bash"}])
-    assert "denied 1 tool call" in unread["reason"]
+    assert "1 denied tool call(s)" in unread["reason"]
     assert read["step"] == "plan"
 
 
@@ -2517,7 +2554,7 @@ def test_a_plans_denials_are_read_before_implementation_starts(tmp_path: Path) -
     read = _next(root)
 
     assert (unread["step"], unread["seq"]) == ("owner", run["seq"])
-    assert "denied 1 tool call" in unread["reason"]
+    assert "1 denied tool call(s)" in unread["reason"]
     assert read["step"] == "owner" and "agree the next implementation round" in read["reason"]
 
 
