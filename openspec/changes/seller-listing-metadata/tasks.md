@@ -325,13 +325,60 @@ details beside the listing envelope". Touches `core/storefront`
 (`client.py`, `models.py`), and `domains/vms/storefront`
 (`services/listing_service.py`).
 
-- [ ] 4.1 Core storefront library integration
+Correction (the owner's direction at section 4's start, on section 3's handoff):
+before 4.1 the change makes its once-per-change version bump, which no task
+planned (`versioning.md`, "One bump per unit of work"; `package-versions.md`, "A
+version changes when its contents change"). Each version is one step from
+`origin/dev`'s:
+
+- Minor, for every package whose contents the change alters, since each gains the
+  details as public API and sections 5 and 6 add within that: `arkhai-core`
+  0.7.0, `arkhai-core-registry` 0.7.0, `arkhai-core-registry-client` 0.14.0,
+  `arkhai-core-storefront` 0.19.0, `arkhai-core-storefront-client` 0.31.0 (its
+  README's package line with it), `arkhai-vms-listings` 0.10.0,
+  `arkhai-vms-storefront` 0.30.0, `arkhai-bare-metal` 0.17.0,
+  `arkhai-bare-metal-storefront` 0.30.0, `arkhai-apicredits-storefront` 0.22.0.
+- Patch, for every package whose one change is a moved exact pin, followed to
+  their own exact pinners: `arkhai-kit-alkahest` 0.13.1, `arkhai-kit-policy`
+  0.7.1, `arkhai-kit-settlement-runtime` 0.8.2, `arkhai-kit-arkhai-payments`
+  0.9.1, `arkhai-kit-contact-exchange` 0.5.2, `arkhai-kit-config` 0.6.2,
+  `arkhai-kit-negotiation-runtime` 0.6.1, `arkhai-kit-capacity-publication`
+  0.12.1, `arkhai-core-buyer` 0.8.1, `arkhai-bare-metal-buyer` 0.9.1,
+  `arkhai-vms-buyer` 0.13.1, `arkhai-compute-provisioning-service` 0.26.1.
+- Lower bounds raised to the first version holding what each consumer uses:
+  `arkhai-core>=0.7.0` in the core, API-credit, bare-metal and VM storefronts,
+  which import `market_core.listing_details` (the bound sections 4 and 6 planned
+  as `>=0.6.0`); `arkhai-core-registry-client>=0.14.0` in the core storefront,
+  whose fan-out passes the details to `ListingRequest`, and in the registry's dev
+  group; `arkhai-core-storefront>=0.19.0` in the three domain storefronts;
+  `arkhai-bare-metal>=0.17.0` in the bare-metal storefront;
+  `arkhai-vms-listings>=0.10.0` in the VM storefront.
+
+Outside the direction, which named `arkhai-core`, the registry and its client:
+the other packages the change alters are bumped here too, as the same rule asks,
+in the one relock, so sections 5 and 6 bump nothing; raising the core storefront's
+bound changes its wheel in any case. `make check-version-bumps
+CHANGE_BASE=origin/dev` passes, `make lock` rewrote 43 locks, and `make
+check-locks` passes.
+
+- [x] 4.1 Core storefront library integration
   (`core/storefront/tests/integration/test_listing_details.py`): the detail
   migration adds the three columns to a database at `dev`'s previous head and is
   part of a fresh chain; a listing saved with details loads them, metadata as a
   map; an update sets and clears each; `publish_listing_to_registries` sends only
   stated fields to every registry (D5).
-- [ ] 4.2 VM storefront application integration through
+  Library integration, `make -C core/storefront test`: 244 passed, the file's 5
+  among them, each against a real SQLite database migrated through core's chain.
+  The migration case stops the chain before `20261118_001_listing_details`,
+  inserts a listing, migrates on, and reads the columns null; a load and a list
+  read the details back with metadata as a map; updates set all three, change one
+  leaving the others, and clear all three; the fan-out case loads each stored
+  listing and publishes it through `publish_listing_to_registries` with the real
+  `registry_client.ListingRequest`, the registry client injected, and every
+  registry's body carries all three, only the title, or no detail key, as stored.
+  `run test-before` cannot run the file at the round's base: its `--no-project`
+  environment has no `market_identity`, and collection fails.
+- [x] 4.2 VM storefront application integration through
   `StorefrontClient.create_listing` against the in-process app
   (`domains/vms/storefront/tests/integration/`), registries replaced at the client
   wrapper as `test_publication_loop.py`'s `registry_world` does: a create stating
@@ -339,16 +386,81 @@ details beside the listing envelope". Touches `core/storefront`
   them unchanged; a republication of that listing (term refresh or resume) sends
   them again; a create stating none sends no detail key; a create over a limit is
   refused before a listing row exists (rejection-path raw call).
-- [ ] 4.3 Confirm the storefront client's sync/async parity contract test covers
+  Application integration, `TestCreateListingDetails` in
+  `tests/integration/test_listings_api.py`: the listings router with the real
+  listing service, seller and administrator auth, and `recorded_registries()`
+  standing where `MultiRegistryClient` wraps the two registries, as
+  `publication_app` places it. A seller's typed-client create stating all three is
+  read back by `get_listing` and sent unchanged to both registries; the
+  administrator's pause and resume republish it from the stored row, and both
+  registries are sent the three again; a create stating none reads none and sends
+  no detail key; a description over its limit is refused 422 with no listing row
+  and nothing sent. Correction: no call is raw. The typed client carries the
+  details as plain values and leaves their limits to the storefront, so it sends
+  the refused body itself, as section 3 found for the registry. Which limit each
+  field carries is request-model validation, unit level only (`test-levels.md`,
+  "Coverage between the levels"): `core/storefront/tests/unit/test_listing_models.py`
+  shows `CreateListingRequest`, which the VM request extends, admitting all three
+  at their limits, stating none by default, and refusing each one past its limit
+  with the error on that field. The republication is the resume, since the plan
+  admits either; a term refresh of an override-sourced listing is 5.1's.
+  `make -C domains/vms/storefront test` before the refusal cases moved: 1199 unit
+  passed, 1 skipped, and 639 integration passed; the class now holds 3 cases,
+  which pass.
+- [x] 4.3 Confirm the storefront client's sync/async parity contract test covers
   `create_listing`'s new parameters (`TESTING.md`, "Sync/async client parity"), and
   `StorefrontListingSummary` parsing of stated details in
   `core/storefront-client/tests/`.
-- [ ] 4.4 Verification point: core storefront unit and integration,
+  Confirmed: `domains/vms/storefront/tests/unit/test_storefront_client_parity.py`
+  compares every public method's resolved signature on `StorefrontClient` and
+  `SyncStorefrontClient`, `create_listing`'s `title`, `description` and `metadata`
+  among them, and passes in the VM storefront's unit run. A signature guard sends
+  nothing, so `core/storefront-client/tests/test_lifecycle_auth.py` gains a
+  create stating all three through both clients, whose bodies carry them and are
+  byte-equal; its existing create case shows both omitting an unstated detail
+  (D5). The parsed model is `storefront_client.models.ListingSummary`; unit,
+  `core/storefront-client/tests/test_listing_details.py` (3 cases): stated details
+  read into their fields and out of `extra`, unstated ones read as `None`, and a
+  listing list reads each listing's. `make -C core/storefront-client test`: 79
+  passed. `run test-before` cannot run the new client file at the round's base: its
+  `--no-project` environment has no `market_identity`, and collection fails.
+  Correction: `TESTING.md` has no "Sync/async client parity"; the rule is
+  `docs/guidance/engineering/integration-tests.md`, "Sync and async client parity".
+- [x] 4.4 Verification point: core storefront unit and integration,
   storefront-client, and VM storefront unit and integration suites pass, 4.2 being
   the application-integration case; `scripts/change-workflow run pre-commit
   seller-listing-metadata` and `make check-packaging` pass.
   End-to-end: `e2e_deal` creates its VM listing stating no details, evidence for the
   unchanged create path only; no scenario is owed.
+  `scripts/change-workflow run pre-commit seller-listing-metadata --base origin/dev`
+  passes every hook: its `make lock`, its `make validate-local` (`make
+  check-packaging` and the whole `make test`, `docker` now on the `PATH`, so
+  `test_multi_storefront_compose.py` ran and passed), and the `pre-commit` checks,
+  version bumps among them. In that `make test`: core storefront 244 passed,
+  storefront-client 79, VM storefront 1199 unit passed with 1 skipped and 637
+  integration; beside them the bump's other consumers, among them registry 162
+  unit and 181 integration, registry-client 37, bare-metal storefront 676 and
+  API-credit storefront 285. End-to-end confirmed: no committed VM scenario's
+  `create_listing` states a detail.
+
+Handoff from section 4:
+
+- The version bump is done for the whole change: every package sections 5 and 6
+  touch is already one step from `origin/dev`, so neither bumps, moves a pin, or
+  raises the `arkhai-core` bound section 2's handoff gave them; a later edit
+  needing a larger step than its package has is the only reason to bump again.
+  The VM storefront's `arkhai-core-storefront-client>=0.30.0` stays: its code
+  uses none of 0.31.0's additions, which only its tests call, against the locked
+  0.31.0.
+- The `ALL_PROXY` failures sections 2 and 3 worked around are gone with the
+  variable: every suite here ran as `make -C <package> test`, VM
+  `test_watchdog_buy.py` included.
+- `tests/integration/test_listings_api.py`'s `publishing_clients` fixture is the
+  listings router with seller and administrator clients over
+  `recorded_registries()`; `_accepted_escrow_listing_service` builds the real
+  listing service it and `_full_client` share.
+- The typed storefront client sends a detail over its limit as stated, so a
+  storefront refusal test needs no raw call.
 
 ## 5. Compute listings take their details from the pool override
 
