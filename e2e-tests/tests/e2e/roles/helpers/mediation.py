@@ -18,7 +18,9 @@ MEDIATION.CA_BUNDLE_PATH alone when one is set.
 No buyer command files a case on a deal still delivering, so where a scenario
 needs one the harness files as the buyer itself (``file_as_buyer``): through the
 mediation kit's dispute adapter over its typed client, as the buyer's lifecycle
-submits a filing, never a hand-built request.
+submits a filing, never a hand-built request. A scenario reads what the
+authority recorded the same way, as the buyer through that client
+(``read_record``), each entry verified against the record key the Agreement pins.
 """
 
 from __future__ import annotations
@@ -36,6 +38,8 @@ import injected_time
 import pytest
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
+from market_arkhai_mediation.contract import wire
+from market_arkhai_mediation.models import ReadAfter
 from market_deal_lifecycle.adapters import (
     DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, submit_dispute,
 )
@@ -167,6 +171,53 @@ def buyer_dispute_credential_toml(target: MediationTarget | None) -> tuple[str, 
     return lines
 
 
+def _buyer_credential(target: MediationTarget) -> MediationCredential:
+    """The buyer's credential at the target, bound to the target's identity."""
+    if not target.buyer_api_key:
+        pytest.fail("MEDIATION.BUYER_API_KEY not configured")
+    return MediationCredential(
+        (INTERFACE, target.service_url, target.account, target.record_key),
+        token=SecretStr(target.buyer_api_key),
+    )
+
+
+def read_record(
+    target: MediationTarget, *, negotiation_id: str, transaction: str,
+    agreement: Mapping[str, Any], page_size: int = 1000,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> list[dict[str, Any]]:
+    """Every entry of the Agreement's signed record, read as the buyer; the
+    entries as JSON, in sequence.
+
+    The read is the mediation kit's public client's, the one either party's
+    adapter reads with, page by page from the start, each page asking for up to
+    ``page_size`` entries: each entry is verified against the authority's record
+    key the Agreement pins and against its place in the sequence before it is
+    returned, and an entry failing it raises the kit's record verification error.
+    ``transport`` replaces the network, for a test.
+    """
+    terms = decode_terms(agreement["settlement"]["lifecycle"])
+    assert terms is not None, f"the accepted Agreement of {negotiation_id} names no dispute authority"
+    authority = terms.adjudication.dispute
+    digest = hashlib.sha256(canonical_json(dict(agreement))).hexdigest()
+
+    async def read() -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        async with MediationClient(authority, _buyer_credential(target), transport=transport,
+                                   ca_bundle=target.ca_bundle_path) as client:
+            after = 0
+            while True:
+                page = await client.read_record(ReadAfter.model_validate({
+                    "agreement": digest, "after": after, "limit": page_size,
+                }), transaction=transaction)
+                entries.extend(wire(signed)["entry"] for signed in page.entries)
+                if not page.has_more:
+                    return entries
+                after = page.next_after
+
+    return asyncio.run(read())
+
+
 def file_as_buyer(
     target: MediationTarget, *, negotiation_id: str, transaction: str,
     agreement: Mapping[str, Any], store: Path, ended_at: int | None = None,
@@ -185,15 +236,10 @@ def file_as_buyer(
     filing answer carries the case reference and each part's hold. ``transport``
     replaces the network, for a test.
     """
-    if not target.buyer_api_key:
-        pytest.fail("MEDIATION.BUYER_API_KEY not configured")
+    credential = _buyer_credential(target)
     terms = decode_terms(agreement["settlement"]["lifecycle"])
     assert terms is not None, f"the accepted Agreement of {negotiation_id} names no dispute authority"
     binding = DisputeBinding(negotiation_id, transaction, terms.adjudication.dispute)
-    credential = MediationCredential(
-        (INTERFACE, target.service_url, target.account, target.record_key),
-        token=SecretStr(target.buyer_api_key),
-    )
     intent = DeliveryEndIntent(
         ended_at=injected_time.now() if ended_at is None else ended_at, delivered=True,
         cause="payer",

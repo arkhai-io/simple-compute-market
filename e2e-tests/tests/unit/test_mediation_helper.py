@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 import pytest
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_arkhai_mediation.records import RecordVerificationError
 from market_deal_lifecycle.configuration import AuthorityIdentity, dispute_config
 
 from tests.e2e.roles.helpers import mediation
@@ -211,6 +212,44 @@ def test_the_buyer_files_the_delivery_end_claim_through_the_adapter(tmp_path) ->
     assert outcome.status == "accepted" and outcome.filing is not None, outcome
     assert outcome.filing.case_ref in peer.cases
     assert outcome.filing.parts
+
+
+def _read(peer: MediationContractFake, *, page_size: int) -> list[dict[str, Any]]:
+    request = peer.data["filing"]["request"]
+    return mediation.read_record(
+        _peer_target(peer), negotiation_id="negotiation-fixture",
+        transaction=request["transaction"], agreement=request["agreement"],
+        page_size=page_size, transport=peer.transport(),
+    )
+
+
+def test_the_record_is_read_whole_page_by_page_as_the_buyer(tmp_path) -> None:
+    """A filed case an operator ruled and closed: three signed entries, read as
+    the buyer in pages of two, verified and returned as their JSON in sequence."""
+    peer = MediationContractFake()
+    outcome = _file(peer, tmp_path, peer.transport())
+    peer.decide(outcome.filing.case_ref, [])
+    peer.requests.clear()
+
+    entries = _read(peer, page_size=2)
+
+    assert entries == [signed["entry"] for signed in peer.entries]
+    assert [entry["kind"] for entry in entries] == ["filed", "ruled", "closed"]
+    reads = [request for request in peer.requests if request.url.path == "/record"]
+    assert [(request.url.params["after"], request.url.params["limit"]) for request in reads] == [
+        ("0", "2"), ("2", "2"),
+    ]
+    assert {request.headers["authorization"] for request in reads} == {"Bearer fixture-payer"}
+
+
+def test_an_entry_failing_its_signature_is_refused(tmp_path) -> None:
+    peer = MediationContractFake()
+    outcome = _file(peer, tmp_path, peer.transport())
+    peer.decide(outcome.filing.case_ref, [])
+    peer.entries[1]["entry"]["basis"] = "payee_filed"
+
+    with pytest.raises(RecordVerificationError):
+        _read(peer, page_size=1000)
 
 
 def test_an_unreachable_authority_leaves_the_buyer_s_filing_unknown(tmp_path) -> None:

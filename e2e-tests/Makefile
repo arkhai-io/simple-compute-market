@@ -112,9 +112,11 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # deal by the buyer's own stop before the deal's delivery deadline;
 # `e2e_vm_rate_servicing`'s rows each end a deal of their own, lane time set
 # as far as the maximum term's Agreement end; `e2e_vm_rate_watchdog` runs the
-# shipped `market buy` in the harness's process on a deal of its own.
+# shipped `market buy` in the harness's process on a deal of its own; and
+# `e2e_vm_rate_dispute`'s two rows each file and rule a case on a rate deal of
+# their own, removing their rules from the lane's doubles when they end.
 E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_vm_recurring_purchase \
-              or e2e_vm_rate_servicing or e2e_vm_rate_watchdog \
+              or e2e_vm_rate_servicing or e2e_vm_rate_watchdog or e2e_vm_rate_dispute \
               or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_vm_dispute_ruled_end or e2e_vm_dispute_discount or e2e_vm_dispute_lost_filing \
               or e2e_vm_dispute_mediation_unavailable or e2e_vm_dispute_payments_hold \

@@ -27,12 +27,25 @@ Each assertion names the fields it compares, in three kinds:
   of what was paid;
 - **ignored** — every other field: identifiers (the transaction, request ids,
   the ledger), signatures and the snapshot's signing identity, ``observedAt``,
-  sequence numbers (an event's is read only to find the event that stopped the
-  part), the fee and net amounts, which are the producer's fee policy, holds,
+  sequence numbers (a payment assertion reads an event's only to find the event
+  that stopped the part), the fee and net amounts, which are the producer's fee policy, holds,
   release instants, extensions and attachments.
 
 A difference fails the assertion, never skips it, naming every differing field
 with its expected and actual values.
+
+A dispute row's output is two producers': the dispute authority's signed record
+of the case, its entries as JSON in sequence as the mediation kit's public
+client reads them, and the payments snapshot its effects moved. Its assertions
+compare, besides the payment fields above, the filing's per-part protection, the
+ruled entry's basis and effects and their applied state, the authority's stop,
+reversals and lifted extensions, and the closed case. A payment event's sequence
+is read there to match an extension to the filing that reports it, and an
+entry's to order the case's entries. They ignore the record's signatures, record
+references, case references beyond finding the case, the entries' own ``at``
+(the relations read the effects' instants), and the payload a payment event
+carries, which is the authority's own: a reversal is matched to its effect by
+the order the ruling lists its effects in.
 """
 
 from __future__ import annotations
@@ -308,3 +321,219 @@ def assert_term_end(snapshot: Mapping[str, Any], *, agreement_end: int, period_p
             settled_relation=f"{periods!r} whole periods of {period_seconds}s at {period_price}",
         ),
     ])
+
+
+# ===========================================================================
+# A case ruled on a rate deal: the authority's record and the payments it moved
+# ===========================================================================
+
+def _case_entries(record: list[Mapping[str, Any]], case_ref: str,
+                  kind: str) -> list[Mapping[str, Any]]:
+    """The case's record entries of ``kind``, in sequence."""
+    return sorted((entry for entry in record
+                   if entry.get("case_ref") == case_ref and entry.get("kind") == kind),
+                  key=lambda entry: entry.get("sequence", 0))
+
+
+def _authority_events(snapshot: Mapping[str, Any], kind: str, authority: str,
+                      part: int) -> list[Mapping[str, Any]]:
+    """The payment events of ``kind`` the authority's account sent on ``part``, in
+    sequence."""
+    return sorted((entry for entry in snapshot.get("events", [])
+                   if entry.get("account") == authority
+                   and field(entry, "event.kind") == kind
+                   and field(entry, "event.part") == part),
+                  key=lambda entry: entry.get("sequence", 0))
+
+
+def _protection_checks(record: list[Mapping[str, Any]], snapshot: Mapping[str, Any], *,
+                       case_ref: str, filer: str, authority: str, part: int) -> list[Check]:
+    """The filing and its protection of ``part``: filed once by ``filer``, the
+    part held by an extension the authority opened at payments, which it lifted
+    once the case closed."""
+    filed = _case_entries(record, case_ref, "filed")
+    entry: Mapping[str, Any] = filed[0] if filed else {}
+    protection = next((item for item in entry.get("parts", []) if item.get("part") == part), {})
+    extension = protection.get("extension_ref", ABSENT)
+    case = f"case {case_ref}"
+    return [
+        Check(f"{case}: filed entries", len(filed), 1),
+        Check(f"{case}: the filing's actor", entry.get("actor", ABSENT), filer),
+        Check(f"{case}: the filing's protection of part {part}", protection.get("status", ABSENT),
+              "held"),
+        Check(f"the authority's extend events on part {part}",
+              [item.get("sequence") for item in _authority_events(snapshot, "extend", authority, part)],
+              [extension], f"the extension_ref {case}'s filing reports"),
+        Check(f"the authority's lift events on part {part}",
+              [field(item, "event.ref") for item in _authority_events(snapshot, "lift", authority, part)],
+              [extension], f"the extension_ref {case}'s filing reports"),
+        Check(f"parts.{part}.extensions", field(snapshot, f"parts.{part}.extensions"), []),
+    ]
+
+
+def _ruling_checks(record: list[Mapping[str, Any]], *, case_ref: str, basis: str,
+                   kinds: list[str]) -> tuple[list[Check], dict[str, Mapping[str, Any]]]:
+    """The ruling and the closed case: the ruled entry's basis and effects, the
+    closed entry closing the case as ruled with those effects, each applied.
+    Also the effects by kind, as the closed entry lists them."""
+    ruled = _case_entries(record, case_ref, "ruled")
+    closed = _case_entries(record, case_ref, "closed")
+    ruling: Mapping[str, Any] = ruled[0] if ruled else {}
+    closing: Mapping[str, Any] = closed[0] if closed else {}
+    outcome = closing.get("outcome", [])
+    case = f"case {case_ref}"
+    effects = {item["effect"]["kind"]: item for item in outcome if "effect" in item}
+    checks = [
+        Check(f"{case}: the ruled entry's basis", ruling.get("basis", ABSENT), basis),
+        Check(f"{case}: closed entries", len(closed), 1),
+        Check(f"{case}: the closed entry's reason", closing.get("reason", ABSENT), "ruled"),
+        Check(f"{case}: the closed entry's basis", closing.get("basis", ABSENT), basis),
+        Check(f"{case}: the closed entry's effects, by kind",
+              [field(item, "effect.kind") for item in outcome], kinds),
+        Check(f"{case}: the ruled entry's effects",
+              [(item.get("id"), item.get("effect")) for item in ruling.get("outcome", [])],
+              [(item.get("id"), item.get("effect")) for item in outcome],
+              "the closed entry's effects"),
+        Check(f"{case}: the effects' states", [item.get("state") for item in outcome],
+              ["applied"] * len(outcome)),
+    ]
+    return checks, effects
+
+
+def _authority_stop_checks(snapshot: Mapping[str, Any], effects: Mapping[str, Mapping[str, Any]],
+                           *, case_ref: str, authority: str, part: int) -> list[Check]:
+    """The ruling's stop: stated at the delivery end, and taken by payments from
+    the authority's account with the part's money accounted for. A stop time
+    already passed when the authority sends it is a stop at its receipt, since
+    payments never backdates one."""
+    prefix = f"parts.{part}"
+    stop = field(effects.get("stop", {}), "effect")
+    stop_at = field(stop, "at")
+    received = _received_at(snapshot, prefix, "stop")
+    effective = (ABSENT if ABSENT in (stop_at, received) else max(int(stop_at), int(received)))
+    gross = amount(field(snapshot, f"{prefix}.gross"))
+    held = amount(field(snapshot, f"{prefix}.held"))
+    released = amount(field(snapshot, f"{prefix}.released"))
+    reversed_ = amount(field(snapshot, f"{prefix}.reversed"))
+    remainder = (ABSENT if ABSENT in (gross, held, released, reversed_)
+                 else gross - held - released - reversed_)
+    case = f"case {case_ref}"
+    return [
+        Check(f"{case}: the stop effect's part", field(stop, "part"), part),
+        Check(f"{case}: the stop effect's partialPeriod", field(stop, "partialPeriod"), "returned"),
+        Check(f"{case}: the stop effect's at", stop_at,
+              field(effects.get("end_delivery", {}), "effect.at"), "the ruling's delivery end"),
+        Check(f"{prefix}.stop.cause", field(snapshot, f"{prefix}.stop.cause"), "authority"),
+        Check(f"{prefix}.stop.partialPeriod", field(snapshot, f"{prefix}.stop.partialPeriod"),
+              "returned"),
+        _stopper_check(snapshot, prefix, "stop", account=authority),
+        Check(f"{prefix}.stop.effectiveAt", field(snapshot, f"{prefix}.stop.effectiveAt"), effective,
+              "the stop effect's at, or the authority's receipt of the stop once that passed"),
+        Check(f"{prefix}.reserved", amount(field(snapshot, f"{prefix}.reserved")), 0),
+        Check(f"{prefix}.refunded", amount(field(snapshot, f"{prefix}.refunded")), remainder,
+              f"{prefix}.gross less the held, released and reversed amounts"),
+    ]
+
+
+def _reversal_amounts(snapshot: Mapping[str, Any], *, authority: str, part: int) -> list[int]:
+    return [int(field(item, "event.amount"))
+            for item in _authority_events(snapshot, "reverse", authority, part)]
+
+
+def assert_payee_filing_ruled(
+    record: list[Mapping[str, Any]], snapshot: Mapping[str, Any], *, case_ref: str, payee: str,
+    authority: str, penalty: int, period_price: int, period_seconds: int, part: int = 0,
+) -> None:
+    """A seller's ``delivery_end`` filing on a rate deal, ruled as the dispute
+    authority documents a mechanical ruling.
+
+    Exact: the case filed once by the payee, ``part`` held; the ruling's basis
+    ``payee_filed``, its effects a delivery end, a ``stop`` returning its
+    period, a ``reverse`` and a ``penalty``, in that order, every one applied; the
+    case closed as ruled; the part stopped by the authority's account with
+    ``returned``, nothing reserved; the case's extension lifted. By relation:
+    the extension the filing reports is the one the authority opened and lifted
+    at payments; the ruled entry's effects are the closed entry's; the stop
+    stated at the delivery end and effective then, or at its receipt once that
+    passed; the reverse effect's amount the periods earned after the delivery end
+    up to the stop at ``period_price``, and payments reversing exactly it first;
+    the penalty's reversals after it the Agreement's ``penalty`` capped at what
+    the part still held; the refund the rest of what was paid. The penalty
+    effect's recorded amount is ignored, since a producer may record the term or
+    its cap: what it moved is compared. Everything else is ignored (module
+    docstring).
+    """
+    prefix = f"parts.{part}"
+    ruling, effects = _ruling_checks(record, case_ref=case_ref, basis="payee_filed",
+                                     kinds=["end_delivery", "stop", "reverse", "penalty"])
+    end_at = field(effects.get("end_delivery", {}), "effect.at")
+    started = field(snapshot, f"{prefix}.started")
+    effective = field(snapshot, f"{prefix}.stop.effectiveAt")
+    after_end = (ABSENT if ABSENT in (started, end_at, effective) else
+                 _periods(started, effective, period_seconds, started_period=False)
+                 - _periods(started, end_at, period_seconds, started_period=False))
+    reverse_amount = amount(field(effects.get("reverse", {}), "effect.amount"))
+    reversals = _reversal_amounts(snapshot, authority=authority, part=part)
+    taken = sum(reversals[1:])
+    held = amount(field(snapshot, f"{prefix}.held"))
+    capped = ABSENT if held is ABSENT else min(penalty, taken + held)
+    case = f"case {case_ref}"
+    require(f"the ruling of {case} on the payee's filing", [
+        *_protection_checks(record, snapshot, case_ref=case_ref, filer=payee, authority=authority,
+                            part=part),
+        *ruling,
+        *_authority_stop_checks(snapshot, effects, case_ref=case_ref, authority=authority,
+                                part=part),
+        Check(f"{case}: the reverse effect's amount", reverse_amount,
+              _times(after_end, period_price),
+              f"{after_end!r} periods earned after the delivery end, at {period_price}"),
+        Check(f"the authority's first reversal of part {part}", reversals[:1],
+              [] if reverse_amount is ABSENT else [reverse_amount], "the reverse effect's amount"),
+        Check(f"the authority's penalty reversals of part {part}", taken, capped,
+              f"the Agreement's penalty of {penalty}, capped at what the part still held"),
+    ])
+
+
+def assert_contested_case_ruled(
+    record: list[Mapping[str, Any]], snapshot: Mapping[str, Any], *, case_ref: str, payer: str,
+    payee: str, authority: str, reverse_amount: int | None = None, part: int = 0,
+) -> None:
+    """A buyer's ``delivery_end`` filing the storefront contested, ruled by an
+    operator with a stop and a reverse.
+
+    Exact: the case filed once by the payer, ``part`` held; one answer by the
+    payee before the ruling, the contest; the ruling's basis ``operator``, its
+    effects a delivery end, a ``stop`` returning its period and a ``reverse``,
+    in that order, every one applied; the case closed as ruled; the part stopped
+    by the authority's account with ``returned``, nothing reserved; the case's
+    extension lifted; the reverse effect's amount ``reverse_amount`` where the
+    caller's own ruling fixed it, and ignored where a policy it does not see
+    chose it. By relation: the extension the filing reports is the one the
+    authority opened and lifted at payments; the ruled entry's effects are the
+    closed entry's; the stop stated at the delivery end and effective then, or
+    at its receipt once that passed; payments reversing exactly the reverse
+    effect's amount; the refund the rest of what was paid. Everything else is
+    ignored (module docstring).
+    """
+    ruling, effects = _ruling_checks(record, case_ref=case_ref, basis="operator",
+                                     kinds=["end_delivery", "stop", "reverse"])
+    ruled = _case_entries(record, case_ref, "ruled")
+    ruled_at = ruled[0].get("sequence", 0) if ruled else 0
+    answers = [entry.get("actor") for entry in _case_entries(record, case_ref, "appended")
+               if entry.get("sequence", 0) < ruled_at]
+    effect_amount = amount(field(effects.get("reverse", {}), "effect.amount"))
+    case = f"case {case_ref}"
+    checks = [
+        *_protection_checks(record, snapshot, case_ref=case_ref, filer=payer, authority=authority,
+                            part=part),
+        Check(f"{case}: the answers before the ruling", answers, [payee]),
+        *ruling,
+        *_authority_stop_checks(snapshot, effects, case_ref=case_ref, authority=authority,
+                                part=part),
+        Check(f"the authority's reversals of part {part}",
+              _reversal_amounts(snapshot, authority=authority, part=part),
+              [] if effect_amount is ABSENT else [effect_amount], "the reverse effect's amount"),
+    ]
+    if reverse_amount is not None:
+        checks.append(Check(f"{case}: the reverse effect's amount", effect_amount, reverse_amount))
+    require(f"the ruling of {case} on the payer's contested filing", checks)

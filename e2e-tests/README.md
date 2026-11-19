@@ -61,8 +61,8 @@ ACTIVE_PROFILES=staging,staging-secrets
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
 `e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase`,
 `e2e_bare_metal_recurring_purchase`, `e2e_vm_rate_servicing`,
-`e2e_bare_metal_rate_servicing`, `e2e_vm_rate_watchdog` and
-`e2e_bare_metal_rate_watchdog`, and the qualification modules
+`e2e_bare_metal_rate_servicing`, `e2e_vm_rate_watchdog`,
+`e2e_bare_metal_rate_watchdog` and `e2e_vm_rate_dispute`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -480,6 +480,38 @@ events for the transaction are the storefront's `start` and the payer's `stop`,
 `buy` ends `stopped`, the storefront records the payer's end with no filing, and
 a `deal-servicing` step begins the teardown the shared teardown stages complete.
 Off a Compose lane's injected lane time and doubles the modules are blocked.
+
+### Rate-deal disputes
+
+`e2e_vm_rate_dispute` runs in the VM lane: two modules under
+`tests/e2e/roles/scenarios/vms/rate_dispute/`, each on a rate deal of its own and
+lane-double evidence. Each shares the recurring purchase's stages through its
+accepted money — a default buyer's `market buy` of a recurring on-demand option
+under the lane's `[charged, returned]` declaration, delivered — then sets lane
+time a minute into the second period, so the first period's earnings are held,
+and files a case the authority rules with a stop
+(`tests/e2e/roles/scenarios/vms/rate_dispute/stages.py`):
+
+| Module | What it proves |
+|---|---|
+| `test_seller_filing.py` | the storefront's administrator ends delivery as a failure through the storefront client's interruption, and the storefront records the end and files `delivery_end` as the payee; a mediation-double rule, held at its gate, rules the filing as the dispute authority documents a mechanical ruling — basis `payee_filed`, a delivery end, a `stop` returning its period, a `reverse` of the earnings since the end and the Agreement's premature-stop `penalty` — and closes the case. Lane time passes the second period's end before the rule resumes, so the part earns after the end; the double then stops the part as the authority, a stop now since its time passed, reverses that period and takes the penalty from what the part still holds. The storefront records the ruling's end with no filing beyond its own |
+| `test_buyer_contested_case.py` | the buyer files `delivery_end` through the mediation kit's dispute adapter in the harness (`file_as_buyer`), the storefront's respondent discovery contests the case with an append, and an operator decision through the typed control client rules a `stop` returning its period and a `reverse` of the held first period, closing the case. The storefront records the ruled end with no filing |
+
+The seller's filing needs the part funded past its first reservation, so it
+calls the payments double's reservation control first, as the rate rows do. Each
+module reads the dispute authority's signed record as the buyer, through the
+mediation kit's public client (`read_record`), and the payments snapshot, and
+asserts on both through its row's assertion in
+`tests/e2e/roles/helpers/producer_assertions.py`, which names the fields it
+compares exactly, by relation, or not at all; the payment rows' and the
+recurring purchase's endings assert through that module's payment assertions the
+same way. Each then completes the teardown through the shared teardown stages,
+checks the payer got back everything the part did not keep for the seller, and,
+once the case is closed, reads the seller's list showing the deal `ended` with no
+open case or extension. No stage steps the storefront's servicing while a ruling
+waits at its gate, and each module removes its rules through
+`lane_double_rules`. Off a Compose lane's injected lane time and doubles the
+modules are blocked.
 
 ### Real bare-metal provisioning
 

@@ -326,7 +326,7 @@ deal is qualified in the VM lane" (`test-compatibility`, added). Touches a new
 the assertions module of section 2, `e2e-tests/pyproject.toml`'s markers, the Makefile's
 VM lane list, and `e2e-tests/README.md`.
 
-- [ ] 3.1 The seller's filing row: on a delivered on-demand rate deal reached through the
+- [x] 3.1 The seller's filing row: on a delivered on-demand rate deal reached through the
       recurring purchase's stages, with lane time past the first period's end so
       earnings are held, the storefront's administrator ends delivery through the typed
       seller lifecycle client and the storefront files as the payee; a rule installed
@@ -337,28 +337,160 @@ VM lane list, and `e2e-tests/README.md`.
       unstarted remainder and the reversed and penalised earnings, the teardown, and,
       once the case is closed, the seller's list reading the deal `ended` with no open
       extension (D6). Verify (system): the module passes in the VM lane.
-- [ ] 3.2 The buyer's contested case row: on a delivered on-demand rate deal, the buyer
+      Done: `e2e-tests/tests/e2e/roles/scenarios/vms/rate_dispute/test_seller_filing.py`,
+      on its own executor, pool, resource and GPU model (`host_registry.py`). Differs
+      from the plan in two places. The administrator's end is the storefront client's
+      `admin_interrupt_deal` with `interruption_kind="failure"`, not the seller
+      lifecycle client, which offers only `notice`, `read` and `list`; that route
+      records the operator end, files `delivery_end` as the payee and begins the
+      teardown. And since the double rules at filing and the end is at the filing's
+      instant, "earnings since the end" would be nothing: the rule is held at its
+      gate (`pause_before_effects`), lane time moves a period on past the second
+      period's end, then the rule resumes, so the stop (its time passed) is a stop
+      now, the reverse takes the period earned after the end, and the penalty (the
+      Agreement's, 24 periods) is capped at the first period still held. That needs
+      the part funded past its first reservation, so the row declares the rate
+      rows' `Reservation06`. The storefront's recorded end is then the ruling's
+      delivery end at the operator's instant (a `dispute-effect:` source sorts before
+      the `operator:` one at the same instant), the part's final stop is the
+      authority's, and the only filing is the operator end's own, accepted — no
+      filing for the authority's stop, which is what its classification `ruling`
+      yields; no route reads the classification itself.
+      System, the VM lane's Compose stack, `E2E_MODULE=e2e_vm_rate_dispute` on the
+      final code — the module's 35 stages pass (3.5's run), each dispute stage
+      logged as run.
+- [x] 3.2 The buyer's contested case row: on a delivered on-demand rate deal, the buyer
       files through the mediation kit's dispute adapter in the harness, as the VM dispute
       controls do; the storefront's respondent discovery contests it; an operator
       decision through the typed control client rules `stop` with `returned` and a
       `reverse`. Assert the ruled end recorded, the payer's returns, the teardown and the
       deal `ended` once the case closes (D6, D5's policy row's lane twin). Verify
       (system): the module passes in the VM lane.
-- [ ] 3.3 Write the two dispute assertions over the producer's output — the filing's
+      Done: `rate_dispute/test_buyer_contested_case.py`: lane time a minute into the
+      second period, the buyer's filing claims the end at that instant; one servicing
+      step appends the seller's answer; the operator decision rules a stop at the
+      claimed end (`returned`) and a reverse of the held first period, closing the
+      case. A servicing step then shows the ruled end (`ruling`, at the claimed
+      instant), the authority's final stop and no filing. Both rows end with the
+      shared teardown stages, the payer's balance down only by what the part kept
+      (nothing, in both runs), and the seller's list `ended` with no outstanding code,
+      no open case and no open extension, the double holding only the row's case.
+      System, the same run — its 34 stages pass.
+- [x] 3.3 Write the two dispute assertions over the producer's output — the filing's
       per-part protection; the ruled entry's basis and effects and their applied state;
       the snapshot's authority stop, reversals and lifted extensions; the closed case —
       with exact, relational and ignored fields named as in 2.1, and have both rows
       assert through them (D6). Verify (unit, `e2e-tests/tests/unit/`): each passes on a
       recorded double output and fails naming the field on an altered one.
-- [ ] 3.4 Register the marker (`e2e_vm_rate_dispute`, lane-double evidence) in
+      Done: `producer_assertions.assert_payee_filing_ruled` and
+      `assert_contested_case_ruled`, over the record as the mediation kit's public
+      client reads it (`helpers/mediation.py`'s new `read_record`, as the buyer, each
+      entry verified against the Agreement's record key) and the payments snapshot.
+      Exact: filed once by the filer, the part held; the basis; the effects' kinds in
+      order, each applied; the case closed as ruled; the authority's stop with
+      `returned`, nothing reserved; the extension lifted; for the contest, one answer
+      by the payee before the ruling; the reverse amount where the caller's ruling
+      fixed it. By relation: the extension the filing reports is the one the
+      authority extended and lifted at payments; the ruled entry's effects are the
+      closed entry's; the stop stated at the delivery end and effective then or at
+      its receipt once passed; the seller's reverse the periods earned after the end;
+      the penalty's reversals the Agreement's penalty capped at what the part held;
+      the refund the rest. Ignored: record references and signatures, payment
+      payloads (reversals matched to effects by order), and the penalty effect's
+      recorded amount. Both rows assert through them, so the lane run asserts the
+      doubles' real outputs; that run is the only evidence on those. Unit
+      (`tests/unit/test_producer_dispute_assertions.py`, 13 pass) is not on a
+      committed recording, which the logged outputs make too large to commit (the
+      filed entry carries the whole Agreement), but on snapshots the payments engine
+      produces from payment events the test writes as the mediation double's
+      `service.py` sends them, keys and payloads included, and record entries the
+      test writes in the double's shape, each validated by the mediation kit's
+      `RecordEntry` model (a stub Agreement in the filing): each assertion passes,
+      the seller's with a penalty above and below the holdings; another basis,
+      another stop cause, an effect left prepared, a reverse other than the earnings
+      since the end, a penalty beyond its cap, a stop effective before its receipt,
+      an extension left open, a missing contest and a reverse amount other than the
+      caller's each fail naming the field and both values; with no reverse amount
+      given, the policy's amount is not compared; renamed record references,
+      payloads, a signature and `observedAt` are ignored by both. `read_record` is
+      unit tested against the mediation kit's `MediationContractFake`
+      (`tests/unit/test_mediation_helper.py`): a filed, ruled and closed case read as
+      the buyer in pages of two, entries returned in sequence; a tampered entry
+      raises the kit's `RecordVerificationError`. Its page size is a parameter for
+      that test, 1000 by default. The engine helper both payment-assertion unit
+      files share moved to `tests/unit/payments_engine.py`.
+- [x] 3.4 Register the marker (`e2e_vm_rate_dispute`, lane-double evidence) in
       `e2e-tests/pyproject.toml` and the VM lane's default module list in
       `e2e-tests/Makefile`, and describe the rows in `e2e-tests/README.md` (D6). Verify
       (unit): `make -C e2e-tests test-unit` passes, `ORDERS` included.
-- [ ] 3.5 Verification point: the two rows pass, leaving no payment hold, mock rule or
+      Done: the marker, the lane list and its comment, a "Rate-deal disputes" README
+      section (which also names the payment assertions) and the module in the
+      shared payment-scenario list. `tests/unit/test_recurring_purchase_stages.py`
+      holds both modules' shared stages to their orders, reads `rate_dispute/stages.py`
+      for the handoff check with `RateDisputeState`'s fields, and its reservation
+      check now reads a module's whole run order, so a domain stage setting lane time
+      past the first reservation (`SellerFiling10_RulingApplied`) is held to
+      reserving first. Where the domain's own dispute stages sit, and that their
+      subclasses' bodies are empty, is held only by the handoff check, as the rate
+      rows' domain stages are. Unit: `make -C e2e-tests test-unit` — 1081 passed, 1
+      skipped,
+      `ORDERS`, the hold and cleanup-order checks included.
+- [x] 3.5 Verification point: the two rows pass, leaving no payment hold, mock rule or
       held loop (system, the VM lane's Compose stack: `make -C e2e-tests test-e2e-vm
       "E2E_MODULE=e2e_vm_rate_dispute"`), and the whole VM lane passes.
       End-to-end: `e2e_vm_rate_dispute`.
       Nothing is owed to validation.
+      Evidence: system, the command above, on the final code — 69 passed, 2015
+      deselected;
+      the whole VM lane, `make -C e2e-tests test-e2e-vm` — 513 passed, 1568
+      deselected, on the scenario code as committed but for `read_record`'s page
+      size becoming a parameter (its default unchanged) and docstrings; the stack
+      taken down after each. Nothing left held: each row's payment ends stopped,
+      nothing reserved or held, its extension lifted, as its assertion and
+      `RateDispute12` show; its teardown completed; and its cleanup finished without
+      error — `lane_double_rules` fails a module whose rule still holds a case and
+      `run_cleanup` raises on any step failing, the mock gates' rules removed among
+      them — while the loops' holds release in their finalisers, which the modules
+      after the rows in the whole lane, holding and stepping the same loops, also
+      show.
+      End-to-end scenarios confirmed as listed: `e2e_vm_rate_dispute`, lane-double
+      evidence of the storefront's handling of a ruled stop on a rate deal.
+      `scripts/change-workflow run pre-commit` on the final tree:
+      `after-functional-change` passed; `pre-commit-functional` passed (local
+      evidence for tree `0f85e67c3606`: `check-packaging` and `make test`); the
+      workflow checks passed and `check-repository` passed 8 of 9, documentation
+      citations reporting only section 8's summary.
+
+Handoff (section 3):
+
+- For section 6's live twins: `read_record` is the public read they poll; the
+  dispute assertions take the record and snapshot whole. The seller's live ruling
+  is the hosted authority's own, at its own time, so the reverse relation
+  (periods earned after the end up to the stop) and the penalty cap need no lane
+  instant; the contested case's reverse amount is ignored when `reverse_amount` is
+  not given, since the topology's policy chooses it. Reversals are matched to
+  effects by order, not by the double's payload; a producer that orders them
+  otherwise fails the comparison, which is what it is for.
+- The seller row's gate is how the lane makes the earnings since the end real;
+  the hosted authority rules a filing later than it is filed anyway, and the live
+  twin needs no gate.
+- `admin_interrupt_deal` answers the filing's outcome inline; with the gate it is
+  `accepted` and the case `applying`.
+- The rows borrow `RateRow` from `rate_servicing/conftest.py`, leaving its notice
+  and second-payer fields at their defaults; a row needing either would set it
+  there.
+- The fresh-context check found: `read_record` with no unit test (tests added
+  against the kit's contract fake, with the page-size parameter); the 3.3 notes
+  calling hand-written events and entries the double's (corrected, and the
+  events now carry the double's keys and payloads); three failure tests checking
+  only the field (now both values), ignored fields tested on one assertion (now
+  both), the contested case's reverse-amount branches untested (tests added); the
+  first targeted run predating the unit files (rerun on the final code); the
+  leftover-state claim resting on later modules (restated on the cleanup
+  fixtures); two docstring sentences on sequences and entries' `at` (corrected);
+  an unused import (removed). Declined: a domain-stage order check, which the
+  rate rows' domain stages lack too and the handoff check partly covers; and a
+  `RateRow` of the rows' own, since the borrowed one carries what they need.
 
 ## 4. The VM chart's production example
 

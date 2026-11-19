@@ -2,14 +2,13 @@
 
 Each output is the signed transaction snapshot of the payments kit's
 ``PaymentsAuthority`` engine, the engine the lanes' payments double serves,
-driven through each row's input on the lane's own terms: a quarter-hour rate
-part at one period's price, the payer free to stop at once with its started
-period charged, a spot seller on two minutes' notice with its period returned,
-and the term ending with its partial final period returned. Each assertion passes
-on its row's output, fails naming the field and both values when an exact or a
-related field is altered, and ignores identifiers, signatures, ``observedAt`` and
-the latest event sequence. Every
-account and key below is a development fixture, never used on any network.
+driven through each row's input on the lane's own terms (``payments_engine``):
+the payer stopping at once with its started period charged, a spot seller on two
+minutes' notice with its period returned, funds running out, and the term ending
+with its partial final period returned. Each assertion passes on its row's
+output, fails naming the field and both values when an exact or a related field
+is altered, and ignores identifiers, signatures, ``observedAt`` and the latest
+event sequence.
 """
 
 from __future__ import annotations
@@ -18,8 +17,6 @@ import copy
 from typing import Any, Callable
 
 import pytest
-from market_arkhai_payments.fixtures import PaymentsAuthority
-from market_identity import Ed25519Signer
 
 from tests.e2e.roles.helpers.producer_assertions import (
     ABSENT,
@@ -30,62 +27,17 @@ from tests.e2e.roles.helpers.producer_assertions import (
     assert_term_end,
     field,
 )
+from tests.unit.payments_engine import (
+    PAYEE,
+    PAYER,
+    PERIOD_SECONDS,
+    PRICE,
+    T0,
+    TERM_END,
+    Engine,
+)
 
-# Development fixtures: two party accounts, the dispute authority's, and a
-# receipt-signing seed.
-PAYER = "11111111-1111-4111-8111-111111111111"
-PAYEE = "22222222-2222-4222-8222-222222222222"
-AUTHORITY = "33333333-3333-4333-8333-333333333333"
-SIGNER = Ed25519Signer(bytes([9]) * 32)
-
-T0 = 1_794_823_200
-PERIOD_SECONDS = 900
-PRICE = 250_000
-#: Twelve whole periods and five minutes of a thirteenth, which the term end
-#: returns.
-TERM_END = T0 + 3 * 3600 + 300
 SPOT_NOTICE_SECONDS = 120
-ASSET = "USD/6"
-
-
-class Engine:
-    """The payments engine on a clock the test moves, and one rate deal on it."""
-
-    def __init__(self, *, funds: int) -> None:
-        self.now = T0
-        self.authority = PaymentsAuthority(signer=SIGNER, clock=lambda: self.now)
-        self.authority.fund(PAYER, ASSET, funds)
-
-    def approve_and_start(self, *, payee_notice_seconds: int | None) -> str:
-        stops = [{"account": PAYER, "notice": "PT0S", "partialPeriod": "charged"}]
-        if payee_notice_seconds is not None:
-            stops.append({"account": PAYEE, "notice": f"PT{payee_notice_seconds}S",
-                          "partialPeriod": "returned"})
-        stops.append({"account": AUTHORITY, "notice": "PT0S", "partialPeriod": "chosen"})
-        mandate = {
-            "from": PAYER, "to": PAYEE, "fee": {"bps": 250}, "nonce": "unit-rate",
-            "deal": "ab" * 32, "expires": T0 + 300,
-            "parts": [{
-                "kind": "rate", "asset": ASSET, "amount": str(PRICE), "period": "PT15M",
-                "reserveAhead": "PT15M", "hold": {"for": "P7D"},
-                "end": {"at": TERM_END, "partialPeriod": "returned"},
-                "authorities": {"stop": stops, "reverse": [PAYEE, AUTHORITY],
-                                "extend": [AUTHORITY], "start": [PAYEE]},
-                "maxHoldExtension": None,
-            }],
-        }
-        transaction = self.authority.approve(mandate, account=PAYER).receipt.transaction.root
-        self.authority.submit(transaction, {"account": PAYEE, "requestId": "start",
-                                         "event": {"kind": "start"}})
-        return transaction
-
-    def stop(self, transaction: str, account: str) -> None:
-        self.authority.submit(transaction, {"account": account, "requestId": f"stop-{account}",
-                                         "event": {"kind": "stop"}})
-
-    def snapshot(self, transaction: str) -> dict[str, Any]:
-        signed = self.authority.snapshot(transaction)
-        return signed.snapshot.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 def payer_stop_output() -> dict[str, Any]:
