@@ -16,9 +16,10 @@ accounts, its notice, and the instants an earlier read recorded.
 
 Each assertion names the fields it compares, in three kinds:
 
-- **exact** — equal to a value the row's own terms fix: a stop's cause and
-  partial-period treatment, the account that stopped the part, an amount derived
-  from the row's price and a number of periods;
+- **exact** — equal to a value the row's own terms fix, or to an input the
+  scenario itself sent: a stop's cause and partial-period treatment, the account
+  that stopped the part, an amount derived from the row's price and a number of
+  periods, a filing's filer and the kind and delivery end its claim names;
 - **by relation** — equal to a value derived from another field of the output or
   from an instant an earlier read recorded: an effective instant equal to the
   authority's receipt of the stop plus the notice, a ``terms`` stop at the funded
@@ -37,9 +38,10 @@ with its expected and actual values.
 A dispute row's output is two producers': the dispute authority's signed record
 of the case, its entries as JSON in sequence as the mediation kit's public
 client reads them, and the payments snapshot its effects moved. Its assertions
-compare, besides the payment fields above, the filing's per-part protection, the
-ruled entry's basis and effects and their applied state, the authority's stop,
-reversals and lifted extensions, and the closed case. A payment event's sequence
+compare, besides the payment fields above, the claim the filing carries against
+the delivery end the scenario filed, the filing's per-part protection, the ruled
+entry's basis, delivery end and effects and their applied state, the authority's
+stop, reversals and lifted extensions, and the closed case. A payment event's sequence
 is read there to match an extension to the filing that reports it, and an
 entry's to order the case's entries. They ignore the record's signatures, record
 references, case references beyond finding the case, the entries' own ``at``
@@ -347,8 +349,10 @@ def _authority_events(snapshot: Mapping[str, Any], kind: str, authority: str,
 
 
 def _protection_checks(record: list[Mapping[str, Any]], snapshot: Mapping[str, Any], *,
-                       case_ref: str, filer: str, authority: str, part: int) -> list[Check]:
-    """The filing and its protection of ``part``: filed once by ``filer``, the
+                       case_ref: str, filer: str, claimed_end: int, authority: str,
+                       part: int) -> list[Check]:
+    """The filing and its protection of ``part``: filed once by ``filer``,
+    claiming ``delivery_end`` at ``claimed_end``, the end the scenario sent, the
     part held by an extension the authority opened at payments, which it lifted
     once the case closed."""
     filed = _case_entries(record, case_ref, "filed")
@@ -359,6 +363,10 @@ def _protection_checks(record: list[Mapping[str, Any]], snapshot: Mapping[str, A
     return [
         Check(f"{case}: filed entries", len(filed), 1),
         Check(f"{case}: the filing's actor", entry.get("actor", ABSENT), filer),
+        Check(f"{case}: the filed claim's kind", field(entry, "filing.request.kind"),
+              "delivery_end"),
+        Check(f"{case}: the filed claim's ended_at", field(entry, "filing.request.ended_at"),
+              claimed_end),
         Check(f"{case}: the filing's protection of part {part}", protection.get("status", ABSENT),
               "held"),
         Check(f"the authority's extend events on part {part}",
@@ -435,6 +443,13 @@ def _authority_stop_checks(snapshot: Mapping[str, Any], effects: Mapping[str, Ma
     ]
 
 
+def _ruled_end_check(effects: Mapping[str, Mapping[str, Any]], *, case_ref: str,
+                     ruled_end: int) -> Check:
+    """The ruling's delivery end, at ``ruled_end``."""
+    return Check(f"case {case_ref}: the ruling's delivery end",
+                 field(effects.get("end_delivery", {}), "effect.at"), ruled_end)
+
+
 def _reversal_amounts(snapshot: Mapping[str, Any], *, authority: str, part: int) -> list[int]:
     return [int(field(item, "event.amount"))
             for item in _authority_events(snapshot, "reverse", authority, part)]
@@ -442,16 +457,19 @@ def _reversal_amounts(snapshot: Mapping[str, Any], *, authority: str, part: int)
 
 def assert_payee_filing_ruled(
     record: list[Mapping[str, Any]], snapshot: Mapping[str, Any], *, case_ref: str, payee: str,
-    authority: str, penalty: int, period_price: int, period_seconds: int, part: int = 0,
+    claimed_end: int, authority: str, penalty: int, period_price: int, period_seconds: int,
+    part: int = 0,
 ) -> None:
     """A seller's ``delivery_end`` filing on a rate deal, ruled as the dispute
     authority documents a mechanical ruling.
 
-    Exact: the case filed once by the payee, ``part`` held; the ruling's basis
-    ``payee_filed``, its effects a delivery end, a ``stop`` returning its
-    period, a ``reverse`` and a ``penalty``, in that order, every one applied; the
-    case closed as ruled; the part stopped by the authority's account with
-    ``returned``, nothing reserved; the case's extension lifted. By relation:
+    Exact: the case filed once by the payee, claiming ``delivery_end`` at
+    ``claimed_end``, the end the storefront filed, ``part`` held; the ruling's
+    basis ``payee_filed``, its delivery end the claimed one, as a mechanical
+    ruling of the claim states it, its effects a delivery end, a ``stop``
+    returning its period, a ``reverse`` and a ``penalty``, in that order, every
+    one applied; the case closed as ruled; the part stopped by the authority's
+    account with ``returned``, nothing reserved; the case's extension lifted. By relation:
     the extension the filing reports is the one the authority opened and lifted
     at payments; the ruled entry's effects are the closed entry's; the stop
     stated at the delivery end and effective then, or at its receipt once that
@@ -479,9 +497,10 @@ def assert_payee_filing_ruled(
     capped = ABSENT if held is ABSENT else min(penalty, taken + held)
     case = f"case {case_ref}"
     require(f"the ruling of {case} on the payee's filing", [
-        *_protection_checks(record, snapshot, case_ref=case_ref, filer=payee, authority=authority,
-                            part=part),
+        *_protection_checks(record, snapshot, case_ref=case_ref, filer=payee,
+                            claimed_end=claimed_end, authority=authority, part=part),
         *ruling,
+        _ruled_end_check(effects, case_ref=case_ref, ruled_end=claimed_end),
         *_authority_stop_checks(snapshot, effects, case_ref=case_ref, authority=authority,
                                 part=part),
         Check(f"{case}: the reverse effect's amount", reverse_amount,
@@ -496,24 +515,26 @@ def assert_payee_filing_ruled(
 
 def assert_contested_case_ruled(
     record: list[Mapping[str, Any]], snapshot: Mapping[str, Any], *, case_ref: str, payer: str,
-    payee: str, authority: str, reverse_amount: int | None = None, part: int = 0,
+    payee: str, claimed_end: int, authority: str, ruled_end: int | None = None,
+    reverse_amount: int | None = None, part: int = 0,
 ) -> None:
     """A buyer's ``delivery_end`` filing the storefront contested, ruled by an
     operator with a stop and a reverse.
 
-    Exact: the case filed once by the payer, ``part`` held; one answer by the
+    Exact: the case filed once by the payer, claiming ``delivery_end`` at
+    ``claimed_end``, the end the buyer filed, ``part`` held; one answer by the
     payee before the ruling, the contest; the ruling's basis ``operator``, its
     effects a delivery end, a ``stop`` returning its period and a ``reverse``,
     in that order, every one applied; the case closed as ruled; the part stopped
     by the authority's account with ``returned``, nothing reserved; the case's
-    extension lifted; the reverse effect's amount ``reverse_amount`` where the
-    caller's own ruling fixed it, and ignored where a policy it does not see
-    chose it. By relation: the extension the filing reports is the one the
-    authority opened and lifted at payments; the ruled entry's effects are the
-    closed entry's; the stop stated at the delivery end and effective then, or
-    at its receipt once that passed; payments reversing exactly the reverse
-    effect's amount; the refund the rest of what was paid. Everything else is
-    ignored (module docstring).
+    extension lifted; the ruling's delivery end ``ruled_end`` and the reverse
+    effect's amount ``reverse_amount`` where the caller's own ruling fixed them,
+    and each ignored where a policy it does not see chose it. By relation: the
+    extension the filing reports is the one the authority opened and lifted at
+    payments; the ruled entry's effects are the closed entry's; the stop stated
+    at the delivery end and effective then, or at its receipt once that passed;
+    payments reversing exactly the reverse effect's amount; the refund the rest
+    of what was paid. Everything else is ignored (module docstring).
     """
     ruling, effects = _ruling_checks(record, case_ref=case_ref, basis="operator",
                                      kinds=["end_delivery", "stop", "reverse"])
@@ -524,8 +545,8 @@ def assert_contested_case_ruled(
     effect_amount = amount(field(effects.get("reverse", {}), "effect.amount"))
     case = f"case {case_ref}"
     checks = [
-        *_protection_checks(record, snapshot, case_ref=case_ref, filer=payer, authority=authority,
-                            part=part),
+        *_protection_checks(record, snapshot, case_ref=case_ref, filer=payer,
+                            claimed_end=claimed_end, authority=authority, part=part),
         Check(f"{case}: the answers before the ruling", answers, [payee]),
         *ruling,
         *_authority_stop_checks(snapshot, effects, case_ref=case_ref, authority=authority,
@@ -534,6 +555,8 @@ def assert_contested_case_ruled(
               _reversal_amounts(snapshot, authority=authority, part=part),
               [] if effect_amount is ABSENT else [effect_amount], "the reverse effect's amount"),
     ]
+    if ruled_end is not None:
+        checks.append(_ruled_end_check(effects, case_ref=case_ref, ruled_end=ruled_end))
     if reverse_amount is not None:
         checks.append(Check(f"{case}: the reverse effect's amount", effect_amount, reverse_amount))
     require(f"the ruling of {case} on the payer's contested filing", checks)

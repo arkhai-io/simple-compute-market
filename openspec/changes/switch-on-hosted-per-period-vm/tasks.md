@@ -492,6 +492,42 @@ Handoff (section 3):
   rate rows' domain stages lack too and the handoff check partly covers; and a
   `RateRow` of the rows' own, since the borrowed one carries what they need.
 
+Round 1's triage fix (28 F1): the dispute assertions now bind the comparison to the
+claim the scenario sent. Before, nothing compared a filing's claim or the ruled delivery
+end with any input: a ruling consistent with itself on another end passed. Both
+assertions take `claimed_end` and compare exactly the filed entry's
+`filing.request.kind` (`delivery_end`) and `ended_at` with it. `assert_payee_filing_ruled`
+also holds the ruling's `end_delivery` at to it, as a mechanical ruling of the claim
+states it. `assert_contested_case_ruled` compares the ruled end only when given
+`ruled_end`, as it does `reverse_amount`, since a live topology's policy chooses both.
+Both rows pass `delivery_end_at`; the contested row passes it as `ruled_end` too, its
+operator decision being the row's own. The module docstring's exact class now includes
+the inputs a scenario sent. For 6.1–6.2: the seller's live module passes the end the
+storefront recorded as `claimed_end`; the buyer's passes the end it filed and no
+`ruled_end`. The lane double records `end_delivery` at its own clock when it rules,
+which equals the claim in both rows only because lane time is held at the claimed
+instant from filing to ruling.
+Evidence: unit, `tests/unit/test_producer_dispute_assertions.py` — 18 passed, the new
+cases a changed filed end and kind failing in both assertions naming both values, the
+ruling's end and stop moved together half a minute (every relation still holding)
+failing in both naming only the ruled end, and the contested case with no `ruled_end`
+holding on the moved ruling; with `test_producer_assertions.py` and
+`test_recurring_purchase_stages.py`, 85 passed. System, the VM lane's Compose stack,
+`make -C e2e-tests test-e2e-vm "E2E_MODULE=e2e_vm_rate_dispute"` — 69 passed, 2020
+deselected, both rows' `[s10]` and `[c10]` asserting through the new checks on the
+doubles' and storefront's real output; the stack's teardown (`make -C e2e-tests
+e2e-vm-down`) was refused in the triage session and is left to the owner.
+`scripts/change-workflow run test-before` failed on import at the round's base (no
+project environment, `web3` missing), as in sections 1 and 3: no proof the new tests
+fail there. The fresh-context check found the module docstring's exact class not
+covering the claimed end (widened to the inputs a scenario sent) and a kind mutation
+using a value the contract lacks (`effects` now); nothing declined.
+`scripts/change-workflow run pre-commit` on the fix's tree: `after-functional-change`
+passed; `pre-commit-functional` passed (local evidence for tree `414b73918d4d`:
+`check-packaging` and `make test`); the index, tasks, skills and strict OpenSpec checks
+passed, and `check-repository` passed 8 of 9, documentation citations reporting only
+section 8's summary.
+
 ## 4. The VM chart's production example
 
 Delivers `helm/charts/storefront/examples/production-values.yaml`: an agent settling in

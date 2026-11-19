@@ -341,8 +341,9 @@ class SellerFiling10_RulingApplied:
         record, snapshot = _producer_output(payments_config, mediation_target, deal_state)
         assert_payee_filing_ruled(
             record, snapshot, case_ref=deal_state.case_ref,
-            payee=str(payment_setting("SELLER_ACCOUNT")), authority=mediation_target.account,
-            penalty=deal_state.penalty, period_price=PERIOD_GROSS, period_seconds=PERIOD_SECONDS,
+            payee=str(payment_setting("SELLER_ACCOUNT")), claimed_end=deal_state.delivery_end_at,
+            authority=mediation_target.account, penalty=deal_state.penalty,
+            period_price=PERIOD_GROSS, period_seconds=PERIOD_SECONDS,
         )
         deal_state._ruling_applied = True
         log.info("[s10] Case %s ruled at %s: stopped, reversed %s, case closed",
@@ -442,7 +443,8 @@ class ContestedCase10_OperatorRules:
         record, snapshot = _producer_output(payments_config, mediation_target, deal_state)
         assert_contested_case_ruled(
             record, snapshot, case_ref=deal_state.case_ref, payer=str(deal_state.payer_account),
-            payee=str(payment_setting("SELLER_ACCOUNT")), authority=mediation_target.account,
+            payee=str(payment_setting("SELLER_ACCOUNT")), claimed_end=deal_state.delivery_end_at,
+            authority=mediation_target.account, ruled_end=deal_state.delivery_end_at,
             reverse_amount=PERIOD_GROSS,
         )
         deal_state._ruling_applied = True

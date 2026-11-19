@@ -11,8 +11,9 @@ mediation kit's contract model; the doubles' own outputs are asserted by the
 lane's rows. The seller's filing is ruled with a penalty above and below what the
 part holds; the buyer's contested case with an operator's stop and reverse. Each
 assertion passes on its row's output, fails naming the field and both values when
-an exact or a related field is altered, and ignores record references, payment
-payloads, signatures and ``observedAt``. Every account and key is a development
+an exact or a related field is altered — the filed claim and the ruled end
+included, even where the ruling's own times move together — and ignores record
+references, payment payloads, signatures and ``observedAt``. Every account and key is a development
 fixture, never used on any network.
 """
 
@@ -163,14 +164,17 @@ def contested_case_output() -> Output:
 
 def _seller(output: Output, penalty: int = PENALTIES[0]) -> None:
     record, snapshot = output
-    assert_payee_filing_ruled(record, snapshot, case_ref=CASE, payee=PAYEE, authority=AUTHORITY,
-                              penalty=penalty, period_price=PRICE, period_seconds=PERIOD_SECONDS)
+    assert_payee_filing_ruled(record, snapshot, case_ref=CASE, payee=PAYEE,
+                              claimed_end=DELIVERY_END, authority=AUTHORITY, penalty=penalty,
+                              period_price=PRICE, period_seconds=PERIOD_SECONDS)
 
 
-def _contested(output: Output, reverse_amount: int | None = PRICE) -> None:
+def _contested(output: Output, reverse_amount: int | None = PRICE,
+               ruled_end: int | None = DELIVERY_END) -> None:
     record, snapshot = output
     assert_contested_case_ruled(record, snapshot, case_ref=CASE, payer=PAYER, payee=PAYEE,
-                                authority=AUTHORITY, reverse_amount=reverse_amount)
+                                claimed_end=DELIVERY_END, authority=AUTHORITY,
+                                ruled_end=ruled_end, reverse_amount=reverse_amount)
 
 
 def _altered(data: Any, path: str, value: Any) -> Any:
@@ -211,6 +215,59 @@ def test_a_reverse_amount_a_policy_chose_is_not_compared():
     message = _message(lambda value: _contested(value, reverse_amount=PRICE // 2), output)
     assert (f"case {CASE}: the reverse effect's amount: expected {PRICE // 2!r}, "
             f"got {PRICE!r}") in message, message
+
+
+@pytest.mark.parametrize(("output", "check"), [
+    (lambda: seller_filing_output(PENALTIES[0]), _seller),
+    (contested_case_output, _contested),
+], ids=["seller", "contested"])
+def test_a_filed_claim_other_than_the_one_sent_fails_naming_it(output, check):
+    """The filing's claim is the scenario's own input: another end, or another
+    kind, differs from what was sent."""
+    record, snapshot = output()
+    message = _message(check, (_altered(record, "0.filing.request.ended_at", DELIVERY_END + 1),
+                               snapshot))
+    assert (f"case {CASE}: the filed claim's ended_at: expected {DELIVERY_END!r}, "
+            f"got {DELIVERY_END + 1!r}") in message, message
+    message = _message(check, (_altered(record, "0.filing.request.kind", "effects"), snapshot))
+    assert (f"case {CASE}: the filed claim's kind: expected 'delivery_end', "
+            f"got 'effects'") in message, message
+
+
+def _ruled_times_moved(record: list[dict[str, Any]], seconds: int) -> list[dict[str, Any]]:
+    """The record with the ruling's delivery end and stop time both moved by
+    ``seconds``, in the ruled and the closed entry alike: a ruling consistent
+    with itself, on an end other than the one claimed."""
+    moved = copy.deepcopy(record)
+    for entry in moved:
+        for item in entry.get("outcome", []):
+            effect = item["effect"]
+            if effect["kind"] in ("end_delivery", "stop"):
+                # A new mapping: the entries share their effects' mappings.
+                item["effect"] = {**effect, "at": effect["at"] + seconds}
+    return moved
+
+
+@pytest.mark.parametrize(("output", "check"), [
+    (lambda: seller_filing_output(PENALTIES[0]), _seller),
+    (contested_case_output, _contested),
+], ids=["seller", "contested"])
+def test_a_ruling_moved_off_the_claimed_end_fails_naming_only_the_ruled_end(output, check):
+    """Half a minute earlier, within the same period, every relation among the
+    ruling's own times and the payments still holds; only the ruled end, held
+    to the claimed one, differs."""
+    record, snapshot = output()
+    message = _message(check, (_ruled_times_moved(record, -30), snapshot))
+    differences = [line for line in message.splitlines() if line.startswith("  ")]
+    assert differences == [f"  case {CASE}: the ruling's delivery end: expected "
+                           f"{DELIVERY_END!r}, got {DELIVERY_END - 30!r}"], message
+
+
+def test_a_ruled_end_a_policy_chose_is_not_compared():
+    """Where the caller does not fix the contested case's ruled end, a ruling
+    on another end holds, its stop still related to it."""
+    record, snapshot = contested_case_output()
+    _contested((_ruled_times_moved(record, -30), snapshot), ruled_end=None)
 
 
 def test_a_ruling_on_another_basis_fails_naming_it_and_both_values():
