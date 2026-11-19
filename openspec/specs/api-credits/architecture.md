@@ -4,11 +4,11 @@ The [normative contract](spec.md) defines API-credit behavior. This document exp
 
 ## Market shape
 
-API credits are prepaid finite units for a named service. A listing advertises a unit rate and available quota. The buyer negotiates a quantity, settles the accepted Agreement, and receives either a new bearer key funded with that quantity or a top-up to an existing key.
+API credits are prepaid finite units for a named service. A listing advertises commercial terms and available quota. The buyer negotiates a quantity and payment under the configured buyer and seller policies, settles the accepted Agreement, and receives either a new bearer key funded with that quantity or a top-up to an existing key. An advertised per-credit rate can supply a quantity-scaled opening, bound, or reference; it does not fix the final payment independently of negotiation.
 
 ```text
 quota-backed listing
-      ↓ quantity-priced negotiation
+      ↓ quantity-aware negotiation
 verified settlement
       ↓ idempotent issuance
 API key balance
@@ -69,11 +69,13 @@ The credits service stores only a hash of the bearer secret. The storefront pers
 
 A newly issued secret is not guaranteed to be returned exactly once: an unused-key retry may rotate it, and the owning storefront may return persisted credentials through its authenticated status flow. Architecture and clients must therefore distinguish secret confidentiality from one-time-display semantics.
 
-## Middleware role
+## Consumption integration
 
-Python, TypeScript, and Rust gates implement the same observable verification and consumption protocol. A gate parses credentials, asks the service to verify and consume a fixed configured amount, and maps authority results to HTTP admission outcomes.
+The credits authority understands positive balance debits, not the protected service's operations. Each seller's storefront and service define what a credit means and which operations consume how many credits, then submit that amount through the authority's consumption protocol. This permits fixed, route-specific, variable, outcome-sensitive, or non-HTTP interpretations without adding service-specific behavior to the API-credits domain.
 
-Caching and batching reduce service calls but do not create another balance authority. Cached verification may delay observation of revocation for its configured TTL. Optional batching uses an optimistic local estimate and flushes to the service; authoritative balance and idempotency remain server-side.
+The bundled Python, TypeScript, and Rust HTTP gates are one integration pattern. They parse credentials, ask the service to verify and consume one configured amount before admitting a request, and map authority results to HTTP outcomes. Their fixed amount per admitted request is adapter configuration, not a domain invariant.
+
+Caching and batching reduce service calls but do not create another balance authority. Cached verification may delay observation of revocation for its configured TTL. Optional batching uses an optimistic local estimate and flushes service-selected debits to the authority; authoritative balance and idempotency remain server-side.
 
 ## Failure and compensation
 
@@ -171,7 +173,7 @@ delegate's `place_hold`.
 
 ## Current limits
 
-Current metering charges one fixed configured amount per admitted request; route-specific or variable-cost metering is not established. Possession-challenge protocols for existing keys are not implemented. Verification caching means revocation is not globally instantaneous, and optional batching must not be described as a strict zero-overdraft guarantee.
+The bundled HTTP gates currently charge one configured amount per admitted request; they do not provide route-specific, variable-cost, or outcome-sensitive policy. Services needing those semantics must supply their own integration over the authority's positive-amount consumption operation. Possession-challenge protocols for existing keys are not implemented. Verification caching means revocation is not globally instantaneous, and optional batching must not be described as a strict zero-overdraft guarantee.
 
 API credits intentionally has no compute-provisioning capability. A non-physical market does not acquire VM, lease-executor, or fulfillment-scheduler dependencies merely to conform to physical delivery architecture.
 
