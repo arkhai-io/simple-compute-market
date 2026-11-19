@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from market_core.listing_details import ListingMetadata, ListingTitle
+from market_core.listing_details import (
+    ListingDescription,
+    ListingMetadata,
+    ListingTitle,
+)
 from market_identity import Identity
 from pydantic import BaseModel, Field
 from storefront_client.models import ListingListResponse
@@ -37,7 +41,10 @@ class PublishFromQuotaRequest(BaseModel):
     service_name: str
     accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
     settlement_clauses: list[dict[str, Any]] | None = None
-    description: str | None = None
+    # The prose publishes beside the listing envelope as well as inside its
+    # resource, so it takes the envelope's limit: a longer description would
+    # leave a listing row the registry then refuses to publish.
+    description: ListingDescription | None = None
     title: ListingTitle | None = None
     metadata: ListingMetadata | None = None
     openapi_url: str | None = None

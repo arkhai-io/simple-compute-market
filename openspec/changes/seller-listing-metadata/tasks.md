@@ -285,6 +285,9 @@ change's `specs/registry-discovery/spec.md`.
   branch changed nothing else under `e2e-tests`. End-to-end confirmed: no
   committed scenario, stack configuration or storefront configuration states a
   listing detail, so the three scenarios above publish none.
+  Correction (section 6): both API-credit storefront configurations' `[seed]`
+  state a `description`, which the seed publishes beside the envelope, so
+  `e2e_credits_deal` publishes one detail through a real registry; 6.3 records it.
 
 Handoff from section 3:
 
@@ -583,21 +586,104 @@ seller's prose". Touches `domains/apicredits/storefront`
 (`listing_publication.py`, `services/listing_service.py`,
 `controllers/listings_controller.py`, `cli.py`).
 
-- [ ] 6.1 Type `PublishFromQuotaRequest.description` as the shared
+- [x] 6.1 Type `PublishFromQuotaRequest.description` as the shared
   `ListingDescription` (`listing_publication.py`). A unit test in
   `domains/apicredits/storefront/tests/unit/` shows 4000 characters admitted and
   4001 refused by the request model.
-- [ ] 6.2 Application integration through `ApiCreditListingClient.publish_from_quota`
+  Unit, `tests/unit/test_publish_from_quota_request.py` (2 cases): 4000
+  characters admitted, 4001 refused with its one error on `description`. Outside
+  the task's text, in a file the section names: the `publish` command
+  (`cli.py`) builds the request model before it reads the credential or opens a
+  storefront, so a request the model refuses fails as a usage error (exit 2)
+  with the model's errors, where the sync client's validation had raised a
+  traceback; unit, `tests/unit/test_listing_publication_entry_points.py`'s
+  `test_a_description_past_its_limit_fails_as_usage_before_any_storefront_is_opened`,
+  replacing only the command module's own `_open_storefront`, shows a description
+  far past the limit exiting 2, `description` named, and no storefront opened.
+  That one case is the evidence; a title or metadata the model refuses takes the
+  same branch, untested here.
+- [x] 6.2 Application integration through `ApiCreditListingClient.publish_from_quota`
   against the in-process app (`domains/apicredits/storefront/tests/integration/`):
   a publish stating all three sends `title` and `metadata` beside the envelope and
   the description both beside it and, unchanged, inside `listing_resource`; a
   publish stating none sends no envelope detail key; a description over the limit
   is refused 422 and no listing row exists afterwards (rejection-path raw call).
-- [ ] 6.3 Verification point: API-credit storefront unit and integration suites
+  Application integration, `tests/integration/test_listing_details.py` (4 cases):
+  the real app and lifespan on `test_alkahest_release_conditions`' harness (its
+  `storefront` fixture and `_started`), registry discovery enabled with two
+  pinned registries replaced where `MultiRegistryClient` wraps them, at
+  `_make_registry_client`: both its bindings, the publication service's and the
+  one `server.py` imports for startup's dispute-authority read, so no call
+  leaves the process. A seller's typed-client publish stating all three answers
+  `published` after startup read the double's recommendations once,
+  `get_listing` reads the three back, and
+  both registries are sent them beside the envelope with the description,
+  unchanged, in `listing_resource`; a publish stating none sends neither registry
+  a detail key, and the resource's description is null; a description far past
+  the limit is refused 422, `list_listings` then reads no listing, and neither
+  registry was sent anything. Correction: the refusal is no raw HTTP call. It is
+  still a rejection-path test, commented so and asserting only the status: the
+  typed client validates its request model and so refuses to build the body, so
+  the test builds it with `PublishFromQuotaRequest.model_construct`, which the
+  client sends unvalidated through its own route, signing and operation.
+  Outside the plan: the credits lane's `[seed]` passes its configured
+  description to `ListingService.publish_from_quota` without the request model,
+  so a seed description past the limit would have written a listing row every
+  registry refuses. The service now validates the three details through
+  `ListingDetails` before it reads the resource or writes anything. Application
+  integration, the same module's
+  `test_a_seed_description_past_the_envelope_limit_gives_the_seed_up_with_no_listing`:
+  the started app seeded as `test_alkahest_release_conditions`' seed cases seed
+  it, with a description far past the limit, its quota registration replaced on
+  the composed seed; the administrator's first `listing-seed` cycle fails, the
+  next reports the seed `given_up` for a `ValidationError`, `list_listings`
+  reads no listing, and neither registry was sent anything. Only 6.1's unit test holds the limit's edges, as the plan
+  asks; every other new case states a description far past it, so a limit
+  changed in `market_core` changes only that test here (`test-levels.md`,
+  "Coverage between the levels").
+  `run test-before` cannot collect either new test file at `HEAD`: its
+  `--no-project` environment has no `injected_time`, which the package's
+  `conftest.py` imports.
+- [x] 6.3 Verification point: API-credit storefront unit and integration suites
   pass, 6.2 being the application-integration case; `scripts/change-workflow run
   pre-commit seller-listing-metadata` and `make check-packaging` pass.
   End-to-end: `e2e_credits_deal` and `e2e_credits_payment_deal` publish without a
   description, evidence for the unchanged path only; no scenario is owed.
+  `scripts/change-workflow run pre-commit seller-listing-metadata --base
+  origin/dev` passes every hook: its `make lock` rewrote no lock, its `make
+  validate-local` passed `make check-packaging` and the whole `make test`, and
+  the `pre-commit` checks passed. In that `make test` the API-credit storefront
+  ran 292 passed, unit and integration: 285 before this section and its 7 new
+  cases.
+  End-to-end corrected: those scenarios discover the listing the API-credit
+  lane's storefront seeds (`storefront.credits.lane.toml`, `[seed]`, as
+  `storefront.credits.toml` does for the full local stack), and the seed states
+  `description = "Prepaid weather-API credits"`. They therefore publish that
+  description beside the envelope and inside `listing_resource` through a real
+  API-credit registry, which is evidence that a real registry admits a stated
+  description on the seed's path. They state no title or metadata, and the seed
+  calls the listing service directly, so the seller's route and request model
+  are proven by 6.1 and 6.2 alone. No scenario is owed.
+
+Handoff from section 6:
+
+- With registry discovery enabled, the API-credit storefront's startup reads
+  every registry's descriptor through `_make_registry_client`, which `server.py`
+  imports by name from `publication_service`. A test that doubles the registries
+  replaces both bindings, or startup reaches the configured URLs for real and
+  logs the failure while the test still passes: each case took about 5 seconds
+  until it did. `ApiCreditCompositionSeams` offers no registry seam; adding one
+  means threading a factory through the publication service's module-level
+  runtime construction, which this section declined as outside its scope. The
+  fresh-context check raised it as patching around a seam.
+- `run test-before` cannot collect any API-credit storefront test: its
+  `--no-project` environment lacks `injected_time`, which the package's
+  `conftest.py` imports. No new test here was shown failing at the round's base.
+- A request the typed `ApiCreditListingClient` refuses can still be sent for a
+  rejection-path test as `PublishFromQuotaRequest.model_construct(...)`: the
+  client's `model_validate` returns an existing instance unvalidated.
+- Both API-credit storefront configurations' `[seed]` state a `description`, the
+  one detail any committed end-to-end scenario publishes.
 
 ## 7. Closeout
 

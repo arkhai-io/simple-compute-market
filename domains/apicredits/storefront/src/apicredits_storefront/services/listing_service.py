@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from market_core.listing_details import ListingDetails
 from market_core.schemas import settlement_option_schema
 from core_storefront.sqlite_client import store_timestamp
 from core_storefront.stage_log import stage_event
@@ -208,7 +209,13 @@ class ListingService:
         is raised only once the resource and its pool have been read, and only
         for a mechanism the pool's backing lets the listing publish, so a create
         refused as retryable is one that publishes once the mechanism answers.
+
+        Details past the envelope's limits raise ``ValueError`` before anything
+        is read or written: the seed passes its configured prose here without
+        the request model the route validates, and a listing row holding prose
+        the registry refuses would never publish.
         """
+        ListingDetails(title=title, description=description, metadata=metadata)
         clauses = (
             settlement_publication_defaults()
             if settlement_clauses is None
