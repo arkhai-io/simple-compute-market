@@ -91,8 +91,10 @@ read-only like any other. A protected path MUST NOT be granted.
 A repository MUST add writable paths in `[sandbox]`: `writable.common` for every step
 but the review, `writable.<step>` for one step, relative paths from the checkout's
 root and `~` the home directory; and protected paths in `protected`, which only add.
-The configuration's check MUST refuse a writable path under a protected one, a
-`writable.review`, and an unknown step.
+The configuration's check MUST refuse a writable path that is or lies under a
+protected one, a `writable.review`, and an unknown step. A writable directory
+containing a protected path MUST be admitted, the protected path mounted read-only
+inside it (CW-r6kd).
 
 #### Scenario: A repository gives design its documents
 
@@ -101,9 +103,15 @@ The configuration's check MUST refuse a writable path under a protected one, a
 
 #### Scenario: A repository opens a protected path
 
-- **WHEN** the configuration declares `writable.common = [".agents/"]`
+- **WHEN** the configuration declares `writable.common = [".agents/workflow.toml"]`
 - **THEN** every reader of the configuration refuses, naming the field and the
-  protected path beneath it
+  protected path
+
+#### Scenario: A repository opens a directory holding a protected path
+
+- **WHEN** the configuration declares `writable.design = [".agents/"]`
+- **THEN** design's sandbox writes `.agents/`, and `.agents/workflow.toml` stays
+  read-only inside it
 
 ### Requirement: CW-v5ny Where the sandbox cannot run, a step runs unconfined and says so
 
@@ -120,13 +128,20 @@ by those checks alone: no scope, protected path, or sandbox `git` binds it.
   orchestrating session tells the owner, and the run's invariants are checked as
   any run's
 
-### Requirement: CW-j4cs Only the guarded push leaves a checkout during an unattended run
+### Requirement: CW-j4cs No git push but the guarded push's leaves a checkout during an unattended run
 
-The sandbox MUST mount the engine's own `git` read-only over the system's. It MUST
-refuse a `push` while the unattended-run marker is set and the guarded push's marker
-is not, whatever the push's options, and otherwise run the system's `git`. The
-engine MUST leave the checkout's hooks and `core.hooksPath` as they are. An adapter
-MAY also refuse `git push` by its harness's command rules.
+The sandbox MUST mount the engine's own `git` read-only over each of the system's Git
+executables, the one on `PATH` and the one in Git's exec path. It MUST refuse a
+`push` while the unattended-run marker is set and the guarded push's marker is not,
+whatever the push's options, MUST record each push it refuses, with its command
+line, among the session's invocations, and otherwise MUST run the system's `git`.
+The engine MUST leave the checkout's hooks and `core.hooksPath` as they are. An
+adapter MAY also refuse `git push` by its harness's command rules. Other routes to
+the remote — a real Git called by its own path, the Git host's API, the wire
+protocol directly — are a step working around the refusal, outside the threat model
+the sandbox serves: the orchestrating session's reading of a finding's run
+(CW-5rmh) and the check after the run (CW-q7ub) are what catch them, and the Git
+host's authorization what bounds them.
 
 #### Scenario: A step pushes directly
 
@@ -140,6 +155,19 @@ MAY also refuse `git push` by its harness's command rules.
   core.hooksPath=/dev/null push origin HEAD:dev`
 - **THEN** the sandbox's `git` refuses it, and nothing is pushed
 
+#### Scenario: A refused push reaches the run's record
+
+- **WHEN** an unattended implementation run's `git push --no-verify` is refused by
+  the sandbox's `git`, and the run goes on
+- **THEN** the run's line carries the refused push among its `refusals`, with its
+  command line, whatever harness ran the step
+
+#### Scenario: A step calls Git's exec path
+
+- **WHEN** an unattended implementation run runs `/usr/lib/git-core/git push origin
+  HEAD:dev`
+- **THEN** the sandbox's `git`, mounted there too, refuses it, and nothing is pushed
+
 #### Scenario: The owner pushes from the workspace
 
 - **WHEN** the owner pushes a branch from the workspace, outside any unattended run
@@ -152,8 +180,9 @@ After every unattended session, whatever its outcome, the engine MUST check agai
 the state it recorded at the start: `HEAD` is on the change's branch and descends
 from the start commit; for validation and review, `HEAD` and every tracked file are
 unchanged; the workflow log and the ledger were only appended to; each review record
-is unchanged; `refs/stash` is unchanged; the remote moved only by the guarded push;
-and, for closeout, every path changed since the start, committed or not, is one
+is unchanged; `refs/stash` is unchanged; the remote moved only by the guarded push,
+the change's branch at the last successful guarded push its record names or
+unchanged (CW-59c7); and, for closeout, every path changed since the start, committed or not, is one
 closeout may change (CW-pkug).
 
 #### Scenario: A step amends an earlier commit
@@ -197,8 +226,10 @@ action or hook after the session MUST run, and nothing MUST be repaired.
 
 The harness's adapter MUST read the run's events for writes the sandbox refused — a
 read-only file system, or a protected file busy — and the wrapper MUST record each,
-with its tool, command or path, and error, as `refusals` on the run's line. A step
-MUST treat such an error as outside its scope.
+with its tool, command or path, and error, as `refusals` on the run's line. The
+wrapper MUST also record there each push the sandbox's `git` refused, from the
+engine's own record of it (CW-j4cs). A step MUST treat such an error as outside its
+scope.
 
 #### Scenario: A check writes a cache during design
 
@@ -292,7 +323,7 @@ check out, switch, rebase, stash, or clean.
 
 - **WHEN** an unattended implementation run commits a section
 - **THEN** it pushes that commit through the guarded push of the change's branch, and
-  any other push it attempted would be refused
+  any other `git push` it attempted would be refused (CW-j4cs)
 
 ### Requirement: CW-4yhk A refused run stops, or goes on within its scope
 
@@ -426,9 +457,10 @@ for a fresh run through `start` or a resumed one through `resume`, recorded as
 held to its scope again. Each value MUST be split on `;`, each part trimmed and empty
 parts dropped, and each path resolved as a `[sandbox]` entry is (CW-h2zt). A grant
 MUST name a path: the engine MUST refuse a value with a glob character, and a path
-under a protected path, naming the value, before it launches anything. A file MUST
-mount its directory, and a path absent at launch MUST be created as a directory
-before it is mounted.
+that is or lies under a protected path, naming the value, before it launches
+anything. A directory containing a protected path MUST be granted, the protected
+path staying read-only inside it. A file MUST mount its directory, and a path absent
+at launch MUST be created as a directory before it is mounted.
 
 #### Scenario: The owner grants rules before a fresh run
 
@@ -548,10 +580,13 @@ check confirms that `HEAD` is attached, the worktree is clean, the branch is non
 the configured protected branches, and its upstream has the same name. The push MUST
 send exactly `HEAD` to the upstream's remote, or a remote given as an argument, and
 MUST NOT be forced. The check MUST report a refused state and MUST NOT repair it.
-Under an unattended run, a push to a given remote of a branch with no upstream MUST
+Under an unattended run, each push the guarded push attempts MUST be recorded among
+the session's invocations once Git returns: its branch, its remote, the commit sent,
+and Git's exit status. A push to a given remote of a branch with no upstream MUST
 NOT set one, since `.git/config` is protected (CW-r6kd); once the session ends, the
-engine MUST set the branch's upstream, outside the sandbox, to the remote that push
-recorded.
+engine MUST set the branch's upstream, outside the sandbox, to the remote of the
+run's last successful guarded push of that branch, and MUST set none where no push
+of it succeeded.
 
 #### Scenario: The worktree is dirty
 
@@ -577,6 +612,13 @@ recorded.
   given, a branch with no upstream
 - **THEN** the push sends `HEAD` without setting an upstream, and once the session
   ends the engine sets the branch's upstream to that remote's branch of its name
+
+#### Scenario: An unattended push fails
+
+- **WHEN** an unattended design run's guarded push of a branch with no upstream
+  passes its pre-push hook, and Git then fails to push
+- **THEN** the push's record carries Git's failing status, and once the session ends
+  the engine sets no upstream
 
 ## REMOVED Requirements
 

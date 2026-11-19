@@ -41,9 +41,13 @@ harness, as categorical bounds on what a step can change on the owner's machine.
   merge, and validation the checkout. A file or pattern entry mounts its directory.
 - **Protected paths no step writes:** the workflow's configuration, `.git/config`,
   the engine's `git`, and every settings file the harness loads, present or absent.
-- **Only the guarded push leaves a checkout during an unattended run,** any other
-  push refused by the engine's `git`, which the sandbox mounts over the system's,
-  whatever the push's options.
+- **No `git push` but the guarded push's leaves a checkout during an unattended
+  run,** any other refused by the engine's `git`, which the sandbox mounts over the
+  system's Git executables, whatever the push's options, and recorded among the
+  run's refusals. Each guarded push records its result, from which the engine sets
+  a missing upstream after the run. Other routes to the remote are a step working
+  around the refusal: the run's reading and the checks catch them, and the Git
+  host's authorization bounds them.
 - **Seven checks after every run** — history only extended, validation and review
   changing nothing, the log and ledger only appended to, review records
   unchanged, no stash, the remote moved only by the guarded push, closeout
@@ -85,8 +89,9 @@ harness, as categorical bounds on what a step can change on the owner's machine.
 - **Do not restrict credentials or the network.** Steps keep the owner's GitHub,
   GCP, and kube access.
 - **Do not contain a malicious agent.** A step can still escape through the Docker
-  socket or by deliberately unsetting the unattended marker; the checks and reviews
-  catch what that does to the change.
+  socket, by deliberately unsetting the unattended marker, or by pushing through
+  another route than `git`; the checks and reviews catch what that does to the
+  change, and the Git host's authorization bounds what reaches the remote.
 - **Do not build a public adapter interface or add harnesses.**
   `add-workflow-harness-adapters` does that; this change's adapters are internal.
 - **Do not build the container or the hosted runner.** `host-change-workflow-runner`
@@ -134,7 +139,7 @@ declared here.
 | `propose <change> <prerequisite>` | added | compatible |
 | `config`, `config --json` | each step's resolved scope, each path's source | compatible: an output gains a field |
 | `round-view`, `round-done` | refuse under the unattended marker | compatible: unattended steps were already denied them |
-| the guarded push | under a run, sets no upstream; the engine sets it after the session | compatible for the owner |
+| the guarded push | under a run, records each push's result and sets no upstream; the engine sets it after the session from the last successful push | compatible for the owner |
 | `.agents/workflow.toml` | `[sandbox]` added | compatible where undeclared. An older engine refuses a configuration declaring it (CW-w8ne), so a repository declares it with the engine that reads it; here both land together, and a change in flight gets both by merging the landing branch |
 | a role an adopting repository provides | `.claude/change-steps.toml`, the step table, removed | incompatible: its rules are no longer read; what a repository added there moves to `[sandbox]`, here MCW-s4bx |
 | the record set | lines gain `invariants`, `refusals`, `writes_granted`, `unconfined`; `granted` is no longer written | compatible for a newer reader of older lines (P9); no format version (CW-x7jd) |
@@ -165,9 +170,13 @@ declared here.
 
 `docs/change-workflow-handbook.md` changes with it. The lesser goal's gap
 "Unattended permissions are allowlists of this repository's commands" in
-`openspec/changes/README.md` is owned by this change and closes with it, as do three
-of `change-workflow`'s Current limits: the forgeable marker and the unchecked
-configuration, the step table's place and syntax, and Read reaching any file.
+`openspec/changes/README.md` is owned by this change and closes with it. Of
+`change-workflow`'s Current limits, two close: the unchecked configuration, now
+mounted read-only, and the step table's place and syntax. Two are retired rather
+than closed, their bullets removed and their content moved into the companion's
+restrictions section as boundaries of the threat model (28 F5): the forgeable
+marker, outside P1 (D1, D14), whose remedy of credentials the step does not hold the
+owner has ruled out; and Read reaching any file, which P3 keeps open by design.
 
 ### Knowledge to promote
 

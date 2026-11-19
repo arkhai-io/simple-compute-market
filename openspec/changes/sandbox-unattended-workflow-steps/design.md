@@ -1,7 +1,8 @@
 # Design: sandbox unattended workflow steps
 
 Status: design settled 2026-11-19; revised the same day on the triage of design
-review 19 (D2, D4, D5, D5a, D6, D8, D10, D13). Some decisions are expected to be
+review 19 (D2, D4, D5, D5a, D6, D8, D10, D13) and of design review 28 (D2, D4, D6,
+D7, D8, D12, the cadence). Some decisions are expected to be
 reconsidered when `extract-change-workflow-repository` moves the workflow out of this
 repository; each stands until then.
 
@@ -82,23 +83,41 @@ keeping the guarantee at the rule level — it cannot travel; deferring — it b
 extraction and the adapters. A Docker socket, reachable by every writing step, is a
 way out of any local sandbox; under P1 it is accepted.
 
-### D2 — The push stays in the session, refused otherwise by the sandbox's `git`
+### D2 — The push stays in the session; any other `git push` is refused by the sandbox's `git`
 
 Steps keep pushing through `scripts/change-workflow push`. The sandbox binds the
-engine's own `git` read-only over the system's (D4): it refuses a `push` while the
-unattended-run marker is set and the guarded push's marker is not, whatever its
-options — `--no-verify` and `-c core.hooksPath=…` among them — and otherwise runs the
-real `git`. The checkout's hooks and `core.hooksPath` are left as they are, so the
-guarded push runs the repository's pre-push as it does today (CW-p7kq), and the
-owner's pushes, outside any sandbox, are untouched. An adapter may add its harness's
-command rules refusing `git push` (P6). The check after the run (D6, check 6) is the
-backstop, and in an unconfined run (D10) the only guard.
+engine's own `git` read-only over both of the system's Git executables (D4),
+`/usr/bin/git` and `/usr/lib/git-core/git`, Git's exec path, which Git puts first on
+`PATH` for its scripted commands and aliases; the real binary sits at a path only
+the engine's `git` names. It refuses a `push` while the unattended-run marker is set
+and the guarded push's marker is not, whatever its options — `--no-verify` and `-c
+core.hooksPath=…` among them — and otherwise runs the real `git`. The checkout's
+hooks and `core.hooksPath` are left as they are, so the guarded push runs the
+repository's pre-push as it does today (CW-p7kq), and the owner's pushes, outside
+any sandbox, are untouched. An adapter may add its harness's command rules refusing
+`git push` (P6). The check after the run (D6, check 6) is the backstop, and in an
+unconfined run (D10) the only guard.
+
+The guarantee is about `git push`, the route an agent's mistakes take: a plain push,
+then a retry with the hooks skipped. Other routes to the remote — the real binary
+called by its own path, the Git host's API with the ambient credential, the wire
+protocol directly — are working around the refusal, outside P1 (28 F2): the
+orchestrating session looks for them in a run's later calls (CW-5rmh), and check 6
+finds one that reached a protected branch. Protection against a bad remote write
+belongs at the Git host's authorization, not on the owner's machine: a Git mistake
+caught at the time can be undone, and the container `host-change-workflow-runner`
+designs will hold narrower API keys than the owner's.
+
+Each push the guarded push attempts is recorded, once Git returns, among the
+session's invocations: its branch, its remote, the commit sent, and Git's exit
+status. Each push the engine's `git` refuses is recorded there too, with its command
+line, and the wrapper carries it into the line's `refusals` (D7) (28 F3).
 
 The guarded push sets no upstream under a run, since `.git/config` is protected:
 where the branch has none and a remote is given, it pushes without
 `--set-upstream`, and once the session ends the engine sets the branch's upstream,
-outside the sandbox, to the remote the push recorded among the session's
-invocations.
+outside the sandbox, to the remote of the run's last successful guarded push of that
+branch, as its record names it. A failed push, or no push, sets none.
 
 Rejected: the engine pushing at the run's edge — once the step holds the credential
 it buys nothing, and loses the per-section pushes; a command rule alone, or an
@@ -108,9 +127,15 @@ pre-push hook the engine wired through `core.hooksPath` was restated (19 F1): Gi
 skips it on `git push --no-verify`, and a command-line `-c core.hooksPath` overrides
 it without writing `.git/config`, so an agent retrying a push its hook refused
 reaches the remote; keeping the hook beside the wrapper for unconfined runs — two
-mechanisms. For the upstream: setting a missing one before the run — the engine
-would choose the remote for the step; refusing a push without one — it stops the
-step for the owner.
+mechanisms. Restated on design review 28's F2, which found a second real Git beside
+the mounted one: the engine making every remote Git write outside the step — it
+reopens D1's ambient credentials and the per-section pushes; restricting remote
+access at the OS level — the network and credential controls D1 excludes. For the
+upstream: setting a missing one before the run — the engine would choose the remote
+for the step; refusing a push without one — it stops the step for the owner. For its
+record (28 F3): reading the push from the transcript or the pre-push hook's
+invocations — the hook's are kept before Git runs, whatever Git then does, a
+repository may declare no hook, and a transcript is the harness's (P6).
 
 ### D3 — Enforcement below the harness
 
@@ -130,7 +155,7 @@ real case; deferring.
 
 The engine launches `bwrap` with the root filesystem read-only, the step's writable
 paths bound read-write over it, each protected path bound read-only over those, the
-engine's `git` bound read-only over the system's (D2), the network shared, and
+engine's `git` bound read-only over the system's two (D2), the network shared, and
 `--die-with-parent`. A write to a protected file fails as a read-only file system;
 replacing one by rename fails busy, so `git config` cannot rewrite `.git/config`. A
 Unix socket on a read-only mount stays connectable, so Docker needs no setting. A
@@ -232,8 +257,9 @@ after it, the wrapper checks against the state it recorded at the start:
    appends its line meanwhile);
 4. each existing review record is unchanged, and the ledger only grew at its end;
 5. `refs/stash` is unchanged;
-6. the remote's change branch is the last guarded push or unchanged, and no
-   protected branch on the remote gained a commit made in the run (one fetch);
+6. the remote's change branch is the last successful guarded push, as its record
+   names it (D2), or unchanged, and no protected branch on the remote gained a commit
+   made in the run (one fetch);
 7. for closeout, every path changed since the start, committed or not, is one
    closeout may change (CW-pkug): the repository's inert paths, changes' records,
    and the archive's own writes.
@@ -254,7 +280,9 @@ reach code, and neither its review nor any validation reads closeout's own commi
 
 The harness's adapter reads the run's event stream for writes the sandbox refused —
 "Read-only file system", or "Device or resource busy" for a protected file — and the
-wrapper records each on the line as `refusals`: tool, command or path, error. The
+wrapper records each on the line as `refusals`: tool, command or path, error. A push
+the sandbox's `git` refused is a refusal too, read from the engine's own record of it
+(D2), not from the harness's events, so every harness reports it alike (28 F3). The
 step's unattended instructions make it recognize such an error as outside its scope,
 end stopped when it cannot go on, and say what it did instead when it can. `denials`
 remains for harness rule denials, such as an adapter's `git push` rule. The
@@ -275,8 +303,10 @@ trimmed and empty parts dropped, as `--allow`'s are today. Each path resolves as
 directory. A grant names a path, never a pattern — a value with a glob character is
 refused — since a gap is answered with the narrowest path (D7). A file mounts its
 directory (D5a); a path absent at launch is created as a directory before it is
-mounted. The engine refuses, naming the value, a path under a protected path, before
-launching anything (19 F7). `--allow` and `ALLOW=` go.
+mounted. The engine refuses, naming the value, a path that is or lies under a
+protected path, before launching anything (19 F7); a directory containing a
+protected path is granted, the protected path staying read-only inside it, as in
+every scope (D4, D12; 28 F4). `--allow` and `ALLOW=` go.
 
 Rejected: no grants — a round could not be widened without moving `HEAD`; running a
 step under another step's scope — broader than any gap. A new key rather than
@@ -338,10 +368,19 @@ protected = []
 ```
 
 Relative paths are from the checkout's root, `~` the home directory. The check
-refuses a writable path under a protected one, `writable.review`, and an unknown step
-(CW-w8ne). `config` and `config --json` list each step's resolved scope with each
-path's source — engine, adapter, repository — so the orchestrating session can
-propose the narrowest path for a gap (CW-o6kc).
+refuses a writable path that is or lies under a protected one, since the sandbox
+could not honour it, `writable.review`, and an unknown step (CW-w8ne). A writable
+directory containing a protected path is admitted, the protected path mounted
+read-only inside it, as the engine's own scopes hold `.agents/workflow.toml` inside
+the checkout and Codex's `config.toml` inside `~/.codex` (28 F4). `config` and
+`config --json` list each step's resolved scope with each path's source — engine,
+adapter, repository — so the orchestrating session can propose the narrowest path
+for a gap (CW-o6kc).
+
+Rejected (28 F4): refusing a writable directory that contains a protected path — it
+would hold a repository's additions and the owner's grants to a stricter rule than
+the engine's own scopes, for no protection the read-only mount does not already
+give.
 
 ### D13 — Internal adapters for Claude Code and Codex
 
@@ -403,18 +442,30 @@ One round, three sessions, then closeout:
    table; `[sandbox]` and its checks; scope resolution and its listing in `config`;
    the bubblewrap launcher with protected mounts, the probe, and the unconfined
    fallback.
-2. **Adapters and wiring.** The Claude Code and Codex adapters (launch, state,
+2. **The guarantees.** The seven checks and the stopped outcome; the sandbox's
+   `git` with its marker condition, bound by session 1's launcher, and its record of
+   refused pushes; the guarded push's record of each push, and the upstream set
+   after the run from it.
+3. **Adapters and wiring.** The Claude Code and Codex adapters (launch, state,
    protected paths, refusals, optional rules); the wrapper's and review's launch
-   through them; grants as `--write`; refusals recorded and routed; the step table
-   and `steps.py` removed; the skills' unattended paragraph and the three exemptions.
-3. **The guarantees around it.** The seven checks and the stopped outcome; the
-   sandbox's `git` with its marker condition, and the upstream set after the run;
-   `propose` and design's section 4; the
-   history copy as an engine action and archive cleanup's skill; `round-view` and
-   `round-done` refused under the marker; MCW-s4bx's declaration.
+   through them; grants as `--write`; refusals recorded and routed; the skills'
+   unattended paragraph and the three exemptions; `propose` and design's section 4;
+   the history copy as an engine action and archive cleanup's skill; `round-view`
+   and `round-done` refused under the marker; MCW-s4bx's declaration; the step table
+   and `steps.py` removed last.
 
-This change rewires the engine it runs on: after its round lands, its own triage and
-closeout run under the new sandbox, the unconfined fallback limiting the risk.
+This change rewires the engine it runs on, and each session of its round runs on the
+engine the sessions before it committed. No step runs between the old restraint's
+removal and its replacement's installation (28 F1): session 2 runs under the step
+table; session 3 under the step table and the checks, which run whether or not a run
+is confined (D10); and every run after it, the round's own triage and closeout among
+them, under the whole sandbox. The session removing `.claude/change-steps.toml` runs
+under rules that deny edits under `.claude/`, so the plan gives that removal to the
+orchestrating session or the owner.
+
+Rejected (28 F1): keeping the command rules until a final atomic switch — two
+restraint systems at once, which D10 rejects as a fallback; one session for every
+launch and guard change — a review slice much larger than the others.
 
 ## Open Questions
 
