@@ -138,7 +138,9 @@ claim that waited on the lock sees a lease committed meanwhile, and an owner
 already holding a lease on a draining relay still receives it (11 F8). On any `IntegrityError` it reads the owner's active lease
 again and returns it when one now exists — the case of a concurrent claim on
 another relay, which the relay lock does not serialize — and moves to the next port
-only otherwise. `RelayWindowExhaustedError` therefore means the window is full. The
+only otherwise. `RelayWindowExhaustedError` therefore means, for a relay that exists,
+that its window is full; a relay that does not exist is refused with the same error,
+as before this change (scoped at the implementation round's triage, its §5 note). The
 two constraints are told apart by re-reading state, not by a dialect's constraint
 name, so the rule is the same on SQLite and PostgreSQL. Tests: the statement order
 rendered for the PostgreSQL dialect (owner lookup after `relays … FOR UPDATE`), as

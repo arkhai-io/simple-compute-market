@@ -118,7 +118,8 @@ exceed, so a teardown that succeeds on a retry strands its lease for an operator
   placement rule; the relay rules are unchanged.
 - **Concurrent retries return the first acceptance and the owner's lease** (D2).
   The allocator reads the owner's lease after the relay lock and again on any
-  uniqueness conflict, so `RelayWindowExhaustedError` means the window is full;
+  uniqueness conflict, so `RelayWindowExhaustedError` means, for a relay that
+  exists, that its window is full (a missing relay is refused with it too);
   acceptance judges the row its lock returns, so an equivalent retry receives the
   first fulfillment. Both are proven by deterministic tests on SQLite.
 - **A bare-metal end under a delivery conflict is stated and guarded** (D9). A

@@ -9,6 +9,7 @@ failure is recorded at an instant the test chose.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -83,6 +84,33 @@ class _Client:
         }
 
 
+class _HeldRegistries(_Registries):
+    """Registries whose reads, once ``hold`` is set, each wait for the test.
+
+    Each held read appends its event to ``held``, sets ``requested``, and
+    answers, once the test sets its event, as the registries answer then.
+    """
+
+    def __init__(self, accounts: dict[str, str], *, failing: set[str] = frozenset()):
+        super().__init__(accounts, failing=failing)
+        self.hold = False
+        self.held: list[asyncio.Event] = []
+        self.requested = asyncio.Event()
+
+    def factory(self) -> _Client:
+        self.built += 1
+        return _HeldClient(self) if self.hold else _Client(self)
+
+
+class _HeldClient(_Client):
+    async def get_descriptors(self, registries=None):
+        released = asyncio.Event()
+        self._registries.held.append(released)
+        self._registries.requested.set()
+        await released.wait()
+        return await super().get_descriptors(registries)
+
+
 class _Clock:
     def __init__(self) -> None:
         self.instant = _START
@@ -133,6 +161,35 @@ async def test_a_reread_after_every_read_succeeded_reads_nothing():
 
     assert registries.built == 1
     assert registries.selections == [[_A, _B]]
+    assert _accounts(policy, _A) == ["account-a"]
+
+
+@pytest.mark.asyncio
+async def test_overlapping_rereads_read_once_and_a_success_stays_read():
+    """Two compositions overlap on the event loop, as two API-credit listing
+    creations do: the second waits for the first's read and finds the registry
+    read. Were their reads not serialized, the second's request, failing after
+    the first's success, would mark the registry unread again."""
+    registries = _HeldRegistries({_A: "account-a"}, failing={_A})
+    policy = _policy(_Clock())
+    await policy.refresh(registries.factory)
+    registries.hold = True
+    registries.failing.clear()
+
+    first = asyncio.create_task(policy.reread())
+    second = asyncio.create_task(policy.reread())
+    await asyncio.wait_for(registries.requested.wait(), timeout=1)
+
+    registries.held[0].set()
+    await asyncio.wait_for(first, timeout=1)
+    # Any request answered from here on fails.
+    registries.failing.add(_A)
+    for released in registries.held[1:]:
+        released.set()
+    await asyncio.wait_for(second, timeout=1)
+
+    assert registries.selections == [[_A], [_A]]
+    assert policy.unread_registries() == ()
     assert _accounts(policy, _A) == ["account-a"]
 
 

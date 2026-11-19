@@ -491,7 +491,12 @@ lease is released by what its fulfillment proves"; the release-failure scenarios
   which pass with no change to their assertions (the second's docstring is
   restated). The VM rerun at this level is left for the round's triage to judge:
   it needs a VM fulfillment driven through `begin` in this module, which the
-  bare-metal helpers do not give.
+  bare-metal helpers do not give. Settled at the round's triage (its §3 note):
+  no VM rerun test is owed. The rerun is the compute family's
+  `JobFulfillmentProvider` (`job_fulfillment.py`) and release status
+  (`release.py`), which both adapters build with the container's one policy,
+  the VM adapter passing it straight through; the composition test proves the
+  wiring, so a VM case would repeat these assertions over another plan.
 - [x] 3.6 Bump `arkhai-vm-provisioning-adapter` and
   `arkhai-bare-metal-provisioning-adapter` (or the names their `pyproject.toml`
   states; minor, the provider's new argument) and raise their lower bound on
@@ -693,7 +698,11 @@ Section 5 notes (handoff):
   only when every port in the window is held or quarantined, while the
   allocator also raises it for a relay that does not exist
   (`test_allocating_against_an_absent_relay_fails`). The section changes no
-  specification; the wording is the round's to settle.
+  specification; the wording is the round's to settle. Settled at the round's
+  triage (its §5 note): the delta's sentence, D2 and the proposal now scope the
+  full-window meaning to a relay that exists, and say a relay that does not
+  exist is refused with the same error, as it was before this change; no code
+  changes.
 - The fresh-context check's findings were taken: the docstring's race
   sentence and the missing-relay case, a test docstring's "Today's", a third
   new test that repeated the stale-scan test (folded into it), the conftest's
@@ -773,6 +782,10 @@ delivery's relay is its declaration's pool's"). Touches tests only:
   reaches acceptance, and the move asserted inside 6.2's test, which repeated
   the existing test's assertions once per parametrization. The round's triage
   may judge whether the scenario wants a relay-specific test of its own.
+  Settled at the round's triage (its §6 note): none is owed. A relay port lease
+  is only ever held by a reservation's fulfillment, so the scenario's
+  declaration is under the held-capacity refusal the existing test proves, by
+  the same path and assertions.
 - [x] 6.4 Verification: `uv run pytest provisioning/compute/iac/tests
   domains/vms/provisioning/adapter/tests provisioning/compute/service/tests/integration/test_capacity_api.py`
   passes, and `scripts/change-workflow run pre-commit
@@ -956,7 +969,49 @@ Section 7 notes (handoff):
   `implementation.md`'s "No speculative guard code" rules against, and which is
   why section 7's first check removed it. The owner restored it (40 F4, D6),
   so it stays; whether that wants an exception declared under `rules.md` is
-  the round's triage's to settle.
+  the round's triage's to settle. Settled at the round's triage (its §7 note):
+  no exception, since the refusal meets "No speculative guard code". Its case
+  is described (40 F4, D6: a selection spelled otherwise, or one string, read
+  as a complete read), and it guards a library's public parameter, which the
+  library's own tests trigger deliberately through that API (unit tests in
+  `core/storefront/tests/unit/test_multi_registry_descriptors.py`, over the
+  real client; it owns no storage, so it has no library-integration level
+  beyond them). That no application's test reaches it reflects only today's one
+  caller, which passes the client's own `urls`. A later check is not to remove
+  it on that rule.
+- The round's triage fix, 49 F1 (outside the plan's tasks; the owner's
+  disposition "Agreed."): overlapping compositions — two API-credit listing
+  creations — could each send a re-read, and a failure answered after the
+  other's success put a read registry back among the unread, against "A
+  successful read MUST be kept until the storefront restarts".
+  `RegistryDisputePolicy` now holds an `asyncio.Lock` across `refresh()` and
+  `reread()`, the unread set read under it, so a waiting re-read finds the
+  registry read and sends nothing. No bump: the kit's 0.12.0 is 7.4's,
+  unreleased. Evidence:
+  - unit, `test_overlapping_rereads_read_once_and_a_success_stays_read`
+    (`kit/storefront/tests/unit/test_dispute_configuration.py`): a held
+    registry double; the first re-read's request succeeds, any later one would
+    fail; asserts one re-read request, the registry read and not reported.
+    Failed against the unfixed policy (its first draft, which waited by
+    yielding: three selections where two were expected); the draft then waited
+    on a `requested` event instead, per the fresh-context check, and was not
+    run against the unfixed code again (setting the fix aside with `git stash`
+    was denied), the change being only how the test waits. `make -C
+    kit/storefront test` 147 passed.
+  - `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
+    over the triage's edits: `[change-workflow] after-functional-change at
+    24e786a30…: passed, exit 0`, `[change-workflow] pre-commit-functional at
+    24e786a30…: passed, exit 0` (`make test`, every suite: the three
+    storefronts' and the storefront kit's among them), `[change-workflow]
+    pre-commit at 24e786a30…: passed, exit 0`; no lock moved.
+  - Fresh-context check of the diff against `24e786a30`: taken — the test's
+    wait by yielding replaced by an event and its first task bounded, a test
+    comment ("answered", not "sent"), the provider's class name in 3.5's note
+    (`JobFulfillmentProvider`), 7.6's note no longer calling unit tests library
+    integration, and the proposal's D2 bullet naming the missing relay. Noted,
+    not changed: while a registry stays unreachable, overlapping API-credit
+    creations now retry it one after another, each waiting on the earlier
+    reads' timeouts — the cost of the serialization the owner chose.
 
 ## 8. The mechanisms report an unread registry in their public details
 

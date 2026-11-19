@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -55,6 +56,10 @@ class RegistryDisputePolicy:
     # The registry client factory the startup read was given, which the
     # re-read uses, so it reads the registries the storefront publishes through.
     _client_factory: Callable[[], Any] | None = field(default=None, init=False, repr=False)
+    # Held across every read, so compositions that overlap read one at a time:
+    # a failure answered after another read's success cannot mark a read
+    # registry unread again, and a registry is not requested twice at once.
+    _reading: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> RegistryDisputePolicy:
@@ -97,31 +102,34 @@ class RegistryDisputePolicy:
         A failed registry contributes no recommendations. Local preferences and
         vetoes still apply, and one registry never supplies another's defaults.
         """
-        self._recommendations.clear()
-        self._unread.clear()
-        self._client_factory = client_factory
-        if client_factory is not None:
-            client = client_factory()
-            urls = client.urls
-            self._recommendations.update({url: [] for url in urls})
-            if self.config.use_registry_dispute_authorities:
-                await self._read(client, urls)
-        self._resolve()
+        async with self._reading:
+            self._recommendations.clear()
+            self._unread.clear()
+            self._client_factory = client_factory
+            if client_factory is not None:
+                client = client_factory()
+                urls = client.urls
+                self._recommendations.update({url: [] for url in urls})
+                if self.config.use_registry_dispute_authorities:
+                    await self._read(client, urls)
+            self._resolve()
 
     async def reread(self) -> None:
         """Read again only the registries whose last read failed.
 
         It reads through the client factory :meth:`refresh` was given. Every
         other registry keeps the recommendations its read gave. With no
-        registry unread, nothing is read.
+        registry unread, nothing is read. A re-read that overlaps another
+        waits for it, and then reads only what is still unread.
         """
-        if self._client_factory is None or not self._unread:
-            return
-        unread = [url for url in self._recommendations if url in self._unread]
-        # A registry still unread changes nothing, so resolving again would
-        # only repeat the warnings its first failure gave.
-        if await self._read(self._client_factory(), unread):
-            self._resolve()
+        async with self._reading:
+            if self._client_factory is None or not self._unread:
+                return
+            unread = [url for url in self._recommendations if url in self._unread]
+            # A registry still unread changes nothing, so resolving again would
+            # only repeat the warnings its first failure gave.
+            if await self._read(self._client_factory(), unread):
+                self._resolve()
 
     async def _read(self, client: Any, urls: Iterable[str]) -> bool:
         """Read ``urls``' descriptors, recording each outcome; True if any was read."""
