@@ -561,14 +561,20 @@ HOOK_STEPS: dict[str, frozenset[str]] = {
 
 # When an action or a hook runs around a step's session.
 BEFORE, AFTER = "before", "after"
+# The engine's copy of a change's history into the owner's workspace, an action no
+# step runs through `run`: it writes outside every step's scope.
+HISTORY = "history"
 # The engine's own actions around each step's session, by when they run and the
-# step, each a name of `HOOK_STEPS` run as that step: the gathering of the evidence
-# `HEAD` lacks before validation, and every kind's cleanup before archive cleanup.
-# Deterministic work belongs here, judgement to the step's skill. A repository's
-# `before-<step>` or `after-<step>` hook runs after the action of the same moment.
+# step: each a name of `HOOK_STEPS` run as that step — the gathering of the evidence
+# `HEAD` lacks before validation, and every kind's cleanup before archive cleanup —
+# or the history copy once archive cleanup's session finishes, before its outcome is
+# logged (CW-hak6). Deterministic work belongs here, judgement to the step's skill.
+# A repository's `before-<step>` or `after-<step>` hook runs after the action of the
+# same moment.
 STEP_ACTIONS: dict[tuple[str, str], tuple[str, ...]] = {
     (BEFORE, "validate"): ("gather",),
     (BEFORE, "archive-cleanup"): ("cleanup",),
+    (AFTER, "archive-cleanup"): (HISTORY,),
 }
 
 
@@ -581,13 +587,17 @@ def step_actions(when: str, step: str) -> tuple[str, ...]:
 # only the engine's record of what it invoked; every other step writes the paths its
 # work changes.
 READ_ONLY, WRITING = "read-only", "writing"
-# Two baseline entries the workflow names by role, which a step's scope resolves as a
+# The baseline entries the workflow names by role, which a step's scope resolves as a
 # run starts: the repository's inert paths, from its configuration, and the
 # temporary directory. Every other entry is a path from the checkout's root — one
 # under `.git/` a path in its Git directory, wherever Git keeps it — or from the home
 # directory where it begins with `~`.
 INERT_PATHS = "<inert paths>"
 TEMPORARY = "<temporary directory>"
+# A third, design's: each worktree registered in its checkout whose directory, beside
+# the checkout, is named `<prerequisite>-proposal`, where `propose` puts one (CW-k8dn).
+PROPOSALS = "<proposal worktrees>"
+PROPOSAL_SUFFIX = "-proposal"
 _CHECKOUT = "."
 _GIT = ".git/"
 # Where the engine keeps what a session invoked through `run`, `gather`, or the
@@ -618,7 +628,7 @@ def _writing(skill: str, *paths: str, resume_from: str | None = None) -> StepDef
 # step's skill or widening its baseline would change what the workflow is, so a
 # repository's additions live in its configuration's `[sandbox]` and only add.
 STEP_DEFINITIONS: dict[str, StepDefinition] = {
-    "design": _writing("change-design", "openspec/", _GIT),
+    "design": _writing("change-design", "openspec/", _GIT, PROPOSALS),
     "review": StepDefinition("change-review", READ_ONLY, (_INVOCATIONS, TEMPORARY)),
     "triage": _writing("change-triage", _CHECKOUT),
     "plan": _writing("change-plan", "openspec/", _GIT, resume_from="design"),

@@ -16,9 +16,13 @@ from typing import Sequence
 
 import pytest
 
+from change_workflow import history
 from change_workflow import clone as change_clone
 from change_workflow import find as find_change
-from change_workflow import history
+from change_workflow.log import record_outcome
+from change_workflow.wrapper import Wrapper
+from change_workflow_fixtures import (ACCEPTING, LANDED, MODELS, NO_SANDBOX, VALID, FakeClaude,
+                                      clock, event_lines)
 
 CHANGE = "seed-pool"
 ARCHIVED = Path("openspec/changes/archive/2026-10-22-seed-pool")
@@ -203,6 +207,44 @@ def test_the_first_copy_brings_the_records_and_named_evidence_to_the_same_paths(
     # The transcript's citation names nothing, so it is neither copied nor missed.
     assert synced.absent == []
     assert not list(workspace.rglob("*.tmp"))
+    assert history.differences(clone, workspace, CHANGE) == []
+
+
+def test_the_engine_copies_archive_cleanups_history_once_its_session_finishes(
+        workspace: Path, clone: Path) -> None:
+    """CW-hak6's "Records grow after archive cleanup copied them": the engine copies the
+    records after archive cleanup's session, before its outcome is logged, the copy
+    on the line's `invoked`; once the outcome and another record follow in the clone,
+    the next copy extends the workspace's log and adds the record. Library
+    integration: the wrapper on a real clone, the harness doubled."""
+    _history(clone)
+    log = REVIEWS / "workflow.jsonl"
+    # The log as the engine writes it, closeout's line its last before cleanup.
+    (clone / log).unlink()
+    record_outcome(clone / log, "closeout", VALID["finished"], session="c-1", commit=COMMIT)
+    (clone / ".agents/workflow.toml").write_text(CONFIGURATION + MODELS, "utf-8")
+    claude = FakeClaude((event_lines({**VALID["finished"], "next": {"step": "done"},
+                                      "landing": LANDED}), 0))
+    wrapper = Wrapper(root=clone, runner=claude, head=lambda _: COMMIT, clock=clock,
+                      echo=None, conversation=lambda _, session: clone / f"{session}.jsonl",
+                      runs=lambda _: None, checkout=lambda *_: ACCEPTING,
+                      target=lambda *_: None, kind=lambda *_: None, confinement=NO_SANDBOX)
+
+    line = wrapper.run("archive-cleanup", CHANGE)
+
+    copied = (workspace / log).read_text("utf-8")
+    assert line["outcome"] == "finished", line.get("reason")
+    (copy,) = [entry for entry in line["invoked"] if entry["hook"] == "history"]
+    assert (copy["command"], copy["exit_status"]) == (f"history sync {CHANGE}", 0)
+    # Copied before the line was written: the workspace's log lacks it.
+    assert '"archive-cleanup"' not in copied
+    assert (clone / log).read_text("utf-8").startswith(copied)
+    _write(clone, REVIEWS / "05-merge.md", "# Merge review\n")
+
+    synced = history.sync(clone, workspace.resolve(), CHANGE)
+
+    assert log.as_posix() in synced.extended
+    assert (REVIEWS / "05-merge.md").as_posix() in synced.copied
     assert history.differences(clone, workspace, CHANGE) == []
 
 

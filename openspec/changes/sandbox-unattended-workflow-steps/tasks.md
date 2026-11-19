@@ -1179,26 +1179,135 @@ CW-hak6, CW-p3vz). Files: a new `scripts/change_workflow/propose.py`, `cli.py`,
 `test_change_workflow_cli.py`, `test_change_workflow_scope.py`,
 `test_change_workflow_around.py`, `scripts/tests/test_round_view.py`.
 
-- [ ] 9.1 Add `propose <change> <prerequisite>`: the worktree
+- [x] 9.1 Add `propose <change> <prerequisite>`: the worktree
   `../<prerequisite>-proposal` on a new branch `propose-<prerequisite>` from the
   change's landing branch (`find --json`'s `base`) as its remote holds it, `--no-track`,
   refusing one that exists, at the provisional tier (D5b; CW-k8dn). Verify:
   library-integration tests on real Git: the worktree on its branch with no upstream,
   and a second run refused.
-- [ ] 9.2 A design run's scope adds, writable, every worktree registered in its
+  Done. The new `propose.py` holds `propose(root, change, prerequisite, base)` and
+  `main`, and `cli` dispatches `propose <change> <prerequisite> [--base <branch>]` to
+  it. Its help and docstring call it provisional.
+  - The landing branch is `find.landing_branch`, as `find --json`'s `base` reads it,
+    or `--base` where no clone recorded one, which the refusal names.
+  - The remote is the one the landing branch tracks, as the owner's workspace
+    records it in a clone, else as this checkout does. The engine names no remote of
+    its own, as `clone` does not: one tracking none is refused.
+  - It fetches into the remote-tracking branch, never `FETCH_HEAD`, which a parallel
+    fetch could replace. Then it runs `git worktree add --no-track -b
+    propose-<prerequisite> ../<prerequisite>-proposal refs/remotes/<remote>/<base>`.
+  - It refuses an unknown change, a prerequisite that is no change name (the new
+    public `find.check_name`), an existing directory, an existing branch, and a
+    failed fetch or worktree.
+  Library-integration tests in `test_change_workflow_cli.py`, real Git with a bare
+  remote, through `cli.main`, all passing:
+  - the worktree on `propose-shape-floor` at `origin`'s `dev`, not the local `HEAD`
+    ahead of it, with no `branch.propose-shape-floor.remote`, the checkout's branch
+    unmoved; a second run refused, naming the path;
+  - a landing branch tracking `upstream`, as a fork's does, fetched from there;
+  - an existing branch refused, and a change with no landing branch refused, naming
+    `--base`;
+  - an unknown change, `archive`, and a path as the prerequisite refused, no worktree
+    made.
+  `propose.main` joins `test_change_workflow_common.py`'s refusal outside any
+  repository. Not tested: a failed fetch, and a failed `worktree add`.
+  The command and its tier reach the companion's "The command and its tiers" at
+  closeout (12.9).
+- [x] 9.2 A design run's scope adds, writable, every worktree registered in its
   checkout's `.git/worktrees/` whose path matches `../*-proposal` (D5b; CW-k8dn).
   Verify: a unit test resolving design's scope with one registered and one unrelated
   worktree; a library-integration test through real bubblewrap that the doubled
   design writes the proposal there.
-- [ ] 9.3 Add the history copy to `STEP_ACTIONS` after archive cleanup, run once its
+  Done. Design's baseline holds a new role entry, `graph.PROPOSALS`.
+  `scope._Checkout.proposals` reads `git worktree list --porcelain`. It keeps each
+  worktree beside the root whose name ends `-proposal` (`graph.PROPOSAL_SUFFIX`, which
+  `propose` names its worktree by), never the checkout itself. Each is an engine path.
+  Tests, all passing:
+  - library integration (the plan said unit: it asks real Git for the worktrees), in
+    `test_change_workflow_scope.py`: design's scope holds a registered proposal
+    worktree, and not an unrelated worktree, one so named elsewhere, or planning's;
+  - external-process integration through real bubblewrap, in
+    `test_change_workflow_sandbox.py`: a design scope's shell writes a file under the
+    proposal worktree's `openspec/`, the worktree made by hand as `propose` makes it,
+    and a write to a sibling worktree fails read-only.
+  `test_change_workflow_graph.py`'s baseline test names `PROPOSALS` for design.
+- [x] 9.3 Add the history copy to `STEP_ACTIONS` after archive cleanup, run once its
   session finishes and before its outcome is logged, writing outside the sandbox
   (D5; CW-hak6). Verify: library-integration tests with the harness doubled for
   CW-hak6's scenario and the copy's line in `invoked`.
-- [ ] 9.4 `round-view` and `round-done` refuse while `CHANGE_WORKFLOW_UNATTENDED` is
+  Done. `STEP_ACTIONS[(AFTER, "archive-cleanup")]` is `(graph.HISTORY,)`, an action
+  that is no hook-table entry, so no step runs it through `run`.
+  - `Around._history` runs `history.main(["sync", change])` in the engine's process,
+    outside the sandbox. It keeps an `Invoked` entry, `{hook: "history", command:
+    "history sync <change>", exit_status, …}`, for the line, its start from `Around`'s
+    new `clock`, which the wrapper and `run before|after` pass.
+  - A change worked in place has no clone, so it copies nothing and passes, saying
+    so.
+  - A failed copy is a failed action: the session is resumed with it, as for any
+    action after a finished session.
+  Library-integration tests, all passing:
+  - in `test_change_history.py`, CW-hak6's scenario through the wrapper on a real
+    clone, the harness and the sandbox stood in for:
+    - the workspace's log holds what preceded the line, the line not yet in it;
+    - the line's `invoked` holds the copy with status 0;
+    - after the line and a new record, the next `history.sync` extends the log and
+      copies the record;
+  - in `test_change_workflow_around.py`, in place: `Around.after` passes, saying so,
+    and keeps the entry with the clock's time.
+  That the copy succeeds after a confined session holds by structure — it runs in
+  the engine's process, never the sandbox — and no test confines the session.
+  `test_change_workflow_graph.py`'s actions test admits the history copy beside the
+  hook-table entries, and checks it is no hook.
+- [x] 9.4 `round-view` and `round-done` refuse while `CHANGE_WORKFLOW_UNATTENDED` is
   set, naming the step, and move nothing (D14; CW-p3vz). Verify: a library-integration
   test in `test_round_view.py` for CW-p3vz's scenario.
-- [ ] 9.5 Verification point: the tests above (unit, library integration through real
+  Done. `round_view.main` takes `environ`, and refuses `start` and `done` before
+  reading anything while `UNATTENDED_RUN` names a step (`unattended_refusal`). `cli`
+  hands it the command's `environ`. `check` still runs: a step's guard reads it.
+  Library-integration tests in `test_round_view.py` on a real checkout, through
+  `cli.main`, passing:
+  - CW-p3vz's scenario: `round-view <change>` under a triage's marker exits 1 naming
+    the triage, `HEAD` and the worktree unmoved, no view open; `check` under the
+    marker passes;
+  - `round-done` under the marker, with the owner's view open, exits 1, and the
+    view stays open at the base.
+  Found while testing: a suite run inside an unattended run inherits its marker, as
+  section 5's handoff warned. Three existing round-view tests then refused. The
+  module's autouse fixture now removes the marker, as it already isolates Git's
+  configuration. Validation's suites run under its marker, so this mattered there
+  too.
+- [x] 9.5 Verification point: the tests above (unit, library integration through real
   bubblewrap); `run pre-commit` passes. End-to-end: none.
+  Done. The tests through real bubblewrap are external-process integration.
+  - `make test-release-tooling` on the sandbox, scope, round view, graph, CLI,
+    history, around, common, wrapper, and review tests: 682 passed, none skipped.
+  - `run pre-commit`, first run: its functional hooks pass, the relock, packaging, and
+    every suite. `check-doc-citations` now passes, `propose.py` existing. It failed
+    only `check-comment-hygiene`, on a fixture path ending `proposal.md`, renamed. The
+    rerun after the check's fixes passed every hook and check, nine of nine; the
+    relock left the locks as committed.
+  - Fresh-context check fixes:
+    - `propose`'s remote read as the landing branch tracks it, never a default
+      `origin`;
+    - its fetch into the remote-tracking branch, not `FETCH_HEAD`;
+    - one name check (`find.check_name`);
+    - the history copy's clock injected;
+    - `cli` handing its `environ` to the round view;
+    - `PROPOSAL_SUFFIX` moved to `graph`;
+    - the round-done test opening the owner's view first, and `check` under the
+      marker;
+    - the in-place history test moved to the around tests;
+    - test docstrings and a test name corrected;
+    - `propose`'s refusals tested, and its `main` among the commands refused outside
+      a repository.
+
+    Declined: reusing `Hooks`' timing and keeping for the copy's entry. They time and
+    keep a hook's commands under a `Hooks` instance, which the copy has no use for.
+    The copy builds one `Invoked` entry and keeps it, a dozen lines.
+  Handoff:
+  - Section 10: `change-design` uses `propose`; `change-archive-cleanup` drops
+    `history`, its report naming the copy's entry on the line;
+    `change-orchestrate` repeats the copy once the outcome is logged (CW-hak6).
 
 ## 10. The skills
 

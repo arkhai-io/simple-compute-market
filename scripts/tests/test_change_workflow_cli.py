@@ -66,6 +66,83 @@ def _repository(path: Path, *changes: str) -> Path:
     return path
 
 
+def _landing_on(root: Path, remote: Path, branch: str, name: str = "origin") -> str:
+    """`root` given a bare remote called `name` holding `branch` at a commit of its own,
+    `branch` tracking that remote, and marked as the change's clone recording `branch`
+    as the one it lands on; that commit."""
+    _git(root.parent, "init", "-q", "--bare", str(remote))
+    _git(root, "remote", "add", name, str(remote))
+    _git(root, "push", "-q", name, f"HEAD:refs/heads/{branch}")
+    _git(root, "config", f"branch.{branch}.remote", name)
+    (root / ".git" / find.CLONE_MARKER).write_text(
+        json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": branch}), "utf-8")
+    return _git(root, "rev-parse", "HEAD")
+
+
+def test_propose_makes_a_prerequisites_worktree_on_its_own_branch(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-k8dn: the worktree beside the checkout, on `propose-<prerequisite>` from the
+    branch the change lands on as its remote holds it, tracking nothing; a second run
+    is refused and changes nothing. Library integration: real Git."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    landed = _landing_on(root, tmp_path / "origin.git", "dev")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "local only")
+    proposal = tmp_path / "shape-floor-proposal"
+
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 0
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 1
+
+    assert f"{proposal} exists" in capsys.readouterr().err
+    assert _git(proposal, "branch", "--show-current") == "propose-shape-floor"
+    assert _git(proposal, "rev-parse", "HEAD") == landed
+    assert subprocess.run(["git", "config", "branch.propose-shape-floor.remote"], cwd=root,
+                          capture_output=True).returncode != 0
+    assert _git(root, "branch", "--show-current") == "main"
+
+
+def test_propose_refuses_a_branch_that_exists_and_a_missing_landing_branch(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 1
+    assert "give it with --base <branch>" in capsys.readouterr().err
+    _landing_on(root, tmp_path / "origin.git", "dev")
+    _git(root, "branch", "propose-shape-floor")
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 1
+
+    assert "the branch propose-shape-floor exists" in capsys.readouterr().err
+    assert not (tmp_path / "shape-floor-proposal").exists()
+
+
+def test_propose_fetches_from_the_remote_the_landing_branch_tracks(tmp_path: Path) -> None:
+    """The engine names no remote of its own: a landing branch tracking `upstream`, as a
+    fork's does, is fetched from there."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    landed = _landing_on(root, tmp_path / "upstream.git", "dev", name="upstream")
+
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 0
+
+    assert _git(tmp_path / "shape-floor-proposal", "rev-parse", "HEAD") == landed
+
+
+@pytest.mark.parametrize("arguments,refused", [
+    (["no-such-change", "shape-floor"], "no change 'no-such-change'"),
+    ([CHANGE, "archive"], "'archive' is not a change name"),
+    ([CHANGE, "../escape"], "'../escape' is not a change name"),
+])
+def test_propose_refuses_a_change_or_prerequisite_it_cannot_name(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], arguments: list[str],
+        refused: str) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    _landing_on(root, tmp_path / "origin.git", "dev")
+
+    assert cli.main(["propose", *arguments], root=root) == 1
+
+    assert refused in capsys.readouterr().err
+    assert [path.name for path in tmp_path.iterdir()] != [] and not any(
+        path.name.endswith("-proposal") for path in tmp_path.iterdir())
+
+
 def _archive(root: Path) -> Path:
     archived = root / ARCHIVED
     archived.mkdir(parents=True)

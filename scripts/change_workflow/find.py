@@ -68,6 +68,12 @@ def _check_name(name: str) -> None:
         raise ChangeNotFound(f"{name!r} is not a change name")
 
 
+def check_name(name: str) -> None:
+    """Refuse, as `ChangeNotFound`, a name no change can have, such as one naming a
+    path, for a command that names a change it does not look up."""
+    _check_name(name)
+
+
 def _archived(root: Path, name: str) -> list[Path]:
     archive = root / ARCHIVE
     return sorted(

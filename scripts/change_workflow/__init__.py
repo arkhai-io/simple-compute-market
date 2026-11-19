@@ -74,6 +74,8 @@ siblings by relative import:
 - `clone` — a change's own clone of the owner's workspace: creating, reading, and
   removing it;
 - `history` — a change's history copied from its clone into the owner's workspace;
+- `propose` — a prerequisite's proposal worktree, made beside the checkout for a
+  design that needs another change first;
 - `round_view` — an implementation round shown as uncommitted changes for the owner
   to read;
 - `push` — the guarded push of a change's own branch;

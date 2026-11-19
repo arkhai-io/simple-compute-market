@@ -17,8 +17,8 @@ import pytest
 from change_workflow import cli, diagram, graph
 from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
 from change_workflow.graph import (AFTER, ARCHIVE_CLEANUP, BEFORE, CLOSEOUT_TRIAGE, DESIGN,
-                                   HOOK_STEPS, NODES, OWNER, STEP_ACTIONS, STEPS, TABLE, WAIT,
-                                   Node, step_actions)
+                                   HISTORY, HOOK_STEPS, NODES, OWNER, STEP_ACTIONS, STEPS,
+                                   TABLE, WAIT, Node, step_actions)
 from change_workflow.running import INVOCATIONS
 from change_workflow.steps import load_steps
 
@@ -392,14 +392,17 @@ def test_the_report_lists_each_departure_and_fails(capsys) -> None:
         "- no edge draws ('archive_cleanup', 'design', ('a return',))\n")
 
 
-def test_the_engine_gathers_before_validation_and_cleans_up_before_archive_cleanup() -> None:
-    """CW-g6th, CW-ikmm: the engine's own actions around steps, each a hook-table
-    entry run as the step it is around."""
+def test_the_engines_actions_around_validation_and_archive_cleanup() -> None:
+    """CW-g6th, CW-ikmm, CW-hak6: the engine's own actions around steps, each a
+    hook-table entry run as the step it is around, or the history copy after archive
+    cleanup."""
     assert STEP_ACTIONS == {(BEFORE, "validate"): ("gather",),
-                            (BEFORE, "archive-cleanup"): ("cleanup",)}
+                            (BEFORE, "archive-cleanup"): ("cleanup",),
+                            (AFTER, "archive-cleanup"): (HISTORY,)}
     for (when, step), actions in STEP_ACTIONS.items():
         assert when in (BEFORE, AFTER) and step in STEPS
-        assert all(step in HOOK_STEPS[action] for action in actions)
+        assert all(action == HISTORY or step in HOOK_STEPS[action] for action in actions)
+    assert HISTORY not in HOOK_STEPS
     assert step_actions(BEFORE, "validate") == ("gather",)
     assert step_actions(AFTER, "validate") == step_actions(BEFORE, "implement") == ()
 
@@ -441,7 +444,8 @@ def test_each_writing_step_writes_its_baseline_and_the_cache() -> None:
     assert {definition.profile for definition in writing.values()} == {graph.WRITING}
     assert {name: set(definition.baseline) - {graph.TEMPORARY}
             for name, definition in writing.items()} == {
-        "design": {"openspec/", ".git/", "~/.cache"}, "plan": {"openspec/", ".git/", "~/.cache"},
+        "design": {"openspec/", ".git/", graph.PROPOSALS, "~/.cache"},
+        "plan": {"openspec/", ".git/", "~/.cache"},
         "implement": {".", "~/.cache"}, "triage": {".", "~/.cache"}, "merge": {".", "~/.cache"},
         "validate": {".", "~/.cache"}, "closeout": {graph.INERT_PATHS, ".git/", "~/.cache"},
         "archive-cleanup": {"openspec/changes/", ".git/", "~/.cache"}}

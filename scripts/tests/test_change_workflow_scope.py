@@ -176,6 +176,29 @@ def test_a_linked_worktrees_git_paths_resolve_through_git(checkout: Path) -> Non
         _resolve("design", linked, grants=(".git/config",))
 
 
+def test_designs_scope_holds_each_proposal_worktree_registered_beside_it(
+        checkout: Path) -> None:
+    """CW-k8dn: a worktree registered in the checkout, beside it and named
+    `<prerequisite>-proposal`, is writable to design, and not to planning; an unrelated
+    worktree, or one elsewhere so named, is not."""
+    _git(checkout, "add", "-A")
+    _git(checkout, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "commit", "-qm", "x")
+    proposal = checkout.parent / "shape-floor-proposal"
+    unrelated, elsewhere = checkout.parent / "linked", checkout.parent / "deep/x-proposal"
+    for path, branch in ((proposal, "propose-shape-floor"), (unrelated, "linked"),
+                         (elsewhere, "deep")):
+        _git(checkout, "worktree", "add", "-q", "-b", branch, str(path))
+
+    design, plan = _resolve("design", checkout), _resolve("plan", checkout)
+
+    assert _writable(design)[proposal] == ENGINE
+    assert {path.entry for path in design.writable if path.path == proposal} == {
+        "<proposal worktrees>"}
+    assert unrelated not in _writable(design) and elsewhere not in _writable(design)
+    assert proposal not in _writable(plan)
+
+
 # Grants.
 
 def test_a_grant_names_a_pattern(checkout: Path) -> None:

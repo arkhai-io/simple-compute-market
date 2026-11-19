@@ -26,7 +26,8 @@ change's records into the log's format, shown first and written on the owner's
 The others reach the module that holds them: `next` the next-step computation,
 `find` a change's directory and records, `clone`, `clone where`, and `clone-remove`
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
-of a change's history, `cost` its cost report, `push` the guarded push, `config`
+of a change's history, `propose` a prerequisite's proposal worktree, provisional,
+`cost` its cost report, `push` the guarded push, `config`
 how the repository's workflow configuration resolved and each step's scope,
 `config load` a step's
 documents, or with `common` those every session reads, `evidence` which evidence
@@ -69,7 +70,7 @@ from typing import Callable, Mapping, Sequence
 from . import around
 from . import clone as clones
 from . import (config, cost_report, diagram, evidence, find, gather, graph, history, hook,
-               hooks, index, next_step, push, round_view, skills, tasks, wait)
+               hooks, index, next_step, propose, push, round_view, skills, tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
@@ -389,6 +390,14 @@ def _parser() -> argparse.ArgumentParser:
     history_ = commands.add_parser(
         "history", help="copy a change's history from its clone into the workspace")
     history_.add_argument("change")
+    proposing = commands.add_parser(
+        "propose", help="provisional: make a prerequisite's proposal worktree beside the "
+                        "checkout, on a new branch from the branch the change lands on")
+    proposing.add_argument("change")
+    proposing.add_argument("prerequisite")
+    proposing.add_argument("--base", default=None,
+                           help="the branch the proposal starts from, for a change whose "
+                                "clone recorded none")
     cost = commands.add_parser("cost", help="report what a change's runs cost")
     cost.add_argument("change")
     push_ = commands.add_parser("push", help="push exactly HEAD to its own branch, once it may be")
@@ -680,6 +689,10 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
                                            if getattr(args, "base", None) else [])]),
         "round-done": (round_view.main, ["done"]),
         "history": (history.main, ["sync", getattr(args, "change", "")]),
+        "propose": (propose.main, [getattr(args, "change", ""),
+                                   getattr(args, "prerequisite", ""),
+                                   *(["--base", args.base]
+                                     if getattr(args, "base", None) else [])]),
         "cost": (cost_report.main, [getattr(args, "change", "")]),
         "push": (push.main, ["push", *(["--remote", args.remote]
                                        if getattr(args, "remote", None) else [])]),
@@ -790,6 +803,9 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         if args.command == "push":
             _round_view_closed(root)
             return push.main(arguments, root=root, environ=environ)
+        if args.command in ("round-view", "round-done"):
+            # The round view reads the unattended marker from the command's environment.
+            return round_view.main(arguments, root=root, environ=environ)
         return main_(root) if arguments is None else main_(arguments, root=root)
     if args.command == "watch":
         # A change worked in its own clone writes its progress files there, and the

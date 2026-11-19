@@ -456,7 +456,7 @@ class Wrapper:
         return Around(self.root, config.load(self.root), change, step,
                       kind=self.kind(self.root, change) if step == "triage" else None,
                       base=landing_branch(self.root, change), environ=self.environ,
-                      invocations=self.invocations)
+                      invocations=self.invocations, clock=self.clock)
 
     def _logged_turn(self, step: str, change: str, log: Path, prompt: str,
                      models: Sequence[Model], confined: Confined, *, session: str | None,

@@ -17,8 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from change_workflow import cli
 from change_workflow import clone as clones
 from change_workflow import round_view as rounds
+from change_workflow.common import UNATTENDED_RUN
 from change_workflow.running import Run, recorded_run, runs_directory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +41,9 @@ def _no_runs(_: Path) -> list[Run]:
 def _git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    # The owner opens a round view: a suite run inside an unattended run, a validation's
+    # say, inherits that run's marker, under which the view refuses.
+    monkeypatch.delenv(UNATTENDED_RUN, raising=False)
     for role in ("AUTHOR", "COMMITTER"):
         monkeypatch.setenv(f"GIT_{role}_NAME", "test")
         monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.invalid")
@@ -131,6 +136,36 @@ def test_the_round_shows_as_uncommitted_changes_with_the_files_unchanged(repo: P
     assert _status(repo) == ROUND_STATUS
     assert (repo / "src/new.py").read_text("utf-8") == "new\n"
     assert "src/new.py" in _git(repo, "diff", "--name-only")
+
+
+TRIAGE_RUN = {UNATTENDED_RUN: "triage"}
+
+
+def test_a_step_opens_no_round_view(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-p3vz's "A step opens a round view": `scripts/change-workflow round-view
+    <change>` under an unattended triage's marker refuses, naming the triage step, and
+    moves nothing; the guard every step reads still runs under it."""
+    base, head = _round(repo)
+
+    assert cli.main(["round-view", CHANGE, "--base", base], root=repo,
+                    environ=TRIAGE_RUN) == 1
+
+    assert "the unattended triage run" in capsys.readouterr().err
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert _status(repo) == set() and rounds.open_view(repo) is None
+    assert rounds.main(["check"], root=repo, environ=TRIAGE_RUN) == 0
+
+
+def test_a_step_ends_no_round_view(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The owner's open view stays open under an unattended run's `round-done`."""
+    base, _ = _round(repo)
+    _start(repo, base)
+
+    assert cli.main(["round-done"], root=repo, environ=TRIAGE_RUN) == 1
+
+    assert "the unattended triage run" in capsys.readouterr().err
+    assert _git(repo, "rev-parse", "HEAD") == base
+    assert rounds.open_view(repo) is not None
 
 
 def test_done_restores_the_commit_and_keeps_the_owners_edits(repo: Path) -> None:

@@ -4,7 +4,9 @@ keeps read-only inside them, each named by the source it came from.
 A step writes only its scope (CW-m8wq). The scope of one run is resolved as the run
 starts, from four sources:
 
-- the engine: the step's baseline (`graph.STEP_DEFINITIONS`), and the paths protected
+- the engine: the step's baseline (`graph.STEP_DEFINITIONS`), design's holding each
+  prerequisite's proposal worktree registered in its checkout (CW-k8dn), and the
+  paths protected
   in every scope (`PROTECTED`) — the workflow's configuration, so no step changes
   what its own hooks run; Git's configuration, which says where Git finds its hooks;
   and the system's two Git executables, so no step replaces the Git its pushes go
@@ -46,7 +48,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from .common import StepError
-from .graph import INERT_PATHS, STEP_DEFINITIONS, TEMPORARY
+from .graph import INERT_PATHS, PROPOSAL_SUFFIX, PROPOSALS, STEP_DEFINITIONS, TEMPORARY
 from .records import inert, is_pattern
 
 # Where each path of a scope came from.
@@ -185,6 +187,17 @@ class _Checkout:
             return [absolute(entry, self.root, self.home)]
         return list(dict.fromkeys(Path(os.path.normpath(self.root / path)) for path in named))
 
+    def proposals(self) -> list[Path]:
+        """Each worktree registered in the checkout whose directory sits beside it,
+        named `<prerequisite>-proposal`; none outside a Git checkout."""
+        found = self._git("worktree", "list", "--porcelain") or ""
+        paths = [Path(line.removeprefix("worktree ")) for line in found.splitlines()
+                 if line.startswith("worktree ")]
+        root = Path(os.path.normpath(self.root))
+        return [path for path in paths
+                if path != root and path.parent == root.parent
+                and path.name.endswith(PROPOSAL_SUFFIX) and path.name != PROPOSAL_SUFFIX]
+
     def files(self) -> list[str]:
         """The checkout's files as Git lists them, tracked or untracked but not ignored,
         from its root; none outside a Git checkout."""
@@ -261,6 +274,8 @@ def resolve(step: str, root: Path, *, inert_paths: Sequence[str],
     for entry in definition.baseline:
         if entry == TEMPORARY:
             paths.append(ScopedPath(temporary, ENGINE, entry))
+        elif entry == PROPOSALS:
+            paths.extend(ScopedPath(path, ENGINE, entry) for path in checkout.proposals())
         elif entry == INERT_PATHS:
             paths.extend(path for inert_path in inert_paths
                          for path in checkout.writable(inert_path, ENGINE))

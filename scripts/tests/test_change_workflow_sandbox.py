@@ -325,6 +325,29 @@ def test_codex_runs_in_the_reviews_scope_and_its_own_sandbox_nests(checkout: Pat
 
 
 @needs_bwrap
+def test_design_writes_a_prerequisites_proposal_in_its_worktree(checkout: Path) -> None:
+    """CW-k8dn's "A design needs a prerequisite": a worktree beside the checkout, made
+    as `propose` makes one, is writable to the resumed design, and a sibling worktree
+    is not."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run([*git, "add", "-A"], cwd=checkout, check=True)
+    subprocess.run([*git, "commit", "-qm", "x"], cwd=checkout, check=True)
+    proposal, sibling = checkout.parent / "shape-floor-proposal", checkout.parent / "sibling"
+    for path, branch in ((proposal, "propose-shape-floor"), (sibling, "sibling")):
+        subprocess.run([*git, "worktree", "add", "-q", "-b", branch, str(path)], cwd=checkout,
+                       check=True)
+    written = proposal / "openspec/changes/shape-floor/notes.txt"
+
+    proposed = _run(_scope("design", checkout),
+                    f"mkdir -p {written.parent} && echo y > {written}", checkout)
+    beside = _run(_scope("design", checkout), f"echo y > {sibling}/notes.md", checkout)
+
+    assert proposed.returncode == 0, proposed.stderr
+    assert written.read_text("utf-8") == "y\n"
+    assert "Read-only file system" in beside.stderr
+
+
+@needs_bwrap
 def test_a_file_outside_the_scope_is_read(checkout: Path) -> None:
     read = _run(_scope("review", checkout), "cat src/main.py", checkout)
 
