@@ -58,9 +58,15 @@ lease without the status read, so a conflict no longer blocks an end. Two things
 are left:
 
 - No test shows that an end goes through while a delivery conflict stands, and no
-  requirement says it must.
+  requirement says it must, nor what the reads answer after it. A conflict is judged
+  only against an active delivery, so once the lease is ending the reads report the
+  ending (design D9).
 - `BareMetalFulfillmentService.converge_teardown`, which only wrapped the status
   read for the removed route, is dead: nothing calls it, not even a test.
+
+Design found a defect beside it: the result read answers "not ready" while any
+bare-metal lease is `terminating`, between the end and the site's first teardown
+report, though its recorded result stood before and stands after (D9).
 
 ### 4. A storefront that starts before its registry never offers payments
 
@@ -116,8 +122,10 @@ exceed, so a teardown that succeeds on a retry strands its lease for an operator
   acceptance judges the row its lock returns, so an equivalent retry receives the
   first fulfillment. Both are proven by deterministic tests on SQLite.
 - **A bare-metal end under a delivery conflict is stated and guarded** (D9). A
-  `storefront-publication` scenario, a storefront integration test, and
-  `converge_teardown` deleted.
+  `storefront-publication` scenario — the end is not refused, and once the lease is
+  ending the reads report the ending, not the conflict — a storefront integration
+  test, and `converge_teardown` deleted. The result read answers the recorded result
+  while a lease is `terminating`, a new `storefront-publication` requirement.
 - **A storefront reads again a registry it could not read** (D6). Each publication
   cycle re-reads only the registries whose last read failed, through a selective
   descriptor read in the core storefront package; while one is unread, each
@@ -165,7 +173,8 @@ Design's decisions are `design.md` D1–D10.
   `finished_at` (D4, D5).
 - `settlement-configuration`: reading a registry again after a failed read, and
   reporting an unread registry in status (D6).
-- `storefront-publication`: a bare-metal end under a delivery conflict (D9).
+- `storefront-publication`: a bare-metal end under a delivery conflict, and the
+  result read while a lease ends (D9).
 
 ### New Capabilities
 
@@ -200,7 +209,8 @@ None.
   (`accept_fulfillment`), `fulfillment_persistence.py` (`FulfillmentTransaction.accept`
   and `FulfillmentAcceptanceDecision`), and their tests.
 - `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/fulfillment_service.py`
-  (`converge_teardown` deleted) and `domains/bare_metal/storefront/tests/test_http_settlement.py`.
+  (`converge_teardown` deleted), `api.py` (the result route admits `terminating`),
+  and `domains/bare_metal/storefront/tests/test_http_settlement.py`.
 - `kit/storefront/src/market_storefront_kit/dispute_configuration.py`, the three
   storefronts' publication cycles and settlement readiness;
   `core/storefront/src/core_storefront/multi_registry_client.py`
@@ -230,7 +240,9 @@ None.
   - the core storefront package's `MultiRegistryClient.get_descriptors` gains an
     optional selection of the registries to read;
   - the Alkahest and Arkhai Payments mechanisms allowlist the public detail
-    `dispute_authorities_unread`.
+    `dispute_authorities_unread`;
+  - the bare-metal result read answers the recorded result, where it answered 409
+    "not ready", while a lease is `terminating`.
 
 ## Dependencies and Related Changes
 
@@ -287,6 +299,7 @@ None.
   `ARCHITECTURE.md`, "Release", where the rule that a fulfillment's teardown is one
   job is restated.
 - D9: `storefront-publication`'s specification (a bare-metal end under a delivery
-  conflict).
+  conflict, the reads after it reporting the ending; and "A bare-metal result read
+  answers the recorded result while its lease ends").
 - D10: no permanent destination — the implementation cadence is this change's
   plan, not the system's.

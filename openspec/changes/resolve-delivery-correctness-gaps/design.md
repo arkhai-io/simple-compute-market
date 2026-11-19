@@ -68,7 +68,8 @@ nothing on their job records proves it.
   the first one's fulfillment or lease, never a second fulfillment ID or a false
   exhaustion.
 - A bare-metal end under a delivery conflict is guarded by a test and stated by a
-  scenario; `converge_teardown` is gone.
+  scenario, the reads after it reporting the ending, the result read answering the
+  recorded result while any lease ends; `converge_teardown` is gone.
 - A storefront that started before its registry offers payments without a
   restart, and says why while it cannot.
 - A teardown whose execution is recorded as never started recovers without an
@@ -446,18 +447,55 @@ item 5: its convergence already retries without a ceiling.
 *Rejected.* Restating the rule in the `fulfillment` specification, which would
 make the provider-neutral kit describe one provider's job identities.
 
-### D9 — Item 3 is a scenario, a test, and a deletion
+### D9 — Item 3 is two requirements' scenarios, a test, a fix to the result read, and a deletion
+
+A delivery conflict is a disagreement about a live delivery: the storefront compares
+the recorded result with the delivery the site reports only while the site reports
+the fulfillment `active` (`BareMetalFulfillmentService.status`), as the requirement's
+"for an active bare-metal fulfillment" already states. An ending lease has no live
+delivery to disagree about.
 
 `storefront-publication`'s "A bare-metal delivery that conflicts with its recorded
-result is refused" gains a scenario: a buyer's end of a deal whose site reports
-another delivery terminates the lease through the lifecycle `end`, and the status,
-result and access reads still answer 409 `delivery_conflict` with the recorded
-result unchanged. The storefront integration test
-`test_a_delivery_other_than_the_recorded_result_is_a_conflict` is extended to drive
-it. `BareMetalFulfillmentService.converge_teardown` is deleted.
+result is refused" therefore gains, beside its refusal of the reads, that a buyer's
+end is not refused for the conflict, terminates the lease through the lifecycle
+`end`, and leaves the recorded result standing, and that once the lease is ending the
+buyer's reads report the ending as for any ended lease, not the conflict. Its scenario
+"A buyer ends a deal while the site reports a different delivery" states it: after the
+end, the status read reports the lease ending, the result read answers the recorded
+result, and the access read is refused as outside an active lease, none of them
+answering `delivery_conflict`. A buyer under a conflict thus sees its lease end
+through the status read, as every buyer does (the bare-metal lanes assert `released`
+there).
+
+The result read answered "not ready" while a lease was `terminating`, the state
+`apply_end` records once it has terminated the lease and before the site reports a
+teardown state, though the recorded result and receipt stood before and after: the
+result route's admitted states predate `terminating` and were not extended when it
+was added. The route admits `terminating`, and still answers "not ready" while no
+result or receipt is recorded, so a lease ended before delivery reads as before.
+`storefront-publication` gains "A bare-metal result read answers the recorded result
+while its lease ends", a requirement of its own since it holds for every ending
+lease, not only one under a conflict. Against `marketplace-v0.3.0` a 409 becomes a
+200 carrying the recorded result, within the bare-metal storefront's minor bump this
+change already takes. This is a defect found during the change, recorded in the task
+notes.
+
+Tests, application integration through the storefront's typed clients in
+`test_http_settlement.py`: `test_a_delivery_other_than_the_recorded_result_is_a_conflict`
+extended to the end and the three reads after it; a delivered deal whose lease is
+`terminating`, the provisioning double still reporting the fulfillment `active` after
+`terminate_lease`, read as its recorded result; and a lease ended before delivery,
+read as not ready. `BareMetalFulfillmentService.converge_teardown` is deleted.
 
 *Rejected.* A test with no scenario, which would guard a behaviour no requirement
-states.
+states. The reads still answering `delivery_conflict` after the end, which needs the
+storefront to keep a conflict past the live delivery it was judged against — a stored
+mark on its lifecycle row, a migration, and a behaviour change for a state no
+requirement motivates — and leaves a buyer under a conflict unable to see its lease
+end through the status read. Dropping the after-end clause, which leaves the reads
+after an end unstated, the gap D9 closes. Recording the result read as an unowned gap
+rather than fixing it, which leaves "the reads report the ending" false for one read
+and costs a later change a design, review and closeout for one admitted state.
 
 ### D10 — One round of three sessions
 
@@ -484,15 +522,24 @@ section depend on session 1's (11 F11). Session 3's packages are its own.
 The delta specifications are written whole at design, so no session edits a shared
 specification file.
 
+Session 3 stopped in item 3, which returned to design (D9). A fresh session, in the
+same round, completes item 3 as D9 now gives it, in the bare-metal storefront, which
+section 7's bump already covers; the round's implementation review and validation
+follow it.
+
 *Rejected.* Two rounds reviewing item 5 alone first, which the owner judged not
 worth the extra round. One session for everything, which serializes independent
-work.
+work. A second round for item 3's remainder alone, a review boundary for a few lines
+in one package already bumped.
 
 ## Implementation cadence
 
 One round of three sessions, as D10 gives it: session 1 implements item 5 (D3,
 D4, D5, D7, D8); session 2 items 1 and 2 (D1, D2); session 3 items 3 and 4 (D6,
-D9). One implementation review follows the round, then closeout.
+D9). After item 3's return to design, a fresh session in the same round completes
+item 3 as D9 restates it (the result read during `terminating`, the extended
+conflict test and its sibling cases, and the deletion already made). One
+implementation review follows the round, then closeout.
 
 ## Risks / Trade-offs
 
