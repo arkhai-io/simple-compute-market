@@ -10,12 +10,13 @@ default agent from ``values.yaml``, as an operator's overlay does: Helm merges
 the overlay into the agent key by key and replaces lists, and the chart removes a
 key or an agent the overlay sets to ``None``. The production example's tests
 render the storefront chart alone instead, over ``examples/production-values.yaml``,
-which states the globals that render reads, and read its own agent.
+which states the globals that render reads, and read its own agent; the seller
+quickstart's on-demand and spot TOML is held to that example.
 
 Set ``STOREFRONT_PYTHON`` to the storefront environment's interpreter to also
 load rendered documents with the storefront's own configuration loader, run its
-startup refusal over them, and publish the production example's clauses through
-its per-clause publication step.
+startup refusal over them, and publish the production example's clauses, and the
+quickstart's read beneath it, through its per-clause publication step.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tomllib
 from pathlib import Path
 
 CHART = Path(__file__).resolve().parents[1]
@@ -1240,13 +1242,16 @@ else:
 """
 
 
-def _startup_refusal(config: dict, python: str) -> str | None:
+def _startup_refusal(config: dict, python: str, *, operator_toml: str | None = None) -> str | None:
     """What the storefront's own startup refusal reports for one rendered
-    document, or None when it would start."""
+    document, or None when it would start. ``operator_toml`` is an operator's own
+    ``storefront.toml``, which the loader merges beneath the rendered document."""
     with tempfile.TemporaryDirectory() as home:
         directory = Path(home) / "arkhai"
         directory.mkdir()
         (directory / "storefront.json").write_text(json.dumps(config))
+        if operator_toml is not None:
+            (directory / "storefront.toml").write_text(operator_toml)
         loaded = subprocess.run(
             [python, "-c", _REFUSAL_PROBE],
             env={**os.environ, "XDG_CONFIG_HOME": home},
@@ -1600,10 +1605,10 @@ def test_the_production_example_passes_the_storefront_startup_check() -> None:
 # Publishes the loaded configuration's clauses through the per-clause step the
 # storefront's publication composes, wired as its composition wires it, against a
 # representative dispute authority advertising a fourteen-day minimum filing
-# window, the payments kit's recurring-options fixture's horizon (a day, no
-# availability end) and no pool deadline, as the VM composition supplies none, so
-# each clause's own deadline publishes; at a fixed instant. Prints each option's
-# terms and every refusal.
+# window, the configuration's own default listing bounds — the horizon a pool
+# with no override of its own publishes under — and no pool deadline, as the VM
+# composition supplies none, so each clause's own deadline publishes; at a fixed
+# instant. Prints each option's terms and every refusal.
 _PUBLICATION_PROBE = """
 import json, warnings; warnings.simplefilter('ignore')
 from datetime import datetime, timezone
@@ -1636,11 +1641,14 @@ step = ClausePublication(
     clock=lambda: datetime(2027, 1, 1, tzinfo=timezone.utc),
 )
 ready = MechanismReadiness(mechanism="arkhai.payments.v1", configured=True, enabled=True, ready=True)
+pricing = getattr(settings, "pricing", None)
 refusals, options = [], []
 for clause in settlement_publication_defaults():
     artifacts = step.publish(
         ready, clause, resources={}, delivery_deadline=lambda: None,
-        max_duration_seconds=86400, available_until_utc=None, diagnose=refusals.append,
+        max_duration_seconds=getattr(pricing, "default_max_duration_seconds", None),
+        available_until_utc=getattr(pricing, "default_available_until_utc", None),
+        diagnose=refusals.append,
     )
     for item in artifacts.settlement_options:
         option = SettlementOption.model_validate(item)
@@ -1655,13 +1663,16 @@ print(json.dumps({"options": options, "refusals": refusals}))
 """.replace("MINIMUM_WINDOW", str(AUTHORITY_MINIMUM_WINDOW))
 
 
-def _published(config: dict, python: str) -> dict:
+def _published(config: dict, python: str, *, operator_toml: str | None = None) -> dict:
     """The options and refusals ``_PUBLICATION_PROBE`` reports for one rendered
-    document, read with the storefront's own loader."""
+    document, read with the storefront's own loader, beneath which it merges
+    ``operator_toml`` as an operator's own ``storefront.toml``."""
     with tempfile.TemporaryDirectory() as home:
         directory = Path(home) / "arkhai"
         directory.mkdir()
         (directory / "storefront.json").write_text(json.dumps(config))
+        if operator_toml is not None:
+            (directory / "storefront.toml").write_text(operator_toml)
         loaded = subprocess.run(
             [python, "-c", _PUBLICATION_PROBE],
             env={**os.environ, "XDG_CONFIG_HOME": home},
@@ -1704,6 +1715,59 @@ def test_the_production_example_publishes_both_recurring_options() -> None:
     assert [refusal["code"] for refusal in withdrawn["refusals"]] == [
         "rate_servicing_undeclared", "rate_servicing_undeclared",
     ], withdrawn["refusals"]
+
+
+#: The seller quickstart, whose "Offering on-demand and spot" shows a seller the
+#: declaration and clauses the production example deploys, as TOML.
+SELLER_QUICKSTART = REPO / "docs" / "seller-quickstart.md"
+QUICKSTART_SECTION = "## Offering on-demand and spot"
+QUICKSTART_PAYEE_PLACEHOLDER = "<YOUR_PAYEE_ACCOUNT>"
+
+
+def _quickstart_rate_servicing_toml(payee_account: str) -> str:
+    """The one TOML block of the quickstart's "Offering on-demand and spot", its
+    payee account placeholder given ``payee_account``."""
+    text = SELLER_QUICKSTART.read_text()
+    section = text.split(f"\n{QUICKSTART_SECTION}\n", 1)[1].split("\n## ", 1)[0]
+    (block,) = re.findall(r"```toml\n(.*?)```", section, flags=re.DOTALL)
+    assert QUICKSTART_PAYEE_PLACEHOLDER in block, block
+    return block.replace(QUICKSTART_PAYEE_PLACEHOLDER, payee_account)
+
+
+def test_the_seller_quickstart_shows_the_production_examples_rate_servicing() -> None:
+    """The TOML the seller quickstart shows for offering on-demand and spot, its
+    payee account given the example's, is the example's declaration and its whole
+    `pricing` — the default horizon and both clauses — so the two cannot drift
+    apart. The storefront's own loader reads it as an operator's
+    `storefront.toml`, beneath the rendered example stripped of those tables: its
+    startup refusal finds nothing, and its publication step publishes an
+    on-demand and a spot option, with nothing refused, under the horizon the
+    TOML states."""
+    config = _example_config(_ok(_render_example()))
+    payee_account = config["pricing"]["settlements"][0]["mechanism_input"]["payee_account"]
+    operator_toml = _quickstart_rate_servicing_toml(payee_account)
+    shown = tomllib.loads(operator_toml)
+
+    assert sorted(shown) == ["Settlement", "pricing"], sorted(shown)
+    assert shown["Settlement"] == {"rate_servicing": config["Settlement"]["rate_servicing"]}, shown
+    assert shown["pricing"] == config["pricing"], shown
+
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the quickstart's storefront checks did not run")
+        return
+    settlement = {key: value for key, value in config["Settlement"].items() if key != "rate_servicing"}
+    rendered = {**{key: value for key, value in config.items() if key != "pricing"}, "Settlement": settlement}
+    refusal = _startup_refusal(rendered, python, operator_toml=operator_toml)
+    assert refusal is None, refusal
+    published = _published(rendered, python, operator_toml=operator_toml)
+    assert published["refusals"] == [], published["refusals"]
+    assert [option["entitlements"] for option in published["options"]] == [
+        ["payer"], ["payee", "payer"],
+    ], published["options"]
+    # Without the TOML, the stripped document declares no rate servicing and
+    # states no clause of its own, so the options above are the TOML's.
+    assert _published(rendered, python)["options"] == []
 
 
 def main() -> int:

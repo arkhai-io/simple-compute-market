@@ -621,6 +621,13 @@ example, `helm/charts/storefront/tests/test_render.py`, and
       the two could drift without this check failing; the rest of
       `publication_artifacts` — readiness of a reachable service, the listing's
       resources — is not run, since the render check has no service.
+      Correction (section 7): the probe passed the fixture's day as the horizon by
+      hand, which hid that the example stated none — the packaged
+      `default_max_duration_seconds = 0` means unbounded, so deployed alone it
+      would refuse both clauses `recurring_horizon_unbounded`. The example now
+      states a day, the probe reads the configuration's default listing bounds,
+      and the `deployment-state` delta names the horizon; 7.1's notes give the
+      evidence.
 - [x] 4.4 Verification point: the chart render tests pass with the loader and
       publication checks run, not skipped, and `scripts/change-workflow run pre-commit
       switch-on-hosted-per-period-vm` passes.
@@ -1274,7 +1281,7 @@ Delivers the seller and buyer quickstart sections and the storefront operator's 
 Implements D1, D7, D10 and D11. Touches `docs/seller-quickstart.md`,
 `docs/buyer-quickstart.md` and `docs/operator-handbook.md`.
 
-- [ ] 7.1 `docs/seller-quickstart.md`, a new section "Offering on-demand and spot": the
+- [x] 7.1 `docs/seller-quickstart.md`, a new section "Offering on-demand and spot": the
       on-demand and spot recurring clauses, the declaration `[charged, returned]` with
       `setup = false`, the clause's `delivery_deadline_seconds` and a dispute window
       covering it plus the authority's minimum, withdrawal by removing the table, and
@@ -1283,14 +1290,107 @@ Implements D1, D7, D10 and D11. Touches `docs/seller-quickstart.md`,
       documentation; pointing at the chart's production example (D1, D7, D10). Verify:
       the TOML shown parses as the storefront's settings (the same loader as 4.2) and
       `make check-doc-citations CHANGE=switch-on-hosted-per-period-vm` passes.
-- [ ] 7.2 `docs/buyer-quickstart.md`, a new section on on-demand and spot options: the
+      Done: the section, after "6. Preview and publish", shows one TOML block — the
+      declaration, `[pricing]` with `default_max_duration_seconds`, and the two
+      clauses as `[[pricing.settlements]]` tables, the example's values with the
+      payee account a placeholder, replacing the payments-only block's `[pricing]` —
+      then the declaration, the term (a finite horizon, `recurring_horizon_unbounded`
+      without one), the clauses (the on-demand penalty's default and override,
+      collectible only from held earnings), the deadline (storefront-enforced, the
+      site not, linking the handbook's runbook), the window against the option's
+      authority (`dispute_window_before_delivery_deadline`), payout, the spot
+      seller's `deals preempt`, and withdrawal (`rate_servicing_undeclared`, after a
+      restart, since the declaration is read at startup). It names no later change:
+      the deadline is described as the system stands. Verified by a render test
+      rather than a one-off run, outside the plan's "Touches" line:
+      `helm/charts/storefront/tests/test_render.py`,
+      `test_the_seller_quickstart_shows_the_production_examples_rate_servicing`,
+      takes the section's one TOML block, gives the placeholder the example's
+      account, and requires it, parsed with `tomllib`, to equal the example's
+      `rate_servicing` and whole `pricing`, so the two cannot drift; then the
+      storefront's own loader reads the block as an operator's `storefront.toml`,
+      beneath the rendered example with those tables removed, and the startup
+      refusal finds nothing and 4.3's publication probe publishes an on-demand and a
+      spot option with nothing refused; the stripped document alone publishes
+      nothing, so the declaration, the clauses and a finite horizon all came from
+      the TOML (the horizon's value is not asserted). Static configuration test
+      (`static-configuration-tests.md`; the chart render tests, `make -C helm
+      test-render`, `STOREFRONT_PYTHON` set by `test-render.sh`): every check passes,
+      the new test `ok` and not skipped. With the example's
+      `default_max_duration_seconds` removed for one run, 4.3's test failed on
+      `recurring_horizon_unbounded` and this one on the TOML differing — restored
+      after. Not shown failing before the change otherwise: the render tests are a
+      script, not pytest, so `run test-before` does not run them; at the round's
+      base the section is absent and the test's split raises. `make
+      check-doc-citations` reports only section 8's summary, but it scans only the
+      change's own documents; the new sections' links (`#serving-rate-deals`,
+      `#offering-on-demand-and-spot`, `#settlement-consumer-configuration-and-cutover`,
+      `deal-lifecycle/architecture.md#one-end-instant-transactional-admission`,
+      `#7-on-demand-and-spot`) were checked by reading the headings they name.
+      Outside the plan, two defects fixed. The production example (section 4)
+      stated no horizon, and the storefront's packaged default,
+      `default_max_duration_seconds = 0`, means none, so deployed alone it would
+      refuse both clauses `recurring_horizon_unbounded`; 4.3's probe hid it by
+      passing a day by hand. The example now states a day, and the probe reads the
+      configuration's `default_max_duration_seconds` and
+      `default_available_until_utc`, as `publication_terms.py` does for a pool with
+      no override (the storefront chart stays 0.5.1, this change's unreleased
+      version). And the quickstart's existing payments-only once-only clause ("2.
+      Configure") stated no `dispute_window_seconds`, which
+      `ArkhaiPaymentsPublicationInput` requires (no default; the once-only builder,
+      `arkhai_payments_option_builder`, validates the clause with it), so it could
+      not publish; it now states the window and a delivery deadline, the section's
+      values, with a sentence pointing at the new section. Evidence for that one:
+      the code read only — no test loads that block.
+- [x] 7.2 `docs/buyer-quickstart.md`, a new section on on-demand and spot options: the
       default refusals and the waiver for each, approval refused when the balance cannot
       cover the first reservation, a top-up before the funded boundary keeping a deal
       running and after it a new deal, the premature-stop penalty collectible only from
       the seller's earnings still held, and the dispute remedy a case (D10). Verify: each
       command and flag shown is in the installed `market --help` output, and the
       citations check passes.
-- [ ] 7.3 `docs/operator-handbook.md`, a new section for a storefront serving rate deals:
+      Done: "7. On-demand and spot", after "6. Service and reclaim": a `market buy`
+      selecting a recurring option (`arkhai_payments.billing_kind=per_period`, with
+      `early_termination.payee=false` for on-demand or `true` for spot), what `buy`
+      discloses before negotiating, the four default refusals and their waivers as a
+      table with `--allow-unprotected-terms` (a treatment other than returning, so
+      prorating too, is refused), how a refusal is reported, funding (approval
+      refused `insufficient_funds`, a top-up before the funded boundary, a funding
+      stop final and `market delivery`'s `funding_stop`), `market end` and
+      `--end-now-regardless`, which files the surrender as a case, `buy --watchdog`,
+      the penalty collectible only from held earnings, and a case as the remedy,
+      any other filed through the authority's own interface (Goal 8's unowned row).
+      The fresh-context check found two behaviours the first draft got wrong, both
+      corrected from the source: `end --end-now-regardless` files the buyer's
+      `delivery_end` (`ending.py`), and the default refusals are only logged
+      (`BuyerTermsPolicy.__call__` reports them to `AuthoritySelection.report`,
+      logging at info, and they never reach its `refusals`, which `emit_term_refusals`
+      prints and `buy`'s exit code reads), so a buy they alone empty prints "No
+      listings matched" and exits 0. That gap is a new unowned row in Goal 8's table
+      (`docs/development/ROADMAP.md`). The second check found advice to compare
+      options through `market listing show`, which shows no settlement option
+      (removed), the watchdog described without its conditional bound, which
+      `buyer-orchestration`'s companion requires wherever it is described, and
+      without "consecutive" (both added), and the exit-code rule stated too narrowly
+      (any refusal by those checks with nothing left exits 2; restated). Commands and
+      flags checked against the CLI's source, not `market --help`: running the
+      installed `market` was denied (no rule allows it), so Grep and Read stood in;
+      flag existence and, after the two checks, the behaviour the section describes
+      were read — `buy`'s options in
+      `domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py`
+      (`--resource`, `--settlement`, `--duration-hours`, `--yes` from core's
+      `assume_yes_option`, the four waivers and the shorthand from
+      `kit/settlement-runtime`'s `TERM_WAIVERS`, `--watchdog`, `--watchdog-interval`,
+      `--watchdog-threshold`), `end` and `delivery` with `--from` and
+      `--end-now-regardless` (`kit/deal-lifecycle-buyer`'s `commands.py`, registered
+      on the VM app by `end_cli.register`), and the settlement fields
+      `arkhai_payments.billing_kind` (the payments kit's clause fields) and
+      `early_termination.payee` (`kit/deal-lifecycle`'s `LIFECYCLE_QUERY_FIELDS`,
+      a boolean as `kit/settlement-runtime`'s clause tests spell it). The disclosure
+      rows are `buyer_terms.py`'s. No test runs the commands the section shows.
+      `make check-doc-citations` — only section 8's summary (the section's links
+      checked by hand, as 7.1).
+- [x] 7.3 `docs/operator-handbook.md`, a new section for a storefront serving rate deals:
       truncating a lease abandoned before delivery and monitoring committed reservations
       still unactivated past their deadline, through the storefront's and the site's
       existing operator interfaces; draining running payment deals before a receipt key
@@ -1300,10 +1400,118 @@ Implements D1, D7, D10 and D11. Touches `docs/seller-quickstart.md`,
       the authority's to correct — linking the dispute authority's policy where it is
       published, hosting none of it (D7, D11). Verify: each command and route named
       exists (`--help`, the storefront's route table), and the citations check passes.
-- [ ] 7.4 Verification point: `scripts/change-workflow run pre-commit
+      Done: "Serving rate deals", after "Payments access": the administrator's signed
+      lifecycle list and read; "Leases the storefront has not delivered" — why the
+      site holds an undelivered lease, the site's active VM leases with a null
+      `activated_at_utc` past start (or commitment) plus the deadline, reading the
+      deal, a servicing cycle run now, the administrator's failure interrupt, and
+      terminating at the site when the storefront cannot service it; "Draining
+      payment deals before a receipt key change" — trading paused, deals left to end
+      (spot preempted), every payment deal listed `ended`, `receipt_identities` for the
+      switch, `check-payments`, trading resumed; "What each dispute outcome shows" —
+      the four `ending` codes and seven outcomes, the ruled end with no stop left
+      `ending` with `payment_running` as the authority's to correct, and the
+      authority's policy left to the authority. Differs from the plan: it links no
+      published policy, since this repository knows no published location; it says
+      the policy is the authority's to publish and points at an
+      `arkhai.mediation.v1` authority's description's `contact`. The fresh-context
+      check found the retiring receipt identity stated without the `valid_until` it
+      must carry (`receipts.py` refuses one without; the cited
+      `settlement-configuration/configuration.md` called it optional, and now says a
+      retiring entry requires it — outside the plan), the deadline's cap
+      at the term end, a page per servicing cycle, a negotiation already open when
+      trading pauses, and the description it restated unlinked; each is fixed.
+      Routes checked in the route tables, by Grep and Read (no `--help` run,
+      as 7.2): the storefront's `GET /api/v1/admin/lifecycle` and
+      `GET /api/v1/admin/lifecycle/{negotiation_id}` (`kit/deal-servicing`'s
+      `routes.py`, administrators' signatures), `POST /api/v1/admin/pause`, `/resume`,
+      `/lifecycle/resume`, `/lifecycle/{loop}/run-cycle` with the loop
+      `deal-servicing`, and `/deals/{escrow_uid}/interrupt`, whose parameter takes a
+      payment deal's negotiation id, with `interruption_kind` (the VM storefront's
+      `admin_controller.py` and
+      `deal_lifecycle.py`); the provisioning service's
+      `GET /api/v1/contract/leases` filtered by `status` and `offering_mode` (`vm`),
+      `POST …/terminate`, `retry-release` and `force-release`
+      (`compute_provisioning_contracts/routes.py`, `leases_controller.py`, the
+      administrator alone for the list); `LeaseView`'s `activated_at_utc`,
+      `lease_start_utc` and `deal_ref.negotiation_id` (`compute_delivery/path.py`
+      writes it); `market-storefront deals preempt --operation-key` and
+      `check-payments`/`check-mediation` (`cli.py`, `groups/deals.py`). What a site
+      termination becomes at the storefront is `classify_site_end`'s
+      `unentitled_withdrawal`; the outcome rows rest on `DealSummary`, `ENDING_TEXT`,
+      the watch's recorded causes (`ruling` for a ruled end, the payment stop's own
+      cause) and `deal-lifecycle/architecture.md`. No test runs the routes the
+      section shows. `make check-doc-citations` — only section 8's summary (the
+      section's links checked by hand, as 7.1).
+- [x] 7.4 Verification point: `scripts/change-workflow run pre-commit
       switch-on-hosted-per-period-vm` passes.
       End-to-end: none; documentation.
       Nothing is owed to validation.
+      Evidence: `scripts/change-workflow run pre-commit` on the section's final tree
+      but this note: `after-functional-change` passed, no lock changed;
+      `pre-commit-functional` passed (local evidence for tree `253195c44d89`:
+      `check-packaging` and `make test`, whose log shows the chart render tests'
+      7.1 quickstart test `ok`); the index, tasks, skills and strict OpenSpec checks
+      passed, and `check-repository` passed 8 of 9, documentation citations
+      reporting only section 8's summary
+      (`docs/attachments/switch-on-hosted-per-period-vm/live-verification.md`), as in
+      sections 1 to 6. The example and the render test are outside the inert paths,
+      so the functional hooks ran. Two earlier runs, before the fresh-context
+      checks' fixes (trees `76b59cd3f74b` and `5692bc4a4062`), gave the same.
+      End-to-end scenarios confirmed: none; no scenario reads the quickstarts or the
+      handbook.
+
+Handoff (section 7):
+
+- Outside the plan's "Touches" line (the three documents): the render test 7.1 adds
+  to `helm/charts/storefront/tests/test_render.py`, its module docstring, the
+  `operator_toml` parameter of `_startup_refusal` and `_published`, and the
+  publication probe reading the configured horizon; the production example's
+  `default_max_duration_seconds`; the quickstart's once-only clause; the
+  `valid_until` sentence of `settlement-configuration/configuration.md`; and a new
+  unowned row in Goal 8's table of `docs/development/ROADMAP.md`. The test holds the
+  quickstart's TOML equal to the production example's `rate_servicing` and
+  `pricing`, so a change to either fails it until the other follows; the
+  quickstart's block must stay the section's only TOML block, with the
+  `<YOUR_PAYEE_ACCOUNT>` placeholder.
+- The change's row in `openspec/changes/README.md` read `ready for implementation`,
+  left so by the replanning of sections 5 and 6; it is `in implementation` again.
+- For section 8's deployment and closeout: the production example only publishes
+  recurring options because it now states `default_max_duration_seconds`; a
+  deployment copying an older form of it would publish none.
+- Running the installed `market` and `market-storefront` was denied in this session
+  (no rule allows them), so 7.2's and 7.3's commands, flags and routes were checked
+  against the CLI source and route tables instead; a later session needing `--help`
+  output should not expect it.
+- The handbook's "Serving rate deals" is the runbook `renewable-compute-lease-deadlines`
+  retires in part (its abandoned-lease and unactivated-reservation subsection, once
+  the site enforces the deadline); the seller quickstart's deadline bullet links it
+  by its anchor, `operator-handbook.md#serving-rate-deals`.
+- For closeout's promotion (9.9): D7's quickstart and D10/D11's documents are
+  written here. D11's `deal-lifecycle/architecture.md` "Current limits" sentence and
+  D1's caveat corrections stay closeout's, and the caveats wait for section 8's
+  evidence (D3). The handbook says only what SCM relies on of the dispute
+  authority, and points at the authority's own published policy and its
+  description's `contact` rather than linking a document, since no published
+  location is known to this repository.
+- For 9.5: the buyer quickstart states that `market` files no case on a running
+  deal but the surrender `end --end-now-regardless` makes, Goal 8's existing
+  unowned row; and that a buy its default refusals alone empty says nothing and
+  exits 0, the new unowned row.
+- The fresh-context check's findings declined: the payments service's own facts in
+  the quickstarts (the 7-day payout, held earnings, top-up behaviour) rest on the
+  design's context, as D10 names them, not on code here; and that a refused
+  approval (`insufficient_funds`) may surface to the buyer as an unhandled error
+  rather than a clean refusal — the quickstart says only that nothing is bought,
+  which holds, and the error's presentation was not traced further.
+- Two fresh-context checks ran. The first's findings are in 7.1–7.3's notes; the
+  second, on the fixed diff, found the `listing show` advice, the watchdog's bound,
+  the exit-code wording, the `deployment-state` delta not naming the example's
+  horizon (now it does, with 4.3's correction note), a test docstring saying "laid
+  over" for "beneath", and two note phrasings (the test's level, an unasserted
+  horizon value); all fixed. It also noted that `settlement-configuration`'s
+  companion still says no shipped configuration declares rate servicing, which
+  9.9's D1 corrects at closeout once section 8's evidence is in.
 
 ## 8. Live verification evidence
 

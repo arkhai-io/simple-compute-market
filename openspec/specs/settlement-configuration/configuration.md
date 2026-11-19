@@ -144,8 +144,8 @@ For the moment of a signing-key switch, `receipt_identities` in
 `[Settlement.arkhai_payments]` may list the current and the retiring identity pins, so
 a fresh approval does not fail while clocks and configurations differ; it keeps no
 deal alive past the removal of the retiring entry, which ends the cutover. Each entry has `identity`,
-`valid_from` (inclusive Unix seconds, default zero), optional `valid_until`
-(exclusive), and `retiring` (default false). A nonempty list must include the
+`valid_from` (inclusive Unix seconds, default zero), `valid_until` (exclusive),
+optional but required on a retiring entry, and `retiring` (default false). A nonempty list must include the
 current `service_identity` as a non-retiring entry. With no list, that identity
 alone remains trusted. Receipt signatures are checked at `approvedAt`; snapshot
 signatures at `observedAt`. A valid current-key snapshot may attest an embedded

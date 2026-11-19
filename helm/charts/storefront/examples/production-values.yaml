@@ -98,6 +98,10 @@ agents:
               - returned
             setup: false
       pricing:
+        # The longest deal, a day: a recurring option publishes only under a
+        # finite term, which leaves room for approval, the delivery deadline and
+        # a whole period.
+        default_max_duration_seconds: 86400
         # An on-demand and a spot option, each USD 1.00 an hour paid by the
         # hour to the seller's account, with ten minutes to approve. Each
         # promises delivery within half an hour, a deadline the storefront

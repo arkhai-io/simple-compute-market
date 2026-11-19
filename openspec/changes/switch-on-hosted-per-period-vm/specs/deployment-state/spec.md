@@ -4,9 +4,10 @@
 
 The VM storefront chart MUST ship a production example values file whose agent settles
 in `arkhai.payments.v1` in live mode, declares rate servicing for `charged` and
-`returned` with no setup charge, and publishes an on-demand and a spot recurring clause
-whose payments clause sets `delivery_deadline_seconds` and a dispute window covering
-that deadline plus the authority's minimum filing window. The example MUST render, its
+`returned` with no setup charge, states a finite default listing horizon, and publishes
+an on-demand and a spot recurring clause whose payments clause sets
+`delivery_deadline_seconds` and a dispute window covering that deadline plus the
+authority's minimum filing window. The example MUST render, its
 rendered storefront configuration MUST pass the storefront's startup check, and it MUST
 set no injected time.
 
@@ -20,7 +21,8 @@ set no injected time.
 #### Scenario: The production example publishes both recurring options
 
 - **WHEN** the rendered example's configuration is loaded and its recurring clauses are
-  derived against a representative dispute authority advertisement and pool horizon
+  derived against a representative dispute authority advertisement under the example's
+  own default listing horizon
 - **THEN** an on-demand and a spot option are published, each with the clause's delivery
   deadline, a dispute window covering it plus the authority's minimum filing window, and
   the `charged` and `returned` treatments, and no clause is refused
