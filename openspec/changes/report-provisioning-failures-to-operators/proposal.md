@@ -71,8 +71,8 @@ their own.
 ## Non-Goals
 
 - Rerunning a teardown that never reached its executor.
-  `resolve-delivery-correctness-gaps` owns that, using the job's missing execution
-  handle rather than a failure class.
+  `resolve-delivery-correctness-gaps` owns that, using the job's recorded start
+  (`execution_started_at`) rather than a failure class.
 - Buyer-facing notification.
 
 ## Impact
@@ -86,7 +86,10 @@ their own.
 
 ## Dependencies and Related Changes
 
-- None.
+- `resolve-delivery-correctness-gaps`, before this change's design. Its rerun
+  predicate's `spent` outcome and a lease's `release_failed` with
+  `teardown_timeout` past the stalled-teardown grace are what this change's events
+  for an exhausted teardown and a held lease read.
 - `replace-polling-with-authenticated-push` and `redesign-storefront-stage-events`
   also concern event delivery. Design checks whether operator events share their
   transport.

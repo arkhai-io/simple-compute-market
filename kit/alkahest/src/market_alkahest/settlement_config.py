@@ -42,6 +42,9 @@ from .escrow_verification import verify_escrow_against_plan
 
 ALKAHEST_MECHANISM_ID = "alkahest.v1"
 ALKAHEST_CONFIG_KEY = "alkahest"
+# The readiness resource, and the public detail, naming the registries whose
+# recommended dispute authorities the composing storefront could not read.
+_DISPUTE_AUTHORITIES_UNREAD = "dispute_authorities_unread"
 _EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _ESCROW_KIND = re.compile(r"^[a-z][a-z0-9_]*$")
 _CLAUSE_OPERATORS = frozenset(
@@ -558,7 +561,10 @@ async def alkahest_preflight(
       a blocker;
     - ``chain_probe``: its :class:`~market_alkahest.chain_probe.AlkahestChainProbe`,
       whose last result per selected chain readiness reads; readiness makes no
-      chain call of its own.
+      chain call of its own;
+    - ``dispute_authorities_unread``: each registry whose recommended dispute
+      authorities it could not read, and when that read last failed, which
+      readiness copies into its public details.
 
     A buyer supplies none of them. A wallet stating no address is read as the
     account its key signs as (:func:`wallet_account_address`); a seller's wallet
@@ -672,6 +678,11 @@ async def alkahest_preflight(
     chain_probe = resources.get("chain_probe")
     if chain_probe is not None:
         details["chain_probe"] = chain_probe.public_results()
+    # A report, never a blocker: the options a seller's local dispute entries
+    # allow still publish while a registry's recommendations are unread.
+    unread = resources.get(_DISPUTE_AUTHORITIES_UNREAD)
+    if unread:
+        details[_DISPUTE_AUTHORITIES_UNREAD] = unread
     return MechanismReadiness(
         mechanism=ALKAHEST_MECHANISM_ID,
         configured=True,
@@ -1010,7 +1021,7 @@ def create_alkahest_registration(
         publication_input_validator=validate_alkahest_publication_input,
         buyer_compatibility=alkahest_buyer_compatibility,
         public_detail_keys=frozenset(
-            {"chain", "asset", "release_models", "chain_probe"}
+            {"chain", "asset", "release_models", "chain_probe", _DISPUTE_AUTHORITIES_UNREAD}
         ),
     )
 

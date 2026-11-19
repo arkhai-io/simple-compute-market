@@ -205,6 +205,12 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
         # A cycle that fails before deriving a site leaves that site's last
         # derivation, which status keeps reporting beside the failed outcome.
         loops.enter_stage("compose")
+        # A registry whose recommendations could not be read is read again
+        # before options are composed, so the authorities it recommends reach
+        # this cycle's listings without a restart. A preview changes nothing,
+        # so it reads nothing.
+        if runtime.settlement_composition is not None:
+            await runtime.settlement_composition.disputes.reread()
         cycle = compose_publication()
         return to_jsonable_python(await cycle.run())
 

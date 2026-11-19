@@ -21,7 +21,6 @@ from .transitions import CREATE_COMPENSATION
 @dataclass(frozen=True)
 class FulfillmentAcceptanceDecision:
     record: Any
-    newly_accepted: bool
     dispatch_required: bool
 
 
@@ -158,8 +157,8 @@ class SqlAlchemyFulfillmentTransaction:
         market: str,
         fulfillment_request: VersionedEnvelope[Any],
     ) -> FulfillmentAcceptanceDecision:
-        before = self._repository.get(self.db, capacity_reservation_id)
-        was_accepted = bool(before and before.fulfillment_id)
+        # Everything acceptance decides is judged from the row the locked
+        # select returns, never from a read taken before the lock.
         record = self._repository.accept_fulfillment(
             self.db,
             capacity_reservation_id=capacity_reservation_id,
@@ -172,7 +171,6 @@ class SqlAlchemyFulfillmentTransaction:
         )
         return FulfillmentAcceptanceDecision(
             record=record,
-            newly_accepted=not was_accepted,
             dispatch_required=dispatch_required,
         )
 

@@ -373,6 +373,11 @@ class RecordingRegistries:
     test planted there with :meth:`plant` -- a listing the storefront did not
     publish through this double -- and a close it is sent removes it.
     ``publisher_reads`` records the principal each read named.
+
+    A registry's descriptor read returns what ``descriptors`` holds for it, its
+    descriptor as the real client returns it once verified, or ``None``
+    for a registry whose read fails, as every registry's does until a test
+    sets one; ``descriptor_reads`` records the registries each read selected.
     """
 
     def __init__(self) -> None:
@@ -383,6 +388,13 @@ class RecordingRegistries:
         self.failing: set[tuple[str, str]] = set()
         self.planted: dict[str, list[ListingSummary]] = {url: [] for url in REGISTRY_URLS}
         self.publisher_reads: list[Any] = []
+        self.descriptors: dict[str, Any] = {url: None for url in REGISTRY_URLS}
+        self.descriptor_reads: list[list[str]] = []
+
+    async def get_descriptors(self, registries=None):
+        selected = [url for url in self.urls if registries is None or url in registries]
+        self.descriptor_reads.append(selected)
+        return {url: self.descriptors[url] for url in selected}
 
     def plant(self, url: str, listing_id: str, *, offering_mode: str) -> None:
         """An open listing at ``url``, under the storefront's principal."""

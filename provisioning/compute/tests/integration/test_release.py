@@ -36,9 +36,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
 
-from compute_provisioning import ReleaseEffects
+from compute_provisioning import JobExecutorTable, ReleaseEffects, TeardownRerunPolicy
+from compute_provisioning.jobs import JobRetryPolicy
 from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.db import JobRecord
+from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
     FulfillmentReleaseGuard,
@@ -424,8 +426,19 @@ async def test_the_release_decision_follows_the_aggregate_state_and_writes_nothi
 
 
 def _status_port(factory):
+    """The port over the same database's job authority, which holds no
+    teardown job here, so a ``teardown_failed`` aggregate has no rerun."""
+    executors = JobExecutorTable()
+    executors.freeze()
+    jobs = JobEngine(
+        factory, executors=executors, host_lookup=lambda host_id: None,
+        retry_policy=JobRetryPolicy(),
+    )
     return FulfillmentReleaseStatusPort(
-        settlement_repository=SettlementRepository(), session_factory=factory
+        settlement_repository=SettlementRepository(),
+        session_factory=factory,
+        rerun_policy=TeardownRerunPolicy(teardown_rerun_limit=3, retry_policy=JobRetryPolicy()),
+        jobs=jobs,
     )
 
 

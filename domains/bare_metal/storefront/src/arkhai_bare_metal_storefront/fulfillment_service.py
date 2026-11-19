@@ -51,6 +51,10 @@ TERMINATING = "terminating"
 _TEARDOWN_STATES = frozenset(
     {"teardown_dispatch_pending", "tearing_down", "teardown_failed", "torn_down"}
 )
+# The states a recorded result is answered in: an active lease, and an ending
+# one from ``terminating``, before the site reports a teardown state, through
+# its release.
+_RESULT_STATES = frozenset({"active", TERMINATING, "released"}) | _TEARDOWN_STATES
 
 
 class BareMetalFulfillmentError(RuntimeError):
@@ -441,6 +445,35 @@ class BareMetalFulfillmentService:
             ),
         }
 
+    async def result(
+        self,
+        *,
+        negotiation_id: str,
+        buyer_principal: Identity,
+    ) -> dict[str, Any]:
+        """The receipt and result recorded at delivery, to the accepted buyer.
+
+        The read goes through :meth:`status`, which refuses an active lease's
+        read under a delivery conflict. Once the lease is ending the recorded
+        result still stands, so it is answered through the lease's release. A
+        lease that ended before delivery recorded no receipt or result, and
+        reads as not ready. See openspec/specs/storefront-publication/spec.md,
+        "A bare-metal result read answers the recorded result while its lease
+        ends".
+        """
+
+        lifecycle = await self.status(
+            negotiation_id=negotiation_id,
+            buyer_principal=buyer_principal,
+        )
+        if lifecycle["state"] not in _RESULT_STATES:
+            raise BareMetalFulfillmentError("bare-metal fulfillment result is not ready")
+        receipt = await self.db.load_bare_metal_receipt(negotiation_id=negotiation_id)
+        result = await self.db.load_bare_metal_result(negotiation_id=negotiation_id)
+        if receipt is None or result is None:
+            raise BareMetalFulfillmentError("bare-metal fulfillment result is not ready")
+        return {"negotiation_id": negotiation_id, "receipt": receipt, "result": result}
+
     async def apply_end(self, negotiation_id: str, *, terminate: bool, at: int, operation_key: str, reason: str) -> PhysicalResult:
         row = await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
         if row is None or row.get("state") == "released":
@@ -486,17 +519,6 @@ class BareMetalFulfillmentService:
         """
         await self.lifecycle.local_end(negotiation_id, cause=reason)
         return await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
-
-    async def converge_teardown(
-        self,
-        *,
-        negotiation_id: str,
-        buyer_principal: Identity,
-    ) -> dict[str, Any]:
-        return await self.status(
-            negotiation_id=negotiation_id,
-            buyer_principal=buyer_principal,
-        )
 
 
 async def fulfill_bare_metal(

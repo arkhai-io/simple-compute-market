@@ -227,10 +227,12 @@ config:
   # `definitions.relays` and is read only when that relay is created — a token
   # rotated through the relay API is authoritative from then on.
 
-  # Lease watchdog
+  # Lease watchdog. The grace is how long a lease may stay releasing before it
+  # is marked release_failed with teardown_timeout, sized for teardowns of
+  # expected length; see the service's settings.toml.
   lease_watchdog_enabled: true
   lease_watchdog_poll_interval_seconds: 60
-  lease_watchdog_grace_period_seconds: 300
+  lease_watchdog_grace_period_seconds: 3600
   storefront_site_id: "default"
   storefront_url: ""
 
