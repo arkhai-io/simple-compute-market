@@ -1208,7 +1208,7 @@ Touches `domains/bare_metal/storefront` only: its `api.py`, its
 `fulfillment_service.py` (the deletion, already committed), and
 `tests/test_http_settlement.py`.
 
-- [ ] 10.1 In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/api.py`,
+- [x] 10.1 In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/api.py`,
   `fulfillment_result` admits `terminating` (the module's `TERMINATING`, from
   `fulfillment_service.py`, rather than a second literal) among the lifecycle
   states its result is answered in, and keeps answering "bare-metal fulfillment
@@ -1216,11 +1216,25 @@ Touches `domains/bare_metal/storefront` only: its `api.py`, its
   through `status` first, so an active lease under a conflict is still refused with
   `delivery_conflict`. Verify with 10.3. (D9, 40 F1; "A bare-metal result read
   answers the recorded result while its lease ends".)
-- [ ] 10.2 Confirm `BareMetalFulfillmentService.converge_teardown` is deleted from
+  Done, the rule moved out of the route. Beyond the plan's file, so the HTTP
+  binding stays thin (`implementation.md`, "Thin controllers"), as the sibling
+  access read already is: the route calls a new
+  `BareMetalFulfillmentService.result()` in `fulfillment_service.py`, which
+  reads through `status`, answers in `_RESULT_STATES` — `active`,
+  `TERMINATING`, the module's `_TEARDOWN_STATES` and `released`, with no
+  literal repeated — and still answers "bare-metal fulfillment result is not
+  ready" while no receipt or result is recorded; its docstring states the
+  rule and cites the requirement. The route's answers, its messages and its
+  refusals are unchanged but for `terminating`. Evidence: 10.3.
+- [x] 10.2 Confirm `BareMetalFulfillmentService.converge_teardown` is deleted from
   `fulfillment_service.py` (committed at `1d93f5d5f`) and nothing calls it: `git
   grep -n converge_teardown -- ':!openspec' ':!docs'` names only the provisioning
   service's `converge_teardowns` and the e2e comments naming it. (D9.)
-- [ ] 10.3 Application integration through the storefront's typed clients, in
+  Done: the grep names only the provisioning service's `converge_teardowns`
+  (and its private `_converge_teardown_record`), that service's tests calling
+  `converge_teardowns`, and the two e2e comments; nothing in the bare-metal
+  storefront.
+- [x] 10.3 Application integration through the storefront's typed clients, in
   `domains/bare_metal/storefront/tests/test_http_settlement.py`:
   - `test_a_delivery_other_than_the_recorded_result_is_a_conflict`, as extended at
     `1d93f5d5f`, restated to the scenario: before the end the status, result and
@@ -1245,10 +1259,53 @@ Touches `domains/bare_metal/storefront` only: its `api.py`, its
     record why in the section's notes and state the case at the lowest level that
     reaches the route.
   Verify with `make -C domains/bare_metal/storefront test`.
-- [ ] 10.4 No package bump: `arkhai-bare-metal-storefront` is at 0.29.0 from 7.4,
+  Done: application integration, the real storefront app served on a loopback
+  port, driven by the production buyer's fulfillment transport
+  (`BareMetalFulfillmentTransport`: status, result, access, and `teardown`, the
+  lifecycle `end`) after a settle through `StorefrontClient`, with the capacity
+  and provisioning doubles at the site boundary. `make -C
+  domains/bare_metal/storefront test` 662 passed (the three tests below, four
+  cases with the parametrization), and again after the fresh-context fixes.
+  - `test_a_delivery_other_than_the_recorded_result_is_a_conflict`, restated
+    and parametrized over the site after the termination: still reporting the
+    other delivery (not having begun the teardown) or having torn it down.
+    Before the end the three reads answer 409 `delivery_conflict`; the end
+    answers `tearing_down` and terminates the lease once; afterwards status
+    answers the lease's state (`terminating`, or `torn_down`), the result read
+    answers exactly what it answered before the conflict, receipt and result,
+    and access answers 409 "bare-metal access is unavailable outside an active
+    lease" (a plain detail, no error code); the stored result is unchanged.
+    The first case shows that the reads after an end make no comparison even
+    while the site still reports the other delivery.
+  - `test_a_result_is_read_as_recorded_while_its_lease_ends`: delivered, no
+    conflict, the lease ended while the site still reports the fulfillment
+    `active`; status answers `terminating` and the result read answers the
+    recorded result and receipt.
+  - `test_a_lease_ended_before_delivery_has_no_result`: the site reports the
+    fulfillment `dispatch_pending` through the settle, so no result is
+    recorded; the end terminates the begun lease (one begin, one termination),
+    status answers `terminating`, and the result read answers 409 "bare-metal
+    fulfillment result is not ready", no receipt or result stored. It reaches
+    the route through the typed clients, so no lower-level case was needed.
+  The provisioning double gains `tears_down_on_termination` (default true,
+  today's behaviour) and a class attribute `state` (default `active`), the
+  state reported before any teardown; it is a class attribute because two
+  subclasses in `test_deal_controls.py` already set one of that name, which an
+  instance attribute would shadow. No other test changes. Fail-before not
+  shown: `scripts/change-workflow run test-before … --at 195a67c32` fails
+  loading the package's `conftest.py` in its `--no-project` environment (`No
+  module named 'injected_time'`). Reasoned: at that commit the route did not
+  admit `terminating`, so the conflict test's first parametrization and the
+  ending-lease test fail at their result read with 409 "not ready", as the
+  stopped session's notes below record of the route. The before-delivery test
+  passes there too, but by the state check refusing `terminating`, with the
+  same message; only with the fix does its read reach the missing-receipt
+  clause, so it cannot tell the two refusals apart.
+- [x] 10.4 No package bump: `arkhai-bare-metal-storefront` is at 0.29.0 from 7.4,
   unreleased in this change (D10), and no lock moves. Verify with `make
   check-version-bumps`.
-- [ ] 10.5 Verification: `make -C domains/bare_metal/storefront test` passes, and
+  Done: no bump and no lock moved; `make check-version-bumps` passes.
+- [x] 10.5 Verification: `make -C domains/bare_metal/storefront test` passes, and
   `scripts/change-workflow run pre-commit resolve-delivery-correctness-gaps`
   passes (Docker running, since `make test`'s `test-release-tooling` renders
   Compose files; sections 8 and 9's notes). Record in the section's notes that
@@ -1262,8 +1319,53 @@ Touches `domains/bare_metal/storefront` only: its `api.py`, its
   lane plants a conflicting delivery or reads the result while a lease is
   `terminating`, and none is owed: 10.3's application-integration cases are the
   evidence.
+  Done: `make -C domains/bare_metal/storefront test` 662 passed. `pre-commit`
+  passed over the section's final code (`after-functional-change`,
+  `pre-commit-functional` — every suite of `make test`, `test-release-tooling`
+  with its Compose renders included, so sections 8 and 9's environmental
+  failure did not recur — and `pre-commit`, at `195a67c32`, task 7.6's
+  commit, with this section's edits); after it, only a docstring's wording in
+  `result()` and the gap row's count changed. The defect is recorded in the
+  section's notes. End-to-end, reasoned and not run (the lanes run at
+  validation): `e2e_bare_metal_mock_deal` and `e2e_bare_metal_payment_deal`
+  are in the bare-metal lane (`e2e-tests/Makefile`), `e2e_bare_metal_deal` in
+  none, since it needs a real host; their result reads
+  (`scenarios/bare_metal/compute_deal_driver.py`'s and `purchase_driver.py`'s
+  `assert_delivery`, and the payment deal's re-drive) come while the lease is
+  active, before the buyer's teardown, so they exercise the unchanged path; no
+  lane plants a conflicting delivery or reads a result while a lease is
+  `terminating`, and none is owed.
 
-Section 10 notes (stopped; the change returns to design):
+Section 10 notes (completed in the session that completes the round):
+
+- Outside item 3's stated scope: the result read answering "not ready" while
+  a lease is `terminating`, though its receipt and result stood before and
+  after, is a defect found during the change (`docs/guidance/workflow/changes.md`,
+  "Defects found during a change"; D9), fixed here (10.1).
+- Beyond the plan's file: the result read's rule now lives in
+  `BareMetalFulfillmentService.result()`, as the access read's does, and the
+  route only calls it (10.1). The section touches `api.py`,
+  `fulfillment_service.py` and `test_http_settlement.py`.
+- The provisioning double in `test_http_settlement.py` is shared:
+  `test_deal_controls.py` imports it and subclasses it with a class attribute
+  `state`, so the double's own `state` is a class attribute too (10.3).
+- Recorded as an unowned gap in `openspec/changes/README.md`: the
+  bare-metal storefront's flat `tests/` root, `test_http_settlement.py` among
+  its modules.
+- Two fresh-context checks ran. Taken: the result rule moved out of the
+  route, with no state literal repeated; the flat test root recorded as a gap;
+  the double's `terminate_lease` docstring and a helper's name (`_accepted_deal`,
+  the deal accepted, not settled); a docstring's "until the lease is released",
+  now "through"; the gap row's module count; and two evidence claims in 10.3
+  (the case count, and why the before-delivery case passes at the base).
+  Declined: nothing. The `result()` docstring cites the added requirement's
+  heading, which reaches `openspec/specs/storefront-publication/spec.md` when
+  closeout archives the change.
+- The round is complete with this section: validation and the implementation
+  review follow, then the round's triage.
+
+Section 10 notes from the earlier session (stopped; the change returned to
+design, and the task numbers they cite are the replaced tasks'):
 
 - What the code shows. The planned scenario (D9; the `storefront-publication`
   delta's "A buyer ends a deal while the site reports a different delivery";

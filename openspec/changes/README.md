@@ -97,6 +97,7 @@ No change owns this yet either. It was found by `resolve-delivery-correctness-ga
 | Item | Origin |
 |---|---|
 | Some 25 test modules of the kits and of compute provisioning build their tables with SQLAlchemy's `create_all`, where a test needing a migrated database migrates it through its chain, or in a kit through the kit's own baseline ([`testing-python.md`, "Building tables"](../../docs/guidance/engineering/testing-python.md#building-tables); [`migration-chain-tests.md`](../../docs/guidance/repository/migration-chain-tests.md)). `git grep -ln create_all -- 'kit/*/tests/*' 'provisioning/*/tests/*'` lists them | `resolve-delivery-correctness-gaps` implementation, its fresh-context check of `kit/fulfillment`'s acceptance tests |
+| `domains/bare_metal/storefront` keeps some 37 test modules, `test_http_settlement.py` among them, in its flat `tests/` root beside its `tests/integration/`, where [`test-placement.md`, "Test file layout"](../../docs/guidance/repository/test-placement.md#test-file-layout) splits a service's tests into `unit/` and `integration/`; the change added cases to `test_http_settlement.py` rather than moving a suite it does not otherwise touch. Moving them means sorting each by level and moving the shared helpers they import by name (`seeded_threads.py`, `site_trust.py`, `loopback.py` and others) | `resolve-delivery-correctness-gaps` section 10, its fresh-context check |
 
 ## Roadmap goal — Negotiate full compute capability, not GPU count alone
 
