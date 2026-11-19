@@ -2782,7 +2782,7 @@ The provisioning service MUST serve, to the administrator only, the leases a rel
 
 ### Requirement: The buyer-facing tunnel client is hardened on every host
 
-Host preparation for a VM host and for a bare-metal host MUST install the buyer-facing tunnel client from one shared family role, with its configuration readable only by root, and its admin API bound to a loopback port below 1024 and protected by a password generated for that host at preparation. Every task that reloads the client or reads its status MUST authenticate with that password. The client's configuration belongs to the host, which is sold either as VM slices or as a whole host, never both at once. Adding or removing a proxy MUST reload the client and MUST NOT restart it; the client MUST be restarted only when its relay baseline changes.
+Host preparation for a VM host and for a bare-metal host MUST install the buyer-facing tunnel client from one shared family role, with its configuration readable only by root, and its admin API bound to a loopback port below 1024 and protected by a password generated for that host at preparation. Every task that reloads the client or reads its status MUST authenticate with that password. The client's configuration belongs to the host, which is sold either as VM slices or as a whole host, never both at once. Adding or removing a proxy MUST reload the client and MUST NOT restart it; the client MUST be restarted only when its relay baseline or its service unit changes, as when its pinned frp version changes.
 
 #### Scenario: An unauthenticated call reaches the admin API
 
@@ -3491,7 +3491,7 @@ Both fields MUST be required in the typed relay response, with no default, so th
 
 ### Requirement: A relayed delivery's relay is its declaration's pool's
 
-A relayed delivery's port MUST be leased on the relay its capacity declaration's pool references, whatever pool, if any, its host is placed in. The job that adds the delivery's proxy MUST point the host's buyer-facing client at that relay — its address, port and admission token — before adding the proxy, restarting the client only when that baseline changes. A host has at most one capacity declaration, a pool's relay reference cannot change while the pool holds a lease, and a declaration MUST NOT move to another pool while a reservation holds capacity against it, so every delivery on a host is leased on one relay at a time, and that relay is the one the host's client dials.
+A relayed delivery's port MUST be leased on the relay its capacity declaration's pool references, whatever pool, if any, its host is placed in. The job that adds the delivery's proxy MUST point the host's buyer-facing client at that relay — its address, port and admission token — before adding the proxy, restarting the client only when that baseline or its service unit changes. A host has at most one capacity declaration, a pool's relay reference cannot change while the pool holds a lease, and a declaration MUST NOT move to another pool while a reservation holds capacity against it, so every delivery on a host is leased on one relay at a time, and that relay is the one the host's client dials.
 
 #### Scenario: A host placed under another relay delivers through its declaration's
 

@@ -533,10 +533,12 @@ delivery's relay is its declaration's pool's"). Touches tests only:
 Section 6 notes:
 
 - Tests only; no package bump.
-- Left for the closeout review: the delta's "restarting the client only when that
-  baseline changes" reads as if nothing else restarts it, while the `relay-client`
-  role's unit-file task also notifies the restart. No triage settled the
-  wording, and closeout does not (its task 11.3 note).
+- The delta's "restarting the client only when that baseline changes", and the
+  older hardening requirement's "restarted only when its relay baseline changes",
+  left out the `relay-client` role's unit-file task, which also notifies the
+  restart: the unit names the versioned binary, so a moved frp pin takes effect
+  by it. Closeout review 67's triage (F1) amended both permanent requirements to
+  admit a restart when the client's service unit changes.
 
 ## 7. The descriptor read selects registries, and the policy reads again what failed
 
@@ -861,11 +863,11 @@ after campaign index currency.
   companions, the settings in the capabilities' `configuration.md`, the
   cross-system release account in `ARCHITECTURE.md`, the migration in
   `DEPLOYMENT_AND_CONFIG.md`, operator steps in the operator handbook, the gaps
-  in the roadmap. Every document written describes the current state. Not
-  settled here, for the closeout review: the delta's "restarting the client only
-  when that baseline changes" (section 6's notes), which the merged code's
-  `relay-client` unit-file task contradicts in one case; the companion's text
-  says the synchronization restarts the client when the baseline changes.
+  in the roadmap. Every document written describes the current state. The
+  client-restart wording the `relay-client` unit-file task contradicted was
+  settled by closeout review 67's triage (F1; section 6's notes); the
+  companion's text, that the synchronization restarts the client when the
+  baseline changes, needed no edit.
 - [x] 11.4 Narrative compression: shorten completed-task notes here to final
   behaviour, evidence, deferred work and destinations, moving any rationale not yet
   in `design.md` there first.
