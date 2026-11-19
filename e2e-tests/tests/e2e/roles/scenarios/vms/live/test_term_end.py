@@ -69,13 +69,15 @@ from tests.e2e.roles.scenarios.vms.rate_servicing.stages import (
 OBSERVATIONS = ("the term end",)
 
 pytestmark = [
-    # The payments target first, so a run against none, or against a lane's
-    # own double, is a blocked skip before any hold or write. Then the holds,
-    # taken before, and released after, every other fixture of the module; the
-    # cleanup follows them, so it runs while the holds stand.
+    # The prerequisites first — the payments target, the provenance, mock
+    # provisioning and the buyer's balance — so a topology missing one is a
+    # blocked skip naming it before the module's holds or purchase. Then the
+    # holds, taken before, and released after, every other fixture of the
+    # module; the cleanup follows them, so it runs while the holds stand.
     pytest.mark.usefixtures(
-        "payments_config", "storefront_loops_held", "fulfillment_convergence_held",
-        "lease_watchdog_held", "ensure_storefront_resumed", "reap_buyer_settle_subprocess",
+        "payments_config", "live_provenance", "mock_provisioning", "funded_buyer",
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess",
         "release_reserved_resources", "purchase_cleanup",
     ),
     pytest.mark.e2e_vm_live_rate_servicing,

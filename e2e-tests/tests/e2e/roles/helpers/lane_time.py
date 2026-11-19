@@ -31,11 +31,13 @@ stage read, as the effect of the scenario's own request — a pending stop's
 effective instant, a funded boundary — each wait bounded and refused past its
 bound; any other instant is a blocked skip naming the wall-time target. An
 output the authority makes on its own schedule after such an instant is read by
-polling its public read, bounded (``poll_until``). Either way the session reads
-the status of every party the profile names and fails naming a mix of sources. A run whose profile has no
-``lane_time`` section, a hosted target's, has no lane time and reads no status,
-and a stage there waits for an Agreement instant as a wall run does
-(``compute_deal_stages.reach_agreement_instant``).
+polling its public read, bounded (``poll_until``). Either way the session
+reads the status of every party the profile names and fails naming a mix of
+sources. A run whose profile has no ``lane_time`` section, a hosted target's,
+has no lane time and reads no status, and a stage there waits for an Agreement
+instant, or an authority's recorded one, as a wall run does
+(``compute_deal_stages.reach_agreement_instant``,
+``recurring_purchase_stages.reach_lane_instant``).
 """
 
 from __future__ import annotations

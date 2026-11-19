@@ -19,8 +19,12 @@ assertion (``producer_assertions.py``), on wall time. Its run states, in the
   blocked skip naming it, so its observation is unproven rather than made with
   no provenance.
 
-A value that is not a positive whole number of seconds, or terms no deal can
-hold, fail the scenario naming the setting.
+A value that is not a positive whole number of seconds fails the scenario
+naming the setting, and so do a term past the listing's maximum duration, a
+period longer than the term and a notice no shorter than it. The market
+refuses the other terms no deal can hold where it publishes the option or
+accepts the Agreement, which ``e2e-tests/README.md``'s "Live verification"
+states.
 """
 
 from __future__ import annotations

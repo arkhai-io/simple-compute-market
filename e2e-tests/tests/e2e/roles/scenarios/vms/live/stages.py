@@ -26,14 +26,14 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-import pytest
+import injected_time
 
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.lane_time import poll_until
 from tests.e2e.roles.helpers.live_verification import (
     POLL_INTERVAL,
     LiveSettings,
-    live_provenance,
+    Provenance,
 )
 from tests.e2e.roles.helpers.payments import payment_setting
 from tests.e2e.roles.helpers.producer_assertions import (
@@ -52,7 +52,6 @@ from tests.e2e.roles.helpers.recurring_purchase_stages import (
     ASSET,
     RecurringPurchaseDriver,
     end_by_the_buyers_stop,
-    payer_available,
     reach_lane_instant,
     transaction_snapshot,
 )
@@ -70,6 +69,17 @@ class LiveRateState(RateServicingState):
 
 def _stopped(snapshot: Mapping[str, Any]) -> bool:
     return "stop" in snapshot["parts"][0]
+
+
+def _funded_through(snapshot: Mapping[str, Any]) -> int:
+    """The transaction's funded boundary: its one rate part's
+    ``reservedThrough``. The snapshot's ``fundedThrough`` is the earliest
+    boundary of its parts still running, so equal to it while the part runs
+    and absent once it has stopped; the part's own reservation is reported
+    either way."""
+    through = snapshot["parts"][0].get("rate", {}).get("reservedThrough")
+    assert through is not None, f"the rate part reports no reservation: {snapshot['parts']}"
+    return int(through)
 
 
 def _poll_snapshot(payments_config: Any, deal_state: LiveRateState, settings: LiveSettings,
@@ -93,15 +103,17 @@ def _poll_snapshot(payments_config: Any, deal_state: LiveRateState, settings: Li
 
 class Live00_LabelledLiveEvidence:
     def test_l00_the_run_is_labelled_live_evidence_with_its_provenance(
-        self, provisioning_client, live_settings: LiveSettings, deal_state: LiveRateState,
+        self, provisioning_client, live_settings: LiveSettings, live_provenance: Provenance,
+        deal_state: LiveRateState,
     ):
         """The run's log carries the live-evidence label and its public-safe
         provenance: the source revision the topology runs, the deployment's
         alias for the topology, the payments authority's revision identifier,
         and the provisioning mode the provisioning service reports, beside the
         terms the deal is offered on. A run stating no provenance is a blocked
-        skip naming the setting, so its observation is unproven."""
-        provenance = live_provenance()
+        skip naming the setting at the ``live_provenance`` fixture, which the
+        module takes before any stage, so its observation is unproven."""
+        provenance = live_provenance
         mocked = provisioning_client.get_system_status().execution.mocked
         log.info("[l00] Live evidence: source revision %s, target %s, payments authority "
                  "revision %s, provisioning %s; period %ss, seller notice %ss, term %ss",
@@ -147,28 +159,19 @@ class LiveBuyerStop_PayerStopCharged:
 
 class LiveExhaustion00_RatePayerHoldsTheFundedPeriods:
     def test_le00_the_rate_payer_holds_exactly_the_funded_periods(
-        self, payments_config, deal_driver: RecurringPurchaseDriver,
+        self, funded_rate_payer: str, deal_driver: RecurringPurchaseDriver,
         deal_state: LiveRateState,
     ):
         """The topology funded the rate payer (``PAYMENTS.RATE_PAYER_ACCOUNT``)
         with exactly ``FUNDED_PERIODS`` periods' price at the run's period, as
-        the lane row's funding control does; the scenario funds nothing. A
-        payer named but holding anything else is a blocked skip naming the
-        requirement, and the purchase then pays from it."""
+        the lane row's funding control does, and the purchase pays from it;
+        the scenario funds nothing. The ``funded_rate_payer`` fixture, which
+        the module takes before any stage, read the balance: any other is a
+        blocked skip naming the requirement before anything is bought."""
         require_state(deal_state, "_live_labelled")
-        payer = str(payment_setting("RATE_PAYER_ACCOUNT"))
-        if not payer:
-            pytest.skip("blocked: funds running out pays from PAYMENTS.RATE_PAYER_ACCOUNT, "
-                        "which the run does not name")
-        required = FUNDED_PERIODS * deal_driver.rate_terms.period_gross
-        held = payer_available(payments_config, payer).get(ASSET, 0)
-        if held != required:
-            pytest.skip(f"blocked: funds running out needs the rate payer {payer} funded with "
-                        f"exactly {required} {ASSET}, {FUNDED_PERIODS} periods at the run's "
-                        f"period, and it holds {held}")
-        deal_state.payer_account = payer
-        log.info("[le00] Rate payer %s holds %s %s, %s periods", payer, held, ASSET,
-                 FUNDED_PERIODS)
+        deal_state.payer_account = funded_rate_payer
+        log.info("[le00] Rate payer %s holds %s %s, %s periods", funded_rate_payer,
+                 FUNDED_PERIODS * deal_driver.rate_terms.period_gross, ASSET, FUNDED_PERIODS)
 
 
 class LiveExhaustion07_FundsRunOut:
@@ -179,29 +182,40 @@ class LiveExhaustion07_FundsRunOut:
         """The authority's scheduler reserves the part ahead as far as the
         payer's balance pays, and stops it by its terms at the funded boundary.
 
-        The funded boundary is read from the snapshot and reached by waiting
-        for it, then the snapshot is polled until the part is stopped or the
-        boundary has moved on, the scheduler having reserved a further period;
-        a moved boundary is reached in turn. The boundary read last before the
-        stop is the one ``producer_assertions.assert_funds_exhausted`` compares
-        the stop's instant with, settling ``FUNDED_PERIODS`` periods."""
+        The funded boundary is read from the snapshot (``_funded_through``)
+        and reached by waiting for it, then the snapshot is polled until the
+        part is stopped or the boundary has moved on, the scheduler having
+        reserved a further period; a moved boundary is reached in turn. The
+        boundary read last before the stop, or a later one the stopping read
+        reports, is the one ``producer_assertions.assert_funds_exhausted``
+        compares the stop's instant with, settling ``FUNDED_PERIODS`` periods;
+        it lies before the Agreement's end, or the stop is a term end's."""
         require_state(deal_state, "_live_labelled", "_accepted_money_shown", "payer_account",
-                      "settlement_id")
+                      "settlement_id", "agreement_end")
         deal_state._deal_ending = True
         snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
                                         deal_state.settlement_id)
         assert len(snapshot["parts"]) == 1, snapshot["parts"]
-        boundary = snapshot.get("fundedThrough")
+        boundary = _funded_through(snapshot)
         while not _stopped(snapshot):
-            boundary = int(snapshot["fundedThrough"])
+            boundary = _funded_through(snapshot)
             reach_lane_instant(lane_time, boundary, fixed_by_agreement=False,
                                recorded_by_authority=True, bound=live_settings.reach_bound)
             snapshot = _poll_snapshot(
                 payments_config, deal_state, live_settings,
                 lambda read, reached=boundary: (
-                    _stopped(read) or int(read.get("fundedThrough") or 0) > reached),
+                    _stopped(read) or _funded_through(read) > reached),
                 f"a stop at, or a reservation past, the funded boundary {boundary}",
             )
+        # The read that shows the stop may also show a reservation the
+        # scheduler made since the boundary last reached, and then the stop
+        # falls at that one; a reservation reported shorter than the boundary
+        # reached is not taken, so a stop before it differs from the expectation.
+        boundary = max(boundary, _funded_through(snapshot))
+        end = math.ceil(deal_state.agreement_end.timestamp())
+        assert boundary < end, (
+            f"the part was funded through {boundary}, the Agreement's end {end} or past it: "
+            "its stop is the term end's, not funds running out")
         terms = deal_driver.rate_terms
         assert_funds_exhausted(snapshot, funded_boundary=boundary, funded_periods=FUNDED_PERIODS,
                                period_price=terms.period_gross)
@@ -222,9 +236,17 @@ class LivePreemption07_SellerNoticeHeld:
         """The seller's notice, as the lane's preemption row sends it; the
         payments authority holds it as a pending ``payee`` stop due the
         Agreement's seller notice after its receipt
-        (``producer_assertions.assert_payee_stop_pending``)."""
+        (``producer_assertions.assert_payee_stop_pending``). A notice that
+        would fall due at or past the Agreement's end meets the term end
+        first, so the run's notice is held to the term left before it is
+        sent: one too long fails naming the setting the run owes."""
         require_state(deal_state, "_live_labelled", "_accepted_money_shown", "payer_account",
-                      "settlement_id", "negotiation_id")
+                      "settlement_id", "negotiation_id", "agreement_end")
+        left = int(deal_state.agreement_end.timestamp()) - injected_time.now()
+        assert live_settings.payee_notice_seconds < left, (
+            f"LIVE.PAYEE_NOTICE_SECONDS is {live_settings.payee_notice_seconds}, and only {left} "
+            "seconds of the term are left once the deal is delivered: the notice would meet "
+            "the term end")
         deal_state._deal_ending = True
         submit_the_sellers_notice(storefront_admin_client, deal_state)
         snapshot = _poll_snapshot(

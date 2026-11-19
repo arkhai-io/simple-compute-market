@@ -38,7 +38,9 @@ class RateRow:
     #: The seller's notice the row's option states: a spot option's; none for
     #: on-demand.
     payee_notice_seconds: int | None = None
-    #: The row pays from the lane's second payer, which it funds itself.
+    #: The row pays from the run's rate payer (PAYMENTS.RATE_PAYER_ACCOUNT): in
+    #: a lane the second payer, which the row funds itself through the double;
+    #: in a live module the payer the topology funded.
     rate_payer: bool = False
 
 

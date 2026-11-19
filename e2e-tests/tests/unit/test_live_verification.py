@@ -1,7 +1,9 @@
 """A live verification run's settings, provenance and per-period terms.
 
-The ``LIVE`` settings parse and default to the lanes' values, refuse a value or
-terms no deal can hold, and a run stating no provenance is a blocked skip naming
+The ``LIVE`` settings parse and default to the lanes' values, refuse a value
+that is no number of seconds and the terms the harness itself checks (a term
+past the listing's hour, a period past the term, a notice not inside it), and a
+run stating no provenance is a blocked skip naming
 the setting. A recurring option's terms at a run's period are what the lanes'
 are at theirs, and a live purchase asks for the run's term. Every value below is
 a development fixture, never used on any network.
@@ -75,7 +77,8 @@ def test_a_value_that_is_no_positive_whole_number_of_seconds_fails_naming_it(val
     ({"PERIOD_SECONDS": 60, "PAYEE_NOTICE_SECONDS": 600, "MAXIMUM_TERM_SECONDS": 600},
      "LIVE.PAYEE_NOTICE_SECONDS"),
 ])
-def test_terms_no_deal_can_hold_fail_naming_the_setting(values, named) -> None:
+def test_a_term_past_the_listing_a_period_past_the_term_or_a_notice_outside_it_fails(
+        values, named) -> None:
     with pytest.raises(Failed, match=named):
         live_settings(setting=_reader(**values))
 

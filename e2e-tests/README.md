@@ -534,11 +534,17 @@ term, and leaves reserving to the authority's own scheduler.
 The modules are in no lane. A deployment prepares a topology meeting the
 requirements below, runs them through `test-module`, and records its own
 sanitized summary of the outcome; raw logs and records stay in its storage.
-Against no external payments target, or against a lane's own double (LANE_OWNED),
-each module is a blocked skip before any hold or write. Each module's first own
-stage logs the live-evidence label with its provenance, every stage logs the
-identifiers it reads, and the module logs its observation's outcome at its end:
-made, failed, or unproven naming what a skipped stage lacked
+Each module checks its prerequisites at its first fixtures, before its holds and
+anything it buys: against no external payments target, against a lane's own
+double (LANE_OWNED), with no provenance to label its evidence, or with a
+topology that misses a requirement below that the harness can read — test mode,
+mock provisioning, a payer's balance — it is a blocked skip naming what is
+missing, and with a setting the run owes missing it fails naming the setting.
+Only the session's fixtures and the VM lane's idempotent host registration, an
+autouse fixture, set up before them. Each module's first own stage logs the
+live-evidence label with its provenance, every stage logs the identifiers it
+reads, and the module logs its observation's outcome at its end: made, failed,
+or unproven naming what a skipped stage lacked
 (`tests/e2e/roles/helpers/qualification.py`).
 
 ```bash
@@ -566,22 +572,27 @@ What a topology provides for them, naming no deployment:
   `returned` with no setup charge, as the VM chart's production example does;
   the buyer's registry recommends a dispute authority whose advertised minimum
   filing window PAYMENTS.DISPUTE_WINDOW_SECONDS covers beside the delivery
-  deadline, as every compute payments option requires. No case is filed.
+  deadline, as every compute payments option requires. The site holds no
+  reservation but the run's: a module's cleanup releases every reservation the
+  site holds. No case is filed.
 - **Payments: Arkhai payments in test mode, executing rate parts.** The target
   starts a rate part, keeps it reserved ahead by its own scheduler as far as the
   payer's balance pays, holds a payee's stop with notice as pending until it is
   due, and stops a part by its terms at its funded boundary and at its mandate's
   end. LIVEMODE is false.
 - **Accounts and starting balances.** The run's buyer account
-  (PAYMENTS.BUYER_ACCOUNT, with BUYER_API_KEY) holds enough for the buyer's
-  stop, the preemption and the term end, at most one term's price each at the
-  run's period, and nothing else spends from it during a run. The seller account
+  (PAYMENTS.BUYER_ACCOUNT, with BUYER_API_KEY) holds at least one term's price
+  at the run's period as each of the buyer's stop, the preemption and the term
+  end starts, which each module reads before it buys — less is a blocked skip
+  naming this requirement — and nothing else spends from it during a run. The
+  seller account
   (PAYMENTS.SELLER_ACCOUNT) is the storefront's. Funds running out pays from a
   rate payer (PAYMENTS.RATE_PAYER_ACCOUNT, with RATE_PAYER_API_KEY) holding
   exactly three periods' price at the run's period — 49 998 USD/6 base units at
   a one-minute period, 750 000 at the lanes' fifteen minutes — and nothing else;
-  any other balance makes that module a blocked skip naming this requirement.
-  No module funds an account.
+  any other balance makes that module a blocked skip naming this requirement,
+  before it buys anything, and a run naming no rate payer or key fails that
+  module naming the setting. No module funds an account.
 - **Run settings.** The `PAYMENTS` section as every payment scenario reads it,
   with LANE_OWNED unset. The `LIVE` section (environment prefix `ARKHAI_LIVE__`,
   `tests/e2e/roles/helpers/live_verification.py`): PERIOD_SECONDS, the option's
@@ -592,14 +603,21 @@ What a topology provides for them, naming no deployment:
   SOURCE_REVISION, TARGET_ALIAS and PAYMENTS_REVISION, without which each module
   is a blocked skip naming the setting. The period, notice and term set how long
   a run takes on wall time, the term end waiting out the whole term, so a
-  deployment states short ones, the period no longer than the term and the
-  notice shorter than it.
+  deployment states short ones, within what a deal can hold: the harness refuses
+  a period longer than the term and a notice no shorter than it, and the market
+  refuses the rest — publication an option whose five-minute approval window,
+  five-minute delivery deadline and period do not fit in the listing's hour, and
+  negotiation a term shorter than the time to approval's expiry plus the
+  delivery deadline and a period. Funds running out fails naming the term when
+  it lasts at most its three periods, since the term end would come first,
+  and the preemption fails naming the notice when it is no shorter than the term
+  left once the deal is delivered.
 - **What the caller owes between runs.** Resetting the rate payer to exactly
   three periods' price, which a run leaves empty, and topping up the buyer. A
   module stops only the deal its input stops; funds running out and the term end
   leave the authority to stop theirs, and a module's cleanup ends an approved
-  deal no input stopped by the buyer's own `end`. Each module releases its
-  reserved resources and removes its mock gates' rules; once its holds are
+  deal no input stopped by the buyer's own `end`. Each module releases the
+  site's reserved resources and removes its mock gates' rules; once its holds are
   released the storefront services the stopped deals and tears them down on its
   own.
 

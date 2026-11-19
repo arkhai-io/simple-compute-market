@@ -47,6 +47,7 @@ from storefront_client.client import ADMIN_TIME_OPERATION, ADMIN_TIME_RESOURCE
 
 from tests.e2e.roles.buyer_cli import _time_section
 from tests.e2e.roles.helpers.compute_deal_stages import reach_agreement_instant
+from tests.e2e.roles.helpers.recurring_purchase_stages import reach_lane_instant
 from tests.e2e.roles.helpers.lane_time import (
     BuyerFileParty,
     ChainParty,
@@ -419,6 +420,24 @@ def test_an_agreement_instant_is_set_in_an_injected_run() -> None:
 
     assert reach_agreement_instant(lane, instant) == instant
     assert party.now == T + 3
+
+
+def test_a_run_with_no_lane_time_skips_an_instant_no_authority_recorded() -> None:
+    with pytest.raises(pytest.skip.Exception, match="needs lane time, and the run has none"):
+        reach_lane_instant(None, T, fixed_by_agreement=False)
+
+
+def test_a_run_with_no_lane_time_refuses_a_recorded_instant_past_its_bound() -> None:
+    far = int(datetime.now(timezone.utc).timestamp()) + 86400
+    with pytest.raises(AssertionError, match="refusing to wait .*the bound is 0:01:00"):
+        reach_lane_instant(None, far, fixed_by_agreement=False, recorded_by_authority=True,
+                           bound=timedelta(minutes=1))
+
+
+def test_a_run_with_no_lane_time_reaches_a_recorded_instant_already_passed() -> None:
+    passed = int(datetime.now(timezone.utc).timestamp()) - 60
+    assert reach_lane_instant(None, passed, fixed_by_agreement=False,
+                              recorded_by_authority=True, bound=timedelta(minutes=1)) > passed
 
 
 def test_the_generated_buyer_configuration_names_the_lane_time_file_only_when_injected() -> None:

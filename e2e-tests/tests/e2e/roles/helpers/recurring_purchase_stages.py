@@ -19,7 +19,8 @@ by waiting: lane time is one frozen instant every party shares, so the stages
 set the Agreement's start before stepping delivery recovery, and an instant
 inside the first period before the buyer's stop, which a stop at the start
 itself would leave uncharged. A run on wall time reaches only an instant the
-Agreement fixes, by waiting for it, and needs no other: its clock moves on its
+Agreement fixes, or one an authority recorded as the effect of the scenario's
+own request, by waiting for it (``reach_lane_instant``): its clock moves on its
 own.
 
 A recurring purchase module declares, in order, each by subclassing it with an
@@ -42,7 +43,9 @@ empty body:
   ``Recurring09``'s balance and ``Recurring10``'s seller list.
 
 The rate servicing rows (``rate_servicing_stages.py``) share every stage up to
-``Recurring07`` and end their deals their own ways.
+``Recurring07`` and end their deals their own ways, and so do the VM live
+verification modules (``scenarios/vms/live/``), which run them against an
+external payments target on wall time.
 ``tests/unit/test_recurring_purchase_stages.py`` holds every module to its
 order.
 
@@ -205,7 +208,8 @@ def check_recurring_option(
     assert params.get("approval_window") == APPROVAL_WINDOW, option
     assert "setup_amount" not in params, option
     assert option.price_asset == ASSET, option
-    assert compute_rate_total(option.price_rates[0], terms.period_seconds) == terms.period_gross, option
+    assert compute_rate_total(option.price_rates[0],
+                              terms.period_seconds) == terms.period_gross, option
     early = option.lifecycle["early_termination"]
     entitlements = {"payer": {"notice_seconds": 0, "settles_through": "started_period"}}
     if payee_notice_seconds is not None:
@@ -439,11 +443,12 @@ class Recurring04_MandateApproved:
         self, payments_config, deal_driver: RecurringPurchaseDriver,
         deal_state: RecurringPurchaseState,
     ):
-        """The correlated Agreement's mandate, and what the payments double approved.
+        """The correlated Agreement's mandate, and what the payments authority approved.
 
         ``Purchase04`` correlated the run's events as one paid deal; its
-        mandate is one rate part charging one period's price per period. The
-        double's snapshot and receipt verify against the receipt keys the
+        mandate is one rate part charging one period's price per period of the
+        driver's ``rate_terms``. The authority's snapshot and receipt — the
+        lane's double's, or a live module's external target's — verify against the receipt keys the
         payments configuration trusts, bound to that Agreement and mandate;
         the receipt reserves whole periods of that price, and the payer's
         available balance fell by exactly the receipt's gross, while nothing
@@ -561,11 +566,12 @@ class Recurring06_RateStartedAfterActivation:
         One pass of the storefront loop that services the domain's deals runs
         first, so what is read follows the storefront's own servicing of a
         running rate deal as well as the delivery's drive. The lease
-        ``Stage09c`` recorded names the site's activation; the payments double
+        ``Stage09c`` recorded names the site's activation; the payments
+        authority — the lane's double, or a live module's external target —
         records the part started, and one start event, no earlier than the
         whole second of that activation, since delivery starts billing only once
-        the site has activated the deal. Lane time holds one instant from the
-        start on, so the two fall in the same second; each storefront's
+        the site has activated the deal. In a lane, lane time holds one instant
+        from the start on, so the two fall in the same second; each storefront's
         ``test_rate_delivery.py`` proves billing starts from the recorded
         activation. The lifecycle read names the committed transaction and
         shows the deal active, with no end and no filing.
@@ -579,7 +585,8 @@ class Recurring06_RateStartedAfterActivation:
         snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
                                         deal_state.settlement_id)
         (part,) = snapshot["parts"]
-        assert part.get("started") is not None, f"the double records no rate start: {part}"
+        assert part.get("started") is not None, (
+            f"the payments authority records no rate start: {part}")
         assert int(part["started"]) >= activated, (
             f"the rate part started at {part['started']}, before the site activated the "
             f"deal at {lease.get('activated_at_utc')}: {part}"
