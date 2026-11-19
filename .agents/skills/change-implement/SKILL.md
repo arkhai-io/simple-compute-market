@@ -351,8 +351,13 @@ Run each of these, and fix what it reports:
   `scripts/change-workflow run test-before <change> --test <path> [--at <commit>]`
   runs the test file as `HEAD` holds it against the round's base, or the commit
   given, in a throwaway worktree, and its closing line says whether it failed
-  there. A test that imports what only the change adds fails as it is collected,
-  which shows less; say which it was. Never stash, check out, or reset to see the
+  there. It runs in the environment of the project owning the test, against the
+  checkout's wheels; where the code under test is an internal dependency's, name
+  the root `make` targets that rebuild its wheels from that commit in
+  `TEST_BEFORE_DIST` (`TEST_BEFORE_DIST=dist-compute-provisioning`), and `dist`
+  only when no narrower set will do. A test that imports what only the change adds
+  fails as it is collected, which shows less; read the error and say which it was.
+  Never stash, check out, or reset to see the
   old code: the change's worktree is not touched to answer it;
 - `scripts/change-workflow run pre-commit <change>`, the repository's checks
   before a commit. The paths the worktree changes decide what it runs: when any

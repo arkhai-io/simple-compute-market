@@ -66,6 +66,8 @@ allow = [
   "Bash(make audit-secrets)", "Bash(python3 scripts/check_secrets.py *)",
   # The bounded wait on a background command's output; it only reads the file.
   "Bash(scripts/change-workflow wait *)",
+  # Whether the Docker daemon is up, before a run that needs it; it only reads.
+  "Bash(docker info)", "Bash(docker info *)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
