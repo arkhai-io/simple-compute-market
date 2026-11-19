@@ -41,6 +41,12 @@ has, so it is a stage of its own, declared only by these rows, which run only
 against a Compose lane's doubles on injected lane time; anywhere else it is a
 blocked skip, and so is every row stage after it, which reads what it reserved.
 
+What the payments double emits for each ending — the part's stop, pending or
+final, its settled and refunded amounts — is asserted through the ending's
+assertion in ``producer_assertions.py``, which states each field it compares
+exactly, by relation, or not at all; the row reads the snapshot once after its
+step, and the assertion is apart from that read.
+
 No storefront route reads how it classified an end, so a row observes what
 follows from the classification: the end recorded with its cause and instant,
 no filing, and the teardown. That the storefront classifies a funds-running-out
@@ -66,6 +72,12 @@ from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.lane_doubles import payments_controls
 from tests.e2e.roles.helpers.lane_time import LaneTime
 from tests.e2e.roles.helpers.payments import payment_setting
+from tests.e2e.roles.helpers.producer_assertions import (
+    assert_funds_exhausted,
+    assert_payee_stop,
+    assert_payee_stop_pending,
+    assert_term_end,
+)
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     ASSET,
     PERIOD_GROSS,
@@ -115,10 +127,16 @@ class RateServicingState(RecurringPurchaseState):
     _deal_ended: bool = False
 
 
-def _the_part(payments_config: Any, deal_state: RateServicingState) -> dict[str, Any]:
+def _the_snapshot(payments_config: Any, deal_state: RateServicingState) -> dict[str, Any]:
+    """The deal's transaction snapshot, its one rate part checked to be its only part."""
     snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
                                     deal_state.settlement_id)
-    (part,) = snapshot["parts"]
+    assert len(snapshot["parts"]) == 1, snapshot["parts"]
+    return snapshot
+
+
+def _the_part(payments_config: Any, deal_state: RateServicingState) -> dict[str, Any]:
+    part: dict[str, Any] = _the_snapshot(payments_config, deal_state)["parts"][0]
     return part
 
 
@@ -238,8 +256,9 @@ class Exhaustion07_FundsRunOut:
         deal through three periods from its start: after the first
         reservation's end, before the Agreement's end. Lane time is set to that
         boundary and the storefront's servicing steps once: the double records
-        a ``terms`` stop effective at the boundary, charging the three periods,
-        and the storefront records that stop as the deal's end at the boundary,
+        a ``terms`` stop effective at the boundary, settling the three periods
+        (``producer_assertions.assert_funds_exhausted``), and the storefront
+        records that stop as the deal's end at the boundary,
         files nothing, and carries the end out at the site
         (``begin_teardown``).
         """
@@ -264,11 +283,9 @@ class Exhaustion07_FundsRunOut:
         reach_lane_instant(lane_time, boundary, fixed_by_agreement=False)
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
 
-        part = _the_part(payments_config, deal_state)
-        stop = part.get("stop") or {}
-        assert (stop.get("cause"), stop.get("effectiveAt")) == ("terms", boundary), part
-        assert part.get("reserved", "0") == "0", part
-        assert int(part["held"]) + int(part["released"]) == FUNDED_PERIODS * PERIOD_GROSS, part
+        assert_funds_exhausted(_the_snapshot(payments_config, deal_state),
+                               funded_boundary=boundary, funded_periods=FUNDED_PERIODS,
+                               period_price=PERIOD_GROSS)
         _recorded_end_with_no_filing(deal_driver, deal_state, cause="terms", at=boundary)
         fulfillment_id = begin_teardown(provisioning_client, storefront_admin_client,
                                         deal_driver, deal_state)
@@ -337,10 +354,14 @@ class Preemption07_SellerNoticeHeld:
         assert answer.outcome.status == "accepted", answer
         effective = notice_at + SPOT_NOTICE_SECONDS
 
-        part = _the_part(payments_config, deal_state)
-        pending = part.get("pendingStop") or {}
-        assert (pending.get("cause"), pending.get("at")) == ("payee", effective), part
-        assert part.get("stop") is None, part
+        snapshot = _the_snapshot(payments_config, deal_state)
+        assert_payee_stop_pending(snapshot, payee=str(payment_setting("SELLER_ACCOUNT")),
+                                  payee_notice_seconds=SPOT_NOTICE_SECONDS)
+        part = snapshot["parts"][0]
+        assert part["pendingStop"]["at"] == effective, (
+            f"the seller's stop is due at {part['pendingStop']['at']}, not the notice's lane "
+            f"instant {notice_at} plus {SPOT_NOTICE_SECONDS}s: {part}"
+        )
         assert effective <= int(part["rate"]["reservedThrough"]), (
             f"the seller's stop takes effect at {effective}, past the part's first "
             f"reservation: {part}"
@@ -374,11 +395,11 @@ class Preemption08_StopTakesEffect:
         reach_lane_instant(lane_time, effective, fixed_by_agreement=False)
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
 
-        part = _the_part(payments_config, deal_state)
-        stop = part.get("stop") or {}
-        assert (stop.get("cause"), stop.get("effectiveAt"), stop.get("partialPeriod")) == (
-            "payee", effective, "returned"), part
-        assert part.get("reserved", "0") == "0", part
+        snapshot = _the_snapshot(payments_config, deal_state)
+        assert_payee_stop(snapshot, payee=str(payment_setting("SELLER_ACCOUNT")),
+                          payee_notice_seconds=SPOT_NOTICE_SECONDS, period_price=PERIOD_GROSS,
+                          period_seconds=PERIOD_SECONDS)
+        assert snapshot["parts"][0]["stop"]["effectiveAt"] == effective, snapshot["parts"]
         _recorded_end_with_no_filing(deal_driver, deal_state, cause="payee", at=effective)
         fulfillment_id = begin_teardown(provisioning_client, storefront_admin_client,
                                         deal_driver, deal_state)
@@ -447,11 +468,8 @@ class MaximumTerm07_TermEnds:
         reach_lane_instant(lane_time, end, fixed_by_agreement=True)
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
 
-        part = _the_part(payments_config, deal_state)
-        stop = part.get("stop") or {}
-        assert (stop.get("cause"), stop.get("effectiveAt"), stop.get("partialPeriod")) == (
-            "terms", end, "returned"), part
-        assert part.get("reserved", "0") == "0", part
+        assert_term_end(_the_snapshot(payments_config, deal_state), agreement_end=end,
+                        period_price=PERIOD_GROSS, period_seconds=PERIOD_SECONDS)
         _recorded_end_with_no_filing(deal_driver, deal_state, cause="terms", at=end)
         fulfillment_id = begin_teardown(provisioning_client, storefront_admin_client,
                                         deal_driver, deal_state)

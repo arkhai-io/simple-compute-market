@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arkhai-e2e-tests"
-version = "0.3.0"
+version = "0.3.1"
 license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.14"
@@ -71,7 +71,9 @@ dependencies = [
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
     "arkhai-apicredits-buyer>=0.7.0",
-    "arkhai-kit-arkhai-payments>=0.4.0",
+    # 0.9.0 first offers the authority engine's further reservation, which the
+    # shared payment assertions' unit tests drive the engine through.
+    "arkhai-kit-arkhai-payments>=0.9.0",
     "arkhai-kit-policy>=0.4.0",
     # The settlement option and its schema, which the buyer-purchase stages
     # and the VM listing helper read from a listing.

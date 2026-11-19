@@ -89,6 +89,7 @@ from tests.e2e.roles.helpers.payments import (
     payment_flag,
     payment_setting,
 )
+from tests.e2e.roles.helpers.producer_assertions import assert_payer_stop
 
 log = logging.getLogger(__name__)
 
@@ -589,8 +590,10 @@ class Recurring08_BuyerEnds:
         The payer's stop at the payments double is accepted, then a hint makes
         the storefront read the double. The stop takes effect at once, with no
         payer notice, inside the started period, which it charges: the part is
-        stopped by the payer, charging one period's price to the payee and
-        reserving nothing more. On the hint's read the storefront records the
+        stopped by the payer, charging the started period's price to the payee
+        and reserving nothing more
+        (``producer_assertions.assert_payer_stop``). On the hint's read the
+        storefront records the
         payer's stop as the deal's end, before the delivery deadline, so it
         files no seller non-delivery: the scenario does not wait for that
         deadline. That the storefront classifies the stop an entitled one is
@@ -622,11 +625,10 @@ class Recurring08_BuyerEnds:
 
         snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
                                         deal_state.settlement_id)
-        (part,) = snapshot["parts"]
-        stop = part.get("stop") or {}
-        assert (stop.get("cause"), stop.get("partialPeriod")) == ("payer", "charged"), part
-        assert part.get("reserved", "0") == "0", part
-        assert int(part["held"]) + int(part["released"]) == PERIOD_GROSS, part
+        assert len(snapshot["parts"]) == 1, snapshot["parts"]
+        assert_payer_stop(snapshot, payer=str(deal_state.payer_account),
+                          period_price=PERIOD_GROSS, period_seconds=PERIOD_SECONDS)
+        stop = snapshot["parts"][0]["stop"]
 
         read = deal_driver.lifecycle_read(deal_state.negotiation_id)
         assert read.delivery.recorded_end is not None, read.delivery

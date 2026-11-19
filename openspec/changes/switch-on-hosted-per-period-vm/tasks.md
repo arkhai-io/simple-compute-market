@@ -205,7 +205,7 @@ verification scenario compares a producer's outputs with a lane's expectations"
 (`recurring_purchase_stages.py`, `rate_servicing_stages.py`, and a new module holding the
 assertions), and the VM recurring purchase and rate servicing modules that call them.
 
-- [ ] 2.1 Write the four assertions over what the payments double and the hosted
+- [x] 2.1 Write the four assertions over what the payments double and the hosted
       service both emit — the signed snapshot's part stop (cause, stopping account,
       effective instant, treatment), settled and refunded amounts, the funded boundary —
       each naming its exact fields (cause, treatment, amounts derived from the row's
@@ -217,15 +217,104 @@ assertions), and the VM recurring purchase and rate servicing modules that call 
       bounded poll. Verify (unit, `e2e-tests/tests/unit/`): each assertion passes on a
       recorded double output, fails naming the field and both values on an altered
       exact field, and ignores an altered identifier or `observedAt`.
-- [ ] 2.2 Make `e2e_vm_recurring_purchase`'s buyer stop and `e2e_vm_rate_servicing`'s
+      Done: `e2e-tests/tests/e2e/roles/helpers/producer_assertions.py`, functions over
+      the snapshot as JSON: `assert_payer_stop`, `assert_funds_exhausted`,
+      `assert_payee_stop_pending` and `assert_payee_stop` (the preemption's two
+      observations, pending then final), and `assert_term_end`. Each collects every
+      differing field and fails naming it with expected and actual values (and, for a
+      related field, what it relates to). Exact: cause, treatment, the stopping
+      event's account (the `terms` issuer for a terms stop), nothing left reserved, a
+      funding stop's settled `N × price`. By relation: `effectiveAt` (or a pending
+      stop's `at`) equal to the stop event's `receivedAt` plus the notice, the funded
+      boundary passed in, or the Agreement's end; settled gross the periods between
+      `started` and the stop (the one in progress too for `charged`) at the price;
+      `held + released` equal to it; `refunded` the gross less settled and reversed.
+      Ignored, stated in the module docstring: identifiers, signatures and the
+      snapshot's signing identity, `observedAt`, sequence numbers (an event's is
+      read only to find the stopping event), fee and net, holds, releases,
+      extensions. A funding stop's treatment is ignored too: it falls between
+      periods. The read and the assertion are separate functions rather than
+      separate stages (see the handoff). Unit (`tests/unit/test_producer_assertions.py`,
+      the assertions directly, on snapshots from the payments kit's
+      `PaymentsAuthority` engine — the engine the payments double serves — driven
+      through each row's input on the lane's terms, the term ending five minutes
+      into a thirteenth period, rather than on a committed recording): each passes;
+      an altered exact field and an instant off its relation each fail naming the
+      field and both values; an altered refund names its relation and both values;
+      a term end settling its partial final period as a whole one fails; two
+      differing fields are both named; a changed transaction id, `observedAt`,
+      `latestEventSequence`, proof, ledger and request ids are ignored — 26 pass.
+      The engine's further reservation first ships in `arkhai-kit-arkhai-payments`
+      0.9.0, so `e2e-tests/pyproject.toml`'s floor on it rises from 0.4.0 (already
+      below what the helpers used) to 0.9.0, with `arkhai-e2e-tests` 0.3.0 to 0.3.1
+      and `make lock PROJECTS=e2e-tests`.
+      `scripts/change-workflow run test-before` fails at collection, the base's
+      `e2e-tests/tests/conftest.py` importing `web3` with no project environment,
+      which shows nothing about the change.
+- [x] 2.2 Make `e2e_vm_recurring_purchase`'s buyer stop and `e2e_vm_rate_servicing`'s
       three rows assert through them, the lanes' step-and-read stages unchanged, and the
       bare-metal rows untouched (D6). Verify (unit): `make -C e2e-tests test-unit`
       passes, the stage order and handoff checks (`ORDERS`) included.
-- [ ] 2.3 Verification point: the VM lane's recurring purchase and rate rows pass on the
+      Done: `Recurring08_BuyerEnds`, `Exhaustion07_FundsRunOut`,
+      `Preemption07_SellerNoticeHeld`, `Preemption08_StopTakesEffect` and
+      `MaximumTerm07_TermEnds` read the snapshot as before and assert through the
+      shared functions in place of their inline checks; the preemption keeps its
+      lane-only checks that the stop is due at the notice's lane instant plus the
+      notice and within the first reservation. No module and no stage order changed.
+      These stages are shared with bare metal, which declares the same classes, so
+      its rows assert through them too while its modules are untouched (a VM-only
+      copy would break the rule that a compute lane's shared stage has one body);
+      the bare-metal rows were run for that (2.3). Unit: `make -C e2e-tests
+      test-unit` — 1051 passed, 1 skipped, `ORDERS` and the handoff checks included.
+- [x] 2.3 Verification point: the VM lane's recurring purchase and rate rows pass on the
       shared assertions (system, the VM lane's Compose stack: `make -C e2e-tests
       test-e2e-vm "E2E_MODULE=e2e_vm_recurring_purchase or e2e_vm_rate_servicing"`).
       End-to-end: `e2e_vm_recurring_purchase`, `e2e_vm_rate_servicing`.
       Nothing is owed to validation.
+      Evidence: system, the VM lane's Compose stack, the command above — 121 passed,
+      1862 deselected; the stack taken down after (`make -C e2e-tests e2e-vm-down`).
+      Outside the plan, since the shared bodies also run in bare metal: system, the
+      bare-metal lane's Compose stack, `make -C e2e-tests test-e2e-bare-metal
+      "E2E_MODULE=e2e_bare_metal_recurring_purchase or
+      e2e_bare_metal_rate_servicing"` — 249 passed, 1734 deselected; that stack
+      taken down after (`make -C e2e-tests e2e-bare-metal-down`).
+      End-to-end scenarios confirmed as listed; they are lane-double evidence that the
+      double emits what each shared assertion expects, and the bare-metal recurring
+      purchase and rate rows now exercise the same assertions.
+      `scripts/change-workflow run pre-commit` on the final tree:
+      `after-functional-change` passed; `pre-commit-functional` passed (local
+      evidence for tree `3d2f5beadd95`: `check-packaging` and `make test`); the
+      workflow checks passed and `check-repository` passed 8 of 9, documentation
+      citations reporting only section 8's summary, as in section 1.
+
+Handoff (section 2):
+
+- The plan's "a stage that reads … and a stage that asserts … are separate" is met
+  as two functions, not two stage classes: the shared stages keep reading as they
+  did and call the assertion. Separate stage classes would change every module's
+  stage order, bare metal's included, which the plan leaves untouched. For section
+  5, a live module composes its own stages: the input its lane twin's stage sends
+  (the buyer's `end`, a seller's notice), a bounded poll of the snapshot, then the
+  same assertion. `Recurring08_BuyerEnds` and the rows' ending stages bundle the
+  input, the read, the assertion and the storefront's servicing in one body, so a
+  live module cannot subclass them whole; factoring the input out of each is
+  section 5's to do.
+- Inputs a live run must supply each assertion: the payer or payee account, the
+  period price and seconds, the notice, and for funds running out the funded
+  boundary read from the snapshot's `fundedThrough` before the stop and the
+  number of periods the topology's balance funds; for the term end, the
+  Agreement's end rounded up to the whole second.
+- `Recurring08` used to assert one period's price held and released outright;
+  the shared assertion checks the settled amount against the periods between the
+  part's start and its stop, so the exact one period now rests on the stage
+  setting the stop a minute into the first period and on `Recurring09`'s balance.
+- `e2e-tests` is 0.3.1 in this change; a later section changing its `src/` or
+  `pyproject.toml` takes no second bump.
+- The fresh-context check found: the dependency floor (raised), docstring
+  sentences describing live callers not yet written (rewritten), "issuer"
+  ambiguous (now the snapshot's signing identity), a test class named `Lane`
+  (now `Engine`), notes overstating the sequence and term-end coverage (tests
+  added for a partial final period and two differing fields, notes corrected).
 
 ## 3. A dispute on a running rate deal in the VM lane
 
