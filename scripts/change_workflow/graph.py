@@ -36,9 +36,11 @@ refuses every entry while it is not met (`entry_refusal`); a waivable one takes 
 owner's direction as its override.
 
 Beside the graph, `HOOK_STEPS` holds which steps may run each of the repository's
-hooks through `scripts/change-workflow run`, and `STEP_ACTIONS` the engine's own
-actions before and after each step's session; like the graph, no repository changes
-either (CW-u4pc, CW-g6th, CW-ikmm).
+hooks through `scripts/change-workflow run`, `STEP_ACTIONS` the engine's own
+actions before and after each step's session, and `STEP_DEFINITIONS` each step's
+skill, the session it resumes, its profile, and the paths it writes before a
+repository adds its own; like the graph, no repository changes any of them (CW-u4pc,
+CW-g6th, CW-ikmm, CW-m8wq), a repository's paths only adding to a step's (CW-h2zt).
 
 The change-workflow architecture shows the table as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
@@ -54,6 +56,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .common import StepError
+from .running import INVOCATIONS
 
 Result = dict[str, Any]
 # What the reading of where the change stands hands a guard: the run whose outcome
@@ -572,6 +575,59 @@ STEP_ACTIONS: dict[tuple[str, str], tuple[str, ...]] = {
 def step_actions(when: str, step: str) -> tuple[str, ...]:
     """The engine's actions `when` the step's session runs, before or after it."""
     return STEP_ACTIONS.get((when, step), ())
+
+
+# A step's profile: the review writes nothing it reviews, so in its checkout it writes
+# only the engine's record of what it invoked; every other step writes the paths its
+# work changes.
+READ_ONLY, WRITING = "read-only", "writing"
+# Two baseline entries the workflow names by role, which a step's scope resolves as a
+# run starts: the repository's inert paths, from its configuration, and the
+# temporary directory. Every other entry is a path from the checkout's root — one
+# under `.git/` a path in its Git directory, wherever Git keeps it — or from the home
+# directory where it begins with `~`.
+INERT_PATHS = "<inert paths>"
+TEMPORARY = "<temporary directory>"
+_CHECKOUT = "."
+_GIT = ".git/"
+# Where the engine keeps what a session invoked through `run`, `gather`, or the
+# guarded push, in the Git directory: the one path of its checkout a review writes,
+# so the checks it runs for evidence record themselves.
+_INVOCATIONS = f"{_GIT}{INVOCATIONS}/"
+_CACHE = "~/.cache"
+
+
+@dataclass(frozen=True)
+class StepDefinition:
+    """A step's skill, the step whose last session it resumes rather than starting
+    fresh, its profile, and the paths it writes before its adapter's or the
+    repository's are added: the workflow's own terms only, since a repository adds its
+    paths in its configuration and never loosens these."""
+
+    skill: str
+    profile: str
+    baseline: tuple[str, ...]
+    resume_from: str | None = None
+
+
+def _writing(skill: str, *paths: str, resume_from: str | None = None) -> StepDefinition:
+    return StepDefinition(skill, WRITING, (*paths, TEMPORARY, _CACHE), resume_from)
+
+
+# Each step's definition, which no repository changes: a repository renaming a
+# step's skill or widening its baseline would change what the workflow is, so a
+# repository's additions live in its configuration's `[sandbox]` and only add.
+STEP_DEFINITIONS: dict[str, StepDefinition] = {
+    "design": _writing("change-design", "openspec/", _GIT),
+    "review": StepDefinition("change-review", READ_ONLY, (_INVOCATIONS, TEMPORARY)),
+    "triage": _writing("change-triage", _CHECKOUT),
+    "plan": _writing("change-plan", "openspec/", _GIT, resume_from="design"),
+    "implement": _writing("change-implement", _CHECKOUT),
+    "merge": _writing("change-merge", _CHECKOUT),
+    "closeout": _writing("change-closeout", INERT_PATHS, _GIT),
+    "archive-cleanup": _writing("change-archive-cleanup", "openspec/changes/", _GIT),
+    "validate": _writing("change-validate", _CHECKOUT),
+}
 
 
 class TargetError(StepError):

@@ -19,6 +19,8 @@ from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
 from change_workflow.graph import (AFTER, ARCHIVE_CLEANUP, BEFORE, CLOSEOUT_TRIAGE, DESIGN,
                                    HOOK_STEPS, NODES, OWNER, STEP_ACTIONS, STEPS, TABLE, WAIT,
                                    Node, step_actions)
+from change_workflow.running import INVOCATIONS
+from change_workflow.steps import load_steps
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = Path("openspec/specs/change-workflow/README.md")
@@ -400,6 +402,49 @@ def test_the_engine_gathers_before_validation_and_cleans_up_before_archive_clean
         assert all(step in HOOK_STEPS[action] for action in actions)
     assert step_actions(BEFORE, "validate") == ("gather",)
     assert step_actions(AFTER, "validate") == step_actions(BEFORE, "implement") == ()
+
+
+def test_every_step_with_a_run_has_one_definition() -> None:
+    assert set(graph.STEP_DEFINITIONS) == set(STEPS)
+    for name, definition in graph.STEP_DEFINITIONS.items():
+        assert definition.resume_from is None or definition.resume_from in STEPS, name
+
+
+def test_each_steps_skill_and_resumed_session_are_the_step_tables() -> None:
+    table = load_steps()
+
+    assert set(table) == set(graph.STEP_DEFINITIONS)
+    for name, rules in table.items():
+        definition = graph.STEP_DEFINITIONS[name]
+        assert (definition.skill, definition.resume_from) == (rules.skill, rules.resume_from), name
+
+
+def test_the_review_writes_no_path_of_its_checkout_but_the_engines_invocation_record() -> None:
+    review = graph.STEP_DEFINITIONS["review"]
+
+    assert review.profile == graph.READ_ONLY
+    checkout = [path for path in review.baseline
+                if path != graph.TEMPORARY and not path.startswith("~")]
+    assert checkout == [f".git/{INVOCATIONS}/"]
+    assert "~/.cache" not in review.baseline
+
+
+def test_every_step_writes_the_temporary_directory() -> None:
+    for name, definition in graph.STEP_DEFINITIONS.items():
+        assert graph.TEMPORARY in definition.baseline, name
+
+
+def test_each_writing_step_writes_its_baseline_and_the_cache() -> None:
+    writing = {name: definition for name, definition in graph.STEP_DEFINITIONS.items()
+               if name != "review"}
+
+    assert {definition.profile for definition in writing.values()} == {graph.WRITING}
+    assert {name: set(definition.baseline) - {graph.TEMPORARY}
+            for name, definition in writing.items()} == {
+        "design": {"openspec/", ".git/", "~/.cache"}, "plan": {"openspec/", ".git/", "~/.cache"},
+        "implement": {".", "~/.cache"}, "triage": {".", "~/.cache"}, "merge": {".", "~/.cache"},
+        "validate": {".", "~/.cache"}, "closeout": {graph.INERT_PATHS, ".git/", "~/.cache"},
+        "archive-cleanup": {"openspec/changes/", ".git/", "~/.cache"}}
 
 
 def test_make_change_graph_reports_that_the_diagram_draws_the_table() -> None:

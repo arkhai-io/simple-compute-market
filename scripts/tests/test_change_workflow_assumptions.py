@@ -319,8 +319,8 @@ def provided(markdown: str, heading: str, root: Root) -> set[str]:
 
 def configured(text: str, root: Root) -> set[str]:
     """Every make target and path the configuration's commands name: each hook's, the
-    validation preflight's, and each evidence kind's `run`, `start`, `collect`, and
-    `cleanup`, each a command or a list of them."""
+    OpenSpec command, the validation preflight's, and each evidence kind's `run`,
+    `start`, `collect`, and `cleanup`, each a command or a list of them."""
     def each(value: object) -> list[str]:
         if isinstance(value, str):
             return [value]
@@ -331,6 +331,7 @@ def configured(text: str, root: Root) -> set[str]:
     validation = configuration.get("validation", {})
     commands = [command for value in configuration.get("hooks", {}).values()
                 for command in each(value)]
+    commands += each(configuration.get("openspec", {}).get("command"))
     commands += each(validation.get("preflight"))
     for kind in validation.get("evidence", {}).values():
         for key in ("run", "start", "collect", "cleanup"):

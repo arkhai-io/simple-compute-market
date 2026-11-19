@@ -8,7 +8,8 @@ siblings by relative import:
   the working directory, the engine's error, and its clock;
 - `graph` — the workflow's graph: its nodes, their exits, joins, and guards, which
   the next-step computation interprets, and the steps and review kinds it declares,
-  the engine's only list of either;
+  the engine's only list of either; and beside it each step's definition: its skill,
+  the session it resumes, its profile, and the paths it writes;
 - `diagram` — the architecture's hand-laid diagram of the graph, held to the table
   (`scripts/change-workflow check graph`);
 - `outcome` — the outcome a step ends with, checked against its schema, and the

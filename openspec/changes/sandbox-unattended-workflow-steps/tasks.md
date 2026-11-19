@@ -29,7 +29,7 @@ change's deltas need on every commit (D11, D5's table; CW-m8wq's baseline, CW-k5
 `openspec/specs/change-workflow/index.md`, `openspec/specs/market-change-workflow/index.md`,
 `scripts/tests/test_change_workflow_graph.py`.
 
-- [ ] 1.1 In `openspec/specs/change-workflow/index.md`, add entries for the ids the
+- [x] 1.1 In `openspec/specs/change-workflow/index.md`, add entries for the ids the
   change's deltas add — under "### Permissions": CW-x3pf, CW-m8wq, CW-r6kd, CW-v5ny,
   CW-w3oa, CW-t6mb; under "### Step runs and outcomes": CW-q7ub, CW-f9le; under "###
   The guarded push": CW-j4cs; under "### Interactive runs": CW-g5ry; under "### A
@@ -44,7 +44,10 @@ change's deltas need on every commit (D11, D5's table; CW-m8wq's baseline, CW-k5
   before the archive (a repository obligation, `openspec/README.md#the-index-check`);
   closeout's promotion revises the summary lines (12.9). Verify: `make
   check-spec-index CHANGE=sandbox-unattended-workflow-steps` passes.
-- [ ] 1.2 In `graph.py`, beside `HOOK_STEPS` and `STEP_ACTIONS`, hold each step's
+  Done: `make check-spec-index CHANGE=sandbox-unattended-workflow-steps` and the
+  unscoped `make check-spec-index` pass. The new entries carry provisional summary
+  lines; the renamed entries keep their old summaries until 12.9 revises them.
+- [x] 1.2 In `graph.py`, beside `HOOK_STEPS` and `STEP_ACTIONS`, hold each step's
   definition: its skill and `resume_from` as `.claude/change-steps.toml` gives them
   today, its profile (read-only for the review, workspace for the rest), and its
   baseline scope in the workflow's own terms only (CW-n8tr) — the review: in the
@@ -55,10 +58,49 @@ change's deltas need on every commit (D11, D5's table; CW-m8wq's baseline, CW-k5
   unit tests that every step of `graph.STEPS` with a run has one definition, that the
   skills and `resume_from` equal the step table's today, and that the review's
   baseline holds no other checkout path.
-- [ ] 1.3 Verification point: `test_change_workflow_graph.py` (unit) and `make
+  Done: `graph.STEP_DEFINITIONS` maps each step to a `StepDefinition` (skill,
+  profile, baseline, `resume_from`). The profiles are `READ_ONLY` and `WRITING`.
+  The plan's "workspace" was renamed, since the workflow's "workspace" is the
+  owner's. Two baseline entries are named by role: `INERT_PATHS` (closeout's) and
+  `TEMPORARY`. Every other entry is a checkout path, a `.git/` path, or a `~`
+  path. The review's invocation path is built from `running.INVOCATIONS`. Unit tests
+  in `test_change_workflow_graph.py`, all passing:
+  - one definition per step;
+  - the skills and `resume_from` equal `load_steps()`'s;
+  - the review's checkout paths are only `.git/change-invocations/`;
+  - every step writes the temporary directory;
+  - each writing step's baseline and `~/.cache`.
+- [x] 1.3 Verification point: `test_change_workflow_graph.py` (unit) and `make
   check-spec-index CHANGE=sandbox-unattended-workflow-steps`; `scripts/change-workflow
   run pre-commit sandbox-unattended-workflow-steps` passes.
   End-to-end: none — no scenario exercises the workflow's tooling.
+  Done:
+  - `make test-release-tooling TESTS=scripts/tests/test_change_workflow_graph.py`
+    (unit) passes, and so does `make check-spec-index`.
+  - `run pre-commit`'s functional hooks pass: the relock, packaging, and every suite
+    in `make validate-local`, including 3383 scripts tests.
+  - Its `pre-commit` fails one check of nine, `check-doc-citations`. This plan's
+    `tasks.md` cites eight files that sections 2 to 5 and 9 create: `scope.py`,
+    `sandbox.py`, `invariants.py`, `propose.py`, and their tests. The check fails
+    until the last of them exists. No permanent document is involved.
+  - Outside the plan, a fix: `test_change_workflow_assumptions.py`'s `configured`
+    now reads `openspec.command`. The maintenance commit before this branch let
+    every step run `scripts/openspec validate`. The roles test then failed on
+    `scripts/openspec`, which the configuration names only as its OpenSpec command.
+  - Not fixed: in two of three runs the relock (`make lock`, the
+    `after-functional-change` hook) rewrote two locks,
+    `kit/capability-admissibility/uv.lock` and `kit/capability-pricing/uv.lock`. Each
+    then resolved `arkhai-kit-capability-shape` 0.3.0 from PyPI rather than `.dist`,
+    against `docs/guidance/repository/wheelhouse.md`'s internal-package rule. The
+    third run's relock left both as committed, so the section commits neither.
+  Handoff:
+  - Nothing reads `STEP_DEFINITIONS` yet: section 7 moves the wrapper onto it.
+  - Section 2 should resolve `.git/` entries through Git
+    (`git rev-parse --git-path`) rather than as checkout paths, so a linked
+    worktree's Git directory resolves too.
+  - Run `run pre-commit` alone. A second `run pre-commit` in the same checkout, such
+    as a helper's, clears `.dist` under the first, and the first's kit tests then
+    fail to resolve.
 
 ## 2. `[sandbox]` and a step's resolved scope
 
