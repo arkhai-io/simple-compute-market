@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import injected_time
-from arkhai_compute.end_classification import payment_actor
+from arkhai_compute.end_classification import classify_payment_stop, payment_actor
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from market_alkahest.payment_adapter import AlkahestOnceAdapter
@@ -29,13 +29,12 @@ from market_deal_lifecycle.delivery import DeliveryEvidence
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_contracts.models import (
-    Accepted, CommitMessage, EvidenceItem, ListDealsRequest,
-    Pending, Rejected, SubmitResponse, Unknown,
+    Accepted, CommitMessage, EvidenceItem, Pending, Rejected, SubmitResponse, Unknown,
 )
 from market_deal_servicing import (
-    DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
-    LifecycleRouteServices, RespondentPoller, SellerDeal, SellerServicing,
-    SellerSession, SQLiteEvidenceStore, seller_retention,
+    Classification, DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
+    LifecycleRouteServices, SellerDeal, SellerServicing, SellerSession, ServicingCycle,
+    SQLiteEvidenceStore, seller_retention,
 )
 from market_deal_servicing.end import EndService
 from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
@@ -53,6 +52,13 @@ from market_storefront.services.vm_fulfillment_planner import VERIFIED_EVIDENCE_
 
 logger = logging.getLogger(__name__)
 
+#: The configuration that composes the payments seller stage, without which an
+#: accepted payments deal, once-only or rate, cannot be serviced.
+PAYMENTS_SERVICING_FIELDS = "[Settlement].arkhai_payments service_url and service_identity"
+
+#: The servicing loop whose page position the kit keeps.
+SERVICING_LOOP = "deal-servicing"
+
 
 def instant(value: str) -> int:
     return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
@@ -61,8 +67,13 @@ def instant(value: str) -> int:
 class VmDealLifecycle:
     def __init__(
         self, db, signer, payments, disputes, *, clock=injected_time.now, fulfillment=None,
-        mediation_transport=None,
+        capacity=None, physical=None, mediation_transport=None,
     ):
+        """``capacity`` is the storefront's capacity runtime and ``fulfillment``
+        its per-site fulfillment client, which the end service's physical end,
+        site-report recovery, the delivery path and the release failure action
+        use; when not given, each is built from the configured sites' runtime.
+        ``physical`` replaces the end service's physical end built over them."""
         self.db = db
         self.path = Path(db.db_path)
         self.signer = signer
@@ -70,14 +81,17 @@ class VmDealLifecycle:
         self.dispute_config = disputes.config
         self.clock = clock
         self.fulfillment = fulfillment
+        self.capacity = capacity
         # The transport every mediation client sends through; None gives each
         # client its own connection to the Agreement-pinned origin.
         self.mediation_transport = mediation_transport
         self.evidence = SQLiteEvidenceStore(self.path)
         self.clients = {}
-        self.respondents = {}
-        self.continuation = None
-        self.end = EndService(self.path, VmPhysicalEnd(db), clock=clock)
+        self.end = EndService(
+            self.path,
+            physical if physical is not None else VmPhysicalEnd(db, capacity=capacity, fulfillment=fulfillment),
+            clock=clock,
+        )
         self.ingress = DeliveryIngress(
             self.path, clock=clock, verify_site=self.verify_site, receipt_claim=self.receipt_claim,
             classify_site=self.classify_site,
@@ -92,6 +106,7 @@ class VmDealLifecycle:
             disputes=DisputeAdapterTable([(INTERFACE, self.dispute_adapter)]),
             credential_available=self.credential_available,
             watch_factory=self.watch, clock=clock,
+            missing_adapters={} if payments is not None else {"arkhai.payments.v1": PAYMENTS_SERVICING_FIELDS},
         )
 
     def accepted(self, negotiation_id):
@@ -227,11 +242,17 @@ class VmDealLifecycle:
                 authority=authority,
             )
 
+        term_end = instant(agreement["start_utc"]) + agreement["duration_seconds"]
+
+        def classify(event):
+            kind = classify_payment_stop(event, entitlements=deal.entitlements, term_end=term_end)
+            return Classification(kind=kind, evidence_refs=[event.authority_record_ref]) if kind else None
+
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
             seller_account=data.mandate.to.root if data is not None else "",
-            actor=actor, clock=self.clock,
+            actor=actor, clock=self.clock, classify_payment_end=classify,
             observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 
@@ -262,90 +283,25 @@ class VmDealLifecycle:
         await self.seller.read(message.negotiation_id)
         return SubmitResponse(outcome=Accepted())
 
-    async def cycle(self, *, limit=100):
-        deals, self.continuation = await in_transaction(
-            self.path, lambda conn: SellerSession(conn).page(ListDealsRequest(
-                limit=limit, continuation=self.continuation,
-            )),
+    def servicing(self):
+        """The kit's servicing order over this lifecycle.
+
+        The lifecycle is its own respondent port. Its one recovery step reads
+        the site's lease end reports; its site-report correction applies the
+        compute family's site classifier.
+        """
+        return ServicingCycle(
+            self.path, domain="vms", loop=SERVICING_LOOP, seller=self.seller, end=self.end,
+            respondents=self, signer=self.signer, clock=lambda: self.clock(),
+            recovery=[("site-report recovery", lambda deal: self.recover_site_reports(deal.negotiation_id))],
+            resolve_site_corrections=lambda session, negotiation_id, now: resolve_site_corrections(
+                session, negotiation_id, now=now,
+            ),
         )
-        # Discovery precedes watch so both reuse the same prepared answer journal.
-        for deal in deals:
-            if deal.dispute is None or not self.credential_available(deal.dispute):
-                continue
-            agreement, raw = self.accepted(deal.negotiation_id)
-            account = PaymentSettlementData.parse(raw).mandate.to.root
-            key = (canonical_json(deal.dispute), account)
-            if key not in self.respondents:
-                adapter = self.dispute_adapter(deal.dispute_binding)
 
-                def resolve(case, *, authority=deal.dispute):
-                    with transaction(self.path) as conn:
-                        row = conn.execute(
-                            "SELECT deal FROM servicing_seller_deals WHERE json_extract(deal, '$.commitment_ref')=?",
-                            (case.commitment_ref,),
-                        ).fetchone()
-                    matched = SellerDeal.model_validate_json(row[0]) if row else None
-                    if matched is None or matched.dispute != authority:
-                        return None
-                    candidate = self.dispute_adapter(matched.dispute_binding)
-                    if candidate.agreement_digest != case.agreement_ref:
-                        raise ValueError("respondent case differs from accepted Agreement")
-                    return matched.negotiation_id, candidate
-
-                self.respondents[key] = RespondentPoller(
-                    self.path, authority=deal.dispute, account=account, read=adapter.respondent,
-                    resolve=resolve, signer=self.signer, clock=self.clock,
-                )
-        for poller in self.respondents.values():
-            try:
-                await poller.poll()
-            except Exception:
-                logger.exception("VM respondent discovery awaits recovery")
-        for deal in deals:
-            # The payment authority is read before a missed deadline is admitted,
-            # so a buyer stop it recorded while the storefront was down is the
-            # deal's end rather than seller non-delivery. Admission waits for that
-            # read itself, so a failed one delays the deadline to a later cycle.
-            try:
-                async for _ in self.seller.watch(deal.negotiation_id):
-                    pass
-            except Exception:
-                logger.exception("VM lifecycle watch awaits recovery for %s", deal.negotiation_id)
-
-            def admit_deadline(conn):
-                end = EndSession(conn)
-                record = end.read(deal.negotiation_id)
-                # A recovery sweep observes missed delivery, not a new admission.
-                # Re-admitting an unchanged phase invalidates concurrent CAS readers.
-                now = self.clock()
-                if now > record.deadline and (record.available_at is None or record.available_at > record.deadline):
-                    end.admit(deal.negotiation_id, record.phase, record.revision, now=now)
-            await in_transaction(self.path, admit_deadline)
-            try:
-                await self.recover_site_reports(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM site-report recovery awaits retry for %s", deal.negotiation_id)
-            try:
-                await self.end.drive_physical(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM physical end awaits recovery for %s", deal.negotiation_id)
-            try:
-                await in_transaction(self.path, lambda conn: resolve_site_corrections(
-                    EndSession(conn), deal.negotiation_id, now=self.clock(),
-                ))
-            except Exception:
-                logger.exception("VM end classification awaits recovery for %s", deal.negotiation_id)
-            try:
-                # The watch dispatched the filings journaled before it; this
-                # dispatches any the deadline or a site correction journaled since.
-                await self.seller.dispatch_filings(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM delivery-end filing awaits recovery for %s", deal.negotiation_id)
-            try:
-                await self.end.drive_physical(deal.negotiation_id)
-            except Exception:
-                logger.exception("VM observed end awaits recovery for %s", deal.negotiation_id)
-        return len(deals)
+    async def cycle(self, *, limit=100):
+        """Service one page of deals in the kit's order; the page's size."""
+        return await self.servicing().cycle(limit=limit)
 
     def receipt_claim(self, negotiation_id, at):
         # Ingress holds its write transaction; this immutable binding read
@@ -389,7 +345,9 @@ class VmDealLifecycle:
         if view.progress == "released" and any(item.evidence_id == history_ref for item in evidence.items):
             return
         thread = await self.db.load_thread_binding(negotiation_id=negotiation_id)
-        fulfillment = self.fulfillment or build_fulfillment_client(build_capacity_runtime(lambda: self.db).client())
+        fulfillment = self.fulfillment or build_fulfillment_client(
+            (self.capacity or build_capacity_runtime(lambda: self.db)).client()
+        )
         lease = await fulfillment.get_lease(reservation, site_id=thread.site_id)
         for report in lease.end_reports:
             await asyncio.to_thread(self.ingress.site_report, negotiation_id, body=canonical_json(report), headers={})

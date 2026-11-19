@@ -1,8 +1,11 @@
 """A site and a provisioning service at the delivery path's external boundary.
 
 ``DeliverySite`` is an aggregate capacity client over one site's reservation
-ledger: placement-keyed reserve replay, commit, activation and release, and an
-acknowledgement that can be lost after its effect, as the site does.
+ledger, and serves as that site's own client inside a capacity runtime:
+placement-keyed reserve replay, commit, activation, release and the
+reservation listing, an acknowledgement that can be lost after its effect, as
+the site does, and a reserve that fails before its effect while the site is
+unreachable.
 ``DeliveryProvisioning`` schedules and begins one fulfillment per reservation
 and reports it active with a VM access delivery.
 """
@@ -37,6 +40,8 @@ class DeliverySite:
         self.lose: dict[str, int] = {}
         #: Each commit's requested window, as sent.
         self.commits: list[tuple[str, str | None, str | None]] = []
+        #: On: a reserve fails before its effect, as an unreachable site's does.
+        self.unreachable = False
 
     def _answer(self, operation: str, row: dict[str, Any]) -> dict[str, Any]:
         if self.lose.get(operation, 0) > 0:
@@ -54,6 +59,8 @@ class DeliverySite:
 
     async def reserve(self, *, claim, deal_ref, ttl_seconds=None, lease_start_utc=None,
                       lease_duration_seconds=None, site=None):
+        if self.unreachable:
+            raise SiteCapacityClientError("site unreachable")
         key = (deal_ref or {}).get("placement_key")
         request = {"claim": dict(claim), "start": lease_start_utc, "duration": lease_duration_seconds}
         if key is not None and key in self.keys:
@@ -87,6 +94,14 @@ class DeliverySite:
         row = self.rows[capacity_reservation_id]
         row["state"] = "released"
         return self._answer("release", row)
+
+    async def list_reservations(self, *, state=None, escrow_uid=None, request_id=None):
+        """The reservations the site holds, filtered as its listing filters them."""
+        return [
+            {**row, "site": self.site_id} for row in self.rows.values()
+            if (state is None or row["state"] == state)
+            and (escrow_uid is None or row["deal_ref"].get("escrow_uid") == escrow_uid)
+        ]
 
     async def truncate_lease(self, *, capacity_reservation_id, lease_end_utc, site_id=None):
         row = self.rows[capacity_reservation_id]

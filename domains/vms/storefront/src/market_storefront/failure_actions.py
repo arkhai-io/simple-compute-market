@@ -395,7 +395,10 @@ async def _release_capacity(
     if not ctx.listing_id:
         raise RuntimeError("capacity release requires the persisted listing binding")
     binding = await capacity_binding_for_listing(db, ctx.listing_id)
-    runtime = capacity or build_capacity_runtime(lambda: db)
+    # The storefront deal lifecycle's capacity runtime when it was given one.
+    lifecycle = getattr(_container.resolved_settlement_composition, "lifecycle", None)
+    composed = getattr(lifecycle, "capacity", None) if getattr(lifecycle, "db", None) is db else None
+    runtime = capacity or composed or build_capacity_runtime(lambda: db)
     reservation = await runtime.release(
         binding,
         capacity_reservation_id=str(ctx.capacity_reservation_id or ""),

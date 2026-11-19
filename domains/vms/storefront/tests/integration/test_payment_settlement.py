@@ -41,6 +41,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.lifecycle_steps import payment_reconciliation_step
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -261,11 +262,13 @@ class Harness(SimpleNamespace):
 
 async def _harness(
     tmp_path, *, deposit=False, actions=("emit_event",), authority=None, disputes=None,
-    mediation_transport=None, payments=None,
+    mediation_transport=None, payments=None, physical=None,
 ):
     """``authority`` replaces the Agreement's dispute authority, ``disputes`` is
-    the storefront's dispute configuration document, and ``mediation_transport``
-    the network under every mediation client."""
+    the storefront's dispute configuration document, ``mediation_transport``
+    the network under every mediation client, and ``physical`` builds the end
+    service's physical end from the database and the harness's delivery, the
+    delivery itself by default."""
     delivery = Delivery()
     domain = replace(
         build_vm_storefront_domain(),
@@ -281,9 +284,9 @@ async def _harness(
     lifecycle = VmDealLifecycle(
         db, SELLER, coordinator, RegistryDisputePolicy.from_document(disputes or {}),
         mediation_transport=mediation_transport,
+        physical=physical(db, delivery) if physical is not None else delivery,
     )
     coordinator.lifecycle = lifecycle
-    lifecycle.end.physical = delivery
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = registry
     _container.resolved_marketplace_signer = SELLER
@@ -677,13 +680,11 @@ async def _restart(h, tmp_path, *, approved: bool):
 @pytest.mark.asyncio
 async def test_an_approved_payment_converges_after_restart_without_the_buyer(make, tmp_path):
     """The buyer approved, never settled, and the storefront restarted: the seller delivers."""
-    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
-
     h = await make()
     restarted = await _restart(h, tmp_path, approved=True)
 
-    # What the fulfillment resume loop runs each sweep; no buyer request is made.
-    await _reconcile_payment_deals()
+    # What the payment-reconciliation loop runs each cycle; no buyer request is made.
+    await payment_reconciliation_step()
     task = restarted.coordinator.tasks.get(NEGOTIATION)
     assert task is not None
     await task
@@ -696,18 +697,16 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(mak
     assert delivery["status"] == "ready"
 
     # A later pass finds nothing left to do.
-    await _reconcile_payment_deals()
+    await payment_reconciliation_step()
     assert restarted.delivery.starts == [NEGOTIATION]
 
 
 @pytest.mark.asyncio
 async def test_reconciliation_leaves_an_unapproved_payment_pending(make, tmp_path):
-    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
-
     h = await make()
     restarted = await _restart(h, tmp_path, approved=False)
 
-    await _reconcile_payment_deals()
+    await payment_reconciliation_step()
 
     assert restarted.delivery.starts == []
     assert await restarted.db.load_vm_delivery(negotiation_id=NEGOTIATION) is None

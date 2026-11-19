@@ -45,8 +45,8 @@ def test_the_opt_in_probe_and_stop_survive_a_restart_and_the_read_shows_each(tmp
         _, fresh = lifecycle(tmp_path, 1000)
         read = await fresh.buyer_read("deal")
         assert read["watchdog"] == {"status": "monitored", "last_probe_at": 990}
-        # The status sits beside the lifecycle read, never inside it.
-        assert LifecycleRead.model_validate({k: v for k, v in read.items() if k != "watchdog"})
+        # The status and the funding stop sit beside the lifecycle read, never inside it.
+        assert LifecycleRead.model_validate({k: v for k, v in read.items() if k not in {"watchdog", "funding_stop"}})
 
         _, later = lifecycle(tmp_path, 1100)
         assert (await later.buyer_read("deal"))["watchdog"]["status"] == "unmonitored"

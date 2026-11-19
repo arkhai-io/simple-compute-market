@@ -614,6 +614,25 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
+    async def list_unreleased_bare_metal_fulfillments(self) -> list[str]:
+        """Every negotiation whose fulfillment lifecycle is not released, least
+        recently updated first."""
+
+        def _load() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                return [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT negotiation_id FROM bare_metal_fulfillment_lifecycle "
+                        "WHERE state != 'released' ORDER BY updated_at, negotiation_id"
+                    )
+                ]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
     async def load_bare_metal_fulfillment_lifecycle_by_reservation(
         self,
         *,

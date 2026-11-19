@@ -197,20 +197,22 @@ waiver a step recommended is a ledger line whether you take it or not. The merge
 before closeout judges whether its own validation may be waived and asks you to
 confirm.
 
-Any part of validation may be waived, by you alone: a waived part is an omission of
-evidence, recorded as `waived` and counted in no result. A waiver for later
-validations is your decision in the change's workflow log, naming the parts and the
-condition; under orchestration the orchestrating session records it, and otherwise
-you do:
+Any evidence kind of validation may be waived, by you alone: a waived kind is an
+omission of evidence, recorded as `waived` and counted in no result. A waiver for
+later validations is your decision in the change's workflow log, naming the kinds and
+the condition; under orchestration the orchestrating session records it, and
+otherwise you do:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --waives deployment --decision "waive the deployment part of validation for the rest of this change, while nothing it touches affects the services it deploys" --reason "<your words>"
+scripts/change-workflow note <change> orchestrator --by owner --waives deployment --decision "waive the deployment kind of validation for the rest of this change, while nothing it touches affects the services it deploys" --reason "<your words>"
 ```
 
-`--waives` names the parts, which validation's plan then marks as waived. Validation
-runs a waived part anyway, saying the waiver lapsed, when the commits since the last
-validation that ran it include a merge or the condition no longer holds; the engine
-refuses to run a waived part unless validation gives that reason.
+`--waives` names the kinds, which `scripts/change-workflow evidence` then reports as
+waived and the engine's gathering skips. A waived kind is gathered anyway, the record
+saying the waiver lapsed, when the commits since the last validation that ran it
+include a merge, which the gathering notices itself, or when validation judges the
+condition no longer holds; the engine refuses a new attempt of a waived kind unless
+validation says the waiver lapsed.
 
 **Directing a change.** You can send a change to any step outside the exits its
 steps take — another review, a validation before a step, a step past a guard that is
@@ -545,11 +547,18 @@ an archived change, and in a clone waits for the bootstrap. The round's triage t
 waits for four things: the round's sections checked, your reading of the round, its
 validation, and its implementation review.
 
-**Validation** (`change-validate`) validates the commit at `HEAD`: it pushes it,
-runs each part of validation the repository configures — its own checks and suites,
-and, as the repository provides them, a deployment and an end-to-end pipeline —
-skipping any part you waived, diagnoses every failure from its logs, and writes the
-change's next validation record. It commits nothing. It always runs for a target, the
+**Validation** (`change-validate`) validates the commit at `HEAD`. Before its session
+starts, the engine gathers the evidence the commit still lacks: it pushes `HEAD`,
+then runs or dispatches each evidence kind the repository configures — its own
+checks and suites, and, as the repository provides them, a deployment and an
+end-to-end pipeline — that has no evidence yet for the commit's tree, or for the
+commit where a kind keys by it, skipping any kind you waived. Evidence already there
+is reused, whoever wrote it: the functional checks an implementation ran before its
+commit usually leave the local kind's. The session then assesses every kind from its
+guide, diagnoses every failure from its evidence, asks you before gathering a kind
+again after an environmental failure, and writes the change's next validation
+record, naming each kind's result and whether it was present or gathered. It commits
+nothing. It always runs for a target, the
 step it validates for: a passed validation clears the way to it, a failed or
 inconclusive one names you, except that a failed validation of a merged `HEAD` goes
 back to the merge, which repairs what it found.
@@ -579,8 +588,8 @@ implementation. It exits to the closeout review.
 **Archive cleanup** (`change-archive-cleanup`) fetches and records the branch the
 change lands on, releases the changes that depend on it, sets its index row to
 `archived`, commits, drafts the merge commit message and the pull request description,
-runs the cleanup of validation's parts, pushes, and copies the change's history into
-your workspace. It enters only an archived change. It exits to done, unless the
+commits what the cleanup of each evidence kind wrote — the engine runs the cleanups
+before its session — pushes, and copies the change's history into your workspace. It enters only an archived change. It exits to done, unless the
 landing branch moved while the change was closed out, when it exits to the merge after
 the archive.
 
@@ -689,7 +698,10 @@ The engine's parts, by what they do:
 - **The command** parses a subcommand and hands it to the module that does the work.
 - **The repository's configuration** is read, and checked whole, from
   `.agents/workflow.toml`; the hooks module runs the repository's commands at each
-  point of a step's work, and validation's parts ("Customization", below).
+  point of a step's work, and the engine runs its own actions and the repository's
+  hooks before and after each step ("Customization", below).
+- **Evidence**: which evidence a commit has for each of validation's evidence kinds,
+  and the gathering of what is missing before validation's session.
 - **Starting a step**: the wrapper runs an unattended step. It reads the step table
   for the step's skill and permissions, chooses the first available of the step's
   models, starts the harness — Claude Code or Codex — headless, reads its event stream
@@ -732,19 +744,37 @@ A repository adopts and tunes the workflow in a few files:
   pre-commit checks and, after the pre-closeout review, needs no new validation; the
   repository's commands as hooks on the workflow's moments (after a step's last
   functional change, before every commit, before a commit with a functional change,
-  before the archive, before a push, as a clone is made); the OpenSpec command;
-  validation's parts, each with its commands, whether it is owed, and its cleanup; the
-  documents every step and each step reads as it starts; the models each step and the
+  before the archive, before a push, as a clone is made), and optional hooks before
+  and after each step; the OpenSpec command; validation's evidence kinds, each with
+  whether it is always required or owed by a plan's sections, the pattern its evidence
+  is found at, its commands, its cleanup, and its guide; the documents every step and
+  each step reads as it starts; the models each step and the
   orchestrating session run on, each an ordered list of a harness, a model, and an
   effort; and how often a review whose draft fails the format check is sent back. A
   default check is turned off only by naming it with a reason. The engine refuses a
   step's models naming two of one vendor.
 - **`.claude/change-steps.toml`**, the step table: each step's skill and its allow and
   deny rules. A rule you grant for one run ("Interventions", above) never enters it.
-- **`.agents/skills/`**: each step's skill, one source every harness loads.
+- **`.agents/skills/`**: each step's skill, one source every harness loads. The skills
+  name no target or path of one repository's; what they need of it comes from the
+  configuration, the guides, and the guidance.
+- **`.agents/evidence/`**: each evidence kind's guide, prose telling validation, and
+  the steps that plan, implement, merge, clean up, or review against it, how to read
+  that kind's evidence and tell its failures apart. A guide repeats nothing the
+  configuration states.
 - **The repository's guidance**, which every step reads: how the repository fills the
-  roles the workflow leaves to it — its validation parts, its checks, its branches —
-  and the rules a change's work is held to.
+  roles the workflow leaves to it — its checks, its branches — and the rules a
+  change's work is held to.
+
+A step hook runs a command of yours around a step's session: `before-<step>` once the
+engine's own action before that step has run, `after-<step>` after the session
+finishes. None runs unless you declare it. Whatever a hook writes as a Markdown file
+into the run's inputs directory, `reviews/runs/<run>/before/` or `…/after/`, the
+session reads in full, with `status.md`, where the engine records each action's and
+hook's result. A failing `before-` hook prevents nothing: the session starts with the
+failure in front of it and says what it means for its work. A failing `after-` hook
+resumes the session once to fix what it found; a second failure comes to you as a
+question naming the hook, as does a failing `after-review` at once.
 
 No step edits the configuration or the step table: each changes as a tracked edit you
 commit, or the orchestrating session commits on your word in the change's clone. The

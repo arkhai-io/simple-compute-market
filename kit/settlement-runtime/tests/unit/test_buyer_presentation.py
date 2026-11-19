@@ -10,7 +10,7 @@ from collections.abc import Callable
 from copy import deepcopy
 
 import pytest
-from market_core.schemas import AgreedPrice, Agreement, PriceBasis, SettlementOption
+from market_core.schemas import AgreedPrice, Agreement, PriceBasis, SettlementOption, derive_settlement_option_id
 from market_deal_lifecycle.terms import TermContext, decode_terms
 from market_settlement_runtime import (
     MechanismRegistration,
@@ -113,6 +113,23 @@ def test_a_spot_option_discloses_the_seller_s_notice_stop():
         "Entitled with 120 seconds' notice; settles_through=last_boundary (final partial period returned)."
     ]
     assert rows["Premature-stop penalty"][0].startswith("Up to 0 minor units of USD/6")
+
+
+@pytest.mark.parametrize(("setup", "first_period"), [
+    (None, "nothing in its first period, since it has no setup charge."),
+    ("100000", "in its first period, only the earned setup charge."),
+])
+def test_the_penalty_is_disclosed_as_collectible_only_from_earnings_still_held(setup, first_period):
+    option = _option(early=ON_DEMAND)
+    if setup is not None:
+        body = option.model_dump(mode="json", exclude={"option_id"})
+        body["settlement"]["setup_amount"] = setup
+        option = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+    (penalty,) = _rows(lifecycle_disclosure(option, context=_context()))["Premature-stop penalty"]
+    assert (
+        "It is collectible only from the seller's earnings still held: under this option's holds, "
+        "what the deal has earned so far and not yet been paid, after refunds; " + first_period
+    ) in penalty
 
 
 def test_a_once_option_discloses_no_entitled_stop():

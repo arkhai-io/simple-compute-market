@@ -84,7 +84,7 @@ async def test_a_credential_naming_no_ca_bundle_builds_the_deals_client(harness,
     await h.settle()
     lifecycle, deal = _deal_with_credential(h)
 
-    lifecycle.dispute(deal.dispute_binding)
+    lifecycle.dispute_adapter(deal.dispute_binding)
 
     [client] = lifecycle.clients.values()
     assert client.authority.identity == deal.dispute.identity

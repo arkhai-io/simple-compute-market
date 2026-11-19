@@ -132,7 +132,7 @@ Both compute buyers — `market buy` and `market negotiate` for VM, `bare-metal 
 
 **The numbers come from the mechanism.** A buyer never parses a mechanism's payment fields. Each installed registration's `present_payment` returns the quote, the separate setup once charge and the initial reserve in the quote's asset and minor units — zero meaning none, null undetermined rather than a guessed zero — and the registry checks the basis and asset and that an accepted quote comes back unchanged. The buyer renders those beside the derived class, the price's unit, the asking rate, both bounds, the horizon and the lifecycle rows the shared codec decodes, on stderr even when no prompt is shown, so bare metal's JSON stdout stays usable. A fresh display reads the listing's bounds and the requested horizon; an accepted display reads only the Agreement, never a current listing, so an accepted horizon cannot be shown as extendable. VM's public price bounds stay hourly and are scaled to one period for a recurring option and to the requested span for a reserved one, through a per-match unit-count hook core calls without knowing the units.
 
-**What the display claims.** It shows only what an authority enforces. Reserve is reserved funds, not spend and not a cap on a dishonest seller's billing. The penalty is a ceiling, taken from what the seller has earned and not yet been paid — at the start of a deal the setup charge, and nothing when nothing is held. A filed case shows the authority's per-part `held` or `not_held` answer, never a pending refund. A setup charge is owed from approval, kept by the seller if the buyer stops, and returned only when the seller never delivered. An option whose mechanism has no lifecycle adapter, Alkahest today, is shown as making no delivery promise rather than refused for lacking one. A setup charge and a refusal to deal with churners are the seller's pricing and policy, so neither buyer asks for a minimum-spend term.
+**What the display claims.** It shows only what an authority enforces. Reserve is reserved funds, not spend and not a cap on a dishonest seller's billing. The premature-stop penalty is a ceiling, and the disclosure states its collectible bound before approval: it is collectible only from the seller's earnings still held, which under the option's holds is what the deal has earned so far and not yet been paid, after refunds — in its first period only the earned setup charge, and nothing without one — so nothing earned and held means nothing taken. A filed case shows the authority's per-part `held` or `not_held` answer, never a pending refund. A setup charge is owed from approval, kept by the seller if the buyer stops, and returned only when the seller never delivered. An option whose mechanism has no lifecycle adapter, Alkahest today, is shown as making no delivery promise rather than refused for lacking one. A setup charge and a refusal to deal with churners are the seller's pricing and policy, so neither buyer asks for a minimum-spend term.
 
 **One policy, one waiver per term.** The shipped default policy, `default_buyer_refusals`, refuses an option with a lifecycle adapter that has no delivery deadline, an on-demand option with no positive penalty, and a payee stop or term end that keeps the started period; both buyers compose it over the deal-lifecycle `AuthoritySelection`, refusing before ranking, and the seller's publication diagnostic reads the same policy and wording. Each refusal has its own waiver, and one table in `buyer_terms` holds the four with their flags, help and the shorthand `--allow-unprotected-terms`, so all three commands declare the same flags; only the deadline's waiver sets the deal-lifecycle allowance for a missing deadline. A single blanket waiver was rejected because it made a caller waive four protections to pass one. The waivers in force are recorded in run metadata as `compute_term_waivers` and named, with the refusal each waives, in both pre-approval disclosures. Payment approval applies the same run's policy: both buyers hand their run's `BuyerTermsPolicy` to the payments kit's `PaymentApproval`, which refuses at approval exactly the default refusals the run did not waive. Approval reads the waivers, not the policy's authority ranking: selection ranked the dispute authority against the listing's registry, which approval cannot see, and the exact mandate check binds it to the accepted option. A resumed or recovered VM run reads its waivers from that record, the ones its selection was made under, and refuses waiver flags given to the resuming command, as it refuses a new shape or clause: a resume that could add a waiver would accept an option the run never chose under it.
 
@@ -245,12 +245,37 @@ without taking it, and `buy` exits nonzero, as `end` does for a stop the authori
 not accept. The read still shows `stopped`, meaning the watchdog journaled its stop,
 beside the lifecycle read's payment state.
 
-While end service refuses every rate deal's commit no rate deal reaches `available`,
-so the loop, its stop and its status are proven without a delivered deal; the
-delivered-deal cases — the real `buy` probing from `available`, access lost with the
-storefront stopped yielding a single buyer stop, a killed command reading
-`unmonitored` once its last probe goes stale, and a resumed run reading `monitored` —
-run once rate servicing delivers rate deals.
+**A funding stop is final, and the buyer says so.** A rate part stopped with cause
+`terms` before the Agreement's end ran out of funds: its balance could not reserve the
+next period. The buyer's `delivery` read then carries a `funding_stop` message, and a
+watchdog that exits because the deal ended by another path adds it, saying that the
+deal stopped because its balance could not reserve the next period, that a top-up
+cannot revive it, and that a new deal is needed; a deal stopped at the Agreement's end
+reached its term and carries no such message. The buyer tells exhaustion apart from the
+payment authority's record already in its read, never by asking the storefront, with
+the compute family's stop classifier, the one the storefronts use. `kit/deal-lifecycle-buyer`
+is a kit and cannot import the compute family, so `BuyerLifecycle` takes the
+classifier through a slot, `classify_payment_stop`, which each compute buyer fills with
+`arkhai_compute`'s; with no classifier the buyer reports no funding stop.
+
+**The waits run on the command's clock, the probe on the access the buyer read.** Each
+compute buyer CLI composes its watchdog through two factories, `watchdog_probe` and
+`wait_clock`. Every wait `buy` makes runs on the `WaitClock` that `wait_clock` returns:
+bare metal's commit, availability and watchdog waits, and VM's commit loop, settlement
+wait and watchdog alike. VM's `watchdog_probe` is built from its delivery's connection
+details; bare metal's from the access its caller — `buy`'s delivery-and-watch step or
+its resume — read from the storefront's access route when the monitor starts, so each
+probe then reaches the host alone and a storefront outage is never read as the host's
+loss. The library-integration tests run each compute buyer's watchdog against a
+storefront refusing connections, proving an unreachable storefront does not hold the
+stop back (`domains/vms/buyer/tests/test_watchdog_rate_stop.py`,
+`domains/bare_metal/buyer/tests/test_watchdog_rate_stop.py`). The delivered-deal
+cases — the real `buy` probing from `available`, a killed command reading
+`unmonitored` once its last probe goes stale, a resumed run reading `monitored`, and
+access lost with the storefront's loops paused yielding a single buyer stop — run in
+both compute lanes, the shipped `buy` in the harness's process with those two
+factories replaced by a programmed probe and a stepped clock
+([`TESTING.md`, "The canonical compute deal"](../../../docs/development/TESTING.md#the-canonical-compute-deal)).
 
 ## The buyer's time
 
@@ -272,6 +297,9 @@ service for the time, which in production would make a seller the buyer's clock.
 the lanes the harness generates the buyer's configuration with the `[time]` table
 and writes the file with every lane-time set
 ([lane time](../test-compatibility/architecture.md#lane-time-and-the-doubles-controls)).
+The watchdog's delivered-deal cases run the buyer in the harness's process with no
+`[time]` table, so the `market` callback installs no source and the buyer reads the
+harness's own lane-time source.
 
 ## Current limits
 

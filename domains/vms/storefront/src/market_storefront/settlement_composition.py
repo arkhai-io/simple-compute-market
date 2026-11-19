@@ -38,6 +38,7 @@ from market_alkahest import (
     require_deliverable_release_models,
 )
 from market_arkhai_payments import (
+    ClientForOwner,
     PaymentSellerStage,
     servicing_stage,
 )
@@ -100,15 +101,17 @@ class VmSettlementComposition:
     configuration_registry: SettlementConfigurationRegistry
     # Carries the seller wallet's key, so it is never part of the repr.
     mechanism_resources: Mapping[str, Any] = field(repr=False)
-    arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
     lifecycle: VmDealLifecycle | None = None
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
-    # `build_vm_settlement_composition` builds `arkhai_payments_stage` with this
-    # same declaration, so materialization admits exactly what publication and
-    # acceptance admit; a caller supplying its own stage owns that agreement.
+    # The payments stage is built with this same declaration, so materialization
+    # admits exactly what publication and acceptance admit.
     rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
+    # The payments service's client for an owner account; ``None`` builds one
+    # from the payments section.
+    payments_client_for_owner: ClientForOwner | None = field(default=None, repr=False)
+    arkhai_payments_stage: PaymentSellerStage | None = field(default=None, init=False, repr=False)
     # ``None`` installs the payments kit's helper and projection; an explicit
     # mapping, empty included, replaces them.
     rate_preset_helpers: Mapping[str, RatePresetHelper] | None = field(default=None, repr=False)
@@ -119,6 +122,13 @@ class VmSettlementComposition:
     default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
 
     def __post_init__(self) -> None:
+        # Accepted payment deals are serviced whether or not new payment options
+        # are published, so the stage follows the servicing fields, not `enabled`.
+        object.__setattr__(self, "arkhai_payments_stage", servicing_stage(
+            self.settlement_config.mechanism_config("arkhai_payments"),
+            client_for_owner=self.payments_client_for_owner,
+            rate_servicing=self.rate_servicing,
+        ))
         helpers, projections = payments_rate_wiring(self.disputes.for_publication)
         if self.rate_preset_helpers is None:
             object.__setattr__(self, "rate_preset_helpers", helpers)
@@ -593,7 +603,7 @@ async def persist_vm_settlement_outcome(
     if not isinstance(listing_id, str):
         raise TypeError("VM settlement listing input is missing")
     private = outcome.private_result if isinstance(outcome.private_result, dict) else {}
-    # A deferred delivery stays open for the fulfillment resume pass, which
+    # A deferred delivery stays open for the delivery-recovery loop, which
     # owns finishing it, so only a fulfilled or failed outcome is terminal; the
     # delivery path already recorded its own, which this leaves in place.
     if outcome.status != "deferred":
@@ -627,9 +637,9 @@ async def persist_vm_settlement_outcome(
         return
     if outcome.status == "deferred":
         # The VM exists and a step after it is pending: the escrow stays open
-        # for the fulfillment resume pass, which owns finishing it.
+        # for the delivery-recovery loop, which owns finishing it.
         logger.info(
-            "[SETTLE_JOB] Escrow %s left open for the fulfillment resume pass: %s",
+            "[SETTLE_JOB] Escrow %s left open for the delivery-recovery loop: %s",
             context.escrow_uid,
             outcome.reason,
         )
@@ -922,10 +932,6 @@ def build_vm_settlement_composition(
         persist_outcome=persist_vm_settlement_outcome,
         wake_servicing=wake_servicing,
     )
-    payments_config = settlement_config.mechanism_config("arkhai_payments")
-    # Accepted payment deals are serviced whether or not new payment options
-    # are published, so the stage follows the servicing fields, not `enabled`.
-    payments_stage = servicing_stage(payments_config, rate_servicing=settlement_config.rate_servicing)
     composition = VmSettlementComposition(
         domain=domain,
         repository=repository,
@@ -941,14 +947,14 @@ def build_vm_settlement_composition(
         disputes=disputes,
         rate_servicing=settlement_config.rate_servicing,
         default_penalty_periods=storefront_config.default_premature_stop_penalty_periods(),
-        arkhai_payments_stage=payments_stage,
-        payments_coordinator=VmPaymentsCoordinator(
-            domain=domain, db=sqlite_client, stage=payments_stage
-        )
-        if payments_stage is not None
-        else None,
     )
-    lifecycle = VmDealLifecycle(sqlite_client, marketplace_signer, composition.payments_coordinator, disputes)
-    if composition.payments_coordinator is not None:
-        composition.payments_coordinator.lifecycle = lifecycle
-    return replace(composition, lifecycle=lifecycle)
+    stage = composition.arkhai_payments_stage
+    coordinator = (
+        VmPaymentsCoordinator(domain=domain, db=sqlite_client, stage=stage) if stage is not None else None
+    )
+    lifecycle = VmDealLifecycle(sqlite_client, marketplace_signer, coordinator, disputes)
+    if coordinator is not None:
+        coordinator.lifecycle = lifecycle
+    # Replacing a composition builds its stage again, an equal one over the
+    # same section and declaration; the coordinator keeps the first.
+    return replace(composition, payments_coordinator=coordinator, lifecycle=lifecycle)

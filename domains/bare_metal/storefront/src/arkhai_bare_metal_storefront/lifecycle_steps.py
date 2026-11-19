@@ -47,6 +47,7 @@ from market_storefront_kit import (
 from pydantic_core import to_jsonable_python
 
 from .config import BareMetalConfigurationError
+from .delivery_recovery import recover_bare_metal_deliveries
 from .publication import BareMetalPublicationError
 
 if TYPE_CHECKING:
@@ -55,11 +56,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 NEGOTIATION_WATCHDOG = "negotiation_watchdog"
+#: The four loops both compute storefronts run under the same names, whatever
+#: they compose: the kit's servicing cycle, the family's delivery re-drive, the
+#: advance of accepted payment deals and the settlement worker.
+DEAL_SERVICING = "deal_servicing"
+DELIVERY_RECOVERY = "delivery_recovery"
+PAYMENT_RECONCILIATION = "payment_reconciliation"
 SETTLEMENT_SERVICING = "settlement_servicing"
 SITE_PROJECTION_POLLER = "site_projection_poller"
 PUBLICATION = "publication"
 INTRODUCTION_RETENTION = INTRODUCTION_RETENTION_LOOP
-PAYMENT_RECONCILIATION = "payment_reconciliation"
 
 #: The errors whose messages a recorded cycle outcome may carry: the
 #: storefront's own configuration and publication errors, and the capacity and
@@ -140,8 +146,9 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
 
     Publication and the site-projection poller run their first cycle as soon as
     their timers start, after startup's first projection load. The sweeps --
-    the watchdog, settlement servicing, payment reconciliation, and introduction
-    retention -- change durable deals and introductions, so their first cycle
+    the watchdog, deal servicing, delivery recovery, payment reconciliation,
+    settlement servicing, and introduction retention -- change durable deals
+    and introductions, so their first cycle
     is due one interval later, giving an operator who holds the loops as the
     storefront starts a whole interval to do so.
     """
@@ -258,51 +265,55 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
             )
         )
 
-    if runtime.payments_reconciliation_enabled():
+    async def payment_reconciliation_step() -> Mapping[str, Any]:
+        """Advance accepted payment deals a buyer has not settled; none without payments."""
+        if not runtime.payments_reconciliation_enabled():
+            return {"loop": PAYMENT_RECONCILIATION, "attempted": 0, "failed": 0}
+        done = await runtime.settlement_service().reconcile_payments_once()
+        return {"loop": PAYMENT_RECONCILIATION, "attempted": done.attempted, "failed": done.failed}
 
-        async def payment_reconciliation_step() -> Mapping[str, Any]:
-            done = await runtime.settlement_service().reconcile_payments_once()
-            return {
-                "loop": PAYMENT_RECONCILIATION,
-                "attempted": done.attempted,
-                "failed": done.failed,
-            }
-
-        composed.append(
-            _Loop(
-                PAYMENT_RECONCILIATION,
-                "payment-reconciliation",
-                payment_reconciliation_step,
-                interval_seconds=runtime.payment_reconciliation_interval_seconds,
-                initial_delay_seconds=runtime.payment_reconciliation_interval_seconds,
-            )
+    composed.append(
+        _Loop(
+            PAYMENT_RECONCILIATION,
+            "payment-reconciliation",
+            payment_reconciliation_step,
+            interval_seconds=runtime.payment_reconciliation_interval_seconds,
+            initial_delay_seconds=runtime.payment_reconciliation_interval_seconds,
         )
+    )
+
+    async def deal_servicing_step() -> Mapping[str, Any]:
+        """One page of the kit's servicing cycle over the lifecycle; its size."""
+        return {"loop": DEAL_SERVICING, "processed": await runtime.lifecycle.cycle()}
 
     async def delivery_recovery_step() -> Mapping[str, Any]:
-        return {"loop": "delivery_recovery", "processed": await runtime.lifecycle.cycle()}
+        """One pass of the family's re-drive over the unfinished deliveries."""
+        return {"loop": DELIVERY_RECOVERY, "redriven": await recover_bare_metal_deliveries(runtime)}
 
-    composed.append(_Loop(
-        "delivery_recovery", "delivery-recovery", delivery_recovery_step,
-        interval_seconds=runtime.payment_reconciliation_interval_seconds,
-        initial_delay_seconds=runtime.payment_reconciliation_interval_seconds,
-    ))
+    for name, route, step, interval in (
+        (DEAL_SERVICING, "deal-servicing", deal_servicing_step, runtime.deal_servicing_interval_seconds),
+        (DELIVERY_RECOVERY, "delivery-recovery", delivery_recovery_step,
+         runtime.delivery_recovery_interval_seconds),
+    ):
+        seconds = runtime.payment_reconciliation_interval_seconds if interval is None else interval
+        composed.append(_Loop(name, route, step, interval_seconds=seconds, initial_delay_seconds=seconds))
 
     worker = runtime.settlement_worker
-    if worker is not None:
 
-        async def settlement_servicing_step() -> Mapping[str, Any]:
-            processed = await worker.run_once()
-            return {"loop": SETTLEMENT_SERVICING, "processed": int(processed)}
+    async def settlement_servicing_step() -> Mapping[str, Any]:
+        """One sweep of the settlement worker; none without one composed."""
+        processed = await worker.run_once() if worker is not None else 0
+        return {"loop": SETTLEMENT_SERVICING, "processed": int(processed)}
 
-        composed.append(
-            _Loop(
-                SETTLEMENT_SERVICING,
-                "settlement-servicing",
-                settlement_servicing_step,
-                interval_seconds=runtime.settlement_servicing_interval_seconds,
-                initial_delay_seconds=runtime.settlement_servicing_interval_seconds,
-            )
+    composed.append(
+        _Loop(
+            SETTLEMENT_SERVICING,
+            "settlement-servicing",
+            settlement_servicing_step,
+            interval_seconds=runtime.settlement_servicing_interval_seconds,
+            initial_delay_seconds=runtime.settlement_servicing_interval_seconds,
         )
+    )
 
     retention = runtime.introduction_retention()
     if retention is not None:
@@ -362,6 +373,8 @@ def register_bare_metal_loops(runtime: BareMetalStorefrontRuntime) -> dict[str, 
 
 
 __all__ = [
+    "DEAL_SERVICING",
+    "DELIVERY_RECOVERY",
     "DISCLOSED_CYCLE_ERRORS",
     "INTRODUCTION_RETENTION",
     "NEGOTIATION_WATCHDOG",

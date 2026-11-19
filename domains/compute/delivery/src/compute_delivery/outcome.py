@@ -1,8 +1,8 @@
 """Where one ``drive`` left a deal.
 
 Six outcomes suffice: a first drive is the start of the normal path, and a
-missing deal, unreadable progress and a commit end service refuses ask the
-same of a caller, which the repair reason distinguishes. A ``repair_required`` or ``ended`` outcome names
+missing deal, unreadable progress and a refused commitment ask the same of a
+caller, which the repair reason distinguishes. A ``repair_required`` or ``ended`` outcome names
 the deal's recorded reservation and fulfillment and the authority evidence it
 rests on, so a repair or an end report is explained without re-reading the
 deal. See openspec/specs/compute-delivery/spec.md, "Delivery is driven one
@@ -26,12 +26,7 @@ class OutcomeKind(str, Enum):
 
 
 class RepairReason(str, Enum):
-    """The closed set of reasons a deal needs repair before it can go on.
-
-    ``RATE_SERVICING_UNAVAILABLE`` is end service's refusal to commit a deal it
-    could not service once delivered; the deal holds no capacity, and each drive
-    asks end service again.
-    """
+    """The closed set of reasons a deal needs repair before it can go on."""
 
     NO_ACCEPTED_DEAL = "no_accepted_deal"
     TIMING_INVALID = "timing_invalid"
@@ -39,7 +34,6 @@ class RepairReason(str, Enum):
     DOMAIN_RESULT_INVALID = "domain_result_invalid"
     ACTIVATION_UNEXPLAINED = "activation_unexplained"
     SITE_UNANSWERED = "site_unanswered"
-    RATE_SERVICING_UNAVAILABLE = "rate_servicing_unavailable"
 
 
 HookDisposition = Literal["fulfilled", "deferred", "failed"]

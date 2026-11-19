@@ -505,8 +505,8 @@ def test_a_monitored_purchase_persists_its_opt_in_and_never_watches_an_unavailab
     before approval, then waits for availability. The fake seller answers no
     delivery read, so the deal never becomes available: the command exits at its
     timeout with nothing probed and the bound never stated."""
-    probed: list[str] = []
-    monkeypatch.setattr(cli, "watchdog_probe", lambda run_id, config: probed.append(run_id))
+    probed: list[Any] = []
+    monkeypatch.setattr(cli, "watchdog_probe", lambda access: probed.append(access))
 
     bought = _purchase(
         monkeypatch, tmp_path, _Seller(), "--payment-timeout-seconds", "5",

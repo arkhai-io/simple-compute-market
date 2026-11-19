@@ -12,8 +12,8 @@ agreed, escrowed and settled through the typed clients:
   finds no capacity: delivery records the seller's failure before anything is
   dispatched and makes no reservation of its own.
 
-A re-drive is one step of VM's resume pass, the loop a restarted storefront
-runs first. Settle answers before its delivery runs, and drives it in the
+A re-drive is one step of VM's `delivery-recovery` loop, the delivery
+re-drive by which a restarted storefront resumes its unfinished deliveries. Settle answers before its delivery runs, and drives it in the
 background, so a stage waits for the delivery's own stage event or settled
 status before it measures. The storefront's loops, fulfillment convergence and
 the lease watchdog are held for the module, so every effect asserted here is
@@ -57,7 +57,7 @@ from tests.e2e.roles.scenarios.vms.lifecycle_deal import LifecyclePurchase
 
 log = logging.getLogger(__name__)
 
-RESUME = "fulfillment-resume"
+RESUME = "delivery-recovery"
 #: How far ahead the forward deal's Agreement starts: room to agree, escrow,
 #: settle and observe the deal waiting before its start arrives.
 FORWARD_LEAD = timedelta(seconds=30)
@@ -149,7 +149,7 @@ class Stage13a_ForwardDealCommittedAndWaiting:
         delivery's ``reserved`` event, which follows the drive's commit. The
         deal's one reservation is then leased under the Agreement's start and
         end; nothing is dispatched, the lease is not activated, and the buyer
-        sees no fulfillment. With the resume pass stepped before the start,
+        sees no fulfillment. With the re-drive stepped before the start,
         nothing is dispatched either.
         """
         require_state(deal_state, "lifecycle_purchase", "seller_listing_id")
@@ -211,7 +211,7 @@ class Stage13b_ForwardDealDeliveredAtItsStart:
     ):
         """Once its start is reached, a re-drive dispatches and delivers the deal.
 
-        The resume pass is stepped once the lane reaches the Agreement start:
+        The re-drive is stepped once the lane reaches the Agreement start:
         it dispatches the fulfillment on the reservation committed at
         settlement, and once the fulfillment is ready a further step activates
         the lease, inside the Agreement's window, and the deal becomes ready.
@@ -288,7 +288,7 @@ class Stage13d_SettlementFindsNoCapacity:
         Delivery cannot commit the released hold and places no reservation of
         its own, since the replacement placement finds no capacity: it records
         the end as the seller's, with nothing dispatched. The deal's only
-        reservation stays the released hold. A step of the resume pass, which
+        reservation stays the released hold. A step of the re-drive, which
         drives no ended deal, leaves all of it as it was.
         """
         require_state(deal_state, "_forward_deal_released", "seller_listing_id")

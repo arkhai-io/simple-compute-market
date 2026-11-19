@@ -1,24 +1,32 @@
-"""A VM recurring purchase through ``market buy``, refused at commit, on the mock VM lane.
+"""A VM recurring purchase through ``market buy``, delivered, on the mock VM lane.
 
 The lane's buyer, with no wallet and a default buyer's terms, buys a recurring
 on-demand option through ``market buy`` in ``arkhai.payments.v1`` against the
 lane's payments double. The lane's storefront declares rate servicing for
 ``charged`` and ``returned`` (``domains/vms/storefront/storefront.bob.lane.toml``),
-a lane fixture that lets it publish and accept the option; end service services
-no rate deal, so it refuses the commit. The module runs the shared purchase
-stages through the commit (``helpers/buyer_purchase_stages.py``) and the
-recurring purchase's stages (``helpers/recurring_purchase_stages.py``), with
-``VmRecurringPurchaseDriver`` supplying VM's part, and inserts its own:
+a lane fixture that lets it publish, accept and service the option. The module
+runs the shared purchase stages (``helpers/buyer_purchase_stages.py``), the
+canonical deal's delivery and teardown stages
+(``helpers/compute_deal_stages.py``) and the recurring purchase's stages
+(``helpers/recurring_purchase_stages.py``), with ``VmRecurringPurchaseDriver``
+supplying VM's part, and inserts its own:
 
-  03  Listing:  its resource listed with one recurring payments settlement
+  03    Listing:         its resource listed with one recurring payments settlement
+  09a2  Reconciliation:  the capacity-event loop stepped, closing the listing
 
-The buyer ends the deal by its own ``market end``, and the scenario does not wait
-for the delivery deadline. Its resource, host, pool and GPU model are its own
-(``host_registry.py``), since a listing's binding to its resource outlives the
-listing and ``market buy`` selects its listing by discovery. The storefront's
-loops, fulfillment convergence and the lease watchdog are held for the module.
-This is lane-double evidence: it proves the money a buyer is shown and approves
-for a per-period Agreement and the refused commit, never rate delivery.
+``market buy`` polls its settlement until delivery, so it runs in the
+background from ``Purchase03`` until ``Purchase09`` while the stages step
+delivery. The buyer ends the deal by its own ``market end``, which the
+storefront's servicing step carries out at the site, and the seller's list
+shows it ended once released. Every instant is reached by setting lane time,
+never by waiting, and the scenario does not wait for the delivery deadline.
+Its resource, host, pool and GPU model are its
+own (``host_registry.py``), since a listing's binding to its resource outlives
+the listing and ``market buy`` selects its listing by discovery. The
+storefront's loops, fulfillment convergence and the lease watchdog are held for
+the module. This is lane-double evidence: it proves the money a buyer is shown
+and approves for a per-period Agreement, rate delivery and the buyer's end.
+Mock delivery is never evidence of a real guest.
 """
 
 from __future__ import annotations
@@ -35,6 +43,8 @@ from tests.e2e.roles.helpers.buyer_purchase_stages import (
     Purchase01_PayerBalanceBefore,
     Purchase02_ListingDiscovered,
     Purchase03_Bought,
+    Purchase04_PurchaseCorrelated,
+    Purchase09_PurchaseRunEnded,
 )
 from tests.e2e.roles.helpers.cleanup import run_cleanup
 from tests.e2e.roles.helpers.compute_deal_stages import (
@@ -47,19 +57,33 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage00e_ProvisioningMockMode,
     Stage00f1_ExecutorHostRegistry,
     Stage00h_ProvisioningStorefrontLink,
+    Stage07a_ArmCreateGate,
+    Stage08b2_ReleaseCreateGateAndDrain,
+    Stage09a_FulfillmentConvergesToActive,
+    Stage09b_SettlementReadyAndCredentials,
+    Stage09c2_ArmTeardownGate,
+    Stage09c_LeaseRecorded,
+    Stage11a2_ReleaseTeardownGateAndDrain,
+    Stage11b_TeardownCompletion,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     Recurring04_MandateApproved,
-    Recurring05_CommitRefused,
-    Recurring06_PurchaseRunClosed,
-    Recurring07_BuyerEnds,
-    Recurring08_PayerBalanceRestored,
+    Recurring05_DeliveryRecoveredAtTheStart,
+    Recurring06_RateStartedAfterActivation,
+    Recurring07_AcceptedMoneyShown,
+    Recurring08_BuyerEnds,
+    Recurring09_PayerChargedOnePeriod,
+    Recurring10_SellerListsTheDealEnded,
     RecurringPurchaseState,
     recurring_purchase_cleanup,
 )
-from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id, capacity_source_for
+from tests.e2e.roles.scenarios.vms.conftest import (
+    capacity_site_id,
+    capacity_source_for,
+    step_listing_reconciliation,
+)
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_RECURRING_PURCHASE_HOST,
     E2E_RECURRING_PURCHASE_POOL_ID,
@@ -157,12 +181,25 @@ def deal_driver(
 
 @pytest.fixture(scope="module")
 def purchase_cleanup(purchase_cli, deal_driver: VmRecurringPurchaseDriver,
-                     deal_state: VmRecurringPurchaseState):
-    """Stop a ``market buy`` still running and end an approved deal the stages
-    did not end, by the buyer's own stop; the lane's cleanup releases the
-    module's holds."""
+                     deal_state: VmRecurringPurchaseState, provisioning_test_client):
+    """Resume a job the purchase's gates still hold, stop a ``market buy``
+    still running, end an approved deal the stages did not end, by the buyer's
+    own stop, then remove the gates' rules; the lane's cleanup releases the
+    module's holds and its reserved resources.
+
+    The gates are opened before their rules are removed, since a removed rule
+    leaves a job it holds waiting.
+    """
     yield
-    run_cleanup(recurring_purchase_cleanup(purchase_cli, deal_driver, deal_state))
+    rules = provisioning_test_client.vm_rules
+    run_cleanup([
+        ("open the purchase's mock gates", deal_driver.open_gates),
+        *recurring_purchase_cleanup(purchase_cli, deal_driver, deal_state),
+        # Deleting a rule that is already gone reports it not deleted; only a
+        # real failure raises, and it is reported like any step's.
+        ("remove the create mock rule", lambda: rules.delete_rule(deal_driver.create_rule_id)),
+        ("remove the teardown mock rule", lambda: rules.delete_rule(deal_driver.teardown_rule_id)),
+    ])
 
 
 # ===========================================================================
@@ -229,7 +266,7 @@ class TestStage03_ListingCreated:
 
 
 # ===========================================================================
-# The purchase, through its commit
+# The purchase
 # ===========================================================================
 
 class TestPurchase01_PayerBalanceBefore(Purchase01_PayerBalanceBefore):
@@ -240,29 +277,94 @@ class TestPurchase02_ListingDiscovered(Purchase02_ListingDiscovered):
     pass
 
 
+class TestStage07a_ArmCreateGate(Stage07a_ArmCreateGate):
+    pass
+
+
 class TestPurchase03_Bought(Purchase03_Bought):
     pass
 
 
-# ===========================================================================
-# The refused commit and the buyer's end
-# ===========================================================================
+class TestPurchase04_PurchaseCorrelated(Purchase04_PurchaseCorrelated):
+    pass
+
+
+class TestStage08b2_ReleaseCreateGateAndDrain(Stage08b2_ReleaseCreateGateAndDrain):
+    pass
+
 
 class TestRecurring04_MandateApproved(Recurring04_MandateApproved):
     pass
 
 
-class TestRecurring05_CommitRefused(Recurring05_CommitRefused):
+# ===========================================================================
+# Delivery
+# ===========================================================================
+
+class TestStage09a_FulfillmentConvergesToActive(Stage09a_FulfillmentConvergesToActive):
     pass
 
 
-class TestRecurring06_PurchaseRunClosed(Recurring06_PurchaseRunClosed):
+class TestStage09a2_CapacityEventCycle:
+    def test_09a2_capacity_events_dry_run_then_advance(
+        self, storefront_admin_client, deal_state: VmRecurringPurchaseState,
+    ):
+        """Step the held capacity-event loop, which closes the listing the
+        purchase's reservation leaves unsatisfiable (``step_listing_reconciliation``)."""
+        require_state(deal_state, "seller_listing_id", "provisioning_result_injected")
+        pending, applied = step_listing_reconciliation(storefront_admin_client)
+        deal_state._listing_reconciled = True
+        log.info("[09a2] Capacity events for listing %s stepped: %s pending, %s applied",
+                 deal_state.seller_listing_id, pending, applied)
+
+
+class TestRecurring05_DeliveryRecoveredAtTheStart(Recurring05_DeliveryRecoveredAtTheStart):
     pass
 
 
-class TestRecurring07_BuyerEnds(Recurring07_BuyerEnds):
+class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCredentials):
     pass
 
 
-class TestRecurring08_PayerBalanceRestored(Recurring08_PayerBalanceRestored):
+class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestRecurring06_RateStartedAfterActivation(Recurring06_RateStartedAfterActivation):
+    pass
+
+
+class TestPurchase09_PurchaseRunEnded(Purchase09_PurchaseRunEnded):
+    pass
+
+
+class TestRecurring07_AcceptedMoneyShown(Recurring07_AcceptedMoneyShown):
+    pass
+
+
+# ===========================================================================
+# The buyer's end, teardown and release
+# ===========================================================================
+
+class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
+
+
+class TestRecurring08_BuyerEnds(Recurring08_BuyerEnds):
+    pass
+
+
+class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAndDrain):
+    pass
+
+
+class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestRecurring09_PayerChargedOnePeriod(Recurring09_PayerChargedOnePeriod):
+    pass
+
+
+class TestRecurring10_SellerListsTheDealEnded(Recurring10_SellerListsTheDealEnded):
     pass

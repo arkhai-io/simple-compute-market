@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute-delivery"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "The compute family's delivery order: one path from an accepted deal to available compute, behind domain ports."
 requires-python = ">=3.12,<3.14"
@@ -11,10 +11,12 @@ dependencies = [
     # VersionedEnvelope, the fulfillment result the path reads.
     "arkhai-core>=0.5.0",
     # Delivery phases, evidence and the payment-adapter protocol.
-    "arkhai-kit-deal-lifecycle>=0.4.0",
+    "arkhai-kit-deal-lifecycle>=0.5.0",
     "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
-    # End service, admission, the end journal and seller evidence.
-    "arkhai-kit-deal-servicing>=0.3.0",
+    # End service, admission, the end journal and seller evidence: the path
+    # relies on end service asking the payment adapter for every deal and
+    # holding back an answer that changed at an unchanged revision.
+    "arkhai-kit-deal-servicing>=0.4.0",
     # CapacityEffects and the listing's durable capacity binding.
     "arkhai-kit-capacity-publication>=0.11.0",
     # The site's refusal and unauthenticated-answer errors the path classifies.

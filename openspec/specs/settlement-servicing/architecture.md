@@ -170,9 +170,10 @@ clock-injected `PaymentsAuthority` fixture cover these proofs and per-part event
 **A receipt key change drains rather than re-anchors.** The retiring pin serves the
 moment of a switch, so a fresh approval does not fail while clocks and configurations
 differ; it keeps no deal alive past the removal of its entry, and nothing re-anchors
-a running deal to the new key. Draining suffices because no deployed deal outlives
-one: the released marketplace's payment deals are once-only with a guaranteed end,
-and no rate deal is delivered while end service refuses to commit one. Removing the
+a running deal to the new key. Draining suffices because every payment deal has a
+fixed end: a once-only deal's at its term end, and a rate deal's at its rate part's
+absolute end, the Agreement's start plus its duration, which a late start never
+extends. Removing the
 retired identity at the cutover is what closes it: every snapshot must be signed by
 an identity valid at the snapshot's own claimed `observedAt`, so a retired identity
 left configured with a closed window still lets a holder of that key, were it
@@ -250,22 +251,31 @@ from the current refresh outcome. Respondent discovery signs or contests from
 retained facts and journals the answer before advancing; deal watch waits for
 that answer or confirmed closure. Original semantic filings have one durable
 writer; lost responses resolve/adopt a signed equivalent case, never a fresh
-case key. Initial missing mediation history permits the first filing only.
+case key. A dispute authority learns an Agreement from its first filing and until
+then answers a first-page read `404 invalid_request`; the mediation adapter reads that
+answer, for every read, as an accepted read of an empty record — no dispute and no
+case — so a deal nobody has filed on has its view saved and its cases observed, and a
+404 after a page was read is a failure. The authority gives a reader who is no party
+the same answer, and no published route says which account a credential
+authenticates, so that read rests on a premise the contract cannot check: that the
+credential authenticates the Agreement's party.
 Neither cached history nor an absent authority is a current successful refresh.
 
 ## Current limits
 
-The adapter starts, stops and observes rate parts, but no storefront services a
-running rate deal: end service refuses to commit one, and funding-timer
-classification, continued servicing and the consolidated rate qualification are not
-implemented. Hosted execution of every offered treatment, the dispute entry's `chosen`
-stop included, is unqualified; lane runs are lane-double evidence only. Local case
-filing/observation is not deployed rate/ruling-execution qualification. The
+Both compute storefronts deliver and service rate deals, but hosted execution of
+every offered treatment, the dispute entry's `chosen` stop included, is unqualified;
+lane runs are lane-double evidence only. Local case filing/observation is not
+deployed rate/ruling-execution qualification. A seller whose mediation credential
+authenticates another account than the Agreement's party reads every unfiled deal,
+and any case filed against it before its first accepted read, as no case, so a
+released, paid deal with a case open can list `ended`. An operator meets that
+misconfiguration as filings the authority refuses (`filer_not_party`) and an empty
+respondent listing, neither of which corrects the list. The
 Agreement pins the dispute origin/key for deal life without mid-deal rotation.
 An unresolved unanswered case holds its deal's dispute cursor. The retention
 observer and refresh-before-prune API are composed, but no production storefront
-prune trigger exists, so seller evidence is retained indefinitely. VM/bare-metal
-respondent lifetimes and term-end recovery differ as recorded in
+prune trigger exists, so seller evidence is retained indefinitely. See
 [lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
 
 Heartbeat evidence remains persisted but is not an automated adjudication

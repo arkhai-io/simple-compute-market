@@ -5,17 +5,22 @@ and the delivery path are real; each deal is an accepted Alkahest deal adopted
 by settlement verification. The site's capacity client and provisioning client
 are doubled at the clients the storefront wraps (``_CapacityClient``,
 ``_ProvisioningClient``), answering with the provisioning family's typed
-contracts. Delivery is entered as every caller enters it, through
-``BareMetalFulfillmentService.deliver`` and so core's ``fulfill_domain``.
+contracts. Delivery is entered as settlement enters it, through
+``BareMetalFulfillmentService.deliver`` and so core's ``fulfill_domain``; a
+waiting deal is re-driven by the served storefront's ``delivery-recovery``
+loop, stepped through the typed admin client.
 """
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 from core_buyer.negotiation_client import AuthenticatedHTTPError
 from core_storefront import StorefrontFulfillmentContext, StorefrontFulfillmentPorts
@@ -23,10 +28,14 @@ from loopback import serving
 from market_deal_lifecycle_contracts.models import Rejected
 from market_deal_servicing import Classification, EndSession, FinalRequest
 from market_deal_servicing.evidence import transaction
+from market_identity import TrustedIdentitySet
 from market_site_client import SiteCapacityClientError
+from storefront_client import StorefrontClient
 from test_http_settlement import (
+    ADMIN_SIGNER,
     BUYER_SIGNER,
     ESCROW_UID,
+    SELLER_SIGNER,
     _accepted_runtime,
     _app,
     _CapacityClient,
@@ -156,36 +165,115 @@ async def test_settlement_after_the_start_commits_the_agreement_window(tmp_path)
     assert runtime.capacity_client.reserve_calls[0]["lease_start_utc"] == start.isoformat()
 
 
-async def test_a_deal_that_starts_later_waits_for_its_start(tmp_path) -> None:
+async def _waiting(tmp_path):
+    """A deal committed two hours before its start, waiting; its end service's
+    clock is then set to the start."""
     start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=2)
     runtime, negotiation_id = await _verified(tmp_path, start=start)
-    provisioning = runtime.fulfillment_client
-
     waiting = await _deliver(runtime, negotiation_id)
-
     assert waiting.public_result["outcome"] == "waiting"
     assert waiting.public_result["disposition"] == "deferred"
     assert len(runtime.capacity_client.commit_calls) == 1
-    assert provisioning.begin_calls == []
+    assert runtime.fulfillment_client.begin_calls == []
     assert runtime.capacity_client.activations == []
-
-    # At the start, the lifecycle's cycle drives it and it is dispatched.
     runtime.lifecycle.end.clock = lambda: int(start.timestamp()) + 1
-    await runtime.lifecycle.cycle()
+    return runtime, negotiation_id
 
+
+@asynccontextmanager
+async def _administrator(runtime):
+    """The served storefront's administrator, its timers held for the test."""
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with StorefrontClient(
+            "http://seller", signer=ADMIN_SIGNER, caller_role="admin",
+            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+            transport=httpx.ASGITransport(app=app),
+        ) as admin:
+            await admin.admin_pause_lifecycle_loops()
+            yield admin
+
+
+async def test_a_deal_waiting_for_its_start_is_claimed_re_checked_and_driven_at_its_start(tmp_path) -> None:
+    runtime, negotiation_id = await _waiting(tmp_path)
+    provisioning = runtime.fulfillment_client
+    lock = runtime.lifecycle.lock(negotiation_id)
+    verified = runtime.escrow_verifier
+    verifications: list[int] = []
+    at_begin: list[tuple[bool, int]] = []
+
+    async def counted(**kwargs):
+        verifications.append(1)
+        return await verified(**kwargs)
+
+    begin = provisioning.begin_fulfillment
+
+    async def observed_begin(body):
+        at_begin.append((lock.locked(), len(verifications)))
+        return await begin(body)
+
+    object.__setattr__(runtime, "escrow_verifier", counted)
+    provisioning.begin_fulfillment = observed_begin
+    async with _administrator(runtime) as admin:
+        stepped = await admin.admin_run_lifecycle_cycle("delivery-recovery")
+
+    assert stepped["redriven"] == 1
+    # The escrow was read from the chain again before anything was begun —
+    # by the routine's re-check and by deliver's own gate — and the drive held
+    # the deal's lock, released after.
+    assert at_begin == [(True, 2)] and not lock.locked()
     assert len(provisioning.begin_calls) == 1
     assert len(runtime.capacity_client.reserve_calls) == 1
+    assert len(runtime.capacity_client.activations) == 1
+    assert _record(runtime, negotiation_id).available_at is not None
 
 
-async def test_an_end_recorded_while_a_deal_waits_stops_it_at_its_start(tmp_path) -> None:
-    start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=2)
-    runtime, negotiation_id = await _verified(tmp_path, start=start)
-    await _deliver(runtime, negotiation_id)
+async def test_a_deal_another_drive_holds_is_skipped(tmp_path) -> None:
+    runtime, negotiation_id = await _waiting(tmp_path)
+
+    async with _administrator(runtime) as admin:
+        async with runtime.lifecycle.lock(negotiation_id):
+            stepped = await admin.admin_run_lifecycle_cycle("delivery-recovery")
+
+    assert stepped["redriven"] == 0
+    assert runtime.fulfillment_client.begin_calls == []
+    assert _record(runtime, negotiation_id).available_at is None
+
+
+async def test_a_deal_whose_escrow_does_not_verify_is_not_driven(tmp_path, caplog) -> None:
+    runtime, negotiation_id = await _waiting(tmp_path)
+
+    async def reclaimed(**_kwargs):
+        raise ValueError("escrow does not match the accepted plan")
+
+    object.__setattr__(runtime, "escrow_verifier", reclaimed)
+    with caplog.at_level(logging.WARNING):
+        async with _administrator(runtime) as admin:
+            stepped = await admin.admin_run_lifecycle_cycle("delivery-recovery")
+
+    assert stepped["redriven"] == 0
+    assert [
+        record.getMessage() for record in caplog.records
+        if record.name == "arkhai_bare_metal_storefront.fulfillment_service"
+        and "re-check" in record.getMessage()
+    ] == [f"[DELIVERY] {negotiation_id} does not re-check for recovery: stored escrow source is invalid"]
+    assert not [record for record in caplog.records if record.name == "compute_delivery.recovery"]
+    assert runtime.fulfillment_client.begin_calls == []
+    assert runtime.capacity_client.activations == []
+    assert _record(runtime, negotiation_id).available_at is None
+
+
+async def test_an_end_recorded_while_a_deal_waits_is_never_re_driven(tmp_path) -> None:
+    """A recorded end moves the deal's physical progress off delivery, so the
+    re-drive lists it no more; its end is the servicing cycle's."""
+    runtime, negotiation_id = await _waiting(tmp_path)
     _end_recorded(runtime, negotiation_id)
+    assert _record(runtime, negotiation_id).progress == "end_recorded"
 
-    runtime.lifecycle.end.clock = lambda: int(start.timestamp()) + 1
-    await runtime.lifecycle.cycle()
+    async with _administrator(runtime) as admin:
+        stepped = await admin.admin_run_lifecycle_cycle("delivery-recovery")
 
+    assert stepped["redriven"] == 0
     assert runtime.fulfillment_client.begin_calls == []
     assert runtime.capacity_client.activations == []
     assert _record(runtime, negotiation_id).available_at is None

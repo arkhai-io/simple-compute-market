@@ -203,11 +203,13 @@ class Purchase01_PayerBalanceBefore:
     ):
         """The payer's own available balance, before the scenario's first approval.
 
-        Read with the buyer's token, as the payments service answers a balance
-        only for the caller's own account. ``Purchase05`` compares the drop
-        with the purchase's debit.
+        The payer is the run's buyer account, unless an earlier stage of the
+        scenario named another, as one that funds its own payer does. Read
+        with the payer's token, as the payments service answers a balance only
+        for the caller's own account. ``Purchase05`` compares the drop with the
+        purchase's debit.
         """
-        payer = str(payment_setting("BUYER_ACCOUNT"))
+        payer = str(deal_state.payer_account or payment_setting("BUYER_ACCOUNT"))
         with buyer_payments_client(payments_config, payer) as client:
             before = available_balances(client.get_balance(payer))
         deal_state.payer_account = payer

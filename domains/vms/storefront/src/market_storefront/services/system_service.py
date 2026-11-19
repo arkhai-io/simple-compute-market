@@ -85,6 +85,21 @@ async def _default_settlement_provider() -> list[dict[str, Any]] | None:
     return [status.safe_projection() for status in await composition.readiness()]
 
 
+async def _default_unserviceable_deals_provider() -> list[dict[str, str]] | None:
+    """Each open deal the configuration composes no adapter for, with the
+    configuration that would; ``None`` when no deal lifecycle is composed."""
+    composition = _container.resolved_settlement_composition
+    lifecycle = getattr(composition, "lifecycle", None)
+    if lifecycle is None:
+        return None
+    return unserviceable_deals(await asyncio.to_thread(lifecycle.seller.unserviceable))
+
+
+def unserviceable_deals(found: list[tuple[str, str]]) -> list[dict[str, str]]:
+    """The readiness report's entries for deals the storefront cannot service."""
+    return [{"negotiation_id": negotiation_id, "reason": reason} for negotiation_id, reason in found]
+
+
 def _default_listing_identity_carryover_provider() -> dict[str, Any]:
     """Which pre-shape listings carried a seller's close or pause, and to which
     shape-bearing successor: the listing a seller should reopen or resume."""
@@ -121,6 +136,9 @@ class SystemService:
         settlement_provider: (
             Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
         ) = None,
+        unserviceable_deals_provider: (
+            Callable[[], Awaitable[list[dict[str, str]] | None]] | None
+        ) = None,
         registry_probe_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._db = sqlite_client
@@ -150,6 +168,9 @@ class SystemService:
         )
         self._lifecycle_provider = lifecycle_provider or _default_lifecycle_provider
         self._settlement_provider = settlement_provider or _default_settlement_provider
+        self._unserviceable_deals_provider = (
+            unserviceable_deals_provider or _default_unserviceable_deals_provider
+        )
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -290,6 +311,10 @@ class SystemService:
                 result["settlement"] = await self._settlement_provider()
             except Exception:
                 result["settlement"] = None
+            try:
+                result["unserviceable_deals"] = await self._unserviceable_deals_provider()
+            except Exception:
+                result["unserviceable_deals"] = None
 
         return result
 

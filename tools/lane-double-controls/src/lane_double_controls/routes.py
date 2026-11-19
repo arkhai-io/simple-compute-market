@@ -58,13 +58,14 @@ TIME = ControlRoute("POST", "/test/time", _EVERY)
 STATUS = ControlRoute("GET", "/test/status", _EVERY)
 FUNDING = ControlRoute("POST", "/test/funding", _PAYMENTS)
 SIGNER_ROTATE = ControlRoute("POST", "/test/signer/rotate", _PAYMENTS)
+RESERVE = ControlRoute("POST", "/test/transactions/{transaction}/reserve", _PAYMENTS)
 CASE_LIST = ControlRoute("GET", "/test/cases", _MEDIATION)
 CASE_DECIDE = ControlRoute("POST", "/test/cases/{case_ref}/decide", _MEDIATION)
 CASE_CLOSE = ControlRoute("POST", "/test/cases/{case_ref}/close", _MEDIATION)
 
 ROUTES: tuple[ControlRoute, ...] = (
     RULES, RULE_LIST, RULE_DELETE, RULE_RESUME, TIME, STATUS,
-    FUNDING, SIGNER_ROTATE, CASE_LIST, CASE_DECIDE, CASE_CLOSE,
+    FUNDING, SIGNER_ROTATE, RESERVE, CASE_LIST, CASE_DECIDE, CASE_CLOSE,
 )
 
 
@@ -110,6 +111,7 @@ __all__ = [
     "ControlRoute",
     "FUNDING",
     "HEALTH_PATH",
+    "RESERVE",
     "ROUTES",
     "RULES",
     "RULE_DELETE",

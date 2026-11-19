@@ -100,6 +100,11 @@ is not scope creep. A defect fixed outside the stated
 scope is recorded where the change's reviewers will see it: in the task notes, or in
 the triage record.
 
+A change that takes on work another change owns — a task of its plan, or part of its
+design — names the move in its own proposal and in that change's row Notes in the
+change index, so the owner of the other change sees what left it and that change's
+design is reverified against what was taken.
+
 ## A change's documents are as public as its code
 
 A change's documents — its design rationale, its task notes — are as public as the

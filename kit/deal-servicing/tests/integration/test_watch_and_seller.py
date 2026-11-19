@@ -1,13 +1,22 @@
 from unittest.mock import AsyncMock, Mock
 
-from market_deal_lifecycle.adapters import InterfaceRequest
+from market_arkhai_mediation.adapter import MediationAdapter
+from market_arkhai_mediation.client import MediationClient, MediationCredential
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_arkhai_mediation.models import Filing
+from market_deal_lifecycle.adapters import DisputeAdapterTable, InterfaceRequest, PaymentAdapterTable, PaymentSelector
+from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CaseRecord, DisputeEvent, LifecycleCommand, ListDealsRequest,
-    OpenExtension, Unknown,
+    OpenExtension, PaymentEvent, PaymentPartObservation, Unknown,
 )
-from market_deal_servicing import EndSession, PhysicalResult
+from market_deal_servicing import (
+    Classification, DeliveryRecord, EndSession, FinalRequest, PhysicalResult, SellerDeal, SellerServicing,
+    SellerSession,
+)
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.watch import WatchSession
+from pydantic import SecretStr
 
 
 async def test_ruling_applies_once_before_and_after_application_with_authority_actor(rig):
@@ -120,3 +129,289 @@ async def test_seller_pages_pinned_authority_repair_and_operator_end_filing(rig)
     assert adapter.submit.await_args_list[0].args[0] == adapter.submit.await_args_list[1].args[0]
     assert (await api.read("deal")).delivery.recorded_end is not None
     assert (await api.list()).deals[0].state == "ending"
+
+
+async def test_a_deal_whose_mechanism_has_no_adapter_composed_is_repair_required_until_released(rig):
+    # The storefront installs the deal's mechanism, but its configuration
+    # composed no adapter for it.
+    api = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([]),
+        disputes=DisputeAdapterTable([(rig["authority"].interface, lambda _: rig["dispute"])]),
+        credential_available=lambda _: False, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        missing_adapters={"fixture.payment.v1": "[Settlement].fixture"},
+    )
+    reason = "repair required: fixture.payment.v1 has no lifecycle adapter; configure [Settlement].fixture"
+
+    [summary] = (await api.list()).deals
+    assert summary.state == "repair_required"
+    # It is the repair reason before the deal's missing dispute credential.
+    assert (await api.read("deal")).authority.outcome.reason == reason
+    assert api.unserviceable() == [("deal", reason)]
+    # A storefront that names the mechanism yet composes its adapter has no
+    # unserviceable deal, and lists it by its authority's state.
+    composed = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([(rig["deal"].payment, lambda _: rig["payment"])]),
+        disputes=DisputeAdapterTable([(rig["authority"].interface, lambda _: rig["dispute"])]),
+        credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        missing_adapters={"fixture.payment.v1": "[Settlement].fixture"},
+    )
+    assert composed.unserviceable() == []
+    assert (await composed.list()).deals[0].state == "running"
+    # Nor does one naming no missing configuration for the mechanism.
+    unnamed = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([]), disputes=DisputeAdapterTable([]),
+        credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+    )
+    assert unnamed.unserviceable() == []
+
+    # A deal ended and released whose dispute authority was never observed
+    # still has no case verified closed, so it stays open.
+    record_buyer_end(rig, "deal", progress="released")
+    assert api.unserviceable() == [("deal", reason)]
+
+    # Once one read of its dispute authority, showing no case, is saved, it is
+    # not open.
+    await rig["watch"]().poll()
+    assert api.unserviceable() == []
+
+
+def record_buyer_end(rig, negotiation_id, *, progress):
+    """The buyer's lawful end at 140, its resource at ``progress``."""
+    with transaction(rig["path"]) as conn:
+        end = EndSession(conn)
+        end.record_end(FinalRequest(
+            negotiation_id=negotiation_id, source_ref="buyer-end", ended_at=140, observed_at=140,
+            actor=rig["buyer"].identity, cause="buyer_surrender", source="buyer", evidence_refs=["buyer-end"],
+        ), now=150, classification=Classification(kind="buyer_surrender", evidence_refs=["buyer-end"]))
+        end.physical_progress(negotiation_id, progress)
+
+
+async def listed(rig, negotiation_id):
+    [summary] = [deal for deal in (await rig["service"]().list()).deals if deal.negotiation_id == negotiation_id]
+    return summary.state, summary.ending
+
+
+def register_rate(rig) -> SellerDeal:
+    """A committed rate deal, ``rate``, beside the rig's once-only ``deal``."""
+    rate = SellerDeal(
+        negotiation_id="rate", commitment_ref="rate-commitment", domain="fixture",
+        buyer=rig["buyer"].identity, payment=PaymentSelector("fixture.payment.v1"), dispute=rig["authority"],
+        once_only=False,
+    )
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="rate", commitment_ref="rate-commitment", seller=rig["seller"].identity,
+            start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
+        ))
+        SellerSession(conn).register(rate)
+    return rate
+
+
+async def test_a_released_rate_deal_is_ended_only_once_every_part_has_stopped(rig):
+    rate = register_rate(rig)
+    running = PaymentPartObservation(part="0", started_at=100, evidence_ref="rate-commitment:snapshot:1:140")
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[running])
+    await rig["watch"](deal=rate).poll()
+    # The buyer ended delivery at the storefront and the resource is released,
+    # while the buyer's stop has not reached the payment authority.
+    record_buyer_end(rig, "rate", progress="released")
+
+    assert await listed(rig, "rate") == ("ending", ["payment_running"])
+
+    # One part stops at the authority, the other reaches its end by now.
+    stop = PaymentEvent(
+        negotiation_id="rate", commitment_ref="rate-commitment", part="0", kind="stop", actor="payer-account",
+        at=145, cause="payer", sequence=1, authority_record_ref="rate-commitment:events:1:part:0",
+        settles_through="started_period",
+    )
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="ended", parts=[
+        running.model_copy(update={"final_stop": stop}),
+        PaymentPartObservation(part="1", started_at=100, end_at=150, evidence_ref="rate-commitment:snapshot:2:150"),
+    ])
+    await rig["watch"](deal=rate).poll()
+
+    assert await listed(rig, "rate") == ("ended", [])
+
+
+async def test_a_released_rate_deal_never_observed_at_the_payment_authority_is_ending(rig):
+    rate = register_rate(rig)
+    # The buyer ended at the storefront and the resource is released before
+    # any watch has read the payment authority, so no part's stop is verified,
+    # nor, with no read of the dispute authority, is any case verified closed.
+    record_buyer_end(rig, "rate", progress="released")
+
+    assert await listed(rig, "rate") == ("ending", ["payment_running", "case_unobserved"])
+
+    # A view that lists no part verifies no stop either.
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[])
+    await rig["watch"](deal=rate).poll()
+
+    assert await listed(rig, "rate") == ("ending", ["payment_running"])
+
+
+async def test_a_released_once_only_deal_is_ended_only_once_its_dispute_authority_is_observed(rig):
+    # A once-only deal has no rate part to stop, but it names a dispute
+    # authority, and before any read of it is saved no case is verified closed.
+    record_buyer_end(rig, "deal", progress="released")
+
+    assert await listed(rig, "deal") == ("ending", ["case_unobserved"])
+
+    # Without the authority's credential it shows repair required first.
+    rig["credentials"][0] = False
+    assert await listed(rig, "deal") == ("repair_required", [])
+    rig["credentials"][0] = True
+
+    # A failed read saves no view, so the authority is still unobserved.
+    rig["dispute"].read.return_value = AuthorityView(outcome=Unknown(reason="authority unreachable"))
+    await rig["watch"]().poll()
+
+    assert await listed(rig, "deal") == ("ending", ["case_unobserved"])
+
+    # One verified read showing no case ends it.
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted())
+    await rig["watch"]().poll()
+
+    assert await listed(rig, "deal") == ("ended", [])
+
+
+async def test_a_released_stopped_deal_nobody_filed_on_is_ended_until_a_party_files(rig):
+    # The mediation contract's peer holds no record of an Agreement nobody has
+    # filed on, and answers its first record page 404 invalid_request.
+    peer = MediationContractFake()
+    authority = DisputeAuthority.model_validate(peer.authority)
+    fixture = peer.data["filing"]["request"]
+    unfiled = SellerDeal(
+        negotiation_id="unfiled", commitment_ref=fixture["transaction"], domain="fixture",
+        buyer=rig["buyer"].identity, payment=PaymentSelector("fixture.payment.v1"), dispute=authority,
+        once_only=False,
+    )
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="unfiled", commitment_ref=fixture["transaction"], seller=rig["seller"].identity,
+            start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
+        ))
+        SellerSession(conn).register(unfiled)
+    stop = PaymentEvent(
+        negotiation_id="unfiled", commitment_ref=fixture["transaction"], part="0", kind="stop",
+        actor="payer-account", at=145, cause="payer", sequence=1,
+        authority_record_ref=fixture["transaction"] + ":events:1:part:0", settles_through="started_period",
+    )
+    payment = AsyncMock()
+    payment.read.return_value = AuthorityView(outcome=Accepted(), state="ended", parts=[PaymentPartObservation(
+        part="0", started_at=100, final_stop=stop, evidence_ref=fixture["transaction"] + ":snapshot:2:145",
+    )])
+    record_buyer_end(rig, "unfiled", progress="released")
+    # Public deterministic contract-fake credentials; never use on a public network.
+    async with MediationClient(
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=peer.transport(),
+    ) as payee, MediationClient(
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payer")),
+        transport=peer.transport(),
+    ) as payer:
+        adapter = MediationAdapter(
+            unfiled.dispute_binding, fixture["agreement"], payee, clock=lambda: rig["clock"][0],
+        )
+        service = SellerServicing(
+            rig["path"], payments=PaymentAdapterTable([(unfiled.payment, lambda _: payment)]),
+            disputes=DisputeAdapterTable([(authority.interface, lambda _: adapter)]),
+            credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        )
+
+        async def listed_unfiled():
+            [summary] = [deal for deal in (await service.list()).deals if deal.negotiation_id == "unfiled"]
+            return summary.state, summary.ending
+
+        # Before any watch, neither authority has been read.
+        assert await listed_unfiled() == ("ending", ["payment_running", "case_unobserved"])
+
+        watch = rig["watch"](deal=unfiled, payment=payment, dispute=adapter)
+        await watch.poll()
+        with transaction(rig["path"]) as conn:
+            saved = WatchSession(conn).view("unfiled", watch.dispute_record)
+        assert saved is not None and saved.outcome.status == "accepted"
+        assert saved.cases == [] and saved.disputes == []
+        assert await listed_unfiled() == ("ended", [])
+        read = await service.read("unfiled")
+        assert read.authority.outcome.status == "accepted" and read.authority.cases == []
+
+        await payer.file(Filing.model_validate({
+            "transaction": fixture["transaction"], "agreement": fixture["agreement"],
+            "request": {"kind": "effects", "effects": [{"kind": "reverse", "part": 0, "amount": "1"}]},
+            "claim": "Operator review requested.", "items": [],
+        }), idempotency_key="payer-filing")
+        await rig["watch"](deal=unfiled, payment=payment, dispute=adapter).poll()
+
+        assert await listed_unfiled() == ("ending", ["case_open"])
+
+
+async def test_a_released_deal_naming_no_dispute_authority_needs_no_dispute_read(rig):
+    plain = SellerDeal(
+        negotiation_id="plain", commitment_ref="plain-commitment", domain="fixture",
+        buyer=rig["buyer"].identity, payment=PaymentSelector("fixture.payment.v1"), once_only=True,
+    )
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="plain", commitment_ref="plain-commitment", seller=rig["seller"].identity,
+            start_at=100, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
+        ))
+        SellerSession(conn).register(plain)
+    record_buyer_end(rig, "plain", progress="released")
+
+    assert await listed(rig, "plain") == ("ended", [])
+
+
+async def test_a_released_rate_deal_still_billing_stays_unserviceable_until_its_part_stops(rig):
+    rate = register_rate(rig)
+    running = PaymentPartObservation(part="0", started_at=100, evidence_ref="rate-commitment:snapshot:1:140")
+    rig["payment"].read.return_value = AuthorityView(outcome=Accepted(), state="running", parts=[running])
+    await rig["watch"](deal=rate).poll()
+    record_buyer_end(rig, "rate", progress="released")
+    # The storefront restarts with no adapter composed for the deals' mechanism.
+    api = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([]),
+        disputes=DisputeAdapterTable([(rig["authority"].interface, lambda _: rig["dispute"])]),
+        credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        missing_adapters={"fixture.payment.v1": "[Settlement].fixture"},
+    )
+    reason = "repair required: fixture.payment.v1 has no lifecycle adapter; configure [Settlement].fixture"
+
+    # Released, but its part last showed no stop: still open, so still reported
+    # beside the once-only deal that has no end.
+    assert sorted(api.unserviceable()) == [("deal", reason), ("rate", reason)]
+
+    # A part's stop observed while its adapter was composed closes the deal.
+    stop = PaymentEvent(
+        negotiation_id="rate", commitment_ref="rate-commitment", part="0", kind="stop", actor="payer-account",
+        at=145, cause="payer", sequence=1, authority_record_ref="rate-commitment:events:1:part:0",
+        settles_through="started_period",
+    )
+    rig["payment"].read.return_value = AuthorityView(
+        outcome=Accepted(), state="ended", parts=[running.model_copy(update={"final_stop": stop})],
+    )
+    await rig["watch"](deal=rate).poll()
+
+    assert api.unserviceable() == [("deal", reason)]
+
+
+async def test_each_outstanding_condition_is_named_and_a_later_case_returns_a_deal_to_ending(rig):
+    filed = CaseRecord(case_ref="case", state="filed", record_ref="case-filed")
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted(), cases=[filed])
+    await rig["watch"]().poll()
+    record_buyer_end(rig, "deal", progress="tearing_down")
+
+    assert await listed(rig, "deal") == ("ending", ["release_pending", "case_open"])
+
+    closed = filed.model_copy(update={"state": "closed", "record_ref": "case-closed"})
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted(), cases=[closed])
+    await rig["watch"]().poll()
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).physical_progress("deal", "released")
+
+    assert await listed(rig, "deal") == ("ended", [])
+
+    later = CaseRecord(case_ref="later-case", state="filed", record_ref="later-filed")
+    rig["dispute"].read.return_value = AuthorityView(outcome=Accepted(), cases=[closed, later])
+    await rig["watch"]().poll()
+
+    assert await listed(rig, "deal") == ("ending", ["case_open"])

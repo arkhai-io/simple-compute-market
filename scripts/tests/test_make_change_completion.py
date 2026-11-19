@@ -121,7 +121,7 @@ def test_the_fragments_targets_complete(including: Path) -> None:
     assert _complete(including, "make round-", ["make", "round-"]) == [
         "round-done", "round-view", "round-view-closed"]
     assert _complete(including, "make check-ch", ["make", "check-ch"]) == [
-        "check-change", "check-change-index"]
+        "check-change", "check-change-index", "check-change-workflow-config"]
 
 
 def test_change_names_complete_on_the_fragments_targets(including: Path) -> None:

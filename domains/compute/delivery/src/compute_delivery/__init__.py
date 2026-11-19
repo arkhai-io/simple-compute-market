@@ -17,6 +17,7 @@ from .ports import (
     ReserveClaim,
     SiteFulfillment,
 )
+from .recovery import DeliveryDrive, DeliveryRecovery, recover_deliveries
 from .window import AgreementWindow, TimingInvalid, agreement_window
 
 __all__ = [
@@ -27,8 +28,10 @@ __all__ = [
     "ComputeDeliveryDomain",
     "ComputeDeliveryPath",
     "ContinuationState",
+    "DeliveryDrive",
     "DeliveryOutcome",
     "DeliveryProgress",
+    "DeliveryRecovery",
     "DeliveryStep",
     "HoldPlacement",
     "HookDisposition",
@@ -39,4 +42,5 @@ __all__ = [
     "SiteFulfillment",
     "TimingInvalid",
     "agreement_window",
+    "recover_deliveries",
 ]

@@ -358,15 +358,14 @@ def wait_clock() -> WaitClock:
     return WaitClock()
 
 
-def watchdog_probe(run_id: str, config: str | None) -> Probe:
+def watchdog_probe(access: Mapping[str, Any]) -> Probe:
     """Reachability of the host's SSH endpoint, as the storefront disclosed it.
 
-    The access is read once, when the monitor starts: each probe then reaches
-    the host alone, so a storefront outage is never read as the host's loss.
-    The probe asks only whether the endpoint accepts a connection.
+    ``access`` is the deal's access as the storefront's access route served
+    it, read once by the caller when the monitor starts: each probe then
+    reaches the host alone, so a storefront outage is never read as the host's
+    loss. The probe asks only whether the endpoint accepts a connection.
     """
-    deal, _, fulfillment = _recovered_transports(run_id, config)
-    access = fulfillment.access(deal.negotiation_id)
     host, port = access.get("host"), access.get("port")
     if not host or not port:
         raise ValueError("the storefront disclosed no SSH endpoint for the watchdog to probe")
@@ -407,7 +406,8 @@ def _deliver_and_watch(run_id: str, config: str | None, *, timeout: float, poll_
         return {"run_id": run_id, "negotiation_id": target.negotiation_id, "available": False,
                 "watchdog": "ended" if waited == "ended" else None}
     try:
-        probe = watchdog_probe(run_id, config)
+        deal, _, fulfillment = _recovered_transports(run_id, config)
+        probe = watchdog_probe(fulfillment.access(deal.negotiation_id))
     except ValueError as exc:
         typer.echo(f"Watchdog not running: {exc}; the deal is unmonitored.", err=True)
         outcome = None

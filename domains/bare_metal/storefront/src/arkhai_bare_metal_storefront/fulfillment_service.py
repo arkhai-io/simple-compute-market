@@ -3,7 +3,8 @@
 Delivery runs through the compute family's delivery path, entered only through
 core's fulfillment hook: ``fulfill_bare_metal`` builds the path from the
 caller's ports and the storefront's lifecycle, and ``deliver`` is how every
-bare-metal caller reaches it. See openspec/specs/physical-provisioning/spec.md,
+bare-metal caller reaches it, the family's re-drive of unfinished deliveries
+included (``redeliver``). See openspec/specs/physical-provisioning/spec.md,
 "Bare-metal delivery enters through the core fulfillment hook".
 """
 
@@ -179,6 +180,40 @@ class BareMetalFulfillmentService:
                 "settlement evidence conflicts with the trusted resource binding"
             )
         return evidence, delivery.terms
+
+    async def _recorded_buyer(self, negotiation_id: str) -> Identity:
+        """The buyer the deal's trusted resource binding recorded at acceptance."""
+        context = await self.db.load_bare_metal_fulfillment_context(negotiation_id=negotiation_id)
+        if context is None:
+            raise BareMetalFulfillmentError(
+                "accepted bare-metal agreement has no trusted resource binding", status_code=404,
+            )
+        return Identity(scheme=context["buyer_scheme"], identifier=context["buyer_identifier"])
+
+    async def revalidate(self, negotiation_id: str) -> bool:
+        """Whether the deal's settlement re-checks now, as ``deliver`` requires before a drive.
+
+        The evidence must be currently verified and active against its
+        authority, through the accepted entry's recovery gate, and agree with
+        the trusted resource binding, for the buyer recorded at acceptance; a
+        refusal of any of these answers ``False``.
+        """
+        try:
+            buyer = await self._recorded_buyer(negotiation_id)
+            context = await self._owned_context(negotiation_id=negotiation_id, buyer_principal=buyer)
+            await self._verified_evidence(
+                negotiation_id=negotiation_id, buyer_principal=buyer, context=context,
+            )
+        except BareMetalFulfillmentError as exc:
+            logger.warning("[DELIVERY] %s does not re-check for recovery: %s", negotiation_id, exc.detail)
+            return False
+        return True
+
+    async def redeliver(self, negotiation_id: str) -> StorefrontFulfillmentLifecycle:
+        """Drive the deal again through ``deliver``, for the buyer recorded at acceptance."""
+        return await self.deliver(
+            negotiation_id=negotiation_id, buyer_principal=await self._recorded_buyer(negotiation_id),
+        )
 
     async def deliver(
         self, *, negotiation_id: str, buyer_principal: Identity

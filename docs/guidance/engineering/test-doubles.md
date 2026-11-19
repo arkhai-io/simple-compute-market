@@ -24,6 +24,12 @@ whenever the producer revises its rules, and a test against a double proves the
 client's handling of a decision, not the decision's arithmetic, which stays the
 producer's to qualify.
 
+A producer's scheduled actions — a billing service charging a renewal on its own
+schedule, say — are decisions of the same kind: a scenario programs each through a
+control when it needs it to happen. The double stays externally programmable and
+gains no internal behaviour, such as a scheduler of its own, that a scenario could
+program instead.
+
 ## A double answers as its producer would
 
 A double's default output is what the real producer emits for the request: a

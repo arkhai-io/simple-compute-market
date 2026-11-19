@@ -417,21 +417,25 @@ def vm_delivery_path(
     """The delivery path over VM's ports, composed from the storefront's runtime.
 
     ``capacity`` is the guarded capacity effects and ``fulfillment`` the
-    per-site fulfillment client; the fulfillment client defaults to the deal
-    lifecycle's, and each is otherwise built from the storefront's runtime.
-    ``composition`` is the settlement composition, by default the one the
-    storefront resolved: its deal lifecycle supplies end service and the
-    payment-adapter table, and its stages the continuation.
+    per-site fulfillment client; each defaults to the deal lifecycle's — its
+    capacity runtime's effects and its fulfillment client — and is otherwise
+    built from the storefront's runtime. ``composition`` is the settlement
+    composition, by default the one the storefront resolved: its deal
+    lifecycle supplies end service and the payment-adapter table, and its
+    stages the continuation.
     """
     composition = composition if composition is not None else _container.resolved_settlement_composition
     lifecycle = getattr(composition, "lifecycle", None)
     if lifecycle is None:
         raise RuntimeError("VM delivery requires the storefront's deal lifecycle")
+    runtime = getattr(lifecycle, "capacity", None)
     if capacity is None:
-        capacity = _BuiltOnUse(lambda: build_capacity_runtime(lambda: db).effects())
+        capacity = runtime.effects() if runtime is not None else _BuiltOnUse(
+            lambda: build_capacity_runtime(lambda: db).effects()
+        )
     if fulfillment is None:
         fulfillment = lifecycle.fulfillment or _BuiltOnUse(
-            lambda: build_fulfillment_client(build_capacity_runtime(lambda: db).client())
+            lambda: build_fulfillment_client((runtime or build_capacity_runtime(lambda: db)).client())
         )
     site_fulfillment = VmSiteFulfillment(fulfillment)
     domain = VmDeliveryDomain(
@@ -465,8 +469,9 @@ async def read_vm_credentials(
     lifecycle = getattr(composition, "lifecycle", None)
     if lifecycle is None:
         raise RuntimeError("VM delivery requires the storefront's deal lifecycle")
+    runtime = getattr(lifecycle, "capacity", None)
     client = lifecycle.fulfillment or _BuiltOnUse(
-        lambda: build_fulfillment_client(build_capacity_runtime(lambda: db).client())
+        lambda: build_fulfillment_client((runtime or build_capacity_runtime(lambda: db)).client())
     )
     path = vm_delivery_path(db, fulfillment=client, composition=composition)
     binding = await db.load_thread_binding(negotiation_id=negotiation_id)

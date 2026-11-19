@@ -14,6 +14,7 @@ negotiation runtime.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -525,6 +526,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_contact_exchange = services.contact_exchange
         _container.resolved_introduction_delivery = services.introduction_delivery
         await services.settlement_composition.disputes.refresh(_make_registry_client)
+        await _report_unserviceable_deals(services.settlement_composition)
         announce_time_source(
             injected_time.installed(),
             payments_livemode=payments_livemode(settlement_config_mapping()),
@@ -539,6 +541,20 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
     except BaseException:
         _container.clear_lifespan_state(registry=services.registry)
         raise
+
+
+async def _report_unserviceable_deals(composition: Any) -> None:
+    """Log each open deal the configuration composes no adapter for.
+
+    The storefront starts regardless, so one mechanism's missing configuration
+    does not stop its other business; system status reports the same deals,
+    each lists repair required, and its read names the configuration.
+    """
+    lifecycle = getattr(composition, "lifecycle", None)
+    if lifecycle is None:
+        return
+    for negotiation_id, reason in await asyncio.to_thread(lifecycle.seller.unserviceable):
+        logger.warning("[STARTUP] Deal %s cannot be serviced: %s", negotiation_id, reason)
 
 
 async def _stop_vm_services(services: VmStorefrontServices) -> None:

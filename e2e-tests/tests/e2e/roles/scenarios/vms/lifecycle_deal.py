@@ -184,7 +184,7 @@ class Stage12b_BuyerSurrendersTwice:
         for name in ("negotiation_id", "operation_key", "receipt_at", "selected_end"):
             assert again[name] == first[name], (name, first, again)
         assert first["delivery"]["progress"] == "tearing_down", first
-        advance_storefront(storefront_admin_client, "settlement-servicing")
+        advance_storefront(storefront_admin_client, "deal-servicing")
         delivery = vm_lifecycle_buyer.read(purchase)
         assert delivery["progress"] == "tearing_down", delivery
         assert len(delivery["site_reports"]) == 1, delivery

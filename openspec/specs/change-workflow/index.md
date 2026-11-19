@@ -59,7 +59,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 ### Sections and sessions
 
 - [CW-5r7l](spec.md#requirement-cw-5r7l-a-section-is-a-verifiable-slice) — each section is a coherent slice ending at a verification point; `tasks.md` prescribes no session distribution; its last section, titled exactly `Closeout`, is the closeout section.
-- [CW-5h8e](spec.md#requirement-cw-5h8e-evidence-only-a-push-produces-is-owed-by-validation) — evidence only a push produces is owed by validation and never gates a task's completion.
+- [CW-5h8e](spec.md#requirement-cw-5h8e-evidence-only-a-push-produces-is-owed-by-validation) — evidence only a push produces is owed by validation, named by the evidence kind producing it, and never gates a task's completion.
 - [CW-0ia3](spec.md#requirement-cw-0ia3-an-implementation-session-starts-fresh-unless-the-owner-continues-one) — implementation starts in a fresh session unless the owner names an earlier one to continue.
 - [CW-al17](spec.md#requirement-cw-al17-the-implementation-cadence-is-settled-in-design-and-mapped-by-the-plan) — design settles the cadence of sessions and rounds; planning orders sections by it and reports the mapping.
 - [CW-v6nj](spec.md#requirement-cw-v6nj-each-round-is-recorded-as-it-starts) — each round is recorded as it starts from the plan's mapping; an unmapped round asks the owner; a round recorded while one is open continues it.
@@ -82,12 +82,19 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 - [CW-a7dw](spec.md#requirement-cw-a7dw-validation-describes-one-commit-and-modifies-nothing) — validation describes one commit, fails on a dirty worktree or moved `HEAD`, and regenerates nothing.
 - [CW-af15](spec.md#requirement-cw-af15-validation-repairs-nothing) — validation fixes nothing; a repairable condition such as a stale lock fails it back to implementation.
-- [CW-zkhs](spec.md#requirement-cw-zkhs-validations-parts-are-the-repositorys) — validation runs the parts the repository's configuration declares but those the owner waived, each part's evidence from the commit under validation alone.
-- [CW-g4oz](spec.md#requirement-cw-g4oz-validation-runs-the-parts-the-configuration-declares) — validation learns its plan from `config parts`: preflight first, every started part, then the `run` parts, each in declared order; owed parts once per owed workflow.
-- [CW-x9bt](spec.md#requirement-cw-x9bt-the-engine-keeps-a-started-parts-marker-and-closes-each-part) — the engine keeps a `start`'s last line as its collect's `{after}`, keyed by commit, part, and owed workflow, and closes each part with its own line.
-- [CW-e7lm](spec.md#requirement-cw-e7lm-validations-result-is-passed-failed-or-inconclusive) — results are `passed`, `failed` (commit-caused or unknown), or `inconclusive` (environmental missing evidence); a part the owner waived is `waived`, counted in no result, a standing waiver read from the log and lapsing at a merge.
+- [CW-zkhs](spec.md#requirement-cw-zkhs-validations-parts-are-the-repositorys) — validation assesses the evidence kinds the repository's configuration declares but those the owner waived, each kind's evidence describing the tree or commit under validation, whoever wrote it.
+- [CW-g4oz](spec.md#requirement-cw-g4oz-validation-runs-the-parts-the-configuration-declares) — the configuration declares each evidence kind with its requirement, pattern, commands, and guide; the gathering starts every started kind before the `run` kinds, each after the kind its `after` names.
+- [CW-x9bt](spec.md#requirement-cw-x9bt-the-engine-keeps-a-started-parts-marker-and-closes-each-part) — the engine keeps a `start`'s last line as its collect's `{after}`, keyed by tree or commit, kind, and owed argument, and closes each kind's gathering with its own line.
+- [CW-e7lm](spec.md#requirement-cw-e7lm-validations-result-is-passed-failed-or-inconclusive) — results are `passed`, `failed` (commit-caused or unknown), or `inconclusive` (environmental missing evidence); a kind the owner waived is `waived`, counted in no result, a standing waiver read from the log and lapsing at a merge since the kind last ran.
 - [CW-a1nz](spec.md#requirement-cw-a1nz-an-environmental-failure-goes-to-the-owner-with-its-remedy) — an environmental failure goes to the owner with its remedy, rerun on their word, every attempt kept.
 - [CW-av28](spec.md#requirement-cw-av28-a-validation-record-names-the-scenarios-that-exercise-the-change) — the validation record names the end-to-end scenarios exercising the change, with each one's basis.
+- [CW-t3ev](spec.md#requirement-cw-t3ev-evidence-describes-a-tree-or-a-commit-where-its-result-depends-on-history) — a kind's pattern holds `{tree}` or `{commit}`: tree evidence, the worktree's `git write-tree`, is reused for any commit with that tree; commit evidence describes `HEAD` alone.
+- [CW-g1gn](spec.md#requirement-cw-g1gn-what-the-workflow-writes-after-implementation-is-ignored-by-git) — whatever validation, its gathering, or a step hook writes after implementation is ignored by Git; the check refuses an evidence pattern under a directory Git does not ignore.
+- [CW-p4rs](spec.md#requirement-cw-p4rs-evidence-counts-by-its-presence) — evidence counts by being present at its kind's pattern, whoever wrote it; the workflow fetches nothing from beyond the checkout.
+- [CW-r5qk](spec.md#requirement-cw-r5qk-an-evidence-kind-is-required-always-or-when-owed) — a kind is required `always` or `owed`, once per argument a complete section's owed line names, each argument one safe path segment; a waiver names kinds.
+- [CW-e2vd](spec.md#requirement-cw-e2vd-the-engine-reports-which-required-evidence-is-present) — `evidence <change>` lists each required kind and owed argument for `HEAD`'s tree or commit as present, missing, waived, or not required, the last match in path order current.
+- [CW-a8ss](spec.md#requirement-cw-a8ss-validation-gathers-what-is-missing-and-assesses-all-of-it) — validation gathers each missing kind and assesses every kind from its guide; present failing evidence is diagnosed, never gathered again for a pass.
+- [CW-g6th](spec.md#requirement-cw-g6th-the-engine-gathers-missing-evidence-before-validations-session) — before validation's session the engine gathers what is missing and not waived; `gather --kind` makes a new attempt of a kind or one owed argument, `--lapsed` for a waived one.
 
 ### The triage of a round
 
@@ -147,13 +154,17 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Hooks
 
-- [CW-b2xr](spec.md#requirement-cw-b2xr-the-workflows-hooks-are-named-by-when-they-run) — a repository's commands are hooks named by when they run: `after-functional-change`, `pre-commit`, `pre-commit-functional`, `pre-archive`, `pre-push`, `post-clone`.
+- [CW-b2xr](spec.md#requirement-cw-b2xr-the-workflows-hooks-are-named-by-when-they-run) — a repository's commands are hooks named by when they run: `after-functional-change`, `pre-commit`, `pre-commit-functional`, `pre-archive`, `pre-push`, `post-clone`, and `before-<step>` and `after-<step>` around each step's session.
 - [CW-k9vd](spec.md#requirement-cw-k9vd-a-hook-runs-every-command-it-lists) — a hook holds a command or a list; every command runs and is recorded, the hook failing if any failed.
 - [CW-u4pc](spec.md#requirement-cw-u4pc-the-engine-holds-which-steps-may-run-each-hook) — the engine's hook table says which step may run each hook; the unattended marker names the step, and `run` refuses others.
 - [CW-y6mj](spec.md#requirement-cw-y6mj-a-pre-commit-hook-changes-nothing) — `pre-commit`, its defaults included, reports and changes nothing, so a review may run it.
 - [CW-e1sg](spec.md#requirement-cw-e1sg-a-commits-hooks-follow-from-the-paths-it-changes) — a commit touching a path outside the inert paths runs the functional hooks before `pre-commit`; a cleanup's tracked file is committed alone.
 - [CW-c8lw](spec.md#requirement-cw-c8lw-a-hooks-default-checks-run-unless-disabled-by-name) — `pre-commit`'s default checks run before its declared commands unless `defaults.disable` names one with a reason.
-- [CW-v2dq](spec.md#requirement-cw-v2dq-a-command-receives-its-values-through-placeholders) — a command takes the workflow's values as shell-quoted placeholders, each available only where it is defined; the machine's through the environment.
+- [CW-v2dq](spec.md#requirement-cw-v2dq-a-command-receives-its-values-through-placeholders) — a command takes the workflow's values as shell-quoted placeholders, `{tree}`, `{commit}`, `{kind}`, and `{inputs}` among them, each available only where it is defined; the machine's through the environment.
+- [CW-h3ks](spec.md#requirement-cw-h3ks-each-step-has-a-hook-before-and-after-it) — a repository may declare `before-<step>` and `after-<step>`, with no defaults; a review's runner runs a review's, and an interactive review runs none.
+- [CW-b7fl](spec.md#requirement-cw-b7fl-a-failing-hook-before-a-step-informs-its-session) — a failing `before-` hook never prevents its step's session, which reads the failure from its inputs; a hook the check refuses refuses the step.
+- [CW-a4fl](spec.md#requirement-cw-a4fl-a-failing-hook-after-a-step-resumes-its-session-once) — an `after-` hook runs after a finished outcome; on failure the session resumes once, then the run ends as a question; a failing `after-review` goes to the owner at once.
+- [CW-i9np](spec.md#requirement-cw-i9np-a-runs-inputs-reach-its-session-through-a-directory) — each run has an inputs directory, `{inputs}` to its hooks and named on its log line, holding `status.md`, hook logs, and messages the session reads in full.
 
 ### The orchestrating session
 
@@ -181,7 +192,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-k5mk](spec.md#requirement-cw-k5mk-a-runs-denials-come-from-its-own-record) — every unattended outcome carries the run's own recorded denials across all turns, with the harness's reasons.
 - [CW-xgq3](spec.md#requirement-cw-xgq3-a-question-resumes-its-session-and-a-return-waits-for-the-owner) — a question resumes its session; a proposed return changes nothing until the owner's logged confirmation.
 - [CW-ht4h](spec.md#requirement-cw-ht4h-a-decision-names-the-run-it-resolves-and-a-direction-is-the-owners) — a decision names exactly the run it resolves or reads; a decision directing a step is the owner's.
-- [CW-q5fy](spec.md#requirement-cw-q5fy-each-runs-log-line-records-what-it-invoked) — a run's log line records as `invoked` each hook, part, and command run through `run` or the guarded push, with its exit status and timing.
+- [CW-q5fy](spec.md#requirement-cw-q5fy-each-runs-log-line-records-what-it-invoked) — a run's log line records as `invoked` each hook, kind, and command the run or its gathering ran through the engine, with its exit status and timing, and names the run's inputs directory.
 
 ### Interactive runs
 
@@ -276,12 +287,13 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-rf50](spec.md#requirement-cw-rf50-copying-a-changes-history-overwrites-nothing) — the history copy is repeatable, extends prefix files, and refuses to overwrite a differing file.
 - [CW-c3he](spec.md#requirement-cw-c3he-a-step-looks-for-records-in-its-checkout-then-in-the-workspace) — a step looks for other changes' records in its own checkout, then in the owner's workspace.
 - [CW-xx5f](spec.md#requirement-cw-xx5f-a-clone-is-removed-only-once-its-work-is-safe) — a clone is removed only on the owner's command, once its records are copied and its work is merged into its landing branch on its upstream's remote.
-- [CW-ikmm](spec.md#requirement-cw-ikmm-archive-cleanup-removes-a-changes-validation-resources) — archive cleanup runs every part's declared `cleanup` through `run cleanup`, each succeeding when it finds nothing.
+- [CW-ikmm](spec.md#requirement-cw-ikmm-archive-cleanup-removes-a-changes-validation-resources) — before archive cleanup's session the engine runs every kind's declared `cleanup`, which `run cleanup` runs again, each succeeding when it finds nothing; a tracked file one writes is committed alone.
 
 ### Skills from one source
 
 - [CW-d8de](spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness) — each skill has one source every harness loads; no per-harness copies, and every harness entry resolves.
 - [CW-s7rq](spec.md#requirement-cw-s7rq-a-skill-restates-guidance-no-stricter-than-its-source) — a skill restates guidance briefly where its step applies it, citing it and never stricter; a stricter need amends the guidance.
+- [CW-n8tr](spec.md#requirement-cw-n8tr-the-workflows-skills-name-no-repositorys-targets-or-paths) — a target or path a workflow skill names is the workflow's own or an owned exemption, or a test fails naming the skill.
 
 ## 5. The public surface
 
@@ -303,8 +315,12 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-n7ra](spec.md#requirement-cw-n7ra-the-repositorys-inert-paths) — the repository's inert paths name what validation would prove nothing about; with none declared, `openspec/` and every Markdown file, and an empty declaration makes none inert.
 - [CW-l7hn](spec.md#requirement-cw-l7hn-a-steps-documents-to-load-come-from-the-configuration) — a step loads `load.common` and `load.<step>` through `config load`, an entry ending in `/` expanding to its Markdown files and refused when it yields none; the post-compaction hook re-reads `load.common`.
 - [CW-i2we](spec.md#requirement-cw-i2we-the-openspec-cli-runs-through-the-configured-command) — the OpenSpec validation and archive run through `openspec.command`, or `openspec` on the path.
-- [CW-o6kc](spec.md#requirement-cw-o6kc-the-configurations-resolution-is-listed) — `config` lists how every field resolved, and `config parts` validation's plan, each with `--json`.
+- [CW-o6kc](spec.md#requirement-cw-o6kc-the-configurations-resolution-is-listed) — `config` lists how every field resolved, each evidence kind's guide among them, and `config --json` the same as structured output.
 - [CW-z5me](spec.md#requirement-cw-z5me-no-step-edits-the-configuration) — no unattended step edits the configuration; it changes only as a tracked edit by the owner, or by the orchestrating session on the owner's word.
+- [CW-d1nj](spec.md#requirement-cw-d1nj-a-repository-injects-into-the-workflow-through-its-configuration-and-its-guides) — the configuration holds every value the engine reads and the guides what an agent is told; a skill learns a shared value from the engine's output.
+- [CW-g2rs](spec.md#requirement-cw-g2rs-a-guide-restates-nothing-the-configuration-holds) — an evidence kind's guide restates none of its configuration entry, held by review.
+- [CW-k7gd](spec.md#requirement-cw-k7gd-an-evidence-kind-has-a-guide-the-steps-read) — each kind names a non-empty guide the steps handling it read; a kind without one is refused by every reader.
+- [CW-c5nt](spec.md#requirement-cw-c5nt-a-skill-names-a-contradiction-it-notices-and-follows-its-own-text) — a guide or message may add to or narrow a skill; a skill names a contradiction it notices and follows its own text.
 
 ### The repository's guidance
 
@@ -317,7 +333,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### What an adopting repository provides
 
-- [CW-m4ps](spec.md#requirement-cw-m4ps-an-adopting-repository-provides-the-workflows-roles) — the workflow describes each configuration field and each role outside it; a test fails on a named target or path both the statement and the configuration omit.
+- [CW-m4ps](spec.md#requirement-cw-m4ps-an-adopting-repository-provides-the-workflows-roles) — the workflow describes each configuration field and each role outside it; a test fails on a target or path the step table or make fragment names that both the statement and the configuration omit.
 
 ## Retired ids
 

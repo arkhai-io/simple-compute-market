@@ -40,7 +40,10 @@ The accepted Agreement supplies payee rights and affected rate parts; today's
 listing supplies neither. An accepted outcome contains verified controlling
 stop records with the authority's effective time. Unknown remains unknown until
 read/retry resolves it. Read exposes those records in `authority.parts`, and
-seller list exposes the same per-part observations in each summary.
+seller list exposes the same per-part observations in each summary. A listed
+deal that is `ending` names each outstanding condition in `ending`, and its
+`ending_reasons` pairs each code with the text the lifecycle contracts carry,
+so a caller renders that text rather than interpreting the codes.
 
 Both compute storefronts expose `deals preempt NEGOTIATION_ID --operation-key KEY
 [--at UNIX_SECOND] [--storefront-url URL]` using their existing administrator

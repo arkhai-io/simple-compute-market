@@ -87,6 +87,9 @@ class BareMetalHealthResponse(BaseModel):
     # Each composed settlement mechanism's readiness as its registration
     # projects it, each blocker with its kind; on status.
     settlement: list[dict[str, object]] | None = None
+    # Each open deal the configuration composes no adapter for, with the
+    # configuration that would; on status.
+    unserviceable_deals: list[dict[str, str]] | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):

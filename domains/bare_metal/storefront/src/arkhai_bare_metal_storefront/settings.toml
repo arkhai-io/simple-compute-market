@@ -32,6 +32,10 @@ negotiation_watchdog_interval = 60
 settlement_servicing_interval_seconds = 30
 # How often accepted payment deals are reconciled, while payments are configured.
 payment_reconciliation_interval = 30
+# The kit's servicing cycle (deal-servicing) and the delivery re-drive
+# (delivery-recovery) run at payment_reconciliation_interval unless
+# deal_servicing_interval_seconds or delivery_recovery_interval_seconds states
+# that loop's own.
 
 # Marketplace identity (public). Signing material is supplied only through
 # the ARKHAI_IDENTITY_CREDENTIAL secret environment variable.

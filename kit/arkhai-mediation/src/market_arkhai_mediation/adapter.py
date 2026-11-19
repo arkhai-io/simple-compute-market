@@ -253,7 +253,7 @@ class MediationAdapter:
                     "commitment": self.binding.commitment_ref, "agreement": self.agreement_digest,
                     "authority": self.binding.authority.model_dump(mode="json"),
                 })).hexdigest()
-                view = await self._read(unregistered_for_filing=True)
+                view = await self.read()
                 if not isinstance(view.outcome, Accepted):
                     return view.outcome
                 originals = [event for event in view.disputes if event.kind == "filed" and
@@ -318,18 +318,16 @@ class MediationAdapter:
         )
 
     async def read(self) -> AuthorityView:
-        return await self._read()
-
-    async def _read(self, *, unregistered_for_filing: bool = False) -> AuthorityView:
         after = 0
+        pages = 0
         try:
-            after = 0
-            events = []
+            events: list[DisputeEvent] = []
             cases: dict[str, CaseRecord] = {}
             while True:
                 page = await self.client.read_record(ReadAfter.model_validate({
                     "agreement": self.agreement_digest, "after": after, "limit": 1000,
                 }), transaction=self.binding.commitment_ref)
+                pages += 1
                 for signed in page.entries:
                     entry = wire(signed)["entry"]
                     case = entry["case_ref"]
@@ -347,11 +345,16 @@ class MediationAdapter:
             # not a claim that a finite extension is still open.
             return AuthorityView(outcome=Accepted(), disputes=events, cases=list(cases.values()))
         except (RecordVerificationError, SchemaValidationError, ValidationError, MediationError, ValueError) as exc:
-            # The authority learns the Agreement from its first filing. A missing
-            # initial record may permit that write, not prove an empty history
-            # to watches or acknowledge a case without its signed filed entry.
-            if (unregistered_for_filing and after == 0 and not events
-                    and isinstance(exc, MediationAPIError)
+            # The authority learns an Agreement from its first filing and answers
+            # a first-page read of one nobody has filed on 404 invalid_request: an
+            # empty record, no dispute and no case. It gives a reader who is no
+            # party the same answer, and no published route says which account a
+            # token authenticates, so this read rests on the credential
+            # authenticating the Agreement's party, a premise the contract cannot
+            # check. Under a credential for another account every unfiled deal,
+            # and any case filed before the first accepted read, reads as none.
+            # A 404 after a page was read is a failure.
+            if (pages == 0 and isinstance(exc, MediationAPIError)
                     and exc.status == 404 and exc.code == "invalid_request"):
                 return AuthorityView(outcome=Accepted())
             if isinstance(exc, MediationError):

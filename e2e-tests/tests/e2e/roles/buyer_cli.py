@@ -5,6 +5,15 @@ on their own machine to negotiate, escrow, settle, and poll. Tests
 that want to verify cross-machine behavior should drive that same
 binary as a subprocess, not call ``SyncStorefrontClient`` directly.
 
+The buyer watchdog's delivered-deal cases are the one exception: they run the
+shipped ``buy``, its resume and the buyer's read in the harness's own process
+(``helpers/in_process_buyer.py``). Lane provisioning is mocked, so the endpoint
+a deal discloses reaches no machine, and the watchdog paces its probes on a
+monotonic clock no lane control moves; so the harness replaces each buyer CLI's
+probe and wait-clock factories with a probe it programs and a clock it steps,
+the mock layer a service gets from its doubles, applied in the harness's
+process so nothing test-only ships with the CLI.
+
 This fixture spawns the buyer's installed ``market`` CLI against a
 hermetic XDG state/config dir, exposes helpers to wait on run-log
 events emitted by the CLI, and parses the JSONL for assertions.
@@ -309,6 +318,17 @@ class BuyerCli:
     def run_dir(self) -> Path:
         return self.state_dir / "arkhai" / "buy-runs"
 
+    def environment(self) -> dict[str, str]:
+        """The variables the buyer runs under: its XDG directories, ``HOME`` and
+        its credentials."""
+        return {
+            "XDG_STATE_HOME": str(self.state_dir),
+            "XDG_CONFIG_HOME": str(self.config_path.parent.parent),
+            "XDG_DATA_HOME": str(self.data_dir),
+            **self.credential_env,
+            "HOME": str(self.home_dir),
+        }
+
     def _resolve_run_id_from_args(self, args: Iterable[str]) -> Optional[str]:
         return run_id_from_args(args)
 
@@ -337,12 +357,7 @@ class BuyerCli:
             p.stem for p in self.run_dir.glob("*.jsonl")
         ) if self.run_dir.exists() else frozenset()
 
-        env = dict(os.environ)
-        env["XDG_STATE_HOME"] = str(self.state_dir)
-        env["XDG_CONFIG_HOME"] = str(self.config_path.parent.parent)
-        env["XDG_DATA_HOME"] = str(self.data_dir)
-        env.update(self.credential_env)
-        env["HOME"] = str(self.home_dir)
+        env = {**os.environ, **self.environment()}
 
         cmd = [str(self.binary), "--config", str(self.config_path), *args_list]
         log.info("[buyer_cli] %s", " ".join(cmd))
@@ -442,6 +457,7 @@ def create_profiled_buyer_cli(
     toml_sections: Iterable[str] = (),
     credential_variable: str | None = None,
     credential_environment: Mapping[str, str] | None = None,
+    lane_time_file: bool = True,
 ) -> BuyerCli:
     """Create one hermetic buyer over the shared profile/config boundary.
 
@@ -451,6 +467,11 @@ def create_profiled_buyer_cli(
     owns the persistent profile, exact credential reference, XDG directories,
     and registry list without assuming a VM wallet, listing shape, provisioning
     service, result carrier, or teardown mechanism.
+
+    In an injected run the configuration's ``[time]`` table names the lane's
+    buyer time file. A buyer run in the harness's own process takes
+    ``lane_time_file=False``: with no table its ``market`` callback installs no
+    source, so it reads the harness's installed lane-time source.
     """
     if not marketplace_credential:
         raise ValueError(f"{domain_identity} marketplace credential is missing")
@@ -507,7 +528,7 @@ def create_profiled_buyer_cli(
         "urls = [" + ", ".join(_toml_quote(url) for url in registry_urls) + "]",
         "",
         *_registry_authority_sections(registry_urls, registry_authorities),
-        *_time_section(buyer_time_file(lane_time_settings(settings))),
+        *(_time_section(buyer_time_file(lane_time_settings(settings))) if lane_time_file else ()),
         *tuple(toml_sections),
     ]
     config_path = config_dir / "buyer.toml"

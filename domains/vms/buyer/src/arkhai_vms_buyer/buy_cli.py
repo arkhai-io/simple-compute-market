@@ -25,7 +25,6 @@ from .evidence import evidence_store
 
 import json
 import os
-import time
 from typing import Any
 
 import injected_time
@@ -70,6 +69,7 @@ from .buy_orchestrator import (
     query_registry_for_matches_multi,
     run_buy,
 )
+from .arkhai_payments import sync_sleep
 from .buyer_client import ResumeState, negotiate_with_seller
 from . import end_cli
 from .cli_helpers import (
@@ -161,7 +161,8 @@ def watchdog_probe(connection_details: Any) -> Probe:
 
 
 def wait_clock() -> WaitClock:
-    """The clock the watchdog's probes and waits run on."""
+    """The clock ``buy``'s waits run on: a payment's commit, its settlement wait
+    and the watchdog's probes."""
     return WaitClock()
 
 
@@ -175,8 +176,12 @@ def settle_resumption() -> Any:
     return run_settle_from_log
 
 
-def _watch(run_id: str, negotiation_id: str | None, connection_details: Any, console: Console) -> None:
-    """Run the watchdog over a delivered run's deal when the deal opted in.
+def _watch(
+    run_id: str, negotiation_id: str | None, connection_details: Any, console: Console,
+    clock: WaitClock,
+) -> None:
+    """Run the watchdog over a delivered run's deal when the deal opted in, on
+    ``clock``, the clock the run's settlement waited on.
 
     A deal that never opted in opens nothing: its run is not read again.
     """
@@ -188,7 +193,7 @@ def _watch(run_id: str, negotiation_id: str | None, connection_details: Any, con
     except ValueError as exc:
         console.print(f"[yellow]Watchdog not running:[/yellow] {exc}; the deal is unmonitored.")
         return
-    _exit_on_refused_stop(run_monitor(target, probe=probe, clock=wait_clock()))
+    _exit_on_refused_stop(run_monitor(target, probe=probe, clock=clock))
 
 
 def _exit_on_refused_stop(outcome: WatchdogOutcome | None) -> None:
@@ -431,17 +436,19 @@ def _run_resume_from(
         )
     if _carry_journaled_stop(from_run, signer):
         return
+    clock = wait_clock()
     final = settle_resumption()(
         run_id=from_run,
         poll_interval=poll_interval,
         settlement_timeout=settlement_timeout,
         console=console,
         identity=identity,
+        clock=clock,
     )
     # The settled deal re-enters the watchdog it opted into before a restart.
     final = final or {}
     negotiation_id = final.get("negotiation_id") or run_negotiation_id(from_run, signer)
-    _watch(from_run, negotiation_id, final.get("connection_details"), console)
+    _watch(from_run, negotiation_id, final.get("connection_details"), console, clock)
 
 
 def register(app: typer.Typer) -> None:
@@ -1026,14 +1033,16 @@ def register(app: typer.Typer) -> None:
             capture=evidence_store().capture,
             waivers=waivers,
         )
+        clock = wait_clock()
         settle_hook = make_legacy_settle_hook(
             config=config,
             provision=provision,
             confirm_settlement=confirm_settlement_cb,
             settlement_poll_interval=poll_interval,
             settlement_total_timeout=settlement_timeout,
-            sleep=time.sleep,
+            sleep=sync_sleep(clock),
             settlement_policy=settlement_policy,
+            clock=clock,
         )
         try:
             result = buy_orchestration()(
@@ -1085,7 +1094,7 @@ def register(app: typer.Typer) -> None:
                 console.print(f"connect  {details.connect}")
             if result.status != "ready":
                 raise typer.Exit(4)
-            _watch(run_log.run_id, result.negotiation_id, result.connection_details, console)
+            _watch(run_log.run_id, result.negotiation_id, result.connection_details, console, clock)
             return
         tbl = Table.grid(padding=(0, 2))
         tbl.add_column(style="bold")
@@ -1137,6 +1146,6 @@ def register(app: typer.Typer) -> None:
 
         if result.status != "ready":
             raise typer.Exit(4)
-        _watch(run_log.run_id, result.negotiation_id, result.connection_details, console)
+        _watch(run_log.run_id, result.negotiation_id, result.connection_details, console, clock)
 
     register_policy_verb(app, "buy", buy, _policy)

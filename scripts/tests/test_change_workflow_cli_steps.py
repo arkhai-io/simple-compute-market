@@ -21,7 +21,7 @@ from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.running import live_runs, recorded_run, select_run, signal_run, stop
 from change_workflow_fixtures import (ACCEPTING, CHANGE, COMMIT, DENIALS, HEAD, LANDED, VALID,
                                       FakeClaude, configured, event_lines, log_file,
-                                      make_wrapper, option, option_rules, repository,
+                                      make_wrapper, option, option_rules, prompted, repository,
                                       review_text)
 
 
@@ -353,7 +353,8 @@ def test_implementation_is_given_its_sections(tmp_path: Path) -> None:
     assert main(["start", "implement", CHANGE, "--sections", "1-3", "--unattended"],
                 root=tmp_path, wrapper=make_wrapper(tmp_path, claude)) == 0
 
-    assert claude.commands[0][2] == f"/change-implement {CHANGE} sections 1-3"
+    assert claude.commands[0][2] == prompted(f"/change-implement {CHANGE} sections 1-3",
+                                             "implement")
     assert read_log(log_path(tmp_path, CHANGE))[-1]["sections"] == [1, 2, 3]
 
 
@@ -370,7 +371,8 @@ def test_the_command_continues_a_named_implementation_session(
     assert main(["start", "implement", CHANGE, "--session", "other", "--unattended"],
                 root=tmp_path, wrapper=wrapper) == 1
 
-    assert claude.commands[1][2] == f"/change-implement {CHANGE} section 8B"
+    assert claude.commands[1][2] == prompted(f"/change-implement {CHANGE} section 8B",
+                                             "implement", 2)
     assert option(claude.commands[1], "--resume") == "i-1"
     first, continued = [entry for entry in read_log(log_path(tmp_path, CHANGE))
                         if entry["step"] == "implement"]

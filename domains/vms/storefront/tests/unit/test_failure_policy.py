@@ -15,7 +15,7 @@ from market_storefront.failure_actions import (
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fake_site import FakeProjectionSite, site_projection_state
+from tests.fake_site import FakeProjectionSite, FakeSite, capacity_runtime_over, site_projection_state
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x51" * 32).identity
 BUYER_EVM_ADDRESS = "0x" + "bb" * 20
@@ -116,6 +116,44 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(
     assert reservation["state"] == "released"
     assert reservation["failure_reason"] == "provisioning_error"
     assert fake._available("gpu-host-1") == 2
+
+
+@pytest.mark.asyncio
+async def test_the_release_uses_the_deal_lifecycles_capacity_runtime(tmp_path, monkeypatch):
+    """With no capacity passed, an uncommitted hold is released through the
+    capacity runtime the storefront's deal lifecycle was given."""
+    migrate_storefront_database(tmp_path / "failure-policy.db")
+    db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    fake = FakeSite(deliverable_modes={"vm"})
+    fake.add_resource("gpu-host-1", 2, attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"})
+    binding = PublicationBinding("site-test", "vm", "pool-test", BACKED)
+    capacity = capacity_runtime_over(fake, site_name=binding.site_id)
+
+    async def resolve_capacity_binding(repository, listing_id):
+        return binding
+
+    def configured_sites_runtime(_):
+        raise AssertionError("the configured sites' runtime was built")
+
+    monkeypatch.setattr("market_storefront.failure_actions.capacity_binding_for_listing", resolve_capacity_binding)
+    monkeypatch.setattr("market_storefront.failure_actions._configured_failure_actions_source", lambda: ["release_capacity"])
+    monkeypatch.setattr("market_storefront.failure_actions.build_capacity_runtime", configured_sites_runtime)
+    monkeypatch.setattr(
+        "market_storefront.container.resolved_settlement_composition",
+        SimpleNamespace(lifecycle=SimpleNamespace(db=db, capacity=capacity)),
+    )
+    reserved = await capacity.reserve(
+        binding, claim={"offering_mode": "vm", "resource_id": "gpu-host-1", "gpu_count": 1},
+        deal_ref={"listing_id": "listing-1x", "escrow_uid": "escrow-1"},
+    )
+
+    result = await apply_fulfillment_failure_policy(db, FulfillmentFailureContext(
+        listing_id="listing-1x", capacity_reservation_id=reserved["capacity_reservation_id"],
+        escrow_uid="escrow-1", reason="provisioning_error", message="host rejected request", source="test",
+    ))
+
+    assert result.state == "released"
+    assert fake.reservations[reserved["capacity_reservation_id"]]["state"] == "released"
 
 
 @pytest.mark.asyncio

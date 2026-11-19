@@ -33,6 +33,12 @@ def test_a_path_parameter_is_escaped() -> None:
     assert routes.RULE_DELETE.url(rule_id="a/b c") == "/test/rules/a%2Fb%20c"
 
 
+def test_the_reservation_route_is_the_payments_partys_alone_and_names_its_transaction() -> None:
+    assert routes.RESERVE.parties == frozenset({"payments"})
+    assert (routes.RESERVE.method, routes.RESERVE.url(transaction="ab" * 32)) == (
+        "POST", f"/test/transactions/{'ab' * 32}/reserve")
+
+
 def test_a_route_refuses_parameters_it_does_not_take() -> None:
     with pytest.raises(ValueError):
         routes.RULE_DELETE.url()
@@ -45,7 +51,7 @@ def test_each_party_serves_its_own_controls() -> None:
     mediation = set(routes.routes_for("mediation", time_settable=True))
     sample_app = set(routes.routes_for("sample-app", time_settable=True))
 
-    assert {routes.FUNDING, routes.SIGNER_ROTATE} <= payments - mediation
+    assert {routes.FUNDING, routes.SIGNER_ROTATE, routes.RESERVE} <= payments - mediation
     assert {routes.CASE_LIST, routes.CASE_DECIDE, routes.CASE_CLOSE,
             routes.RULE_RESUME} <= mediation - payments
     assert {routes.RULES, routes.RULE_LIST, routes.RULE_DELETE, routes.TIME,

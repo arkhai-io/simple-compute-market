@@ -11,12 +11,14 @@ records as it ends. ``VmPurchaseDriver`` is the lane's, over
 ``arkhai.payments.v1`` settlement. The lease view is the canonical deal's,
 which finds a VM hold by its negotiation whatever the settlement mechanism.
 ``VmRecurringPurchaseDriver`` is the lane's recurring purchase, whose listing's
-one settlement is a recurring on-demand option.
+one settlement is a recurring option, on-demand or spot, and
+``VmRateWatchdogDriver`` that purchase opting into the buyer's watchdog.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,7 @@ from tests.e2e.roles.helpers.payments import (
     payment_config_toml,
     payment_setting,
 )
+from tests.e2e.roles.helpers.rate_watchdog_stages import WATCHDOG_OPT_IN
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
     check_recurring_option,
     recurring_settlement,
@@ -63,12 +66,16 @@ SETTLEMENT_TIMEOUT_SECONDS = 300
 SETTLEMENT_POLL_SECONDS = 1.0
 
 
-def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
+def vm_purchase_cli(payments_config: Any, binary: Any, base: Path, *,
+                    payer: str | None = None, lane_time_file: bool = True) -> BuyerCli:
     """The run's VM buyer (``BUYER``), profiled under ``base`` with no wallet,
-    buying through Arkhai payments alone, with its dispute credential for the
-    run's mediation target when the run names one. Each profile keeps its own
-    run logs, so a purchase's compensation finds that purchase alone."""
+    buying through Arkhai payments alone from ``payer``, the run's buyer account
+    unless named, with its dispute credential for the run's mediation target
+    when the run names one. Each profile keeps its own run logs, so a
+    purchase's compensation finds that purchase alone. A buyer run in the
+    harness's process names no lane time file (``create_profiled_buyer_cli``)."""
     mediation = mediation_if_configured()
+    payer = payer or str(payment_setting("BUYER_ACCOUNT"))
     registry_url = str(settings.REGISTRY.API_URL or "").rstrip("/")
     assert registry_url, "REGISTRY.API_URL is required for the purchase's discovery"
     scheme = str(settings.BUYER.get("marketplace_scheme", "eip191") or "eip191")
@@ -76,7 +83,7 @@ def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
     assert credential, "BUYER.MARKETPLACE_CREDENTIAL is required for the purchase's buyer"
     sections = (
         "[vms]",
-        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
+        f"payer_account = {_toml_quote(payer)}",
         "",
         # Only the configured, enabled mechanism is selectable, so the buyer
         # can settle this purchase no other way.
@@ -103,10 +110,11 @@ def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
             }],
         }},
         credential_environment={
-            **buyer_payments_environment(payments_config),
+            **buyer_payments_environment(payments_config, payer),
             **buyer_mediation_environment(mediation),
         },
         toml_sections=sections,
+        lane_time_file=lane_time_file,
     )
 
 
@@ -253,51 +261,35 @@ class VmPurchaseDriver(VmPurchaseParts, VmComputeDealDriver):
         assert status.fulfillment_id == deal_state.fulfillment_id, status
 
 
-#: How long ``market buy`` is given to read its settlement once after its commit.
-FIRST_SETTLEMENT_POLL_SECONDS = 30.0
-
-
 @dataclass(kw_only=True)
 class VmRecurringPurchaseDriver(VmPurchaseDriver):
     """VM's ``RecurringPurchaseDriver``, for the lane's purchase of a recurring
-    on-demand option through ``market buy``, which end service refuses to
-    commit."""
+    on-demand option through ``market buy``."""
 
-    #: The storefront loop that watches its committed deals' payments.
-    servicing_loop = "settlement-servicing"
+    #: The storefront loop whose servicing cycle reads its committed deals'
+    #: payments and carries out their recorded ends at the site.
+    servicing_loop = "deal-servicing"
+    #: The seller's notice a spot option states; none for on-demand.
+    payee_notice_seconds: int | None = None
 
     def listing_settlement(self) -> dict[str, Any]:
-        """The listing's one settlement: a recurring on-demand option, paid
-        through Arkhai payments to the lane's seller account."""
+        """The listing's one settlement: a recurring option, on-demand or spot,
+        paid through Arkhai payments to the lane's seller account."""
         return recurring_settlement(
             seller_account=self.seller_account,
             delivery_deadline_seconds=delivery_deadline_seconds(),
+            payee_notice_seconds=self.payee_notice_seconds,
         )
 
     def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
         assert listing.listing_resource["gpu_model"] == self.gpu_model, listing
         # The listing states the recurring payments settlement alone.
         assert len(listing.settlement_options) == 1, listing.settlement_options
-        check_recurring_option(option, delivery_deadline_seconds=delivery_deadline_seconds())
+        check_recurring_option(option, delivery_deadline_seconds=delivery_deadline_seconds(),
+                               payee_notice_seconds=self.payee_notice_seconds)
 
-    def close_purchase_run(self, run: Any, deal_state: Any) -> None:
-        """``market buy`` polls its settlement until delivery, which never
-        comes: still running, it has read the settlement at least once and
-        never read it ready, and it is stopped here, as a buyer stops a
-        command waiting on a delivery its seller cannot make."""
-        run.wait_for_event("settlement_poll", timeout=FIRST_SETTLEMENT_POLL_SECONDS)
-        events = run.read_events()
-        assert not run.exited, (
-            f"{self.buy_command} run {run.run_id} ended rc={run.returncode} while delivery "
-            f"was refused; last events {[event.get('event') for event in events[-6:]]}"
-        )
-        assert not [event for event in events if event.get("event") == "run_ended"], events[-6:]
-        polled = [
-            (event.get("body") or {}).get("status")
-            for event in events if event.get("event") == "settlement_poll"
-        ]
-        assert "ready" not in polled, polled
-        run.terminate()
+    def read_arguments(self, run_id: str) -> list[str]:
+        return ["delivery", "--from", run_id]
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         async def read() -> LifecycleRead:
@@ -306,3 +298,37 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
             ) as peer:
                 return await peer.read(negotiation_id)
         return asyncio.run(read())
+
+
+def _ssh_endpoint(connection_details: Any) -> tuple[str, int]:
+    """The SSH endpoint VM connection details name, given as their JSON or decoded."""
+    details = (json.loads(connection_details) if isinstance(connection_details, str)
+               else dict(connection_details or {}))
+    return str(details["host"]), int(details["port"])
+
+
+@dataclass(kw_only=True)
+class VmRateWatchdogDriver(VmRecurringPurchaseDriver):
+    """VM's ``RateWatchdogDriver``: the lane's recurring purchase, its ``market
+    buy`` opting into the watchdog, whose probe VM builds from its delivery's
+    connection details."""
+
+    def buy_arguments(self, listing_id: str, option_id: str) -> list[str]:
+        return [*super().buy_arguments(listing_id, option_id), *WATCHDOG_OPT_IN]
+
+    def resume_arguments(self, run_id: str) -> list[str]:
+        return [
+            "buy", "--from", run_id,
+            "--poll-interval", str(SETTLEMENT_POLL_SECONDS),
+            "--settlement-timeout", str(max(SETTLEMENT_TIMEOUT_SECONDS, delivery_deadline_seconds())),
+        ]
+
+    def disclosed_endpoint(self, negotiation_id: str) -> tuple[str, int]:
+        # The connection details the settlement status discloses to the
+        # purchase's buyer, which this storefront client signs as; the typed
+        # status keeps them among the fields it does not model.
+        status = self.storefront_client.get_settle_status(negotiation_id)
+        return _ssh_endpoint(status.extra.get("connection_details"))
+
+    def probed_endpoint(self, built_for: Any) -> tuple[str, int]:
+        return _ssh_endpoint(built_for)

@@ -22,3 +22,6 @@ class VmSystemStatusResponse(HealthResponse):
     #: Every stored storefront pool override and the one state it is in:
     #: ``applied``, ``orphaned``, ``unknown``, or ``site_unconfigured``.
     pool_overrides: list[dict[str, Any]] | None = None
+    #: Each open deal the configuration composes no adapter for, with the
+    #: configuration that would.
+    unserviceable_deals: list[dict[str, str]] | None = None

@@ -348,7 +348,17 @@ maturity yet in one `hold:<transaction>:<part>:until` entry held until `stop` or
 `lift`. `FakePaymentsClient.get_balance` serves the same view.
 `advance(transaction)` performs due stops, maturity and reservation refill;
 reads/commands apply due stops without driving the refill scheduler, matching the
-producer's read boundary. The caller owns HTTP, authentication, controls and
+producer's read boundary. `reserve(transaction, through)` is the scheduler's
+decision made by a test: it brings the transaction to the clock as a read does,
+then reserves each started, unstopped rate part through `through`, on the
+arithmetic of the reservation at `start`, as far as the part's end and the
+payer's balance allow, and returns each such part's `part`, `reserved_through`
+(the snapshot's `reservedThrough`) and `periods_added`; a transaction with none
+is refused `PaymentsAPIError(409, "no_running_rate_part")` with nothing changed.
+A lead reserves to cover 60 seconds past it, as at `start`, so a `through` on a
+period boundary short of the part's end reserves the period after it too. Without
+it or a refilling `advance`, a rate part holds what approval and `start` reserved,
+so time past that reads as a `terms` stop at its end. The caller owns HTTP, authentication, controls and
 mediation composition; the kit imports none of that tooling.
 
 The fixture applies only the permissions encoded in each part: no favourable

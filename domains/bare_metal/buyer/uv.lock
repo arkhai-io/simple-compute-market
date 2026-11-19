@@ -154,10 +154,11 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-buyer"
-version = "0.8.1"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute" },
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
     { name = "arkhai-core-registry-client" },
@@ -184,20 +185,21 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-bare-metal", specifier = ">=0.16.0" },
+    { name = "arkhai-compute", specifier = ">=0.3.0" },
     { name = "arkhai-core", specifier = ">=0.6.0" },
-    { name = "arkhai-core-buyer", specifier = "==0.7.0" },
+    { name = "arkhai-core-buyer", specifier = "==0.8.0" },
     { name = "arkhai-core-registry-client", specifier = "==0.13.0" },
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.9.0" },
-    { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.1" },
     { name = "arkhai-kit-arkhai-payments", specifier = "==0.9.0" },
-    { name = "arkhai-kit-contact-exchange", specifier = "==0.5.0" },
+    { name = "arkhai-kit-contact-exchange", specifier = "==0.5.1" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.3.0" },
     { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.1.0" },
     { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
-    { name = "arkhai-kit-settlement-runtime", specifier = "==0.8.0" },
+    { name = "arkhai-kit-settlement-runtime", specifier = "==0.8.1" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "typer", specifier = ">=0.12" },
 ]
@@ -207,13 +209,13 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<10.0.0" }]
 
 [[package]]
 name = "arkhai-compute"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_compute-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_compute-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -229,7 +231,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-buyer"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -244,7 +246,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_core_buyer-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_core_buyer-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -290,7 +292,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -302,7 +304,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -345,7 +347,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.6.0"
+version = "0.6.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -356,12 +358,12 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.6.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-contact-exchange"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -373,12 +375,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_contact_exchange-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_contact_exchange-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -386,12 +388,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-buyer"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -401,12 +403,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_buyer-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_buyer-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -415,19 +417,19 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -497,7 +499,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.8.0"
+version = "0.8.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -508,7 +510,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.8.1-py3-none-any.whl" },
 ]
 
 [[package]]
