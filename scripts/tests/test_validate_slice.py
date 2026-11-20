@@ -1969,7 +1969,7 @@ def _make_n(target: str, *variables: str, environment: dict[str, str] | None = N
     """What `make -n <target>` of the root Makefile runs, with no step variable
     inherited from the caller, a make that ran these tests among them."""
     env = {key: value for key, value in os.environ.items()
-           if key not in ("HELM_ALL_SCENARIOS", "UNATTENDED", "ARGUMENTS", "ALLOW",
+           if key not in ("HELM_ALL_SCENARIOS", "UNATTENDED", "ARGUMENTS", "WRITE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     return subprocess.run(
         ["make", "-n", "--no-print-directory", "-C", str(REPO_ROOT), target, "CHANGE=x",

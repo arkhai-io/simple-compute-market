@@ -25,10 +25,16 @@ FORMAT = 2
 # non-empty value marks a run unattended. The marker is internal: no repository or
 # runner reads it.
 UNATTENDED_RUN = "CHANGE_WORKFLOW_UNATTENDED"
+# Set by the guarded push in the environment of the one `git push` it runs, so the
+# engine's `git`, which the sandbox mounts over the system's, lets that push through
+# while it refuses every other of an unattended run (`sandbox_git`).
+GUARDED_PUSH = "CHANGE_WORKFLOW_GUARDED_PUSH"
 # Where Claude Code gives every command it starts the id of its session. The
 # variable is not documented, so a run where it is unset is refused rather than
 # recorded without a session, and `record --session` gives the id instead; what a
-# command invoked outside any session is kept for no line.
+# command invoked outside any session is kept for no line. The engine gives it a key
+# of its own in the commands of an action or hook it runs, and of a Codex review,
+# whose harness names no session, so what they invoke is kept for the run's line.
 SESSION_ID = "CLAUDE_CODE_SESSION_ID"
 
 Clock = Callable[[], datetime]
@@ -46,8 +52,8 @@ class NotInRepository(StepError):
 def repository_root(directory: Path | None = None) -> Path:
     """The top level of the Git repository containing `directory`, the working
     directory by default: the repository every command acts on. A command finds it
-    as it starts; a part not handed a repository, a step table, or a schema finds
-    it again from the same working directory, and so the same one.
+    as it starts; a part not handed a repository, a configuration, or a schema
+    finds it again from the same working directory, and so the same one.
 
     The engine acts on the repository it is run in, never on the one its own files
     sit in, so a change's clone and the owner's workspace each act on themselves.

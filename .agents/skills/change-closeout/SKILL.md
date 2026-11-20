@@ -41,33 +41,21 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed, so
-  if a chained command is denied, run its commands one call at a time. If a single
-  command or any other tool call is denied, finish every part of the work that does
-  not depend on it. If the step cannot complete without that call, end with
-  `stopped`, `reason` naming that exact call and why the step needed it, and
-  `denials` listing the calls as you saw them; the wrapper replaces them with the
-  run's own record. Otherwise go on and end as the step ends: the wrapper records
-  the denial on the outcome whatever it is, and the orchestrating session reads it
-  before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it, except where the rule exists only to keep file writes on the Edit and
-  Write tools — the step table's comments name those rules: sed's in-place forms,
-  find's deleting, running, and writing actions, and the diff family's
-  output-to-file forms — whose refused shell write may be made with the Edit or
-  Write tool this step's rules allow. A call denied because no rule allows it —
-  the harness reports it as don't ask mode — may be done instead by a tool this
-  step's rules allow for the same work, such as the Edit tool for a shell write or
-  Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question. Wait on a
+  background command with `scripts/change-workflow wait`, never by following its
+  output. Closeout's sandbox mounts each inert path's directory, a README's code
+  beside it included: a path closeout may not change, changed, stops the run at the
+  checks after it.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
-  the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`: `-C` names only a subdirectory a skill names.
 - **The end is an outcome.** Each point this skill puts to the owner is a
   `question`. A part that would need a code edit ends with `returned`, `next`
   implementation, `{"step": "round"}`, and `evidence` naming the closeout task's

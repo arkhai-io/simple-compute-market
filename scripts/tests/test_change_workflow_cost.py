@@ -150,7 +150,7 @@ def test_a_resume_with_no_conversation_file_measures_the_gap_from_the_log(
 def test_a_codex_review_records_the_tokens_it_reports(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    def counting(command: Sequence[str], log: Path) -> int:
+    def counting(command: Sequence[str], log: Path, key: str | None = None) -> int:
         status = writing(review_text())(command, log)
         with log.open("a", encoding="utf-8") as stream:
             stream.write("tokens used\n403,900\n")
@@ -194,7 +194,7 @@ def test_every_attempts_turns_count_toward_the_run(tmp_path: Path) -> None:
 def test_a_rejected_codex_review_still_records_its_tokens(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    def rejected(command: Sequence[str], log: Path) -> int:
+    def rejected(command: Sequence[str], log: Path, key: str | None = None) -> int:
         status = writing("not a review")(command, log)
         with log.open("a", encoding="utf-8") as stream:
             stream.write("tokens used\n12,000\n")

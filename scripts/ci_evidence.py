@@ -8,8 +8,8 @@ the run of the validated commit.
 `dispatch <workflow>` runs `gh workflow run <workflow> --ref <branch>` for a
 workflow on `DISPATCHABLE`, and refuses any other, naming the list. Several
 workflows that accept a dispatch publish a release, so a plan naming one must not
-be able to publish from a feature branch; the list is held here rather than in the
-step table because the table binds only unattended runs. `pipeline` dispatches the
+be able to publish from a feature branch; the list is held here, where it binds
+every run, attended or not, and whichever harness runs it. `pipeline` dispatches the
 end-to-end pipeline, `PIPELINE`, which validation runs on every commit it
 validates. Each reads the newest run of its workflow on the branch before
 dispatching, printed as the fetch that follows takes it (`CI_AFTER_RUN=<id>`, or
