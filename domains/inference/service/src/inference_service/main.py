@@ -40,10 +40,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# The process's time source, installed before the application is built and
-# before anything reads the time: `time.source`, "wall" unless set "injected";
-# any other value refuses startup naming the setting and the value. The site
-# ledger this service hosts reads it too.
+# Installed before the application is built: `time.source`, "wall" unless
+# "injected". The site ledger this service hosts reads it too.
 injected_time.install(
     injected_time.source_for(
         injected_time.WALL
@@ -167,9 +165,7 @@ app.include_router(
     ),
     prefix="/api/v1",
 )
-# The time-setting route, mounted only while the source installed above is
-# injected: a wall-time service serves no such route, and its time is changed
-# only by reconfiguring and restarting it.
+# Mounted only under injected time; a wall-time service serves no such route.
 if injected_time.TimeRouteService(injected_time.installed()).settable:
     app.include_router(
         make_time_router(lambda: _container_module.resolved_system_service),

@@ -22,13 +22,8 @@
 # double as the dispute authority, as every lane's do. Paths are relative to the
 # repository root.
 #
-# Every party of the lane runs injected time, set by the lane-time fixture
-# (e2e-tests/config/config-inference-lane.yml names them), from configuration
-# only the lanes load: the registries' lane profile
-# (dev-env/registry/config-payments-lane.env), the storefront's lane
-# configuration, and below, in the environment each takes its settings from, the
-# inference service's and the gateway's. The model stub reads no time a party
-# checks and has no time source. The full local stack stays on wall time.
+# Every party runs injected time, set by the lane-time fixture; the model stub
+# reads no time a party checks. The full local stack stays on wall time.
 services:
   # Every registry the buyer reads layers the lane's profile recommending its
   # mediation double as the dispute authority over its own.
@@ -39,11 +34,8 @@ services:
   inference-service:
     environment:
       - INFERENCE_TIME__SOURCE=injected
-      # The stack's principals and the lane's operator, `admin`: the lane-time
-      # fixture reads the service's time and, under injected time, sets it,
-      # signed as that role. Anvil 9, a well-known development key never for a
-      # public network; e2e-tests/config/config-inference-lane.yml holds its
-      # credential.
+      # The stack's principals plus the lane's operator, `admin` (Anvil 9, a
+      # development key never for a public network), which sets the service's time.
       - INFERENCE_TRUSTED_PRINCIPALS=@json {"seller":[{"scheme":"eip191","identifier":"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"}],"service":[{"scheme":"ed25519","identifier":"iHX7NkwTJ0RDDsjwIpC_K4JRV3RKIxRDd-UY3Bgzmk4"}],"admin":[{"scheme":"eip191","identifier":"0xa0ee7a142d267c1f36714e4a8f75612f20a79720"}]}
 
   inference-storefront:
@@ -54,9 +46,8 @@ services:
 
   inference-gateway:
     environment:
-      # The gateway's time, which its gate signs by, set with every other
-      # party's through its time control behind this public development token,
-      # never for a public network.
+      # The gateway's time control, behind a public development token never for
+      # a public network.
       - INFERENCE_GATEWAY_TIME_SOURCE=injected
       - INFERENCE_GATEWAY_CONTROL_TOKEN=inference-gateway-lane-control-public-development-token
 

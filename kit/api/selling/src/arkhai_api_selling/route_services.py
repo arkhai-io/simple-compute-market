@@ -381,7 +381,7 @@ class NegotiateRoutes:
                 seller_principal=seller_principal,
             )
         except OfferUnfulfillableError as exc:
-            # A buyer's accept on a listing its source no longer supports, or
+            # A buyer's accept on a listing its source does not support, or
             # whose capacity is taken.
             raise RouteRefusal(
                 409,

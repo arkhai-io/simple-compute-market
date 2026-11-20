@@ -163,7 +163,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.19.0"
+version = "0.20.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -179,7 +179,7 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.19.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.20.0-py3-none-any.whl" },
 ]
 
 [[package]]

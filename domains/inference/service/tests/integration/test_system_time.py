@@ -15,16 +15,18 @@ import httpx
 import injected_time
 import pytest
 from arkhai_api_client import AuthorityClient, AuthorityError
+from arkhai_api_contracts import operations
 from arkhai_api_contracts.routes import ADMIN_ROLE, SERVICE_ROLE
 from arkhai_inference.label import INFERENCE_LABEL
 from injected_time import InjectedTime
-from market_identity import TrustedIdentitySet
+from market_identity import EMPTY_BODY, TrustedIdentitySet, canonical_json
 
 from tests.integration.signed_service import (
     AUTHORITY,
     GATEWAY_SIGNER,
     OPERATOR_SIGNER,
     load_signed_app,
+    signed_headers,
     unload_service_modules,
 )
 
@@ -87,6 +89,39 @@ async def test_the_gateway_cannot_set_or_read_the_time(composed):
 
     assert (refused.value.status_code, unread.value.status_code) == (403, 403)
     assert injected_time.now() == T
+
+
+async def test_the_composed_service_admits_the_time_setting_alone_outside_the_skew(composed):
+    """A setting signed 900 s ahead of the service is admitted and moves it; a
+    status read signed there is refused. Raw requests, since the typed client
+    signs at this process's instant, the service's own."""
+    app = composed("injected")
+    injected_time.install(InjectedTime(start=T))
+
+    def ahead(method: str, operation: str, body=EMPTY_BODY) -> dict[str, str]:
+        return signed_headers(
+            signer=OPERATOR_SIGNER, role=ADMIN_ROLE, method=method, operation=operation,
+            resource="", body=body, timestamp=T + 900,
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://inference-service"
+    ) as raw:
+        status = await raw.get(
+            "/api/v1/system/status", headers=ahead("GET", operations.SYSTEM_STATUS)
+        )
+        setting = await raw.post(
+            "/api/v1/system/time",
+            content=canonical_json({"now": T + 900}),
+            headers={
+                "Content-Type": "application/json",
+                **ahead("POST", operations.SYSTEM_TIME, {"now": T + 900}),
+            },
+        )
+
+    assert status.status_code == 403
+    assert setting.status_code == 200
+    assert injected_time.now() == T + 900
 
 
 async def test_a_wall_time_service_serves_no_time_route_and_reports_wall(composed):

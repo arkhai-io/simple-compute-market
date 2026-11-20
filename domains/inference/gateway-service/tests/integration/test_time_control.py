@@ -23,6 +23,7 @@ from lane_double_controls import ControlClient, ControlError, TimeView
 
 from inference_gateway_service.config import AUTHORITY_LABEL
 from inference_gateway_service.main import GatewayService, configured_app, create_app
+from inference_gateway_service.time_control import STATUS_PATH, TIME_PATH
 from tests.cards import QUOTA, SERVED_MODEL, STOREFRONT_URL, UPSTREAM_URL, Storefront, listing, settings
 from tests.integration.test_gateway_against_authority import (  # noqa: F401 — `authority` is a fixture
     Upstream,
@@ -145,12 +146,21 @@ async def test_a_refused_setting_changes_nothing(source: InjectedTime, now: int,
     assert source.now() == T
 
 
-async def test_a_control_call_with_a_wrong_control_token_is_refused(source: InjectedTime):
+@pytest.mark.parametrize(("method", "path"), [("GET", STATUS_PATH), ("POST", TIME_PATH)])
+@pytest.mark.parametrize("headers", [
+    pytest.param({}, id="missing-header"),
+    pytest.param({"Authorization": f"Basic {CONTROL_TOKEN}"}, id="wrong-scheme"),
+    pytest.param({"Authorization": "Bearer not-the-control-token"}, id="wrong-token"),
+])
+async def test_a_control_call_without_the_control_token_is_refused(
+    source: InjectedTime, method: str, path: str, headers: dict[str, str],
+):
+    # The typed client always sends its bearer token, so the header is written here.
+    body = {"json": {"now": T + HOUR}} if method == "POST" else {}
     async with _started(_unlisted(control_token=CONTROL_TOKEN), loaded=False) as served:
-        with pytest.raises(ControlError) as refused:
-            await served.control("set_time", T + HOUR, token="not-the-control-token")
+        response = await served.http.request(method, path, headers=headers, **body)
 
-    assert (refused.value.status, refused.value.code) == (401, "authentication_required")
+    assert (response.status_code, response.json()["code"]) == (401, "authentication_required")
     assert source.now() == T
 
 

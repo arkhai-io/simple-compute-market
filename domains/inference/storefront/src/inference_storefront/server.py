@@ -553,10 +553,8 @@ def build_inference_storefront_app(
     )
 
 
-# The process's time source is installed here, before the application is built
-# and before anything reads the time: `[Time] source` decides whether the
-# time-setting route is mounted, and a value other than "wall" or "injected"
-# refuses startup naming it.
+# Installed before the application is built: `[Time] source` decides whether
+# the time-setting route is mounted.
 install_time_source(configured_time_source())
 app = build_inference_storefront_app(
     registry=build_inference_storefront_registry(

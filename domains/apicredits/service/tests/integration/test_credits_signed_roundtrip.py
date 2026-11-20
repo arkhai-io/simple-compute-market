@@ -24,12 +24,15 @@ from fastapi.responses import JSONResponse
 from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_site.auth import SiteAuthMiddleware
 from arkhai_api_authority import site_route_contracts
+from arkhai_api_client import AuthorityClient
 from arkhai_api_gate.client import TokensClient
 from arkhai_api_gate.signing import (
     AuthoritySigning,
     build_signer,
     build_trusted_authorities,
 )
+
+from apicredits_service.config import ISSUANCE_LABEL
 
 #: The monorepo root, five levels up from this file, for the committed dev
 #: identities. Nothing else is resolved by path: both clients and the
@@ -223,9 +226,6 @@ async def test_an_untrusted_gated_app_is_refused(signers):
 
 @pytest.fixture
 def storefront_client(signers):
-    from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api_client import AuthorityClient
-
     authority = signers["authority"]
     seller = create_signer("ed25519", _seed("api-credits-registry"))
 
@@ -304,9 +304,6 @@ async def test_storefront_signing_requires_both_halves():
     an unauthenticated answer, which is the weaker of the two properties
     silently replacing the stronger.
     """
-    from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api_client import AuthorityClient
-
     signer = create_signer("ed25519", _seed("api-credits-registry"))
     with pytest.raises(ValueError, match="together"):
         AuthorityClient("http://credits-service", label=ISSUANCE_LABEL, signer=signer)

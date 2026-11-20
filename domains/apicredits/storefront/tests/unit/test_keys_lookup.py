@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from apicredits_storefront.services import credits_service_client, keys_lookup
+from apicredits_storefront.utils import config
 from arkhai_api_client import ADMIN_KEY_HEADER, AuthorityClient
 from arkhai_apicredits.label import API_CREDITS_LABEL
 
@@ -49,8 +50,6 @@ async def test_lookup_key_record_returns_none_for_unknown_key(monkeypatch):
 
 
 def test_the_composition_builds_one_client_from_configuration(monkeypatch):
-    from apicredits_storefront.utils import config
-
     monkeypatch.setattr(credits_service_client, "_client", None)
     monkeypatch.setattr(config, "credits_service_url", lambda: "http://credits-service:8082")
     monkeypatch.setattr(config, "credits_admin_key", lambda: "test-admin-key")

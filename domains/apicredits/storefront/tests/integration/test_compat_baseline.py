@@ -7,6 +7,7 @@ is decided, so an unsigned probe observes them.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import difflib
 import json
 import re
@@ -15,6 +16,7 @@ import time
 import tomllib
 import uuid
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import httpx
@@ -458,8 +460,6 @@ def load_record(name: str) -> Any:
 
 @pytest.fixture(scope="module")
 def captured(tmp_path_factory: pytest.TempPathFactory):
-    import asyncio
-
     monkeypatch = pytest.MonkeyPatch()
     try:
         probe = Probe(tmp_path_factory.mktemp("baseline") / "baseline.db", monkeypatch)
@@ -484,11 +484,6 @@ def _diff(record: str, expected: Any, actual: Any) -> str:
 
 
 def main(argv: list[str]) -> int:
-    import asyncio
-    from tempfile import TemporaryDirectory
-
-    from pytest import MonkeyPatch
-
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write", action="store_true", help="write the fixtures; refuses to overwrite")
     args = parser.parse_args(argv)
@@ -498,7 +493,7 @@ def main(argv: list[str]) -> int:
     if existing:
         print(f"{FIXTURES} already holds {existing}; fixtures are never rewritten", file=sys.stderr)
         return 1
-    monkeypatch = MonkeyPatch()
+    monkeypatch = pytest.MonkeyPatch()
     with TemporaryDirectory() as directory:
         try:
             records = asyncio.run(capture_all(Probe(Path(directory) / "baseline.db", monkeypatch)))

@@ -7,9 +7,10 @@ compute and API-credits markets: a registry instance selecting the packaged
 `inference` filter specification by path, with its own authority identity, the inference authority,
 the gateway in front of a model server, and the inference storefront. Each
 signing role MUST have its own development credential supplied through an
-explicit, role-scoped reference, and no credential value may be committed in a
-stack definition. The stack MUST run without a GPU and without fetching a model
-from an external host.
+explicit, role-scoped reference, and a signing role's credential MUST NOT be
+committed in a stack definition. A lane overlay MAY state a public development
+control token, labelled as one. The stack MUST run without a GPU and without
+fetching a model from an external host.
 
 #### Scenario: The full stack is brought up
 

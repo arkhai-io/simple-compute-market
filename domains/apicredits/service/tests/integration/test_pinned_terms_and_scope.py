@@ -8,6 +8,7 @@ import pytest
 from arkhai_api.issuance import KeyDisposition, accepted_terms_digest, issuance_request
 from arkhai_api_client import AuthorityError
 
+from apicredits_service.config import ISSUANCE_LABEL
 from tests.integration.signed_service import load_signed_app, unload_service_modules
 from tests.integration.test_compat_baseline import (
     BUYER,
@@ -37,8 +38,6 @@ async def app(tmp_path: Path, monkeypatch):
 
 
 def _request(negotiation_id: str, *, pinned: bool, existing_key: str | None = None, terms=TERMS):
-    from apicredits_service.config import ISSUANCE_LABEL
-
     fields = (
         {"accepted_terms": terms, "terms_digest": accepted_terms_digest(terms), "request_charge": 2}
         if pinned

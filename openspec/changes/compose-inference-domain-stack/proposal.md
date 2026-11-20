@@ -225,7 +225,16 @@ only request-priced rate cards are publishable until then.
   `test-compatibility` capability's `spec.md` and `architecture.md`, "Lane time
   and the doubles' controls", the `injected-time` capability's
   `architecture.md`, and `dev-env/identities/README.md`, "The inference
-  stack"; a baseline ID per
+  stack"; each inference party's time setting, routes and control — the
+  `inference` capability's `spec.md`, "Each inference party's time is
+  configured and set through its own control", and the inference service and
+  gateway among a lane's parties — the `test-compatibility` capability's
+  `spec.md`, "Every party in a lane shares one lane time the scenario sets";
+  the inference buyer in the `market` binary and the inference lane outside
+  release-candidate validation — `docs/guidance/repository/images.md`, "The
+  `market` binary", and `docs/release-handbook.md`, "Running the lanes on a
+  release candidate's images", the first stating the binary's domains and the
+  second listing the lanes a candidate runs, inference not among them; a baseline ID per
   family storefront — the `api-family` capability's `architecture.md`, "Current limits"; the sweep kept
   for inference and its one-identity assumption — the `inference` capability's `architecture.md`,
   "Current limits".

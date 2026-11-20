@@ -6,9 +6,8 @@ description = "The api family's bearer gate: ASGI middleware gating a downstream
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "httpx>=0.27",
-  # The process time source the host installs, which every signed request's
-  # timestamp and every response's freshness check reads. Standard library
-  # only, so an unsigned deployment's dependency set stays light.
+  # The process time source signed requests and freshness checks read.
+  # Standard library only.
   "arkhai-injected-time>=0.1.0",
 ]
 

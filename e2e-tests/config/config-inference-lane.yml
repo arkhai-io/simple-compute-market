@@ -3,11 +3,10 @@
 #
 # The inference end-to-end lane's own settings (`make test-e2e-inference`), over
 # config-docker.yml and config-payments-lane.yml: what compose.inference-lane.yml
-# alone declares, merged key by key into the `inference` section, and the lane's
-# time. The lane has no payment scenario, since inference settles through
-# Alkahest alone, so it states no payments setting. Every value is a public deterministic development
-# value, never for a public network; see dev-env/identities/README.md, "The
-# inference stack".
+# alone declares, and the lane's time. Inference settles through Alkahest alone,
+# so it states no payments setting. Every value is a public deterministic
+# development value, never for a public network; see
+# dev-env/identities/README.md, "The inference stack".
 # ---------------------------------------------------------------------------
 
 inference:
@@ -25,14 +24,10 @@ inference:
   api_credits_registry_scheme:       "ed25519"
   api_credits_registry_identifier:   "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
 
-# The lane's time: its mode and every party it runs, each reached by its typed
-# client or control as tests/e2e/roles/helpers/lane_time.py builds it. A party
-# named here and not reachable fails the session's setup. The model stub is not
-# among them: it signs nothing and reads no time a party checks. Every
-# credential is a public development value restated from the lane's committed
-# configuration (config-docker.yml's inference, config-payments-lane.yml,
-# dev-env/registry/, compose.inference-lane.yml's inference operator, Anvil 9,
-# and gateway control token), never for a public network.
+# The lane's time: its mode and every party the fixture sets and reads. The
+# model stub is not one: it reads no time a party checks. Every credential is
+# a public development value from the lane's committed configuration, never
+# for a public network.
 lane_time:
   mode: injected
   target: "the inference Compose lane"

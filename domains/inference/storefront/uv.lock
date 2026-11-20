@@ -226,7 +226,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.19.0"
+version = "0.20.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -242,12 +242,12 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.19.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.20.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.30.0"
+version = "0.31.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -255,7 +255,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.30.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.31.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -396,7 +396,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.12.1"
+version = "0.12.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront" },
@@ -404,7 +404,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.12.1-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.12.2-py3-none-any.whl" },
 ]
 
 [[package]]

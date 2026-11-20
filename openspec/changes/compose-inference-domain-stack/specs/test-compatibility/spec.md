@@ -35,16 +35,14 @@ The inference end-to-end lane MUST run its storefront, inference service,
 gateway, three registries and both doubles on injected time from configuration
 only the lane loads, and its runner profile MUST name each of them, the chain
 and the buyer's lane-time file as lane-time parties, so the lane-time fixture
-sets and confirms them as it does every Compose lane's. The inference gateway
-MUST install its process time source from `INFERENCE_GATEWAY_TIME_SOURCE`,
-`"wall"` by default or `"injected"`, and its gate MUST read that source for
-every timestamp it signs and every response it verifies. Under injected time
-the gateway MUST serve `POST /test/time` with `{"now": <Unix seconds>}` and a
-status reporting its source and now, behind a control bearer token from its
-environment, with the doubles' answers and refusals, ahead of its gate and
-whether or not its listing has loaded; on wall time it MUST serve neither. The
-model stub, which signs nothing and reads no time a party checks, has no time
-source. The full local stack MUST run each of these parties on wall time.
+sets and confirms them as it does every Compose lane's. The fixture MUST set
+the storefront and the inference service through their signed administrator
+routes and the gateway through its time control, with the doubles' typed
+control client and the gateway's control token, as `inference`'s "Each
+inference party's time is configured and set through its own control" gives
+each. The model stub, which signs nothing and reads no time a party checks,
+has no time source. The full local stack MUST run each of these parties on
+wall time.
 
 #### Scenario: The lane's parties are set together
 
@@ -60,7 +58,28 @@ source. The full local stack MUST run each of these parties on wall time.
 - **THEN** the gate's signed calls are accepted by the service and the request
   is charged
 
-#### Scenario: A wall-time gateway serves no control
+## MODIFIED Requirements
 
-- **WHEN** a gateway configured for wall time receives `POST /test/time`
-- **THEN** it serves no such route and its time is unchanged
+### Requirement: Every party in a lane shares one lane time the scenario sets
+
+Each Compose lane MUST run every party on injected time: every storefront, provisioning service, registry, the API-credits service and the sample app, and the inference service and the inference gateway, where the lane runs them, both doubles, and the buyer, with the harness's own signing clients reading its process source. One harness fixture MUST set every party at the session's start to the wall instant at that moment, or to the latest instant a party already holds when that is later, so the start never sets a party back — a party whose instant the start cannot read holds none, and one that then refuses the instant set fails the setup naming it — and its set MUST move, in order, the harness's own source, each service, both doubles, the sample app and the inference gateway, the chain and the buyer's lane-time file to one instant, then read every party's status and fail naming any that does not report it, a party whose status has no time section among them. Lane time MUST only move forward and MUST never be reset; a stage MAY set any forward instant, and a backward set MUST fail naming the party and both instants. A party the run's profile names but cannot reach MUST fail the setup rather than skip.
+
+#### Scenario: Funds run out without waiting
+
+- **WHEN** a rate deal's funding reaches its boundary at 1794823200 and a stage sets lane time to 1794823200, then steps the storefront's servicing and the lease watchdog
+- **THEN** the storefront records the exhaustion stop, the site ends the lease at 1794823200, and teardown follows, with no wait on wall time
+
+#### Scenario: A party misses a set
+
+- **WHEN** a lane-time set leaves one registry at its previous instant
+- **THEN** the fixture fails naming that registry and the instant it reports
+
+#### Scenario: An older image ignores the setting
+
+- **WHEN** a lane configures injected time for a service image that predates the setting, which boots on wall time
+- **THEN** the session fixture fails naming that service, since its status has no time section
+
+#### Scenario: A module follows an advanced one
+
+- **WHEN** a module ends with lane time at 1794830000
+- **THEN** the next module starts at 1794830000 or later, with every party reporting the same instant

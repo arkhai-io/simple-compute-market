@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 #: The listing's bound pool could not be read; nothing about its source is known.
 SOURCE_UNCONFIRMED = "source_unconfirmed"
-#: The bound pool no longer holds, enables, or advertises the listing's resource.
+#: The bound pool does not hold, enable, or advertise the listing's resource.
 SOURCE_MISMATCH = "source_mismatch"
 #: The bound pool declares a backing other than the listing's.
 BACKING_CHANGED = "backing_changed"
@@ -309,7 +309,7 @@ class QuotaPublication:
         return pools
 
     async def close_on_source_mismatch(self, db: Any) -> list[str]:
-        """Close every open listing its bound pool definitely no longer supports; an unreadable site closes nothing."""
+        """Close every open listing its bound pool definitely does not support; an unreadable site closes nothing."""
         _sources, bound = await self._sources(db, await all_listings(db, status="open"))
         if not bound:
             return []
@@ -374,7 +374,7 @@ class QuotaPublication:
 def _source_problem(
     source: BoundQuotaSource, pool: QuotaPool | QuotaPoolUnavailable | None
 ) -> str | None:
-    """Why ``source`` no longer matches its bound pool, or ``None``; a changed backing always mismatches."""
+    """Why ``source`` does not match its bound pool, or ``None``; a changed backing always mismatches."""
     if pool is None:
         return SOURCE_UNCONFIRMED
     if isinstance(pool, QuotaPoolUnavailable):

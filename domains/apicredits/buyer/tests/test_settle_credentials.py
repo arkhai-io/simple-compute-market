@@ -22,6 +22,7 @@ from typer.testing import CliRunner
 
 import arkhai_api_buying.buy as buy
 import arkhai_api_buying.commands as commands
+import arkhai_api_buying.common as common
 import arkhai_api_buying.settlement_composition as settlement_composition
 import arkhai_api_buying.stages as stages
 import arkhai_api_buying_alkahest.stage as alkahest_stage
@@ -157,8 +158,6 @@ def agreed_run(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_chain_config(monkeypatch):
-    import arkhai_api_buying.common as common
-
     chain = SimpleNamespace(
         name="anvil",
         rpc_url="http://anvil:8545",

@@ -343,8 +343,8 @@ class TokenGate:
         return await self._charge(verified, amount, idempotency_key)
 
     def _vouches(self, state: _KeyState, verified: VerifiedKey) -> bool:
-        # An expired verification, or one older than the handle's, no longer
-        # vouches for the key.
+        # An expired verification, or one older than the handle's, does not
+        # vouch for the key.
         return (
             state.verify_expires > self._clock()
             and state.verified_ticket >= verified.verified_ticket

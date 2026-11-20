@@ -462,6 +462,25 @@ follows; where an earlier entry said otherwise, this one supersedes it.
   storefront: two inference storefronts sharing an identity and a registry
   would close each other's listings. A listing of another offering mode under
   the same identity is left alone.
+- **The inference buyer is in the `market` binary.** *Added 2026-11-20
+  (pre-closeout review 24 F5).* The released `market` binary bundles
+  `arkhai-inference-buyer` (`core/buyer/market-binary/pyproject.toml`,
+  `manifests/release-components.json`), because the release rule requires the
+  binary's project to depend on every declared buyer domain
+  (`docs/guidance/repository/images.md`, "The `market` binary"). The inference
+  lane is not among the lanes a release candidate is validated against
+  (`docs/release-handbook.md`, "Running the lanes on a release candidate's
+  images") until inference is meant to ship: the owner's decision of
+  2026-11-19.
+- **Each inference party's time is normative in `inference`.** *Added
+  2026-11-20 (pre-closeout review 24 F4).* The inference service's time
+  setting and `admin`-only status and time routes, the storefront's, and the
+  gateway's setting and token-guarded control are a requirement of the
+  `inference` delta, since `injected-time` gives each party's setting, route
+  and status to its own capability and the gateway is a published service,
+  not test apparatus. The lane's composition stays in the `test-compatibility`
+  delta, whose lane-time requirement now names the inference service and
+  gateway among a lane's parties.
 
 Rejected: one storefront baseline ID with a startup check that the bundle's
 tables exist, which leaves `--check` and the migrate command reporting the

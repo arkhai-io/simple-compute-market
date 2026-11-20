@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 
 import pytest
+from jsonpath_ng import parse as parse_path
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from core_registry.api.filter_spec import (
@@ -307,9 +309,6 @@ def test_repo_api_credits_spec_loads() -> None:
 
 def test_repo_inference_spec_loads() -> None:
     """The third filter specification packaged in the image is valid."""
-    from jsonpath_ng import parse as parse_path
-    from jsonschema import Draft202012Validator
-
     repo_root = Path(__file__).resolve().parents[4]
     path = repo_root / "domains/inference/registry/filter-spec.yaml"
 

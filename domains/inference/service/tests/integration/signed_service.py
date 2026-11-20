@@ -93,6 +93,7 @@ def signed_headers(
     resource: str,
     body: Any = EMPTY_BODY,
     request_id: str | None = None,
+    timestamp: int | None = None,
 ) -> dict[str, str]:
     authenticated = sign_request(
         signer=signer,
@@ -103,7 +104,7 @@ def signed_headers(
             operation=operation,
             resource=resource,
             request_id=request_id or str(uuid.uuid4()),
-            timestamp=int(time.time()),
+            timestamp=int(time.time()) if timestamp is None else timestamp,
             body_hash=canonical_body_hash(body),
         ),
     )

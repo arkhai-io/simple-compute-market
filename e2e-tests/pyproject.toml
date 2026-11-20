@@ -71,7 +71,6 @@ dependencies = [
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
     "arkhai-apicredits-buyer>=0.7.0",
-    "arkhai-apicredits-domain>=0.8.0",
     # The inference schema plugin, under `market inference …`, and its domain
     # vocabulary, which the inference scenario validates a delivery against.
     "arkhai-inference-buyer>=0.1.0",
@@ -103,8 +102,7 @@ dependencies = [
     # clients and stages read lane time, and the buyer's lane-time file writer.
     "arkhai-injected-time>=0.1.0",
     # The family authority's typed client and the API-credits label, through
-    # which lane time sets the credits service's time, as it sets the inference
-    # service's under the inference label.
+    # which lane time sets the credits and inference services' time.
     "arkhai-api-client>=0.1.0",
     "arkhai-apicredits-domain>=0.10.0",
 ]

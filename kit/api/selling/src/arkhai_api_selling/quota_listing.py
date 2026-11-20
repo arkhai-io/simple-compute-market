@@ -291,7 +291,7 @@ def build_listing_source_check(
 ) -> ListingSourceCheck:
     """A check run before every seller decision and acceptance, against the listing's own site.
 
-    It is a declared mismatch when the listing's projection no longer names the
+    It is a declared mismatch when the listing's projection does not name the
     bound quota resource, or the resource has left the bound pool, or that pool is
     disabled, stops advertising the offering mode, or changes its backing. An
     unreadable source is unverifiable, which the runtime refuses as retryable.

@@ -119,9 +119,10 @@ reads every domain-specific choice from the bundle:
   injected by the escrow stage.
 - **Publication.** Publication guards run wherever a listing publishes:
   creation, resume, a reconciliation reopen, and a registry divergence repair.
-  Reconciliation pages every listing by the core store's keyset over
-  `(created_at, listing_id)`, which no write changes, so a pass visits each
-  listing once.
+  Reconciliation pages every listing by the core store's keyset cursor,
+  `(created_at, listing_id)`, over an order no write changes — `created_at`,
+  then the order listings were first written — so a pass visits each listing
+  once.
 - **Opening.** A thread takes its listing's binding when it opens. The opening
   is one transaction: the negotiation runtime's `open_negotiation` hook hands
   the thread, its opening message, and the binding to `selling`, which writes

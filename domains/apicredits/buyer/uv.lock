@@ -255,7 +255,7 @@ requires-dist = [
     { name = "arkhai-api-buying", specifier = ">=0.3.0" },
     { name = "arkhai-api-buying-alkahest", specifier = ">=0.2.0" },
     { name = "arkhai-api-buying-arkhai-payments", specifier = ">=0.1.2" },
-    { name = "arkhai-apicredits-domain", specifier = ">=0.12.0" },
+    { name = "arkhai-apicredits-domain", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.7.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.1.0" },
@@ -275,7 +275,7 @@ dev = [
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.13.0"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
@@ -285,7 +285,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]

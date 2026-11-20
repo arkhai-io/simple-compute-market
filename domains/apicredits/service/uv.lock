@@ -111,7 +111,7 @@ signed = [
 
 [[package]]
 name = "arkhai-apicredits-service"
-version = "0.10.0"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-api" },

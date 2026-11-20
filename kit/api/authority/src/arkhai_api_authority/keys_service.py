@@ -120,7 +120,7 @@ def _in_scope(
 def _pinned_terms(row: GrantTerms | None) -> dict[str, Any]:
     """A terms row as the wire carries it, empty when unpinned.
 
-    A payload that no longer matches its digest is a corrupt store, so the read fails.
+    A payload that does not match its digest is a corrupt store, so the read fails.
     """
     if row is None:
         return {}

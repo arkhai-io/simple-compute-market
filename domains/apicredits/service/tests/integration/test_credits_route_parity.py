@@ -21,6 +21,8 @@ gated app signs against, and because the comparison needs `fastapi` and
 from __future__ import annotations
 
 import pytest
+from arkhai_api_contracts.routes import SELLER_ROLE
+from arkhai_api_gate import client
 
 from apicredits_service.main import CREDITS_ROUTE_CONTRACTS
 
@@ -32,8 +34,6 @@ def contracts():
 
 @pytest.fixture(scope="module")
 def gate_client():
-    from arkhai_api_gate import client
-
     return client
 
 
@@ -106,6 +106,4 @@ def test_the_two_clients_do_not_claim_each_others_roles(gate_client):
     keys. That is expressed by the roles the two clients sign as, so the
     two constants must stay different.
     """
-    from arkhai_api_contracts.routes import SELLER_ROLE
-
     assert gate_client.GATED_APP_ROLE != SELLER_ROLE

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import difflib
 import json
 import re
 import sys
 import tomllib
 from importlib.metadata import version as installed_version
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import httpx
@@ -18,8 +21,12 @@ from arkhai_api_client import AuthorityClient
 from arkhai_api_gate.client import TokensClient
 from arkhai_api_gate.signing import AuthoritySigning, build_trusted_authorities
 from market_identity import EMPTY_BODY, Identity, TrustedIdentitySet
+from market_site.auth import CAPACITY_ROUTE_CONTRACTS
+from market_site_client.client import SiteCapacityAdminClient
 from starlette.routing import Route
 
+from apicredits_service.config import ISSUANCE_LABEL
+from apicredits_service.main import _UNSIGNED_PATHS, CREDITS_ROUTE_CONTRACTS
 from tests.integration.signed_service import (
     AUTHORITY,
     GATED_SIGNER,
@@ -81,9 +88,6 @@ async def capture_openapi(client: httpx.AsyncClient) -> dict[str, Any]:
 
 
 def capture_route_contracts() -> dict[str, Any]:
-    from apicredits_service.main import _UNSIGNED_PATHS, CREDITS_ROUTE_CONTRACTS
-    from market_site.auth import CAPACITY_ROUTE_CONTRACTS
-
     def declare(contract) -> dict[str, Any]:
         return {
             "method": contract.method,
@@ -125,8 +129,6 @@ def _recorded(response: httpx.Response) -> dict[str, Any]:
 
 
 def _seller_client(app):
-    from apicredits_service.config import ISSUANCE_LABEL
-
     return AuthorityClient(
         "http://credits-service",
         label=ISSUANCE_LABEL,
@@ -153,8 +155,6 @@ def _gated_client(app):
 
 
 def _capacity_admin(app):
-    from market_site_client.client import SiteCapacityAdminClient
-
     return SiteCapacityAdminClient(
         "http://credits-service",
         signer=STOREFRONT_SIGNER,
@@ -164,8 +164,6 @@ def _capacity_admin(app):
 
 
 def _issuance(negotiation_id: str, quantity: int, *, owner=BUYER, existing_key=None):
-    from apicredits_service.config import ISSUANCE_LABEL
-
     key = (
         KeyDisposition(mode="existing", key_id=existing_key)
         if existing_key
@@ -439,7 +437,6 @@ async def test_the_baseline_diffs_to_zero(captured, record):
 def _diff(record: str, expected: Any, actual: Any) -> str:
     before = json.dumps(expected, indent=2, sort_keys=True).splitlines()
     after = json.dumps(actual, indent=2, sort_keys=True).splitlines()
-    import difflib
 
     return f"{record} changed:\n" + "\n".join(
         difflib.unified_diff(before, after, "recorded", "served", lineterm="", n=2)
@@ -447,10 +444,6 @@ def _diff(record: str, expected: Any, actual: Any) -> str:
 
 
 def main(argv: list[str]) -> int:
-    import asyncio
-    from pytest import MonkeyPatch
-    from tempfile import TemporaryDirectory
-
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write", action="store_true", help="write the fixtures; refuses to overwrite")
     args = parser.parse_args(argv)
@@ -460,7 +453,7 @@ def main(argv: list[str]) -> int:
     if existing:
         print(f"the baseline already holds {existing}; fixtures are never rewritten", file=sys.stderr)
         return 1
-    monkeypatch = MonkeyPatch()
+    monkeypatch = pytest.MonkeyPatch()
     with TemporaryDirectory() as directory:
         app = load_signed_app(Path(directory), monkeypatch)
         try:

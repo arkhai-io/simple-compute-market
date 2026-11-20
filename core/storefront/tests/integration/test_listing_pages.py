@@ -30,10 +30,9 @@ _DOMAIN = StorefrontDomainBinding(
 _CREATED_AT = "2026-08-15T00:00:00Z"
 
 
-async def _store(tmp_path, count: int) -> SQLiteClient:
+async def _store(tmp_path, listing_ids: list[str]) -> SQLiteClient:
     client = SQLiteClient(core_database(tmp_path / "storefront.db"))
-    for index in range(count):
-        listing_id = f"listing-{index:03d}"
+    for listing_id in listing_ids:
         source = {"pool_id": "pool-a", "listing": listing_id}
         await client.upsert_listing_with_binding(
             binding=StorefrontListingBinding.from_source_envelope(
@@ -61,7 +60,7 @@ async def _store(tmp_path, count: int) -> SQLiteClient:
 
 
 async def test_a_keyset_cursor_visits_tied_listings_once_while_statuses_change(tmp_path):
-    client = await _store(tmp_path, 7)
+    client = await _store(tmp_path, [f"listing-{index:03d}" for index in range(7)])
     seen: list[str] = []
     before = None
     while True:
@@ -78,9 +77,21 @@ async def test_a_keyset_cursor_visits_tied_listings_once_while_statuses_change(t
     assert seen == [f"listing-{index:03d}" for index in reversed(range(7))]
 
 
-async def test_rows_tied_on_created_at_come_in_listing_id_order(tmp_path):
-    client = await _store(tmp_path, 3)
+async def test_rows_tied_on_created_at_come_newest_written_first(tmp_path):
+    client = await _store(tmp_path, ["listing-b", "listing-c", "listing-a"])
 
     rows = await client.list_listings(limit=10)
 
-    assert [row["listing_id"] for row in rows] == ["listing-002", "listing-001", "listing-000"]
+    assert [row["listing_id"] for row in rows] == ["listing-a", "listing-c", "listing-b"]
+
+
+async def test_small_pages_visit_tied_listings_once_whatever_their_identifiers(tmp_path):
+    written = ["listing-d", "listing-a", "listing-e", "listing-c", "listing-b"]
+    client = await _store(tmp_path, written)
+    seen: list[str] = []
+    before = None
+    while page := await client.list_listings(limit=2, before=before):
+        seen.extend(row["listing_id"] for row in page)
+        before = (page[-1]["created_at"], page[-1]["listing_id"])
+
+    assert seen == list(reversed(written))

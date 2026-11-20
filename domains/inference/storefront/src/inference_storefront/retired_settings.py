@@ -1,7 +1,7 @@
-"""Settings the storefront no longer reads, and why nothing replaces them.
+"""Settings the storefront does not read, and why nothing replaces them.
 
 A removed setting refuses startup (`startup_refusal`): running with a setting
-the storefront no longer honours would change its behaviour silently, where a
+the storefront does not honour would change its behaviour silently, where a
 refusal says what to change.
 """
 

@@ -341,3 +341,93 @@ gateway base URL, and the served model name.
 - **WHEN** a purchase settles and a key is issued
 - **THEN** the buyer is shown the key, the base URL, and the model name needed
   for a first request
+
+### Requirement: Each inference party's time is configured and set through its own control
+
+The inference service MUST install its process time source from `time.source`,
+`"wall"` by default or `"injected"`. It MUST serve
+`GET /api/v1/system/status`, a signed route admitting only the `admin` role,
+carrying the time section, in either mode. Under injected time alone it MUST
+serve `POST /api/v1/system/time`, a signed route admitting only the `admin`
+role, taking `{"now": <Unix seconds>}`, answering
+`{"source": "injected", "now": <Unix seconds>}`, refusing an earlier instant
+with `409 time_moves_forward` and an invalid body with `422 invalid_time`. It
+MUST serve both through the family authority's system route service, under the
+family authority's route contracts, and MUST admit the gateway's `service` role
+to neither.
+
+The inference storefront MUST take its time source, its time-setting route and
+its status's time section as `market-composition`'s "Storefront time is
+configured and set through one kit route service" requires of every storefront.
+
+The inference gateway MUST install its process time source from
+`INFERENCE_GATEWAY_TIME_SOURCE`, `"wall"` by default or `"injected"`, refusing
+to start on any other value, naming the setting and the value, and its gate
+MUST read that source for every timestamp it signs and every response it
+verifies. Under injected time alone the gateway MUST serve `POST /test/time`,
+taking `{"now": <Unix seconds>}` and answering
+`{"source": "injected", "now": <Unix seconds>}`, and `GET /test/status`,
+reporting its source and now, each behind the control bearer token
+`INFERENCE_GATEWAY_CONTROL_TOKEN` names, ahead of its gate and whether or not
+its listing has loaded. A call without that token MUST be refused
+`401 authentication_required` and change nothing. A gateway configured for
+injected time with no control token MUST refuse to start, naming the token's
+setting. On wall time the gateway MUST serve neither path.
+
+#### Scenario: The administrator sets and reads the inference service's time
+
+- **WHEN** the administrator sets an injected inference service at 1794822300
+  to 1794823200, then to 1794822300
+- **THEN** the first set answers source `injected` and now 1794823200 and the
+  status reports the same, and the second is refused `409 time_moves_forward`
+
+#### Scenario: The gateway's role reaches the service's time routes
+
+- **WHEN** a request signed in the `service` role reaches
+  `POST /api/v1/system/time` or `GET /api/v1/system/status`
+- **THEN** each is refused `403` and the service's time is unchanged
+
+#### Scenario: A wall-time inference service
+
+- **WHEN** the inference service runs with `time.source` unset
+- **THEN** its status reports source `wall` and `POST /api/v1/system/time`
+  answers `404`
+
+#### Scenario: The administrator sets the inference storefront's time
+
+- **WHEN** the administrator sets an injected inference storefront at
+  1794822300 to 1794823200 through the canonical storefront client
+- **THEN** it answers source `injected` and now 1794823200, its status reports
+  the same, and a set back to 1794822300 is refused `409`
+
+#### Scenario: A wall-time inference storefront
+
+- **WHEN** the inference storefront runs on wall time
+- **THEN** its status reports source `wall` and its time-setting route answers
+  `404`
+
+#### Scenario: The gateway's time is set before its listing loads
+
+- **WHEN** an injected gateway whose storefront has published no listing, and
+  whose health reports it unready, is set one hour forward through its control,
+  with its control token
+- **THEN** the control answers source `injected` and the new instant, and the
+  status reports the same
+
+#### Scenario: A control call carries another token
+
+- **WHEN** `POST /test/time` reaches an injected gateway with a bearer token
+  other than its control token
+- **THEN** it is refused `401 authentication_required` and the gateway's time
+  is unchanged
+
+#### Scenario: An injected gateway has no control token
+
+- **WHEN** a gateway is composed on injected time with no control token
+- **THEN** it refuses to start, naming `INFERENCE_GATEWAY_CONTROL_TOKEN`
+
+#### Scenario: A wall-time gateway serves no control
+
+- **WHEN** a gateway on wall time receives `POST /test/time`
+- **THEN** it answers `404` as for any path it does not serve, and nothing is
+  forwarded to the model server

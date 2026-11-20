@@ -1,18 +1,7 @@
-# Inference seller in the inference end-to-end lane: storefront.inference.toml,
-# the full local stack's profile, plus the lane's injected time. The two files
-# differ only in that, which e2e-tests/tests/unit/test_lane_time_profiles.py
-# holds them to, so a change to one is made to both. compose.inference-lane.yml
-# mounts this file in place of storefront.inference.toml, which the full local
-# stack keeps.
-#
+# Inference seller in the inference end-to-end lane: storefront.inference.toml
+# plus the lane's injected time, which a unit test holds the two files to.
 # Deterministic local chain; DO NOT use these values on any public network.
-#
-# Mounted into the inference-storefront container at
-# /etc/arkhai/storefront.toml (XDG_CONFIG_HOME=/etc).
-#
-# The identity and wallet are Anvil account 0, and the registry and authority
-# pins are the public halves of dev-env/identities/inference-registry.ed25519
-# and inference-service.ed25519; see dev-env/identities/README.md.
+# See dev-env/identities/README.md for the identities.
 
 agent_id      = "inferenceseller"
 port          = 8000

@@ -2127,7 +2127,7 @@ every end-to-end run").
       `e2e_credits_service_rollback` green (test-compatibility requirement "A
       deployable domain's deal runs on every end-to-end run"). A host that
       cannot run the lanes records that as the blocker it is, naming the
-      cause, for closeout part 8.
+      cause, for closeout's end-to-end pipeline part.
 - [x] 11.7 **Verification.** `make test-e2e-unit` (the harness's unit level)
       and `make test-release-tooling`; the system level is `make -C e2e-tests
       test-e2e-inference` (`e2e_inference_deal`) and `test-e2e-apicredits`
@@ -2214,8 +2214,8 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
   `make check-decision-destinations` passes for this change.
 - `scripts/check_local_imports.py` still reports lines in files this round did
   not touch, and `check-history-wording` and `check-version-bumps` still fail
-  against `dev`; none is in this round's diff, and closeout parts 1 and 2 own
-  them.
+  against `dev`; none is in this round's diff. Pre-closeout review 24's fixes,
+  below, settle them.
 - A fresh-context check of the diff found seven points, all fixed: two
   undeclared test-only distributions, the lane profile's identities held by no
   test, two further local imports in an edited test file, two documents saying
@@ -2223,27 +2223,113 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
   removed assertion, a README heading cited by the wrong name, and an evidence
   line citing a floor fixture the inference storefront does not have.
 
+*Merge of `dev` (design D20; pre-closeout review 24 F5), outside the plan's
+sections:* the merge brought the lane-time requirement onto this change's
+parties and the release rule onto its buyer, and added:
+- The inference service's time: `time.source`, and the signed, `admin`-only
+  status and time routes, served through the family authority's
+  `SystemRouteService` under the family's route contracts
+  (`kit/api/contracts/src/arkhai_api_contracts/routes.py` and `operations.py`,
+  `kit/api/authority/src/arkhai_api_authority/route_services.py`,
+  `kit/api/client/src/arkhai_api_client/client.py`;
+  `domains/inference/service/src/inference_service/main.py`, `config.py`,
+  `controllers/system_controller.py`), proven by
+  `domains/inference/service/tests/integration/test_system_time.py`.
+- The inference storefront's time route and lane configuration
+  (`domains/inference/storefront/src/inference_storefront/controllers/time_controller.py`,
+  `server.py`, `utils/config.py`;
+  `domains/inference/storefront/storefront.inference.lane.toml`), proven by
+  `tests/integration/test_time_controls.py` and `tests/unit/test_time_settings.py`
+  there.
+- The gateway's time source and token-guarded control
+  (`domains/inference/gateway-service/src/inference_gateway_service/config.py`,
+  `main.py`, `time_control.py`), set for the lane alone in
+  `compose.inference-lane.yml`, proven by
+  `domains/inference/gateway-service/tests/integration/test_time_control.py`.
+- The harness's `inference` party kind
+  (`e2e-tests/tests/e2e/roles/helpers/lane_time.py`) and the lane profile's
+  `lane_time` parties (`e2e-tests/config/config-inference-lane.yml`), held by
+  `e2e-tests/tests/unit/test_lane_time_profiles.py` and
+  `scripts/tests/test_lane_compose.py`.
+- The inference buyer bundled into the `market` binary
+  (`core/buyer/market-binary/pyproject.toml`,
+  `manifests/release-components.json`), as design D20 records.
+
+Evidence, at the merge commit `ec2daa205`, on an arm64 macOS host:
+- Application integration: the gateway service's suite, 40 passed; the
+  inference storefront's, 65 passed; the inference service's, 30 passed.
+- Library: `kit/api/gateway`, 50 passed; `kit/api/gate`, 108 passed.
+- Unit: the end-to-end harness's unit level, 1041 passed, 1 skipped.
+- End to end, run locally and not by the pipeline: the VM lane, 444 passed;
+  the bare-metal lane, 249; the API-credit lane, 4; the inference lane, 1.
+- No validation record exists for that commit; the owner accepted these runs
+  in its place (`reviews/workflow.jsonl`, seq 9). No Helm deployment and no
+  Linux run of the IaC suites exists.
+
+*Fix (pre-closeout review 24 F1–F9), outside the plan's sections:*
+- F1: the comments the history-wording check named reworded to what holds; the
+  29 function-level imports it named moved to module level; `arkhai-apicredits-domain`
+  and `arkhai-apicredits-service` set one step above `dev`'s versions.
+- F2: `arkhai-core-storefront`, `arkhai-core-storefront-client` and
+  `arkhai-apicredits-storefront` bumped one step above `dev`'s, with the exact
+  pins that move and the dependents those pins change; `arkhai-api-selling`
+  requires the core storefront version that has `domain_writes`.
+- F3: the inference service's suite proves the time-setting operation alone is
+  admitted outside the skew; `e2e_inference_deal` ends by moving lane time an
+  hour forward and showing one request charged and the next refused.
+- F4, F5, F6, F8: the `inference` delta's time requirement, the lane-time
+  requirement naming the inference parties, the merge note above, the closeout
+  section below, and the narrowed credential sentence.
+- F7: listing pages break ties on `created_at` by first write, as every other
+  query does, under the same cursor; the `storefront-publication` delta states it.
+- F9: the gateway control's authentication is proven for both routes against a
+  missing header, another scheme and another token.
+
+Evidence, at the fix commit's tree, on an arm64 macOS host:
+- `make check-packaging` and `make check-repository` (comment hygiene, history
+  wording, local imports, version bumps, decision destinations) passed.
+- Unit and integration: `make -k test` passed but for the Linux-only IaC suites
+  and one release-tooling case that passes on a second run
+  (`scripts/tests/test_validate_slice.py`, a credential helper that does not
+  answer); the bare-metal domain, storefront, buyer and adapter suites, which
+  that target skips on this host behind the IaC suite, passed run directly
+  (226, 680, 87, 138); the Helm render tests passed.
+- End to end, run locally and not by the pipeline: VM 444, bare metal 249,
+  API credits 4, inference 1, the last with the lane-time stage.
+- A fresh-context check of the diff found four points, all fixed: the listing
+  order's permanent requirement, which the delta now restates; this note; a
+  scenario claiming more than its test asserts; and a line overstating what the
+  release handbook says of the inference lane.
+
 ## 12. Closeout
 
-The eleven parts of `openspec/README.md`'s "Plan closeout requirements", in
-order, each specific to this change; closeout edits documentation only, and a
-part that would need a code edit returns the change to implementation.
+The parts of `docs/guidance/workflow/closeout.md`, in its order, with this
+repository's own two — packaging and the end-to-end pipeline
+(`openspec/README.md`, "This repository's closeout parts") — after campaign
+index currency and before promotion; each is specific to this change. Closeout
+edits only the inert paths, and a part that would need a code edit returns the
+change to implementation.
 
 - [ ] 12.1 **Comment hygiene.** Confirm: `make check-comment-hygiene` passes,
-      and the three recovered modules (5.3, 5.5, 5.6) and every new root were
-      read for references to the withdrawn branch, the API-credits history, or
-      this change. Anything found returns the change to implementation.
+      and the three recovered modules (5.3, 5.5, 5.6), every new root, and the
+      time routes and control the merge of `dev` added were read for
+      references to the withdrawn branch, the API-credits history, or this
+      change. Anything found returns the change to implementation.
 - [ ] 12.2 **Import placement.** Confirm: no function-level import this
       change added — in the family's vocabulary, contracts, authority, gate,
       and gateway, or in the four roles — lacks a verified circular-import or
-      lazy-load reason. One that should move returns the change to
-      implementation.
+      lazy-load reason
+      (`docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level`).
+      One that should move returns the change to implementation.
 - [ ] 12.3 **Documentation compliance.** Re-check every decision in the
-      promotion record below against `openspec/README.md`'s placement rules:
-      normative behaviour in the owning `spec.md` (written by the archive from
-      the five deltas), rationale and limits in the companions, repository-wide
-      topology in `docs/development/ARCHITECTURE.md`, deployment conventions in
-      `DEPLOYMENT_AND_CONFIG.md`; confirm no permanent document announces
+      promotion record below against the placement tables
+      (`docs/guidance/workflow/openspec-documentation.md`,
+      `openspec/README.md#documentation-placement`): normative behaviour in
+      the owning `spec.md` (written by the archive from the six deltas),
+      rationale and limits in the companions, repository-wide topology in
+      `docs/development/ARCHITECTURE.md`, deployment description in
+      `DEPLOYMENT_AND_CONFIG.md`, the repository's rules in
+      `docs/guidance/repository/`; confirm no permanent document announces
       completion or names this change.
 - [ ] 12.4 **Narrative compression.** Shorten each section's completed-task
       notes to final behaviour, material validation evidence, unresolved or
@@ -2256,21 +2342,30 @@ part that would need a code edit returns the change to implementation.
       update in the promotion record.
 - [ ] 12.6 **Campaign index currency.** `openspec/changes/README.md`: this
       change's row and the Goal 9 campaign graph; every link resolves; `make
-      check-change-index` passes. Other rows' `Depends on` are left as they
-      are: `meter-inference-usage` and `package-inference-seller` are released
-      at archive cleanup, not here.
+      check-change-index` passes; name the update in the promotion record.
+      Other rows' `Depends on` are left as they are: `meter-inference-usage`
+      and `package-inference-seller` are released at archive cleanup, not
+      here.
 - [ ] 12.7 **Packaging.** `make check-packaging` passes with every new
       project's lock current; `make check-architecture-change
       CHANGE=compose-inference-domain-stack` reports no exception or override
-      row owned by this change.
-- [ ] 12.8 **End-to-end pipeline.** Record the pipeline run — the `e2e-inference`
-      job (`e2e_inference_deal`) and the `e2e-apicredits` job
-      (`e2e_credits_deal`, the family's unchanged bytes over databases the
-      migrate commands built; design D20) — its
-      result, and the scenarios that exercise this change. If it cannot run
-      for a cause unrelated to the change, record the blocker naming the cause
-      and the change that owns it, and treat the validations it gates as
-      unrun.
+      row owned by this change; `make check-agent-skills` if the change
+      touched `.agents/`, `.claude/`, or `.codex/`. A failure returns the
+      change to implementation.
+- [ ] 12.8 **End-to-end pipeline.** Record the pipeline run the latest passing
+      validation gathered — the `e2e-inference` job (`e2e_inference_deal`) and
+      the `e2e-apicredits` job (`e2e_credits_deal`, the family's unchanged
+      bytes over databases the migrate commands built; design D20) — with its
+      result and the scenarios that exercise this change, from that
+      validation's record; closeout dispatches no run of its own. What exists
+      today: no validation record of the merged commit; the owner accepted in
+      its place the local runs section 11's merge note lists
+      (`reviews/workflow.jsonl`, seq 9), and a pipeline run is sought before
+      closeout. Closeout therefore needs a validation record of the commit it
+      closes out, carrying that pipeline run; without one it records the
+      pipeline as unrun, naming the cause and the change that owns it, and
+      treats what the pipeline gates — the amd64 images on a native host, a
+      Helm deployment, the Linux-only suites — as unproven.
 - [ ] 12.9 **Promotion.** Write the permanent documents the record below
       names, file and heading exactly: the `inference` capability's
       `architecture.md` ("Role composition over the family kit",
@@ -2284,18 +2379,39 @@ part that would need a code edit returns the change to implementation.
       schema and the inference roles); `docs/development/DEPLOYMENT_AND_CONFIG.md`
       ("Per-domain stack composition" — the inference files, overlays, and the
       `vllm` profile; "Migrations at startup" — the `grant_terms` migration and
-      the refusal of a migrated database by an image without it); `dev-env/identities/README.md` (a new
-      section "The inference lane" and its rows in the stack table); then
-      complete the design-promotion record last. No new capability companion
-      is created, so `openspec/specs/README.md` gains no row; confirm its
-      `inference` row, written by `add-inference-domain-contract`'s closeout,
-      resolves.
-- [ ] 12.10 **Documentation citations.** `make check-doc-citations
+      the refusal of a migrated database by an image without it);
+      `dev-env/identities/README.md` ("The inference stack" and its rows in
+      the stack table); the lane-time destinations —
+      `docs/development/TESTING.md` ("Lane time" — the inference service and
+      gateway among the parties, the model stub outside them), the
+      `test-compatibility` capability's `architecture.md` ("Lane time and the
+      doubles' controls"), and the `injected-time` capability's
+      `architecture.md` (the table of each party's setting, route and status
+      under "The component" — the inference service's and the gateway's
+      rows); then complete the design-promotion record last. A document the
+      merge of `dev` already carries in its final state is confirmed against
+      the code, not rewritten. No new capability companion is created, so
+      `openspec/specs/README.md` gains no row; confirm its `inference` row,
+      written by `add-inference-domain-contract`'s closeout, resolves. No
+      capability this change's deltas touch is organized by an index, so
+      `make check-spec-index CHANGE=compose-inference-domain-stack` is run
+      and no `index.md` is written.
+- [ ] 12.10 **Guidance placement.** Read the guidance this change wrote since
+      it branched against the layer test, adjacency, and exception placement:
+      under `docs/guidance/repository/`, `compose-stacks.md`,
+      `contract-conformance.md`, `migrations-at-startup.md`,
+      `package-layers.md`, `project-environments.md`, and
+      `published-packages.md`. Move what is misplaced within the inert paths,
+      report a misplacement that needs a decision for the closeout review, and
+      run `make check-guidance`.
+- [ ] 12.11 **Documentation citations.** `make check-doc-citations
       CHANGE=compose-inference-domain-stack` after promotion, every match
-      resolved; then `openspec validate compose-inference-domain-stack
-      --strict` as the last check before the archive.
-- [ ] 12.11 **Archival.** `openspec archive compose-inference-domain-stack
-      -y`, merging the five deltas into `openspec/specs/{api-family,inference,
+      resolved; then `scripts/change-workflow openspec validate
+      compose-inference-domain-stack --strict` as the last check before the
+      archive.
+- [ ] 12.12 **Archival.** `scripts/change-workflow openspec archive
+      compose-inference-domain-stack -y`, merging the six deltas into
+      `openspec/specs/{api-family,inference,
       deployment-state,test-compatibility,market-composition}/spec.md` and
       moving the change under `changes/archive/`; the index row then links the
       archive. Dependents are released at archive cleanup, not here.
@@ -2314,7 +2430,7 @@ part that would need a code edit returns the change to implementation.
 | D8 — the request-priced guard is one removable entry | the `inference` capability's `spec.md` — "Only request-priced rate cards are publishable without metered consumption" |
 | D9 — Alkahest only, refused at startup | the `inference` capability's `spec.md` — "Alkahest is the only inference settlement mechanism" |
 | D9 (implementation) — the issuance label and the accepted-terms payload are domain-package values both roots share | the `inference` capability's `architecture.md` — "Role composition over the family kit" |
-| D10 — Compose files, identities, and env targets mirror API credits | the `deployment-state` capability's `spec.md` — "Local inference stack composition"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Per-domain stack composition"; `dev-env/identities/README.md` — "The inference lane" |
+| D10 — Compose files, identities, and env targets mirror API credits | the `deployment-state` capability's `spec.md` — "Local inference stack composition"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Per-domain stack composition"; `dev-env/identities/README.md` — "The inference stack" |
 | D11 — the scenario runs in its own lane | the `test-compatibility` capability's `spec.md` — "Inference end-to-end deal path" |
 | D12 — the buyer plugin's contributions | the `inference` capability's `spec.md` — "The buyer plugin discovers by model card under the inference schema"; the `api-family` capability's `architecture.md` — "Contribution bundles" (inference column) |
 | D13 — the withdrawn modules are recovered, not rewritten | `design.md` only; the resulting behaviour promotes under D3, D7, and D8 |
@@ -2335,5 +2451,8 @@ part that would need a code edit returns the change to implementation.
 | plan review 06 F3 — the request charge is positive and ledger-bounded | the `inference` capability's `spec.md` — "Only request-priced rate cards are publishable without metered consumption"; the `api-family` capability's `spec.md` — "The issuance subject may carry accepted terms" |
 | review 01 F2 — a top-up is admitted after the gate's verification TTL | the `inference` capability's `spec.md` — "The gateway admits only paid requests for listed models"; its `architecture.md` — "Current limits" |
 | D19 — the storefront starts without its dependencies, refuses what waiting cannot repair, reaches chains through the probe, and names the seller by its key's account | the `inference` capability's `architecture.md` — "Role composition over the family kit" |
-| D20 — the family's four stateful services migrate through packaged commands and only check at startup; no rollback over a migrated database; every lane layers the doubles and the inference lane's runner has its own profile; each family storefront names its own baseline ID; the sweep is kept for inference under one seller identity per storefront | the `deployment-state` capability's `spec.md` — "Service-owned migration history"; its `architecture.md` — "Migration and initialization boundary"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup"; `docs/operator-handbook.md` — "Upgrading a deployment"; the `api-family` capability's `spec.md` — "The issuance subject may carry accepted terms"; its `architecture.md` — "Current limits"; `docs/development/TESTING.md` and the `test-compatibility` capability's `spec.md` — the lane profiles; `dev-env/identities/README.md` — "The inference stack"; the `inference` capability's `architecture.md` — "Current limits" |
-| Roadmap and index currency (closeout parts 5 and 6) | `docs/development/ROADMAP.md` — Goal 9 current state and gap table; `openspec/changes/README.md` — this change's row and the Goal 9 campaign graph |
+| D20 — the family's four stateful services migrate through packaged commands and only check at startup; no rollback over a migrated database; every lane layers the doubles and the inference lane's runner has its own profile; each family storefront names its own baseline ID; the sweep is kept for inference under one seller identity per storefront | the `deployment-state` capability's `spec.md` — "Service-owned migration history"; its `architecture.md` — "Migration and initialization boundary"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup"; `docs/operator-handbook.md` — "Upgrading a deployment"; the `api-family` capability's `spec.md` — "The issuance subject may carry accepted terms"; its `architecture.md` — "Current limits"; `docs/development/TESTING.md` and the `test-compatibility` capability's `spec.md` — the lane profiles; `dev-env/identities/README.md` — "The inference stack"; the `inference` capability's `architecture.md` — "Current limits"; the inference lane's injected lane time — `docs/development/TESTING.md` — "Lane time"; the `test-compatibility` capability's `spec.md` — "The inference lane runs every party on lane time", "Every party in a lane shares one lane time the scenario sets"; its `architecture.md` — "Lane time and the doubles' controls"; the `injected-time` capability's `architecture.md` — "The component" (the table of each party's setting, route and status) |
+| D20 (pre-closeout review 24 F4) — each inference party's time setting, routes and control are normative in `inference` | the `inference` capability's `spec.md` — "Each inference party's time is configured and set through its own control" |
+| D20 (pre-closeout review 24 F5) — the inference buyer is in the `market` binary; the inference lane is outside release-candidate validation until inference ships | `docs/guidance/repository/images.md` — "The `market` binary"; `docs/release-handbook.md` — "Running the lanes on a release candidate's images" (the first states the binary's domains; the second lists the lanes a candidate runs, inference not among them; no edit owed) |
+| Pre-closeout review 24 F7 — listing pages order by `created_at`, then by first write, newest first, under the `(created_at, listing_id)` cursor | the `storefront-publication` capability's `spec.md` — "Reconciliation reads every listing once" (written by the archive from the delta); the `api-family` capability's `architecture.md` — the publication paragraph (already in final state) |
+| Roadmap and index currency (closeout's "Roadmap currency" and "Campaign index currency") | `docs/development/ROADMAP.md` — Goal 9 current state and gap table; `openspec/changes/README.md` — this change's row and the Goal 9 campaign graph |

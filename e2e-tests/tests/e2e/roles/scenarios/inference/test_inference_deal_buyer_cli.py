@@ -4,6 +4,7 @@
     → an unlisted model is refused uncharged → consume to 402
     → buy again into the existing key → call again → stream a completion
     → a key bought under another listing is refused at this gateway
+    → an hour of lane time later the last credit is charged once
 
 The topology (the inference lane): a registry speaking the ``inference``
 schema, the inference service, the gateway in front of the deterministic model
@@ -154,6 +155,7 @@ def test_inference_full_deal(
     inference_buyer_cli: BuyerCli,
     inference_deal_state: DomainDealState,
     monkeypatch: pytest.MonkeyPatch,
+    lane_time,
 ) -> None:
     served_model = lane_setting("INFERENCE.SERVED_MODEL_NAME")
 
@@ -242,7 +244,8 @@ def test_inference_full_deal(
     inference_deal_state.assert_complete()
 
     # --- h. A top-up into the same key is admitted after the verify TTL ------
-    topup = _buy(inference_buyer_cli, "--key-id", key_id, quantity=2)
+    # Three credits: one for this step, one for the stream, one for the advance.
+    topup = _buy(inference_buyer_cli, "--key-id", key_id, quantity=3)
     topup.wait_for_event("run_ended", predicate=lambda e: e.get("status") == "ready", timeout=10.0)
     deadline = time.monotonic() + 20.0
     last: httpx.Response | None = None
@@ -316,3 +319,14 @@ def test_inference_full_deal(
     assert_market_run_succeeded(other_topup, command="market inference buy --key-id (other listing)")
     delivered = other_topup.wait_for_event("credentials_delivered", timeout=10.0)
     assert (delivered["key_id"], delivered["balance"]) == (other_creds["key_id"], 3), delivered
+
+    # --- j. An hour of lane time later, a request is still charged once ------
+    # Past the signing skew, so the gateway's signed calls are admitted only
+    # because it and the service both moved. A blocked skip on a wall-time run.
+    if lane_time is None:
+        pytest.skip("blocked: an hour forward needs lane time, and the run has none")
+    lane_time.reach(lane_time.now() + 3600, fixed_by_agreement=False)
+    assert _reply(_chat(base_url, secret, model=served_model)) == _stub_reply(PROMPT)
+    spent = _chat(base_url, secret, model=served_model)
+    assert spent.status_code == 402, spent.text
+    assert spent.json()["error"] == "insufficient_credits"

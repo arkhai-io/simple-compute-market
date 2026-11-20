@@ -54,6 +54,7 @@ from market_identity import (
 from market_resource_pools import read_site_declarations
 from market_resource_pools_contracts import BACKED
 
+from apicredits_service.config import ISSUANCE_LABEL
 from tests.integration.signed_service import migrate_service_database
 
 AUTHORITY_SEED = b"credits-authority-seed-32-byte!!"
@@ -481,8 +482,6 @@ def test_a_deployment_without_an_identity_keeps_the_shared_secret_gate(
 
 
 def _seller_client(signed_app):
-    from apicredits_service.config import ISSUANCE_LABEL
-
     return AuthorityClient(
         "http://credits-service",
         label=ISSUANCE_LABEL,
@@ -563,8 +562,6 @@ def _issuance_request(negotiation_id: str, quantity: int = 5):
     string. The vocabulary computes the digest over every bound field, so a
     literal never becomes a second source of truth for what the request says.
     """
-    from apicredits_service.config import ISSUANCE_LABEL
-
     return issuance_request(
         ISSUANCE_LABEL,
         negotiation_id=negotiation_id,
@@ -761,8 +758,6 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
     key = await seller.get_key(issued.key_id)
     assert key["balance"] == 7
 
-    from apicredits_service.config import ISSUANCE_LABEL
-
     grant = await seller.get_issuance(fulfillment_id(ISSUANCE_LABEL, "neg-2"))
     assert grant is not None
 
@@ -776,8 +771,6 @@ async def test_a_route_failing_after_authentication_answers_a_signed_500(
     The failure is a committed grant whose key row is gone, which no route can
     produce, so the row is removed directly as service-internal setup.
     """
-    from apicredits_service.config import ISSUANCE_LABEL
-
     await _seed_quota(signed_app)
     seller = _seller_client(signed_app)
     issued = await seller.submit_issuance(_issuance_request("neg-broken"))
@@ -806,8 +799,6 @@ def _credit_request(
     resource_id: str = "svc-quota",
 ):
     """An issuance for an eip191 buyer, new key or a top-up of an existing one."""
-    from apicredits_service.config import ISSUANCE_LABEL
-
     key = (
         KeyDisposition(mode="existing", key_id=existing_key)
         if existing_key

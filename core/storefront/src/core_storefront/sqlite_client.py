@@ -3917,9 +3917,11 @@ class SQLiteClient:
     ) -> list[dict[str, Any]]:
         """Return a paginated list of orders with optional filters.
 
-        Rows are ordered newest first by ``(created_at, listing_id)``, which no
-        write changes. ``before`` is a keyset cursor, the last row's
-        ``(created_at, listing_id)``, so successive pages visit each listing once.
+        Rows are ordered newest first by ``(created_at, rowid)``, which no write
+        changes; the row identifier keeps insertion order among listings created
+        at one instant. ``before`` is a keyset cursor, the last row's
+        ``(created_at, listing_id)``, whose row identifier the query resolves, so
+        successive pages visit each listing once.
         Each row carries ``closed_by`` as :meth:`load_listing` does.
         """
 
@@ -3936,7 +3938,10 @@ class SQLiteClient:
                     clauses.append("paused = ?")
                     params.append(1 if paused else 0)
                 if before is not None:
-                    clauses.append("(created_at < ? OR (created_at = ? AND listing_id < ?))")
+                    clauses.append(
+                        "(created_at < ? OR (created_at = ? AND rowid < "
+                        "(SELECT rowid FROM listings WHERE listing_id = ?)))"
+                    )
                     params.extend((before[0], before[0], before[1]))
                 where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
                 cur.execute(
@@ -3954,7 +3959,7 @@ class SQLiteClient:
                            rate_structure,
                            available_until_utc
                     FROM listings {where}
-                    ORDER BY created_at DESC, listing_id DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),
