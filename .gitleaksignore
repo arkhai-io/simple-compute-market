@@ -1,0 +1,4 @@
+# Only these immutable, published development-fixture findings are baselined.
+# New/staged key blocks and current-file audits retain the strict key rule.
+31a1ba47cda2a573d4df21168d668eb08ec73b7d:tools/payments-lane-double/tls/double.key.pem:private-key-block:1
+bcd95449f8884b358b4ded5b38dbf84e05523c50:tools/payments-lane-double/tls/double.key.pem:private-key-block:1
