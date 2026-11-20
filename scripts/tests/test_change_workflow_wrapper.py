@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import claude_code, sandbox
+from change_workflow import claude_code
 from change_workflow.common import StepError
 from change_workflow.claude_code import TOOLS
 from change_workflow.sandbox import BWRAP, Confinement
@@ -27,7 +27,8 @@ from change_workflow.wrapper import Wrapper, triage_kind, validation_target
 from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT, MODELS,
                                       NETWORK, OPUS, SESSION, VALID, FakeClaude, clock,
                                       configured,
-                                      event_lines, failed_run, make_wrapper, not_installed,
+                                      event_lines, failed_run, make_wrapper, needs_bwrap,
+                                      not_installed,
                                       option, option_rules, prompted, reading,
                                       without_session_id)
 
@@ -1256,11 +1257,9 @@ def test_a_run_that_did_not_finish_is_checked_too(tmp_path: Path) -> None:
 # Runs launched as the sandbox confines them: external-process integration, the
 # wrapper launching a program that stands in for Claude Code, in a real Git checkout.
 # The tests launching real bubblewrap are skipped, saying why, where the engine's own
-# probe finds the sandbox cannot run; the last, its probe doubled to fail, launches
-# the stand-in unconfined wherever it runs.
+# probe finds the sandbox cannot run, and fail there under `SANDBOX_REQUIRED=1`; the
+# last, its probe doubled to fail, launches the stand-in unconfined wherever it runs.
 
-PROBED = sandbox.probe()
-needs_bwrap = pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
 
 # Claude Code stood in for: it runs each command it is given as a Bash call, in the
 # session's environment, streaming the call and its result as Claude Code does, then

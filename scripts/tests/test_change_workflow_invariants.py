@@ -289,6 +289,47 @@ def test_the_change_branch_moved_but_by_the_guarded_push_is_found(repo: Path) ->
     assert _checks(repo, start, [_pushed(head)]) == []
 
 
+def test_the_change_branch_the_round_view_moved_is_not_the_runs(
+        repo: Path, tmp_path: Path) -> None:
+    """CW-q7ub: a change branch is held only to have no commit made in the run at its
+    tip, unless the guarded push sent it. The round view, opened in the
+    owner's workspace during a review, checks the workspace's branch out at the
+    round's base, a commit from before the run; a commit the owner makes there is
+    none of the run's either."""
+    workspace = tmp_path / "workspace"
+    _git(tmp_path, "init", "-q", "-b", "dev", str(workspace))
+    _git(repo, "remote", "add", "workspace", str(workspace))
+    start = _start(repo, "review")
+    _git(repo, "push", "-q", "workspace", "dev:refs/heads/feat/change")
+
+    assert _checks(repo, start) == []
+
+    _git(workspace, "checkout", "-q", "feat/change")
+    _write(workspace, "notes.txt", "the owner's\n")
+    _commit(workspace, "the owner's")
+
+    assert _checks(repo, start) == []
+
+
+def test_a_change_branch_holding_a_commit_made_in_the_run_is_found(
+        repo: Path, tmp_path: Path) -> None:
+    """CW-q7ub: a commit made in the run on another remote's change branch, sent
+    there other than by the guarded push, is found."""
+    workspace = tmp_path / "workspace.git"
+    _git(tmp_path, "init", "-q", "--bare", str(workspace))
+    _git(repo, "remote", "add", "workspace", str(workspace))
+    start = _start(repo)
+    _write(repo, "src/main.py", "more code\n")
+    head = _commit(repo, "section")
+    _git(repo, "push", "-q", "workspace", "HEAD:refs/heads/feat/change")
+
+    (found,) = invariants.check(repo, start)
+
+    assert found == Violation("remote", f"workspace's feat/change is at {head[:12]}, a commit "
+                                        "made in the run, neither where it was, nothing, nor "
+                                        "the guarded push's last, nothing")
+
+
 def test_an_unreachable_remote_is_not_checked(repo: Path, tmp_path: Path) -> None:
     """CW-q7ub: a remote unreadable at the end of the run is not checked."""
     start = _start(repo)

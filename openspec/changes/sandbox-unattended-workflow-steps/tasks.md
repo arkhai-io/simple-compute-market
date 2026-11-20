@@ -1979,6 +1979,89 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
     `with_test_directory`; a new such test needs one of them, or its scope must write
     what it reads.
 
+  Fixes of the round's triage (review 62, orchestrator records 58 and 64, and the
+  sections' handoffs; the dispositions are in the triage records), outside the
+  plan's tasks, each named by the section it concerns:
+  - Check 6 (section 5; 64 R1): a moved change branch is a violation only when its
+    tip is a commit made in the run and not the guarded push's last, so the owner's
+    round view moving the workspace's branch to the round's base, or the owner's
+    commits there, stop no run (`invariants._remote_violations`; D6, CW-q7ub, its
+    scenario "The owner opens the round view during a review").
+  - The protected check (section 2; 62 F1): `_Checkout.protecting` compares an entry
+    and each protected entry as written and where their links lead, so a grant or a
+    `[sandbox]` entry that is a link into a protected directory is refused before
+    launch (D8, D12, CW-h2zt, CW-tl5v).
+  - The review's scope (sections 2 and 11; handoff 11a.8): the review writes
+    `~/.cache` from the engine and the repository's `writable.common` entries that lie
+    outside its checkout, neither in it nor holding it, as written and where their
+    links lead (`graph.STEP_DEFINITIONS`, `config.repository_writable`,
+    `scope.outside_checkout`; D5, D12, D21, CW-m8wq, CW-h2zt, MCW-s4bx's "A review
+    runs the repository's checks"). A checkout lying under `~/.cache` would be
+    writable to its review: not guarded, as no clone is made there.
+  - The gate for the sandbox tests (sections 3, 4 and 7; 62 F2): every test launching
+    real bubblewrap asks for `conftest.sandbox_runs` through
+    `change_workflow_fixtures.needs_bwrap`, skipped where the probe fails and failed
+    there under `SANDBOX_REQUIRED=1`, which `tests.yml`'s packaging job sets after
+    installing bubblewrap and lifting the runner's AppArmor restriction on
+    unprivileged user namespaces.
+    Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — `make
+    test-deployment-packaging` under `SANDBOX_REQUIRED=1`, its log showing the change
+    workflow's sandbox tests passed, none skipped.
+  - The skills (section 10; handoff 10.5, 58 R3): `change-merge` stops an unattended
+    merge before merging when the landing branch changed a protected path, and
+    continues one the orchestrating session started after that stop;
+    `change-orchestrate` brings that merge in outside the sandbox on the owner's word,
+    and reads a denial by the harness's own guard as a finding by its target or
+    neither (D7, D15, CW-svng).
+  - Documents only: D2 (two routes around the engine's `git`; no upstream after a
+    violation, CW-59c7), D4 (`--unshare-pid`), D5a and CW-m8wq (an adapter's state
+    file mounted alone), D13 (`~/.claude`'s other contents, and Codex's trusted
+    directories, recorded as limits); the permanent indexes and companion naming the
+    review's common paths.
+  Tests, all passing:
+  - library integration on real Git, `test_change_workflow_invariants.py`: the round
+    view's move and the owner's commit pass; a commit made in the run on another
+    remote's change branch is found, named in full;
+  - library integration on real links, `test_change_workflow_scope.py`: a grant of a
+    link into a protected directory refused naming it, a grant under a protected
+    entry that is a link refused, a link to a directory holding a protected file
+    admitted with the file read-only; the review's scope holds `~/.cache`;
+  - `test_change_workflow_config.py`: a `[sandbox]` entry linked into a protected
+    directory refused by the check (library integration, real links); the review's
+    common paths only those outside the checkout, one linked into it and one holding
+    it left out (unit, and library integration for the links); every step, the
+    review included, writes this repository's tool state and `~/.cache/uv` (library
+    integration, real Git);
+  - the four files launching real bubblewrap — `test_change_workflow_sandbox.py`,
+    `_sandbox_git.py`, `_review.py`, `_wrapper.py` — under `SANDBOX_REQUIRED=1`, none
+    skipped (external-process integration); and the gate itself, by a probe forced
+    to fail through a pytest plugin of the session's own, not kept: under
+    `SANDBOX_REQUIRED=1` each sandbox test of `_sandbox_git.py` errors naming the
+    probe's reason, without it each is skipped.
+  The nine new or changed tests of the first three files, run against `de2a55c2c` in a
+  worktree of the session's own, since removed (`run test-before` reads tests as
+  `HEAD` holds them, before this commit), all failed there; the last only on its
+  violation's new wording. `make check-agent-skills` and `make check-comment-hygiene`
+  pass. A fresh-context check of the diff found: `outside_checkout` admitting a path
+  holding the checkout; the merge skill's route and worktree checks stopping the
+  resumed merge; its no-conflict merge left uncommitted; the orchestrator resolving
+  protected paths beyond the workflow's own files; CW-svng and its migration line
+  naming two readings; deletion missing from D6's limits; three permanent
+  documents' stale wording; no `apt-get update` in CI; import order and line length.
+  All fixed. Declined: guarding `~/.cache` against a checkout beneath it (above).
+  `scripts/change-workflow run pre-commit sandbox-unattended-workflow-steps`, in this
+  triage's own sandbox, the first step the engine launched with the private `/tmp`
+  (`/tmp` the owner's, `700`, `TMPDIR=/tmp`), on the tree `7a4bb1830890`, which differs
+  from what the fixes commit only by this paragraph: `after-functional-change` passed,
+  the locks unchanged; `pre-commit-functional` passed — local evidence PASSED (tree
+  before, dist-clean, check-packaging, `make test` in 1010 s, tree after), the
+  bare-metal IaC ledger suite 126 passed and 10 deselected with no "unsafe ancestor",
+  the scripts suite 3566 passed (attempt `20261120T093450.074945Z`); `pre-commit`
+  passed, strict OpenSpec validation and `make check-repository` among it. So the
+  ledger suite passes in a step's own sandbox, unnested, as 11a.8's handoff asked. An
+  earlier run failed one scripts test, the graph's, still asserting the review wrote
+  no `~/.cache`; it was corrected before this run.
+
 ## 12. Closeout
 
 The workflow's closeout parts (`docs/guidance/workflow/closeout.md`), in order, with

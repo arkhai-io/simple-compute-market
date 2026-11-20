@@ -5,7 +5,8 @@ The rendered arguments, the creation of absent paths, and the probe with its run
 doubled are unit tests, on scopes built by hand. The tests that launch real bubblewrap
 are external-process integration: a shell program stands in for the harness, in a
 scope resolved on a real Git checkout. Each is skipped, saying why, where the engine's
-own probe finds the sandbox cannot run; that they ran, not skipped, is the evidence
+own probe finds the sandbox cannot run, and failed there under `SANDBOX_REQUIRED=1`,
+which CI's packaging job sets; that they ran, not skipped, is the evidence
 that the real probe passes on the machine that ran them."""
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ import pytest
 from change_workflow import adapters, sandbox, scope
 from change_workflow.sandbox import BWRAP, Launch
 from change_workflow.scope import ADAPTER, ENGINE, GRANT, Scope, ScopedPath
-from change_workflow_fixtures import with_test_directory
+from change_workflow_fixtures import needs_bwrap, with_test_directory
 
 BASE = [BWRAP, "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
 # The engine's `git` over the system's two, read from descriptors 7 and 8, and the
@@ -288,8 +289,6 @@ def test_inside_the_engines_sandbox_the_git_it_finds_is_kept(tmp_path: Path) -> 
 
 # Through real bubblewrap.
 
-PROBED = sandbox.probe()
-needs_bwrap = pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
 INERT = ("openspec/", "docs/", "**/README.md", "AGENTS.md")
 
 

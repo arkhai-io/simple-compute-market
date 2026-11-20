@@ -16,10 +16,10 @@ is logged `stopped`, naming each (`stopped`).
 4. `records` — each review record that existed is unchanged, and the change's ledger
    only grew at its end;
 5. `stash` — `refs/stash` is unchanged;
-6. `remote` — on each remote, the change's branch is where it was, or at the last
+6. `remote` — on each remote, the change's branch is where it was, at the last
    commit the session's guarded push sent there successfully, as its record names
-   it (`running.ATTEMPTED_PUSH`); and no protected branch holds a commit made in the
-   run;
+   it (`running.ATTEMPTED_PUSH`), or at a commit not made in the run; and no
+   protected branch holds a commit made in the run;
 7. `closeout` — for closeout, every path changed since the session started,
    committed or not, is one closeout may change (CW-pkug): the repository's inert
    paths, changes' records, and the archive's own writes — the change's own
@@ -35,7 +35,11 @@ leaves.
 A commit made in the run is one `HEAD` came to during it, as `HEAD`'s reflog records
 every commit, amend, merge, and checkout, a branch since deleted or a detached `HEAD`
 included; so a commit another party pushed to a protected branch during the run,
-which a step's fetch brought in, is not the run's. The check reads each remote's
+which a step's fetch brought in, is not the run's. Nor is a change branch the owner
+moved during the run: the round view, opened in the owner's workspace beside a
+review in the change's clone, checks the workspace's branch out at the round's base,
+and closing it can leave the owner's own commits there; neither tip is a commit made
+in the run. The check reads each remote's
 tips by listing them, not by fetching, so a protected branch is checked at its tip:
 a commit of the run that another party has since built on is not found. A remote the
 engine cannot reach, as the session starts or after it, is not checked: the
@@ -326,11 +330,11 @@ def _remote_violations(root: Path, start: Start,
         if start.branch is not None:
             was, now = before.get(start.branch), after.get(start.branch)
             pushed = _pushed(invoked, remote, start.branch)
-            if now not in (was, pushed):
+            if now not in (was, pushed) and now in made:
                 found.append(Violation(
-                    "remote", f"{remote}'s {start.branch} is at {_short(now)}, neither where it "
-                              f"was, {_short(was)}, nor the guarded push's last, "
-                              f"{_short(pushed)}"))
+                    "remote", f"{remote}'s {start.branch} is at {_short(now)}, a commit made "
+                              f"in the run, neither where it was, {_short(was)}, nor the "
+                              f"guarded push's last, {_short(pushed)}"))
         for protected in start.protected_branches:
             now = after.get(protected)
             if now is not None and now != before.get(protected) and now in made:

@@ -48,7 +48,8 @@ field is absent, never when it is 0.
 
 `[sandbox]` adds to each step's scope, which the engine's baseline and the adapter
 of the harness running the step hold (`scope`): `writable.common` paths every step
-but the review writes, `writable.<step>` paths one step writes, and `protected` paths
+writes, the review only those outside its checkout, `writable.<step>` paths one step
+writes, and `protected` paths
 no step writes. A repository only adds: the check refuses a writable path that is or
 lies under a protected one, the engine's, any adapter's, or its own; `/tmp` or a
 directory holding it, which would hide the private `/tmp` every step writes; and any
@@ -83,8 +84,8 @@ from .adapters import ADAPTERS, HARNESSES
 from .adapters import PROTECTED as ADAPTER_PROTECTED
 from .harness import Model
 from .records import is_pattern
-from .scope import (PRIVATE_TEMPORARY, PROTECTED, Scope, hides_temporary, protected_by,
-                    resolve)
+from .scope import (PRIVATE_TEMPORARY, PROTECTED, Scope, hides_temporary,
+                    outside_checkout, protected_by, resolve)
 
 # The configuration's place in the repository the command acts on.
 CONFIGURATION = Path(".agents/workflow.toml")
@@ -110,7 +111,8 @@ COMMON_DOCUMENTS = "common"
 DEFAULT_INERT_PATHS = ("openspec/", "**/*.md")
 # The send-backs a review's refused draft is given when the configuration names none.
 DEFAULT_FORMAT_RETRIES = 1
-# The writable paths every step but the review adds, which a step's own add to.
+# The writable paths every step adds, the review only those outside its checkout,
+# which a step's own add to.
 COMMON_WRITABLE = "common"
 # An evidence kind's fields, in the order `config` lists them.
 KIND_KEYS = ("required", "evidence", "run", "start", "collect", "after", "cleanup", "guide")
@@ -258,10 +260,17 @@ class Configuration:
     sandbox_writable: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     sandbox_protected: tuple[str, ...] | None = None
 
-    def repository_writable(self, step: str) -> tuple[str, ...]:
-        """The writable paths the repository adds to a step's scope: `writable.common`,
-        for every step but the review, then the step's own."""
-        common = () if step == "review" else self.sandbox_writable.get(COMMON_WRITABLE, ())
+    def repository_writable(self, step: str, root: Path | None = None,
+                            home: Path | None = None) -> tuple[str, ...]:
+        """The writable paths the repository adds to a step's scope in the checkout at
+        `root`: `writable.common`, then the step's own. The review takes only the
+        common paths outside its checkout, such as a tool's cache in the home
+        directory, since every file it reviews stays read-only; with no `root`, none."""
+        common = self.sandbox_writable.get(COMMON_WRITABLE, ())
+        if step == "review":
+            common = () if root is None else tuple(
+                entry for entry in common
+                if outside_checkout(entry, root, Path.home() if home is None else home))
         return tuple(dict.fromkeys((*common, *self.sandbox_writable.get(step, ()))))
 
     def scope(self, step: str, root: Path, harness: str | None = None,
@@ -278,7 +287,7 @@ class Configuration:
             launch = {"adapter_writable": adapter.state, "adapter_files": adapter.state_files,
                       "adapter_protected": adapter.protected, **launch}
         return resolve(step, root, inert_paths=self.repository_inert_paths(),
-                       writable=self.repository_writable(step),
+                       writable=self.repository_writable(step, root, launch.get("home")),
                        protected=self.sandbox_protected or (), **launch)
 
     def hook(self, name: str) -> tuple[str, ...] | None:

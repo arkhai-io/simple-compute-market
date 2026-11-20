@@ -757,13 +757,49 @@ def test_an_absent_sandbox_table_adds_nothing() -> None:
     assert all(checked.repository_writable(step) == () for step in config.STEPS)
 
 
-def test_common_paths_are_every_step_but_the_reviews() -> None:
-    checked = _checked("[sandbox]\nwritable.common = ['~/.local/share/uv']\n"
+def test_common_paths_are_every_steps_the_reviews_only_outside_its_checkout(
+        tmp_path: Path) -> None:
+    """The review writes the common paths outside its checkout, such as a tool's cache,
+    and none inside it, every file it reviews staying read-only."""
+    root, home = tmp_path / "checkout", tmp_path / "home"
+    checked = _checked("[sandbox]\nwritable.common = ['~/.local/share/uv', 'build/', "
+                       f"'{root}/out', '/var/cache/x']\n"
                        "writable.design = ['docs/', '~/.local/share/uv']\n")
 
-    assert checked.repository_writable("design") == ("~/.local/share/uv", "docs/")
-    assert checked.repository_writable("plan") == ("~/.local/share/uv",)
+    assert checked.repository_writable("design", root, home) == (
+        "~/.local/share/uv", "build/", f"{root}/out", "/var/cache/x", "docs/")
+    assert checked.repository_writable("plan") == (
+        "~/.local/share/uv", "build/", f"{root}/out", "/var/cache/x")
+    assert checked.repository_writable("review", root, home) == ("~/.local/share/uv",
+                                                                 "/var/cache/x")
     assert checked.repository_writable("review") == ()
+
+
+def test_a_common_path_linked_into_the_checkout_stays_out_of_the_reviews_scope(
+        tmp_path: Path) -> None:
+    """A path from the home directory whose link leads into the checkout is inside it,
+    where the sandbox would mount it."""
+    root, home = tmp_path / "checkout", tmp_path / "home"
+    (root / "build").mkdir(parents=True)
+    home.mkdir()
+    (home / "build").symlink_to(root / "build")
+    checked = _checked("[sandbox]\nwritable.common = ['~/build']\n")
+
+    assert checked.repository_writable("review", root, home) == ()
+    assert checked.repository_writable("implement", root, home) == ("~/build",)
+
+
+def test_a_common_path_holding_the_checkout_stays_out_of_the_reviews_scope(
+        tmp_path: Path) -> None:
+    """A directory holding the checkout would make every file the review reads
+    writable, so it is no path outside the checkout."""
+    home = tmp_path / "home"
+    root = home / "code/checkout"
+    root.mkdir(parents=True)
+    checked = _checked(f"[sandbox]\nwritable.common = ['~/code', '~', '{tmp_path}', "
+                       "'~/.npm']\n")
+
+    assert checked.repository_writable("review", root, home) == ("~/.npm",)
 
 
 def _git_checkout(root: Path, text: str) -> Path:
@@ -828,6 +864,18 @@ def test_a_path_under_the_hosts_temporary_directory_is_admitted(tmp_path: Path) 
 
     assert {(path.path, path.source) for path in found.writable} >= {
         (Path("/tmp/shared-cache"), "repository"), (Path("/tmp"), "engine")}
+
+
+def test_a_writable_path_linked_into_a_protected_directory_is_refused(tmp_path: Path) -> None:
+    """The check compares a path where its links lead, as the sandbox mounts it.
+    Library integration: real links on the file system."""
+    root = tmp_path / "checkout"
+    (root / "data/subdir").mkdir(parents=True)
+    (root / "alias").symlink_to(root / "data/subdir")
+    with pytest.raises(ConfigError, match="sandbox.writable.design names alias, which is or "
+                                          "lies under the protected path data/"):
+        config.check("[sandbox]\nwritable.design = ['alias']\nprotected = ['data/']\n",
+                     root / config.CONFIGURATION, home=tmp_path / "home")
 
 
 def test_a_writable_path_under_a_protected_home_path_is_refused(tmp_path: Path) -> None:
@@ -1022,21 +1070,22 @@ def test_design_and_planning_write_the_repositorys_documents(tmp_path: Path) -> 
     assert not _writes(_repository_scope("archive-cleanup", tmp_path / "home"), roadmap)
 
 
-def test_every_writing_step_writes_the_tool_state_its_suites_and_deployments_need(
+def test_every_step_writes_the_tool_state_its_suites_and_deployments_need(
         tmp_path: Path) -> None:
-    """MCW-s4bx's "Implementation syncs an environment" and "Design validates the
-    change": uv's Pythons, and the cluster client's cache, the cloud CLI's
-    configuration, Docker's client configuration, and npm's cache, which the
-    configured OpenSpec command's `npx` writes, for every step but the review, design
-    among them; and nothing protected beyond the engine's and the adapters'."""
+    """MCW-s4bx's "Implementation syncs an environment", "Design validates the change"
+    and "A review runs the repository's checks": uv's Pythons, and the cluster client's
+    cache, the cloud CLI's configuration, Docker's client configuration, and npm's
+    cache, which the configured OpenSpec command's `npx` writes, for every step, the
+    review included, since each lies outside the checkout; and nothing protected
+    beyond the engine's and the adapters'."""
     home = tmp_path / "home"
     tools = [home / ".local/share/uv/python", home / ".kube/cache", home / ".config/gcloud",
-             home / ".docker", home / ".npm/_cacache"]
+             home / ".docker", home / ".npm/_cacache", home / ".cache/uv"]
 
     for step in config.STEPS:
         found = _repository_scope(step, home)
         writes = [_writes(found, tool) for tool in tools]
-        assert writes == [step != "review"] * len(tools), step
+        assert writes == [True] * len(tools), step
         assert not any(path.source == REPOSITORY_SOURCE for path in found.protected), step
     assert config.load(REPOSITORY).sandbox_protected == ()
 

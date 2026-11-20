@@ -584,8 +584,8 @@ def step_actions(when: str, step: str) -> tuple[str, ...]:
 
 
 # A step's profile: the review writes nothing it reviews, so in its checkout it writes
-# only the engine's record of what it invoked; every other step writes the paths its
-# work changes.
+# only the engine's record of what it invoked, and outside it the caches every step's
+# tools write; every other step writes the paths its work changes.
 READ_ONLY, WRITING = "read-only", "writing"
 # The baseline entries the workflow names by role, which a step's scope resolves as a
 # run starts: the repository's inert paths, from its configuration, and the step's
@@ -605,6 +605,8 @@ _GIT = ".git/"
 # guarded push, in the Git directory: the one path of its checkout a review writes,
 # so the checks it runs for evidence record themselves.
 _INVOCATIONS = f"{_GIT}{INVOCATIONS}/"
+# The tools' cache in the home directory, which every step writes, the review included,
+# since the checks a review runs for evidence start tools that write it.
 _CACHE = "~/.cache"
 
 
@@ -630,7 +632,7 @@ def _writing(skill: str, *paths: str, resume_from: str | None = None) -> StepDef
 # repository's additions live in its configuration's `[sandbox]` and only add.
 STEP_DEFINITIONS: dict[str, StepDefinition] = {
     "design": _writing("change-design", "openspec/", _GIT, PROPOSALS),
-    "review": StepDefinition("change-review", READ_ONLY, (_INVOCATIONS, TEMPORARY)),
+    "review": StepDefinition("change-review", READ_ONLY, (_INVOCATIONS, TEMPORARY, _CACHE)),
     "triage": _writing("change-triage", _CHECKOUT),
     "plan": _writing("change-plan", "openspec/", _GIT, resume_from="design"),
     "implement": _writing("change-implement", _CHECKOUT),

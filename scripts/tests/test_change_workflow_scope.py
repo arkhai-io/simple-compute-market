@@ -116,7 +116,8 @@ def test_the_reviews_scope_holds_no_path_of_its_checkout_but_the_invocation_reco
     found = _resolve("review", checkout, writable=())
     record = checkout / ".git/change-invocations"
 
-    assert _writable(found) == {record: ENGINE, TMP: ENGINE}
+    assert _writable(found) == {record: ENGINE, TMP: ENGINE,
+                                checkout.parent / "home/.cache": ENGINE}
     # Absent until a session first invokes something, so created before launch.
     (invocations,) = [path for path in found.writable if path.path == record]
     assert invocations.create
@@ -272,6 +273,38 @@ def test_a_grant_of_a_directory_holding_a_protected_path_keeps_it_read_only(
     found = _resolve("design", checkout, grants=(".agents/",))
 
     assert _writable(found)[checkout / ".agents"] == GRANT
+    assert checkout / ".agents/workflow.toml" in _protected(found)
+
+
+def test_a_grant_of_a_link_into_a_protected_directory_is_refused(checkout: Path) -> None:
+    """The sandbox mounts a path where its links lead, so a link into a protected
+    directory is under it, though its own name is not."""
+    (checkout / "data/subdir").mkdir(parents=True)
+    (checkout / "alias").symlink_to(checkout / "data/subdir")
+
+    with pytest.raises(ScopeError, match="the grant 'alias' names alias, which is or lies "
+                                         "under the protected path data/"):
+        _resolve("design", checkout, grants=("alias",), protected=("data/",))
+
+
+def test_a_grant_under_a_protected_path_that_is_a_link_is_refused(checkout: Path) -> None:
+    """A protected entry is compared where its links lead too."""
+    (checkout / "data/subdir").mkdir(parents=True)
+    (checkout / "guarded").symlink_to(checkout / "data")
+
+    with pytest.raises(ScopeError, match="the protected path guarded"):
+        _resolve("design", checkout, grants=("data/subdir",), protected=("guarded",))
+
+
+def test_a_grant_of_a_link_to_a_directory_holding_a_protected_path_is_admitted(
+        checkout: Path) -> None:
+    """As a directory holding a protected path is: the protected path stays read-only
+    inside the directory the link leads to, where the sandbox mounts it."""
+    (checkout / "alias").symlink_to(checkout / ".agents")
+
+    found = _resolve("design", checkout, grants=("alias",))
+
+    assert _writable(found)[checkout / "alias"] == GRANT
     assert checkout / ".agents/workflow.toml" in _protected(found)
 
 

@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+import pytest
+
 from change_workflow.around import inputs_note
 from change_workflow.harness import Model
 from change_workflow.log import Checkout
@@ -378,3 +380,8 @@ RECORDS = f"openspec/changes/{CHANGE}"
 def validation_text(commit: str, result: str) -> str:
     return (f"# Validation — {CHANGE} — {commit[:12]}\n\n- **Commit:** {commit} on feat/x\n"
             f"- **Result:** {result} — why\n")
+
+
+# A test that launches the real sandbox: skipped where it cannot run, failed instead
+# under `SANDBOX_REQUIRED=1` (`conftest.sandbox_runs`).
+needs_bwrap = pytest.mark.usefixtures("sandbox_runs")

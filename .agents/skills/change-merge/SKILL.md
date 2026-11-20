@@ -147,9 +147,12 @@ and follow this skill.
   and the run follows "After the archive" as well. When a merge is in progress it
   names the owner, `merging`;
   that is yours to continue only when this session started it and is resumed with
-  the owner's answer. Otherwise, when it names anything else, stop: its reason says
+  the owner's answer, or when this session stopped because the base changed a
+  protected path (step 3) and the owner or the orchestrating session started the
+  merge after that stop. Otherwise, when it names anything else, stop: its reason says
   what comes first.
-- **Worktree.** It is clean, but for a merge this session started, and
+- **Worktree.** It is clean, but for a merge this session started or one started
+  after its protected-path stop, and
   `scripts/change-workflow check round-view` passes.
 - **Repair or merge.** Read the latest validation record in `reviews/`. When it
   names `HEAD` and failed, this run repairs it: go to "Repairing a failed
@@ -188,8 +191,22 @@ guidance — which the merge reconciles, with the code, against both sides.
    - `git diff --stat <merge-base> <base>` and `git log --oneline
      <merge-base>..<base>`;
    - the change's own diff, `git diff --stat <merge-base> HEAD`.
-3. `git merge --no-edit <base>`. A merge with no conflict concludes itself as a
-   commit: go to step 4, and add its repairs as a commit of their own (step 6).
+
+   Unattended, compare what the base changed, `git diff --name-only <merge-base>
+   <base>`, with the protected paths of this step's scope, which
+   `scripts/change-workflow config --json` lists under `scopes.merge.protected`,
+   each by its `entry` for one in the checkout.
+   Your sandbox mounts them read-only, so a merge that must write one fails partway.
+   When the base changed any, do not merge: end `stopped` with nothing started,
+   `reason` naming each protected path the base changed. The orchestrating session
+   brings the owner the merge outside the sandbox, and this step is resumed to
+   resolve and conclude it. Interactively, with no sandbox, go on.
+3. `git merge --no-edit <base>`, unless the merge is already in progress because the
+   owner or the orchestrating session started it after such a stop: then go on to
+   resolve it, and, once no conflict is left, commit it with `git commit --no-edit`,
+   since it was started without committing. A merge with no conflict concludes
+   itself as a commit: go to step 4, and add its repairs as a commit of their own
+   (step 6).
 
 **Resolve each conflict** (`git diff --name-only --diff-filter=U`) so both sides
 hold: the change's behaviour as its sections built it, and the base's as its

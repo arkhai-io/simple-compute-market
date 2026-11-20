@@ -13,8 +13,9 @@ starts, from four sources:
   through (CW-r6kd, CW-j4cs);
 - the adapter of the harness that runs the step: the state its harness writes and the
   settings files it loads, which the caller passes in (`adapters`);
-- the repository: its configuration's `[sandbox]`, `writable.common` for every step
-  but the review, `writable.<step>` for one, and `protected` (CW-h2zt);
+- the repository: its configuration's `[sandbox]`, `writable.common` for every step,
+  the review taking only its paths outside the checkout (`outside_checkout`),
+  `writable.<step>` for one, and `protected` (CW-h2zt);
 - a grant: a path the owner gives one run (CW-tl5v).
 
 An entry is a path from the checkout's root, a path from the home directory where it
@@ -42,8 +43,9 @@ is a state file an adapter names, which is mounted alone, since its directory is
 home directory, which no step writes whole: it can be written in place, though not
 replaced by rename. A protected path
 stays read-only inside any writable directory that contains it, so a path is refused
-only where it is, or lies under, a protected one; the configuration's check and a
-grant's both ask `protected_by`, so the two cannot disagree.
+only where it is, or lies under, a protected one, as written or where its links lead,
+since that is where it is mounted; the configuration's check and a grant's both ask
+`protected_by`, so the two cannot disagree.
 """
 
 from __future__ import annotations
@@ -156,11 +158,27 @@ def hides_temporary(entry: str, root: Path, home: Path) -> bool:
     return any(within(PRIVATE_TEMPORARY, found) for found in (path, path.resolve()))
 
 
+def outside_checkout(entry: str, root: Path, home: Path) -> bool:
+    """Whether `entry` names a path outside the checkout at `root`, as it is written and
+    where its links lead: one from the home directory or absolute, neither lying in the
+    checkout nor holding it, never one relative to the root."""
+    if not (_home_relative(entry) or entry.startswith("/")):
+        return False
+    path = absolute(entry, root, home)
+    return not any(within(found, checkout) or within(checkout, found)
+                   for found in (path, path.resolve()) for checkout in (root, root.resolve()))
+
+
 def grant_paths(values: Sequence[str]) -> list[tuple[str, str]]:
     """Each path a run's grants name, with the value that named it: each value split on
     `;`, each part trimmed, and empty parts dropped."""
     return [(value, part.strip()) for value in values for part in value.split(";")
             if part.strip()]
+
+
+def _followed(paths: Iterable[Path]) -> list[Path]:
+    """Each of `paths` as it is written and where its links lead."""
+    return list(dict.fromkeys(found for path in paths for found in (path, path.resolve())))
 
 
 class _Checkout:
@@ -189,12 +207,15 @@ class _Checkout:
         return self._paths[entry]
 
     def protecting(self, entry: str, protected: Iterable[str]) -> str | None:
-        """The first of the `protected` entries that `entry` is or lies under, or None.
-        A pattern is judged by its fixed part, the directory its matches lie under."""
-        paths = self.paths(fixed_part(entry))
+        """The first of the `protected` entries that `entry` is or lies under, or None,
+        each compared as it is written and where its links lead, since the sandbox
+        mounts every path where its links lead: a link into a protected directory is
+        under it. A pattern is judged by its fixed part, the directory its matches lie
+        under."""
+        paths = _followed(self.paths(fixed_part(entry)))
         return next((guarded for guarded in protected
                      if any(within(path, ancestor) for path in paths
-                            for ancestor in self.paths(guarded))), None)
+                            for ancestor in _followed(self.paths(guarded)))), None)
 
     def _resolved(self, entry: str) -> list[Path]:
         parts = Path(entry).parts

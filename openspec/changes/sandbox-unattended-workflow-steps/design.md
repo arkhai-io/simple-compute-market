@@ -5,7 +5,10 @@ review 19 (D2, D4, D5, D5a, D6, D8, D10, D13) and of design review 28 (D2, D4, D
 D7, D8, D12, the cadence); revised again the same day on a return from
 implementation, when the sandbox's identity mapping failed the bare-metal ledger
 suite (D17–D21; D1, D4, D5, D6, D8, D12 and the cadence restated); revised on the
-triage of design review 48 (D6, D13, D19, the cadence). Some decisions are expected to be
+triage of design review 48 (D6, D13, D19, the cadence); revised on the triage of the
+implementation round on 2026-11-20, its review 62, the orchestrator's records 58 and
+64, and the sections' handoffs (D2, D4, D5, D5a, D6, D7, D8, D12, D13, D15, D21). Some
+decisions are expected to be
 reconsidered when `extract-change-workflow-repository` moves the workflow out of this
 repository; each stands until then.
 
@@ -117,7 +120,10 @@ unconfined run (D10) the only guard.
 The guarantee is about `git push`, the route an agent's mistakes take: a plain push,
 then a retry with the hooks skipped. Other routes to the remote — the real binary
 called by its own path, the Git host's API with the ambient credential, the wire
-protocol directly — are working around the refusal, outside P1 (28 F2): the
+protocol directly, or a push spelled so the engine's `git` misreads its subcommand,
+as an alias defined on the command line (`-c alias.p=push p`) or an unknown option
+taking a separate value before it — are working around the refusal, outside P1
+(28 F2): the
 orchestrating session looks for them in a run's later calls (CW-5rmh), and check 6
 finds one that reached a protected branch. Protection against a bad remote write
 belongs at the Git host's authorization, not on the owner's machine: a Git mistake
@@ -133,7 +139,8 @@ The guarded push sets no upstream under a run, since `.git/config` is protected:
 where the branch has none and a remote is given, it pushes without
 `--set-upstream`, and once the session ends the engine sets the branch's upstream,
 outside the sandbox, to the remote of the run's last successful guarded push of that
-branch, as its record names it. A failed push, or no push, sets none.
+branch, as its record names it. A failed push, or no push, sets none; nor does a
+run whose checks found a violation, after which no action runs (D6, CW-f9le).
 
 Rejected: the engine pushing at the run's edge — once the step holds the credential
 it buys nothing, and loses the per-section pushes; a command rule alone, or an
@@ -171,8 +178,10 @@ real case; deferring.
 
 The engine launches `bwrap` with the root filesystem read-only, the step's writable
 paths bound read-write over it, each protected path bound read-only over those, the
-engine's `git` bound read-only over the system's two (D2), the network shared, and
-`--die-with-parent`. A write to a protected file fails as a read-only file system;
+engine's `git` bound read-only over the system's two (D2), the network shared,
+`--die-with-parent`, and `--unshare-pid`, so that bubblewrap's end ends every process
+the harness started, a background one included, as the wrapper's end must
+(CW-x3pf). A write to a protected file fails as a read-only file system;
 replacing one by rename fails busy, so `git config` cannot rewrite `.git/config`. A
 Unix socket on a read-only mount stays connectable, so Docker needs no setting. A
 protected path absent at launch is created first — a settings file in its harness's
@@ -204,9 +213,11 @@ Each step writes only its scope, stopped rather than caught:
 | closeout | its inert paths and `.git/` |
 | archive cleanup | `openspec/changes/`, `.git/` |
 
-Every step, the review included, also writes a private `/tmp` (D17, D18) and its
-adapter's state paths, without which its harness cannot run; every step but the review also
-writes `~/.cache` and the repository's additions (D12). The review's one path in the
+Every step, the review included, also writes a private `/tmp` (D17, D18), its
+adapter's state paths, without which its harness cannot run, and `~/.cache`; every
+step also writes the repository's additions (D12), the review only those outside its
+checkout, so the checks it runs for evidence can write their tools' caches
+(implementation round, handoff 11a.8). The review's one path in the
 checkout is where `run` keeps what a session invoked, so the checks the review skill
 lets it run for evidence (`run pre-commit`) can record themselves; every file it
 reviews stays read-only (19 F2). Protected in every scope: `.agents/workflow.toml`,
@@ -236,6 +247,11 @@ or, for files at the root, the whole checkout, D6's check 7 stops the run on any
 changed outside what closeout may change (CW-pkug). The closeout review reads only
 documentation, so it cannot be relied on to see a code edit: the premise that it
 would, on which this decision was first settled, was restated (19 F4).
+
+An adapter's state file whose directory is the home directory — Claude Code's
+`~/.claude.json` — is mounted alone instead: its directory would make the whole home
+writable, against P3. Such a file can be written in place but not replaced by
+rename; Claude Code catches the failed save (implementation round, handoff 6.1).
 
 Rejected: binding every other entry of such a directory read-only, with a check for
 new files (the agent's recommendation) — complexity and a thousand mounts for what
@@ -281,9 +297,12 @@ after it, the wrapper checks against the state it recorded at the start:
 4. each existing review record is unchanged, and the ledger only grew at its end;
 5. `refs/stash` is unchanged;
 6. the remote's change branch is the last successful guarded push, as its record
-   names it (D2), or unchanged, and no protected branch on the remote has a commit
-   made in the run at its tip, read by listing each remote at the start and the end;
-   a remote unreadable at either end is not checked (48 F4);
+   names it (D2), unchanged, or at a commit not made in the run, and no protected
+   branch on the remote has a commit made in the run at its tip, read by listing each
+   remote at the start and the end; a remote unreadable at either end is not checked
+   (48 F4). The owner's round view, opened in their workspace beside a review in the
+   change's clone, moves the workspace's change branch to the round's base, and
+   closing it can leave the owner's commits there; neither is the run's (64 R1);
 7. for closeout, every path changed since the start, committed or not, is one
    closeout may change (CW-pkug): the repository's inert paths, changes' records,
    and the archive's own writes.
@@ -300,7 +319,13 @@ protected branch to find a run's commit below its tip and stopping a run whose
 remote cannot be read (48 F4) — a run's commit built on by another party within the
 run, or a remote lost between a push and the check, is no mistake's route, and an
 offline run would stop, though the sandbox never gates the workflow (D10);
-protection of the remote is the Git host's authorization (D2); recording a violation beside a standing
+protection of the remote is the Git host's authorization (D2); on 64 R1, leaving the
+clone's `workspace` remote unchecked — the engine keyed to a clone's convention, and
+an unconfined run's push there unseen — and ordering the round view around the runs
+— a `round-done` before a review's end trips it again; and given up there, a run
+rewinding or deleting a change branch, whose new tip holds no commit of the run, as
+the round view's own rewind holds none, and which the sandbox's `git` refuses in a
+confined run; recording a violation beside a standing
 outcome — a rewritten history would route as if nothing happened; a question — a
 resumed session rarely helps. Check 3 as byte-identical was restated: it would fire
 on a parallel review's line. Check 7 was added (19 F4): D5a's mounts let closeout
@@ -318,7 +343,9 @@ end stopped when it cannot go on, and say what it did instead when it can. `deni
 remains for harness rule denials, such as an adapter's `git push` rule. The
 orchestrating session reads both from the record and classifies each: the step
 reached beyond its job, a finding; or its scope is too narrow, a gap answered with
-the narrowest path. The next-step computation treats a line with refusals as one
+the narrowest path. A denial by the harness's own guard rather than a rule — Claude
+Code refusing to write through a link — is a finding where its target makes it one,
+and otherwise neither, since no path answers it (58 R3). The next-step computation treats a line with refusals as one
 with denials (CW-jqi7).
 
 Rejected: the step's own report alone — refusals would be read from messages; no
@@ -334,7 +361,8 @@ directory. A grant names a path, never a pattern — a value with a glob charact
 refused — since a gap is answered with the narrowest path (D7). A file mounts its
 directory (D5a); a path absent at launch is created as a directory before it is
 mounted. The engine refuses, naming the value, a path that is or lies under a
-protected path, or is `/tmp` itself, which would hide the step's private `/tmp` with
+protected path, as written or where its links lead, since that is where it is
+mounted (D20; 62 F1), or is `/tmp` itself, which would hide the step's private `/tmp` with
 the host's (D18), before launching anything (19 F7); a directory containing a
 protected path is granted, the protected path staying read-only inside it, as in
 every scope (D4, D12; 28 F4). `--allow` and `ALLOW=` go.
@@ -400,9 +428,11 @@ protected = []
 ```
 
 Relative paths are from the checkout's root, `~` the home directory. `~/.npm` is
-npm's cache, which the configured OpenSpec command's `npx` writes (D21). The check
-refuses a writable path that is or lies under a protected one, since the sandbox
-could not honour it, `/tmp` itself (D18), `writable.review`, and an unknown step
+npm's cache, which the configured OpenSpec command's `npx` writes (D21).
+`writable.common` is every step's, the review taking only its paths outside the
+checkout, as written and where their links lead (D5). The check refuses a writable
+path that is or lies under a protected one, compared as written and where its links
+lead (62 F1), since the sandbox could not honour it, `/tmp` itself (D18), `writable.review`, and an unknown step
 (CW-w8ne). A writable
 directory containing a protected path is admitted, the protected path mounted
 read-only inside it, as the engine's own scopes hold `.agents/workflow.toml` inside
@@ -414,7 +444,11 @@ for a gap (CW-o6kc).
 Rejected (28 F4): refusing a writable directory that contains a protected path — it
 would hold a repository's additions and the owner's grants to a stricter rule than
 the engine's own scopes, for no protection the read-only mount does not already
-give.
+give. Rejected for the review's caches (handoff 11a.8): a `writable.review` key
+admitting only paths outside the checkout — a second key carrying what
+`writable.common` already declares; leaving the review without them — its `run
+pre-commit` fails this repository's OpenSpec check on `~/.npm`, and its line carries
+the refusal on every run.
 
 ### D13 — Internal adapters for Claude Code and Codex
 
@@ -436,7 +470,16 @@ Codex names no session in its commands' environment, so the engine gives each Co
 review attempt a run key of its own, distinct from the starting session's and from
 Codex's, under which the engine's `git` keeps a refused push and `run` keeps the
 checks the reviewer runs, and from which the review's line reads them (D2, D5, D7;
-48 F3). CW-zq4h's harness clause becomes "only for steps its adapter can
+48 F3). Two limits are recorded, not guarded. Claude Code's writable `~/.claude` holds what
+the owner's own sessions load beside its protected `settings.json` — `CLAUDE.md`,
+skills, agents, commands and hook scripts — and a step writing them has already
+broken its skill's rule, as one writing settings has (D15, D19; P1, P8); protecting
+each, placeholders created where absent, was rejected (handoff 6.6). Codex refuses to
+run in a directory its configuration does not trust, so a review of a clone outside
+those directories ends with Codex's error rather than as unavailable, and does not
+fall back to Claude; detecting it is `add-workflow-harness-adapters`' (handoff
+11a.4).
+CW-zq4h's harness clause becomes "only for steps its adapter can
 run", so Codex stays review-only until `add-workflow-harness-adapters`, which makes
 the interface public and owner-supplied (P6).
 
@@ -462,7 +505,12 @@ outside its scope; stop naming the path if it cannot go on, else say what it did
 wait on background commands with `wait`. The three exemptions this change owns go:
 implementation names project tests and bring-up by role, and a plan gives an edit
 of the harness's settings to the orchestrator because no step writes them. Archive
-cleanup stops running `history`; design's section 4 uses `propose`.
+cleanup stops running `history`; design's section 4 uses `propose`. A merge whose
+landing branch changed a protected path cannot be made inside the merge's sandbox:
+the merge step stops before merging, naming the paths, and the orchestrating
+session, on the owner's word, starts the merge outside any sandbox and resumes the
+step to conclude it (implementation round, handoff 10.5); recording it as a limit,
+with the merge failing partway, was rejected.
 
 ### D16 — The specification
 
@@ -566,10 +614,11 @@ settings would diverge across clones, and a linked writable path such as `~/.cac
 would still need this; refusing to launch on a symlinked scope path — every clone
 would stop.
 
-### D21 — `~/.npm` is a repository addition for every writing step
+### D21 — `~/.npm` is a repository addition for every step
 
 The configured OpenSpec command runs `npx`, which writes npm's cache at `~/.npm`;
-this repository's `writable.common` names it (D12, MCW-s4bx).
+this repository's `writable.common` names it (D12, MCW-s4bx), which gives it the
+review too, since it lies outside the checkout (D5).
 
 Rejected: redirecting npm's cache under `~/.cache` in the configured command —
 repository plumbing in a command for a narrower declaration, and a second cache for

@@ -31,9 +31,11 @@ validation the checkout; closeout its inert paths and `.git/`; archive cleanup
 `openspec/changes/` and `.git/`. Every step, the review included, MUST also write a
 private `/tmp` of its own, owned by the owner and open to no one else, which hides
 the host's `/tmp` but for the paths under it its scope names, each mounted at its own
-path inside it; and its adapter's state. Every step but the review MUST also write
-`~/.cache` and the repository's additions. A file or pattern entry MUST mount each
-match's directory.
+path inside it; its adapter's state; and `~/.cache`. Every step MUST also write the
+repository's additions for it, the review only those of `writable.common` that lie
+outside its checkout, as written and where their links lead. A file or pattern entry
+MUST mount each match's directory, except an adapter's state file whose directory is
+the home directory, which MUST be mounted alone.
 
 #### Scenario: Closeout edits a README beside code
 
@@ -118,11 +120,12 @@ already writing what no step writes, which its review catches.
 
 ### Requirement: CW-h2zt A repository extends a step's scope in its configuration
 
-A repository MUST add writable paths in `[sandbox]`: `writable.common` for every step
-but the review, `writable.<step>` for one step, relative paths from the checkout's
-root and `~` the home directory; and protected paths in `protected`, which only add.
-The configuration's check MUST refuse a writable path that is or lies under a
-protected one, `/tmp` itself, which every step writes as its own (CW-m8wq), a
+A repository MUST add writable paths in `[sandbox]`: `writable.common` for every step,
+the review taking only those outside its checkout (CW-m8wq), `writable.<step>` for
+one step, relative paths from the checkout's root and `~` the home directory; and
+protected paths in `protected`, which only add. The configuration's check MUST
+refuse a writable path that is or lies under a protected one, as written or where
+its links lead, `/tmp` itself, which every step writes as its own (CW-m8wq), a
 `writable.review`, and an unknown step. A writable directory
 containing a protected path MUST be admitted, the protected path mounted read-only
 inside it (CW-r6kd).
@@ -137,6 +140,13 @@ inside it (CW-r6kd).
 - **WHEN** the configuration declares `writable.common = [".agents/workflow.toml"]`
 - **THEN** every reader of the configuration refuses, naming the field and the
   protected path
+
+#### Scenario: A repository opens a link into a protected directory
+
+- **WHEN** the configuration protects `data/` and declares `writable.design =
+  ["alias"]`, where `alias` is a link to `data/subdir`
+- **THEN** every reader of the configuration refuses, naming the field and `data/`,
+  since the sandbox would mount the link where it leads
 
 #### Scenario: A repository opens a directory holding a protected path
 
@@ -217,11 +227,12 @@ the state it recorded at the start: `HEAD` is on the change's branch and descend
 from the start commit; for validation and review, `HEAD` and every tracked file are
 unchanged; the workflow log and the ledger were only appended to; each review record
 is unchanged; `refs/stash` is unchanged; the remote moved only by the guarded push,
-the change's branch at the last successful guarded push its record names or
-unchanged (CW-59c7), and no protected branch with a commit made in the run at its
-tip; and, for closeout, every path changed since the start, committed or not, is one
-closeout may change (CW-pkug). The remote is read by listing each remote at the
-start and the end; a remote unreadable at either end is not checked.
+the change's branch unchanged, at the last successful guarded push its record names
+(CW-59c7), or at a commit not made in the run, and no protected branch with a commit
+made in the run at its tip; and, for closeout, every path changed since the start,
+committed or not, is one closeout may change (CW-pkug). The remote is read by
+listing each remote at the start and the end; a remote unreadable at either end is
+not checked.
 
 #### Scenario: A step amends an earlier commit
 
@@ -239,6 +250,14 @@ start and the end; a remote unreadable at either end is not checked.
 
 - **WHEN** a commit made during an unattended run is on the remote's `dev` after it
 - **THEN** the check finds the remote moved other than by the guarded push
+
+#### Scenario: The owner opens the round view during a review
+
+- **WHEN** the owner's round view checks the workspace's change branch out at the
+  round's base while a review runs in the change's clone, whose `workspace` remote
+  is that workspace
+- **THEN** the review's check finds no violation, since the branch's tip is no
+  commit made in the run
 
 #### Scenario: Closeout edits code beside a README
 
@@ -416,7 +435,10 @@ events (CW-w3oa).
 
 The orchestrating session MUST read each recorded refusal and denial from the run's
 record, never from the step's message, and classify each as the step reaching beyond
-its job, a finding for the owner, or its scope too narrow for the work, a gap.
+its job, a finding for the owner, or its scope too narrow for the work, a gap; a
+denial the harness makes by a guard of its own rather than a rule is a finding where
+its target makes it one, and otherwise neither, its reading recorded, since no path
+answers it.
 
 #### Scenario: A denial carries no reason
 
@@ -507,7 +529,8 @@ for a fresh run through `start` or a resumed one through `resume`, recorded as
 held to its scope again. Each value MUST be split on `;`, each part trimmed and empty
 parts dropped, and each path resolved as a `[sandbox]` entry is (CW-h2zt). A grant
 MUST name a path: the engine MUST refuse a value with a glob character, a path that
-is or lies under a protected path, and `/tmp` itself, naming the value, before it
+is or lies under a protected path, as written or where its links lead, and `/tmp`
+itself, naming the value, before it
 launches anything. A directory containing a protected path MUST be granted, the protected
 path staying read-only inside it. A file MUST mount its directory, and a path absent
 at launch MUST be created as a directory before it is mounted.
@@ -642,7 +665,7 @@ and Git's exit status. A push to a given remote of a branch with no upstream MUS
 NOT set one, since `.git/config` is protected (CW-r6kd); once the session ends, the
 engine MUST set the branch's upstream, outside the sandbox, to the remote of the
 run's last successful guarded push of that branch, and MUST set none where no push
-of it succeeded.
+of it succeeded or the run's checks found a violation (CW-f9le).
 
 #### Scenario: The worktree is dirty
 
@@ -701,7 +724,7 @@ configuration's commands omit.
 
 **Reason**: No write-steering rule remains: a shell write within a step's scope is no longer refused, and every refusal outside it means the same thing (CW-svng).
 
-**Migration**: CW-svng and CW-5rmh read every refusal as a finding or a gap; the skills drop the substitution paragraph.
+**Migration**: CW-svng and CW-5rmh read every refusal as a finding or a gap, and a harness's own guard as a finding or neither; the skills drop the substitution paragraph.
 
 ### Requirement: CW-2h9t A call no rule allows may be done by an allowed tool
 

@@ -28,7 +28,7 @@ from change_workflow.harness import Model
 from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
                                       NO_SANDBOX, RECORDS, VALIDATED, FakeClaude, claude_review,
                                       clock, codex_missing, codex_saying, configured,
-                                      ignore_evidence, not_installed,
+                                      ignore_evidence, needs_bwrap, not_installed,
                                       option, option_rules, prompted, reading, repository,
                                       review_text, reviews_of, validation_text, writing)
 
@@ -1487,9 +1487,8 @@ def test_a_reviewer_that_changes_nothing_is_published(tmp_path: Path) -> None:
 # A reviewer launched in the review's sandbox: external-process integration, the
 # runner launching real bubblewrap around a program that stands in for Codex, in a
 # real Git checkout; skipped, saying why, where the engine's own probe finds the
-# sandbox cannot run.
+# sandbox cannot run, and failed there under `SANDBOX_REQUIRED=1`.
 
-PROBED = sandbox.probe()
 
 # Codex stood in for: it runs each command it is given in the directory it is told to
 # work in, printing it and its output as Codex does, then writes its final message
@@ -1524,7 +1523,7 @@ def _confined_reviewer(text: str, *commands: str, seen: list[list[str]] | None =
     return runner
 
 
-@pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
+@needs_bwrap
 def test_a_confined_reviewer_cannot_write_what_it_reviews_but_records_its_invocations(
         tmp_path: Path) -> None:
     """CW-m8wq's "A review tries to write" and the engine's invocation record writable
@@ -1554,7 +1553,7 @@ def test_a_confined_reviewer_cannot_write_what_it_reviews_but_records_its_invoca
     assert not list(temporary.iterdir())
 
 
-@pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
+@needs_bwrap
 def test_a_codex_reviewers_final_message_written_inside_is_the_review_published(
         tmp_path: Path) -> None:
     """CW-m8wq's "A Codex review writes its final message": the drafts directory the
@@ -1595,7 +1594,7 @@ def _checking(root: Path) -> Path:
     return _tracking(root)
 
 
-@pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
+@needs_bwrap
 def test_a_confined_codex_reviewers_git_commands_reach_the_systems_git(
         tmp_path: Path) -> None:
     """CW-t6mb's "Codex runs a review": inside the engine's sandbox Codex runs without
@@ -1619,7 +1618,7 @@ def test_a_confined_codex_reviewers_git_commands_reach_the_systems_git(
     assert (check["command"], check["exit_status"]) == ("git rev-parse --show-toplevel", 0)
 
 
-@pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
+@needs_bwrap
 def test_a_codex_reviewers_refused_push_and_checks_reach_the_reviews_line(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CW-w3oa's "A Codex reviewer pushes": the sandbox's `git` refuses the reviewer's

@@ -420,13 +420,15 @@ def test_every_step_runs_its_own_skill_and_planning_resumes_the_design() -> None
 
 
 def test_the_review_writes_no_path_of_its_checkout_but_the_engines_invocation_record() -> None:
+    """Outside its checkout it writes the tools' cache, as every step does, for the
+    checks it runs for evidence."""
     review = graph.STEP_DEFINITIONS["review"]
 
     assert review.profile == graph.READ_ONLY
     checkout = [path for path in review.baseline
                 if path != graph.TEMPORARY and not path.startswith("~")]
     assert checkout == [f".git/{INVOCATIONS}/"]
-    assert "~/.cache" not in review.baseline
+    assert "~/.cache" in review.baseline
 
 
 def test_every_step_writes_the_temporary_directory() -> None:

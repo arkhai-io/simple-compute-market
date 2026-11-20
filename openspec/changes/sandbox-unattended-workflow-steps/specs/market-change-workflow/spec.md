@@ -3,8 +3,9 @@
 ### Requirement: MCW-s4bx This repository's sandbox extensions
 
 This repository's configuration MUST give design and planning `docs/` beside their
-baseline scope, and every step but the review the tool state its suites, builds,
-and deployments write outside the checkout: uv's Pythons and tools, the Kubernetes
+baseline scope, and every step the tool state its suites, builds, and deployments
+write outside the checkout, the review included, since none of it is a file the
+review reads: uv's Pythons and tools, the Kubernetes
 client's cache, the Google Cloud SDK's configuration, which refreshes its tokens,
 Docker's client configuration, and npm's cache, which the configured OpenSpec command
 writes. It MUST protect nothing beyond the engine's and the adapters' protected
@@ -28,6 +29,14 @@ paths.
   <change> --strict`, whose `npx` writes npm's cache under `~/.npm`
 - **THEN** the write succeeds, since the configuration gives every writing step that
   path
+
+#### Scenario: A review runs the repository's checks
+
+- **WHEN** an unattended review run runs `scripts/change-workflow run pre-commit
+  <change>` for evidence, whose OpenSpec check's `npx` writes npm's cache under
+  `~/.npm`
+- **THEN** the write succeeds, since the path lies outside the checkout and the
+  configuration gives it to every step
 
 ## MODIFIED Requirements
 

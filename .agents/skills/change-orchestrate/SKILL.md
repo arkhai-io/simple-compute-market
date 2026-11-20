@@ -603,7 +603,8 @@ for what followed a refusal, read the run's transcript, named on its line, from 
 refused call on.
 
 Classify each, from the call and the step's job, as the step reaching beyond its
-job, a finding for the owner, or its scope too narrow for the work, a gap:
+job, a finding for the owner; its scope too narrow for the work, a gap; or, for a
+denial, the harness's own guard:
 
 - A finding: a write its step's job never makes — a review writing what it reviews,
   design writing code, any step writing a protected path such as the workflow's
@@ -611,6 +612,12 @@ job, a finding for the owner, or its scope too narrow for the work, a gap:
   the adapter's command rule denied: the guarded push is the only push a step makes.
 - A gap: a write the step's work needs and its scope does not hold, such as a build
   cache a check writes inside the checkout during planning.
+- The harness's own guard: a denial the harness makes by a guard of its own, not by
+  a rule. Claude Code records it with the reason `other`, for example when it
+  refuses to write through a symbolic link. Read it by its target. Where the target
+  makes it a finding by the first item — a protected path, a file the step reviews,
+  a push — it is one. Otherwise it is neither a finding nor a gap: no path or grant
+  answers a harness's guard. Record your reading, naming the guard, and go on.
 
 After a finding, check the run's later calls for the same work done another way — a
 protected file's content written through a copy it renames, a push made through a
@@ -802,6 +809,17 @@ concluded and pushed. A merge is the owner's intervention, so the run names an
 exit implementation does not declare and its message says where the change stood:
 the computation names the owner with that choice. Relay it, and record where the
 owner directs the change, usually where it stood before the merge.
+
+The merge step's sandbox mounts the protected paths read-only — the workflow's
+configuration and the harness's settings among them — so a landing branch that
+changed one cannot be merged inside it. The step then stops with nothing started,
+its reason naming each protected path the landing branch changed. Take that to
+the owner: on their word, start the merge yourself, outside any sandbox, with `git
+-C <clone> merge --no-commit <remote>/<landing>`. Resolve a protected path's
+conflict yourself only where it is one of the workflow's own files above, the
+configuration among them; take any other, the harness's settings included, to the
+owner as it stands. Then resume the stopped merge step's `seq` to resolve the rest,
+conclude the merge with its commit, and push it.
 
 ## Record decisions through the log's writer
 

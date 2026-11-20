@@ -8,7 +8,8 @@ tested on a real Git checkout, whose Git directory holds the invocations. The te
 that launch real bubblewrap are external-process integration, on a real repository
 with a bare remote: a shell program stands in for the harness and runs Git as a step
 would, and the guarded push runs as the engine's command. Each is skipped, saying
-why, where the engine's own probe finds the sandbox cannot run."""
+why, where the engine's own probe finds the sandbox cannot run, and fails there
+under `SANDBOX_REQUIRED=1`."""
 
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from change_workflow import sandbox, sandbox_git, scope
 from change_workflow.common import GUARDED_PUSH, SESSION_ID, UNATTENDED_RUN
 from change_workflow.running import (ATTEMPTED_PUSH, REFUSED_PUSH, invocations_directory,
                                      kept_invocations)
-from change_workflow_fixtures import SESSION, clock, configured
+from change_workflow_fixtures import SESSION, clock, configured, needs_bwrap
 
 UNATTENDED = {UNATTENDED_RUN: "implement"}
 ENGINE = Path(__file__).resolve().parents[1] / "change-workflow"
@@ -99,8 +100,6 @@ def test_a_refusal_is_said_and_kept_for_the_sessions_line(
 
 # Through real bubblewrap.
 
-PROBED = sandbox.probe()
-needs_bwrap = pytest.mark.skipif(PROBED is not None, reason=f"the sandbox cannot run: {PROBED}")
 IDENTITY = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
             "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
             "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
