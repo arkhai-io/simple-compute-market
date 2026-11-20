@@ -32,7 +32,8 @@ tree; it is ignored, so the tree is unchanged.
 - `local` runs `make check-packaging`, then `make test`.
 - `helm` runs in the change's own namespace (`--change`, else `default`), so two
   changes' validations never touch each other's release, volumes, or Secrets. It
-  builds the images under the change's own tags, runs the chart render checks
+  builds the images under the change's own tags, loads them into the node when
+  the context is a kind cluster's (`kind_load.py`), runs the chart render checks
   with the chart-to-loader check able to run against this tree's code, then
   replaces the change's release: its workloads scaled to zero if a crashed run
   left any up, its volumes deleted, the namespace's Secrets created, and the
@@ -114,6 +115,8 @@ IDENTITY = {"local": TREE, "helm": TREE, "ci": COMMIT}
 # order is time order.
 ATTEMPT_FORMAT = "%Y%m%dT%H%M%S.%fZ"
 DEFAULT_HELM_CONTEXT = "docker-desktop"
+# The prefix kind gives the context of each cluster it creates.
+KIND_CONTEXT_PREFIX = "kind-"
 DEFAULT_NAMESPACE = "default"
 STOREFRONT_PROJECT = "domains/vms/storefront"
 BARE_METAL_STOREFRONT_PROJECT = "domains/bare_metal/storefront"
@@ -906,12 +909,26 @@ def validate_helm(validation: Validation, *, change: str | None = None,
     with _pinned_context(validation, context) as pinned:
         if not pinned or not _helm_preflight(validation, credentials):
             return validation.finish()
-        return _validate_helm(validation, change=change, scenarios=scenarios, sleep=sleep,
-                              volume_wait=volume_wait, capacity=capacity,
-                              sample_interval=sample_interval)
+        return _validate_helm(validation, change=change, context=context,
+                              scenarios=scenarios, sleep=sleep, volume_wait=volume_wait,
+                              capacity=capacity, sample_interval=sample_interval)
 
 
-def _validate_helm(validation: Validation, *, change: str | None,
+def _image_steps(run: HelmRun, context: str) -> list[tuple[str, list[str]]]:
+    """Build the images and, on a kind cluster, load them into its node.
+
+    Docker Desktop's cluster shares the daemon that builds the images; a kind
+    node does not, so its context, `kind-<cluster>`, adds the load.
+    """
+    steps = [("build-dev", ["make", "build-dev", f"IMAGE_SUFFIX={run.image_suffix}"])]
+    if context.startswith(KIND_CONTEXT_PREFIX):
+        steps.append(("kind-load", ["python3", "scripts/kind_load.py",
+                                    context.removeprefix(KIND_CONTEXT_PREFIX),
+                                    *(["--change", run.change] if run.change else [])]))
+    return steps
+
+
+def _validate_helm(validation: Validation, *, change: str | None, context: str,
                    scenarios: Sequence[str] | None, sleep: Callable[[float], None],
                    volume_wait: float, capacity: Path | None,
                    sample_interval: float) -> Summary:
@@ -942,9 +959,7 @@ def _validate_helm(validation: Validation, *, change: str | None,
     # internal wheels it last synced. The images are built first, rebuilding the
     # wheelhouse from this tree, and each environment is then reinstalled from
     # it, so the checks load the tree's code rather than another branch's.
-    for name, command in (DIST_CLEAN,
-                          ("build-dev", ["make", "build-dev",
-                                         f"IMAGE_SUFFIX={run.image_suffix}"]),
+    for name, command in (DIST_CLEAN, *_image_steps(run, context),
                           *((step, ["make", "-C", project, "reinit"])
                             for step, project, _ in LOADER_ENVIRONMENTS)):
         if validation.step(name, command).result != "passed":
@@ -1070,7 +1085,9 @@ def _helm_preflight(validation: Validation, credentials: CredentialProbe) -> boo
             return False
         validation.note(step, str(python))
     try:
-        validation.read(["docker", "info", "--format", "{{.ServerVersion}}"])
+        # Its exit status alone: a format names fields of Docker's report that
+        # Podman's `docker` does not have.
+        validation.read(["docker", "info"])
     except ValidationError as exc:
         validation.fail("docker", f"the Docker daemon is not reachable: {exc}")
         return False
