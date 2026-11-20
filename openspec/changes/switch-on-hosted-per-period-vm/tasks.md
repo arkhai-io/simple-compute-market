@@ -2,7 +2,7 @@
 
 Sections 1–4 are the internal work, proven on the lanes; sections 5–8 are live
 verification, which ends waiting for the deployment's evidence (D3, D9) before the
-pre-closeout review. The live scenarios belong to no pipeline lane: the pipeline proves
+pre-closeout review. Section 9 is a defect fix to the payments kit's local example. The live scenarios belong to no pipeline lane: the pipeline proves
 their lane twins, and the deployment runs them against a topology meeting their stated
 requirements.
 
@@ -125,7 +125,7 @@ change's index row and Goal 8 gap (inert paths).
       left for its own reverification. The Goal 8 gap row drops the clause. This
       change's own row is `in implementation`. `check index` — pass. The Goal 8
       current-state sentence naming the double's `reverse` effects is left for
-      roadmap currency (9.5), as planned.
+      roadmap currency (10.5), as planned.
 - [x] 1.5 Verification point: the double's unit and integration suites pass, and the VM
       lane's dispute scenarios still pass against the amended double (system, the VM
       lane's Compose stack: `make -C e2e-tests test-e2e-vm "E2E_MODULE=e2e_vm_payment_deal
@@ -662,7 +662,7 @@ Handoff (section 4):
 - For closeout's promotion: `docs/guidance/repository/chart-render-tests.md`,
   "Where they live and how they run", describes what the VM chart's render test
   runs under `STOREFRONT_PYTHON` and does not yet name the production example's
-  startup and publication checks, beside the bare-metal example's it names; 9.9's
+  startup and publication checks, beside the bare-metal example's it names; 10.9's
   D8 lists only the specs and `deployment-state/configuration.md`, which has no
   production-examples passage, so the guidance file is the destination to add.
 - The fresh-context check found: the test file's docstring describing only
@@ -919,7 +919,7 @@ Handoff (section 5):
   five-minute delivery deadline and a period, so about a quarter of an hour
   serves; the rate payer's exact balance follows the period (README, "Live
   verification").
-- For closeout's promotion of D4 (9.9): beside `test-compatibility/architecture.md`
+- For closeout's promotion of D4 (10.9): beside `test-compatibility/architecture.md`
   and `system-tests.md`, two permanent documents still say a wall-time run waits
   only for an instant the Agreement fixes, which `LaneTime.reach`'s recorded case
   now widens: `docs/guidance/repository/deal-scenarios.md`, "The discipline every
@@ -988,7 +988,7 @@ within the run's reach bound (at once when the earlier stages took longer; a par
 started later than that instant still meets the assertion's check, which fails it
 rather than passing), and fails naming LIVE.MAXIMUM_TERM_SECONDS when that instant is
 not before the Agreement's end. The README's input column, `test_buyer_stop.py`'s and
-`live/stages.py`'s docstrings say so. For closeout's promotion of D4 and D6 (9.9):
+`live/stages.py`'s docstrings say so. For closeout's promotion of D4 and D6 (10.9):
 `deal-scenarios.md` and `TESTING.md`, "Lane time", admit on wall time "an instant the
 deal's Agreement fixes, such as its start", which does not literally cover the
 Agreement's start plus the scenario's own minute, though the delta's "its own data
@@ -1269,7 +1269,7 @@ Handoff (section 6):
   (`lifecycle_buyer_read`, `delivery_read`) returns. The contest now reads it first
   and is a blocked skip naming the requirement, so the requirement is met as the
   spec words it (below).
-- For closeout's promotion of D6 (9.9), "bounded polling of a live producer for an
+- For closeout's promotion of D6 (10.9), "bounded polling of a live producer for an
   effect of the scenario's own request": `LiveDispute07`'s wait for the first
   period's earnings is such a poll, bounded by up to a whole period plus the poll
   bound, with no instant reached; `system-tests.md`, `deal-scenarios.md` and
@@ -1544,14 +1544,14 @@ Handoff (section 7):
   retires in part (its abandoned-lease and unactivated-reservation subsection, once
   the site enforces the deadline); the seller quickstart's deadline bullet links it
   by its anchor, `operator-handbook.md#serving-rate-deals`.
-- For closeout's promotion (9.9): D7's quickstart and D10/D11's documents are
+- For closeout's promotion (10.9): D7's quickstart and D10/D11's documents are
   written here. D11's `deal-lifecycle/architecture.md` "Current limits" sentence and
   D1's caveat corrections stay closeout's, and the caveats wait for section 8's
   evidence (D3). The handbook says only what SCM relies on of the dispute
   authority, and points at the authority's own published policy and its
   description's `contact` rather than linking a document, since no published
   location is known to this repository.
-- For 9.5: the buyer quickstart states that `market` files no case on a running
+- For 10.5: the buyer quickstart states that `market` files no case on a running
   deal but the surrender `end --end-now-regardless` makes, Goal 8's existing
   unowned row; and that a buy its default refusals alone empty says nothing and
   exits 0, the new unowned row.
@@ -1568,7 +1568,7 @@ Handoff (section 7):
   over" for "beneath", and two note phrasings (the test's level, an unasserted
   horizon value); all fixed. It also noted that `settlement-configuration`'s
   companion still says no shipped configuration declares rate servicing, which
-  9.9's D1 corrects at closeout once section 8's evidence is in.
+  10.9's D1 corrects at closeout once section 8's evidence is in.
 
 The sections 5–7 round's triage (`reviews/41-implementation.triage.md`; validation 42
 passed at `68b5566e4`, the owner's notes 43 had none) fixed 41 F1 and 41 F2, each
@@ -1636,24 +1636,124 @@ and `e2e_vm_live_dispute` at the branch's code, and records its summary. Touches
       deployment, not by the pipeline.
       Nothing is owed to validation.
 
-## 9. Closeout
+## 9. The payments kit's local example names only what a client knows
+
+Delivers a local example, and the documents around it, that ask of the payments
+service only what any client of it has: its origin, its pinned public receipt
+identity, an authentication it admits, and accounts its operator has prepared. Until
+now the example derived the service's receipt identity from the service's own
+signing seed. Its README started the service with the service's own internal
+settings and funded accounts through the service's operator route, none of which is
+a client's to give. Implements no design decision. This is a
+defect fix outside the stated scope, taken in at the owner's direction
+(`docs/guidance/workflow/changes.md`, "Defects found during a change"). Touches
+`kit/arkhai-payments/examples/local_e2e.py`, `kit/arkhai-payments/README.md`,
+`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py` and `client.py`
+(a comment, a docstring and a message),
+`docs/seller-quickstart.md` and `domains/vms/buyer/src/arkhai_vms_buyer/config_cli.py`
+(a placeholder each).
+
+- [x] 9.1 `examples/local_e2e.py` takes the service's public receipt identity from
+      `PAYMENTS_SERVICE_IDENTITY`, the canonical unpadded base64url Ed25519 public key
+      a role states as `service_identity.identifier`. It verifies receipts against
+      that pinned identity, as a client configured by `ArkhaiPaymentsConfig` does, and
+      no longer reads or decodes a signing seed. It still refuses a non-loopback
+      `PAYMENTS_URL` and still authenticates with `development_account`. Verify: the
+      example passes against a local payments service that admits header identity,
+      given that service's public identity alone (9.4). A wrong identity fails
+      receipt verification.
+      Done: the identity is an `Identity(scheme=IdentityScheme.ED25519, ...)`, read
+      and checked before any request, so a missing or malformed value exits before
+      the example sends anything. Against a local service it passed with the
+      service's identity. With another well-formed key it exited "service receipt did
+      not verify against this Agreement". A malformed and an unset value each exited
+      with their own message before any request.
+- [x] 9.2 `README.md`, the local example's section, states the example's inputs as a
+      client's:
+      - a loopback `PAYMENTS_URL`;
+      - the service's public identity in `PAYMENTS_SERVICE_IDENTITY`;
+      - a service that admits `development_account`'s header identity;
+      - the payer funded for the fixture amount and the payee an existing ledger party,
+        both prepared by whoever runs the service.
+      Starting such a service, and preparing its accounts, is left to the service's
+      own documentation. The section names none of the service's settings, ports,
+      tokens, operator routes or ledger commands. Verify: the section's commands are
+      the ones 9.4 runs, and it names no service setting.
+      Done: the run command takes the origin's port and the identity as quoted
+      placeholders. The example's optional `PAYMENTS_FEE_BPS` and
+      `ARKHAI_DISPUTE_AUTHORITY` are listed as client inputs; 9.4 ran with both unset.
+- [x] 9.3 The documents that describe header identity, receipt modes or a pinned
+      identity describe them as a client sees them:
+      - `README.md`'s `development_account` and `development_auth` paragraphs describe
+        a header identity that only a service admitting it accepts, not the service's
+        development mode or authenticator.
+      - `settlement_config.py`'s `livemode` comment says a live service signs `true`
+        and any other signs `false`, naming no other service mode.
+      - The `service_identity` placeholder in `docs/seller-quickstart.md` and in the
+        buyer's configuration template (`config_cli.py`) names the service's public
+        receipt identity, not its signing key.
+      Verify: no document, comment or message in the kit, the quickstart or the
+      template names an internal mode of the payments service (a development or mock
+      mode) or its signing key. Test and live, which a client sees as a receipt's
+      `livemode` and as a deployment it is pointed at, stay. The storefront
+      chart's quickstart render test still passes.
+      Done: beside the planned edits, `client.py`'s `PaymentsClient` docstring now
+      describes `development_account` as the README does, and its HTTPS refusal no
+      longer says "loopback development". No test reads either string, or either
+      placeholder.
+- [x] 9.4 Verification point: the example passes against a local payments service, and
+      `scripts/change-workflow run pre-commit switch-on-hosted-per-period-vm` passes.
+      End-to-end: none; no scenario runs the example.
+      Nothing is owed to validation.
+      Evidence: the example, run as 9.2 shows against a local payments service
+      admitting header identity, printed "approved, receipt verified, Agreement
+      deposited, and reversed" with the service's identity, and failed as 9.1 records
+      otherwise. `scripts/change-workflow run pre-commit` on the section's final tree
+      but this note: `after-functional-change` passed, no lock changed;
+      `pre-commit-functional` passed (local evidence for tree `d7cae5d7181a`:
+      `check-packaging` and `make test`); the index, tasks, skills and strict OpenSpec
+      checks passed; `check-repository` passed 8 of 9, documentation citations
+      reporting only section 8's summary
+      (`docs/attachments/switch-on-hosted-per-period-vm/live-verification.md`), as in
+      sections 1 to 7. The run before it, on the same tree, failed one storefront
+      integration test,
+      `test_delivery_recovery_loop.py::test_a_deal_whose_evidence_fails_its_re_check_is_not_driven`
+      (`negotiate/new` answered 409). It passed five runs alone, and the next full run;
+      nothing in this section reaches the storefront.
+      End-to-end scenarios confirmed: none; no scenario runs the example.
+
+Handoff (section 9):
+
+- The section was recorded as a round of its own by the owner (log seq 79 and 80)
+  while section 8 waits for the deployment. Its validation and implementation review
+  are the round's, as for any other.
+- The fresh-context check's findings were all fixed: `client.py`'s docstring and its
+  HTTPS refusal still named a development mode; 9.3's Verify line read literally
+  caught the client-visible test and live modes, and now names internal modes only;
+  the run command gave a port and an unquoted placeholder; the example's optional
+  fee and dispute authority inputs were unlisted; the section's introduction
+  explained the fix by a change elsewhere; and a README line overran its wrap.
+- For closeout: section 9 changes no capability's behaviour, so 10.9 promotes nothing
+  from it. The kit README and the quickstart are already the permanent documents.
+
+## 10. Closeout
 
 Closes the change through `docs/guidance/workflow/closeout.md`'s parts in order, with
 this repository's own parts (`openspec/README.md`, "This repository's closeout parts")
 after campaign index currency.
 
-- [ ] 9.1 Comment hygiene: run `make check-comment-hygiene`; a finding, or a comment this
+- [ ] 10.1 Comment hygiene: run `make check-comment-hygiene`; a finding, or a comment this
       change added that names a change, a task or a review, returns the change to
       implementation.
-- [ ] 9.2 Import placement: confirm every import this change added is at module level,
+- [ ] 10.2 Import placement: confirm every import this change added is at module level,
       or return the change to implementation.
-- [ ] 9.3 Documentation compliance: re-check D1–D14 against
+- [ ] 10.3 Documentation compliance: re-check D1–D14 against
       `docs/guidance/workflow/openspec-documentation.md` and `openspec/README.md`,
       "Documentation placement", and that every permanent document written describes the
       current state, declaratively and with no wording relative to the change.
-- [ ] 9.4 Narrative compression: shorten completed tasks to final behaviour, evidence,
+- [ ] 10.4 Narrative compression: shorten completed tasks to final behaviour, evidence,
       deferred work and destinations, moving any rationale into `design.md` first.
-- [ ] 9.5 Roadmap currency: in `docs/development/ROADMAP.md`'s Goal 8, remove this
+- [ ] 10.5 Roadmap currency: in `docs/development/ROADMAP.md`'s Goal 8, remove this
       change's open-gap row; absorb into the current state that on-demand and spot VM
       are a supported seller configuration, in production once a release carries them,
       qualified live as the summary of section 8 records (citing it), and that the
@@ -1664,20 +1764,20 @@ after campaign index currency.
       D11; and, if the buyer's contested case is unproven, add a row to "Work this goal
       found and leaves unowned" naming the missing ruling policy. Name the edit in the
       design-promotion record.
-- [ ] 9.6 Campaign index currency: update this change's row in
+- [ ] 10.6 Campaign index currency: update this change's row in
       `openspec/changes/README.md` and the Goal 8 campaign prose and graph annotation
       for this change; leave other rows' `Depends on` as they are; run
       `make check-change-index`.
-- [ ] 9.7 Packaging: run `make check-packaging`, then `make check-architecture-change
+- [ ] 10.7 Packaging: run `make check-packaging`, then `make check-architecture-change
       CHANGE=switch-on-hosted-per-period-vm`; resolve every failure or owned exception;
       run `make check-agent-skills` only if the change touched `.agents/`, `.claude/` or
       `.codex/`.
-- [ ] 9.8 End-to-end pipeline: record, from the latest passing validation, the pipeline
+- [ ] 10.8 End-to-end pipeline: record, from the latest passing validation, the pipeline
       run and its result, and the scenarios exercising this change —
       `e2e_vm_rate_dispute`, `e2e_vm_recurring_purchase`, `e2e_vm_rate_servicing`,
       `e2e_vm_payment_deal` and the `e2e_vm_dispute_*` scenarios; the live scenarios'
       evidence is section 8's summary, not the pipeline's. Closeout dispatches no run.
-- [ ] 9.9 Promotion: write the permanent documents below and complete the
+- [ ] 10.9 Promotion: write the permanent documents below and complete the
       design-promotion record (`docs/guidance/workflow/changes.md`, "The design-promotion
       record"); the `test-compatibility` and `deployment-state` `spec.md` files are
       written by the archive.
@@ -1731,7 +1831,7 @@ after campaign index currency.
       - D8: the `test-compatibility` and `deployment-state` specs, by the archive;
         `openspec/specs/deployment-state/configuration.md`, its production-examples
         passage, if it lists them.
-      - D9: the summary, written in section 8; cited by Goal 8 (9.5).
+      - D9: the summary, written in section 8; cited by Goal 8 (10.5).
       - D10: the quickstarts, written in section 7.
       - D11: the operator handbook, written in section 7;
         `deal-lifecycle/architecture.md`, "Current limits" (each environment's receipt
@@ -1744,12 +1844,12 @@ after campaign index currency.
         `e2e-tests/README.md`).
       Run `make check-spec-index CHANGE=switch-on-hosted-per-period-vm`; neither touched
       capability has an `index.md`, and `openspec/specs/README.md` needs no row.
-- [ ] 9.10 Guidance placement: read the paragraphs promoted in 9.9 against the layer
+- [ ] 10.10 Guidance placement: read the paragraphs promoted in 10.9 against the layer
       test — `system-tests.md`'s and `test-doubles.md`'s in the engineering layer with
       neutral examples, `changes.md`'s in the workflow's — then run `make check-guidance`.
-- [ ] 9.11 Documentation citations: run `make check-doc-citations
+- [ ] 10.11 Documentation citations: run `make check-doc-citations
       CHANGE=switch-on-hosted-per-period-vm` and resolve every match, then
       `scripts/change-workflow openspec validate switch-on-hosted-per-period-vm --strict`.
-- [ ] 9.12 Archival: `scripts/change-workflow openspec archive
+- [ ] 10.12 Archival: `scripts/change-workflow openspec archive
       switch-on-hosted-per-period-vm -y`, merging the deltas into `test-compatibility`
       and `deployment-state`; the index row then links the archive directory.

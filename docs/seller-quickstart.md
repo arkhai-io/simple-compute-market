@@ -144,7 +144,7 @@ priority = ["arkhai.payments.v1"]
 [Settlement.arkhai_payments]
 enabled = true
 service_url = "https://<PAYMENTS_SERVICE>"
-service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
+service_identity = { scheme = "ed25519", identifier = "<SERVICE_RECEIPT_IDENTITY>" }
 fee_bps = 250
 livemode = true                          # false against the public test-mode service
 # api_key goes in the Secret overlay, storefront.secrets.toml, never here.
