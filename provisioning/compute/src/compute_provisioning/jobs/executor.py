@@ -10,6 +10,9 @@ durable state. The split that follows from that:
   happens, from a ``JobRetryPolicy``.
 - The executor redacts everything it reports. Logs and outcomes reach durable
   state exactly as reported.
+- The executor reports that the job's execution is starting before it starts
+  anything that can act on the host, and goes on only once the job authority
+  has recorded it, so no attempt acts on a host without a recorded start.
 - The executor reports an opaque cancellation handle once it has one, and is
   later handed that same value to cancel the job. The job authority stores the
   handle without interpreting it.
@@ -49,6 +52,12 @@ class JobRun:
     action: str
     host: ExecutionHost
     parameters: Mapping[str, Any]
+    # Called immediately before the executor starts anything that can act on
+    # the host. It returns once the job authority has recorded the start, and
+    # raises when it cannot record it or the job has left ``running``; the
+    # executor then starts nothing and lets the error end the attempt, so no
+    # attempt acts on the host without a recorded start.
+    report_starting: Callable[[], None]
     # Called once the executor can be cancelled, with the handle ``cancel``
     # will later receive.
     report_handle: Callable[[Mapping[str, Any]], None]

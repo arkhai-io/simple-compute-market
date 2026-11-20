@@ -299,6 +299,31 @@ source registry uses local entries only. A failed descriptor read contributes
 no recommendations; local preferences remain usable. Disabling recommendations
 does not disable local entries or resolve any authority credential.
 
+A storefront reads again, each time it composes listing options, every registry
+whose last descriptor read failed, and only those, until a read succeeds: at
+each publication cycle's `compose` stage in the VM and bare-metal storefronts,
+and in API credits, which runs no publication cycle, when a listing is created
+or seeded. So a storefront that started before its registry offers the
+authorities it recommends on the first options composed after it answers,
+without a restart. A successful read is kept until the storefront restarts, so
+a healthy registry is not read again. The re-read goes through the core
+storefront client's selective descriptor read, which refuses a selection naming
+a registry it is not configured with, or a string in place of a collection. Reads
+are serialized, so overlapping compositions request a failed registry once and
+a failure answered after a success cannot mark a read registry unread again.
+
+While a registry is unread, each mechanism whose options name a dispute
+authority — Alkahest and Arkhai Payments — reports it in its readiness's public
+details as `dispute_authorities_unread`, each entry the registry and when its
+read last failed; each mechanism allowlists the detail and copies it from the
+readiness resources the storefront supplies. It is a report, not a blocker:
+readiness, publication and open listings are unchanged, so the options a
+seller's local entries allow still publish meanwhile. It is shown on the
+storefront's system status route (`GET /api/v1/system/status`), which reads the
+running process; the `settlement status` command checks configuration in its own
+process, with no dispute policy, and does not carry it. `/health` does not
+depend on it.
+
 A local entry names one authority by all four of `interface`, `origin`,
 `account`, and `record_key`. `params` belongs to that interface. The
 `advertisement` copy states the supported payment mechanisms and minimum

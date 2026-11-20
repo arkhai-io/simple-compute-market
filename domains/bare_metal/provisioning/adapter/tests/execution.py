@@ -87,6 +87,7 @@ def job_run(params: BareMetalJobParams, host: ExecutionHost = HOST) -> JobRun:
         action=params.action,
         host=host,
         parameters=params.model_dump(mode="json"),
+        report_starting=lambda: None,
         report_handle=lambda handle: None,
         report_logs=lambda logs: None,
     )

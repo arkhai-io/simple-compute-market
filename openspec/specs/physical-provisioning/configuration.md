@@ -138,14 +138,37 @@ replace it from the named profile key. The provisioning service's
 `relay_grant_expiry_grace_seconds` (default 3600 seconds) extends the lease end
 for the signed grant, while `relay_port_reuse_margin_seconds` (default 300
 seconds) delays reuse after that grant expiry. The allocator applies a raised
-reuse margin to already released ports. Keep the grace at least the lease
-watchdog's grace period plus a teardown job's retries and their backoff, so a
-grant never expires while the teardown that revokes it is still due; the default
-covers the default watchdog and retry settings. The service refuses to start
+reuse margin to already released ports. Size the grace for the teardown still
+due after the lease ends: the reruns' spacing for `teardown_rerun_limit` reruns,
+a teardown job's retries with their backoff, and the playbook runs a teardown is
+expected to take, so a grant does not expire while a working teardown that
+revokes it is still due. It is sized for the same expected teardown as the lease
+watchdog's grace, and need not cover that grace: past it no teardown is due,
+since the lease is `release_failed` and an operator acts. The default covers the
+defaults' backoff and spacing with room for runs. The service refuses to start
 with a negative grace or a reuse margin that is not positive. Keep the relay
 and provisioning clocks synchronized with skew well below the reuse margin; the
 relay plugin checks expiry against its own clock with no leeway. These values
 are service settings, not pool fields or buyer inputs.
+
+The lease watchdog's `lease_watchdog_grace_period_seconds` (default 3600
+seconds, in the service's settings and in both charts' values) is how long a
+lease may stay `releasing`, timed from when it entered `releasing`, before it is
+marked `release_failed` with `teardown_timeout` for an operator, whether its
+teardown is in progress or a rerun of it is pending. It is sized for the
+teardowns a deployment is expected to run, not for the longest the settings
+allow: at the defaults a teardown's waits are the reruns' spacing (60, 120 and
+240 seconds) and the retry backoff of the one job whose execution starts (60,
+120 and 240 seconds again), 14 minutes in all, leaving about 46 minutes for that
+job's playbook runs. A teardown running longer is timed out like any stuck
+release, and an operator's retry-release then releases its lease once its
+teardown is torn down. `teardown_rerun_limit` (default 3) is how many times a
+teardown whose job failed before its execution started is run again, each under
+a new job, spaced after the previous job's finish by the job retry policy's
+backoff; 0 disables reruns, and the service refuses to start with a negative
+value. Raise the watchdog grace, and the grant grace with it, when raising
+`teardown_rerun_limit`, the job retries or `ansible_timeout_seconds`, or for
+teardowns that run longer ([Proof-driven release](architecture.md#proof-driven-release)).
 
 ## The service's time source
 

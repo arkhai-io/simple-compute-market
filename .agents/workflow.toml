@@ -36,8 +36,10 @@ pre-push = "make pre-push REMOTE={remote}"
 post-clone = "make init"
 # Engine, `run test-before`, for change-implement and change-triage: one test file,
 # as HEAD holds it, run in a detached worktree of an earlier commit, to show a test
-# fails without the change. The scripts' suites run there with no built environment.
-test-before = "uv run --no-project --with pytest --with pyyaml pytest -q {test}"
+# fails without the change. The checkout's scripts/test_before.py runs it in the
+# environment of the project that owns it, rebuilding only the wheels
+# TEST_BEFORE_DIST names; the scripts' suites run with no built environment.
+test-before = "python3 \"$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/test_before.py\" {test}"
 
 [defaults]
 # Engine, `run pre-commit` and `check change`: the workflow's default checks this

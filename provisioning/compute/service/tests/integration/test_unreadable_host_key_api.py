@@ -106,6 +106,9 @@ class TestAKeyProtectedUnderAnotherKey:
         assert ciphertext not in job.error and "unreadable-fixture" not in job.error
         assert (job.retry_count, job.next_retry_at) == (0, None)
         assert fake_ansible.start_playbook.call_count == started
+        # Refused before its playbook: no start was recorded, and its finish was.
+        assert job.execution_started_at is None
+        assert job.finished_at is not None
 
     async def test_its_connectivity_check_answers_unreachable_with_the_reason(
         self, client_and_queue, fake_ansible, session_factory

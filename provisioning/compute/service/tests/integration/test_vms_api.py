@@ -160,6 +160,22 @@ class TestCreateVmViaClient:
         assert final.status == "succeeded"
         assert final.result is not None
 
+    async def test_a_job_that_ran_is_read_with_its_start_and_its_finish(self, client_and_queue):
+        """The job view carries the instants the job authority recorded: the
+        start, committed before the playbook was spawned, and the finish."""
+        client, job_queue = client_and_queue
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+
+        job = await client.family.get_job(submit.job_id)
+        assert job.status == "succeeded"
+        assert job.execution_started_at is not None
+        assert job.finished_at is not None
+        assert job.execution_started_at <= job.finished_at
+
     async def test_create_vm_result_contains_ssh_info(self, client_and_queue):
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)

@@ -234,6 +234,9 @@ class BareMetalStorefrontSettlementComposition:
     ) -> tuple[MechanismReadiness, ...]:
         resources = {
             **self.resources,
+            # Each registry whose recommendations could not be read is
+            # reported in the mechanisms' readiness, and blocks none of them.
+            **self.disputes.readiness_resources(),
             "publication_clauses": [
                 item.model_dump(mode="json", exclude_none=True) for item in clauses
             ],

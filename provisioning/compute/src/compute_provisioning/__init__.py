@@ -48,6 +48,7 @@ from .startup import (
     start_compute_provisioning_runtime,
     stop_compute_provisioning_runtime,
 )
+from .teardown_rerun import TeardownRerunPolicy
 
 __all__ = [
     "ComposedComputeAdapters",
@@ -90,4 +91,5 @@ __all__ = [
     "start_compute_provisioning_background_task",
     "start_compute_provisioning_runtime",
     "stop_compute_provisioning_runtime",
+    "TeardownRerunPolicy",
 ]

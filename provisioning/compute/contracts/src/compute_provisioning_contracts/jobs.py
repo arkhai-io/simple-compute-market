@@ -55,6 +55,24 @@ class JobStatusResponse(BaseModel):
             "operator's job"
         ),
     )
+    execution_started_at: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the job authority recorded that the job's execution was "
+            "starting, before anything acted on the host; kept from its first "
+            "start. Null for a job whose execution has not started, and for one "
+            "recorded before this instant existed, which is no evidence that its "
+            "execution never started"
+        ),
+    )
+    finished_at: Optional[datetime] = Field(
+        default=None,
+        description=(
+            "When the job authority recorded the job reaching a terminal status. "
+            "Null for a job not yet finished, and for one finished before this "
+            "instant existed"
+        ),
+    )
 
 
 class JobCredentialsResponse(BaseModel):

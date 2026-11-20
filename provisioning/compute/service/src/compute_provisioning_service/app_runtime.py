@@ -268,7 +268,7 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
                 "Lease watchdog started (interval=%ds grace=%ds)",
                 (
                     getattr(settings, "lease_watchdog_poll_interval_seconds", 60),
-                    getattr(settings, "lease_watchdog_grace_period_seconds", 300),
+                    getattr(settings, "lease_watchdog_grace_period_seconds", 3600),
                 ),
             )
         )

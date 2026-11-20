@@ -1141,36 +1141,11 @@ async def fulfillment_result(
             negotiation_id=negotiation_id,
             operation="bare_metal_fulfillment_result",
         )
-        lifecycle = await runtime.fulfillment_service().status(
+        result = await runtime.fulfillment_service().result(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        if lifecycle["state"] not in {
-            "active",
-            "teardown_dispatch_pending",
-            "tearing_down",
-            "teardown_failed",
-            "torn_down",
-            "released",
-        }:
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment result is not ready"
-            )
-        receipt = await runtime.db.load_bare_metal_receipt(
-            negotiation_id=negotiation_id,
-        )
-        result = await runtime.db.load_bare_metal_result(
-            negotiation_id=negotiation_id,
-        )
-        if receipt is None or result is None:
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment result is not ready"
-            )
-        return BareMetalFulfillmentResultResponse(
-            negotiation_id=negotiation_id,
-            receipt=receipt,
-            result=result,
-        )
+        return BareMetalFulfillmentResultResponse.model_validate(result)
     except BareMetalFulfillmentError as exc:
         raise _fulfillment_error(exc) from exc
 

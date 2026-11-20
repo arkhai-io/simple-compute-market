@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
@@ -228,14 +228,44 @@ class MultiRegistryClient:
     # Reads — fan-in
     # ------------------------------------------------------------------
 
-    async def get_descriptors(self) -> dict[str, RegistryDescriptor | None]:
-        """Read signed descriptors independently under each registry's pin."""
+    async def get_descriptors(
+        self, registries: Collection[str] | None = None
+    ) -> dict[str, RegistryDescriptor | None]:
+        """Read signed descriptors independently under each registry's pin.
+
+        ``registries`` selects the registries to read, named as :attr:`urls`
+        names them; only those are read and returned, in configured order.
+        Absent, every configured registry is, and an empty selection reads
+        none.
+
+        A selection naming a registry that is not configured, or a string
+        given in place of a collection, is refused with :class:`ValueError`
+        before anything is read. Membership is exact, so an unknown name would
+        otherwise match nothing and be silently skipped, and a string would
+        select every configured URL contained in it; either answer would read
+        as a complete read of the registries the caller meant.
+        """
+        if registries is not None:
+            if isinstance(registries, str):
+                raise ValueError(
+                    "registries must be a collection of registry URLs, not a string"
+                )
+            unknown = [url for url in registries if url not in self._urls]
+            if unknown:
+                raise ValueError(
+                    f"registries names registries that are not configured: {unknown!r}"
+                )
+        selected = [
+            (url, client)
+            for url, client in zip(self._urls, self._clients)
+            if registries is None or url in registries
+        ]
         results = await asyncio.gather(
-            *(self._bound(client.get_registry_descriptor()) for client in self._clients),
+            *(self._bound(client.get_registry_descriptor()) for _url, client in selected),
             return_exceptions=True,
         )
         descriptors: dict[str, RegistryDescriptor | None] = {}
-        for url, result in zip(self._urls, results):
+        for (url, _client), result in zip(selected, results):
             if isinstance(result, BaseException):
                 logger.warning(
                     "registry descriptor unavailable for %s (%s)", url, type(result).__name__

@@ -110,6 +110,47 @@ def test_family_roles_are_available_in_repository_and_image():
     assert 'ANSIBLE_ROLES_PATH="/opt/provisioning/compute/iac/ansible/roles"' in dockerfile
 
 
+def test_a_proxy_is_added_only_after_the_client_baseline_names_the_jobs_relay():
+    """A delivery's port is leased on its declaration's pool's relay, whatever
+    pool the host is placed in, so the job adding its proxy first points the
+    host's one buyer client at that relay: the baseline is synchronized from the
+    job's relay address, port and token, the synchronization notifying the
+    client's restart only when that baseline changed, and pending restarts run
+    before any proxy is written or reloaded."""
+    add = tasks("relay-proxy", "add")
+    names = [task["name"] for task in add]
+    include = next(
+        index for index, task in enumerate(add)
+        if task.get("ansible.builtin.include_role", {}).get("name") == "relay-client"
+    )
+    proxy = next(
+        index for index, task in enumerate(add) if "ansible.builtin.blockinfile" in task
+    )
+    assert include < proxy, names
+    assert include < names.index("Reload the buyer client with authentication")
+
+    client = tasks("relay-client")
+    client_names = [task["name"] for task in client]
+    sync = client[client_names.index("Synchronize the client baseline and retain its per-host password")]
+    stdin = sync["ansible.builtin.command"]["stdin"]
+    for field, variable in (
+        ("'serverAddr'", "frp_server_addr"),
+        ("'serverPort'", "frp_server_port"),
+        ("'auth.token'", "frp_auth_token"),
+    ):
+        assert f"{field}: {variable}" in stdin
+    assert sync["changed_when"] == "relay_client_baseline.stdout == 'changed'"
+    assert sync["notify"] == "restart frpc-buyers"
+    handlers = yaml.safe_load((ROLES / "relay-client/handlers/main.yml").read_text())
+    restart = next(handler for handler in handlers if handler["name"] == "restart frpc-buyers")
+    assert restart["ansible.builtin.systemd"]["state"] == "restarted"
+    flush = client_names.index("Apply a changed baseline before any proxy reload")
+    assert client[flush]["ansible.builtin.meta"] == "flush_handlers"
+    assert flush > client_names.index(
+        "Synchronize the client baseline and retain its per-host password"
+    )
+
+
 def test_every_proxy_attempt_installs_the_root_owned_shared_helper_first():
     main = tasks("relay-proxy")
     names = [task["name"] for task in main]

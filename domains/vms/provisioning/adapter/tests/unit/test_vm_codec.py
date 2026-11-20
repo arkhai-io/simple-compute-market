@@ -122,6 +122,7 @@ def _run(parameters: dict, *, action: str = "create") -> JobRun:
         action=action,
         host=_HOST,
         parameters=parameters,
+        report_starting=lambda: None,
         report_handle=lambda handle: None,
         report_logs=lambda logs: None,
     )
