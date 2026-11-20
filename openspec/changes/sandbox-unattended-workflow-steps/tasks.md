@@ -2071,10 +2071,29 @@ its seventh position.
 - [ ] 12.1 Comment hygiene — run `make check-comment-hygiene` and read the comments and
   docstrings the change added under `scripts/` for history wording or a change
   reference; anything to rewrite returns the change to implementation.
-- [ ] 12.2 Import placement — check the imports the change added in `scope.py`,
+  - **Returned to implementation (closeout, 2026-11-20).** `make check-comment-hygiene`
+    passed (no change id, task number, or change name outside `openspec/`). Reading the
+    comments and docstrings the change added under `scripts/` against `dev`
+    (`024f3a039..46da89c82`), the engine modules' 135 added comments describe the
+    current system, and their requirement ids (CW-…) are permanent ones. One docstring
+    names a decision of this change's `design.md`:
+    `scripts/tests/test_change_workflow_harness.py:176`,
+    `test_the_unattended_prompt_is_one_harness_neutral_paragraph`, opens
+    `"""D15: the prompt says …`. `D15` points into a change document that leaves with
+    the archive, against `docs/guidance/workflow/change-references.md` and
+    `docs/guidance/engineering/comments.md`'s "Comments describe the current system".
+    The mechanical check does not catch decision ids. Fix: drop the `D15: ` prefix so
+    the docstring opens "The prompt says the step runs in a sandbox scoped to it, …",
+    or cite CW-4yhk, the requirement the prompt meets, if a citation is wanted. That is
+    a code edit, so closeout stopped here and returns the change to implementation for
+    a fix round. No other part was started after 12.2.
+- [x] 12.2 Import placement — check the imports the change added in `scope.py`,
   `sandbox.py`, `sandbox_git.py`, `invariants.py`, `propose.py`, `codex.py`,
   `review.py`, and the edited modules;
   one to move returns the change to implementation.
+  - `make check-local-imports` passed ("every import the change adds inside a
+    function since dev gives its reason"). The diff `024f3a039..46da89c82` under
+    `scripts/` adds no import inside a function. Nothing to move.
 - [ ] 12.3 Documentation compliance — check D1 to D21 and the cadence against
   `docs/guidance/workflow/openspec-documentation.md` and
   `openspec/README.md#documentation-placement`, and each permanent document written
