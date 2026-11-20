@@ -22,6 +22,9 @@ REAL_PROVISIONING_TARGET:
       # service (invented name), for host diagnostics to report beside the
       # host's own units.
       # management_unit: example-agent.service
+      # Optional: the VM host's independently confirmed OpenSSH public key.
+      # Deterministic test fixture only, never a public-network identity.
+      # ssh_host_public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJS'
     - host_id: example-bm-1
       domain: bare_metal
       physical_host_id: example-machine-1

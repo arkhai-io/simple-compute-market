@@ -5,6 +5,9 @@ import pytest
 from pydantic import ValidationError
 import compute_provisioning_contracts as contracts
 from compute_provisioning_contracts import (
+    ConnectivityHostKey,
+    ConnectivityResult,
+    HostKeyCaptureRequest,
     PROVISIONING_ROUTE_CONTRACTS,
     HostCreate,
     HostResponse,
@@ -340,3 +343,21 @@ def test_an_update_carrying_only_gpu_fields_sets_nothing():
     """An update naming only the GPU fields sets no field, so it changes
     nothing on the host."""
     assert HostUpdate.model_validate(_GPU_FIELDS).model_fields_set == set()
+
+def test_connectivity_distinguishes_no_ssh_handshake_from_a_kind_that_presents_no_key():
+    fields = dict(host="fixture", reachable=False, detail="unreachable")
+    assert "host_key" not in ConnectivityResult(**fields).model_dump(mode="json")
+    assert ConnectivityResult(**fields, host_key=None).model_dump(mode="json")["host_key"] is None
+    observed = ConnectivityResult(
+        **fields,
+        host_key=ConnectivityHostKey(
+            endpoint="[192.0.2.1]:22", pinned=False, presented="ssh-ed25519 SHA256:fixture",
+        ),
+    )
+    assert observed.model_dump(mode="json")["host_key"]["presented"] == "ssh-ed25519 SHA256:fixture"
+
+
+@pytest.mark.parametrize("value", ["", "SHA256:YWJj", "MD5:abcd", "SHA256:!invalid"])
+def test_capture_rejects_malformed_fingerprints(value):
+    with pytest.raises(ValueError, match="fingerprint"):
+        HostKeyCaptureRequest(fingerprint=value)

@@ -1,7 +1,7 @@
 """Typed operator targets for the real-provisioning scenarios.
 
 The ignored ``config-real-provisioning-target.yml`` profile holds public host
-metadata and service-side key paths, never keys or relay credentials. Each lane
+metadata, public SSH host keys and service-side authentication key paths. Each lane
 selects its own domain's host; missing configuration skips, invalid configuration
 fails before scenario mutations.
 """
@@ -90,6 +90,12 @@ class VmHost(_Host):
     domain: Literal["vm"]
     resource_id: _Text | None = None
     listing_shape: Capacity
+    ssh_host_public_key: _Text | None = None
+
+    @field_validator("ssh_host_public_key")
+    @classmethod
+    def valid_host_key(cls, value: str | None) -> str | None:
+        return canonical_host_public_key(value) if value is not None else None
     #: The operator's management client on the host, a systemd service whose
     #: name this repository cannot know, for host diagnostics to report beside
     #: the host's own units. Optional.

@@ -384,7 +384,6 @@ from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import AnsibleJobExecutor, SshConnectionCodec
 from vm_provisioning_adapter.codec import VmAnsibleCodec
 from compute_provisioning.jobs.engine import JobEngine
-from compute_provisioning_ansible import probe_connectivity
 from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
@@ -622,10 +621,16 @@ def bare_metal_plan_options():
     return {"reclaim_policy": "remove_lease_key", "working_data_policy_id": None}
 
 
+@pytest.fixture
+def connectivity_probe_runner(fake_ansible):
+    return fake_ansible
+
+
 @pytest_asyncio.fixture
 async def client_and_queue(
     session_factory,
     fake_ansible,
+    connectivity_probe_runner,
     bare_metal_runner,
     bare_metal_plan_options,
     job_retry_options,
@@ -753,10 +758,10 @@ async def client_and_queue(
         job_queue_provider=lambda: job_queue,
     )
 
-    async def probe_ssh(host):
-        return await probe_connectivity(fake_ansible, host)
-
-    connectivity_probes = {"ssh": probe_ssh}
+    connectivity_probes = _container_module._make_connectivity_probes(
+        connectivity_probe_runner, host_authority,
+    )
+    host_key_probes = _container_module._make_host_key_probes(connectivity_probe_runner)
 
     physical_settlement_scheduler = PhysicalSettlementScheduler(
         pool_service=resource_pool_service,
@@ -971,6 +976,7 @@ async def client_and_queue(
     )
     _container_module.resolved_host_authority = host_authority
     _container_module.resolved_connectivity_probes = connectivity_probes
+    monkeypatch.setattr(_container_module, "resolved_host_key_probes", host_key_probes)
     _container_module.resolved_bare_metal_mock_executor = (
         bare_metal_runner if isinstance(bare_metal_runner, MockAnsibleRunner) else None
     )

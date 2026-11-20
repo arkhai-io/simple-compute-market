@@ -30,6 +30,24 @@ def configured_relay(provisioning_client: Any, target: VmHost | BareMetalHost) -
 
 
 
+def pin_registered_vm(provisioning_client: Any, host: Any) -> Any:
+    """Capture a first-time VM lane key before declaring that host's supply."""
+    if host.connection.public.get("host_keys"):
+        return host
+    result = provisioning_client.check_connectivity(host.host_id)
+    assert result.reachable and result.host_key is not None, (
+        f"management host {host.host_id!r} presented no usable SSH key: {result.detail}"
+    )
+    fingerprint = result.host_key.presented.rsplit(" ", 1)[-1]
+    if not result.host_key.pinned:
+        provisioning_client.capture_host_key(host.host_id, fingerprint)
+    registered = provisioning_client.get_host(host.host_id)
+    assert registered.connection.public.get("host_keys"), (
+        f"management host {host.host_id!r} has no key pin after capture"
+    )
+    return registered
+
+
 @dataclass
 class JobWatch:
     """Reads the jobs a deal's reservation runs, and waits for one to finish."""

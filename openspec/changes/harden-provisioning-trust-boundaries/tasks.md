@@ -235,7 +235,7 @@ admin-only), `provisioning/compute/src/compute_provisioning/hosts/route_service.
 `provisioning/compute/service/src/compute_provisioning_service/controllers/hosts_controller.py`,
 `provisioning/compute/client/`, and `e2e-tests/`.
 
-- [ ] 4.1 Add `host_key` to `ConnectivityResult`: the endpoint, whether pinned, the
+- [x] 4.1 Add `host_key` to `ConnectivityResult`: the endpoint, whether pinned, the
   presented key's type and SHA-256 fingerprint, and for a pinned host whether it
   matched and the pinned fingerprints; null when no key was presented, with
   `reachable: false` and the probe's reason in `detail`; omitted for a kind whose hosts
@@ -246,7 +246,7 @@ admin-only), `provisioning/compute/src/compute_provisioning/hosts/route_service.
   checks an unpinned host"; connectivity requirement.) Verify: unit tests in
   `test_probes.py` for each case, a timed-out probe giving a null `host_key`, and the
   contracts' `test_contracts.py` for the result's shape.
-- [ ] 4.2 Add `POST /api/v1/hosts/{host}/host-keys/capture` to the family route table
+- [x] 4.2 Add `POST /api/v1/hosts/{host}/host-keys/capture` to the family route table
   among the administrator's operations, served by the host route service: 404 for an
   unknown host; 422 for a kind that presents no key, naming the kind, and for an empty
   or malformed fingerprint, naming the field; 409 coded `host_key_mismatch` with the
@@ -257,7 +257,7 @@ admin-only), `provisioning/compute/src/compute_provisioning/hosts/route_service.
   Verify: unit tests in `provisioning/compute/tests/unit/test_host_route_service.py`;
   `provisioning/compute/contracts/tests/unit/test_route_table.py` shows the route
   admin-only.
-- [ ] 4.3 Give the typed client `capture_host_key(host_id, fingerprint, *, replace=False)`,
+- [x] 4.3 Give the typed client `capture_host_key(host_id, fingerprint, *, replace=False)`,
   surfacing each refusal's code, and the connectivity result's `host_key`. (D5.)
   Verify: application-integration tests through the client in
   `provisioning/compute/service/tests/integration/test_hosts_api.py` for a capture
@@ -265,7 +265,7 @@ admin-only), `provisioning/compute/src/compute_provisioning/hosts/route_service.
   fingerprint, an unknown host, and a connectivity check of an unpinned, a pinned, and
   a mismatched host, the SSH side behind the runner's seam; and
   `test_provisioning_client_endpoint_coverage.py` covering the new route.
-- [ ] 4.4 Have the e2e real-provisioning helpers pin each host: the bare-metal driver
+- [x] 4.4 Have the e2e real-provisioning helpers pin each host: the bare-metal driver
   (`e2e-tests/tests/e2e/roles/scenarios/bare_metal/real_compute_deal_driver.py`)
   states `host_keys` from the target's `ssh_host_public_key`; the VM helper
   (`e2e-tests/tests/e2e/roles/helpers/real_provisioning.py`) checks connectivity and
@@ -274,7 +274,7 @@ admin-only), `provisioning/compute/src/compute_provisioning/hosts/route_service.
   committed example under `e2e-tests/config/`); the reapply scenario
   restates the pins it registered. (D3, D5.) Verify: `e2e-tests/tests/unit/test_real_vm_lane.py`
   and `test_real_bare_metal_lane.py` show each registration pinned.
-- [ ] 4.5 Verification point. Unit: `test_probes.py`, `test_host_route_service.py`,
+- [x] 4.5 Verification point. Unit: `test_probes.py`, `test_host_route_service.py`,
   the contracts' `test_contracts.py` and `test_route_table.py`, the e2e unit suites
   `test_real_vm_lane.py` and `test_real_bare_metal_lane.py`. Application integration
   through the typed client: `test_hosts_api.py`,
@@ -283,6 +283,15 @@ admin-only), `provisioning/compute/src/compute_provisioning/hosts/route_service.
   `e2e-tests/tests/smoke/test_provisioning_smoke.py` reads a connectivity result;
   `e2e_vm_real_provisioning`, `e2e_bare_metal_real_provisioning` and
   `e2e_real_provisioning_reapply` pin hosts against a real target and run in no lane.
+
+**Section evidence.** Six probe tests, 134 contract and route tests, 69
+typed service tests, 213 real-lane helper tests, and 56 qualification tests passed. The tests cover
+observation, adoption, mismatch, explicit replacement, and the host's pin
+round-trip through the typed client. In addition, a local SSH fixture using
+Ed25519, RSA, and ECDSA keys exercised discovery and capture against a temporary
+database. VM test supply is declared once a pin is available. Reapplying the
+VM declaration restates the registered pin if a key is absent from the target
+configuration.
 
 ## 5. A VM guest reaches no other guest and only DHCP and DNS on its host
 
@@ -477,6 +486,10 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
     release" — all as drafted in `design.md` (D16).
   - D1, D2, D12, D13 and D17 have no permanent destination; D11's roadmap row and
     unowned gap were written with the design.
+  Promote the target's management SSH pin field, capture-before-capacity rule, and
+  reapply evidence to the test-compatibility specification and the real-target
+  instructions in the validation runbook and E2E README.
+
 - [ ] 8.10 **Guidance placement.** Read the new engineering file, the package-versions
   section and the release handbook's section against the layer test; run
   `make check-guidance`.

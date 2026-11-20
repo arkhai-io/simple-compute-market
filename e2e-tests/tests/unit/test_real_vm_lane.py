@@ -12,6 +12,7 @@ stage classes, so pytest does not collect them here.
 from __future__ import annotations
 
 import importlib
+from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -33,6 +34,7 @@ from storefront_client.models import ListingListResponse, ListingSummary
 
 from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal import DealLease
+from tests.e2e.roles.helpers.real_provisioning import pin_registered_vm
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
     LISTED_HOURLY_RATE,
@@ -139,6 +141,36 @@ def test_a_new_host_is_registered_with_the_connection_given():
     assert body.connection == target_connection(TARGET)
     assert hosts.updates == []
     assert_registered_as_target(hosts.get_host(HOST), TARGET)
+
+
+def test_a_configured_vm_key_is_stated_and_a_captured_pin_is_restated():
+    # Test-only SSH wire bytes with no corresponding private key.
+    blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"t" * 32
+    key = "ssh-ed25519 " + b64encode(blob).decode("ascii")
+    configured = VmHost.model_validate({
+        **TARGET.model_dump(), "ssh_host_public_key": key,
+    })
+    hosts = FakeHosts()
+    register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(configured))
+
+    assert hosts.get_host(HOST).connection.public["host_keys"] == [key]
+    assert target_connection(TARGET, registered_pins=[key]).public["host_keys"] == [key]
+
+
+def test_an_unpinned_vm_is_observed_and_captured_before_supply_is_declared():
+    host = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
+    fingerprint = "SHA256:" + b64encode(b"x" * 32).decode().rstrip("=")
+    client = MagicMock()
+    client.check_connectivity.return_value = SimpleNamespace(
+        reachable=True, host_key=SimpleNamespace(
+            pinned=False, presented="ssh-ed25519 " + fingerprint
+        ), detail="fixture reachable",
+    )
+    pinned = _host(HOST, REAL_POOL_ID, target_connection(TARGET, registered_pins=["fixture"]))
+    client.get_host.return_value = pinned
+
+    assert pin_registered_vm(client, host) is pinned
+    client.capture_host_key.assert_called_once_with(HOST, fingerprint)
 
 
 def test_an_unchanged_host_is_left_as_it_is():

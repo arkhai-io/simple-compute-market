@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from base64 import b64encode
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from compute_provisioning_contracts import (
     ConnectivityResult,
     HostCreate,
     HostDefinitionsImportRequest,
+    HostKeyCaptureRequest,
+    HostKeyCaptureResponse,
     HostUpdate,
 )
 from sqlalchemy.exc import IntegrityError
 
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
-from compute_provisioning.hosts.route_service import HostRouteService
+from compute_provisioning.hosts.route_service import (
+    HostKeyProbe, HostKeyProbeResult, HostRouteService,
+)
 from compute_provisioning.hosts.service import HostNotFoundError, PoolChangeRefusedError
 from compute_provisioning.route_errors import ProvisioningRouteError
 
@@ -152,3 +157,48 @@ async def test_connectivity_to_an_unknown_host_is_not_found():
         await HostRouteService(hosts, {}).check_connectivity("node-1")
 
     assert refused.value.status_code == 404
+
+@pytest.mark.asyncio
+async def test_capture_refuses_a_kind_that_has_no_key_before_scanning():
+    host_registry = MagicMock()
+    host_registry.lookup.return_value = _execution_host("fixture-kind")
+    service = HostRouteService(host_registry, {})
+    fingerprint = "SHA256:" + b64encode(b"x" * 32).decode().rstrip("=")
+
+    with pytest.raises(ProvisioningRouteError) as refused:
+        await service.capture_host_key("node-1", HostKeyCaptureRequest(fingerprint=fingerprint))
+
+    assert refused.value.status_code == 422
+    assert "fixture-kind" in refused.value.detail
+    host_registry.capture_host_key.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_capture_reports_the_pin_that_committed_while_its_probe_ran():
+    endpoint = "[192.0.2.1]:22"
+    expected = "SHA256:" + b64encode(b"x" * 32).decode().rstrip("=")
+    committed = "SHA256:" + b64encode(b"y" * 32).decode().rstrip("=")
+    observed_host = _execution_host()
+    committed_host = _execution_host()
+    host_registry = MagicMock()
+    host_registry.lookup.return_value = observed_host
+    host_registry.capture_host_key.return_value = (committed_host, False)
+    scanner = AsyncMock(return_value=HostKeyProbeResult(
+        endpoint, presented="fixture " + expected, key="public-fixture"
+    ))
+    probe = HostKeyProbe(
+        describe_pins=lambda host: HostKeyCaptureResponse(
+            endpoint=endpoint, pinned_fingerprints=[committed] if host is committed_host else []
+        ),
+        scan=scanner,
+    )
+    service = HostRouteService(host_registry, {}, {"ssh": probe})
+
+    with pytest.raises(ProvisioningRouteError) as refused:
+        await service.capture_host_key("node-1", HostKeyCaptureRequest(fingerprint=expected))
+
+    assert refused.value.status_code == 409
+    assert refused.value.detail == {
+        "code": "host_key_pinned", "endpoint": endpoint, "pinned_fingerprints": [committed]
+    }
+    scanner.assert_awaited_once_with(observed_host)

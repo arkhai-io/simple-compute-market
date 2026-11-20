@@ -26,6 +26,7 @@ from typing import Any, Optional
 
 import injected_time
 import pytest
+from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import ConnectionSubmission
 from storefront_client import StorefrontClientError
 
@@ -37,7 +38,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     ComputeDealState,
 )
 from tests.e2e.roles.helpers.ssh_access import SshEndpoint, SshHeartbeat
-from tests.e2e.roles.helpers.real_provisioning import JobWatch, RealComputeObservations, configured_relay
+from tests.e2e.roles.helpers.real_provisioning import JobWatch, RealComputeObservations, configured_relay, pin_registered_vm
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmDealDriverBase
 from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
@@ -115,15 +116,18 @@ def vm_executor_is_real(execution: Any) -> Any:
 
 
 
-def target_connection(target: VmHost) -> ConnectionSubmission:
+def target_connection(
+    target: VmHost, *, registered_pins: list[str] | None = None,
+) -> ConnectionSubmission:
     """The connection the provisioning service reaches the target's host by.
 
-    The key is named by where the service reads it; the target never carries
-    key material. The service accepts an `ssh` connection only at version 3. A
+    The authentication key is named by where the service reads it. An
+    independently configured public host key takes precedence over an existing pin. The service accepts an `ssh` connection only at version 3. A
     guest is reached at its own forwarded or relayed port, never the host's
     tenant-facing port, so none is stated.
     """
     host = target
+    pins = [host.ssh_host_public_key] if host.ssh_host_public_key else registered_pins
     return ConnectionSubmission(
         kind="ssh",
         version=3,
@@ -132,6 +136,7 @@ def target_connection(target: VmHost) -> ConnectionSubmission:
             "ssh_port": host.connection.ssh_port,
             "ssh_user": host.connection.ssh_user,
             "key_path": host.connection.ssh_key_path,
+            **({"host_keys": pins} if pins else {}),
             **({"public_host": host.access.public_host} if host.access.mode == "direct" else {}),
         },
     )
@@ -250,6 +255,14 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
         and no GPU, while the listing sells the explicit smaller guest shape.
         """
         configured_relay(self.provisioning_client, self.target)
+        try:
+            existing = self.provisioning_client.get_host(self.target.host_id)
+        except ComputeProvisioningError as exc:
+            if exc.status_code != 404:
+                raise
+            pins = None
+        else:
+            pins = existing.connection.public.get("host_keys")
         host = provision_e2e_executor(
             self.provisioning_client,
             self.site_capacity_admin_client,
@@ -260,7 +273,8 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
             capacity=self.capacity,
             attributes={"region": REAL_REGION, "sla": "90.0"},
             listing_shapes={"vm": [self.listing_shape]},
-            connection=target_connection(self.target),
+            connection=target_connection(self.target, registered_pins=pins),
+            before_declare=lambda host: pin_registered_vm(self.provisioning_client, host),
             provider_config=({"relay_id": self.target.access.relay_id}
                              if self.target.access.mode == "relay" else {}),
         )

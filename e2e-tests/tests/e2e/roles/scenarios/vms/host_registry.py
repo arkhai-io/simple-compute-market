@@ -43,6 +43,7 @@ would share, and no scenario declares it.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from market_resource_pools_contracts.backing import BACKED
@@ -347,6 +348,7 @@ def provision_e2e_executor(
     region: str | None = None,
     connection: ConnectionSubmission | None = None,
     provider_config: dict[str, Any] | None = None,
+    before_declare: Callable[[Any], Any] | None = None,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
 
@@ -376,6 +378,8 @@ def provision_e2e_executor(
     host_row = register_e2e_host(
         provisioning_client, name=host, pool_id=pool_id, connection=connection
     )
+    if before_declare is not None:
+        host_row = before_declare(host_row)
     declare_e2e_capacity(
         site_admin_client,
         resource_id=resource_id,

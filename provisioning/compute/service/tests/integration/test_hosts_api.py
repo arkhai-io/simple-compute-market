@@ -25,12 +25,14 @@ rather than its layout.
 from __future__ import annotations
 import asyncio
 import shlex
+import sys
 from base64 import b64encode
 from types import SimpleNamespace
 
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.hosts.db import Host
 from compute_provisioning_ansible import MockAnsibleRunner, SshConnectionCodec, ssh_connection
+from compute_provisioning_ansible.host_keys import key_fingerprint
 from compute_provisioning_ansible.runner import AnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from vm_provisioning_operator.models import CreateVmRequest, HostDiagnostics
@@ -1006,3 +1008,121 @@ class TestHostsStoredAtVersion1:
             assert stored.connection_public == {
                 **self._PUBLIC, "key_path": "/home/appuser/.ssh/id_ed25519",
             }
+
+
+@pytest.fixture
+def capture_fixture(tmp_path, monkeypatch):
+    def pin(seed: bytes) -> str:
+        # Deterministic test-only wire value, never a public-network identity.
+        blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + seed * 32
+        return "ssh-ed25519 " + b64encode(blob).decode()
+
+    stub = tmp_path / "ssh"
+    stub.write_text(f"#!{sys.executable}\n"+r"""
+import os
+import sys
+from pathlib import Path
+
+observed = os.environ.get("SCM_FIXTURE_OBSERVED_SSH_KEY")
+if not observed:
+    raise SystemExit(255)
+pin, fingerprint = observed.rsplit(" ", 1)
+options = dict(arg.split("=", 1) for arg in sys.argv[1:] if "=" in arg)
+key_file = Path(options["UserKnownHostsFile"])
+entry = f'{options["HostKeyAlias"]} {pin}\n'
+kind = pin.split()[0]
+print(f"debug1: Server host key: {kind} {fingerprint}", file=sys.stderr)
+if options["StrictHostKeyChecking"] == "accept-new":
+    key_file.write_text(entry)
+elif key_file.read_text() != entry:
+    raise SystemExit(255)
+print("debug1: SSH2_MSG_NEWKEYS received", file=sys.stderr)
+raise SystemExit(255)
+""")
+    stub.chmod(0o700)
+    ping = tmp_path / "ansible"
+    ping.write_text("#!/bin/sh\nprintf '%s\\n' 'fixture | SUCCESS'\n")
+    ping.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    def present(key):
+        if key is None:
+            monkeypatch.delenv("SCM_FIXTURE_OBSERVED_SSH_KEY", raising=False)
+        else:
+            fingerprint = key_fingerprint(key).split()[1]
+            monkeypatch.setenv("SCM_FIXTURE_OBSERVED_SSH_KEY", f"{key} {fingerprint}")
+
+    first, second = pin(b"a"), pin(b"b")
+    present(first)
+    return SimpleNamespace(first=first, second=second, present=present)
+
+
+class TestHostKeyCapture:
+    @pytest.fixture
+    def connectivity_probe_runner(self, capture_fixture):
+        return AnsibleRunner(SimpleNamespace(ansible_timeout_seconds=3))
+
+    async def test_capture_and_connectivity_compare_the_ssh_host_key(self, client_and_queue, capture_fixture):
+        clients, _ = client_and_queue
+        client = clients.family
+        fixture = capture_fixture
+        await _register(clients)
+
+        first = key_fingerprint(fixture.first)
+        other = key_fingerprint(fixture.second)
+        unpinned = await client.check_connectivity("kvm1")
+        assert unpinned.reachable and not unpinned.host_key.pinned
+        assert unpinned.host_key.presented == first
+        assert "host_keys" not in (await client.get_host("kvm1")).connection.public
+
+        with pytest.raises(ComputeProvisioningError) as mismatch:
+            await client.capture_host_key("kvm1", other.split()[1])
+        assert mismatch.value.status_code == 409 and mismatch.value.code == "host_key_mismatch"
+        with pytest.raises(ValidationError, match="fingerprint"):
+            await client.capture_host_key("kvm1", "invalid")
+        with pytest.raises(ComputeProvisioningError) as invalid:
+            await client.authenticated_request(
+                "POST", "/api/v1/hosts/kvm1/host-keys/capture", {"fingerprint": "invalid"},
+            )
+        assert invalid.value.status_code == 422 and "fingerprint" in str(invalid.value)
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.capture_host_key("unregistered", first.split()[1])
+        assert missing.value.status_code == 404
+
+        captured = await client.capture_host_key("kvm1", first.split()[1])
+        assert captured.pinned_fingerprints == [first]
+        result = await client.check_connectivity("kvm1")
+        assert result.reachable and result.host_key.pinned and result.host_key.matched
+
+        fixture.present(fixture.second)
+        refused = await client.check_connectivity("kvm1")
+        assert not refused.reachable and refused.host_key.matched is False
+        assert refused.host_key.pinned_fingerprints == [first]
+        with pytest.raises(ComputeProvisioningError) as pinned:
+            await client.capture_host_key("kvm1", other.split()[1])
+        assert pinned.value.status_code == 409 and pinned.value.code == "host_key_pinned"
+
+        fixture.present(None)
+        with pytest.raises(ComputeProvisioningError) as absent:
+            await client.capture_host_key("kvm1", other.split()[1], replace=True)
+        assert absent.value.code == "no_host_key_presented"
+        assert (await client.get_host("kvm1")).connection.public["host_keys"] != [fixture.second]
+        fixture.present(fixture.second)
+        updated = await client.capture_host_key("kvm1", other.split()[1], replace=True)
+        assert updated.pinned_fingerprints == [other]
+        assert (await client.get_host("kvm1")).connection.public["host_keys"] == [fixture.second]
+
+
+    async def test_connectivity_adopts_the_migrated_hosts_key(self, client_and_queue, session_factory, capture_fixture):
+        clients, _ = client_and_queue
+        await _register(clients)
+        with session_factory() as db, db.begin():
+            db.get(Host, "kvm1").host_key_adoption_pending = True
+
+        result = await clients.family.check_connectivity("kvm1")
+
+        assert result.reachable and result.host_key.pinned and result.host_key.matched
+        with session_factory() as db:
+            host = db.get(Host, "kvm1")
+            assert not host.host_key_adoption_pending
+            assert host.connection_public["host_keys"] == [capture_fixture.first]

@@ -257,6 +257,8 @@ class RegistrationSnapshot:
     quarantined: tuple[QuarantinedPort, ...] = ()
     #: The relay's ports with an unreleased owner.
     active_ports: tuple[int, ...] = ()
+    #: The target hosts' management SSH pins, compared without logging key material.
+    host_pins: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 def _utc(moment: datetime) -> datetime:
@@ -311,6 +313,10 @@ def registration_faults(
                               ("listings", before.listings, after.listings)):
         if was != now_is:
             faults.append(f"{name}: {kind} changed from {was} to {now_is}")
+    if before.host_pins != after.host_pins:
+        faults.append(f"{name}: management SSH pins changed")
+    if any(not pins for _, pins in after.host_pins):
+        faults.append(f"{name}: management SSH host is unpinned after reapplying")
     kept = {port.lease_id: port for port in after.quarantined}
     for port in before.quarantined:
         if port.grant_expires_at <= now:
