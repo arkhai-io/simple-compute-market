@@ -2,7 +2,7 @@
 
 An executor receives this value from the lookup made immediately before
 execution, never the host registry's record, so what it can see of a host is
-exactly its identity, pool, and connection.
+its identity, pool, connection and whether an existing host needs a pin.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ class ExecutionHost:
     host_id: str
     pool_id: str | None
     connection: ConnectionEnvelope
+    host_key_adoption_pending: bool = False
 
     def __post_init__(self) -> None:
         if not self.host_id or not self.host_id.strip():

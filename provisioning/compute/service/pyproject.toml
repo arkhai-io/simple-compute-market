@@ -16,9 +16,8 @@ dependencies = [
     "arkhai-kit-site>=0.14.0",
     "arkhai-kit-resource-pools>=0.10.0",
     "arkhai-kit-fulfillment>=0.8.0",
-    # The job columns execution_started_at and finished_at, and the migration
-    # adding them, which the chain composes.
-    "arkhai-compute-provisioning>=0.29.1",
+    # The host registry's key-adoption flag, migration and authority.
+    "arkhai-compute-provisioning>=0.30.0",
     # The engine the chain runs on, over the service's SQLAlchemy engine.
     "arkhai-kit-schema-migrations[sqlalchemy]>=0.1.0",
     # The executor reporting a job's start before it spawns a playbook.

@@ -218,6 +218,7 @@ def _make_host_authority(session_factory, codecs):
         codecs=codecs,
         pool_change_hooks=host_pool_change_hooks(codecs),
         connection_change_hooks=host_connection_change_hooks(codecs),
+        pin_fields={SshConnectionCodec.kind: "host_keys"},
     )
 
 

@@ -8,8 +8,8 @@ and never letting a protected value reach a response.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from threading import Event, get_ident
+from datetime import datetime, timezone
 
 import pytest
 from market_resource_pools.db import Base as PoolsBase
@@ -693,6 +693,129 @@ def test_an_inventory_naming_an_unknown_pool_applies_nothing(authority, session_
 
     with session_factory() as db:
         assert db.query(Host).count() == 0
+
+
+
+def test_concurrent_adoptions_return_the_one_committed_pin(file_session_factory) -> None:
+    authority = HostAuthority(
+        file_session_factory, codecs=ConnectionCodecs([_Codec()]), pin_fields={"fake": "pins"}
+    )
+    authority.register_host(HostCreate(host_id="adopting", connection=_connection(token="fixture")))
+    assert authority.lookup("adopting").host_key_adoption_pending is False
+    with file_session_factory() as db:
+        db.get(Host, "adopting").host_key_adoption_pending = True
+        db.commit()
+    observed = authority.lookup("adopting")
+    assert observed.host_key_adoption_pending
+
+    first_wrote = Event()
+    second_attempted = Event()
+
+    def wait_with_first_lock_held(_connection, _cursor, statement, *_args):
+        if statement.startswith("UPDATE hosts") and not first_wrote.is_set():
+            first_wrote.set()
+            assert second_attempted.wait(5)
+
+    def observe_second_attempt(_connection, _cursor, statement, *_args):
+        if statement == "BEGIN IMMEDIATE" and first_wrote.is_set():
+            second_attempted.set()
+
+    engine = file_session_factory.kw["bind"]
+    event.listen(engine, "after_cursor_execute", wait_with_first_lock_held)
+    event.listen(engine, "before_cursor_execute", observe_second_attempt)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            first_adoption = workers.submit(authority.adopt_host_key, observed, "first")
+            assert first_wrote.wait(5)
+            second_adoption = workers.submit(authority.adopt_host_key, observed, "second")
+            first = first_adoption.result(timeout=10)
+            second = second_adoption.result(timeout=10)
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_second_attempt)
+        event.remove(engine, "after_cursor_execute", wait_with_first_lock_held)
+
+    assert first.connection.public["pins"] == second.connection.public["pins"]
+    assert first.connection.public["pins"] == ["first"]
+    assert first.connection.protected_schemes() == {"token": "reverse-v1"}
+    assert first.host_key_adoption_pending is second.host_key_adoption_pending is False
+    assert authority.lookup("adopting").connection.public["pins"] == first.connection.public["pins"]
+
+
+def test_an_operator_pin_wins_over_an_observation_from_before_it(file_session_factory) -> None:
+    authority = HostAuthority(
+        file_session_factory, codecs=ConnectionCodecs([_Codec()]), pin_fields={"fake": "pins"}
+    )
+    authority.register_host(HostCreate(host_id="adopting", connection=_connection()))
+    with file_session_factory() as db:
+        db.get(Host, "adopting").host_key_adoption_pending = True
+        db.commit()
+    observed = authority.lookup("adopting")
+    stated = ConnectionSubmission(
+        kind="fake", version=1, public={"address": "192.0.2.10", "pins": ["operator"]}
+    )
+    authority.update_host("adopting", HostUpdate(connection=stated))
+    result = authority.adopt_host_key(observed, "observed")
+
+    assert result.connection.public["pins"] == ["operator"]
+    assert result.host_key_adoption_pending is False
+    assert "host_key_adoption_pending" not in authority.get_host("adopting").model_dump()
+    (exported,) = authority.host_definitions()
+    assert "host_key_adoption_pending" not in exported.model_dump()
+
+
+def test_adoption_refuses_a_key_observed_at_the_previous_endpoint(file_session_factory) -> None:
+    authority = HostAuthority(
+        file_session_factory, codecs=ConnectionCodecs([_Codec()]), pin_fields={"fake": "pins"}
+    )
+    authority.register_host(HostCreate(host_id="adopting", connection=_connection()))
+    with file_session_factory() as db:
+        db.get(Host, "adopting").host_key_adoption_pending = True
+        db.commit()
+    observed = authority.lookup("adopting")
+
+    authority.update_host("adopting", HostUpdate(connection=_connection("198.51.100.1")))
+    with pytest.raises(ConnectionChangeRefusedError, match="connection changed"):
+        authority.adopt_host_key(observed, "observed")
+
+    current = authority.lookup("adopting")
+    assert current.host_key_adoption_pending
+    assert "pins" not in current.connection.public
+
+
+def test_a_capture_racing_adoption_needs_explicit_replacement(file_session_factory) -> None:
+    authority = HostAuthority(
+        file_session_factory, codecs=ConnectionCodecs([_Codec()]), pin_fields={"fake": "pins"}
+    )
+    authority.register_host(HostCreate(host_id="adopting", connection=_connection(token="fixture")))
+    with file_session_factory() as db:
+        db.get(Host, "adopting").host_key_adoption_pending = True
+        db.commit()
+    observed = authority.lookup("adopting")
+    authority.adopt_host_key(observed, "first")
+
+    current, applied = authority.capture_host_key(observed, "operator")
+    assert not applied and current.connection.public["pins"] == ["first"]
+
+    captured, applied = authority.capture_host_key(observed, "operator", replace=True)
+    assert applied and captured.connection.public["pins"] == ["operator"]
+    assert captured.connection.protected == observed.connection.protected
+    assert not captured.host_key_adoption_pending
+
+
+def test_capturing_an_unpinned_host_clears_its_pending_adoption(file_session_factory) -> None:
+    authority = HostAuthority(
+        file_session_factory, codecs=ConnectionCodecs([_Codec()]), pin_fields={"fake": "pins"}
+    )
+    authority.register_host(HostCreate(host_id="awaiting-pin", connection=_connection()))
+    with file_session_factory() as db, db.begin():
+        db.get(Host, "awaiting-pin").host_key_adoption_pending = True
+    observed = authority.lookup("awaiting-pin")
+    assert observed.host_key_adoption_pending
+
+    captured, applied = authority.capture_host_key(observed, "operator")
+    assert applied and not captured.host_key_adoption_pending
+    assert authority.lookup("awaiting-pin").connection.public["pins"] == ["operator"]
+    assert not authority.lookup("awaiting-pin").host_key_adoption_pending
 
 def test_update_omitting_a_field_does_not_restore_its_stale_value(file_session_factory):
     """A port edit and an explicit pin rotation overlap at the authority."""

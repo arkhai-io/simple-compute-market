@@ -689,6 +689,7 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=connection_codecs,
+        pin_fields={SshConnectionCodec.kind: "host_keys"},
         # The pool- and connection-change hooks exactly as the production
         # container composes them, so a write refused there is refused here,
         # by every host route.

@@ -394,6 +394,35 @@ class TestHostPlacement:
         assert missing.value.status_code == 404
 
 
+async def test_pending_adoption_does_not_appear_in_host_reads_or_exports(
+    client_and_queue, session_factory,
+):
+    clients, _ = client_and_queue
+    await _register(clients)
+    with session_factory() as db, db.begin():
+        db.get(Host, "kvm1").host_key_adoption_pending = True
+
+    responses = []
+
+    async def observe(response):
+        await response.aread()
+        responses.append(response.json())
+
+    response_hooks = clients.family._client.event_hooks["response"]
+    response_hooks.append(observe)
+    try:
+        host = await clients.family.get_host("kvm1")
+    finally:
+        response_hooks.remove(observe)
+    exported = await clients.family.export_hosts()
+
+    assert host.host_id == "kvm1"
+    (wire_host,) = responses
+    assert "host_key_adoption_pending" not in wire_host
+    assert "host_key_adoption_pending" not in exported
+    assert "kvm1" in exported
+
+
 class TestConnectivity:
     async def test_connectivity_registered_host(self, client_and_queue):
         client, _ = client_and_queue

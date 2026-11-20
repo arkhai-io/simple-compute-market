@@ -104,7 +104,7 @@ version-1 connections is migrated". Touches
 `provisioning/compute/src/compute_provisioning/hosts/` (`db.py`, `migrations.py`,
 `service.py`, `execution.py`).
 
-- [ ] 2.1 Add to the provisioning migration chain, after the v1-to-v2 rewrite, a
+- [x] 2.1 Add to the provisioning migration chain, after the v1-to-v2 rewrite, a
   migration that adds the pending-adoption flag to `hosts` and rewrites every `ssh`
   connection stored at version 2 to the literal version 3 with the same public fields
   and protected values and no `host_keys`, setting the flag on each row it rewrites,
@@ -116,7 +116,7 @@ version-1 connections is migrated". Touches
   teardown job naming them to version 3, every host marked, jobs unchanged; the floor
   fixture adoption in `test_migration_chain.py` and
   `test_migration_reads_no_configuration.py` pass with the new migration listed.
-- [ ] 2.2 Expose the flag on the host record (`hosts/db.py`) and on the execution-host
+- [x] 2.2 Expose the flag on the host record (`hosts/db.py`) and on the execution-host
   value an executor receives (`hosts/execution.py`), outside the connection, never in
   the host read, the export or the document; give the host authority one operation
   that records an observed key as a pending host's pin and clears the flag in a single
@@ -129,13 +129,22 @@ version-1 connections is migrated". Touches
   one pending host with different keys (one commits, both callers receive the
   committed pin), a stated pin clearing the flag, a capture after an adoption meeting a
   pinned host, and a host registered after the migration never marked.
-- [ ] 2.3 Verification point. Library integration:
-  `provisioning/compute/tests/integration/test_host_authority.py`. Application
-  integration: `test_ssh_connection_version_migration.py`, `test_migration_chain.py`,
-  `test_migration_reads_no_configuration.py`, and `test_hosts_api.py` showing the flag
-  absent from the host read and the export.
+- [x] 2.3 Verification point. Library integration:
+  `provisioning/compute/tests/integration/test_host_authority.py`,
+  `test_ssh_connection_version_migration.py`, `test_migration_chain.py`, and
+  `test_migration_reads_no_configuration.py`. Application integration:
+  `test_hosts_api.py` verifies omission from the host read and YAML export.
   End-to-end: none runs the migration over a version-2 database; the lanes start from
   empty databases.
+
+**Section evidence.** The host authority and migration suites passed with
+38 and 15 tests respectively. The migrations retain protected values and queued
+jobs, mark rewritten hosts for adoption, and reject a malformed row without
+partially applying the rewrite. Authority tests cover the committed pin in an
+adoption race, explicit replacement after adoption, and the internal
+adoption flag staying out of the public host and definition models. The capture
+route uses the authority operation in section 4. The focused host API test passed,
+verifying omission from the signed host read and YAML export.
 
 ## 3. The Ansible executor reaches only hosts matching their pin
 
