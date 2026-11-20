@@ -1249,6 +1249,36 @@ def test_an_amended_plan_governs_the_rounds_it_maps(tmp_path: Path) -> None:
     assert (result["step"], result["sections"]) == ("round", [[2], [3]])
 
 
+def test_a_plan_amended_while_a_round_is_open_names_the_round_it_continues(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _planned(root, [[[2]]])
+    note_round(log_path(root, CHANGE), [[2]], "plan", commit="b" * 40)
+    opened = read_log(log_path(root, CHANGE))[-1]
+    _check(root, SECOND_DONE)
+    _planned(root, [[[3]]])
+
+    named = _next(root)
+    _round(root, named["sections"])
+    recorded = read_log(log_path(root, CHANGE))[-1]
+
+    # Section 3 joins the open round: its reading and review start from the
+    # open round's base, so section 2 is still read and reviewed with it.
+    assert (named["step"], named["sections"]) == ("round", [[3]])
+    assert (named["continues"], named["base"]) == (opened["seq"], "b" * 40)
+    assert f"seq {opened['seq']} is open" in named["reason"]
+    assert (recorded["continues"], recorded["commit"]) == (opened["seq"], "b" * 40)
+
+
+def test_the_plans_next_round_with_no_round_open_continues_none(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _planned(root)
+
+    result = _next(root)
+
+    assert "continues" not in result and "base" not in result
+
+
 @pytest.mark.parametrize("mapping", [None, [[[3]]]])
 def test_a_first_open_section_no_planned_round_names_goes_to_the_owner(
         tmp_path: Path, mapping) -> None:

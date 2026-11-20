@@ -374,7 +374,10 @@ section. It is the `rounds` of your `finished` outcome, which the wrapper logs o
 the plan's line, or `record` does for an interactive run ("Running interactively"),
 where the next-step computation reads it; give it in the report too. An amended plan
 maps only its sections not yet complete, leaving the rounds already recorded as
-they are.
+they are. Whether an amended plan's sections join a round still open is not the
+mapping's to say: a round recorded while one is open continues it, its reading and
+review covering everything since that round's base, and the computation says so
+when it names the round.
 
 Implementation starts in a new session with `change-implement`, round by round as
 the mapping gives them.

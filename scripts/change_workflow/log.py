@@ -643,7 +643,7 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     if after is not None and (isinstance(after, bool) or not isinstance(after, int)
                               or after < 0):
         raise StepError(f"a round's after is a record number; got {after!r}")
-    continued = _open_round(path) if after is None else None
+    continued = open_round(read_log(path) if path.exists() else []) if after is None else None
     if continued is not None:
         return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
                                    "sections": sections, "by": by,
@@ -674,10 +674,10 @@ def untriaged_owner_notes(reviews: Path, after: int) -> list[int]:
                   and not entry.with_name(entry.name[:-3] + ".triage.md").is_file())
 
 
-def _open_round(path: Path) -> Entry | None:
-    """The latest round, when it is still open: no implementation triage has
-    finished or returned since it. None otherwise."""
-    entries = read_log(path) if path.exists() else []
+def open_round(entries: Sequence[Entry]) -> Entry | None:
+    """The latest round of the log `entries`, when it is still open: no
+    implementation triage has finished or returned since it. None otherwise. A
+    round recorded now would continue it."""
     latest = next((e for e in reversed(entries) if e.get("outcome") == "round"), None)
     if latest is None or not isinstance(latest.get("after"), int):
         return None

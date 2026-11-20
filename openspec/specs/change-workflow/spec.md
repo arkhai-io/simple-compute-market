@@ -582,7 +582,9 @@ first round with a section not yet complete; a change with no mapping for its ne
 incomplete section MUST ask the owner, once per round. A round recorded while the
 latest round is open — no implementation triage has finished or returned since it
 — MUST continue that round, whatever sections it names, keeping its last record and
-starting commit.
+starting commit, and the computation naming the plan's next round while one is open
+MUST say that recording it continues that round, naming the round and its starting
+commit.
 
 #### Scenario: A round is recorded after the fact
 
@@ -607,6 +609,15 @@ starting commit.
   and 6
 - **THEN** the round recorded for sections 5 and 6 continues the open round, and its
   round view, validation, and review read every commit since the open round's base
+
+#### Scenario: The computation names the open round a plan's added section continues
+
+- **WHEN** a round naming sections 1 to 11 is open, a return to design ends in
+  planning adding section 11a and mapping `[[["11a"]]]`, and the computation names
+  the plan's next round
+- **THEN** its result names section 11a, the open round's line as the round it
+  continues, and that round's starting commit, so the orchestrating session records
+  it as named rather than taking it for a new round over 11a alone
 
 ### Requirement: CW-tc82 Each section is checked, handed off, and committed alone
 

@@ -9,7 +9,9 @@ log, and whether a round view is open, and prints one JSON object:
 - `{"step": <step>, "reason": …}` for a step to run: `design`, `plan`, `round`
   (with the `sections` of each session of the round, to be recorded with its `by`
   as it starts: the plan's next round, or sections a triage or the owner named out
-  of the plan's order), `implement` (with its `sections`), `round-view`,
+  of the plan's order; the plan's next round named while a round is still open
+  carries `continues`, that round's seq, and its `base`, since recording it
+  continues the open round), `implement` (with its `sections`), `round-view`,
   `validate` (with the `target` it is for), `review` (with its `kind`),
   `validate-and-review` (with the review's `kind` and the validation's `target`),
   `triage` (with the `kind` of review it triages), `merge`, `closeout`, or
@@ -113,7 +115,8 @@ from .graph import (ARCHIVE_CLEANUP, CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,
 from .graph import owner as _owner
 from .index import INDEX, Row, index_rows
 from .log import (CONTAINED, LOG, NewerFormat, after_cleanup, branch_decisions, log_path,
-                  older, ran, read_log, refuse_newer, standing, undeclared, unrouted_merge)
+                  older, open_round, ran, read_log, refuse_newer, standing, undeclared,
+                  unrouted_merge)
 from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, exempting, is_record,
                       latest_validation, validation_problem, validation_result)
 from .round_view import RoundError, View, open_view
@@ -1268,6 +1271,12 @@ class Computation:
         already complete. A round naming a section the task list lacks goes to the
         owner before anything is recorded: the mapping no longer describes the plan,
         and a round line naming it would leave the round unclassifiable.
+
+        While the latest round is still open — a plan amended mid-round, after a
+        return to design or planning — the round named is recorded as a
+        continuation of it (`log.note_round`), and the result says so: `continues`
+        names the open round's seq and `base` its commit, which the round's
+        reading, validation, and review start from.
         """
         open_ids = [s.id for s in self.state.sections if not s.closeout and not s.complete]
         if not open_ids:
@@ -1291,9 +1300,19 @@ class Computation:
                                       + ", ".join(unknown), round=open_ids)
                     sessions = [kept for session in round_
                                 if (kept := [s for s in session if str(s) in open_ids])]
+                    reason = (f"the plan's next round (seq {plan['seq']}): record it as it "
+                              "starts, then implement it")
+                    if (open_ := open_round(self.state.log)) is None:
+                        return {"step": "round", "sections": sessions, "by": "plan",
+                                "reason": reason}
+                    base = open_.get("commit")
+                    since = f"since {base[:12]}" if base else "since its base"
                     return {"step": "round", "sections": sessions, "by": "plan",
-                            "reason": f"the plan's next round (seq {plan['seq']}): record "
-                                      "it as it starts, then implement it"}
+                            "continues": open_["seq"], **({"base": base} if base else {}),
+                            "reason": f"{reason}; recorded while the round at seq "
+                                      f"{open_['seq']} is open, it continues that round, "
+                                      "whose reading, validation, and review cover "
+                                      f"everything committed {since}"}
         return _owner("agree the next implementation round: which sections, and how many "
                       "sessions; the plan maps none", round=open_ids)
 
