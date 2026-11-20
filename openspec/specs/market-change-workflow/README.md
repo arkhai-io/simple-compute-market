@@ -151,7 +151,11 @@ The Helm targets carry the namespace and the tags:
   siblings, and the deploy names them through a values overlay naming every `arkhai`
   image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
   <path>`); a render test holds the overlay to every image the chart renders, so an
-  image added later cannot deploy under its bare tag. Compose, the pipeline lanes, and
+  image added later cannot deploy under its bare tag. On a kind cluster, whose node
+  keeps its own image store, the Helm kind loads the change's images into it after the
+  build (`scripts/kind_load.py`), each under `docker.io/library/arkhai:<tag>`, the name
+  a pod's `arkhai:<tag>` resolves to, since Podman would otherwise hand kind its
+  `localhost/`-qualified name. Compose, the pipeline lanes, and
   an operator's own deployments keep bare tags; a lane run with `RELEASE_IMAGES=1`
   instead runs a release candidate's release images under its `-<rev9>` suffix
   ([`TESTING.md`, "Release-image mode"](../../../docs/development/TESTING.md#release-image-mode)).
@@ -562,7 +566,7 @@ around a step.
 | Removing a change's validation resources, and recording what they used, at archive cleanup | the `helm` kind's `cleanup`, recording the capacity measured into `helm/validation-capacity.toml`, then removing the change's namespace and images |
 | The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change`, `make lock`, and `pre-commit-functional`, `make validate-local`, which clears the wheelhouse, checks packaging, and runs every suite; the step table's grants for engineering work: `make test` and `make test*`, validation's `make test-release-tooling` (`make test-release-tooling TESTS=*`, one failing test of the scripts' suite run alone), `make -C * test*` in a project (`make -C <package> test`), and one project's tests run directly as `uv run --directory * pytest *`, `uv run --project * pytest *`, or `uv run --find-links * pytest *`; `make lock`, `make lock*`; `make dist*`, `make -C * dist*`; `make init*`, `make -C * init*`; `make reinit*`, `make -C * reinit*`, and `make typecheck*`, `make -C * typecheck*`, and `make -C * first-use*`, the targets of a project's own `Makefile`; `uv lock --directory *`, a new project's first lock; a section's local bring-up, `make -C * migrate*` (`make -C <package> migrate`), `docker run --rm *`, and `docker compose -p *` up, down, ps, and logs under a project name of the session's own; `make build-*`, the images a lane runs, `make -C * e2e-*-down`, a lane's teardown, and `make -C e2e-tests e2e-*-logs`, its containers' logs; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
 | The packaging check before closeout | the configuration's `pre-commit-functional` and `pre-archive`: `make check-packaging`, which runs `make check-architecture` over `docs/development/ARCHITECTURE.toml`, and `make check-architecture-change` |
-| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `scripts/change-workflow run pre-commit`; the checks they run and the step table grants as `make check-*` and `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index` |
+| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `scripts/change-workflow run pre-commit`; the checks they run and the step table grants as `make check-*` and `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index`; and `scripts/openspec`, the pinned OpenSpec CLI, granted as `scripts/openspec validate` |
 | The change index at a known path | `openspec/changes/README.md`, checked in a prerequisite's proposal checkout beside this one by `make -C ../<prerequisite>-proposal check-change-index` (`make -C ../*-proposal check-change-index`) |
 | The guidance documents every step reads | `AGENTS.md`, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, its closeout parts `openspec/README.md#this-repositorys-closeout-parts`, and the shared guidance under `docs/guidance/`, every Markdown file beneath it: the workflow's under `docs/guidance/workflow/` and the engineering guidance under `docs/guidance/engineering/`; the roadmap `docs/development/ROADMAP.md`, which design loads too; and `openspec/config.yaml`. The owner's handbook, `docs/change-workflow-handbook.md`, is no guidance and no step reads it |
 | Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` and its guidance under `docs/guidance/`, the workflow's under `docs/guidance/workflow/`, the engineering guidance under `docs/guidance/engineering/`, and this repository's rules spanning its systems under `docs/guidance/repository/` |
@@ -616,6 +620,8 @@ else, on an exemption no skill names, and on one whose owner is no open change.
   resources a namespace cannot separate; when side-by-side validations become
   routine, with several changes orchestrated from one session; or when unattended
   steps are to be sandboxed from the owner's files.
+- Teardown removes a change's images from the machine's daemon but not from a kind
+  node, which keeps every change's loaded images until the cluster is recreated.
 - Two releases at once may exhaust the node's memory: the capacity preflight is an
   estimate, and stays inactive on a cluster with no metrics source, which has no
   recorded figure.
