@@ -19,6 +19,13 @@ You are told the **review kind** (`design`, `implementation`, `pre-closeout`,
 `closeout`, or `merge`), the **change**, and for the later kinds the **base** branch
 the change is measured against.
 
+You may also be given **the owner's direction** to this review, in their words: a
+place to look harder, such as a part of the change or a concern they hold. Answer
+it — say in your assessment what you found where it points, a finding where
+something is wrong — and still review the whole change in this skill's format,
+asking every question of section 2. A direction never narrows the review, never
+settles a finding for you, and never excuses a question you would otherwise ask.
+
 ## Running unattended
 
 A review runs unattended through `make review`, on the review's models in order:
@@ -43,7 +50,26 @@ A review asked for in an interactive session, outside `make review`, records
 nothing, unlike every other step: it changes no file, so it publishes no record,
 and a review run's outcome names the record its run published. Your final message
 is still the review alone. The owner pastes it into a triage, which saves it as the
-change's next `NN-<kind>-external.md` and triages it like any other review.
+change's next `NN-<kind>-external.md` and triages it like any other review. Being no
+run, it has no inputs directory and runs no hooks: `scripts/change-workflow run
+before review` runs nothing and says so, so never run it.
+
+## The run's inputs
+
+Run through `make review`, the review's runner ran the repository's `before-review`
+hook before starting you, given the review's kind, and kept what it did in the run's
+inputs directory, which your first prompt names last (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook — what a coordinator knows of another repository, say — in
+full. Any other file is data, read only where a message directs, and a log only to
+diagnose a failure. A failing hook prevented nothing: say in the review's summary
+what its failure means for what you could check. The runner runs `after-review` once
+it has published your review; a failure there goes to the owner, never back to you.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in the review's
+summary and follow this skill.
 
 ## 1. Load everything first
 
@@ -51,8 +77,8 @@ Read all of this before forming a view:
 
 - The documents `scripts/change-workflow config load review` prints: the
   repository's guidance, which its configuration names.
-- The goal the change serves, in the roadmap `openspec/README.md`'s documentation
-  placement names, and the change's row, campaign, and dependencies in
+- The goal the change serves, in the repository's roadmap, which its root guidance
+  names, and the change's row, campaign, and dependencies in
   `openspec/changes/README.md`.
 - Every file in the change's directory, including `specs/` and
   `interventions.jsonl`. The directory is what `scripts/change-workflow find
@@ -71,22 +97,31 @@ Read all of this before forming a view:
   history of every cleaned-up change.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
   and its companion when one exists — `README.md` where the capability has an
-  `index.md`, which you read too, and `architecture.md` elsewhere.
+  `index.md`, which you read too, and `architecture.md` elsewhere — and every
+  other Markdown file in its directory but its `index.md`: the capability's own
+  guidance.
 - The code the change cites, and the code it changes or would change. Read enough
   to verify every factual claim it makes.
 - For `implementation`, `pre-closeout`, `closeout`, and `merge`: the change's diff,
   `git diff <base>...HEAD`, and `git log <base>..HEAD`; and the validation record
-  of the commit you review, `reviews/NN-validation.md`, if one exists. Never wait
-  for one: validation runs beside an implementation review, and its results are
-  triaged with yours. A pre-closeout review starts only once a passing validation
-  of `HEAD` exists — or of an ancestor `HEAD` differs from only in changes' ledgers
-  and reviews, or, after an earlier pre-closeout review's triage, only in the
-  repository's inert paths — unless the owner overrides it; when none exists, say so in
-  your readiness section rather than as a finding. The repository's checks before a
-  commit change nothing, so you may run them for evidence:
-  `scripts/change-workflow run pre-commit <change>`, which on the clean checkout
-  you read runs `pre-commit` alone — the workflow's default checks and the
-  repository's closing checks.
+  of the commit you review, `reviews/NN-validation.md`, if one exists, with the
+  guide of each evidence kind it names — the guide told validation how to read that
+  kind's evidence, so judge the record by it; `scripts/change-workflow config
+  --json` names each kind's guide. Never wait for one: validation runs beside an
+  implementation review, and its results are triaged with yours. A pre-closeout
+  review starts only once a passing validation of `HEAD` exists — or of an ancestor
+  `HEAD` differs from only in changes' ledgers and reviews, or, after an earlier
+  pre-closeout review's triage, only in the repository's inert paths — unless the
+  owner overrides it; when none exists, say so in your readiness section rather
+  than as a finding. The repository's checks before a commit change nothing, so you
+  may run them for evidence: `scripts/change-workflow run pre-commit <change>`,
+  which on the clean checkout you read runs `pre-commit` alone — the workflow's
+  default checks and the repository's closing checks.
+- The inputs of the runs whose work you review: each run's line in the change's
+  workflow log (`workflow.jsonl` among its records) names its directory, `inputs`,
+  under `reviews/`. Read each one's `status.md` and its top-level Markdown messages,
+  `before/` and `after/`: what the engine and the repository's hooks gave the step,
+  and what failed around it.
 
 Check claims against the files, never against the prose describing them. A checked
 task, a "promoted to" note, or a "verified" line is a claim; open the file and
@@ -124,10 +159,11 @@ checks your understanding here before reading anything that rests on it. Then:
    rationale does not hold, and title the finding "Challenges D<n>": the owner then
    reaffirms or changes the decision before implementation.
 3. **`architecture`** — Does the design place behavior in the right layer and with
-   the right authority, under `ARCHITECTURE.md`'s layers, authority boundaries, and
-   the test for which party is authoritative? For every interface the design creates
-   or changes — a kit's operations, a declaration or wire format, a report, a hook
-   another kit must call — walk it visibly:
+   the right authority, under the layers, authority boundaries, and test for which
+   party is authoritative that the repository's architecture document draws? For
+   every interface the design creates or changes — a library's operations, a
+   declaration or wire format, a report, a hook another component must call — walk
+   it visibly:
    - **Callers.** List each caller, in this change and in changes that depend on
      it, what it must do, and whether the interface provides that. A caller that
      would have to interpret the interface's internals is a missing operation.
@@ -149,13 +185,13 @@ checks your understanding here before reading anything that rests on it. Then:
    change implements, with a WHEN/THEN scenario, and does the delta modify every
    existing requirement its behavior contradicts rather than only adding new ones?
    Does any open question have its
-   answer prescribed elsewhere (`openspec/README.md#open-questions-and-prescribed-tasks`)?
+   answer prescribed elsewhere (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`)?
    Does every cited path resolve?
 5. **`scope`** — Has the scope grown beyond the original proposal? Growth that is a
    small, understood defect fix, or unification the architecture favours, stays;
    work that is large, or not understood well enough to fix without a design of its
    own, should be its own change
-   (`openspec/README.md#defects-found-during-a-change`). Does anything give the
+   (`docs/guidance/workflow/changes.md#defects-found-during-a-change`). Does anything give the
    change a prerequisite it could close out without?
 6. **`readiness`** — Are there related changes that must land first? Is the design
    ready for planning? If the change already has a `tasks.md`, does it describe the
@@ -169,24 +205,28 @@ checks your understanding here before reading anything that rests on it. Then:
 2. **`testing`** — Is the validation strategy sound? For each significant claim of
    test coverage, state the level it actually operates at — unit against a mocked
    boundary, integration against a real in-process application, or something that
-   needs a live multi-service environment — using `TESTING.md`'s level definitions
-   and coverage jurisdiction. Does each integration test exercise the real typed
-   client, or build requests by hand in a way that could silently diverge from what
-   the client sends? What does the validation report show? A coverage gap you
+   needs a live multi-service environment — using the level definitions and
+   coverage jurisdiction of `docs/guidance/engineering/test-levels.md`, and the
+   typed-client rule of `integration-tests.md` beside it. Does each integration
+   test exercise the real typed client, or build requests by hand in a way that
+   could silently diverge from what the client sends? What does the validation report show? A coverage gap you
    notice while answering — a behaviour the change claims that no test proves at
    the level it claims — is a finding, not only a remark in this answer: a gap
    stated only in prose is never triaged.
-3. **`documentation`** — Does the code and documentation comply with `AGENTS.md`,
-   `ARCHITECTURE.md`, and `openspec/README.md`: comments describing the current system,
-   permanent documents describing current state, promotion where the change says it
-   happened?
-4. **`architecture`** — Is the code organized by `ARCHITECTURE.md`'s layers? Is
-   universal market behavior in core, reusable inter-market functionality in kit, and
-   does the domain compose that functionality rather than encode it?
+3. **`documentation`** — Does the code and documentation comply with the
+   repository's guidance, the documents `scripts/change-workflow config load review`
+   prints: comments describing the current system
+   (`docs/guidance/engineering/comments.md`) and naming no change
+   (`docs/guidance/workflow/change-references.md`), permanent documents describing
+   current state (`docs/guidance/engineering/documentation.md`), promotion where the
+   change says it happened?
+4. **`architecture`** — Is the code organized by the layers the repository's
+   architecture document draws? Is each behaviour in the layer it belongs to, and
+   does a higher layer compose what a lower one offers rather than encode it again?
 5. **`consistency`** — Does the implementation do what the design and delta specs
    say, and only that, beyond a small, understood defect fixed outside the plan and
    recorded in the task notes or a triage record
-   (`openspec/README.md#defects-found-during-a-change`)? An unrecorded one is a
+   (`docs/guidance/workflow/changes.md#defects-found-during-a-change`)? An unrecorded one is a
    finding.
 
 ### Pre-closeout review
@@ -197,17 +237,19 @@ checks your understanding here before reading anything that rests on it. Then:
 2. **`scope`** — What scope crept in during implementation? Review anything new under
    the implementation review's questions. A small, understood defect fixed in place
    belongs in the change; large or vague work belongs in its own change or an
-   unowned gap (`openspec/README.md#defects-found-during-a-change`). Changes are
+   unowned gap (`docs/guidance/workflow/changes.md#defects-found-during-a-change`). Changes are
    rarely split at this stage, so say what the new scope needs rather than only that
    it exists.
 3. **`documentation`** — Are the change's comments and imports as closeout will
    confirm them? Closeout edits no code, so this is the last review that can ask
    for a code change. Read the comments the change added for any naming the review,
    migration, or task that introduced them, or describing history rather than the
-   current system (`AGENTS.md`, "Python comments and docstrings"); and check each
-   import the change added or touched that is local rather than at module level for
-   a recorded reason to stay local
-   (`openspec/README.md#plan-closeout-requirements`, parts 1 and 2).
+   current system (`docs/guidance/engineering/comments.md`;
+   `docs/guidance/workflow/change-references.md`); and check each import the change
+   added or touched that is local rather than at module level for a recorded reason
+   to stay local (`docs/guidance/engineering/dependencies-python.md`, "Imports go at
+   module level"; `docs/guidance/workflow/closeout.md`, "Comment hygiene" and
+   "Import placement").
 4. **`readiness`** — Is the change ready for promotion and closeout?
 5. **`consistency`**, after the merge before closeout — when the workflow log's last
    run before this review is a `merge` run, the merge of the branch the change
@@ -226,7 +268,8 @@ Closeout has already archived the change: its spec deltas are merged into
 specifications as they now stand, not the deltas.
 
 1. **`documentation`** — Does the change comply with the documentation guidance?
-   Check each part of `openspec/README.md#plan-closeout-requirements` against the
+   Check each part of `docs/guidance/workflow/closeout.md`, and the repository's own
+   parts, in the section the root guidance names, against the
    files and the closeout task's recorded evidence, and the design-promotion record
    against the permanent documents it names. Did the archive's merge leave each
    permanent `spec.md` saying what the change's deltas meant?
@@ -263,7 +306,8 @@ means since `git merge-base <merge>^1 <merge>^2`.
 3. **`consistency`** — Does the change's code still use what the landing branch
    offers? For each file the landing branch changed since the merge base that
    defines something the change's diff uses, does the change's code still call what
-   the landing branch renamed, removed, moved into a kit, or changed in meaning, and
+   the landing branch renamed, removed, moved into a shared library, or changed in
+   meaning, and
    did its new callers move where the landing branch moved the others? Do its
    end-to-end scenarios still match the landing branch's harness and fixtures?
 4. **`readiness`** — May archive cleanup run again, or does a finding need a fix
@@ -282,8 +326,9 @@ and why it holds. The reader must be able to tell "no issue" from "not examined"
 **Basis** — what the finding rests on:
 
 - `specification` — a requirement in `openspec/specs/` or the change's own delta; cite it.
-- `guidance` — a written rule in `AGENTS.md`, `docs/development/`, or
-  `openspec/README.md`; cite the document and heading.
+- `guidance` — a written rule in the documents `scripts/change-workflow config load
+  review` prints, a capability's guidance, or an evidence kind's guide; cite the
+  document and heading.
 - `evidence` — a claim in the change that the files contradict; cite the files.
 - `judgement` — your view, resting on no written rule. Say so plainly; these are
   often the most valuable findings.

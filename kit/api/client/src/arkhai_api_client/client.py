@@ -4,24 +4,27 @@ Every method looks its route up by operation name in ``arkhai_api_contracts``
 and takes the method, the path, and the signed resource from that one
 declaration, so the request this client signs is the request the authority's
 authentication reads. With a signer and a trusted authority set, each request
-carries a marketplace identity v2 envelope in the ``seller`` role and every
+carries a marketplace identity v2 envelope in the caller's role, the
+storefront's ``seller`` unless an operator's ``admin`` is given, and every
 response, refusals included, is verified as the authority's; without them the
 client presents the shared ``X-Admin-Key`` an authority with no identity
-provisioned accepts. ``AuthorityClient`` runs over an async transport and
-``SyncAuthorityClient`` over a sync one, with identical methods.
+provisioned accepts. Every timestamp signed and every freshness check reads
+the process time source (``injected_time``). ``AuthorityClient`` runs over an
+async transport and ``SyncAuthorityClient`` over a sync one, with identical
+methods.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     RESPONSE_PROTOCOL,
@@ -124,7 +127,9 @@ class _Prepared:
     request_id: str | None
 
 
-def _prepare(call: _Call, *, service_url: str, admin_key: str, signer: Signer | None) -> _Prepared:
+def _prepare(
+    call: _Call, *, service_url: str, admin_key: str, signer: Signer | None, caller_role: str
+) -> _Prepared:
     """The request as sent: signed from the declaration, or under the shared secret.
 
     On the signed path the canonical bytes hashed into the envelope are the
@@ -141,13 +146,13 @@ def _prepare(call: _Call, *, service_url: str, admin_key: str, signer: Signer | 
     authenticated = sign_request(
         signer=signer,
         envelope=RequestEnvelope(
-            role=SELLER_ROLE,
+            role=caller_role,
             principal=signer.identity,
             method=call.method,
             operation=call.operation,
             resource=call.resource,
             request_id=request_id,
-            timestamp=int(time.time()),
+            timestamp=injected_time.now(),
             body_hash=canonical_body_hash(EMPTY_BODY if call.body is None else call.body),
         ),
     )
@@ -198,7 +203,7 @@ def _verify(
     Verified against the operation, resource, and request id that were sent,
     never values recovered from the response, so a substituted answer cannot
     nominate the question it is answering. The authority signs in the
-    ``service`` role although this client signs as ``seller``.
+    ``service`` role whatever role this client signs in.
     """
 
     body = _signed_body(response)
@@ -238,7 +243,7 @@ def _verify(
     result = verify_response(
         authenticated,
         body=body,
-        now=int(time.time()),
+        now=injected_time.now(),
         max_skew=max_skew,
         expected_role=SERVICE_ROLE,
         expected_principals=expected_authorities,
@@ -258,8 +263,10 @@ def _service_error(response: httpx.Response) -> AuthorityError:
         payload = response.json()
     except ValueError:
         payload = {}
+    # The key routes name their reason `error`; the time route, as every time
+    # route does, names it `code`.
     return AuthorityError(
-        str(payload.get("error") or f"http_{response.status_code}"),
+        str(payload.get("error") or payload.get("code") or f"http_{response.status_code}"),
         str(payload.get("detail") or response.text[:200]),
         status_code=response.status_code,
     )
@@ -318,6 +325,20 @@ def _key_adjust(key_id: str, delta: int, reason: str, timeout: float) -> _Call:
     )
 
 
+def _system_status(timeout: float) -> _Call:
+    return _call(operations.SYSTEM_STATUS, timeout=timeout)
+
+
+def _set_time(now: int, timeout: float) -> _Call:
+    return _call(operations.SYSTEM_TIME, body={"now": now}, timeout=timeout)
+
+
+def _answered(response: httpx.Response) -> dict[str, Any]:
+    if response.is_error:
+        raise _service_error(response)
+    return response.json()
+
+
 def _issued(model: type[IssuanceResult], response: httpx.Response) -> IssuanceResult:
     if response.status_code == 200:
         return model.model_validate(response.json())
@@ -366,6 +387,10 @@ class AuthorityClient:
     ``signer`` and ``expected_authorities`` are kept together because the
     authority accepts exactly one of signed and shared-secret authentication at
     a time, chosen by its own configuration, so the two sides flip together.
+
+    ``caller_role`` is the role a signed request asserts: the storefront's
+    ``seller`` by default, or ``admin`` for an operator reading the authority's
+    status or setting its time.
     """
 
     def __init__(
@@ -378,6 +403,7 @@ class AuthorityClient:
         signer: Signer | None = None,
         expected_authorities: TrustedIdentitySet | None = None,
         max_response_skew: int = 300,
+        caller_role: str = SELLER_ROLE,
     ) -> None:
         _require_both(signer, expected_authorities)
         self._service_url = service_url.rstrip("/")
@@ -386,6 +412,7 @@ class AuthorityClient:
         self._signer = signer
         self._expected_authorities = expected_authorities
         self._max_response_skew = max_response_skew
+        self._caller_role = caller_role
         self._request_model = issuance_request_model(label)
         self._result = issuance_result_model(label)
         self._http: httpx.AsyncClient | None = None
@@ -402,7 +429,11 @@ class AuthorityClient:
 
     async def _request(self, call: _Call) -> httpx.Response:
         prepared = _prepare(
-            call, service_url=self._service_url, admin_key=self._admin_key, signer=self._signer
+            call,
+            service_url=self._service_url,
+            admin_key=self._admin_key,
+            signer=self._signer,
+            caller_role=self._caller_role,
         )
         # One HTTP client for this client's lifetime: closing one per call would
         # close the transport the caller supplied with it.
@@ -466,6 +497,22 @@ class AuthorityClient:
     ) -> dict[str, Any]:
         return _json(await self._request(_key_adjust(key_id, delta, reason, timeout)))
 
+    async def get_system_status(self, *, timeout: float = 10.0) -> dict[str, Any]:
+        """The authority's status, ``{"time": {...}}``; the ``admin`` role alone reads it."""
+        return _answered(await self._request(_system_status(timeout)))
+
+    async def set_time(self, now: int, *, timeout: float = 10.0) -> dict[str, Any]:
+        """Set an injected authority's time to ``now``, in Unix seconds, sent as given.
+
+        The ``admin`` role alone may; the authority refuses anything but an
+        integer instant (422 ``invalid_time``) and an instant earlier than its
+        own (409 ``time_moves_forward``), raised as :class:`AuthorityError`
+        with the status. A wall-time authority serves no such route. The
+        request is signed at this process's instant, which an injected
+        authority admits outside the signing skew for this operation alone.
+        """
+        return _answered(await self._request(_set_time(now, timeout)))
+
     async def rollback_issuance(
         self, *, settlement_ref: str, issuance: Mapping[str, Any], key_mode: str
     ) -> dict[str, Any]:
@@ -504,6 +551,7 @@ class SyncAuthorityClient:
         signer: Signer | None = None,
         expected_authorities: TrustedIdentitySet | None = None,
         max_response_skew: int = 300,
+        caller_role: str = SELLER_ROLE,
     ) -> None:
         _require_both(signer, expected_authorities)
         self._service_url = service_url.rstrip("/")
@@ -512,6 +560,7 @@ class SyncAuthorityClient:
         self._signer = signer
         self._expected_authorities = expected_authorities
         self._max_response_skew = max_response_skew
+        self._caller_role = caller_role
         self._request_model = issuance_request_model(label)
         self._result = issuance_result_model(label)
         self._http: httpx.Client | None = None
@@ -528,7 +577,11 @@ class SyncAuthorityClient:
 
     def _request(self, call: _Call) -> httpx.Response:
         prepared = _prepare(
-            call, service_url=self._service_url, admin_key=self._admin_key, signer=self._signer
+            call,
+            service_url=self._service_url,
+            admin_key=self._admin_key,
+            signer=self._signer,
+            caller_role=self._caller_role,
         )
         if self._http is None:
             self._http = httpx.Client(transport=self._transport)
@@ -585,6 +638,14 @@ class SyncAuthorityClient:
         self, key_id: str, *, delta: int, reason: str, timeout: float = 10.0
     ) -> dict[str, Any]:
         return _json(self._request(_key_adjust(key_id, delta, reason, timeout)))
+
+    def get_system_status(self, *, timeout: float = 10.0) -> dict[str, Any]:
+        """The authority's status; see ``AuthorityClient``."""
+        return _answered(self._request(_system_status(timeout)))
+
+    def set_time(self, now: int, *, timeout: float = 10.0) -> dict[str, Any]:
+        """Set an injected authority's time to ``now``; see ``AuthorityClient``."""
+        return _answered(self._request(_set_time(now, timeout)))
 
     def rollback_issuance(
         self, *, settlement_ref: str, issuance: Mapping[str, Any], key_mode: str

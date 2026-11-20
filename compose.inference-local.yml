@@ -3,12 +3,13 @@
 # buyer service.
 #
 # Layered over compose.inference.yml, which includes compose.dev.yml for the
-# dev chain. The inference end-to-end lane adds compose.inference-lane.yml, the
-# compute and API-credit registries its schema-filter scenario reads:
+# dev chain. The inference end-to-end lane adds the lane doubles and
+# compose.inference-lane.yml, the compute and API-credit registries its
+# schema-filter scenario reads and the lane's injected time:
 #
 #     docker compose -p simple-market-inference \
 #       -f compose.inference.yml -f compose.inference-local.yml \
-#       -f compose.inference-lane.yml up -d
+#       -f compose.payments-double.yml -f compose.inference-lane.yml up -d
 #
 # `make -C e2e-tests test-e2e-inference` does exactly this. The full local stack
 # layers this file over docker-compose.yml with the VM and API-credit overlays

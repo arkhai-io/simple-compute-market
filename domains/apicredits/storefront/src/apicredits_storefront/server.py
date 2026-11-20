@@ -48,14 +48,19 @@ from market_alkahest import (
 )
 from market_core import MarketDomainContract
 from market_settlement_runtime import SettlementJobCoordinator
+import injected_time
+from market_arkhai_payments import payments_livemode
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
+    StorefrontTimeRouteService,
     alkahest_client_constructor,
+    announce_time_source,
     build_composed_storefront_app,
+    install_time_source,
 )
 
 import apicredits_storefront.container as _container
@@ -81,6 +86,7 @@ from apicredits_storefront.utils.config import (
     CHAINS,
     capacity_sites,
     chain_address_books,
+    configured_time_source,
     resolve_admin_identities,
     resolve_identity_signer,
     resolve_registry_authorities,
@@ -444,6 +450,11 @@ async def _start_api_credit_services(
     await services.settlement_composition.disputes.refresh(
         _container.registry_client if settings.enable_registry_discovery else None
     )
+    announce_time_source(
+        injected_time.installed(),
+        payments_livemode=payments_livemode(settlement_config_mapping()),
+        logger=logger,
+    )
     logger.info("[STARTUP] Singletons initialized")
     await _startup_tasks(domain=services.domain)
     logger.info("[STARTUP] Background tasks started")
@@ -485,6 +496,9 @@ from apicredits_storefront.controllers.system_controller import (  # noqa: E402
 from apicredits_storefront.controllers.trading_pause_controller import (  # noqa: E402
     router as trading_pause_router,
 )
+from apicredits_storefront.controllers.time_controller import (  # noqa: E402
+    router as time_router,
+)
 
 
 def build_api_credits_storefront_registry(
@@ -504,7 +518,8 @@ def build_api_credits_storefront_app(
     """Build the API-credit app from one frozen domain registration.
 
     ``seams`` defaults to production's Alkahest client construction and chain
-    transport.
+    transport. The time-setting route is mounted only when the process's
+    installed source is injected time.
     """
 
     registration = registry.resolve_mode("api_credits")
@@ -550,6 +565,7 @@ def build_api_credits_storefront_app(
                     admin_settle_router,
                     lifecycle_router,
                     trading_pause_router,
+                    *((time_router,) if StorefrontTimeRouteService().mounted else ()),
                 ),
                 middleware=(_container.AUTH.sign_responses,),
             ),
@@ -557,6 +573,11 @@ def build_api_credits_storefront_app(
     )
 
 
+# The process's time source is installed here, before the application is built
+# and before anything reads the time: `[Time] source` decides whether the
+# time-setting route is mounted, and a value other than "wall" or "injected"
+# refuses startup naming it.
+install_time_source(configured_time_source())
 app = build_api_credits_storefront_app(
     registry=build_api_credits_storefront_registry(
         domain=get_market_domain_contract(),

@@ -16,7 +16,9 @@ A virtual project (`[tool.uv] package = false`) builds no wheel, so the wheel
 rule does not reach it. Dockerfiles are not scanned for editability: an image
 installs its project's own wheel, which is not an editable install.
 
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Rules: docs/guidance/engineering/packaging-python.md, with packaging-uv.md and
+packaging-hatchling.md beside it.
+Conventions: docs/guidance/repository/project-layout.md and wheelhouse.md beside it.
 """
 
 from __future__ import annotations
@@ -114,7 +116,7 @@ def main() -> int:
     for problem in found:
         print(problem)
     if found:
-        print(f"\n{len(found)} project layout problem(s). See docs/development/BUILD_AND_PACKAGING.md.")
+        print(f"\n{len(found)} project layout problem(s). See docs/guidance/repository/packaging-checks.md.")
         return 1
     print("OK: every distribution is one package under src/ and installs editable.")
     return 0

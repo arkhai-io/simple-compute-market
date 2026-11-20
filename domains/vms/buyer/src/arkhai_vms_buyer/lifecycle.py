@@ -6,7 +6,9 @@ import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from datetime import datetime
 
+from arkhai_compute.end_classification import classify_payment_stop
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential, MediationTransportError
 from market_arkhai_mediation.contract import INTERFACE
@@ -137,6 +139,14 @@ async def buyer_lifecycle(
         agreement.negotiation_id, commitment_ref,
         PaymentBinding(agreement.negotiation_id, PaymentSelector(mechanism)), dispute,
         Identity.model_validate(agreement.buyer), Identity.model_validate(agreement.seller),
+        rate=option.settlement.get("period") is not None,
+    )
+    # The storefronts' classifier, bound to the Agreement's entitlements and its
+    # end (start plus duration, whole seconds), so the buyer tells funds running
+    # out from the term end by the payments service's record, as the seller does.
+    entitlements = terms.early_termination.entitlements if terms and terms.early_termination else {}
+    term_end = int(datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00")).timestamp()) + (
+        agreement.duration_seconds
     )
     try:
         async with _EvidencePeer(
@@ -144,9 +154,12 @@ async def buyer_lifecycle(
         ) as peer:
             yield BuyerLifecycle(
                 deal=lambda _: deal, peer=peer, operations=store, evidence=store,
-                end_journal=store.end_journal,
+                end_journal=store.end_journal, watchdog=store.watchdog,
                 payments=PaymentAdapterTable([(deal.payment.selector, lambda _: payment)] if payment else []),
                 disputes=DisputeAdapterTable(dispute_entries),
+                classify_payment_stop=lambda event: classify_payment_stop(
+                    event, entitlements=entitlements, term_end=term_end,
+                ),
             )
     finally:
         if mediation is not None:

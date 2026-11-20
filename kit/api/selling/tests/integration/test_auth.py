@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import time
 
+import injected_time
 import pytest
 from core_storefront.sqlite_client import SQLiteClient
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from injected_time import InjectedTime
 from pydantic import BaseModel
 from market_identity import (
     EMPTY_BODY,
@@ -286,3 +288,53 @@ def test_a_buyer_is_verified_over_the_body_as_sent(mutations) -> None:
             response = client.post("/negotiate/neg-1", json=body, headers=headers)
             assert (response.status_code, response.json()) == (200, {"neg_id": "neg-1", "action": "accept"}), response.text
     assert runs["accept"] == 2
+
+
+def _skewed_admin_statuses(tmp_path, *, skew: int) -> tuple[int, int]:
+    """The statuses of a time setting and of another administrator request,
+    each signed ``skew`` seconds from the storefront's instant."""
+    migrate_storefront_database(example_chain(), tmp_path / "time.db")
+    db = SQLiteClient(db_path=str(tmp_path / "time.db"))
+    auth = StorefrontAuth(
+        replay_store=lambda: db,
+        signer=lambda: STOREFRONT,
+        admin_principals=lambda: TrustedIdentitySet(identities=(ADMIN.identity,)),
+        seller_principal=lambda: STOREFRONT.identity,
+    )
+    app = FastAPI()
+    app.middleware("http")(auth.sign_responses)
+
+    @app.post("/admin/{operation}")
+    async def administer(operation: str, request: Request) -> dict[str, bool]:
+        await auth.authenticate_admin(request, operation=operation, resource=operation)
+        return {"ok": True}
+
+    at = injected_time.now() + skew
+    with TestClient(app) as client:
+        return tuple(
+            client.post(
+                f"/admin/{operation}",
+                headers=_signed(
+                    ADMIN, role="admin", method="POST", operation=operation,
+                    resource=operation, request_id=f"skewed-{operation}",
+                    body=EMPTY_BODY, timestamp=at,
+                ),
+            ).status_code
+            for operation in ("admin_time", "admin_pause")
+        )
+
+
+@pytest.mark.parametrize("skew", (900, -900))
+def test_under_injected_time_the_time_setting_operation_alone_is_admitted_skewed(
+    tmp_path, skew
+) -> None:
+    before = injected_time.installed()
+    injected_time.install(InjectedTime(start=1_794_822_300))
+    try:
+        assert _skewed_admin_statuses(tmp_path, skew=skew) == (200, 403)
+    finally:
+        injected_time.install(before)
+
+
+def test_under_wall_time_the_time_setting_operation_keeps_its_freshness(tmp_path) -> None:
+    assert _skewed_admin_statuses(tmp_path, skew=900) == (403, 403)

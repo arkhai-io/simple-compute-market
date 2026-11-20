@@ -2,10 +2,15 @@
 
 The control contract of the end-to-end lanes' doubles, the payments double
 (`tools/payments-lane-double`) and the mediation double
-(`tools/mediation-lane-double`): the contract a double serves and a scenario
-calls. It holds the wire models, the control route declarations, a typed client,
-the transport-fault middleware, the perceived clock both doubles read
-(`lane_double_controls.clock`), and the lane CA the doubles serve under. It imports no double, so a caller of the controls
+(`tools/mediation-lane-double`), and of the API-credits lane's sample app
+(`domains/apicredits/sample-app`), which serves its time control alone: the
+contract a party serves and a scenario calls. The inference lane's gateway
+(`domains/inference/gateway-service`), a published package, serves the time
+route and the status on this wire without importing this package; the typed
+client here drives it. It holds the wire models, the
+control route declarations, a typed client, the transport-fault middleware, the
+time control over a party's time source (`lane_double_controls.time_control`), and
+the lane CA the doubles serve under. It imports no double, so a caller of the controls
 installs neither FastAPI nor a double's internals, and nothing here is part of
 the market runtime.
 
@@ -13,23 +18,56 @@ the market runtime.
 
 Every control is a deterministic step a scenario takes: nothing here delays,
 races or runs in the background. Control routes sit under `/test/` on each
-double's own API port, which no lane publishes to its host, and each is
-authenticated by the double's fixture control token as a bearer token.
+party's own API port, and each is authenticated by the party's control token as
+a bearer token: a double's fixture token, the sample app's and the inference
+gateway's from their environment. No lane publishes a double's port to its host;
+the sample app's control and the gateway's sit on their published API ports,
+behind their tokens and outside their metering gates.
 
-| Route | Doubles | Control |
+| Route | Parties | Control |
 |---|---|---|
-| `POST /test/rules` | both | install a when→then rule |
-| `GET /test/rules` | both | list rules with their matched and waiting counts |
-| `DELETE /test/rules/{rule_id}` | both | remove a rule, whatever its state |
+| `POST /test/rules` | both doubles | install a when→then rule |
+| `GET /test/rules` | both doubles | list rules with their matched and waiting counts |
+| `DELETE /test/rules/{rule_id}` | both doubles | remove a rule, whatever its state |
 | `POST /test/rules/{rule_id}/resume` | mediation | release a ruling held before its effects |
-| `POST /test/clock/advance` | both | move the perceived clock forward |
-| `POST /test/clock/reset` | both | return the perceived clock to wall time |
-| `GET /test/status` | both | the perceived now and the installed contract hashes |
+| `POST /test/time` | every party, under injected time | set the party's injected time forward |
+| `GET /test/status` | every party | the party's time and the installed contract hashes |
 | `POST /test/funding` | payments | credit an account |
 | `POST /test/signer/rotate` | payments | sign with the second fixture receipt key |
+| `POST /test/transactions/{transaction}/reserve` | payments | reserve a transaction's running rate parts further |
 | `GET /test/cases?transaction=…` | mediation | list a transaction's cases |
 | `POST /test/cases/{case_ref}/decide` | mediation | an operator's ruling on an open case |
 | `POST /test/cases/{case_ref}/close` | mediation | close an open case without ruling |
+
+Each party reads the time of the world from one source, the time component's
+([`tools/injected-time`](../injected-time/README.md)), installed from its own
+time-source setting: wall time by default, or injected time, an instant that
+holds until the time control sets it forward. `TimeControl` wraps the
+component's route service for a party's handlers. `POST /test/time` takes
+`{"now": <Unix seconds>}`, read by the component's one rule, and answers
+`{"source": "injected", "now": …}` (`TimeView`); a party evaluates its due state
+lazily at each read, so a notice, a funding boundary or a hold's release set
+past shows at the next read. Status carries the time as `{"source": "injected",
+"now": …}` or `{"source": "wall"}`, and the sample app's names no contract. A
+wall-time party serves no time route, as no wall-time instance offers a way to
+change its time.
+
+The payments service's scheduler reserves a started rate part's further periods
+as time passes; the payments double reserves them only when the scenario calls
+the reservation control, since a double takes its producer's scheduled decisions
+as answers a scenario programs. `POST /test/transactions/{transaction}/reserve`
+takes `{"through": <Unix seconds>}` (`Reservation`) and reserves each of the
+transaction's running rate parts — started and not stopped — through that
+instant, as far as the part's end and the payer's balance allow, answering
+`{"transaction", "parts": [{"part", "reserved_through", "periods_added"}]}`
+(`Reserved`), each part's `reserved_through` the funded boundary its signed
+snapshot then reports. The double reserves as the payments engine reserves at a
+rate part's `start`, covering 60 seconds past `through`, so a `through` on a
+period boundary short of the part's end reserves the period after it too, and
+`reserved_through` may lie up to a period past `through`. The answer always lists
+at least one part: a transaction
+with no running rate part is refused, so a reservation stage run too early or
+against the wrong deal fails where it runs.
 
 A rule (`Rule`) names a `rule_id`, a `match`, and exactly one action:
 
@@ -70,6 +108,12 @@ wire as `ControlError`:
 | deciding a case that is applying another ruling | `422 invalid_request` |
 | closing a case applying a ruling, before every effect is applied | `409 case_applying`; nothing is lifted |
 | closing a case whose extensions payments does not lift | `502 payments_unavailable` |
+| setting time earlier than the party's instant | `409 time_moves_forward`; nothing changes |
+| a time setting whose body is not exactly `{"now": <instant>}` | `422 invalid_time`; nothing changes |
+| reserving a transaction the payments double does not hold | `404 transaction_not_found`; nothing changes |
+| reserving a transaction with no started, unstopped rate part | `409 no_running_rate_part`; nothing changes |
+| a reservation whose transaction or body is malformed | `422 invalid_request`; nothing changes |
+| setting the time of a wall-time double | `404 invalid_request`, no such control route |
 
 Deleting a rule that has matched is cleanup and answers `204`; listing a
 transaction with no cases answers an empty list.

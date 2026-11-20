@@ -21,11 +21,11 @@ after deletion is proven by the storefront's own tests.
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+import injected_time
 import pytest
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
 from market_contact_exchange import SyncIntroductionAdminClient
@@ -261,7 +261,7 @@ class TestStage02_Reveal:
                 settlement_selection={
                     "option_id": option["option_id"],
                     "settlement": {"schema": CONTACT_MECHANISM},
-                    "expiration_unix": int(time.time()) + 3600,
+                    "expiration_unix": injected_time.now() + 3600,
                 },
                 selection_only=True,
                 buyer_agent_url=BUYER_AGENT_URL,

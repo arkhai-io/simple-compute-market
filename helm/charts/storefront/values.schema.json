@@ -1088,6 +1088,14 @@
                     "null"
                   ]
                 },
+                "^[sS][nN][aA][pP][sS][hH][oO][tT]_[fF][rR][eE][sS][hH][nN][eE][sS][sS]_[sS][eE][cC][oO][nN][dD][sS]$": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 300,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "^[aA][tT][tT][aA][cC][hH]_[aA][gG][rR][eE][eE][mM][eE][nN][tT]$": {
                   "type": [
                     "boolean",
@@ -1202,6 +1210,125 @@
                   ]
                 }
               }
+            },
+            "^[rR][aA][tT][eE]_[sS][eE][rR][vV][iI][cC][iI][nN][gG]$": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[aA][lL][kK][aA][hH][eE][sS][tT]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "^[aA][rR][kK][hH][aA][iI]_[pP][aA][yY][mM][eE][nN][tT][sS]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "^[cC][oO][nN][tT][aA][cC][tT]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "^[tT][iI][mM][eE]$": {
+          "additionalProperties": false,
+          "type": [
+            "object",
+            "null"
+          ],
+          "patternProperties": {
+            "^[sS][oO][uU][rR][cC][eE]$": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "wall",
+                    "injected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         },

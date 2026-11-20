@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 import pytest
+from injected_time import InjectedTime
 
 from lane_double_controls import ControlClient, Rule
 from market_arkhai_payments import PaymentsClient, PaymentsTransportError
@@ -19,14 +20,13 @@ from market_arkhai_payments.receipts import transaction_id
 
 from payments_lane_double.app import create_app
 
-from conftest import Clock
 from loopback import serving
 from support import T0, mandate, suite_directory
 
 
 @dataclass
 class Served:
-    clock: Clock
+    time: InjectedTime
     buyer: PaymentsClient
     controls: ControlClient
     funding: int
@@ -38,11 +38,11 @@ def served() -> Iterator[Served]:
     directory = suite_directory()
     buyer = directory.role("buyer")
     assert buyer.token is not None
-    clock = Clock(T0)
-    with serving(create_app(directory, clock=clock)) as origin:
+    time = InjectedTime(start=T0)
+    with serving(create_app(directory, source=time)) as origin:
         with PaymentsClient(origin, api_key=buyer.token) as client, ControlClient(
                 origin, token=directory.control_token) as controls:
-            yield Served(clock, client, controls, buyer.funding, buyer.account)
+            yield Served(time, client, controls, buyer.funding, buyer.account)
 
 
 class _Accounts:
@@ -76,7 +76,7 @@ def test_an_approval_whose_response_is_dropped_is_retried_to_its_original_receip
     assert _available(served) == str(served.funding - 1_000_000)
     committed = served.buyer.get_transaction(transaction_id(terms)).snapshot.receipt
 
-    served.clock.now = T0 + 60
+    served.time.set(T0 + 60)
     retried = served.buyer.approve(terms)
 
     # The retry, a minute later, returns the receipt approved at T0, with no
@@ -95,7 +95,7 @@ def test_unavailable_abandons_every_api_response_while_the_controls_answer(
         served.buyer.get_balance(served.buyer_account)
     with pytest.raises(PaymentsTransportError):
         served.buyer.approve(mandate(_Accounts()))  # type: ignore[arg-type]
-    assert served.controls.status().offset_seconds == 0
+    assert served.controls.status().time.now == T0
     [view] = served.controls.rules().rules
     assert (view.rule.rule_id, view.matched) == ("down", 2)
 

@@ -156,13 +156,13 @@ async def test_requests_are_the_declared_bodies_and_responses_parse_from_the_dec
     ]
 
 
-def test_the_runtime_dependencies_are_httpx_alone():
+def test_the_runtime_dependencies_are_httpx_and_the_time_source_alone():
     project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
 
     def names(requirements: list[str]) -> set[str]:
         return {re.split(r"[\s<>=!~;\[]", requirement, maxsplit=1)[0] for requirement in requirements}
 
-    assert names(project["dependencies"]) == {"httpx"}
+    assert names(project["dependencies"]) == {"httpx", "arkhai-injected-time"}
     assert {extra: names(reqs) for extra, reqs in project["optional-dependencies"].items()} == {
         "signed": {"arkhai-kit-identity"}
     }

@@ -85,6 +85,9 @@ class Relay(Base):
     staged_grant_key_encrypted = Column(String, nullable=True)
     staged_grant_key_id = Column(String, nullable=True)
     staged_grant_key_public = Column(String, nullable=True)
+    # False drains the relay: its pools' hosts take no new delivery, no port on
+    # it is leased to a new delivery, and every delivery already holding a
+    # lease runs to its end.
     enabled = Column(Boolean, nullable=False, default=True, server_default=sa_true())
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
@@ -128,10 +131,13 @@ class RelayPortLease(Base):
     __table_args__ = (
         UniqueConstraint("relay_id", "remote_port", name="uq_relay_port_leases_endpoint"),
         # One active lease per owner, enforced rather than only queried, so two
-        # concurrent retries of one fulfillment cannot both take a port. Partial
-        # because release is soft: a released lease keeps its row, and an
-        # unconditional constraint would stop an owner ever holding a second
-        # lease across its history. SQLite (3.8+) and PostgreSQL both support it.
+        # concurrent retries of one fulfillment cannot both take a port: the
+        # later claim fails here, and the allocator then reads the owner's lease
+        # again and returns it rather than trying another port, since the
+        # failure says nothing about the port. Partial because release is soft:
+        # a released lease keeps its row, and an unconditional constraint would
+        # stop an owner ever holding a second lease across its history. SQLite
+        # (3.8+) and PostgreSQL both support it.
         Index(
             "uq_relay_port_leases_active_owner",
             "owner_kind",

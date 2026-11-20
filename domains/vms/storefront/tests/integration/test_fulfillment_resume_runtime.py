@@ -1,8 +1,12 @@
-"""The resume pass drives each unfinished VM delivery through the delivery path.
+"""The resume pass drives a recorded Alkahest fulfillment through the delivery path.
 
-Real SQLite persistence and the real path, end service and deal lifecycle;
-the site and provisioning service are the fakes at the storefront's aggregate
-clients, and the Alkahest stage's chain reads are replaced at the stage.
+Real SQLite persistence and the real path, end service and deal lifecycle; the
+pass is called directly with the site and provisioning fakes as its capacity
+effects and fulfillment client, and with a composition holding the Alkahest
+stage alone, whose chain submission and claim binding are replaced at the
+stage's own parameters and whose evidence re-check is a double. The
+``delivery-recovery`` loop's step through the served storefront is
+``test_delivery_recovery_loop``.
 """
 
 import sqlite3
@@ -24,8 +28,9 @@ from tests.fulfillment_fixtures import SELLER_PRINCIPAL, make_vm_lifecycle_fixtu
 _SELLER = SimpleNamespace(identity=SELLER_PRINCIPAL)
 
 
-async def _recorded_fulfillment(tmp_path):
-    """An Alkahest deal interrupted after its fulfillment was accepted."""
+async def _recorded_fulfillment(tmp_path, *, physical=None):
+    """An Alkahest deal interrupted after its fulfillment was accepted;
+    ``physical`` is the end service's physical end, VM's own by default."""
     fixture = await make_vm_lifecycle_fixture(tmp_path / "storefront.db", with_context=False)
     site = DeliverySite("site-1")
     site.rows["reservation-1"] = {
@@ -37,7 +42,7 @@ async def _recorded_fulfillment(tmp_path):
     )
     provisioning = DeliveryProvisioning(site)
     provisioning.by_reservation["reservation-1"] = "fulfillment-1"
-    lifecycle = VmDealLifecycle(fixture.db, _SELLER, None, RegistryDisputePolicy.from_document({}))
+    lifecycle = VmDealLifecycle(fixture.db, _SELLER, None, RegistryDisputePolicy.from_document({}), physical=physical)
     alkahest = build_vm_storefront_domain().settlement.seller_stages["alkahest.v1"]
     stage = SimpleNamespace(
         recover_evidence=AsyncMock(),
@@ -79,7 +84,11 @@ async def test_a_recorded_fulfillment_resumes_without_schedule_or_begin(tmp_path
 
 @pytest.mark.asyncio
 async def test_a_failed_fulfillment_is_handed_to_the_end_and_its_policy_runs_once(tmp_path):
-    fixture, site, provisioning, stage, composition = await _recorded_fulfillment(tmp_path)
+    fixture, site, provisioning, stage, composition = await _recorded_fulfillment(
+        tmp_path, physical=SimpleNamespace(apply_end=AsyncMock(return_value=SimpleNamespace(
+            progress="tearing_down", done=False,
+        ))),
+    )
 
     async def failed(fulfillment_id, *, capacity_reservation_id=None, site_id=None):
         return FulfillmentStatusResponse(
@@ -88,9 +97,6 @@ async def test_a_failed_fulfillment_is_handed_to_the_end_and_its_policy_runs_onc
         )
 
     provisioning.get_fulfillment_status = failed
-    composition.lifecycle.end.physical = SimpleNamespace(apply_end=AsyncMock(return_value=SimpleNamespace(
-        progress="tearing_down", done=False,
-    )))
 
     await _resume(fixture, site, provisioning, composition)
     await _resume(fixture, site, provisioning, composition)

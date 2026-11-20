@@ -26,6 +26,11 @@ REQUEST_ID_HEADER = "X-Market-Request-ID"
 TIMESTAMP_HEADER = "X-Market-Timestamp"
 SIGNATURE_HEADER = "X-Market-Signature"
 
+#: The signed operation of ``POST /api/v1/system/time``, the time-setting
+#: operation the service verifies without its request timestamp's freshness
+#: while its source is injected.
+PROVISIONING_TIME_OPERATION = "provisioning_system_time"
+
 
 class ProvisioningRouteResolutionError(ValueError):
     """A request resolved to no route contract, naming the case that failed.
@@ -315,6 +320,8 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/fulfillment-convergence/resume"), "provisioning_fulfillment_convergence_resume"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/lease-watchdog/pause"), "provisioning_lease_watchdog_pause"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/lease-watchdog/resume"), "provisioning_lease_watchdog_resume"),
+    # Sets an injected service's time; a wall-time service mounts no such route.
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/time"), PROVISIONING_TIME_OPERATION),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/jobs/?"), "provisioning_jobs_list"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/jobs/(?P<job_id>[^/]+)"), "provisioning_job_status", path_resource="job_id"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/jobs/(?P<job_id>[^/]+)/credentials"), "provisioning_job_credentials_admin", path_resource="job_id"),
@@ -373,6 +380,7 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_fulfillment_convergence_pause",
         "provisioning_fulfillment_convergence_resume",
         "provisioning_lease_watchdog_pause",
+        PROVISIONING_TIME_OPERATION,
         "provisioning_identity_rotate",
         "provisioning_lease_watchdog_resume",
         "provisioning_jobs_list",

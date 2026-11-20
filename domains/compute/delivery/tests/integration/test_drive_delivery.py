@@ -7,13 +7,17 @@ provisioning service.
 """
 
 import pytest
+from market_alkahest.payment_adapter import AlkahestOnceAdapter
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, ArkhaiPaymentsConfig
 from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.agreement import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_capacity_publication import CapacityEffects
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
-from market_deal_servicing import Classification, DeliveryRecord, EndSession, FinalRequest
+from market_deal_lifecycle.adapters import PaymentSelector
+from market_deal_servicing import (
+    Classification, DeliveryRecord, EndSession, FinalRequest, SellerDeal, SellerSession, WatchSession,
+)
 from market_deal_lifecycle_contracts.models import Rejected, Unknown
 from market_identity import Ed25519Signer
 from market_site_client import SiteCapacityClientError
@@ -443,6 +447,10 @@ async def test_a_hosted_once_only_payment_deal_starts_billing_as_a_no_op(rig):
             negotiation_id="paid", seller=SELLER.identity, commitment_ref=data.transaction_id,
             start_at=rig.start, term_end=rig.start + 7200, committed_at=rig.start - 600,
         ))
+        SellerSession(conn).register(SellerDeal(
+            negotiation_id="paid", commitment_ref=data.transaction_id, domain="vms", buyer=BUYER.identity,
+            payment=PaymentSelector(ARKHAI_PAYMENTS_MECHANISM), once_only=True,
+        ))
     domain = type(rig.domain)(AcceptedDeal(
         commitment_ref=data.transaction_id, binding=rig.domain.accepted.binding, payment=adapter,
     ))
@@ -456,3 +464,90 @@ async def test_a_hosted_once_only_payment_deal_starts_billing_as_a_no_op(rig):
     assert billing.result["outcome"]["status"] == "accepted" and billing.result["no_op"] is True
     # Each authorized phase was checked against the hosted authority's signed snapshot.
     assert peer.count("get_transaction") >= 4
+
+
+def rate_deal(rig, **register):
+    """Make the rig's deal ``rate``, whose seller projection is not once-only."""
+    rig.negotiation_id = "rate"
+    rig.register(once_only=False, **register)
+
+    async def valid(evidence):
+        return True
+
+    rig.adapter.inner = AlkahestOnceAdapter(
+        negotiation_id="rate", commitment_ref="commitment", validate_commitment=valid,
+    )
+
+
+async def test_a_rate_deal_commits_and_is_delivered(rig):
+    rate_deal(rig)
+
+    outcome = await rig.drive()
+
+    assert outcome.kind is OutcomeKind.CONVERGED and outcome.capacity_reservation_id == "res-1"
+    assert rig.adapter.authorized[0] == "commit"
+    assert rig.adapter.billing_keys == ["rate:billing-start"]
+    assert rig.record().available_at == rig.clock[0]
+
+
+async def test_a_changed_answer_while_a_rate_deal_waits_leaves_the_drive_pending(rig):
+    rate_deal(rig)
+    rig.clock[0] = rig.start - 7200
+    waiting = await rig.drive()
+    assert waiting.kind is OutcomeKind.WAITING
+    journaled = intents(rig, "rate")
+
+    # The commit is asked again while the deal waits, and the payment
+    # authority's answer has changed at the same revision.
+    rig.adapter.answers["commit"] = ["pending"]
+    held = await rig.drive()
+
+    assert held.kind is OutcomeKind.PENDING
+    assert "changed from allow to pending" in held.detail
+    assert intents(rig, "rate") == journaled
+    assert requests(rig, "rate") == []
+
+    # A later drive whose adapter allows again goes on waiting, then delivers.
+    assert (await rig.drive()).kind is OutcomeKind.WAITING
+    rig.clock[0] = rig.start
+    assert (await rig.drive()).kind is OutcomeKind.CONVERGED
+
+
+async def test_an_undelivered_rate_deal_past_its_deadline_waits_for_a_payment_observation(rig):
+    # Committed 600 seconds before the Agreement start with a 600-second
+    # delivery deadline, so the deadline falls 600 seconds after the start.
+    rate_deal(rig, delivery_deadline_seconds=600)
+    rig.clock[0] = rig.start + 100
+    await dispatched(rig)
+    rig.fulfillment.state = "dispatching"
+
+    # Past the deadline, with no payment observation made since: the deal
+    # stays pending, with no end recorded and nothing filed.
+    rig.clock[0] = rig.start + 700
+    waiting = await rig.drive()
+    assert waiting.kind is OutcomeKind.PENDING
+    assert requests(rig, "rate") == []
+    assert "filing" not in {intent.kind for intent in intents(rig, "rate")}
+
+    # The payment watch records an observation made after the deadline, which
+    # showed no earlier end: the next drive finds the deadline's end.
+    with rig.session() as conn:
+        WatchSession(conn).record_payment_observation("rate", "commitment", rig.start + 700)
+    ended = await rig.drive()
+    assert ended.kind is OutcomeKind.ENDED
+    assert [request.source_ref for request in requests(rig, "rate")] == ["delivery-deadline"]
+    assert "filing" in {intent.kind for intent in intents(rig, "rate")}
+
+
+async def test_a_rate_deal_first_driven_past_its_deadline_is_pending_with_nothing_begun(rig):
+    rig.negotiation_id = "rate"
+    rig.register(once_only=False, delivery_deadline_seconds=600)
+
+    outcome = await rig.drive()
+
+    assert outcome.kind is OutcomeKind.PENDING
+    assert outcome.detail == "the missed delivery deadline awaits a payment observation"
+    with rig.session() as conn:
+        assert rig.progress.load(conn, "rate") is None
+    assert requests(rig, "rate") == [] and intents(rig, "rate") == []
+    assert rig.site.calls == []

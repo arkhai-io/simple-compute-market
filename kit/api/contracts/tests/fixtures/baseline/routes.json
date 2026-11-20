@@ -141,6 +141,11 @@
   },
   {
     "method": "GET",
+    "name": "status",
+    "path": "/api/v1/system/status"
+  },
+  {
+    "method": "GET",
     "name": "version",
     "path": "/api/v1/system/version"
   },

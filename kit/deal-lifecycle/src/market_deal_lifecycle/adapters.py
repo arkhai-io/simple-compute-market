@@ -19,7 +19,9 @@ from market_deal_lifecycle_contracts.models import (
 )
 from pydantic import Field, JsonValue, ValidationError
 
-from .delivery import BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase
+from .delivery import (
+    BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase, JournaledBillingStart,
+)
 from .operations import OperationKeys, OperationStore, remember_command
 from .terms import DisputeAuthority
 
@@ -47,8 +49,20 @@ class PaymentAdapter(Protocol):
 
     async def submit(self, command: LifecycleCommand, keys: OperationKeys) -> LifecycleOutcome: ...
     async def read(self) -> AuthorityView: ...
-    async def authorize(self, phase: DeliveryPhase, evidence: DeliveryEvidence) -> DeliveryAuthorization: ...
-    async def start_billing(self, operation_key: str, evidence: DeliveryEvidence) -> BillingStartResult: ...
+
+    async def authorize(
+        self, phase: DeliveryPhase, evidence: DeliveryEvidence, billing: JournaledBillingStart | None = None,
+    ) -> DeliveryAuthorization:
+        """Pure: decide a delivery phase, reading the journaled billing start if supplied."""
+        ...
+
+    async def start_billing(self, keys: OperationKeys, evidence: DeliveryEvidence) -> BillingStartResult:
+        """Begin billing under end service's one billing-start identity.
+
+        ``keys`` carries the caller's operation store, through which a mechanism
+        records each operation it derives before any I/O.
+        """
+        ...
 
 
 class DisputeAdapter(Protocol):

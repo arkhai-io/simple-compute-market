@@ -82,20 +82,6 @@ Capacity MAY be committed at settlement before the Agreement start. Dispatch, ac
 - **WHEN** the buyer's end is recorded at 11:00 for a deal waiting for a 12:00 start
 - **THEN** at 12:00 admission refuses and nothing is dispatched
 
-### Requirement: Protected steps are authorized and admitted
-
-Before commit, dispatch, billing start and disclosure the path MUST call end service's `authorize_delivery` for that phase, and before activation it MUST pass end service's admission for `activate`. A pending or unknown outcome MUST leave the deal pending and resolve the same attempt; a financial allow MUST NOT override a due local end; a mechanism with no adapter MUST NOT be allowed.
-
-#### Scenario: An end wins before dispatch
-
-- **WHEN** an end is recorded after the dispatch authorization was read but before dispatch
-- **THEN** the stale admission fails, nothing is dispatched, and the deal goes to the end hand-off
-
-#### Scenario: An authorization outcome is unknown
-
-- **WHEN** the payment adapter cannot establish its authorization outcome
-- **THEN** the deal stays pending and the next drive resolves the same authorization
-
 ### Requirement: Activation precedes billing start and availability
 
 After ready evidence and admission for `activate`, and no earlier than the Agreement start, the path MUST call `CapacityEffects.activate_lease` for the binding's site. On success it MUST record the site's `activated_at_utc` once through the progress port and adopt the lease's current end; it MUST NOT extend or restore an end. On a 409 it MUST read the lease through the compute contract's `LeaseView`, entering the end hand-off for a `releasing` or `released` lease and repair-required otherwise; on a 404, or when the site cannot be asked or answers unsigned, the deal MUST be repair-required and MUST NOT be treated as activated.
@@ -189,7 +175,7 @@ When the domain supplies an accepted acceptance-time hold, delivery MUST commit 
 
 ### Requirement: An undelivered deal is handed to the end operation with classified evidence
 
-Before availability, a refusal, provisioning failure, elapsed window or lapsed activation MUST enter end service's `record_end`. Delivery MUST supply the actor, cause and source, the Agreement start, the fixed failure-observation time, the resource identities and verified evidence, and MUST NOT classify by event kind, compute amounts or send a payment stop or reverse. Any site refusal of the commit after a reservation was made, other than the refused commit of a hold verified lapsed, MUST be recorded as seller failure before dispatch, with its filing at the Agreement start and the reservation released through end service's no-dispatch path under one key.
+Before availability, a site refusal, provisioning failure, elapsed window or lapsed activation MUST enter end service's `record_end`; a refusal by end service's `authorize_delivery` is handled as "Protected steps are authorized and admitted" says. Delivery MUST supply the actor, cause and source, the Agreement start, the fixed failure-observation time, the resource identities and verified evidence, and MUST NOT classify by event kind, compute amounts or send a payment stop or reverse. Any site refusal of the commit after a reservation was made, other than the refused commit of a hold verified lapsed, MUST be recorded as seller failure before dispatch, with its filing at the Agreement start and the reservation released through end service's no-dispatch path under one key.
 
 #### Scenario: A lawful end wins before availability
 
@@ -239,3 +225,58 @@ A buyer's credential read MUST require `available` or `converged`, the Agreement
 
 - **WHEN** a response was authorized before an end was admitted
 - **THEN** no claim is made to retract it, and physical teardown revokes the disclosed access
+
+### Requirement: Both compute storefronts mount the administrator interrupt route
+
+The VM and bare-metal storefronts MUST each serve `POST /api/v1/admin/deals/{negotiation_id}/interrupt` for a committed `arkhai.payments.v1` deal, authenticated as the storefront's administrator under the canonical storefront client's `admin_interrupt_deal` operation, and MUST carry out the interruption through `kit/deal-servicing`'s seller-half classification, ending delivery through end service. A refusal of that classification MUST answer 409 with nothing recorded. A hosted interruption takes effect at receipt, so the route MUST refuse a caller-supplied interruption time. The canonical client's sync and async `admin_interrupt_deal` MUST expose the interruption kind and operation key.
+
+#### Scenario: A bare-metal administrator preempts a spot deal
+
+- **GIVEN** a committed bare-metal rate deal whose accepted option grants a payee entitlement
+- **WHEN** the administrator interrupts it with kind preemption through the canonical storefront client
+- **THEN** the route answers `notice_stop` with the authority's outcome, and the read shows the pending stop
+- **AND** no end or filing is recorded
+
+#### Scenario: A bare-metal administrator reports a failure
+
+- **WHEN** the administrator interrupts a committed bare-metal deal with kind failure and a reason
+- **THEN** the route answers `delivery_end_filing`, the end is recorded with the administrator's reason, and a `delivery_end` filing is journaled with cause payee
+
+#### Scenario: An interruption the classification refuses
+
+- **WHEN** a rate interruption omits its kind, or an unentitled deal is preempted
+- **THEN** either storefront's route answers 409 and records nothing
+
+### Requirement: Protected delivery steps are authorized and admitted
+
+Before commit, dispatch, billing start and disclosure the path MUST call end service's `authorize_delivery` for that phase, and before activation it MUST pass end service's admission for `activate`. A pending or unknown outcome MUST leave the deal pending and resolve the same attempt; a financial allow MUST NOT override a due local end; a mechanism with no adapter MUST NOT be allowed. Any refusal when no end is due MUST be `repair_required(no_accepted_deal)`.
+
+#### Scenario: An end wins before dispatch
+
+- **WHEN** an end is recorded after the dispatch authorization was read but before dispatch
+- **THEN** the stale admission fails, nothing is dispatched, and the deal goes to the end hand-off
+
+#### Scenario: An authorization outcome is unknown
+
+- **WHEN** the payment adapter cannot establish its authorization outcome
+- **THEN** the deal stays pending and the next drive resolves the same authorization
+
+#### Scenario: A rate deal's changed answer leaves it pending
+
+- **WHEN** end service answers `pending` because the payment authority's answer to an already journaled phase changed at the same revision
+- **THEN** `drive` returns pending with nothing further done, and a later drive asks again
+
+### Requirement: Unfinished deliveries are re-driven by one routine
+
+The compute delivery package MUST provide one routine that re-drives unfinished deliveries, and each compute storefront's `delivery-recovery` loop MUST run it over its domain's ports: the domain lists its unfinished deliveries, claims each one under its own serialization, and has the deal's settlement stage re-check its evidence before the routine drives it. A deal the domain cannot claim, or whose evidence does not re-check, MUST NOT be driven in that pass.
+
+#### Scenario: A delivery waiting for its start is re-driven
+
+- **GIVEN** a VM deal and a bare-metal deal each committed and waiting for their Agreement start
+- **WHEN** each storefront's `delivery-recovery` loop runs at the start
+- **THEN** each claims the deal, re-checks its settlement evidence and drives it through the delivery path
+
+#### Scenario: A deal another worker holds is skipped
+
+- **WHEN** the domain cannot claim an unfinished delivery because another worker holds it
+- **THEN** the routine does not drive it in that pass

@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Protocol
 
+import injected_time
 from market_identity import Identity
 from market_policy.listing_source import ListingSourceVerdict, classify_listing_source
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
@@ -319,6 +320,9 @@ class NegotiationDomainHooks:
     # A revision decoder preserves the opening's non-negotiable terms and
     # interprets only the domain-owned envelope carried by this proposal.
     decode_revised_terms: Callable[[NegotiationTerms, Any], NegotiationTerms] | None = None
+    # Resolve domain bounds against the fixed acceptance clock before artifacts
+    # or durable writes, including a buyer accepting a previous seller counter.
+    resolve_acceptance: Callable[[Acceptance], Acceptance] | None = None
 
 
 #: Refusals an opening raises before or at seller policy; a preview reports them.
@@ -345,7 +349,7 @@ class NegotiationRuntime:
         self._resolve_opening = resolve_opening
         self._resolve_continuation = resolve_continuation
         self._id_factory = id_factory or (lambda: "neg_" + uuid.uuid4().hex)
-        self._now = now or (lambda: datetime.now(UTC))
+        self._now = now or injected_time.now_datetime
 
     async def start(
         self,
@@ -648,7 +652,7 @@ class NegotiationRuntime:
         if accepted:
             # The Agreement records the acceptance instant and the resolved
             # start, so both are fixed before accepted artifacts are built.
-            acceptance = self._fix_acceptance_time(acceptance)
+            acceptance = self._fix_acceptance_time(acceptance, hooks)
             artifacts = self._accepted_artifacts(hooks, acceptance)
         else:
             artifacts = dict(hooks.build_artifacts(acceptance, False))
@@ -707,7 +711,7 @@ class NegotiationRuntime:
             seller_principal=Identity.model_validate(thread.get("seller_principal")),
             binding=resumed.resolved.binding,
         )
-        acceptance = self._fix_acceptance_time(acceptance)
+        acceptance = self._fix_acceptance_time(acceptance, hooks)
         artifacts = self._accepted_artifacts(hooks, acceptance)
         await self._append_message(
             repository,
@@ -919,7 +923,7 @@ class NegotiationRuntime:
                 seller_principal=stored_seller,
                 binding=resolved.binding,
             )
-            acceptance = self._fix_acceptance_time(acceptance)
+            acceptance = self._fix_acceptance_time(acceptance, hooks)
             artifacts = self._accepted_artifacts(hooks, acceptance)
             await self._append_message(
                 repository,
@@ -1052,8 +1056,10 @@ class NegotiationRuntime:
         )
         accepted = decision.action == "accept"
         if accepted:
-            acceptance = self._fix_acceptance_time(acceptance)
+            acceptance = self._fix_acceptance_time(acceptance, hooks)
             artifacts = self._accepted_artifacts(hooks, acceptance)
+        elif decision.action == "counter":
+            artifacts = dict(hooks.build_artifacts(acceptance, False))
         else:
             artifacts = {}
 
@@ -1126,7 +1132,9 @@ class NegotiationRuntime:
         if not evaluation.strategy_label:
             raise NegotiationStateError("domain policy returned no strategy label")
 
-    def _fix_acceptance_time(self, acceptance: Acceptance) -> Acceptance:
+    def _fix_acceptance_time(
+        self, acceptance: Acceptance, hooks: NegotiationDomainHooks,
+    ) -> Acceptance:
         accepted_at = self._now()
         if accepted_at.tzinfo is None:
             accepted_at = accepted_at.replace(tzinfo=UTC)
@@ -1146,7 +1154,7 @@ class NegotiationRuntime:
                 start = start.replace(tzinfo=UTC)
             else:
                 start = start.astimezone(UTC)
-        return replace(
+        fixed = replace(
             acceptance,
             agreement=AgreementTerms(
                 duration_seconds=acceptance.agreement.duration_seconds,
@@ -1154,6 +1162,7 @@ class NegotiationRuntime:
             ),
             accepted_at=accepted_at,
         )
+        return hooks.resolve_acceptance(fixed) if hooks.resolve_acceptance else fixed
 
     def _accepted_artifacts(
         self,

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+
 import typer
+from market_core.schemas import Agreement
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from market_deal_lifecycle_buyer import WaitClock
 from rich.console import Console
 
 from .buy_orchestrator import (
@@ -16,9 +20,11 @@ from .deal_helpers import (
     load_deal_context,
     make_deal_publisher_trust_resolver,
     open_run_log,
+    recorded_waivers,
 )
 from .settlement_composition import (
     buyer_stage,
+    disclose_accepted_agreement,
     resolve_buyer_settlement_policy,
 )
 from .settlement_stages import BuyerResumeContext
@@ -32,16 +38,25 @@ def chain_address_book(chain_name: str) -> str | None:
 def run_settle_from_log(
     *, run_id: str, poll_interval: float, settlement_timeout: float,
     console: Console | None = None, identity: ResolvedBuyerIdentity | None = None,
+    clock: WaitClock = WaitClock(),
 ) -> dict:
-    """Resolve accepted support before any mechanism resources or seller effects."""
+    """Resolve accepted support before any mechanism resources or seller effects.
+
+    ``clock`` paces the resumed commit and settlement wait.
+    """
     identity = identity or common.resolve_recovery_buyer_identity(run_id)
     signer = identity.signer
     try:
         deal = load_deal_context(run_id, signer=signer)
         stage = buyer_stage(accepted_settlement_mechanism(deal))
+        waivers = recorded_waivers(run_id, signer=signer)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
+    if getattr(deal, "agreement_bytes", None) is not None:
+        disclose_accepted_agreement(Agreement.model_validate_json(
+            base64.b64decode(deal.agreement_bytes, validate=True),
+        ), waivers=waivers)
     log.event("settle_resumed", resumed_from=run_id)
     return stage.resume(BuyerResumeContext(
         run_id=run_id, deal=deal, log=log, signer=signer,
@@ -49,7 +64,7 @@ def run_settle_from_log(
         resolve_policy=resolve_buyer_settlement_policy,
         resolve_address_book=chain_address_book,
         poll_interval=poll_interval, timeout=settlement_timeout,
-        console=console or Console(),
+        console=console or Console(), clock=clock,
     ))
 
 

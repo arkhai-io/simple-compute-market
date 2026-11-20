@@ -10,6 +10,8 @@ The published listing is read back as a buyer fetches it.
 from __future__ import annotations
 
 import dataclasses
+import sqlite3
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -51,9 +53,8 @@ class _Sites:
         return self._site
 
 
-async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertises(
-    tmp_path, monkeypatch
-):
+def _publishing_runtime(tmp_path, monkeypatch):
+    """The storefront runtime whose publication step lists the site's pool."""
     composition, clauses = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
     site = Site(pool("pool-1", member("r1", "pool-1")))
 
@@ -73,7 +74,7 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
             default_max_duration_seconds=runtime.default_max_duration_seconds,
         )
 
-    runtime = dataclasses.replace(
+    return dataclasses.replace(
         _runtime(str(tmp_path / "storefront.db")),
         seller_evm_address=SELLER_WALLET,
         settlement_composition=composition,
@@ -94,15 +95,24 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
         loop_controller_factory=held_loop_controller,
         publication_cycle_factory=cycle,
     )
-    app = _app(runtime)
+
+
+def _admin(app) -> StorefrontClient:
+    return StorefrontClient(
+        "http://seller",
+        signer=ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=httpx.ASGITransport(app=app),
+    )
+
+
+async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertises(
+    tmp_path, monkeypatch
+):
+    app = _app(_publishing_runtime(tmp_path, monkeypatch))
     async with app.router.lifespan_context(app):
-        async with StorefrontClient(
-            "http://seller",
-            signer=ADMIN_SIGNER,
-            caller_role="admin",
-            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
-            transport=httpx.ASGITransport(app=app),
-        ) as admin, StorefrontClient(
+        async with _admin(app) as admin, StorefrontClient(
             "http://seller", transport=httpx.ASGITransport(app=app)
         ) as public:
             report = await admin.admin_run_lifecycle_cycle("publication")
@@ -115,3 +125,26 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
         "anvil"
     ]
     assert listing.extra["demands"] == [RECIPIENT_CONDITION]
+
+
+async def test_a_published_listing_holds_the_injected_instant(
+    tmp_path, monkeypatch, injected_source
+):
+    """Every time the listing's ordering and reconciliation read is the
+    storefront's process source, never a read of the wall clock."""
+    runtime = _publishing_runtime(tmp_path, monkeypatch)
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _admin(app) as admin:
+            report = await admin.admin_run_lifecycle_cycle("publication")
+    (published,) = [item for item in report["actions"] if item["action"] == "publish"]
+
+    instant = datetime.fromtimestamp(injected_source.now(), timezone.utc).isoformat()
+    with sqlite3.connect(runtime.db.db_path) as conn:
+        stamped = conn.execute(
+            "SELECT l.created_at, l.updated_at, b.last_reconciled_at FROM listings l"
+            " JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id"
+            " WHERE l.listing_id = ?",
+            (str(published["listing_id"]),),
+        ).fetchone()
+    assert stamped == (instant, instant, instant)

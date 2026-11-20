@@ -3,9 +3,9 @@
 #
 # The inference end-to-end lane's own settings (`make test-e2e-inference`), over
 # config-docker.yml and config-payments-lane.yml: what compose.inference-lane.yml
-# alone declares, merged key by key into the `inference` section. The lane has
-# no payment scenario, since inference settles through Alkahest alone, so it
-# states no payments setting. Every value is a public deterministic development
+# alone declares, merged key by key into the `inference` section, and the lane's
+# time. The lane has no payment scenario, since inference settles through
+# Alkahest alone, so it states no payments setting. Every value is a public deterministic development
 # value, never for a public network; see dev-env/identities/README.md, "The
 # inference stack".
 # ---------------------------------------------------------------------------
@@ -24,3 +24,77 @@ inference:
   api_credits_registry_authority_id: "api-credits-registry"
   api_credits_registry_scheme:       "ed25519"
   api_credits_registry_identifier:   "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
+
+# The lane's time: its mode and every party it runs, each reached by its typed
+# client or control as tests/e2e/roles/helpers/lane_time.py builds it. A party
+# named here and not reachable fails the session's setup. The model stub is not
+# among them: it signs nothing and reads no time a party checks. Every
+# credential is a public development value restated from the lane's committed
+# configuration (config-docker.yml's inference, config-payments-lane.yml,
+# dev-env/registry/, compose.inference-lane.yml's inference operator, Anvil 9,
+# and gateway control token), never for a public network.
+lane_time:
+  mode: injected
+  target: "the inference Compose lane"
+  parties:
+    - name: inference-storefront
+      kind: storefront
+      url: "http://inference-storefront:8000"
+      admin_scheme: eip191
+      admin_credential: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      publisher_scheme: eip191
+      publisher_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+    - name: inference-service
+      kind: inference
+      url: "http://inference-service:8086"
+      admin_scheme: eip191
+      admin_credential: "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6"
+      authority_scheme: ed25519
+      authority_identifier: "nS5GC-Q7uZtXKg2sep2iHsmiDYQEx6KdmME6c4-ah6A"
+    - name: inference-registry
+      kind: registry
+      url: "http://inference-registry:8080"
+      authority_id: inference-registry
+      authority_scheme: ed25519
+      authority_identifier: "QpkX0mKYYK2PMdhAweeYEpDGzdX_htGTGmZq-L0e9r8"
+      caller_scheme: eip191
+      caller_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      admin_key: development-registry-admin-key
+    - name: compute-registry
+      kind: registry
+      url: "http://compute-registry:8080"
+      authority_id: compute-registry
+      authority_scheme: eip191
+      authority_identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+      caller_scheme: eip191
+      caller_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      admin_key: development-registry-admin-key
+    - name: api-credits-registry
+      kind: registry
+      url: "http://api-credits-registry:8080"
+      authority_id: api-credits-registry
+      authority_scheme: ed25519
+      authority_identifier: "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
+      caller_scheme: eip191
+      caller_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      admin_key: development-registry-admin-key
+    - name: payments-double
+      kind: control
+      url: "https://payments-double:8443"
+      token: payments-lane-double-control-public-development-token
+      ca_bundle_path: /run/lane-doubles/lane-ca.pem
+    - name: mediation-double
+      kind: control
+      url: "https://mediation-double:8443"
+      token: mediation-lane-double-control-public-development-token
+      ca_bundle_path: /run/lane-doubles/lane-ca.pem
+    - name: inference-gateway
+      kind: control
+      url: "http://inference-gateway:8090"
+      token: inference-gateway-lane-control-public-development-token
+    - name: anvil
+      kind: chain
+      url: "http://anvil:8545"
+    - name: buyer-file
+      kind: buyer
+      file: /tmp/arkhai-lane-time/now.json

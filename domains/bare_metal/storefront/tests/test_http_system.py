@@ -8,17 +8,22 @@ import sqlite3
 from datetime import datetime, timezone
 
 import httpx
+import injected_time
 import pytest
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from fastapi import Request
 from market_alkahest import AlkahestChainProbe, ProbedChain
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, Identity, TrustedIdentitySet
 
+from market_storefront_kit import StorefrontTimeRouteService
 from storefront_client import StorefrontClient
+from storefront_client.auth import build_authenticated_request
 from storefront_client.client import StorefrontClientError
 from storefront_client.models import HealthResponse
 
+from arkhai_bare_metal_storefront import api as storefront_api
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.lifecycle_steps import (
     PUBLICATION,
@@ -55,6 +60,7 @@ from test_publication_cycle import (
     member,
     pool,
     projections_over,
+    unresolvable,
 )
 
 
@@ -136,8 +142,8 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
         "host_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "access_methods": ["ssh"],
-        "max_duration_seconds": 7200,
     }
+    assert listing.max_duration_seconds == 7200
     assert listing_list.count == 1
     assert listing_list.listings[0].listing_id == "listing-1"
     assert missing.value.status_code == 404
@@ -180,6 +186,93 @@ async def test_pause_is_admin_authenticated_and_process_local(tmp_path) -> None:
         async with _admin_client(second_app) as admin:
             status = await admin.get_system_status()
     assert status.paused is False
+
+
+async def _skewed_admin_requests(
+    tmp_path, *, at: int
+) -> tuple[httpx.Response, httpx.Response, list[int], BareMetalStorefrontRuntime]:
+    """A time setting and a pause, each signed by the administrator at ``at``.
+
+    Raw requests, as a rejection-path test's are: the canonical client signs at
+    the process's instant, the storefront's own, and cannot send a request
+    signed at another, so these are built with its request builder and only
+    their statuses are asserted. Under injected time the storefront's own time
+    route answers; under wall time it mounts none, so a stand-in behind the
+    storefront's administrator authentication, which only this module's route
+    helpers reach, takes its path, counting its calls.
+    """
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+    calls: list[int] = []
+
+    async def set_time(request: Request) -> dict[str, int]:
+        await storefront_api._admin(
+            request=request,
+            runtime=storefront_api._runtime(request),
+            operation="admin_time",
+            resource="time",
+            body=await storefront_api._request_body(request),
+        )
+        calls.append(1)
+        return {"set": len(calls)}
+
+    if not StorefrontTimeRouteService().mounted:
+        app.add_api_route("/api/v1/admin/time", set_time, methods=["POST"])
+    setting = build_authenticated_request(
+        signer=ADMIN_SIGNER,
+        role="admin",
+        method="POST",
+        operation="admin_time",
+        resource="time",
+        body={"now": at},
+        timestamp=at,
+    )
+    pause = build_authenticated_request(
+        signer=ADMIN_SIGNER,
+        role="admin",
+        method="POST",
+        operation="admin_pause",
+        resource="",
+        timestamp=at,
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://seller"
+        ) as raw:
+            # The pause first: once the setting moves the time, an instant
+            # skewed from the old one may be fresh.
+            pause_response = await raw.post("/api/v1/admin/pause", headers=pause.headers)
+            set_response = await raw.post(
+                "/api/v1/admin/time", content=setting.content, headers=setting.headers
+            )
+    return set_response, pause_response, calls, runtime
+
+
+@pytest.mark.parametrize(("skew", "status"), ((900, 200), (-900, 409)))
+async def test_under_injected_time_the_time_setting_operation_alone_is_admitted_skewed(
+    tmp_path, injected_source, skew, status
+) -> None:
+    """Admitted either way: 900 s ahead sets the time, and 900 s behind is
+    refused only as an earlier instant, never for skew."""
+    start = injected_source.now()
+    setting, pause, _, runtime = await _skewed_admin_requests(tmp_path, at=start + skew)
+
+    assert setting.status_code == status, setting.text
+    assert setting.headers["X-Market-Signature"]
+    assert injected_source.now() == max(start, start + skew)
+    assert pause.status_code == 403
+    assert runtime.trading_pause.paused is False
+
+
+async def test_under_wall_time_the_time_setting_operation_keeps_its_freshness(
+    tmp_path,
+) -> None:
+    setting, _, calls, _ = await _skewed_admin_requests(
+        tmp_path, at=injected_time.now() + 900
+    )
+
+    assert setting.status_code == 403
+    assert calls == []
 
 
 async def _health(runtime: BareMetalStorefrontRuntime) -> HealthResponse:
@@ -755,13 +848,11 @@ async def test_status_reports_a_refused_generation_as_loaded_with_the_sites_hold
 async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
     tmp_path, monkeypatch
 ) -> None:
-    """A pool resolving no lease bound is reported held, by its reason, once a
-    cycle has run; a preview records nothing, so before that status reports no
-    derivation. Spec scenario "A bare-metal pool resolves no lease bound"."""
-    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
-    runtime = _derivation_runtime(
-        tmp_path, monkeypatch, sites, default_max_duration_seconds=None
-    )
+    """A pool whose declarations do not resolve is reported held, by its reason,
+    once a cycle has run; a preview records nothing, so before that status
+    reports no derivation."""
+    sites = {"site-a": Site(unresolvable("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites)
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
@@ -774,10 +865,13 @@ async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
 
     assert before == {} and previewed == {}
     (hold,) = status.publication_derivation["site-a"]["holds"]
-    assert hold == {"pool_id": "pool-1", "reason": "pool_lease_bound_missing"}
+    assert (hold["pool_id"], hold["reason"]) == ("pool-1", "pool_unresolvable")
+    assert hold["problems"]
     assert {name: loop["state"] for name, loop in status.lifecycle.items()} == {
+        "deal_servicing": "paused",
         "delivery_recovery": "paused",
         "negotiation_watchdog": "paused",
+        "payment_reconciliation": "paused",
         "publication": "paused",
         "settlement_servicing": "paused",
         "site_projection_poller": "paused",
@@ -844,7 +938,7 @@ async def test_a_cycle_failing_in_compose_leaves_the_last_derivation_in_status(
 ) -> None:
     """A cycle that fails before deriving a site leaves that site's last
     derivation, which status keeps reporting beside the failed outcome."""
-    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    sites = {"site-a": Site(unresolvable("pool-1", member("r1", "pool-1")))}
     composed = iter((True, False))
 
     def factory(runtime):
@@ -856,7 +950,6 @@ async def test_a_cycle_failing_in_compose_leaves_the_last_derivation_in_status(
         tmp_path,
         monkeypatch,
         sites,
-        default_max_duration_seconds=None,
         publication_cycle_factory=factory,
     )
     app = _app(runtime)
@@ -957,8 +1050,10 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             paused = await admin.admin_pause_lifecycle_loops()
             assert paused["paused"] is True
             assert paused["loops"] == {
+                "deal_servicing": "paused",
                 "delivery_recovery": "paused",
                 "negotiation_watchdog": "paused",
+                "payment_reconciliation": "paused",
                 "publication": "paused",
                 "settlement_servicing": "paused",
             }
@@ -976,8 +1071,10 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             assert resumed == {
                 "paused": False,
                 "loops": {
+                    "deal_servicing": "running",
                     "delivery_recovery": "running",
                     "negotiation_watchdog": "running",
+                    "payment_reconciliation": "running",
                     "publication": "running",
                     "settlement_servicing": "running",
                 },
@@ -1029,16 +1126,20 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
 
     assert started == [
         "alkahest_chain_probe",
+        "deal_servicing",
         "delivery_recovery",
         "negotiation_watchdog",
+        "payment_reconciliation",
         "publication",
         "settlement_servicing",
         "site_projection_poller",
     ]
     assert routes == {
         "alkahest-chain-probe": "alkahest_chain_probe",
+        "deal-servicing": "deal_servicing",
         "delivery-recovery": "delivery_recovery",
         "negotiation-watchdog": "negotiation_watchdog",
+        "payment-reconciliation": "payment_reconciliation",
         "publication": "publication",
         "settlement-servicing": "settlement_servicing",
         "site-projections": "site_projection_poller",
@@ -1047,16 +1148,21 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
     assert runtime.loops.registered_loop_names() == []
 
 
-async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_path) -> None:
+async def test_a_storefront_without_a_settlement_worker_steps_its_servicing_loop_idle(tmp_path) -> None:
+    """Both compute storefronts run the same four servicing loops whatever they
+    compose; with no settlement worker, a step of its loop sweeps nothing."""
     runtime = _runtime(str(tmp_path / "storefront.db"))
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
-        assert runtime.loops.registered_loop_names() == ["delivery_recovery", "negotiation_watchdog", "publication"]
+        assert runtime.loops.registered_loop_names() == [
+            "deal_servicing", "delivery_recovery", "negotiation_watchdog", "payment_reconciliation",
+            "publication", "settlement_servicing",
+        ]
         async with _admin_client(app) as admin:
-            with pytest.raises(StorefrontClientError) as refused:
-                await admin.admin_run_lifecycle_cycle("settlement-servicing")
-    assert refused.value.status_code == 404
+            await admin.admin_pause_lifecycle_loops()
+            stepped = await admin.admin_run_lifecycle_cycle("settlement-servicing")
+    assert stepped == {"loop": "settlement_servicing", "processed": 0}
 
 
 # A development identity; never used on any public network.

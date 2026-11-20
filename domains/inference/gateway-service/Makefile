@@ -1,5 +1,6 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath ../../../build-constraints.txt)),$(error ../../../build-constraints.txt not found))
 
 .PHONY: help install reinit test serve build clean
 
@@ -20,7 +21,7 @@ test: reinit ## Run the test suite
 	uv run --find-links $(DIST_DIR) pytest tests -q
 
 serve: ## Run the gateway locally
-	uv run --find-links $(DIST_DIR) uvicorn --factory inference_gateway_service.main:create_app --port 8090
+	uv run --find-links $(DIST_DIR) uvicorn --factory inference_gateway_service.main:configured_app --port 8090
 
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)

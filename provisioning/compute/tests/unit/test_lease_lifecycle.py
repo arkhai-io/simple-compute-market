@@ -272,16 +272,32 @@ async def test_the_releasing_pass_records_a_refused_compensation():
 
 
 @pytest.mark.asyncio
-async def test_a_transient_failure_to_begin_in_the_releasing_pass_is_retried():
+async def test_a_transient_failure_to_begin_in_the_releasing_pass_is_retried_within_the_grace():
+    """Within the grace a failed begin leaves the lease releasing for the next
+    cycle; once the grace has passed, a begin that still fails times it out."""
     site = FakeSiteAuthority(state="releasing")
-    site.reservations["alloc-1"]["release_job_id"] = "f-1"
+    reservation = site.reservations["alloc-1"]
+    reservation["release_job_id"] = "f-1"
+    reservation["release_requested_at"] = datetime.now(timezone.utc).isoformat()
     executor = ScriptedExecutor(_decision(ReleaseAction.TEARDOWN), teardown_fails=True)
     status = ScriptedStatus(ReleaseStatus(ReleaseProgress.READY_FOR_TEARDOWN))
+    lifecycle = _lifecycle(site, executor, status, grace=300)
 
-    summary = await _lifecycle(site, executor, status).check_leases()
+    summary = await lifecycle.check_leases()
 
     assert summary["skipped"] == 1
-    assert site.reservations["alloc-1"]["state"] == "releasing"
+    assert reservation["state"] == "releasing"
+
+    reservation["release_requested_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=301)
+    ).isoformat()
+    summary = await lifecycle.check_leases()
+
+    assert summary["release_failed"] == 1
+    assert (reservation["state"], reservation["failure_reason"]) == (
+        "release_failed",
+        "teardown_timeout",
+    )
 
 
 @pytest.mark.asyncio

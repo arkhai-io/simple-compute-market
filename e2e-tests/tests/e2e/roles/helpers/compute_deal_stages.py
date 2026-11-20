@@ -57,11 +57,11 @@ read its escrow there.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Protocol
 
+import injected_time
 from compute_provisioning_contracts import MockJobEvaluation
 
 from tests.e2e.roles.helpers.compute_deal import (
@@ -73,6 +73,7 @@ from tests.e2e.roles.helpers.compute_deal import (
 )
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
 from tests.e2e.roles.helpers.escrow import create_buyer_escrow
+from tests.e2e.roles.helpers.lane_time import LaneTime, wait_until
 
 log = logging.getLogger(__name__)
 
@@ -117,14 +118,14 @@ BUYER_MAX_PRICE = 12 * 10**18
 #:
 #: Bounded on both sides, which is why it is not simply "a long time ago". The
 #: lease must be past its end for the watchdog to begin releasing, but it must
-#: NOT be past `lease_watchdog_grace_period_seconds` (300s), because the release
-#: path marks `release_failed` the moment grace elapses with teardown
-#: unfinished — and a mock lane deliberately holds teardown at its gate from
-#: 11a until 11a2 releases it.
+#: NOT be past `lease_watchdog_grace_period_seconds` (the configured grace, 3600s
+#: in the charts' values), because the release path marks `release_failed` the
+#: moment grace elapses with teardown unfinished — and a mock lane deliberately
+#: holds teardown at its gate from 11a until 11a2 releases it.
 #: A back-date past grace would have the first cycle both dispatch the removal
 #: and time it out.
 #:
-#: One minute expires the lease and leaves roughly four minutes for the stages
+#: One minute expires the lease and leaves the rest of the grace for the stages
 #: from 10b to 11b, ample for a mock lane, whose stages make no network waits.
 E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
 
@@ -167,35 +168,18 @@ WINDOW_TOLERANCE = timedelta(seconds=1)
 #: the tolerance that a window starting at settlement could not pass for the
 #: Agreement's.
 LATE_SETTLEMENT = 3 * WINDOW_TOLERANCE
-#: The longest wait `wait_until` accepts, so a mistaken instant fails the stage
-#: rather than hanging the lane.
-MAX_CLOCK_WAIT = timedelta(minutes=2)
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+def reach_agreement_instant(lane_time: LaneTime | None, instant: datetime) -> datetime:
+    """Bring the lane to ``instant``, which the deal's Agreement fixes, and return it.
 
-
-def wait_until(instant: datetime, *, now=_utc_now, sleep=time.sleep) -> datetime:
-    """Wait for the wall clock to reach ``instant``, and return the time it did.
-
-    The one wait a stage makes that is not on a request it made, and only for
-    an instant the deal's Agreement fixes: no loop control moves the clock, so
-    a deal that must be late, or must reach its start, waits for the instant
-    itself, and the stage then advances whatever acts on it explicitly. It
-    never waits for a loop to have run.
+    An injected run sets lane time there; a wall run, or one whose profile names
+    no lane parties, waits for the wall clock to reach it.
     """
-    remaining = instant - now()
-    assert remaining <= MAX_CLOCK_WAIT, (
-        f"refusing to wait {remaining} for {instant.isoformat()}; the bound is "
-        f"{MAX_CLOCK_WAIT}"
-    )
-    # A sleep may return slightly before the wall clock reaches the instant,
-    # so it is repeated for whatever remains.
-    while remaining > timedelta(0):
-        sleep(remaining.total_seconds())
-        remaining = instant - now()
-    return now()
+    if lane_time is None:
+        return wait_until(instant)
+    reached = lane_time.reach(int(instant.timestamp()), fixed_by_agreement=True)
+    return datetime.fromtimestamp(reached, timezone.utc)
 
 
 def utc_instant(value: Any) -> datetime:
@@ -209,7 +193,7 @@ def utc_instant(value: Any) -> datetime:
 def _expired_lease_end() -> str:
     """A lease end the watchdog reads as expired but still inside its grace."""
     return (
-        datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+        injected_time.now_datetime() - E2E_LEASE_EXPIRY_BACKDATE
     ).isoformat().replace("+00:00", "Z")
 
 
@@ -925,7 +909,7 @@ class Stage05b_NegotiationStartsAndVisible:
         # created on chain. Left to the client's default, each side computes
         # "now + an hour" at a different moment and settlement verification
         # refuses the attestation over a one-second difference.
-        deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+        deal_state._escrow_expiration_unix = injected_time.now() + ESCROW_TTL_SECONDS
 
         # The listing's one Alkahest option, which the domain's opening names
         # where its storefront needs the selection stated explicitly, and the
@@ -1247,7 +1231,7 @@ class Stage08c_EvaluateProvisioningJob(MockLaneStage):
 class Stage08b_SettlementSubmittedAndJobQueued:
     def test_08b_settlement_submitted_and_provisioning_job_queued(
         self, storefront_client, storefront_admin_client, provisioning_client, buyer_config,
-        deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
+        deal_driver: ComputeDealDriver, deal_state: ComputeDealState, lane_time,
     ):
         """Settlement submitted + fulfillment dispatched — advance + observe.
 
@@ -1265,9 +1249,10 @@ class Stage08b_SettlementSubmittedAndJobQueued:
         passed (``_settle_preflight_passed``).
 
         The deal settles late, after its Agreement start, which is its
-        acceptance: settlement waits until the start is ``LATE_SETTLEMENT``
-        behind, since the dev chain funds an escrow within a second of
-        acceptance and a lease window is kept to the second. 09c and 09c1 then
+        acceptance: the lane is brought to ``LATE_SETTLEMENT`` past the start
+        first, by setting lane time or, on wall time, by waiting, since the dev
+        chain funds an escrow within a second of acceptance and a lease window is
+        kept to the second. 09c and 09c1 then
         check that delivery committed the Agreement's window rather than one
         starting when settlement arrived.
         """
@@ -1281,7 +1266,8 @@ class Stage08b_SettlementSubmittedAndJobQueued:
         events_since = latest_stage_event_id(
             storefront_admin_client, negotiation_id=deal_state.negotiation_id
         )
-        deal_state._settled_at = wait_until(deal_state.agreement_start + LATE_SETTLEMENT)
+        deal_state._settled_at = reach_agreement_instant(
+            lane_time, deal_state.agreement_start + LATE_SETTLEMENT)
         settle_resp = storefront_client.settle_evm(
             deal_state.real_escrow_uid,
             negotiation_id=deal_state.negotiation_id,

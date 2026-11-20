@@ -15,11 +15,12 @@ and resolving are distinct because a run can be denied a call and still end with
 question or a proposed return: its denials are read first, and its outcome is
 answered or decided after. This module is the log's only writer.
 
-A run's line may carry `invoked`: each hook, part, and command the run invoked
-through `run` or the guarded push, with its owed workflow and phase where it has
-them, the command it resolved to, its exit status, when it started, and how long it
-took. The field is optional, so a line without it reads as before and the record
-set's format does not move.
+A run's line may carry `invoked`: each hook, kind, and command the run invoked
+through `run`, `gather`, the guarded push, or the actions and hooks around its
+session, with its owed argument and phase where it has them, the command it
+resolved to, its exit status, when it started, and how long it took; and `inputs`,
+its inputs directory relative to the change's records. Both fields are optional, so
+the record set's format does not depend on them.
 
 A finished merge's or archive cleanup's outcome carries `landing`, the remote,
 branch, and commit the run fetched, which the writer checks against the checkout
@@ -544,11 +545,13 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
 
 def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                        commit: str | None, invoked: Sequence[Entry] = (),
-                       checkout: Checkout | None = None, clock: Clock = utc_now) -> Entry:
+                       checkout: Checkout | None = None, inputs: str | None = None,
+                       clock: Clock = utc_now) -> Entry:
     """Append the outcome of a step the owner ran interactively, which records its
     own: checked as the wrapper checks an unattended run's, a finished merge's or
     archive cleanup's landing record against the `checkout` it ran in included, and
-    marked `interactive`, with what the session `invoked`, when it invoked anything.
+    marked `interactive`, with what the session `invoked`, when it invoked anything,
+    and its `inputs` directory, when it had one.
 
     A triage's finished or returned outcome is refused unless it names the records
     it triaged (`triage_outcome_problems`), as the wrapper records such a run
@@ -566,7 +569,8 @@ def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                         + "; ".join(problems))
     return record_outcome(path, step, outcome, session=session, commit=commit,
                           extra={"interactive": True,
-                                 **({"invoked": list(invoked)} if invoked else {})},
+                                 **({"invoked": list(invoked)} if invoked else {}),
+                                 **({"inputs": inputs} if inputs else {})},
                           checkout=checkout, clock=clock)
 
 
@@ -611,11 +615,17 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     landing between rounds, a design revision among them, are not the round's.
 
     A round recorded while the latest round is still open — no implementation
-    triage has finished or returned since it — over sections that round already
-    names continues it: an owner's direction, or a plan amended mid-round, names
-    only the sections left, and the round's reading, validation, and review must
-    still cover the sections already done. Such a line keeps the open round's
-    `after` and `commit` and names it as `continues`.
+    triage has finished or returned since it — continues it, whatever sections it
+    names: an owner's direction names only the sections left, and a plan amended
+    mid-round, after a return to design or planning, may split or renumber them,
+    yet everything committed since the open round's base is still untriaged, and
+    its reading, validation, and review must cover it. Such a line keeps the open
+    round's `after` and `commit` and names it as `continues`.
+
+    `carries` names the owner records numbered at or below `after` that no triage
+    has read: notes the owner wrote while no review awaited a triage, on a
+    triage's fixes or a re-plan. The round's triage reads them beside its own
+    records; they are never the round's reading.
     """
     if not section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
@@ -625,23 +635,40 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     if after is not None and (isinstance(after, bool) or not isinstance(after, int)
                               or after < 0):
         raise StepError(f"a round's after is a record number; got {after!r}")
-    continued = _open_round(path, sections) if after is None else None
+    continued = _open_round(path) if after is None else None
     if continued is not None:
         return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
                                    "sections": sections, "by": by,
                                    "after": continued["after"],
                                    **({"commit": continued["commit"]}
                                       if continued.get("commit") else {}),
+                                   **({"carries": continued["carries"]}
+                                      if continued.get("carries") else {}),
                                    "continues": continued["seq"]}, clock)
+    if after is None:
+        after = next_number(path.parent) - 1
+    carries = untriaged_owner_notes(path.parent, after)
     return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
-                               "sections": sections, "by": by,
-                               "after": next_number(path.parent) - 1 if after is None
-                               else after, **({"commit": commit} if commit else {})}, clock)
+                               "sections": sections, "by": by, "after": after,
+                               **({"carries": carries} if carries else {}),
+                               **({"commit": commit} if commit else {})}, clock)
 
 
-def _open_round(path: Path, sections: Any) -> Entry | None:
-    """The latest round, when it is still open and names every section in
-    `sections`; otherwise None."""
+def untriaged_owner_notes(reviews: Path, after: int) -> list[int]:
+    """The numbers of the owner records in `reviews` numbered at or below `after`
+    with no triage file beside them."""
+    if not reviews.is_dir():
+        return []
+    return sorted(int(match.group(1)) for entry in reviews.iterdir()
+                  if entry.name.endswith("-implementation-owner.md")
+                  and (match := NUMBERED.match(entry.name))
+                  and int(match.group(1)) <= after
+                  and not entry.with_name(entry.name[:-3] + ".triage.md").is_file())
+
+
+def _open_round(path: Path) -> Entry | None:
+    """The latest round, when it is still open: no implementation triage has
+    finished or returned since it. None otherwise."""
     entries = read_log(path) if path.exists() else []
     latest = next((e for e in reversed(entries) if e.get("outcome") == "round"), None)
     if latest is None or not isinstance(latest.get("after"), int):
@@ -649,9 +676,7 @@ def _open_round(path: Path, sections: Any) -> Entry | None:
     if any(e["seq"] > latest["seq"] and e.get("outcome") in ("finished", "returned")
            and ran(IMPLEMENTATION_TRIAGE, e, entries) for e in entries):
         return None
-    named = {str(s) for session in latest.get("sections") or () for s in session}
-    wanted = {str(s) for session in sections for s in session}
-    return latest if wanted <= named else None
+    return latest
 
 
 def _row_archived(directory: Path) -> bool:
@@ -776,7 +801,8 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
                       sections: list[list[int | str]] | None = None,
                       target: str | None = None,
                       branch: str | None = None, change: str | None = None,
-                      resumes: int | None = None, clock: Clock = utc_now) -> Entry:
+                      resumes: int | None = None, waives: Sequence[str] | None = None,
+                      clock: Clock = utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
@@ -810,20 +836,24 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     run, which `Wrapper.resume` then resumes once with the owner's words; it is
     refused unless that run is the latest triage of the reviews it triaged
     (`revisit_refusal`). It routes nothing: the resumed triage's outcome does.
+    `waives` names the evidence kinds the owner waives for later validations, on
+    the condition the decision states; it directs nothing, and validation reads it
+    through `waived_kinds`, judging whether the condition still holds.
     """
     if next_step is None and (kind, sections, target) != (None, None, None):
         raise StepError("a kind, sections, or target qualify the step a decision directs")
     directed = direction(next_step, kind, sections, target) if next_step is not None else None
     line = decision_line(path, read_log(path), decision, reason, by=by, resolves=resolves,
                          reads=reads, directs=directed, branch=branch, change=change,
-                         resumes=resumes)
+                         resumes=resumes, waives=waives)
     return append_entry(path, line, clock)
 
 
 def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: str, *,
                   by: str, resolves: int | None = None, reads: int | None = None,
                   directs: Entry | None = None, branch: str | None = None,
-                  change: str | None = None, resumes: int | None = None) -> Entry:
+                  change: str | None = None, resumes: int | None = None,
+                  waives: Sequence[str] | None = None) -> Entry:
     """The decision `note_orchestrator` records, checked against `entries`, the lines
     of the log at `path` it would follow, and not yet numbered: `directs` is the
     target of the owner's direction. A line that breaks a rule raises, naming it."""
@@ -862,6 +892,14 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
         if refusal := revisit_refusal(entries, resumes):
             raise StepError(f"the revisit is refused: {refusal}")
         line["resumes"] = resumes
+    if waives is not None:
+        if by != "owner":
+            raise StepError("a waiver of validation's evidence kinds is the owner's")
+        if directs is not None:
+            raise StepError("a waiver of validation's evidence kinds directs no step")
+        if not waives or not all(isinstance(p, str) and p for p in waives):
+            raise StepError(f"a waiver names one or more evidence kinds; got {list(waives)!r}")
+        line["waives"] = list(waives)
     if directs is not None:
         if by != "owner":
             raise StepError("a decision directing a step is the owner's; the orchestrating "
@@ -874,6 +912,16 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
             raise StepError(f"the direction is refused: {refusal}")
         line["next"] = directs
     return line
+
+
+def waived_kinds(entries: Sequence[Entry]) -> dict[str, Entry]:
+    """Each evidence kind the owner waived, with the latest decision waiving it."""
+    waived: dict[str, Entry] = {}
+    for entry in entries:
+        if entry.get("by") == "owner" and isinstance(entry.get("waives"), list):
+            for kind in entry["waives"]:
+                waived[kind] = entry
+    return waived
 
 
 def after_cleanup(entry: Entry, entries: Sequence[Entry]) -> bool:

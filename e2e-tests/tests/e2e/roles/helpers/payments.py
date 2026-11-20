@@ -10,6 +10,12 @@ the runner's environment. The buyer reads its key from the variable its
 configuration's ``api_key_env`` names, so the harness hands the key to each
 buyer it runs under that name: to a ``market`` process in its environment, and
 to an in-process payments client as the environment it resolves the key from.
+
+A lane's payments double also holds a second payer, PAYMENTS.RATE_PAYER_ACCOUNT
+with its key PAYMENTS.RATE_PAYER_API_KEY, funded with nothing at start, so a
+scenario can give a payer exactly the balance it needs, as funds running out
+does; the shared buyer's balance is far larger than any deal spends. The key
+handed to a buyer is the one the run states for the payer it pays from.
 """
 
 import os
@@ -176,11 +182,23 @@ def configured_payments(
     return config
 
 
-def buyer_payments_environment(config: ArkhaiPaymentsConfig) -> dict[str, str]:
-    """The buyer's bearer key under the variable its configuration names, for
-    the buyer processes and clients the harness runs; empty when the run states
-    no key or the buyer uses development authentication."""
-    key = str(payment_setting("BUYER_API_KEY"))
+def payer_api_key(payer: str | None) -> str:
+    """The bearer key the run states for ``payer``: the rate payer's for
+    PAYMENTS.RATE_PAYER_ACCOUNT, and the buyer's for any other payer or none."""
+    rate_payer = str(payment_setting("RATE_PAYER_ACCOUNT"))
+    if payer and rate_payer and payer == rate_payer:
+        return str(payment_setting("RATE_PAYER_API_KEY"))
+    return str(payment_setting("BUYER_API_KEY"))
+
+
+def buyer_payments_environment(
+    config: ArkhaiPaymentsConfig, payer: str | None = None,
+) -> dict[str, str]:
+    """The bearer key of ``payer`` (``payer_api_key``) under the variable the
+    buyer's configuration names, for the buyer processes and clients the
+    harness runs; empty when the run states no key or the buyer uses
+    development authentication."""
+    key = payer_api_key(payer)
     if config.development_auth or not config.api_key_env or not key:
         return {}
     return {config.api_key_env: key}
@@ -192,13 +210,13 @@ def buyer_payments_client(
     *,
     transport: httpx.BaseTransport | None = None,
 ) -> PaymentsClient:
-    """A payments client acting as the buyer account `owner`, its key resolved
+    """A payments client acting as the payer account `owner`, its key resolved
     from `buyer_payments_environment` over the runner's own environment, so a
     key the settings state needs no variable in the runner's process."""
     return payments_client_for_owner(
         config,
         owner,
-        environment={**os.environ, **buyer_payments_environment(config)},
+        environment={**os.environ, **buyer_payments_environment(config, owner)},
         transport=transport,
     )
 

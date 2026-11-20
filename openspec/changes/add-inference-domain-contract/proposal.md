@@ -157,7 +157,7 @@ them.
   negotiation carriers bound from `arkhai-api-contracts`), two API-credits
   storefront tests that sent a string quantity,
   `manifests/published-distributions.json`, `.github/workflows/publish-pypi.yml`
-  and `docs/development/RELEASING.md` (the wheel's release rows), `core/registry/Dockerfile` (one `COPY` per stage),
+  and `docs/guidance/repository/published-packages.md` (the wheel's release rows), `core/registry/Dockerfile` (one `COPY` per stage),
   `core/registry/tests/unit/test_filter_spec.py` (a load test beside
   `test_repo_api_credits_spec_loads`), `domains/Makefile`
   (`dist-inference-domain`, `test-inference`), and the root `Makefile`'s

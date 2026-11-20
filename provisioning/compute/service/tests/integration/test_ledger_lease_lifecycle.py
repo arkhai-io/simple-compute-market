@@ -13,11 +13,16 @@ convergence would leave it.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import injected_time
 import pytest
+from compute_provisioning import JobExecutorTable, TeardownRerunPolicy
+from compute_provisioning.jobs import JobRetryPolicy
 from compute_provisioning.jobs.db import Base as JobsBase
+from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
@@ -26,6 +31,7 @@ from compute_provisioning.release import (
     FulfillmentServiceTeardownPort,
 )
 from compute_provisioning_contracts import LeaseForceRelease
+from injected_time import InjectedTime
 from market_fulfillment import (
     FulfillmentBase,
     FulfillmentOrchestrator,
@@ -42,7 +48,7 @@ from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from market_site.authority import LedgerSiteAuthority
-from market_site.db import Base as SiteBase, CapacityReservation
+from market_site.db import Base as SiteBase, CapacityReservation, LeaseEndedEvent
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -212,6 +218,17 @@ def _settings(**overrides):
     return s
 
 
+def _job_engine(session_factory) -> JobEngine:
+    """The job authority over these tables, read by the release status for a
+    reservation's teardown jobs; no job runs here."""
+    executors = JobExecutorTable()
+    executors.freeze()
+    return JobEngine(
+        session_factory, executors=executors, host_lookup=lambda host_id: None,
+        retry_policy=JobRetryPolicy(),
+    )
+
+
 def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_overrides):
     """The lifecycle as the service composes it, over these tables."""
     fulfillment_service = fulfillment_service or _fulfillment_service(session_factory)
@@ -233,6 +250,10 @@ def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_
         release_status=FulfillmentReleaseStatusPort(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
+            rerun_policy=TeardownRerunPolicy(
+                teardown_rerun_limit=3, retry_policy=JobRetryPolicy()
+            ),
+            jobs=_job_engine(session_factory),
         ),
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
@@ -377,6 +398,60 @@ async def test_a_lease_nothing_was_dispatched_for_is_released_directly(session_f
     assert summary["released"] == 1
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
     sf.notify_capacity_released.assert_awaited_once()
+
+
+#: The instant the lease the injected-time test commits ends at.
+_LEASE_END = 1794822300
+
+
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, injected a second before ``_LEASE_END``."""
+    before = injected_time.installed()
+    installed = InjectedTime(start=_LEASE_END - 1)
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
+
+
+@pytest.mark.asyncio
+async def test_a_lease_is_due_only_once_the_process_s_time_reaches_its_end(
+    session_factory, ledger, source
+):
+    """The watchdog's due check and its expiry classification read the process's
+    time source: a lease ending at an instant is left running until the source
+    reaches it, then ends by expiry, dated by its stored end."""
+    reserved = ledger.reserve(
+        claim={"offering_mode": VM_OFFERING_MODE, "gpu_count": 2, "host_id": "kvm1"},
+        deal_ref={"escrow_uid": "0xinjected"},
+    )
+    capacity_reservation_id = reserved["capacity_reservation_id"]
+    end = datetime.fromtimestamp(_LEASE_END, timezone.utc)
+    ledger.commit(
+        capacity_reservation_id=capacity_reservation_id,
+        lease_start_utc=(end - timedelta(hours=1)).isoformat(),
+        lease_end_utc=end.isoformat(),
+    )
+    svc = _lifecycle(session_factory, ledger)
+
+    held = await svc.force_check_leases()
+    assert (held["checked"], held["released"]) == (0, 0)
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "leased"
+
+    source.set(_LEASE_END)
+    sf = _storefront()
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf):
+        summary = await svc.force_check_leases()
+
+    assert summary["released"] == 1
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
+    with session_factory() as db:
+        (ended,) = db.query(LeaseEndedEvent).filter_by(
+            capacity_reservation_id=capacity_reservation_id
+        ).all()
+    assert (ended.payload["cause"], ended.payload["effective_at"], ended.payload["claimed_deadline"]) == (
+        "expiry", _LEASE_END, _LEASE_END,
+    )
 
 
 @pytest.mark.asyncio

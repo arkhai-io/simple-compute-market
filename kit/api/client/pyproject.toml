@@ -4,10 +4,12 @@ version = "0.1.0"
 license = "MIT"
 description = "The api family authority's typed client, binding and signing each request from the contracts' route declarations."
 requires-python = ">=3.12,<3.14"
-# The contracts, the identity kit, and an HTTP library: a caller signs and
-# verifies against the authority without installing the authority.
+# The contracts, the identity kit, the process time source, and an HTTP
+# library: a caller signs and verifies against the authority without
+# installing the authority.
 dependencies = [
     "arkhai-api-contracts>=0.2.0",
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-identity>=0.4.0",
     "httpx>=0.27",
 ]
@@ -45,4 +47,8 @@ dev = [
 # beyond the standard library, because its lightness is part of its contract.
 # make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-api-contracts", "arkhai-kit-identity", "httpx"]
+allowed-dependencies = ["arkhai-api-contracts", "arkhai-injected-time", "arkhai-kit-identity", "httpx"]
+
+# The time component's import name differs from its distribution's.
+[tool.arkhai.architecture.import-roots]
+injected_time = "arkhai-injected-time"

@@ -17,7 +17,11 @@ from compute_provisioning.startup import (
     stop_compute_provisioning_runtime,
 )
 
-from compute_provisioning_contracts import PrincipalRotationResponse
+import injected_time
+from compute_provisioning_contracts import (
+    PROVISIONING_TIME_OPERATION,
+    PrincipalRotationResponse,
+)
 from market_identity import RotationRequest
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
@@ -33,7 +37,10 @@ from compute_provisioning_service.route_table import assemble_service_route_tabl
 from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController
 from compute_provisioning_service.controllers.pools_controller import PoolController
 from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController
-from compute_provisioning_service.controllers.system_controller import make_system_routers
+from compute_provisioning_service.controllers.system_controller import (
+    make_system_routers,
+    make_time_router,
+)
 from compute_provisioning_service.services.principal_authority import (
     PrincipalRotationError,
 )
@@ -64,11 +71,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# The process's time source, installed before the application is built and
+# before anything reads the time: `time.source`, "wall" unless set "injected";
+# any other value refuses startup naming the setting and the value.
+injected_time.install(
+    injected_time.source_for(
+        injected_time.WALL
+        if settings.configured_time_source is None
+        else settings.configured_time_source,
+        setting="time.source",
+    )
+)
+
+
+def announce_time_source(source: injected_time.TimeSource) -> None:
+    """Log an injected source at startup; a wall-time service logs nothing here."""
+    if source.name == injected_time.INJECTED:
+        logger.info(
+            '[STARTUP] time.source is "injected": time is held at %s until set '
+            "through POST /api/v1/system/time",
+            source.now(),
+        )
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("Starting provisioning service...")
+    announce_time_source(injected_time.installed())
 
     runtime = await start_compute_provisioning_runtime(
         startup_steps=app_runtime.startup_steps(),
@@ -264,6 +293,7 @@ app = build_compute_provisioning_app(
                 "max_timestamp_skew": int(
                     getattr(settings, "identity_max_timestamp_skew_seconds", 300)
                 ),
+                "time_setting_operation": PROVISIONING_TIME_OPERATION,
             },
         ),
         ComputeProvisioningMiddlewareMount(
@@ -320,6 +350,12 @@ async def rotate_provisioning_principal(
     except PrincipalRotationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+# The time-setting route, mounted only while the source installed above is
+# injected: a wall-time service serves no such route, and its time is changed
+# only by reconfiguring and restarting it.
+if injected_time.TimeRouteService(injected_time.installed()).settable:
+    app.include_router(make_time_router())                                           # /api/v1/system/time
 
 # Test controller — only mounted when mock profile is active.
 # Never present in production or staging.

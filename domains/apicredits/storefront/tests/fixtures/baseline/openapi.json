@@ -634,6 +634,18 @@
               }
             ],
             "title": "Storefront Domains"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
           }
         },
         "required": [
@@ -734,6 +746,17 @@
               }
             ],
             "title": "Accepted Escrows"
+          },
+          "available_until_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Until Utc"
           },
           "demands": {
             "anyOf": [
@@ -1005,6 +1028,18 @@
           "buyer_principal": {
             "$ref": "#/components/schemas/Identity"
           },
+          "pricing_pin": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Pin"
+          },
           "proposal": {
             "anyOf": [
               {
@@ -1016,6 +1051,17 @@
               }
             ],
             "title": "Proposal"
+          },
+          "rate_structure_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Structure Digest"
           },
           "reason": {
             "anyOf": [
@@ -1177,6 +1223,18 @@
             "title": "Negotiation Id",
             "type": "string"
           },
+          "pricing_pin": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Pin"
+          },
           "proposal": {
             "anyOf": [
               {
@@ -1188,6 +1246,17 @@
               }
             ],
             "title": "Proposal"
+          },
+          "rate_structure_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Structure Digest"
           },
           "reason": {
             "anyOf": [

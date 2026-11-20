@@ -8,10 +8,12 @@ only a real server can show, are in ``test_faults.py``.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
+from injected_time import WallTime
 
-from lane_double_controls import ControlError, Rule
+from lane_double_controls import ControlError, Rule, TimeView
 from market_arkhai_payments.contracts import get_contract
 from market_arkhai_payments.receipts import (
     ReceiptIdentity,
@@ -20,7 +22,8 @@ from market_arkhai_payments.receipts import (
     verify_snapshot,
 )
 
-from support import AGREEMENT, PAYER, T0, UNKNOWN, Lane, available, mandate, refusal
+from support import AGREEMENT, HOUR, PAYER, T0, UNKNOWN, Lane, available, mandate, refusal
+from test_double import event, once_terms, rate_terms, snapshot, started, stopper
 
 
 @pytest.fixture
@@ -102,34 +105,154 @@ def test_signer_rotation_signs_later_receipts_and_snapshots_with_the_second_key(
                               agreement_json=AGREEMENT, livemode=False)
 
 
-def test_status_reports_the_perceived_now_and_the_installed_contract_hashes(lane: Lane) -> None:
+# --- the reservation control ------------------------------------------------------
+#
+# The rate part of ``test_double``: 1000 minor units an hour, reserving two hours
+# ahead, so an approval at T0 reserves two periods and a start one more from a
+# funded payer. Here it ends at ``END``, six periods after the start.
+
+END = T0 + 6 * HOUR
+
+
+def ending_rate(lane: Lane, *, payer: str, nonce: str,
+                stop: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return rate_terms(lane, payer=payer, nonce=nonce, stop=stop,
+                      end={"at": END, "partialPeriod": "returned"})
+
+
+def test_a_rate_part_is_reserved_one_period_further_to_the_signed_funded_boundary(
+        lane: Lane) -> None:
+    with lane.controls() as controls:
+        # The approval's two periods, the start's one, and one period beyond.
+        controls.fund(PAYER[0], 4 * 1000)
+        transaction = started(lane, ending_rate(lane, payer="payer", nonce="reserve-one"),
+                              payer=PAYER)
+        assert snapshot(lane, transaction)["fundedThrough"] == T0 + 3 * HOUR
+
+        reserved = controls.reserve(transaction, END)
+
+        assert (reserved.transaction, [part.model_dump() for part in reserved.parts]) == (
+            transaction, [{"part": 0, "reserved_through": T0 + 4 * HOUR, "periods_added": 1}])
+        signed = lane.client("seller").get_transaction(transaction)
+        terms = ending_rate(lane, payer="payer", nonce="reserve-one")
+        assert verify_snapshot(signed, lane.directory.receipt_identity, mandate=terms,
+                               agreement_json=AGREEMENT, livemode=False)
+        assert signed.snapshot.fundedThrough == T0 + 4 * HOUR
+        # Once injected time reaches the boundary the payer's funds have run out.
+        controls.set_time(T0 + 4 * HOUR)
+    [part] = snapshot(lane, transaction)["parts"]
+    assert (part["stop"]["cause"], part["stop"]["effectiveAt"]) == ("terms", T0 + 4 * HOUR)
+
+
+def unstarted(lane: Lane) -> str:
+    terms = ending_rate(lane, payer="buyer", nonce="reserve-unstarted")
+    lane.client("buyer").approve(terms)
+    return transaction_id(terms)
+
+
+def once_only(lane: Lane) -> str:
+    terms = once_terms(lane, nonce="reserve-once")
+    lane.client("buyer").approve(terms)
+    return transaction_id(terms)
+
+
+def stopped(lane: Lane) -> str:
+    transaction = started(lane, ending_rate(
+        lane, payer="buyer", nonce="reserve-stopped", stop=[stopper(lane.account("buyer"), "PT0S")]))
+    event(lane, "buyer", transaction, {"kind": "stop"}, "payer-stop")
+    return transaction
+
+
+@pytest.mark.parametrize("make", [unstarted, once_only, stopped],
+                         ids=["unstarted", "once-only", "stopped"])
+def test_a_reservation_is_refused_when_no_rate_part_runs(lane: Lane, make: Any) -> None:
+    transaction = make(lane)
+    before = snapshot(lane, transaction)
+
+    with lane.controls() as controls:
+        assert refused(controls.reserve, transaction, END) == (409, "no_running_rate_part")
+
+    assert snapshot(lane, transaction) == before
+
+
+def test_a_reservation_of_an_unknown_transaction_is_not_found(lane: Lane) -> None:
+    with lane.controls() as controls:
+        assert refused(controls.reserve, "f" * 64, END) == (404, "transaction_not_found")
+
+
+@pytest.mark.parametrize(("transaction", "body"), [
+    ("not-a-transaction", {"through": END}),
+    (None, {"through": "soon"}),
+], ids=["malformed-transaction", "malformed-body"])
+def test_a_malformed_reservation_is_refused_with_nothing_changed(
+        lane: Lane, transaction: str | None, body: dict[str, object]) -> None:
+    started_transaction = started(lane, ending_rate(lane, payer="buyer", nonce="reserve-malformed"))
+    before = snapshot(lane, started_transaction)
+    # Rejection path: the typed client cannot build these requests, so each is
+    # sent by hand; only the status and code are read.
+    answer = lane.http.post(
+        f"/test/transactions/{transaction or started_transaction}/reserve", json=body,
+        headers={"Authorization": f"Bearer {lane.directory.control_token}"})
+
+    assert (answer.status_code, answer.json()["code"]) == (422, "invalid_request")
+    assert snapshot(lane, started_transaction) == before
+
+
+def test_a_rate_part_is_not_reserved_unasked(lane: Lane) -> None:
+    # The shared buyer's balance funds far more than the first reservation.
+    transaction = started(lane, ending_rate(lane, payer="buyer", nonce="reserve-unasked"))
+    with lane.controls() as controls:
+        controls.set_time(T0 + 5 * HOUR)
+
+    [part] = snapshot(lane, transaction)["parts"]
+    assert (part["stop"]["cause"], part["stop"]["effectiveAt"]) == ("terms", T0 + 3 * HOUR)
+
+
+def test_status_reports_the_injected_now_and_the_installed_contract_hashes(lane: Lane) -> None:
     metadata = get_contract().metadata
 
     with lane.controls() as controls:
         status = controls.status()
 
-    assert (status.perceived_now, status.offset_seconds) == (T0, 0)
+    assert status.time == TimeView(source="injected", now=T0)
     assert status.contracts == {
         "schema/payments.schema.json": metadata["schema_sha256"],
         "test-vectors/payments.json": metadata["vectors_sha256"],
     }
 
 
-def test_the_clock_advances_and_resets_to_wall_time(lane: Lane) -> None:
+def test_the_time_is_set_forward_and_held_there(lane: Lane) -> None:
     with lane.controls() as controls:
-        assert controls.advance_clock(3_600).perceived_now == T0 + 3_600
-        lane.clock.now = T0 + 10
-        assert controls.status().perceived_now == T0 + 3_610
+        assert controls.set_time(T0 + 3_600) == TimeView(source="injected", now=T0 + 3_600)
+        assert controls.status().time.now == T0 + 3_600
+        # Setting the instant already held succeeds and changes nothing.
+        assert controls.set_time(T0 + 3_600).now == T0 + 3_600
 
-        reset = controls.reset_clock()
-
-    assert (reset.perceived_now, reset.offset_seconds) == (T0 + 10, 0)
+    assert lane.time.now() == T0 + 3_600
 
 
-def test_admission_reads_the_perceived_clock(lane: Lane) -> None:
+@pytest.mark.parametrize(("now", "expected"), [
+    (T0 - 1, (409, "time_moves_forward")),
+    (True, (422, "invalid_time")),
+])
+def test_a_refused_setting_changes_nothing(lane: Lane, now: int,
+                                           expected: tuple[int, str]) -> None:
+    with lane.controls() as controls:
+        assert refused(controls.set_time, now) == expected
+        assert controls.status().time.now == T0
+
+
+def test_a_wall_time_double_serves_no_time_route() -> None:
+    lane = Lane(source=WallTime(wall=lambda: T0))
+    with lane.http, lane.controls() as controls:
+        assert controls.status().time == TimeView(source="wall")
+        assert refused(controls.set_time, T0 + 60) == (404, "invalid_request")
+
+
+def test_admission_reads_the_injected_time(lane: Lane) -> None:
     terms = mandate(lane)
     with lane.controls() as controls:
-        controls.advance_clock(terms["expires"] - T0)
+        controls.set_time(terms["expires"])
 
     assert refusal(lane.client("buyer").approve, terms) == (409, "mandate_expired")
 

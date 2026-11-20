@@ -29,6 +29,7 @@ from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.relays import (
     DEFAULT_GRANT_EXPIRY_GRACE,
     DEFAULT_PORT_REUSE_MARGIN,
+    RelayDeliverableHosts,
     RelayExecutionResolver,
     RelayPortAllocator,
     RelayReconciliationSchedule,
@@ -63,7 +64,7 @@ from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
 from compute_provisioning.jobs.queue import AsyncJobQueue
-from compute_provisioning import ReleaseEffects, compose_adapter_bundles
+from compute_provisioning import ReleaseEffects, TeardownRerunPolicy, compose_adapter_bundles
 from compute_provisioning_service.services.deal_event_sink import (
     SqlAlchemyCapacityReleaseOutbox,
     StorefrontLifecycleEventSink,
@@ -284,6 +285,20 @@ def _make_job_engine(session_factory, job_executors, host_authority, cfg):
     )
 
 
+def _make_teardown_rerun_policy(cfg) -> TeardownRerunPolicy:
+    """The one rerun policy both domains' providers dispatch by and the release
+    status reads, so whether a rerun is pending is judged alike by both.
+
+    Spaced by the job retry policy. A negative ``teardown_rerun_limit`` is
+    refused, naming the setting; startup composes the providers and the
+    release status, so the refusal stops the service.
+    """
+    return TeardownRerunPolicy(
+        teardown_rerun_limit=int(cfg.teardown_rerun_limit),
+        retry_policy=retry_policy_from(cfg),
+    )
+
+
 def _make_release_effects():
     """The one registry of what domains return with a reservation's capacity.
 
@@ -435,20 +450,26 @@ class Container(containers.DeclarativeContainer):
 
     connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
 
-    # Declared ahead of the ledger and the scheduling unit of work: both read
-    # its report of the hosts taking new delivery, the same object, in the
-    # session that decides.
     host_authority = providers.Singleton(
         _make_host_authority,
         session_factory=session_factory,
         codecs=connection_codecs,
     )
 
+    # Declared ahead of the ledger and the scheduling unit of work: both read
+    # this report of the hosts taking new delivery, the same object, in the
+    # session that decides. It is the host authority's, less the hosts of every
+    # pool on a disabled relay, so a relay's drain keeps new deliveries off it.
+    deliverable_hosts = providers.Singleton(
+        RelayDeliverableHosts,
+        hosts=host_authority,
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
         host_requirement=host_requirement,
-        deliverable_hosts=host_authority,
+        deliverable_hosts=deliverable_hosts,
         # "gpu_count" is this domain's alias for the generic "units" claim
         # key and the dimension its legacy scalar mirrors — kept explicit here
         # rather than hardcoded in kit/site so the ledger stays domain-neutral.
@@ -482,6 +503,8 @@ class Container(containers.DeclarativeContainer):
         host_authority=host_authority,
         cfg=config,
     )
+
+    teardown_rerun_policy = providers.Singleton(_make_teardown_rerun_policy, cfg=config)
 
     # Every job, a fulfillment's or an operator's, is submitted through this.
     job_submission = providers.Singleton(
@@ -518,6 +541,7 @@ class Container(containers.DeclarativeContainer):
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
         connection_codecs=connection_codecs,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
 
     ansible_service = providers.Callable(
@@ -554,6 +578,7 @@ class Container(containers.DeclarativeContainer):
         job_engine=job_engine,
         job_submission=job_submission,
         config=config,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
     bare_metal_mock_executor = providers.Callable(
         _runtime_value,
@@ -606,7 +631,7 @@ class Container(containers.DeclarativeContainer):
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
         repository=settlement_repository,
-        deliverable_hosts=host_authority,
+        deliverable_hosts=deliverable_hosts,
     )
 
     physical_settlement_scheduler = providers.Singleton(
@@ -655,6 +680,8 @@ class Container(containers.DeclarativeContainer):
         FulfillmentReleaseStatusPort,
         settlement_repository=settlement_repository,
         session_factory=session_factory,
+        rerun_policy=teardown_rerun_policy,
+        jobs=job_engine,
     )
 
     fulfillment_unit_of_work = providers.Singleton(

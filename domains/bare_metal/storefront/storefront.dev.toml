@@ -116,6 +116,16 @@ fee_bps = 250
 livemode = false
 ca_bundle_path = "/run/lane-doubles/lane-ca.pem"
 
+# A lane fixture, never a shipped default: no shipped configuration declares
+# rate servicing, which is declared only once qualified against the deployed
+# payment authority. It lets publication and acceptance admit the shipped
+# recurring presets on a pool whose override selects one, as the recurring
+# purchase scenario's does, so the lane approves, commits and delivers a
+# per-period Agreement against the payments double; the clauses below select
+# none.
+[Settlement.rate_servicing.arkhai_payments]
+treatments = ["charged", "returned"]
+
 # Seller-side delivery of each revealed buyer contact, to the lane's Mailpit
 # (compose.bare-metal-local.yml), which scenarios read back through its API.
 # The addresses are development values on a reserved domain.
@@ -149,3 +159,8 @@ default_max_duration_seconds = 86400
 # listed rate where the default chain would exit, so the lane's deal negotiates
 # an open thread.
 policies = ["escrow_shape_guard", "bisection"]
+
+# Every party of the lane runs one injected time, which the lane-time fixture
+# sets; only the bare-metal lane mounts this file.
+[Time]
+source = "injected"

@@ -134,8 +134,8 @@ def _buyer_market_domain() -> MarketDomainContract:
 #: Loaded by ``market.buyer_domains`` discovery.
 domain = _buyer_market_domain()
 
-#: Pre-assembled app for the PyInstaller binary, which cannot rely on installed
-#: entry-point metadata inside the frozen bundle.
+#: The `market` app with the VM domain alone, assembled without entry-point
+#: discovery, for callers that drive the VM commands in process.
 app = build_app(domains=[domain])
 
 

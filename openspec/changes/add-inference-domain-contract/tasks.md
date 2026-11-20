@@ -333,7 +333,7 @@ debiting each grant-and-request pair once to `meter-inference-usage`'s. F2 and
 F10: an option advertises exactly one amount rate and an escrow at most one,
 and the selected-option path runs the same check, the card's asset included. F7:
 the wheel is in `manifests/published-distributions.json`, the PyPI workflow, and
-`docs/development/RELEASING.md`. F4: the filter specification requires
+`docs/guidance/repository/published-packages.md`. F4: the filter specification requires
 `endpoint.api_style`. F14: a unit test checks both registry image stages copy
 each repository filter specification. F5: the proposal, Migration Plan, and the
 header above state the purchase-shape tightening and the new dependencies.

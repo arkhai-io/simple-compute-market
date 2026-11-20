@@ -368,7 +368,13 @@ class VmPublicationCycle:
                 source, candidate, listing_resource
             )
             try:
-                derived = self._await(self._listings.derive_listing(request))
+                derived = self._await(self._listings.derive_listing(
+                    request, publication_diagnostic=lambda entry: self.report.record(
+                        "report", site_id=candidate["site_id"], pool_id=candidate.get("pool_id"),
+                        source=_source_of(candidate), reason=entry["code"],
+                        **{key: value for key, value in entry.items() if key != "code"},
+                    ),
+                ))
                 derived = replace(
                     derived,
                     listing=derived.listing.model_copy(update={"rate_structure": rate_structure}),
@@ -455,6 +461,7 @@ class VmPublicationCycle:
             max_duration_seconds=normalize_max_duration_seconds(
                 pricing.get("max_duration_seconds")
             ),
+            available_until_utc=pricing.get("available_until_utc"),
         )
         return request, composed.rate_structure, ruled_out
 
@@ -593,6 +600,7 @@ class VmPublicationCycle:
             publication_clauses=derived.publication_clauses(),
             demands=fresh.get("demands"),
             max_duration_seconds=fresh.get("max_duration_seconds"),
+            available_until_utc=fresh.get("available_until_utc"),
             rate_structure=derived.rate_structure,
         )
         refreshed = await self._db.load_listing(listing_id=listing_id)
@@ -620,6 +628,13 @@ async def run_publication_cycle_once(
     """
 
     enter_stage("compose")
+    composition = container.resolved_settlement_composition
+    if not dry_run and composition is not None:
+        # A registry whose recommendations could not be read is read again
+        # before options are composed, so the authorities it recommends reach
+        # this cycle's listings without a restart. A preview changes nothing,
+        # so it reads nothing.
+        await composition.disputes.reread()
     cycle = VmPublicationCycle(
         sqlite_client=container.resolved_sqlite_client,
         listing_service=container.resolved_listing_service,

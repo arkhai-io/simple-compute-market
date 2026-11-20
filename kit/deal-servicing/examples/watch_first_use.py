@@ -17,7 +17,9 @@ from market_deal_lifecycle_contracts.models import EvidenceItem
 from market_identity import Identity
 from pydantic import SecretStr
 
-from market_deal_servicing import DeliveryRecord, EndService, EndSession, PhysicalResult
+from market_deal_servicing import (
+    DeliveryRecord, EndService, EndSession, PhysicalResult, create_payment_observations, create_schema,
+)
 from market_deal_servicing.evidence import EvidenceSession, transaction
 from market_deal_servicing.watch import DealWatch, WatchSession
 
@@ -44,6 +46,9 @@ async def main():
         physical = DemoDelivery()
         end = EndService(path, physical, clock=lambda: now)
         with transaction(path) as conn:
+            # The storefront chain's migrations, which no session runs.
+            create_schema(conn)
+            create_payment_observations(conn)
             EndSession(conn).register(DeliveryRecord(
                 negotiation_id=negotiation, seller=seller, commitment_ref=binding.commitment_ref,
                 start_at=now - 2000, term_end=now + 1000, committed_at=now - 2000,

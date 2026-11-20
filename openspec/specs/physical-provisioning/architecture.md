@@ -16,7 +16,7 @@ compute service composition
 
 The offering-mode-neutral composition root lets generic services dispatch by recorded executor or provider identity without importing a concrete domain implementation.
 
-The mock mechanism is a worked instance of the five-piece route pattern (`docs/development/ARCHITECTURE.md`, "Route contracts and their HTTP binding") in which the family owns every piece but the binding's location. `compute_provisioning_contracts.mock_rules` holds the route-contract template, `MockRouteMount`, a path prefix and an operation-name prefix whose `route_declarations()` yields the rule add, list, delete, and resume routes and the evaluate-job route, and the wire models those routes answer with (`MockRuleAdded`, `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, `MockJobEvaluation`, and the request `MockRuleCreate`). The family kit's `MockRuleRouteService` (`compute_provisioning.jobs.executor_mock`) answers with them, and `compute_provisioning_client`'s `MockRuleClient` and `SyncMockRuleClient` sign each call from a mount's declarations and return the same models. A domain states only its mount: VM's is `VM_MOCK_ROUTE_MOUNT`, `("/test", "provisioning_test")`, in `vm_provisioning_operator.routes`; bare metal's two values, `"/test/bare-metal"` and `"provisioning_test_bare_metal"`, live in `arkhai_bare_metal.provisioning_routes`, so `arkhai-bare-metal` keeps no compute dependency and its adapter builds the mount. Each adapter binds the route service under its mount's prefix and contributes the mount's declarations to the service's table. The evaluate-job request stays each domain's, since its fields are the domain's job parameters. A further compute domain mounts the mechanism by stating its two values.
+The mock mechanism is a worked instance of the five-piece route pattern ([`docs/guidance/engineering/implementation.md`, "Route contracts and their HTTP binding"](../../../docs/guidance/engineering/implementation.md#route-contracts-and-their-http-binding)) in which the family owns every piece but the binding's location. `compute_provisioning_contracts.mock_rules` holds the route-contract template, `MockRouteMount`, a path prefix and an operation-name prefix whose `route_declarations()` yields the rule add, list, delete, and resume routes and the evaluate-job route, and the wire models those routes answer with (`MockRuleAdded`, `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, `MockJobEvaluation`, and the request `MockRuleCreate`). The family kit's `MockRuleRouteService` (`compute_provisioning.jobs.executor_mock`) answers with them, and `compute_provisioning_client`'s `MockRuleClient` and `SyncMockRuleClient` sign each call from a mount's declarations and return the same models. A domain states only its mount: VM's is `VM_MOCK_ROUTE_MOUNT`, `("/test", "provisioning_test")`, in `vm_provisioning_operator.routes`; bare metal's two values, `"/test/bare-metal"` and `"provisioning_test_bare_metal"`, live in `arkhai_bare_metal.provisioning_routes`, so `arkhai-bare-metal` keeps no compute dependency and its adapter builds the mount. Each adapter binds the route service under its mount's prefix and contributes the mount's declarations to the service's table. The evaluate-job request stays each domain's, since its fields are the domain's job parameters. A further compute domain mounts the mechanism by stating its two values.
 
 The service's database holds VM's tables, so its metadata (`db/database.py`) maps them and its one chain (`db/migrations.py`) composes the VM adapter's baseline, `vm_provisioning_adapter.migrations.BASELINE`, beside the baselines `kit/resource-pools`, `kit/site`, `kit/fulfillment`, the family kit's hosts, jobs and relays, and the service's own tables export, in foreign-key order, followed by the migrations after the v0.3.0 baseline. `deployment-state`'s "Service-owned migration history" still gives the migration command only its database; nothing injects VM's schema. A single chain is adequate while one compute domain owns provisioning-side tables. When a second domain needs its own, its adapter exports its baseline and migrations and the service's chain composes them in an order the contributions declare.
 
@@ -70,7 +70,9 @@ drive of a deal. Local materialization is adoption history, not current chain
 authority.
 
 Delivery enters through core's `fulfill_domain` hook, as VM's does: payment
-settle and the Alkahest ready step build a `StorefrontFulfillmentContext`, and the
+settle, the Alkahest ready step, the delivery re-drive's `redeliver` and a status
+read each call the fulfillment service's `deliver`, which revalidates the settlement
+through the accepted entry and builds a `StorefrontFulfillmentContext`, and the
 registered hook builds the compute delivery path from the clients in `ports` and
 the storefront's lifecycle in `domain_input`, refusing before any call when the
 lifecycle is absent. There is therefore one registered entry, and it always admits
@@ -90,7 +92,12 @@ domain port reserves the whole-machine claim with `escrow_uid` beside the
 `:settlement` placement key, so recovery replays by key rather than scanning the
 site's reservations, and schedules and records the assigned resource before
 building the materialization over the Agreement window, since the request names
-that resource. The lifecycle cycle drives waiting and pending deals. A status read
+that resource. The `delivery-recovery` loop drives waiting and pending deals again
+through the compute family's re-drive
+([compute delivery, "Dispatch and recovery"](../compute-delivery/architecture.md#dispatch-and-recovery)):
+it lists the deals whose lifecycle row shows a delivery started and not finished,
+skips one whose lock is held, re-checks its settlement through the settlement
+service's `verified_evidence`, and drives it through `deliver`. A status read
 drives a deal whose fulfillment is active and not yet available before answering,
 so the administrator's settle wait and a buyer's status read reach availability;
 the access read does not drive, reaching no payment authority, and goes through the
@@ -155,9 +162,15 @@ returns no capacity; normal release remains proof-driven below.
 
 ## Proof-driven release
 
-Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a second teardown operation. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. A kind-routed `ReleaseJobPort` connects the two: VM-backed reservations resolve release status by reading the fulfillment aggregate's teardown state; other offering modes continue reading the shared job queue. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues without an operator prompting it. A requeue re-observes the teardown's job, whose identity is fixed per reservation; it does not run a job whose own retries are exhausted again, so such a teardown stays failed and its capacity held until an operator verifies the host and force-releases it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
+Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a teardown itself. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. One provider-neutral release executor and one status port connect the two for every offering mode: release begins the fulfillment aggregate's teardown, and release status reads the aggregate's teardown state. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues without an operator prompting it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
 
-A create that was dispatched and then failed has host effects nothing proved removed, so it is not left to an operator by default. When its provider reported the failure and its job metadata names its create job, release compensates it: it begins the domain's ordinary teardown from the `failed` aggregate, marked `create_compensation`, and capacity returns only when that teardown reaches `torn_down`. Each domain's teardown is safe after a partial create: bare metal's reclaim reports an account its grant never created as absent rather than failing, and a VM teardown removes only what its own guest created, finding each artifact by the guest's name when its cleanup script is missing and failing on one it cannot attribute. Compute provisioning alone decides eligibility, through one predicate the release decision, status, and teardown ports share; a failed row it cannot compensate — quarantined, with unreadable metadata, or with its create job missing — still waits for an operator.
+A teardown's job is adopted, not run again, unless its record proves its execution never started. The job engine records two instants on every job from the process's time source: `execution_started_at`, committed when the executor reports, immediately before it starts anything that can act on the host, that the execution is starting — the Ansible executor before it spawns the playbook — and `finished_at`, stamped on every terminal transition. The start's report raises when it cannot be committed or the job has left `running`, so no attempt acts on a host without a recorded start and a job cancelled since its claim spawns nothing; a retry keeps the first instant. A job's execution never started when it is `failed`, not `cancelled`, and records `finished_at` but neither a start nor a handle: it was refused before anything acted on its host — by the engine, or by its executor's codec, inventory, host key or relay — so running it again does exactly what it should have. A job with no `finished_at` was finished by an engine that recorded the handle only after spawning the playbook, so a missing handle there proves nothing, and it is never so classified; a recorded start without a handle counts as started. The job view carries both instants.
+
+The job-backed provider's `dispatch_teardown` adopts the reservation's latest teardown job. When that job's execution never started and a rerun is ready, it submits rerun *n* under `"{reservation}:teardown:rerun-{n}"`, *n* counting the teardown jobs already bound, from the frozen prepared teardown operation's parameters; the first teardown is `"{reservation}:teardown"`. A crash between submitting and recording finds the rerun as the latest job and adopts it, and concurrent dispatches collapse on the job identity. Rerun *n* is ready once the previous job has been finished for the job retry policy's delay after *n* − 1 retries, up to `teardown_rerun_limit` reruns. One compute-owned predicate (`teardown_rerun`) decides from the reservation's teardown jobs, read through one unpaginated engine-internal read, whether the teardown is not rerunnable, waiting, ready, or spent; dispatch acts on it, and the release status reads it beside the aggregate, as it reads the compensable predicate. A `teardown_failed` aggregate whose rerun is waiting or ready, or whose latest job is still unsettled, reads as tearing down, so the lease stays `releasing`; one not rerunnable or spent reads as failed, the message for a never-started teardown saying so and how many reruns were spent, and the lease enters `release_failed`, which then means only that an operator must act. A teardown whose execution started, a cancelled one, and one finished before starts were recorded stay failed, their capacity held, until an operator verifies the host and force-releases. The lease's `release_job_id` is the fulfillment, so a new teardown job touches neither it nor convergence, which requeues every `teardown_failed` row as before.
+
+The lease watchdog's grace is the backstop for every stuck release: a lease still `releasing` past `lease_watchdog_grace_period_seconds`, timed from when it entered `releasing`, enters `release_failed` with `teardown_timeout`, whether its teardown is in progress, a rerun is pending, its status read keeps failing, or its teardown keeps failing to begin. Its default, 3600 seconds, covers a teardown of expected length succeeding on a job retry or a rerun ([configuration](configuration.md#secrets-are-named-not-carried)). A longer teardown is timed out like any other, and since an operator's retry-release re-observes the same aggregate, one that has since reached `torn_down` is released by that call, and one with a rerun pending returns to `releasing` and waits for it.
+
+A create that was dispatched and then failed has host effects nothing proved removed, so it is not left to an operator by default. When its provider reported the failure and its job metadata names its create job, release compensates it: it begins the domain's ordinary teardown from the `failed` aggregate, marked `create_compensation`, and capacity returns only when that teardown reaches `torn_down`. Each domain's teardown is safe after a partial create: bare metal's reclaim reports an account its grant never created as absent rather than failing, and a VM teardown removes only what its own guest created, finding each artifact by the guest's name when its cleanup script is missing and failing on one it cannot attribute. Compute provisioning alone decides eligibility, through one predicate the release decision, status, and teardown ports share; a failed row it cannot compensate — quarantined, with unreadable metadata, or with its create job missing — still waits for an operator. A compensating teardown that fails before its execution starts is run again by the same rule as any teardown, keeping `create_compensation`.
 
 Readiness checks use local service dependencies. Slower outbound provider or storefront diagnostics belong to operator surfaces so an external failure does not unnecessarily make a healthy API/worker process unready.
 
@@ -526,6 +539,14 @@ grant, relay token or admin password use Ansible `no_log`, and each domain's
 codec marks these values as secret fields for job redaction. Provider extras
 cannot override the client baseline, proxy targets or task controls.
 
+In the service, the relay token is decrypted only into a run's variables file,
+created owner-only and exclusively under a random name in the process's
+temporary directory and removed on every ending of the run, as decrypted host
+keys are. That protection rests on the provisioning container never being
+shared between users, which holds by design: a user who opens one to others, by
+adding their own SSH keys or running their own tunnel into it, has stepped
+outside what this repository and its deployment provide.
+
 The `grant_key_secret_key` profile value is one-line standard base64 encoding
 of an Ed25519 PKCS#8 DER private key; surrounding whitespace is stripped, and
 invalid or missing values fail relay creation without echoing the secret. It is
@@ -565,8 +586,9 @@ nonoverlapping issuer ranges and keys, but still shares its token and sessions;
 one operator's frps restart affects every user. A separate relay per operator
 is recommended. For a compromised signing key, remove it immediately and deny
 its next reconnects, or retain it until its leases end with the signing risk
-limited to its issuer. A leaked client token requires stopping admission,
-draining every lease sharing it, then rotating the token and host baselines.
+limited to its issuer. A leaked client token requires draining the relay in
+every provisioning service that registers its server, then rotating the token
+and host baselines.
 
 If teardown cannot reach the host, a relay operator must block the leased port
 and end established sockets in the relay namespace; where firewall control is
@@ -575,12 +597,93 @@ the shared relay. Keep containment until expiry and registration removal are
 verified. Relay containment closes the route only; reclaim still needs host
 activity termination and verified cleanup.
 
+A relayed delivery's port is leased on the relay its capacity declaration's pool
+references, whatever pool, if any, its host is placed in, and the job adding its
+proxy points the host's one buyer-facing client at that relay first:
+`relay-proxy`'s `add.yml` includes `relay-client`, whose baseline
+synchronization writes the job's relay address, port and token and restarts the
+client when they change, before the proxy is added. The job's relay is resolved
+from the lease, and the lease from the declaration's pool. That the relay the
+host's client dials is the relay its deliveries are leased on rests on three
+facts: a host has at most one capacity declaration, so every delivery on it is in
+one pool; a pool's relay reference cannot change while it holds a lease; and the
+site refuses to move a declaration to another pool while a reservation holds
+capacity against it. A change relaxing any of them answers for the rule. Tests
+hold both halves: a static test of the family roles, and an application test
+leasing a host placed under another relay, and an unplaced host, on its
+declaration's pool's relay.
+
+A host's own pool is placement intent, and three rules read it where the relay
+that matters is the declaration's pool's. The management-route rule claims only
+the obvious case, since any admission-enforcing relay refuses a management
+proxy; the host pool-change hook and the drain only refuse or withhold more than
+necessary. Each errs toward caution, so none is moved to the declaration's pool,
+which would need a relay seam into the site's declaration writes.
+
 ### Rebinding requires draining
 
 A host's relay binding cannot change while any affected lease remains active.
 The host authority composes the compute-family relay mechanism's pool-change
-check; it refuses a relay-changing move while relay leases exist. Disablement
-stops new scheduling but leaves existing leases to drain before rebinding.
+check; it refuses a relay-changing move while relay leases exist.
+
+A drain is one lifecycle — stop new work, let existing work finish — at two
+scopes, and there is no other. Disabling a pool drains that pool, which is what
+a pool's relay reference and a host's move to a pool on another relay wait on.
+Disabling a relay drains every pool referencing it, which is what a relay's
+address, port, or token waits on, since each change affects every pool on the
+relay. A refusal under the rebinding rule names the drain at the scope that
+clears it, so an operator facing a relay-side refusal is not sent to disable
+each pool on the relay in turn.
+
+### Disabling a relay drains it
+
+A relay's `enabled` is its drain, for VM and bare-metal delivery alike.
+Disabling it stops new work on the relay in two places and lets every delivery
+already holding a lease on it run to its end:
+
+- **No new delivery is placed on it.** The compute composition reports to the
+  site authority the hosts taking new delivery as the host authority's report
+  less every host placed in, or with a declaration in, a pool referencing a
+  disabled relay — the seam a disabled host already uses, so the site learns
+  nothing of relays. Both are counted because a host's placement and its
+  declaration's pool are recorded apart: a bare-metal host may be unplaced
+  while its one declaration sits in a pool, and a delivery takes its relay from
+  the declaration's pool.
+- **No port on it is leased to a new owner.** The allocator, the one place a
+  lease is created, refuses a new owner on a disabled relay, reading the relay
+  row under a lock a concurrent disable cannot pass, so a disable committed
+  while an acceptance is in flight either waits for it or is seen by it. An
+  owner already holding a lease receives it again. A disabled relay's active
+  leases therefore only shrink, and "drained" is stable once reached.
+
+Execution does not refuse a disabled relay: a create whose lease was allocated
+before the disable, and every teardown and reclaim, run, since refusing them
+would leave guests reachable past their lease end and hold every failed
+delivery's lease, and the relay would never drain.
+
+The relay read reports `active_lease_count` and `drained`, true exactly when
+the relay is disabled and holds no active lease, computed from the leases and
+required in the typed response, so a client reading a service that does not
+report them fails to parse rather than reading an unknown as an answer. The
+condition is stated by the service, where the lifecycle rule lives, rather than
+rebuilt by each reader, because the relay's operator relies on it to remove the
+server. It does not wait for a released lease's grant to expire: a lease is
+released only once its proxy is gone, and a grant is verified only by its own
+relay's keys, which go with the server.
+
+Disabling is reversible before or after the relay drains: it removes no proxy,
+releases no lease, and changes neither the token nor a grant key. Removing the
+relay server, or on a shared relay this relay's keys and range in the admission
+plugin, is the relay operator's, outside this repository; the service never
+verifies that a server exists, so a relay is enabled again only when one runs.
+Nothing deletes a relay: a drained relay's row stays, disabled, as the record
+its leases, retired keys, and pool references point at, and keeps holding its
+rendezvous, so a server reinstated there is the same relay. A relay the
+definition document stops listing is left as it is, since relays are also
+created through the API and omission cannot mean drain; a listed relay is
+drained through its entry's `enabled`. The procedure is the [seller relay
+guide](../../../docs/seller-frp-setup.md#retiring-a-relay) and the [relay
+runbook](../../../docs/development/VALIDATION_RUNBOOK.md#retire-a-relay).
 
 ## Bounded bare-metal working data
 

@@ -12,6 +12,7 @@ from market_identity import Ed25519Signer
 
 from market_deal_servicing import (
     Classification, DeliveryRecord, EndService, EndSession, FinalRequest, PhysicalResult,
+    create_payment_observations, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -39,6 +40,9 @@ async def main():
         path = Path(root) / "storefront.sqlite"
         service = EndService(path, physical, clock=lambda: now[0])
         with transaction(path) as conn:
+            # The storefront chain's migrations, which no session runs.
+            create_schema(conn)
+            create_payment_observations(conn)
             session = EndSession(conn)
             for name in ("before", "racing", "billing", "late", "pending"):
                 session.register(DeliveryRecord(

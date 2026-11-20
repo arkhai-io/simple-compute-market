@@ -229,6 +229,8 @@ class SQLiteClient(CoreSQLiteClient):
             capacity_backing=normalized.capacity_backing,
         )
         listing_resource = normalized.model_dump(mode="json", exclude_none=True)
+        listing_resource.pop("max_duration_seconds", None)
+        listing_resource.pop("available_until_utc", None)
         listing_resource["offering_mode"] = domain_binding.offering_mode
         await self.upsert_listing_with_binding(
             binding=binding,
@@ -238,6 +240,7 @@ class SQLiteClient(CoreSQLiteClient):
             listing_resource=listing_resource,
             fulfillment_resource=None,
             max_duration_seconds=normalized.max_duration_seconds,
+            available_until_utc=normalized.available_until_utc,
             storefront_url=storefront_url,
             seller_principal=seller_principal,
             oracle_address=oracle_address,
@@ -256,9 +259,7 @@ class SQLiteClient(CoreSQLiteClient):
         row = await self.load_listing(listing_id=listing_id)
         if row is None:
             return None
-        raw = row.get("listing_resource")
-        value = json.loads(raw) if isinstance(raw, str) else raw
-        return self._market_domain.codecs.listing(value)
+        return self._market_domain.codecs.listing(row)
 
     async def _save_artifact(
         self,
@@ -608,6 +609,25 @@ class SQLiteClient(CoreSQLiteClient):
                     (negotiation_id,),
                 ).fetchone()
                 return dict(row) if row is not None else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def list_unreleased_bare_metal_fulfillments(self) -> list[str]:
+        """Every negotiation whose fulfillment lifecycle is not released, least
+        recently updated first."""
+
+        def _load() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                return [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT negotiation_id FROM bare_metal_fulfillment_lifecycle "
+                        "WHERE state != 'released' ORDER BY updated_at, negotiation_id"
+                    )
+                ]
             finally:
                 conn.close()
 

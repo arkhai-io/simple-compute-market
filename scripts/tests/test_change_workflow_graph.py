@@ -16,8 +16,9 @@ import pytest
 
 from change_workflow import cli, diagram, graph
 from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
-from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER, STEPS,
-                                   TABLE, WAIT, Node)
+from change_workflow.graph import (AFTER, ARCHIVE_CLEANUP, BEFORE, CLOSEOUT_TRIAGE, DESIGN,
+                                   HOOK_STEPS, NODES, OWNER, STEP_ACTIONS, STEPS, TABLE, WAIT,
+                                   Node, step_actions)
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = Path("openspec/specs/change-workflow/README.md")
@@ -387,6 +388,18 @@ def test_the_report_lists_each_departure_and_fails(capsys) -> None:
         "source embedded:\n"
         "- no edge draws ('triage_closeout', 'design', ('a return',))\n"
         "- no edge draws ('archive_cleanup', 'design', ('a return',))\n")
+
+
+def test_the_engine_gathers_before_validation_and_cleans_up_before_archive_cleanup() -> None:
+    """CW-g6th, CW-ikmm: the engine's own actions around steps, each a hook-table
+    entry run as the step it is around."""
+    assert STEP_ACTIONS == {(BEFORE, "validate"): ("gather",),
+                            (BEFORE, "archive-cleanup"): ("cleanup",)}
+    for (when, step), actions in STEP_ACTIONS.items():
+        assert when in (BEFORE, AFTER) and step in STEPS
+        assert all(step in HOOK_STEPS[action] for action in actions)
+    assert step_actions(BEFORE, "validate") == ("gather",)
+    assert step_actions(AFTER, "validate") == step_actions(BEFORE, "implement") == ()
 
 
 def test_make_change_graph_reports_that_the_diagram_draws_the_table() -> None:

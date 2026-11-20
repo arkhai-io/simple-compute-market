@@ -8,12 +8,14 @@ import pytest
 from pydantic import ValidationError
 
 from lane_double_controls.models import (
-    ClockAdvance,
     ControlError,
     FilingAnswer,
     Funding,
+    Reservation,
+    Reserved,
     Rule,
     Ruling,
+    TimeView,
 )
 
 _REVERSE = {"kind": "reverse", "part": 0, "amount": "500"}
@@ -150,16 +152,64 @@ def test_a_payments_rule_cannot_rule() -> None:
     assert refused.value.code == "invalid_request"
 
 
-@pytest.mark.parametrize("seconds", [0, -1])
-def test_the_clock_advances_only_forward(seconds: int) -> None:
+@pytest.mark.parametrize("view", [
+    {"source": "injected", "now": 1_794_821_400},
+    {"source": "wall"},
+])
+def test_a_time_view_is_an_injected_instant_or_wall_time(view: dict[str, Any]) -> None:
+    assert TimeView.model_validate(view).model_dump(exclude_none=True) == view
+
+
+@pytest.mark.parametrize("view", [
+    {"source": "injected"},
+    {"source": "wall", "now": 1_794_821_400},
+    {"source": "injected", "now": True},
+    {"source": "injected", "now": "1794821400"},
+    {"source": "injected", "now": -1},
+    {"source": "injected", "now": 253_402_300_800},
+    {"source": "frozen", "now": 1_794_821_400},
+])
+def test_a_time_view_states_its_now_exactly_when_injected(view: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
-        ClockAdvance(seconds=seconds)
+        TimeView.model_validate(view)
 
 
 @pytest.mark.parametrize("amount", ["0", "-5", "1.5", "", "01"])
 def test_funding_is_a_positive_count_of_minor_units(amount: str) -> None:
     with pytest.raises(ValidationError):
         Funding(account="00000000-0000-4000-8000-0000000000b1", amount=amount)
+
+
+def test_a_reservation_names_one_instant() -> None:
+    assert Reservation.model_validate({"through": 1_800_007_200}).through == 1_800_007_200
+
+
+@pytest.mark.parametrize("body", [
+    {}, {"through": "1800007200"}, {"through": 1_800_007_200.5}, {"through": True},
+    {"through": -1}, {"through": 1_800_007_200, "periods": 2},
+], ids=["missing", "string", "float", "boolean", "negative", "extra"])
+def test_a_malformed_reservation_is_refused(body: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        Reservation.model_validate(body)
+
+
+_PART = {"part": 0, "reserved_through": 1_800_000_360, "periods_added": 1}
+
+
+def test_a_reservation_answer_lists_each_running_part() -> None:
+    answer = Reserved.model_validate({"transaction": "9c" * 32, "parts": [_PART]})
+    assert answer.parts[0].reserved_through == 1_800_000_360
+
+
+@pytest.mark.parametrize("answer", [
+    {"transaction": "9c" * 32, "parts": []},
+    {"transaction": "not-a-transaction", "parts": [_PART]},
+    {"transaction": "9c" * 32, "parts": [{**_PART, "periods_added": -1}]},
+    {"transaction": "9c" * 32, "parts": [{**_PART, "part": "0"}]},
+], ids=["no-parts", "transaction", "negative-periods", "string-part"])
+def test_a_reservation_answer_reaching_nothing_or_malformed_is_refused(answer: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        Reserved.model_validate(answer)
 
 
 def test_a_control_error_carries_one_body() -> None:

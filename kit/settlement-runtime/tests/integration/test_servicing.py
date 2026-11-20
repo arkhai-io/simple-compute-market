@@ -489,7 +489,8 @@ async def test_a_ready_step_returning_without_the_mark_backs_off(tmp_path) -> No
         runtime, repository, worker_id="w", interval_seconds=1,
         on_ready=released_unmarked,
     )
-    before = time.time()
+    # The worker reads the process time source, in whole seconds.
+    before = int(time.time())
     assert await worker.run_once() == 1
 
     operation = await _fulfill_operation(repository, record)
@@ -517,7 +518,8 @@ async def test_a_mark_an_earlier_step_wrote_does_not_spare_a_later_one(
     idle = SettlementServicingWorker(
         runtime, repository, worker_id="w", interval_seconds=1, on_ready=neither
     )
-    before = time.time()
+    # The worker reads the process time source, in whole seconds.
+    before = int(time.time())
     assert await idle.run_once() == 1
 
     operation = await _fulfill_operation(repository, record)
@@ -554,7 +556,8 @@ async def test_a_worker_without_the_mark_backs_off_an_awaiting_operation(
         interval_seconds=1,
         on_ready=_deferring(runtime, []),
     )
-    before = time.time()
+    # The worker reads the process time source, in whole seconds.
+    before = int(time.time())
 
     assert await worker.run_once() == 1
 

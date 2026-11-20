@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from arkhai_compute.end_classification import CommandEnd, classify_site_end
+from arkhai_compute.end_classification import CommandEnd, classify_payment_stop, classify_site_end
 
 
 def classify(**changes):
@@ -43,3 +43,36 @@ def test_only_exact_truncation_or_agreement_deadline_is_lawful_expiry():
     assert result.kind == "ruling" and result.controlling_source_ref == "ruling"
     assert classify_site_end(classify(cause="expiry", deadline_phase="lease", claimed_deadline=200, effective_at=200), commands=[], **args).kind == "terms"
     assert classify_site_end(classify(cause="expiry", deadline_phase="reservation", claimed_deadline=100), commands=[], **(args | {"available": False})).kind == "provisioning_failure"
+
+
+TERM_END = 1_000
+BOTH = {"payer": {"notice_seconds": 0}, "payee": {"notice_seconds": 60}}
+
+
+def stop(cause, at=500):
+    return SimpleNamespace(cause=cause, at=at)
+
+
+@pytest.mark.parametrize(("cause", "kind"), [
+    ("payer", "entitled_stop"), ("payee", "entitled_stop"), ("authority", "ruling"), ("terms", "exhaustion"),
+])
+def test_each_payment_stop_cause_of_an_entitled_deal_is_classified(cause, kind):
+    assert classify_payment_stop(stop(cause), entitlements=BOTH, term_end=TERM_END) == kind
+
+
+@pytest.mark.parametrize(("cause", "entitled"), [("payer", "payee"), ("payee", "payer")])
+def test_an_unentitled_party_payment_stop_is_pending(cause, entitled):
+    entitlements = {entitled: BOTH[entitled]}
+    assert classify_payment_stop(stop(cause), entitlements=entitlements, term_end=TERM_END) is None
+    assert classify_payment_stop(stop(cause), entitlements={}, term_end=TERM_END) is None
+
+
+def test_an_unknown_payment_stop_cause_is_pending():
+    assert classify_payment_stop(stop("seller"), entitlements=BOTH, term_end=TERM_END) is None
+
+
+@pytest.mark.parametrize(("at", "kind"), [
+    (TERM_END - 1, "exhaustion"), (TERM_END, "terms"), (TERM_END + 1, "terms"),
+])
+def test_a_terms_payment_stop_is_split_by_the_agreement_end(at, kind):
+    assert classify_payment_stop(stop("terms", at), entitlements={}, term_end=TERM_END) == kind

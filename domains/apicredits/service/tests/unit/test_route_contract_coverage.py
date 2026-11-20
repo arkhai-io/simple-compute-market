@@ -19,6 +19,7 @@ from market_site.auth import (
     resolve_site_route,
 )
 from apicredits_service.main import CREDITS_ROUTE_CONTRACTS
+from arkhai_api_contracts.operations import SYSTEM_TIME
 from starlette.routing import Route
 
 ALL_CONTRACTS = CREDITS_ROUTE_CONTRACTS + CAPACITY_ROUTE_CONTRACTS
@@ -121,8 +122,11 @@ def test_every_credits_contract_matches_a_mounted_route(mounted):
                 # A body-resource contract matched the route but this probe
                 # sent no body. The route exists, which is what is asserted.
                 reachable.add(contract.operation)
+    # The time-setting route is mounted only under injected time, whichever
+    # source this process composed the service under.
+    conditional = {SYSTEM_TIME}
     declared = {contract.operation for contract in CREDITS_ROUTE_CONTRACTS}
-    assert declared == reachable, (
+    assert declared - conditional == reachable - conditional, (
         f"contracts matching no mounted route: {sorted(declared - reachable)}"
     )
 

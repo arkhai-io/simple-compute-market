@@ -197,6 +197,8 @@ async def client_and_queue(
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=RelayPortAllocator(session_factory),
+        # No fulfillment runs here, so no teardown is dispatched.
+        teardown_rerun_policy=None,
     )
 
     app.container.vm_runtime.override(vm_runtime)

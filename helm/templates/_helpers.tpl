@@ -33,9 +33,6 @@ Common labels for the root chart.
 {{- define "arkhai-node-operator.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{ include "arkhai-node-operator.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
@@ -173,13 +170,13 @@ runtime Deployments keep their chart-specific config mechanisms.
 {{- $config := $smoke.config | default dict -}}
 {{- if $config.profileFiles -}}
 {{- range $profile := keys $config.profileFiles | sortAlpha }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $profile }}.yml
   subPath: config-{{ $profile }}.yml
   readOnly: true
 {{- end -}}
 {{- else if $config.profile }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $config.profile }}.yml
   subPath: config-{{ $config.profile }}.yml
   readOnly: true

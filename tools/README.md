@@ -163,6 +163,25 @@ specification.
   its own directory as `arkhai:frp-grant-admission`, which `make push-images`
   pushes.
 
+### `injected-time/`
+
+One source of the time of the world per process (distribution
+`arkhai-injected-time`, import `injected_time`): wall time, or an injected
+instant a test sets and moves only forward; the one rule reading a time value;
+the time file a process with no route of its own reads; and a framework-free
+route service each service binds behind its own administrator authentication.
+It depends on the standard library alone. Its [README](injected-time/README.md)
+is its interface, and its specification is
+[`injected-time`](../openspec/specs/injected-time/spec.md). Every published
+package reading the time of the world depends on it.
+
+- `make test` (in its directory) type-checks the package and runs its unit and
+  integration tests, the structure test holding its boundary among them.
+- `make build` builds its wheel into its own `dist/`, or into `DIST_DIR`.
+- From the repository root, `make test-injected-time` runs its `make test` and
+  is part of `make test` and the Tests workflow's matrix; `make
+  dist-injected-time`, part of `make dist`, builds its wheel into `.dist/`.
+
 ## Lane collaborators
 
 A lane collaborator is a stand-in for a service outside this repository, run by
@@ -179,7 +198,7 @@ collaborator, that both doubles and the end-to-end harness import, so a
 scenario drives a double through a typed client without installing the double.
 `make dist` builds its wheel for the doubles' images and the harness; the
 release wheelhouse, `make dist-release`, does not carry it
-([`RELEASING.md`](../docs/development/RELEASING.md)).
+([`published-packages.md`](../docs/guidance/repository/published-packages.md)).
 
 Each lane double's image has its own target in `tools/Makefile`, built with the
 repository root as its context so its Dockerfile can copy the wheelhouse. The
@@ -222,10 +241,11 @@ from its producer, and what its results establish.
 
 ### `lane-double-controls/`
 
-The doubles' control contract (import `lane_double_controls`): the rule, fault,
-clock, funding, rotation and ruling models, the control route declarations, the
-typed `ControlClient`, the transport-fault middleware, the perceived clock both
-doubles read, and the lane CA generator and certificates for both doubles. Its
+The doubles' control contract (import `lane_double_controls`), which the
+API-credit sample app serves too: the rule, fault, time, funding, rotation and
+ruling models, the control route declarations, the typed `ControlClient`, the
+transport-fault middleware, the time control over a party's injected time, and
+the lane CA generator and certificates for both doubles. Its
 [README](lane-double-controls/README.md) lists the controls and their refusals.
 
 - `make test` (in its directory) checks the committed certificates, type-checks

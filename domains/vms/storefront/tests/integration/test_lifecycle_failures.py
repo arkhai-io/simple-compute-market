@@ -37,7 +37,18 @@ RESERVATION = "fixture-vm-reservation"
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure,site_first", [(False, True), (True, True), (True, False)])
 async def test_site_failure_and_delayed_lawful_evidence_drive_one_physical_end(make, failure, site_first):
-    h = await make()
+    # The end service's physical end, over a site holding the deal's leased
+    # reservation; delivered capacity is never released before its callback.
+    site = SimpleNamespace(list_reservations=AsyncMock(return_value=[{
+        "capacity_reservation_id": RESERVATION,
+        "deal_ref": {"negotiation_id": NEGOTIATION}, "state": "leased",
+    }]))
+    capacity = SimpleNamespace(
+        client=lambda: SimpleNamespace(_sites={SITE_ID: site}),
+        release=AsyncMock(side_effect=AssertionError("delivered capacity must await its callback")),
+    )
+    fulfillment = SimpleNamespace(terminate_lease=AsyncMock())
+    h = await make(physical=lambda db, _: VmPhysicalEnd(db, capacity=capacity, fulfillment=fulfillment))
     try:
         await h.db.update_listing(listing_id=LISTING, listing_resource={
             "gpu_model": "H200", "gpu_count": 1, "offering_mode": "vm",
@@ -65,16 +76,6 @@ async def test_site_failure_and_delayed_lawful_evidence_drive_one_physical_end(m
         })
         trust.seed()
         container.resolved_service_peer_trust = trust
-        site = SimpleNamespace(list_reservations=AsyncMock(return_value=[{
-            "capacity_reservation_id": RESERVATION,
-            "deal_ref": {"negotiation_id": NEGOTIATION}, "state": "leased",
-        }]))
-        capacity = SimpleNamespace(
-            client=lambda: SimpleNamespace(_sites={SITE_ID: site}),
-            release=AsyncMock(side_effect=AssertionError("delivered capacity must await its callback")),
-        )
-        fulfillment = SimpleNamespace(terminate_lease=AsyncMock())
-        h.lifecycle.end.physical = VmPhysicalEnd(h.db, capacity=capacity, fulfillment=fulfillment)
         now = h.lifecycle.clock()
         ref = "site-event:fixture-end"
         event = LeaseEndedEvent(

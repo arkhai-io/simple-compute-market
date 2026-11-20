@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "Resource-pool wire models, declaration vocabulary, and route declarations, without the pool authority's persistence."
 requires-python = ">=3.12"
@@ -31,6 +31,6 @@ dev = [
 
 # The package allowlist: every distribution this package may declare or import
 # beyond the standard library, because its lightness is part of its contract.
-# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+# make check-architecture holds it; see docs/guidance/repository/package-layers.md, "Kind".
 [tool.arkhai.architecture]
 allowed-dependencies = ["arkhai-kit-capability-admissibility", "arkhai-kit-capability-shape", "pydantic"]

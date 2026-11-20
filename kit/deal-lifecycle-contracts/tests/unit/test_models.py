@@ -1,6 +1,7 @@
 """The lifecycle wire is closed and preserves every public record on replay."""
 
 import base64
+from typing import get_args
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -96,6 +97,57 @@ def test_evidence_case_and_read_roundtrip():
 def test_unknown_kinds_are_refused(model, data, field):
     with pytest.raises(ValidationError):
         TypeAdapter(model).validate_python(dict(data, **{field: "unknown_kind"}))
+
+
+SUMMARY = dict(negotiation_id="n", commitment_ref="c", domain="d", mechanism="m", entitlements={},
+               state="running", has_open_extension=False, open_cases=[])
+ONCE_EVENT = dict(PAYMENT, kind="reverse")
+# A running rate part with a stop requested and no final stop: its request
+# carries no treatment, so its settles_through is at its default.
+RATE_PART = dict(part="0", started_at=100, evidence_ref="c:snapshot:1:100",
+                 pending_stop=dict(PAYMENT, kind="stop_request", amount=None))
+
+
+@pytest.mark.parametrize("parts", [[], [RATE_PART]], ids=["once-only", "rate"])
+def test_a_summary_dumps_every_field_at_its_default(parts):
+    wire = m.DealSummary(**SUMMARY, parts=parts).model_dump(mode="json")
+    assert set(wire) == set(m.DealSummary.model_fields)
+    assert wire["ending"] == [] and len(wire["parts"]) == len(parts)
+    for part in wire["parts"]:
+        assert set(part) == set(m.PaymentPartObservation.model_fields) and part["final_stop"] is None
+        assert set(part["pending_stop"]) == set(m.PaymentEvent.model_fields)
+        assert part["pending_stop"]["settles_through"] is None
+
+
+def test_an_authority_view_dumps_parts_and_settles_through_at_their_defaults():
+    wire = m.AuthorityView(outcome={"status": "accepted"}, events=[ONCE_EVENT]).model_dump(mode="json")
+    assert wire["parts"] == [] and wire["events"][0]["settles_through"] is None
+
+
+@pytest.mark.parametrize("state,ending", [
+    ("ended", ["case_open"]), ("running", ["release_pending"]), ("ending", ["case_open", "case_open"]),
+])
+def test_ending_codes_are_listed_once_and_only_while_ending(state, ending):
+    with pytest.raises(ValidationError):
+        m.DealSummary(**dict(SUMMARY, state=state), ending=ending)
+
+
+def test_an_ending_summary_names_its_codes_with_their_text():
+    summary = m.DealSummary(**dict(SUMMARY, state="ending"), ending=["release_pending", "case_open"])
+    assert summary.ending_reasons == [
+        ("release_pending", m.ENDING_TEXT["release_pending"]), ("case_open", m.ENDING_TEXT["case_open"]),
+    ]
+    assert roundtrip(m.DealSummary, summary.model_dump(mode="json")) == summary
+
+
+def test_an_unknown_ending_code_is_refused():
+    with pytest.raises(ValidationError):
+        m.DealSummary(**dict(SUMMARY, state="ending"), ending=["unknown_code"])
+
+
+def test_every_ending_code_has_text():
+    assert set(m.ENDING_TEXT) == set(get_args(m.EndingCode))
+    assert all(text.strip() for text in m.ENDING_TEXT.values())
 
 
 @pytest.mark.parametrize("kind", ["extend", "lift"])

@@ -8,7 +8,13 @@ CLI process:
     pick agreed match →
     invoke the accepted Agreement's buyer settlement entry →
     submit to the seller →
-    poll until ready/failed.
+    poll until ready/failed →
+    with --watchdog, probe the delivered VM's disclosed SSH endpoint in the
+    foreground until the watchdog's stop of a rate deal is answered, the deal ends, or the
+    buyer interrupts it. Only while it runs, if that endpoint stops accepting
+    connections, the loss is detected within at most interval x threshold +
+    probe timeout; the authority's acknowledgement and any priced notice come
+    after that, and billing continues until the stop lands.
 
 The command composes VM inputs over core buyer orchestration.
 """
@@ -19,9 +25,9 @@ from .evidence import evidence_store
 
 import json
 import os
-import time
 from typing import Any
 
+import injected_time
 import typer
 from arkhai_vms import VmConnectionDetails, make_vm_provision_terms
 from core_buyer import build_buyer_explanation, explain_registry_query
@@ -32,6 +38,25 @@ from core_buyer.action_policy import (
 from market_alkahest.schemas import EscrowProposal
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
+from market_deal_lifecycle_buyer import (
+    RUN_SPELLINGS,
+    WATCHDOG_REJECTED_EXIT_CODE,
+    EndTarget,
+    Probe,
+    WaitClock,
+    WatchdogJournal,
+    WatchdogOutcome,
+    WatchdogSettings,
+    run_monitor,
+    tcp_reachable,
+    watchdog_interval_option,
+    watchdog_option,
+    watchdog_settings,
+    watchdog_threshold_option,
+)
+from market_settlement_runtime.buyer_terms import (
+    UNPROTECTED_TERMS_FLAG, UNPROTECTED_TERMS_HELP, WAIVERS_BY_TERM, term_waivers, waiver_flags,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -44,20 +69,27 @@ from .buy_orchestrator import (
     query_registry_for_matches_multi,
     run_buy,
 )
+from .arkhai_payments import sync_sleep
 from .buyer_client import ResumeState, negotiate_with_seller
+from . import end_cli
 from .cli_helpers import (
     emit_buyer_explanation,
+    emit_lifecycle_disclosure,
+    requested_duration_seconds,
 )
 from .cli_helpers import (
     resolve_prices_from_matches as _resolve_prices_from_matches,
 )
+from .cli_helpers import emit_term_refusals
 from . import common
 from .common import resolve_config_value
 from .deal_helpers import (
     is_negotiation_complete,
+    load_deal_context,
     load_negotiation_resume_point,
     make_publisher_trust_resolver,
     open_run_log,
+    recorded_waivers,
 )
 from .listing_cli import settlement_clause_error_message
 from .negotiation_amounts import priced_at_opening_shape
@@ -67,6 +99,8 @@ from .run_log import RunLog
 from .settle_cli import run_settle_from_log
 from .settlement_composition import (
     buyer_stage,
+    buyer_compute_disclosure,
+    buyer_lifecycle_disclosure,
     resolve_buyer_settlement_policy,
 )
 
@@ -96,6 +130,115 @@ def _attempt_digest(attempts: list[dict[str, Any]]) -> list[dict[str, str]]:
     return digest
 
 
+# The watchdog's collaborators, and the run's deal it opens, are built through
+# the factories below, the buy command's seam for them.
+
+
+def watchdog_journal() -> WatchdogJournal:
+    """The buyer's per-deal watchdog record, in its evidence store."""
+    return evidence_store().watchdog
+
+
+def watchdog_target(run_id: str) -> EndTarget:
+    """The run's deal as the ``end`` verb opens it, for the watchdog's stop."""
+    return end_cli.end_target(run_id)
+
+
+def watchdog_probe(connection_details: Any) -> Probe:
+    """Reachability of the delivered VM's SSH endpoint, as its delivery disclosed it.
+
+    The probe asks only whether the endpoint accepts a connection: what "stops
+    answering" means is the buyer's access, not its workload.
+    """
+    if isinstance(connection_details, str):
+        details = VmConnectionDetails.model_validate_json(connection_details)
+    else:
+        details = VmConnectionDetails.model_validate(connection_details or {})
+    if not details.host or not details.port:
+        raise ValueError("the delivery disclosed no SSH endpoint for the watchdog to probe")
+    host, port = details.host, details.port
+    return lambda: tcp_reachable(host, port)
+
+
+def wait_clock() -> WaitClock:
+    """The clock ``buy``'s waits run on: a payment's commit, its settlement wait
+    and the watchdog's probes."""
+    return WaitClock()
+
+
+def buy_orchestration() -> Any:
+    """The orchestration a fresh buy runs, from negotiation through settlement."""
+    return run_buy
+
+
+def settle_resumption() -> Any:
+    """The settlement a resumed buy runs once its negotiation has agreed."""
+    return run_settle_from_log
+
+
+def _watch(
+    run_id: str, negotiation_id: str | None, connection_details: Any, console: Console,
+    clock: WaitClock,
+) -> None:
+    """Run the watchdog over a delivered run's deal when the deal opted in, on
+    ``clock``, the clock the run's settlement waited on.
+
+    A deal that never opted in opens nothing: its run is not read again.
+    """
+    if not negotiation_id or watchdog_journal().state(negotiation_id) is None:
+        return
+    target = watchdog_target(run_id)
+    try:
+        probe = watchdog_probe(connection_details)
+    except ValueError as exc:
+        console.print(f"[yellow]Watchdog not running:[/yellow] {exc}; the deal is unmonitored.")
+        return
+    _exit_on_refused_stop(run_monitor(target, probe=probe, clock=clock))
+
+
+def _exit_on_refused_stop(outcome: WatchdogOutcome | None) -> None:
+    # A stop the payment authority refused leaves the deal billing; the command
+    # fails as ``end`` does on a stop it did not accept.
+    if outcome is not None and outcome.reason == "rejected":
+        raise typer.Exit(WATCHDOG_REJECTED_EXIT_CODE)
+
+
+def run_negotiation_id(run_id: str, signer: Any) -> str | None:
+    """The negotiation of a run's accepted deal, or ``None`` when it has none."""
+    try:
+        return load_deal_context(run_id, signer=signer).negotiation_id
+    except ValueError:
+        # A run with no loadable accepted deal holds no deal that could have
+        # opted into the watchdog.
+        return None
+
+
+def _carry_journaled_stop(run_id: str, signer: Any) -> bool:
+    """Carry a watchdog stop journaled before a restart to the payment authority.
+
+    It needs no settle, no delivery and no probe, so a storefront that is down,
+    the case the watchdog exists for, cannot keep the stop from landing.
+    """
+    negotiation_id = run_negotiation_id(run_id, signer)
+    state = watchdog_journal().state(negotiation_id) if negotiation_id else None
+    if state is None or state.stop is None:
+        return False
+    _exit_on_refused_stop(run_monitor(watchdog_target(run_id), probe=None, clock=wait_clock()))
+    return True
+
+
+def _opt_in(run_log: RunLog, negotiation_id: str | None, settings: WatchdogSettings | None) -> None:
+    """Persist the watchdog opt-in for the deal, before it is known to be delivered.
+
+    The opt-in records only that the buyer asked; the deal reads as monitored
+    only while a running loop records probes.
+    """
+    if settings is None or not negotiation_id:
+        return
+    watchdog_journal().opt_in(negotiation_id, settings)
+    run_log.event("watchdog_opted_in", negotiation_id=negotiation_id, **settings.to_json())
+
+
 def _normalize_start_utc(value: str | None) -> str | None:
     if value is None:
         return None
@@ -112,21 +255,21 @@ def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -
     no on-chain transaction has been emitted and the seller's /settle
     endpoint hasn't been touched yet. Declining here is a clean exit.
 
-    Displays the agreed per-hour rate, duration, total payment (= rate
-    x duration_seconds / 3600), seller URL, and listing ID so the buyer
-    can sanity-check the cost before committing.
+    Show the accepted monetary quote unchanged, with its billing unit, alongside
+    the effective horizon. Confirmation must never rescale accepted money.
     """
     duration_hours = terms.duration_seconds / 3600
-    total = terms.agreed_amount * terms.duration_seconds // 3600
+    quote = getattr(terms, "quote", None)
+    price_unit = f"per_period ({quote.period})" if quote is not None and quote.unit == "per_period" else "total"
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("Seller", str(terms.seller_url))
     table.add_row("Listing", str(terms.listing_id))
     table.add_row("Negotiation", str(terms.negotiation_id))
-    table.add_row("Agreed price", f"{terms.agreed_amount} (per hour, raw token units)")
+    table.add_row("Agreed price", f"{terms.agreed_amount} ({price_unit}, raw token units)")
     table.add_row("Duration", f"{terms.duration_seconds}s ({duration_hours:.4g}h)")
-    table.add_row("Total payment", f"{total} (raw token units)")
+    table.add_row("Period charge" if price_unit != "total" else "Total payment", f"{terms.agreed_amount} (raw token units)")
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
     try:
         return typer.confirm(
@@ -161,6 +304,10 @@ def _run_resume_from(
                 "--max-price applies only to fresh buys; resume uses the persisted scaled negotiation ceiling"
             )
         resume_point = load_negotiation_resume_point(from_run, signer=signer)
+        try:
+            resumed_waivers = recorded_waivers(from_run, signer=signer)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
         resumed_initial_price = resume_point.initial_price
         resumed_max_price = resume_point.max_price
         run_log = open_run_log(from_run, signer=signer, profile_id=identity.profile_id)
@@ -232,6 +379,7 @@ def _run_resume_from(
                 ),
                 resolve_seller_principals=resolve_seller_principals,
                 capture=evidence_store().capture,
+                waivers=resumed_waivers,
             )
         except RuntimeError as exc:
             run_log.event("negotiation_failed", error=str(exc))
@@ -286,13 +434,21 @@ def _run_resume_from(
         console.print(
             f"[green]negotiation agreed[/green]  price={outcome.agreed_amount} rounds={outcome.rounds}"
         )
-    run_settle_from_log(
+    if _carry_journaled_stop(from_run, signer):
+        return
+    clock = wait_clock()
+    final = settle_resumption()(
         run_id=from_run,
         poll_interval=poll_interval,
         settlement_timeout=settlement_timeout,
         console=console,
         identity=identity,
+        clock=clock,
     )
+    # The settled deal re-enters the watchdog it opted into before a restart.
+    final = final or {}
+    negotiation_id = final.get("negotiation_id") or run_negotiation_id(from_run, signer)
+    _watch(from_run, negotiation_id, final.get("connection_details"), console, clock)
 
 
 def register(app: typer.Typer) -> None:
@@ -329,7 +485,12 @@ def register(app: typer.Typer) -> None:
             None,
             "--duration-hours",
             "-t",
-            help="Lease duration the buyer wants (hours, fractional ok). Required for fresh runs — sent to the seller's /negotiate/new and validated against the listing's max_duration_seconds. Resumed runs read it from the run-log.",
+            help="Lease duration the buyer wants (hours, fractional ok). Required for reserved selections; optional for recurring selections — sent to the seller's /negotiate/new and validated against the listing's max_duration_seconds. Resumed runs read it from the run-log. Not with --duration-seconds.",
+        ),
+        duration_seconds_option: int | None = typer.Option(
+            None,
+            "--duration-seconds",
+            help="The lease duration in whole seconds; the same request as --duration-hours, which it excludes.",
         ),
         start_utc: str | None = typer.Option(
             None,
@@ -343,9 +504,12 @@ def register(app: typer.Typer) -> None:
         ),
         from_run: str | None = typer.Option(
             None,
-            "--from",
-            help="Resume a partial buy run-id end-to-end. Continues negotiation if it stopped mid-stream, then drives escrow.create + /settle + poll. The same run-log is appended to so `market logs show <id>` captures the full lifecycle.",
+            *RUN_SPELLINGS,
+            help="Resume a partial buy run-id end-to-end. Continues negotiation if it stopped mid-stream, then drives escrow.create + /settle + poll, and re-enters the watchdog where the deal opted in and still runs. The same run-log is appended to so `market logs show <id>` captures the full lifecycle.",
         ),
+        watchdog: bool = watchdog_option(),
+        watchdog_interval: int = watchdog_interval_option(),
+        watchdog_threshold: int = watchdog_threshold_option(),
         registry_urls: str | None = typer.Option(
             None,
             "--registry-urls",
@@ -362,6 +526,24 @@ def register(app: typer.Typer) -> None:
             None,
             "--settlement",
             help="Repeatable typed settlement alternative, for example 'mechanism=alkahest.v1'.",
+        ),
+        allow_no_delivery_deadline: bool = typer.Option(
+            False, WAIVERS_BY_TERM["no_delivery_deadline"].flag,
+            help=WAIVERS_BY_TERM["no_delivery_deadline"].help,
+        ),
+        allow_no_penalty: bool = typer.Option(
+            False, WAIVERS_BY_TERM["no_penalty"].flag, help=WAIVERS_BY_TERM["no_penalty"].help,
+        ),
+        allow_charged_preemption: bool = typer.Option(
+            False, WAIVERS_BY_TERM["charged_preemption"].flag,
+            help=WAIVERS_BY_TERM["charged_preemption"].help,
+        ),
+        allow_charged_term_end: bool = typer.Option(
+            False, WAIVERS_BY_TERM["charged_term_end"].flag,
+            help=WAIVERS_BY_TERM["charged_term_end"].help,
+        ),
+        allow_unprotected_terms: bool = typer.Option(
+            False, UNPROTECTED_TERMS_FLAG, help=UNPROTECTED_TERMS_HELP,
         ),
         explain: bool = typer.Option(
             False,
@@ -412,6 +594,14 @@ def register(app: typer.Typer) -> None:
         settlement identities rather than discovering or buying again.
         """
         console = Console()
+        duration_seconds = requested_duration_seconds(
+            duration_hours=duration_hours, duration_seconds=duration_seconds_option,
+        )
+        waivers = term_waivers(
+            no_delivery_deadline=allow_no_delivery_deadline, no_penalty=allow_no_penalty,
+            charged_preemption=allow_charged_preemption, charged_term_end=allow_charged_term_end,
+            unprotected_terms=allow_unprotected_terms,
+        )
         policy_params_all: dict[str, Any] = {
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
@@ -423,6 +613,7 @@ def register(app: typer.Typer) -> None:
         initial_price: float | None = policy_params_all.get("initial_price")
         max_price: float | None = policy_params_all.get("max_price")
         requested_shape = parse_shape_option(shape)
+        monitor = watchdog_settings(watchdog, watchdog_interval, watchdog_threshold)
         if from_run:
             if explain:
                 raise typer.BadParameter(
@@ -433,6 +624,16 @@ def register(app: typer.Typer) -> None:
                     f"{SHAPE_OPTION} applies only to fresh buys; resume uses the "
                     "shape its negotiation opened with"
                 )
+            if waivers:
+                raise typer.BadParameter(
+                    "default-refusal waivers apply only to fresh buys; resume uses "
+                    "the waivers its run recorded"
+                )
+            if watchdog:
+                raise typer.BadParameter(
+                    "--watchdog applies only to fresh buys; resume re-enters the "
+                    "watchdog its deal opted into"
+                )
             _run_resume_from(
                 from_run=from_run,
                 max_price=max_price,
@@ -442,16 +643,6 @@ def register(app: typer.Typer) -> None:
                 console=console,
             )
             return
-        if not explain and (duration_hours is None or duration_hours <= 0):
-            typer.secho(
-                "Fresh `market buy` runs require --duration-hours (the buyer's lease ask).",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        duration_seconds = (
-            round(duration_hours * 3600) if duration_hours is not None else 0
-        )
         requested_start_utc = _normalize_start_utc(start_utc)
         explicit_prices = initial_price is not None and max_price is not None
         if not explain and (initial_price is not None) != (max_price is not None):
@@ -477,7 +668,7 @@ def register(app: typer.Typer) -> None:
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
             settlement_policy = resolve_buyer_settlement_policy(
-                identity=identity, registry_urls=registry_urls,
+                identity=identity, registry_urls=registry_urls, waivers=waivers,
             )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -548,7 +739,7 @@ def register(app: typer.Typer) -> None:
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3) from exc
-        expiration_unix = int(time.time()) + int(expiration_seconds)
+        expiration_unix = injected_time.now() + int(expiration_seconds)
         if explain:
             assert discovery is not None
             trace = settlement_policy.explain_listings(
@@ -564,6 +755,16 @@ def register(app: typer.Typer) -> None:
             selected = buyer_stage(
                 selected.selection.settlement_schema
             ).prepare_selection(selected)
+            try:
+                rows = buyer_compute_disclosure(
+                    selected.option, listing=match, duration_seconds=duration_seconds,
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
+            emit_lifecycle_disclosure(
+                rows + buyer_lifecycle_disclosure(selected.option, waivers=waivers),
+                title=f"Selected option {selected.option.option_id}: price, horizon and lifecycle terms",
+            )
             normalized = domain_listing_record(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
@@ -575,7 +776,7 @@ def register(app: typer.Typer) -> None:
                 err=True,
                 fg=typer.colors.YELLOW,
             )
-            raise typer.Exit(0)
+            raise typer.Exit(2 if emit_term_refusals(settlement_policy) else 0)
         if requested_shape is not None:
             excess = [
                 (match, shape_excess(requested_shape, match)) for match in matches
@@ -732,6 +933,7 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
+            compute_term_waivers=list(waiver_flags(waivers)),
             profile_id=identity.profile_id,
             principal=identity.principal,
             registry_urls=reg_urls,
@@ -764,6 +966,9 @@ def register(app: typer.Typer) -> None:
 
         def _observe(stage: str, body: dict) -> None:
             run_log.event(stage, **body)
+            if stage == "payment_approved":
+                # Persisted before commit, so a restart's resume finds it.
+                _opt_in(run_log, body.get("negotiation_id"), monitor)
             if quiet:
                 if stage == "settlement_submitted":
                     console.print("provisioning ", end="")
@@ -826,18 +1031,21 @@ def register(app: typer.Typer) -> None:
             derive_prices=None,
             chain=negotiation_chain,
             capture=evidence_store().capture,
+            waivers=waivers,
         )
+        clock = wait_clock()
         settle_hook = make_legacy_settle_hook(
             config=config,
             provision=provision,
             confirm_settlement=confirm_settlement_cb,
             settlement_poll_interval=poll_interval,
             settlement_total_timeout=settlement_timeout,
-            sleep=time.sleep,
+            sleep=sync_sleep(clock),
             settlement_policy=settlement_policy,
+            clock=clock,
         )
         try:
-            result = run_buy(
+            result = buy_orchestration()(
                 config=config,
                 constraints=constraints,
                 provision=provision,
@@ -886,6 +1094,7 @@ def register(app: typer.Typer) -> None:
                 console.print(f"connect  {details.connect}")
             if result.status != "ready":
                 raise typer.Exit(4)
+            _watch(run_log.run_id, result.negotiation_id, result.connection_details, console, clock)
             return
         tbl = Table.grid(padding=(0, 2))
         tbl.add_column(style="bold")
@@ -937,5 +1146,6 @@ def register(app: typer.Typer) -> None:
 
         if result.status != "ready":
             raise typer.Exit(4)
+        _watch(run_log.run_id, result.negotiation_id, result.connection_details, console, clock)
 
     register_policy_verb(app, "buy", buy, _policy)

@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
 from typing import Any
+
+import injected_time
 from market_core.schemas import json_safe_wire_value
 from market_identity import Identity, Signer
 
@@ -102,7 +103,7 @@ def stage_event(stage: str, event: str, **fields: Any) -> None:
     public_fields = _public_value(fields)
     entry = {
         "version": RUN_LOG_VERSION,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": injected_time.now_datetime().isoformat(),
         "stage": stage,
         "event": event,
         **public_fields,

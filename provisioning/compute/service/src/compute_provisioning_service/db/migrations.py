@@ -26,6 +26,7 @@ from sqlalchemy import Connection, text
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.hosts.migrations import BASELINE as HOSTS_BASELINE
 from compute_provisioning.jobs.migrations import BASELINE as JOBS_BASELINE
+from compute_provisioning.jobs.migrations import MIGRATIONS as JOBS_MIGRATIONS
 from compute_provisioning.relays.migrations import BASELINE as RELAYS_BASELINE
 from compute_provisioning_ansible.connection import SSH_CONNECTION_KIND, SshConnectionCodec
 from market_fulfillment.migrations import BASELINE as FULFILLMENT_BASELINE
@@ -291,6 +292,6 @@ CHAIN: Chain[Connection] = Chain(
         FULFILLMENT_BASELINE,
         SITE_BASELINE,
     ),
-    migrations=(*SITE_MIGRATIONS, SSH_CONNECTIONS_VERSION_2),
+    migrations=(*SITE_MIGRATIONS, SSH_CONNECTIONS_VERSION_2, *JOBS_MIGRATIONS),
     floor_ids=FLOOR_IDS,
 )

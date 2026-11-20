@@ -16,5 +16,6 @@
   "settlement": null,
   "site_projections": null,
   "status": "ok",
-  "storefront_domains": null
+  "storefront_domains": null,
+  "time": null
 }

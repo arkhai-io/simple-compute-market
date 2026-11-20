@@ -1,13 +1,12 @@
 """A case filed after a once part's hold has paid out is dismissed with nothing held.
 
-The deal is ended by lease expiry before any clock moves, so no storefront step
-follows the advance. The part's hold runs from its stop, and a once part stops
-at its terms end, so both doubles' perceived clocks are advanced together first
-past that end, when the signed snapshot states the release instant, then past
-that instant: payments shows the part paid out, and the buyer's filing is answered with the part
-``not_held``, ``paid_out``, and the case dismissed with nothing held. The clock
-fixture resets both doubles when the module ends, whatever its outcome, so no
-later module meets the advance.
+The deal is ended by lease expiry before lane time moves. The part's hold runs
+from its stop, and a once part stops at its terms end, so lane time — every
+party's, the doubles' among them — is set first past that end, when the signed
+snapshot states the release instant, then past that instant: payments shows the
+part paid out, and the buyer's filing is answered with the part ``not_held``,
+``paid_out``, and the case dismissed with nothing held. On a wall-time run the
+two stages are blocked skips: the instants are days ahead.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage11b_TeardownCompletion,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
+from tests.e2e.roles.helpers.lane_time import LaneTime
 from tests.e2e.roles.helpers.mediation import file_as_buyer
 from tests.e2e.roles.scenarios.vms.dispute.stages import (
     DisputeStage01_HostedDealCommitted,
@@ -50,7 +50,7 @@ pytestmark = [
         "payments_config", "storefront_loops_held", "alice_loops_held",
         "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
-        "lane_doubles_evidence", "lane_double_rules", "lane_double_clock",
+        "lane_doubles_evidence", "lane_double_rules",
     ),
     pytest.mark.e2e_vm_dispute_hold_passed,
 ]
@@ -67,8 +67,7 @@ def deal_driver(deal_driver):
 
 @pytest.fixture(scope="module")
 def advanced() -> dict:
-    """Both doubles' perceived nows once advanced past the release, for the
-    filing stage."""
+    """The lane instants stages 20 and 21 set, for the stages after each."""
     return {}
 
 
@@ -124,54 +123,60 @@ class TestStageZ_NoFurtherCase(DisputeStageZ_NoFurtherCase):
     pass
 
 
-def _advance_past(lane_double_clock, instant: int) -> dict:
-    """Advance both doubles together to a second past ``instant``."""
-    now = lane_double_clock.controls["payments"].status().perceived_now
-    nows = lane_double_clock.advance(max(instant - now, 0) + 1)
-    assert all(perceived > instant for perceived in nows.values()), nows
-    return nows
+def _past(lane_time: LaneTime | None, instant: int) -> int:
+    """Set lane time to a second past ``instant``, or leave it where it is past
+    it; the lane instant. A blocked skip on wall time, which cannot reach it."""
+    if lane_time is None:
+        pytest.skip(f"blocked: reaching {instant} needs lane time, and the run has none")
+    reached = lane_time.reach(instant + 1, fixed_by_agreement=False)
+    assert reached > instant, reached
+    return reached
 
 
-class TestStage20_ClocksPassTheTermsEnd:
-    def test_20_both_clocks_pass_the_part_s_terms_end_and_its_hold_starts(
-        self, payments_config, lane_double_clock, deal_state, dispute,
+class TestStage20_TimePassesTheTermsEnd:
+    def test_20_lane_time_passes_the_part_s_terms_end_and_its_hold_starts(
+        self, payments_config, lane_time, deal_state, dispute, advanced,
     ):
         """The part's hold runs from its stop, and a once part stops at its
-        terms end, which the lease's ending does not move: both doubles advance
-        past the end the signed snapshot states, and the part's release instant
-        is then stated, its money still held."""
+        terms end, which the lease's ending does not move: lane time is set past
+        the end the signed snapshot states, and the part's release instant is
+        then stated, its money still held."""
         require_state(deal_state, "_teardown_job_completed")
         transaction = dispute.deal.transaction
         part = snapshot_part(payments_config, transaction)
         assert part["released"] == "0" and "releaseAt" not in part, part
-        nows = _advance_past(lane_double_clock, part["end"]["at"])
+        now = _past(lane_time, part["end"]["at"])
         part = snapshot_part(payments_config, transaction)
         assert part["released"] == "0" and part.get("releaseAt"), part
-        log.info("[20] Both doubles advanced past the terms end %s to %s; release at %s",
-                 part["end"]["at"], nows, part["releaseAt"])
+        advanced["terms_end"] = now
+        log.info("[20] Lane time set past the terms end %s to %s; release at %s",
+                 part["end"]["at"], now, part["releaseAt"])
 
 
-class TestStage21_ClocksPassTheHold:
-    def test_21_both_clocks_pass_the_part_s_release_and_it_pays_out(
-        self, payments_config, lane_double_clock, dispute, advanced,
+class TestStage21_TimePassesTheHold:
+    def test_21_lane_time_passes_the_part_s_release_and_it_pays_out(
+        self, payments_config, lane_time, dispute, advanced,
     ):
-        """Both doubles advance together past the release instant the part's
-        signed snapshot states; the next read shows the part paid out."""
+        """Lane time is set past the release instant the part's signed snapshot
+        states; the next read shows the part paid out."""
+        if "terms_end" not in advanced:
+            pytest.skip("blocked: stage 20 did not set lane time past the part's terms end")
         transaction = dispute.deal.transaction
         part = snapshot_part(payments_config, transaction)
         assert part.get("releaseAt"), "the part's hold has not started"
         release = int(datetime.fromisoformat(part["releaseAt"].replace("Z", "+00:00")).timestamp())
-        advanced.update(_advance_past(lane_double_clock, release))
+        advanced["now"] = _past(lane_time, release)
         part = snapshot_part(payments_config, transaction)
         assert int(part["released"]) > 0 and part["status"] in {"released", "settled"}, part
-        log.info("[21] Both doubles advanced past %s to %s; part paid out", release, advanced)
+        log.info("[21] Lane time set past %s to %s; part paid out", release, advanced["now"])
 
 
 class TestStage22_BuyerFilesAfterThePayout:
     def test_22_the_buyer_s_filing_reports_the_part_paid_out_and_is_dismissed(
         self, mediation_target, lane_double_rules, dispute, advanced,
     ):
-        assert advanced, "the clocks were not advanced"
+        if "now" not in advanced:
+            pytest.skip("blocked: stage 21 did not set lane time past the part's release")
         deal = dispute.deal
         outcome = file_as_buyer(mediation_target, negotiation_id=deal.negotiation_id,
                                 transaction=deal.transaction, agreement=deal.agreement,

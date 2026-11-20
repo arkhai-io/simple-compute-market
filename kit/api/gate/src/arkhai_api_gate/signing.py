@@ -19,9 +19,13 @@ authority will accept.
 
 ``market_identity`` is an optional dependency
 (``arkhai-api-gate[signed]``). Unsigned deployments keep the
-httpx-only dependency set, so the import is deferred to the point of use
-and a missing install is reported as configuration rather than as an
-``ImportError`` from inside a request.
+light dependency set, httpx and the standard-library time component, so the
+import is deferred to the point of use and a missing install is reported as
+configuration rather than as an ``ImportError`` from inside a request.
+
+Every timestamp this module signs and every freshness check it makes reads the
+process time source its host installs (``injected_time``); the gate has
+no time control of its own.
 
 Header names are repeated here rather than imported for the same
 packaging reason. They are protocol constants, fixed by the wire format.
@@ -30,10 +34,11 @@ packaging reason. They are protocol constants, fixed by the wire format.
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping
+
+import injected_time
 
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
 IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
@@ -170,7 +175,7 @@ class AuthoritySigning:
                 operation=operation,
                 resource=resource,
                 request_id=request_id,
-                timestamp=int(time.time()),
+                timestamp=injected_time.now(),
                 body_hash=identity.canonical_body_hash(envelope_body),
             ),
         )
@@ -250,7 +255,7 @@ class AuthoritySigning:
         result = identity.verify_response(
             authenticated,
             body=verified_body,
-            now=int(time.time()),
+            now=injected_time.now(),
             max_skew=self._max_response_skew,
             expected_role=AUTHORITY_RESPONSE_ROLE,
             expected_principals=self._expected_authorities,

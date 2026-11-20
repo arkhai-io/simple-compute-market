@@ -16,6 +16,7 @@ from registry_client.auth import (
     authentication_headers,
 )
 from registry_client.models import (
+    AdminStatusResponse,
     FilterSpecResponse,
     HealthResponse,
     ListingListResponse,
@@ -25,6 +26,7 @@ from registry_client.models import (
     PublisherIdentity,
     PublisherListResponse,
     SystemStatsResponse,
+    TimeSettingResponse,
     UpdateListingRequest,
     ValidatePublishRequest,
     ValidatePublishResponse,
@@ -44,6 +46,7 @@ __all__ = [
     "RegistryDescriptor",
     "authenticate_request",
     "authentication_headers",
+    "AdminStatusResponse",
     "FilterSpecResponse",
     "HealthResponse",
     "ListingListResponse",
@@ -53,6 +56,7 @@ __all__ = [
     "PublisherIdentity",
     "PublisherListResponse",
     "SystemStatsResponse",
+    "TimeSettingResponse",
     "UpdateListingRequest",
     "ValidatePublishRequest",
     "ValidatePublishResponse",

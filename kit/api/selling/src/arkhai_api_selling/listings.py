@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from datetime import datetime
 from typing import Any
 
+from core_storefront.sqlite_client import store_timestamp
 from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract
 from market_core.schemas import settlement_option_schema
@@ -367,7 +367,7 @@ class ListingService:
             pool=pool,
             domain=self._domain,
         )
-        now_iso = datetime.now().isoformat()
+        now_iso = store_timestamp()
         await self._db.upsert_listing_with_binding(
             binding=binding,
             status="open",

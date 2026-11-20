@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from datetime import datetime
 
+import injected_time
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentSettlementData
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_lifecycle.delivery import DeliveryPhase
@@ -45,10 +46,16 @@ def register_delivery(conn, negotiation_id):
         committed_at=committed,
         delivery_deadline_seconds=terms.delivery_deadline_seconds if terms else None,
     ))
+    # A payments deal with a rate part is not once-only; end service reads this
+    # projection to refuse committing a deal it could not service.
+    once_only = option.settlement_schema != ARKHAI_PAYMENTS_MECHANISM or all(
+        part.root.kind == "once"
+        for part in PaymentSettlementData.parse(json.loads(row[1]) if isinstance(row[1], str) else row[1]).mandate.parts
+    )
     SellerSession(conn).register(SellerDeal(
         negotiation_id=negotiation_id, commitment_ref=commitment, domain="vms",
         buyer=Identity.model_validate(agreement.buyer), payment=PaymentSelector(option.settlement_schema),
-        dispute=terms.adjudication.dispute if terms else None, once_only=True,
+        dispute=terms.adjudication.dispute if terms else None, once_only=once_only,
         entitlements=terms.early_termination.model_dump(mode="json")["entitlements"]
         if terms and terms.early_termination else {},
     ))
@@ -72,5 +79,5 @@ def admit_delivery(conn, negotiation_id, phase):
     register_delivery(conn, negotiation_id)
     end = EndSession(conn)
     record = end.read(negotiation_id)
-    return end.admit(negotiation_id, phase, record.revision, now=int(time.time())).status == "admitted"
+    return end.admit(negotiation_id, phase, record.revision, now=injected_time.now()).status == "admitted"
 

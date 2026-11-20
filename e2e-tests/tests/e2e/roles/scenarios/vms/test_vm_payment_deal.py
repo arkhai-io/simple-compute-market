@@ -103,7 +103,7 @@ def test_commit_replay_and_servicing_keep_the_same_hosted_deal(
     assert hosted.get("transaction"), "hosted commit did not complete"
     transaction, negotiation_id = hosted["transaction"], hosted["negotiation_id"]
     assert commit(negotiation_id, transaction).outcome.status == "accepted"
-    advance_storefront(storefront_admin_client, "settlement-servicing")
+    advance_storefront(storefront_admin_client, "deal-servicing")
     view = lifecycle_read(negotiation_id)
     assert view.commitment_ref == transaction
     # The authority does not know this Agreement until its first case is filed.
@@ -134,7 +134,7 @@ def test_operator_end_files_one_case_without_a_local_payment_remedy(
         negotiation_id, reason="development hosted VM reclaim",
     )
     assert again["delivery"]["recorded_end"] == first["delivery"]["recorded_end"]
-    advance_storefront(storefront_admin_client, "settlement-servicing")
+    advance_storefront(storefront_admin_client, "deal-servicing")
     view = lifecycle_read(negotiation_id)
     assert view.authority.outcome.status == "accepted", view
     assert len(view.authority.cases) == 1, view

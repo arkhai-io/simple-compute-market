@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 from types import SimpleNamespace
 from copy import deepcopy
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,6 +44,7 @@ from market_core.schemas import RateValue, derive_settlement_option_id
 from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_settlement_runtime import (
     MechanismReadiness,
     ReadinessBlocker,
@@ -218,6 +219,8 @@ class SettlementCompositionDouble:
     alkahest_blockers: tuple[ReadinessBlocker, ...] = ()
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
+        self.rate_servicing = RateServicing()
+        self.rate_term_projections = {}
         self.configuration_registry = build_storefront_settlement_registry()
         self.settlement_config = self.configuration_registry.resolve(
             storefront_config.settlement_config_mapping(), role="seller"
@@ -370,6 +373,11 @@ class RecordingRegistries:
     test planted there with :meth:`plant` -- a listing the storefront did not
     publish through this double -- and a close it is sent removes it.
     ``publisher_reads`` records the principal each read named.
+
+    A registry's descriptor read returns what ``descriptors`` holds for it, its
+    descriptor as the real client returns it once verified, or ``None``
+    for a registry whose read fails, as every registry's does until a test
+    sets one; ``descriptor_reads`` records the registries each read selected.
     """
 
     def __init__(self) -> None:
@@ -380,6 +388,13 @@ class RecordingRegistries:
         self.failing: set[tuple[str, str]] = set()
         self.planted: dict[str, list[ListingSummary]] = {url: [] for url in REGISTRY_URLS}
         self.publisher_reads: list[Any] = []
+        self.descriptors: dict[str, Any] = {url: None for url in REGISTRY_URLS}
+        self.descriptor_reads: list[list[str]] = []
+
+    async def get_descriptors(self, registries=None):
+        selected = [url for url in self.urls if registries is None or url in registries]
+        self.descriptor_reads.append(selected)
+        return {url: self.descriptors[url] for url in selected}
 
     def plant(self, url: str, listing_id: str, *, offering_mode: str) -> None:
         """An open listing at ``url``, under the storefront's principal."""
@@ -587,10 +602,13 @@ async def publication_app(
     *,
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
+    negotiation_options: Mapping[str, Any] | None = None,
     second_site: bool = False,
     contacts: Mapping[str, Mapping[str, str]] | None = None,
     admissibility_default: Mapping[str, Any] | None = None,
     unreachable_sites: Collection[str] = (),
+    settlement_configuration: Mapping[str, Any] | None = None,
+    settlement_composition_factory: Callable[[Mapping[str, bool]], Any] = SettlementCompositionDouble,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -637,7 +655,8 @@ async def publication_app(
         stack.enter_context(
             replaced_setting(
                 "settlement",
-                contact_settlement(contacts) if contacts is not None else SETTLEMENT,
+                settlement_configuration if settlement_configuration is not None
+                else contact_settlement(contacts) if contacts is not None else SETTLEMENT,
             )
         )
 
@@ -665,7 +684,7 @@ async def publication_app(
         # applies nothing.
         migrate_storefront_database(tmp_path / "storefront.db")
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
-        composition = SettlementCompositionDouble(
+        composition = settlement_composition_factory(
             mechanism_fulfillment
             if mechanism_fulfillment is not None
             else {"alkahest.v1": True, "arkhai.payments.v1": True}
@@ -766,11 +785,18 @@ async def publication_app(
                     binding=registration.binding,
                     capacity_runtime=capacity,
                     site_projections=site_projections,
-                    accepted_obligation_dispatch=(
-                        composition.accepted_obligation_dispatch()
-                        if contacts is not None
-                        else None
-                    ),
+                    rate_servicing=composition.rate_servicing,
+                    rate_term_projections=composition.rate_term_projections,
+                    **{
+                        "accepted_obligation_dispatch": (
+                            composition.accepted_obligation_dispatch()
+                            if contacts is not None else None
+                        ),
+                        # The composition's stage, as the composition root hands
+                        # it; the double composes none.
+                        "arkhai_payments_stage": getattr(composition, "arkhai_payments_stage", None),
+                        **(negotiation_options or {}),
+                    },
                 )
             )
             routers = (negotiate_router,)

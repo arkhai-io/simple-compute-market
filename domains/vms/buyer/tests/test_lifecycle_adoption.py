@@ -1,6 +1,8 @@
 """Buyer transport recovery adopts the authority's signed original case."""
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from market_arkhai_mediation.adapter import MediationAdapter
@@ -9,12 +11,17 @@ from market_arkhai_mediation.client import (
 )
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_deal_lifecycle.adapters import (
-    DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, submit_dispute,
+    DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, PaymentAdapterTable, PaymentBinding,
+    PaymentSelector, submit_dispute,
 )
 from market_deal_lifecycle.configuration import DisputeCredential
 from market_deal_lifecycle.terms import DisputeAuthority
+from market_deal_lifecycle_buyer import BuyerDeal, BuyerLifecycle
 from market_deal_lifecycle_buyer.store import FileEvidenceStore
-from market_deal_lifecycle_contracts.models import LifecycleCommand
+from market_deal_lifecycle_contracts.models import (
+    Accepted, AuthorityView, DeliveryView, LifecycleCommand, LifecycleRead, PaymentEvent,
+    PaymentPartObservation,
+)
 from pydantic import SecretStr
 
 from arkhai_vms_buyer.lifecycle import _MediationPort
@@ -49,6 +56,53 @@ def test_lost_filing_response_is_adopted_through_buyer_port(tmp_path):
             assert recovered.records[0].kind == "filed"
             assert len(peer.cases) == 1
             assert len([r for r in peer.requests if r.method == "POST"]) == 1
+
+    asyncio.run(drive())
+
+
+def test_the_buyers_read_of_a_deal_nobody_filed_on_carries_an_accepted_outcome():
+    async def drive():
+        # The contract's peer holds no record of the Agreement, as the authority
+        # holds none before a first filing, and answers its first page 404.
+        peer = MediationContractFake()
+        authority = DisputeAuthority.model_validate(peer.authority)
+        filing = peer.data["filing"]["request"]
+        binding = DisputeBinding("deal", filing["transaction"], authority)
+        deal = BuyerDeal(
+            "deal", filing["transaction"], PaymentBinding("deal", PaymentSelector("arkhai.payments.v1")),
+            binding, rate=True,
+        )
+        stopped = AuthorityView(outcome=Accepted(), state="ended", parts=[PaymentPartObservation(
+            part="0", started_at=1800000000, evidence_ref=filing["transaction"] + ":snapshot:2",
+            final_stop=PaymentEvent(
+                negotiation_id="deal", commitment_ref=filing["transaction"], part="0", kind="stop",
+                actor="payer-account", at=1800000600, cause="payer", sequence=1,
+                authority_record_ref=filing["transaction"] + ":events:1:part:0",
+                settles_through="started_period",
+            ),
+        )])
+        payment = SimpleNamespace(read=AsyncMock(return_value=stopped))
+        storefront = SimpleNamespace(read=AsyncMock(return_value=LifecycleRead(
+            negotiation_id="deal", commitment_ref=filing["transaction"],
+            authority=AuthorityView(outcome=Accepted()), delivery=DeliveryView(progress="released"),
+        )))
+        port = _MediationPort(authority, None)
+        async with MediationClient(
+            authority, MediationCredential(authority.identity, token=SecretStr("fixture-payer")),
+            transport=peer.transport(),
+        ) as client:
+            port.client = client
+            adapter = MediationAdapter(binding, filing["agreement"], port, clock=lambda: 1800001800)
+            buyer = BuyerLifecycle(
+                deal=lambda _: deal, peer=storefront, operations=MagicMock(),
+                payments=PaymentAdapterTable([(deal.payment.selector, lambda _: payment)]),
+                disputes=DisputeAdapterTable([(authority.interface, lambda _: adapter)]),
+            )
+            read = await buyer.read("deal")
+        assert [r.url.path for r in peer.requests] == ["/record"]
+        assert read.authority.outcome.status == "accepted"
+        assert read.authority.cases == [] and read.authority.disputes == []
+        assert read.authority.parts == stopped.parts
 
     asyncio.run(drive())
 

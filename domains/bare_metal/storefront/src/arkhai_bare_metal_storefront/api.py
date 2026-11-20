@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections.abc import Mapping
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
+import injected_time
 from arkhai_bare_metal import CanonicalPrincipal
 from compute_provisioning_contracts.lease_ends import LEASE_ENDED_CALLBACK
 from arkhai_bare_metal.evidence_routes import (
@@ -20,7 +20,13 @@ from arkhai_bare_metal.evidence_routes import (
     BareMetalSignedLeaseReadyEvidence,
     evidence_resource,
 )
-from core_storefront.auth import AuthError, authenticate_request
+from core_storefront.auth import (
+    ADMIN_TIME_OPERATION,
+    ADMIN_TIME_RESOURCE,
+    AuthError,
+    admin_time_setting_operation,
+    authenticate_request,
+)
 from core_storefront.identity_authority import (
     IdentityAuthorityError,
     StorefrontIdentityAuthority,
@@ -67,6 +73,7 @@ from market_contact_exchange import (
     IntroductionRouteError,
     IntroductionStart,
 )
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_identity import EMPTY_BODY, Identity, RotationRequest
 from market_negotiation_runtime import (
     NegotiationStateError,
@@ -91,11 +98,14 @@ from market_storefront_kit import (
     NegotiationControlRouteService,
     StageEventRouteService,
     StorefrontLifecycleRouteService,
+    StorefrontTimeRouteService,
+    TimeRouteError,
     TradingPauseRouteService,
     get_storefront_container,
     opening_proposal,
     refuse_introduction_fulfillment,
     refuse_introduction_settle,
+    time_refusal_body,
 )
 from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 
@@ -115,6 +125,8 @@ from .models import (
     BareMetalCapacityReleasedEvent,
     BareMetalEvaluateSettleRequest,
     BareMetalEvaluateSettleResponse,
+    BareMetalInterruptDealRequest,
+    BareMetalInterruptDealResponse,
     BareMetalReserveCapacityRequest,
     BareMetalSettleWaitResponse,
     BareMetalVerifyEscrowRequest,
@@ -143,6 +155,10 @@ from .settlement_service import (
 
 router = APIRouter()
 
+# The time-setting route, a router of its own because the application mounts it
+# only while the process's source is injected.
+time_router = APIRouter()
+
 
 def _runtime(request: Request) -> BareMetalStorefrontRuntime:
     try:
@@ -168,6 +184,7 @@ async def _principal(
     allowed_principals: tuple[Identity, ...] | None = None,
     body: Any = EMPTY_BODY,
     now: int | None = None,
+    time_setting_operation: str | None = None,
 ) -> Identity:
     bind_response_contract(request, operation=operation, resource=resource)
 
@@ -192,6 +209,7 @@ async def _principal(
             expected_principal=expected_principal,
             allowed_principals=allowed_principals,
             now=now,
+            time_setting_operation=time_setting_operation,
         )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -257,7 +275,8 @@ async def _admin(
 
     ``operation`` and ``resource`` are the ones the canonical storefront client
     signs for the route, the same on every storefront, so one administrator
-    client works against any of them.
+    client works against any of them. The time-setting operation, while it is
+    mounted, is verified without its timestamp's freshness.
     """
     return await _principal(
         request=request,
@@ -267,6 +286,7 @@ async def _admin(
         expected_role="admin",
         allowed_principals=runtime.admin_principals.identities,
         body=body,
+        time_setting_operation=admin_time_setting_operation(),
     )
 
 
@@ -459,9 +479,12 @@ def _listing_response(
     raw = row.get("listing_resource")
     if isinstance(raw, str):
         raw = json.loads(raw)
-    runtime.domain.codecs.listing(raw)
+    runtime.domain.codecs.listing(row)
     normalized = dict(row)
-    normalized["listing_resource"] = raw
+    normalized["listing_resource"] = {
+        name: value for name, value in raw.items()
+        if name not in ("max_duration_seconds", "available_until_utc")
+    }
     return normalized
 
 
@@ -1118,36 +1141,11 @@ async def fulfillment_result(
             negotiation_id=negotiation_id,
             operation="bare_metal_fulfillment_result",
         )
-        lifecycle = await runtime.fulfillment_service().status(
+        result = await runtime.fulfillment_service().result(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        if lifecycle["state"] not in {
-            "active",
-            "teardown_dispatch_pending",
-            "tearing_down",
-            "teardown_failed",
-            "torn_down",
-            "released",
-        }:
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment result is not ready"
-            )
-        receipt = await runtime.db.load_bare_metal_receipt(
-            negotiation_id=negotiation_id,
-        )
-        result = await runtime.db.load_bare_metal_result(
-            negotiation_id=negotiation_id,
-        )
-        if receipt is None or result is None:
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment result is not ready"
-            )
-        return BareMetalFulfillmentResultResponse(
-            negotiation_id=negotiation_id,
-            receipt=receipt,
-            result=result,
-        )
+        return BareMetalFulfillmentResultResponse.model_validate(result)
     except BareMetalFulfillmentError as exc:
         raise _fulfillment_error(exc) from exc
 
@@ -1227,7 +1225,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
     runtime = _runtime(request)
     as_site = request.headers.get("x-market-role") == "service"
     if as_site:
-        now = int(time.time())
+        now = injected_time.now()
         await _principal(
             request=request,
             runtime=runtime,
@@ -1252,6 +1250,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
             resource="system/status",
         )
     status = await runtime.status()
+    status["time"] = StorefrontTimeRouteService().status()
     if not as_site:
         overrides = runtime.pool_override_service()
         if overrides is not None:
@@ -1367,6 +1366,54 @@ async def admin_reserve_capacity(
 
 
 @router.post(
+    "/api/v1/admin/deals/{negotiation_id}/interrupt",
+    response_model=BareMetalInterruptDealResponse,
+)
+async def admin_interrupt_deal(
+    negotiation_id: str, body: BareMetalInterruptDealRequest, request: Request
+) -> BareMetalInterruptDealResponse:
+    """Interrupt a committed payments deal as its administrator classifies it.
+
+    Preemption sends the seller's notice under the accepted payee entitlement;
+    failure ends delivery and files ``delivery_end``. The seller half's
+    classification decides both, and refuses before any effect.
+    """
+    runtime = _runtime(request)
+    actor = await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_interrupt_deal",
+        resource=negotiation_id,
+        body=await _request_body(request),
+    )
+    try:
+        agreement, _ = await asyncio.to_thread(runtime.lifecycle.agreement, negotiation_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown accepted deal {negotiation_id!r}") from exc
+    if agreement.settlement is None or agreement.settlement.settlement_schema != ARKHAI_PAYMENTS_MECHANISM:
+        raise HTTPException(status_code=409, detail="only a payments deal has an administrator interruption")
+    if body.interrupted_at_utc is not None:
+        raise HTTPException(status_code=400, detail="an interruption takes effect at receipt and accepts no time")
+    try:
+        result = await runtime.lifecycle.seller.interrupt(
+            negotiation_id, actor=actor, reason=body.reason or "",
+            operation_key=body.operation_key, interruption_kind=body.interruption_kind,
+            dry_run=body.dry_run, physical=runtime.lifecycle.end.drive_physical,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BareMetalInterruptDealResponse(
+        escrow_uid=negotiation_id,
+        listing_id=agreement.listing_id,
+        status="dry_run" if body.dry_run else result.outcome.status,
+        interrupted_at_utc=injected_time.now_datetime().isoformat().replace("+00:00", "Z"),
+        settlement_action=result.settlement_action,
+        lifecycle_outcome=result.outcome.model_dump(mode="json"),
+        delivery=result.delivery.model_dump(mode="json"),
+    )
+
+
+@router.post(
     "/api/v1/admin/fulfillment/events/capacity-released",
     response_model=BareMetalCapacityEventResponse,
 )
@@ -1382,7 +1429,7 @@ async def capacity_released(
     """
     runtime = _runtime(request)
     operation = "fulfillment_capacity_released"
-    now = int(time.time())
+    now = injected_time.now()
     await _principal(
         request=request,
         runtime=runtime,
@@ -1418,7 +1465,7 @@ async def lease_ended(capacity_reservation_id: str, request: Request) -> dict[st
     if row is None:
         raise HTTPException(status_code=404, detail="reservation is not this storefront's")
     operation = LEASE_ENDED_CALLBACK["operation"]
-    now = int(time.time())
+    now = injected_time.now()
     await _principal(
         request=request, runtime=runtime, operation=operation,
         resource=capacity_reservation_id, expected_role="service",
@@ -1487,7 +1534,7 @@ async def rotate_marketplace_identity(
             _changing_identity_authority(runtime),
             request=body,
             operator=operator,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1514,7 +1561,7 @@ async def retire_marketplace_identity(
             _changing_identity_authority(runtime),
             request=body,
             operator=operator,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1553,7 +1600,7 @@ async def marketplace_identity_status(request: Request) -> IdentityStatusRespons
             StorefrontIdentityAuthority(runtime.db.db_path),
             authority=authority,
             subject=subject,
-            now=int(time.time()),
+            now=injected_time.now(),
         )
     except IdentityAuthorityError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1637,6 +1684,30 @@ async def pause(request: Request) -> AdminPauseResponse:
         body=await _request_body(request),
     )
     return TradingPauseRouteService(runtime.trading_pause).pause()
+
+
+@time_router.post("/api/v1/admin/time")
+async def set_time(request: Request) -> JSONResponse:
+    """Set the storefront's injected time to the instant the body carries.
+
+    Authenticated without the request timestamp's freshness, as the
+    time-setting operation is; the response is signed at the instant set.
+    """
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation=ADMIN_TIME_OPERATION,
+        resource=ADMIN_TIME_RESOURCE,
+        body=await _request_body(request),
+    )
+    try:
+        answer = StorefrontTimeRouteService().set_time(await request.body())
+    except TimeRouteError as error:
+        return JSONResponse(
+            status_code=error.status_code, content=time_refusal_body(error)
+        )
+    return JSONResponse(content=answer)
 
 
 @router.post("/api/v1/admin/resume", response_model=AdminPauseResponse)

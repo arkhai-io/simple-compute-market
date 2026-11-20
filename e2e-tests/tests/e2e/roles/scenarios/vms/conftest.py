@@ -37,8 +37,8 @@ from typing import Any, Optional
 import pytest
 
 import uuid
-from datetime import datetime, timezone
 
+import injected_time
 from market_identity import (
     Identity,
     RequestEnvelope,
@@ -152,7 +152,7 @@ def signed_listing_read_headers(listing_id: str) -> dict[str, str]:
             operation="listing.get",
             resource=listing_id,
             request_id=uuid.uuid4().hex,
-            timestamp=int(datetime.now(timezone.utc).timestamp()),
+            timestamp=injected_time.now(),
             body_hash=canonical_body_hash({"query": []}),
         ),
     )

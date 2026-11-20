@@ -227,7 +227,7 @@ The owner's review of round 2 found two defects in the torn-record fallback.
 
 ## 2. Closeout
 
-The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 Closeout changes documentation only; a part needing a code edit returns the
 change to implementation.
 

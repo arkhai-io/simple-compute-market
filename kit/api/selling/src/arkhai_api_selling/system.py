@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 from core_storefront.models.system_models import LoopStatus
-from market_storefront_kit import StorefrontLoopController
+from market_storefront_kit import StorefrontLoopController, StorefrontTimeRouteService
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +114,12 @@ class SystemService:
         self, *, paused: bool, loops: StorefrontLoopController | None
     ) -> dict[str, Any]:
         """The administrator's status read: health with the registries and the
-        authority, the storefront's principal, the trading pause, and every loop."""
+        authority, the storefront's principal, the trading pause, every loop,
+        and the process's time source."""
         body = await self.get_health(include_registry=True)
         body["paused"] = paused
         body["lifecycle"] = lifecycle_status(loops)
+        body["time"] = StorefrontTimeRouteService().status()
         return body
 
     async def _registry_check(self) -> str:

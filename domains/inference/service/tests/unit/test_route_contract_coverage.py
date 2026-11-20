@@ -8,6 +8,7 @@ from market_site.auth import (
     EXCLUDED_PATHS,
     resolve_site_route,
 )
+from arkhai_api_contracts.operations import SYSTEM_TIME
 from starlette.routing import Route
 
 from inference_service import main
@@ -96,8 +97,11 @@ def test_every_authority_contract_matches_a_mounted_route(mounted):
             except ValueError:
                 # A body-resource contract matched, but the probe sent no body.
                 reachable.add(contract.operation)
+    # The time-setting route is mounted only under injected time, whichever
+    # source this process composed the service under.
+    conditional = {SYSTEM_TIME}
     declared = {contract.operation for contract in INFERENCE_ROUTE_CONTRACTS}
-    assert declared == reachable, (
+    assert declared - conditional == reachable - conditional, (
         f"contracts matching no mounted route: {sorted(declared - reachable)}"
     )
 

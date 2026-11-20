@@ -28,12 +28,22 @@ allow = [
   "Bash(scripts/change-workflow find*)",
   "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
-  "Bash(git merge-base*)", "Bash(git check-ignore*)",
+  "Bash(git merge-base*)", "Bash(git check-ignore*)", "Bash(git grep*)",
+  # Any step may refresh its view of the remote's branches and tags, so one
+  # reading the release record (the marketplace-v* tags) or the landing branch
+  # reads the current one. A fetch moves remote-tracking refs and tags only,
+  # never the worktree or a local branch.
+  "Bash(git fetch origin*)", "Bash(git fetch workspace*)",
   "Bash(scripts/change-workflow next*)", "Bash(scripts/change-workflow cost*)",
   "Bash(scripts/change-workflow log*)", "Bash(scripts/change-workflow config *)",
   "Bash(scripts/change-workflow record*)",
   "Bash(scripts/change-workflow check round-view)", "Bash(scripts/change-workflow check index)",
+  # The task-list check only reads, and any step that edits tasks.md may run it,
+  # with the change named or not.
+  "Bash(scripts/change-workflow check tasks*)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
+  # The repository's own OpenSpec wrapper, validating only: a fixed script and subcommand.
+  "Bash(scripts/openspec validate *)",
   "Bash(openspec show *)", "Bash(openspec status*)",
   "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
   "Bash(grep *)", "Bash(echo *)", "Bash(diff *)", "Bash(find *)",
@@ -56,6 +66,8 @@ allow = [
   "Bash(make audit-secrets)", "Bash(python3 scripts/check_secrets.py *)",
   # The bounded wait on a background command's output; it only reads the file.
   "Bash(scripts/change-workflow wait *)",
+  # Whether the Docker daemon is up, before a run that needs it; it only reads.
+  "Bash(docker info)", "Bash(docker info *)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
@@ -92,6 +104,7 @@ skill = "change-review"
 allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
          "Bash(make check-tasks*)", "Bash(make check-architecture)",
          "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)",
+         "Bash(scripts/change-workflow evidence *)",
          # The reviewer checks its draft with the format check the review is
          # published under, piping it on standard input, since it writes no file.
          "Bash(scripts/change-workflow check review *)", "Bash(make check-review*)"]
@@ -125,7 +138,6 @@ skill = "change-plan"
 resume_from = "design"
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
-  "Bash(scripts/change-workflow check tasks *)",
   "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
   "Bash(make check-*)",
   "Bash(make helm-values-schema)",
@@ -139,6 +151,7 @@ skill = "change-triage"
 allow = [
   "Edit", "Write", "Task",
   "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(make check-*)",
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
@@ -146,9 +159,11 @@ allow = [
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
   "Bash(scripts/change-workflow push)",
-  "Bash(git pull --ff-only workspace *)",
+  "Bash(git pull --ff-only workspace *)", "Bash(git config --get-regexp remote)",
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
-  "Bash(helm version*)", "Bash(make helm-values-schema)",
+  "Bash(helm version*)", "Bash(make helm-values-schema)", "Bash(make typecheck*)",
+  "Bash(make -C * typecheck*)", "Bash(make -C * first-use*)",
+  "Bash(uv run --find-links * pytest *)",
 ]
 # Triage fixes and re-checks one change; running two changes' validations
 # side by side deploys into another change's namespace.
@@ -176,6 +191,12 @@ allow = [
   # and a Compose stack under a project name of the session's own, so it never
   # touches another change's stack or a validation namespace.
   "Bash(make -C * migrate*)", "Bash(docker run --rm *)",
+  # A package's own type check and first-use example, and its tests run with
+  # another environment directory or wheelhouse: the forms sessions reach for.
+  "Bash(make -C * typecheck*)", "Bash(make -C * first-use*)",
+  "Bash(uv run --directory * pytest *)", "Bash(uv run --find-links * pytest *)",
+  # A section checking its delta specifications, through the configured OpenSpec.
+  "Bash(scripts/change-workflow openspec validate *)",
 ]
 deny = ["Bash(make run-e2e*)"]
 
@@ -187,6 +208,9 @@ allow = [
   "Edit(openspec/changes/**/reviews/*-validation.md)",
   "Bash(scripts/change-workflow check push)",
   "Bash(scripts/change-workflow push)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow gather *)", "Bash(scripts/change-workflow evidence *)",
+  # One failing test of the scripts' suite run alone, to tell its cause.
+  "Bash(make test-release-tooling TESTS=*)",
   "Bash(make helm-values-schema)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
@@ -204,7 +228,6 @@ deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
 skill = "change-merge"
 allow = [
   "Edit", "Write", "Task",
-  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
   "Bash(git merge --no-edit origin/*)", "Bash(git merge --no-edit workspace/*)",
   "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
@@ -213,7 +236,10 @@ allow = [
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
   "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
   "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
+  "Bash(make -C * typecheck*)", "Bash(make -C * first-use*)",
+  "Bash(uv run --find-links * pytest *)", "Bash(scripts/change-workflow openspec validate *)",
 ]
 deny = ["Bash(make run-e2e*)", "Bash(git merge --abort*)", "Bash(git merge --quit*)"]
 
@@ -228,6 +254,7 @@ allow = [
   # beside the code it describes without gaining any code path.
   "Edit(**/README.md)",
   "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)", "Bash(scripts/change-workflow check *)",
   "Bash(make helm-values-schema)",
@@ -243,8 +270,7 @@ allow = [
   "Edit(openspec/changes/archive/*/interventions.jsonl)",
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
   "Bash(scripts/change-workflow history*)", "Bash(scripts/change-workflow run *)",
+  "Bash(scripts/change-workflow evidence *)",
   "Bash(make helm-values-schema)",
-  # Archive cleanup fetches the branch the change's last merge brought in, to record it.
-  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
 ]
 deny = ["Bash(gh pr create*)"]

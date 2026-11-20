@@ -74,7 +74,15 @@ class RelayGrantKeys(BaseModel):
 
 
 class RelayResponse(BaseModel):
-    """A relay as callers see it."""
+    """A relay as callers see it.
+
+    ``active_lease_count`` is how many ports the relay holds now, which shows a
+    drain's progress. ``drained`` is true exactly when the relay is disabled
+    and holds no active lease; the relay's operator relies on it to know the
+    relay server may be removed. Both are required, with no default: a client
+    reading a service that does not report them fails to parse the response
+    rather than reading an unknown as drained or not drained.
+    """
 
     id: str
     label: str | None = None
@@ -84,6 +92,8 @@ class RelayResponse(BaseModel):
     vm_port_range_count: int
     enabled: bool
     token_configured: bool
+    active_lease_count: int
+    drained: bool
     grant_keys: RelayGrantKeys
 
 

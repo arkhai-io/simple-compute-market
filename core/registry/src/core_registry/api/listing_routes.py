@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
@@ -34,7 +33,7 @@ from core_registry.api.utils import (
     validate_order_status,
 )
 from core_registry.db.database import get_db
-from core_registry.db.models import Listing
+from core_registry.db.models import Listing, utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -88,7 +87,7 @@ async def publish_listing(
             existing.status = status
             updates.pop("status", None)
         existing.publisher_updates = updates
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = utcnow()
         listing = existing
     else:
         listing = Listing(
@@ -208,7 +207,9 @@ async def query_listings(
     except FilterParamError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    rows = query.order_by(desc(Listing.created_at)).all()
+    # Times are whole seconds, so listings stored in one second tie on
+    # ``created_at``; the listing id keeps their order stable between reads.
+    rows = query.order_by(desc(Listing.created_at), Listing.listing_id).all()
     matched = [
         order_to_dict(row)
         for row in rows
@@ -276,7 +277,7 @@ async def update_listing(
         listing.status = validate_order_status(body["status"])
     if "oracle_address" in body:
         listing.oracle_address = body["oracle_address"]
-    listing.updated_at = datetime.utcnow()
+    listing.updated_at = utcnow()
     db.flush()
     response_body = {
         "listing_id": listing.listing_id,

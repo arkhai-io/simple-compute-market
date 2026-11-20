@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from datetime import datetime
 from typing import Any
 
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
+from core_storefront.sqlite_client import store_timestamp
 from market_core import SettlementEvidence
 
 from arkhai_api_selling.contributions import SellingContributions
@@ -213,7 +213,7 @@ class StorefrontSQLiteClient(CoreSQLiteClient):
                     (
                         obligation_ref,
                         obligation_index,
-                        datetime.now().isoformat(),
+                        store_timestamp(),
                         escrow_uid,
                     ),
                 )

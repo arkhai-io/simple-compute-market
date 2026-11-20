@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 from core_storefront.auth import (
     AuthenticatedPrincipal,
     AuthError,
+    admin_time_setting_operation,
     authenticate_request,
     signed_response_headers,
 )
@@ -143,7 +144,8 @@ class StorefrontAuth:
 
         Routes whose contract a shared typed client defines verify the
         operation and resource that client signs, rather than this
-        storefront's route name and path.
+        storefront's route name and path. The time-setting operation, while
+        it is mounted, is verified without its timestamp's freshness.
         """
         store = self._store()
         body = await self._sent_body(request)
@@ -159,6 +161,7 @@ class StorefrontAuth:
                 replay_store=store,
                 allowed_principals=self._admin_principals().identities,
                 now=self._now(),
+                time_setting_operation=admin_time_setting_operation(),
             )
         except AuthError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

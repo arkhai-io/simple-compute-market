@@ -32,6 +32,14 @@ account = "00000000-0000-4000-8000-0000000000b1"
 token = "payments-lane-double-buyer-public-development-token"
 funding = "1000000000000"
 
+# A second payer, funded with nothing at start, which a scenario funds through
+# the funding control with exactly the balance it needs: funds running out needs
+# a payer whose balance covers a known number of periods, which the buyer's large
+# seed balance never is.
+[accounts.rate_payer]
+account = "00000000-0000-4000-8000-0000000000b3"
+token = "payments-lane-double-rate-payer-public-development-token"
+
 # The payee every lane's storefront acts as.
 [accounts.seller]
 account = "00000000-0000-4000-8000-0000000000b2"

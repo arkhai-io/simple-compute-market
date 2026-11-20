@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Any, Optional
 
+import injected_time
 import typer
 from core_buyer import (
     BuyConfig,
@@ -381,7 +382,7 @@ def register(
                 fg=typer.colors.YELLOW,
             )
             raise typer.Exit(0)
-        expiration_unix = int(time.time()) + int(expiration_seconds)
+        expiration_unix = injected_time.now() + int(expiration_seconds)
 
         def build_proposal_for_match(match: dict) -> Any | None:
             if "_selected_buyer_proposal" in match:

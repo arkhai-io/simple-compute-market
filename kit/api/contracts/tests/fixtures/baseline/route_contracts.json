@@ -326,6 +326,26 @@
       "optional_body_resource": false,
       "path_resource": "key_id",
       "pattern": "/api/v1/keys/(?P<key_id>[^/]+)"
+    },
+    {
+      "allowed_roles": [],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "credits_system_status",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/system/status"
+    },
+    {
+      "allowed_roles": [],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "credits_system_time",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/system/time"
     }
   ],
   "unsigned_paths": [

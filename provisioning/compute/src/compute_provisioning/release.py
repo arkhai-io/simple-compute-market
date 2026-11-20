@@ -32,7 +32,10 @@ teardown, so a crash between the two leaves a release the next cycle resumes
 rather than a teardown the lease does not know about. The lifecycle frees
 capacity through the guarded site release and reads progress through
 ``FulfillmentReleaseStatusPort``. Fulfillment convergence owns teardown
-dispatch, retry, and recovery.
+dispatch, retry, and recovery, and the job-backed provider runs a teardown
+whose execution never started again within a bound; while such a rerun is
+pending, a ``teardown_failed`` aggregate reads as still tearing down, so the
+lease waits in ``releasing`` rather than for an operator.
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import injected_time
 from market_fulfillment import (
     CompensationCandidate,
     CompensationRefusedError,
@@ -54,6 +58,13 @@ from sqlalchemy.orm import Session
 
 from compute_provisioning.job_fulfillment import JobFulfillmentMetadata
 from compute_provisioning.jobs.db import job_bound_to_reservation
+from compute_provisioning.jobs.engine import BoundJob
+from compute_provisioning.teardown_rerun import (
+    TeardownRerunPolicy,
+    never_started_account,
+    rerun_pending,
+    teardown_rerun,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +136,14 @@ class TeardownRefused(Exception):
         super().__init__(message)
         self.reason = reason
         self.message = message
+
+
+class BoundJobReader(Protocol):
+    """The job authority's read of a reservation's jobs under one action."""
+
+    def bound_jobs(
+        self, capacity_reservation_id: str, action_kind: str
+    ) -> tuple[BoundJob, ...]: ...
 
 
 class FulfillmentTeardownPort(Protocol):
@@ -316,11 +335,18 @@ class FulfillmentReleaseStatusPort:
 
     The release handle is the durable ``fulfillment_id``, and the record is read
     directly, so the provider metadata ``compensable`` judges never leaves this
-    package. ``torn_down`` is success. ``teardown_failed`` is reported as failed
-    even though convergence requeues it: the lease then waits in
-    ``release_failed``, and an operator's retry-release adopts the aggregate's
-    teardown again. A compensable ``failed`` aggregate is ready for its
-    compensating teardown; any other ``failed`` one has no teardown.
+    package. ``torn_down`` is success. A ``teardown_failed`` aggregate whose
+    teardown has a rerun pending, as ``teardown_rerun`` decides from the
+    reservation's teardown jobs, is still tearing down: the provider runs the
+    rerun when convergence requeues it. Any other ``teardown_failed`` is failed,
+    since convergence's requeue would only adopt the same failed job: the lease
+    then waits in ``release_failed``, and an operator's retry-release adopts the
+    aggregate's teardown again. A compensable ``failed`` aggregate is ready for
+    its compensating teardown; any other ``failed`` one has no teardown.
+
+    The rerun predicate and the job authority's teardown-job read are the
+    port's one source beyond the aggregate, as ``compensable`` reads the
+    job-backed provider's metadata; it submits and polls no provider job.
     """
 
     def __init__(
@@ -328,9 +354,13 @@ class FulfillmentReleaseStatusPort:
         *,
         settlement_repository: Any,
         session_factory: Callable[[], Any],
+        rerun_policy: TeardownRerunPolicy,
+        jobs: BoundJobReader,
     ) -> None:
         self._settlement_repository = settlement_repository
         self._session_factory = session_factory
+        self._rerun_policy = rerun_policy
+        self._jobs = jobs
 
     def get_status(self, fulfillment_id: str) -> ReleaseStatus:
         with self._session_factory() as db:
@@ -344,6 +374,7 @@ class FulfillmentReleaseStatusPort:
                     error=f"no fulfillment {fulfillment_id!r}",
                 )
             state = str(record.state)
+            capacity_reservation_id = str(record.capacity_reservation_id)
             detail = record.failure_message or record.failure_reason
             compensate = compensable(
                 state, record.failure_reason, record.provider_metadata
@@ -351,11 +382,7 @@ class FulfillmentReleaseStatusPort:
         if state == _State.torn_down.value:
             return ReleaseStatus(ReleaseProgress.TORN_DOWN)
         if state == _State.teardown_failed.value:
-            return ReleaseStatus(
-                ReleaseProgress.FAILED,
-                reason="teardown_failed",
-                error=detail or "teardown failed",
-            )
+            return self._teardown_failed(capacity_reservation_id, detail)
         if state == _State.failed.value:
             if compensate:
                 return ReleaseStatus(ReleaseProgress.READY_FOR_TEARDOWN)
@@ -370,9 +397,28 @@ class FulfillmentReleaseStatusPort:
             return ReleaseStatus(ReleaseProgress.CREATE_IN_FLIGHT)
         return ReleaseStatus(ReleaseProgress.TEARING_DOWN)
 
+    def _teardown_failed(
+        self, capacity_reservation_id: str, detail: str | None
+    ) -> ReleaseStatus:
+        error = detail or "teardown failed"
+        outcome = teardown_rerun(
+            self._jobs.bound_jobs(capacity_reservation_id, "teardown"),
+            self._rerun_policy,
+            injected_time.now_datetime(),
+        )
+        if rerun_pending(outcome):
+            return ReleaseStatus(ReleaseProgress.TEARING_DOWN)
+        account = never_started_account(outcome, self._rerun_policy)
+        return ReleaseStatus(
+            ReleaseProgress.FAILED,
+            reason="teardown_failed",
+            error=error if account is None else f"{error}; {account}",
+        )
+
 
 __all__ = [
     "PROVIDER_REPORTED_FAILURE",
+    "BoundJobReader",
     "FulfillmentReleaseExecutor",
     "FulfillmentReleaseGuard",
     "FulfillmentReleaseStatusPort",

@@ -282,6 +282,87 @@ def test_skew_boundary_is_inclusive_and_one_second_beyond_is_rejected(
     assert _request_result(request, now=NOW - 301).code == VerificationCode.TIMESTAMP_SKEW
 
 
+def test_the_time_setting_operation_alone_is_verified_without_freshness(
+    signer: Signer,
+    request_envelope: RequestEnvelope,
+) -> None:
+    # The fixture's request is the operation the authority names as its
+    # time-setting one; the verifier is 900 s from the request's timestamp.
+    request = sign_request(signer=signer, envelope=request_envelope)
+    setting = request_envelope.operation
+
+    for now in (NOW + 900, NOW - 900):
+        exempt = _request_result(request, now=now, time_setting_operation=setting)
+        assert exempt.code == VerificationCode.VERIFIED
+        assert exempt.reservation is not None
+        assert _request_result(request, now=now).code == VerificationCode.TIMESTAMP_SKEW
+
+    # Naming another operation as the time-setting one exempts nothing here.
+    assert (
+        _request_result(request, now=NOW + 900, time_setting_operation="system.time").code
+        == VerificationCode.TIMESTAMP_SKEW
+    )
+
+
+def test_the_time_setting_operation_is_otherwise_verified_as_every_request(
+    signer: Signer,
+    request_envelope: RequestEnvelope,
+) -> None:
+    request = sign_request(signer=signer, envelope=request_envelope)
+    setting = request_envelope.operation
+    skewed = NOW + 900
+
+    changed_body = _request_result(
+        request, body={"amount": 18}, now=skewed, time_setting_operation=setting
+    )
+    assert changed_body.code == VerificationCode.BODY_HASH_MISMATCH
+
+    other = Ed25519Signer(b"\x55" * 32).identity
+    wrong_principal = _request_result(
+        request,
+        now=skewed,
+        time_setting_operation=setting,
+        expected_principals=TrustedIdentitySet(identities=(other,)),
+    )
+    assert wrong_principal.code == VerificationCode.WRONG_PRINCIPAL
+
+    forged = _replace_request(request, timestamp=NOW + 901)
+    assert (
+        _request_result(forged, now=skewed, time_setting_operation=setting).code
+        == VerificationCode.INVALID_PROOF
+    )
+
+    first = _request_result(request, now=skewed, time_setting_operation=setting)
+    assert first.reservation is not None
+    exact = _request_result(
+        request,
+        now=skewed,
+        time_setting_operation=setting,
+        existing_replay=first.reservation,
+    )
+    assert exact.code == VerificationCode.EXACT_RETRY
+    assert exact.dispatch_allowed is False
+
+    reused_body = {"amount": 99}
+    reused = sign_request(
+        signer=signer,
+        envelope=RequestEnvelope.model_validate(
+            {
+                **request_envelope.model_dump(mode="python"),
+                "body_hash": canonical_body_hash(reused_body),
+            }
+        ),
+    )
+    reuse = _request_result(
+        reused,
+        body=reused_body,
+        now=skewed,
+        time_setting_operation=setting,
+        existing_replay=first.reservation,
+    )
+    assert reuse.code == VerificationCode.CHANGED_REUSE
+
+
 def test_exact_retry_and_changed_reuse_are_distinct(
     signer: Signer,
     request_envelope: RequestEnvelope,

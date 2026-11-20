@@ -263,6 +263,18 @@ both lane doubles, as every lane does, and its three registries layer the
 `payments-lane` profile so they recommend the mediation double as the dispute
 authority.
 
+The lane runs every party on injected lane time, which the lane-time fixture
+sets, so the fixture needs a credential at each. `compose.inference-lane.yml`
+adds the lane's operator, Anvil 9, to the inference authority's trusted
+principals as `admin`, the role its time route takes; the full local stack
+trusts no `admin`. The storefront's time route takes its administrator, the
+storefront's own Anvil 0 principal. The gateway's time control takes the bearer
+token `inference-gateway-lane-control-public-development-token`, which the same
+overlay sets, and each registry's administrator route takes the
+`REGISTRY_ADMIN_API_KEY` of its profile under `dev-env/registry/`.
+`e2e-tests/config/config-inference-lane.yml` restates each in its `lane_time`
+section. All are public development values, never for a public network.
+
 ## The payments lane double
 
 Each lane runs the payments and mediation lane doubles
@@ -286,8 +298,8 @@ each restatement to its fixture:
 | the seller's bearer token | `[Settlement.arkhai_payments].api_key` in `bob.storefront.secrets.toml`, `bare-metal.storefront.secrets.toml` and `api-credits.storefront.secrets.toml` | each lane storefront's payments key at the payments double |
 | the dispute authority | `dev-env/registry/config-payments-lane.env` | the lanes' registries' recommended dispute authorities, one JSON line, the mediation double's identity |
 | the dispute authority's payments token | `[accounts.dispute_authority].token` in `tools/payments-lane-double/fixtures/accounts.toml` | the token the mediation double extends, reverses and lifts with at the payments double |
-| the seller's mediation token | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime`, rewriting its `ca_bundle_path` to the storefront chart's CA file | Bob's credential toward the mediation double, bound to its identity, with the lane CA's path as its `ca_bundle_path` |
-| the lane CA's path | `ca_bundle_path` in each lane storefront configuration and in Bob's dispute credential | where each lane overlay binds `tools/lane-double-controls/tls/lane-ca.pem` |
+| the seller's mediation token | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime`, rewriting its `ca_bundle_path` to the storefront chart's CA file, and in `bare-metal.storefront.secrets.toml` | each compute lane storefront's credential toward the mediation double, bound to its identity, with the lane CA's path as its `ca_bundle_path` |
+| the lane CA's path | `ca_bundle_path` in each lane storefront configuration and in each compute lane storefront's dispute credential | where each lane overlay binds `tools/lane-double-controls/tls/lane-ca.pem` |
 
 The test runner reads the lanes' payments and mediation settings from committed
 profiles, which restate the doubles' values too:

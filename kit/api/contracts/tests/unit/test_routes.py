@@ -12,7 +12,9 @@ from arkhai_api_contracts.routes import AUTHORITY_ROUTES, route
 BASELINE = Path(__file__).resolve().parents[1] / "fixtures" / "baseline"
 ROUTE_CONTRACTS = json.loads((BASELINE / "route_contracts.json").read_text(encoding="utf-8"))
 MOUNTED = json.loads((BASELINE / "routes.json").read_text(encoding="utf-8"))
-AUTHORITY_PATHS = ("/api/v1/issuance", "/api/v1/keys")
+AUTHORITY_PATHS = ("/api/v1/issuance", "/api/v1/keys", "/api/v1/system/status")
+# Declared, and mounted only under injected time, which the recorded service does not run.
+UNMOUNTED = {operations.SYSTEM_TIME}
 
 
 def _as_recorded(declaration: dict) -> dict:
@@ -39,9 +41,14 @@ def test_the_declarations_match_the_services_table_field_for_field():
 
 def test_every_mounted_authority_route_resolves_to_exactly_one_declaration():
     mounted = [r for r in MOUNTED if r["path"].startswith(AUTHORITY_PATHS)]
-    assert len(mounted) == len(AUTHORITY_ROUTES)
+    resolved = []
     for mounted_route in mounted:
-        assert len(_matching(mounted_route["method"], mounted_route["path"])) == 1, mounted_route
+        matches = _matching(mounted_route["method"], mounted_route["path"])
+        assert len(matches) == 1, mounted_route
+        resolved.append(matches[0]["operation"])
+    assert sorted(resolved) == sorted(
+        d["operation"] for d in AUTHORITY_ROUTES if d["operation"] not in UNMOUNTED
+    )
     for path in ROUTE_CONTRACTS["unsigned_paths"]:
         assert not any(_matching(method, path) for method in ("GET", "POST", "PUT", "DELETE")), path
 
@@ -54,5 +61,8 @@ def test_each_operation_is_declared_once_and_looked_up_by_name():
     )
     assert route(operations.KEY_ADJUST)["exact_retry_safe"] is False
     assert route(operations.ISSUE)["body_resource"] == "fulfillment_id"
+    # No role named: request authentication admits the administrator alone.
+    assert route(operations.SYSTEM_STATUS)["roles"] == ()
+    assert route(operations.SYSTEM_TIME)["roles"] == ()
     with pytest.raises(KeyError):
         route("credits_unknown")

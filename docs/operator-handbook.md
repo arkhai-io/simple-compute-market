@@ -9,8 +9,7 @@ It sits beside three other kinds of document:
 
 - [`docs/development/DEPLOYMENT_AND_CONFIG.md`](development/DEPLOYMENT_AND_CONFIG.md)
   says how a service resolves its configuration and how that maps onto
-  Kubernetes and Compose, including the method every definition document
-  follows.
+  Kubernetes and Compose.
 - The specifications under [`openspec/specs/`](../openspec/specs/README.md) are
   the contracts: what a service must do, stated as requirements and scenarios.
   Where this handbook and a specification disagree, the specification is right
@@ -27,10 +26,11 @@ relay document, belongs to the VM domain; this chapter covers the first three.
 Each is a YAML file mounted like any
 configuration file, named by its path setting, and under Helm supplied as the
 provisioning chart's `definitions.<kind>` value, which the chart renders,
-mounts, and names for the service. The method every kind follows, the order
-startup imports them in, and what each does to entries it stops naming are in
-`DEPLOYMENT_AND_CONFIG.md`,
-["Definition documents"](development/DEPLOYMENT_AND_CONFIG.md#definition-documents).
+mounts, and names for the service. The method every kind follows is
+[`definition-documents.md`](guidance/engineering/definition-documents.md); the
+order startup imports them in, and how each kind here applies the method, are
+`physical-provisioning`'s
+["Definition documents"](../openspec/specs/physical-provisioning/configuration.md#definition-documents).
 
 What that method means for running a site:
 
@@ -461,8 +461,8 @@ A storefront settling in `arkhai.payments.v1` needs three things from its
 deployment, beside `[Settlement.arkhai_payments]` in its public `config`: its
 payments key, the CA its payments service's certificate chains to when that is
 not a public one, and a way to prove the two work together. How the storefront
-resolves them is in `DEPLOYMENT_AND_CONFIG.md`,
-["Settlement consumer configuration and cutover"](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover).
+resolves them is in `settlement-configuration`'s
+["Settlement consumer configuration and cutover"](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover).
 
 **The key goes in the runtime Secret's overlay.** State it as
 `[Settlement.arkhai_payments] api_key` in the `storefront.secrets.toml` key of the
@@ -511,8 +511,8 @@ It prints one JSON line and exits 0 when the read succeeded:
 
 | `step` | What failed | Look at |
 |---|---|---|
-| `configuration` | the section is absent, invalid or disabled, names no `service_url` or no key, or its CA bundle cannot be loaded | `config`, the overlay, the `caBundle` source |
-| `credential` | the variable a buyer-style `api_key_env` names is unset or empty | the overlay: a storefront states `api_key` |
+| `configuration` | the storefront cannot read its configuration, or the section is absent, invalid or disabled, names no `service_url` or no key, or its CA bundle cannot be loaded | `config`, the overlay, the `caBundle` source |
+| `credential` | the variable a buyer-style `api_key_env` names is unset, empty, or not a single-line key | the overlay: a storefront states `api_key` |
 | `transport` | the service could not be reached over a trusted connection, or answered outside its contract | `service_url`, the network path, the CA bundle |
 | `refused` | the service refused the read; `code` is its error code | the key, and that `--account` is the key's own account |
 
@@ -545,6 +545,22 @@ It files, rules and changes nothing, and never prints the token:
 | `transport` | the authority could not be reached over a trusted connection, or answered outside its contract | the origin, the network path, the CA bundle |
 | `refused` | the authority refused the read; `code` is its error code | the token |
 
+### Changing the payments service mode
+
+Pointing a buyer and a storefront at a live payments service from a test-mode one,
+or back, is a cutover: a receipt verifies only under the mode its process is set
+to, so a payment deal accepted under the old mode never reaches delivery or
+issuance afterwards (`settlement-configuration`'s
+["Settlement consumer configuration and cutover"](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)).
+
+1. Drain the open payment deals, letting each reach delivery or issuance, or
+   refund them.
+2. Set `livemode` in `[Settlement.arkhai_payments]` (`[bare_metal.arkhai_payments]`
+   in the bare-metal buyer's configuration file) on both buyer and storefront, in
+   the same release that points them at the new service's `service_url` and
+   receipt identity.
+3. Rerun the storefront's `check-payments` against the new service.
+
 ## Registry secret profile
 
 The registry chart takes the registry's secret settings — the bootstrap key
@@ -553,7 +569,7 @@ is empty, and the administrator key `REGISTRY_ADMIN_API_KEY` — from a Secret
 holding a profile env file, named by `secretProfile`. It mounts the file beside the
 profile it renders from its values and appends its profile to `ACTIVE_PROFILES`,
 so a setting the file states overrides the rendered one
-(["Registry descriptor configuration"](development/DEPLOYMENT_AND_CONFIG.md#registry-descriptor-configuration)).
+([`deployment-state`'s "Registry profile configuration"](../openspec/specs/deployment-state/configuration.md#registry-profile-configuration)).
 
 A values file naming `auth.bootstrapKeySecret` or `auth.adminKeySecret` is refused
 at render, naming `secretProfile`. To move off them:
@@ -590,6 +606,59 @@ at render, naming `secretProfile`. To move off them:
 A bootstrap key seeds a key only into an empty table, so moving an existing
 registry changes no key it already holds.
 
+## Storefront configuration under Helm
+
+How the VM and bare-metal storefront charts render an agent's configuration is
+[`DEPLOYMENT_AND_CONFIG.md`, "Storefront agents: pass-through configuration"](development/DEPLOYMENT_AND_CONFIG.md#storefront-agents-pass-through-configuration).
+
+- **Setting a value to `None`.** A `null` in a values file removes the key rather
+  than setting it to `None`. Where the storefront accepts `None` for a setting,
+  state it in the storefront's own file, `storefront.toml`, or in the Secret
+  overlay, `storefront.secrets.toml`.
+- **A refused configuration.** The storefront Deployment uses the `Recreate`
+  strategy, so a release whose configuration the storefront refuses at startup
+  leaves no running pod. Recover with `helm rollback` to the previous release,
+  which restores that release's own values, then correct the values before
+  upgrading again.
+
+## Injected time
+
+Every service reads the time from one source its configuration names: wall time,
+the default, or injected time, an instant its administrator sets. A production
+deployment never sets injected time; leave each service's time-source setting
+unset ([`DEPLOYMENT_AND_CONFIG.md`, "The time source"](development/DEPLOYMENT_AND_CONFIG.md#the-time-source)
+names each one). Nothing refuses it, because no service can tell it runs in
+production, so check instead:
+
+- **The status says which time a service runs on.** Each service's status carries a
+  time section: `{"source": "wall"}`, or `{"source": "injected", "now": <Unix
+  seconds>}`. Read it on the storefronts' and the provisioning service's signed
+  `GET /api/v1/system/status`, the API-credits service's
+  `GET /api/v1/system/status` as `admin`, and the registry's `GET /admin/status`
+  with its administrator key.
+- **A service with injected time says so at startup.** It logs that its time is
+  injected and the instant it starts at; beside an Arkhai payments section with
+  `livemode = true` it also logs a warning. Either line in a production log means
+  the configuration is wrong: unset the setting and restart.
+- **The setting routes exist only under injected time.** On an instance configured
+  for it, an administrator moves its time forward with `POST /api/v1/admin/time`
+  on a storefront, `POST /api/v1/system/time` on the provisioning service and the
+  API-credits service, or `POST /admin/time` on the registry, each taking
+  `{"now": <Unix seconds>}` behind the service's administrator authentication. An
+  earlier instant is refused `409 time_moves_forward` and an invalid body
+  `422 invalid_time`, with nothing changed. A wall-time instance has no such route.
+
+A live service's time is never changed, not even to diagnose or recover: its time
+is a claim it signs and exchanges, and moving it would date its records and
+evidence falsely, break every signed exchange with counterparties on real time,
+and stop none of the payment or dispute authorities' deadlines. Switching a
+service's source is a reconfiguration and restart. To diagnose or recover a
+deployment, pause its loops and use the explicit operator actions — ending a deal,
+terminating or force-releasing a lease, stepping one loop cycle. To reproduce an
+incident at a chosen instant, restore its databases into a local or lane stack
+configured for injected time and set that stack's time there
+([injected time, "No live change"](../openspec/specs/injected-time/architecture.md#no-live-change)).
+
 ## Upgrading a deployment
 
 Every stateful service — compute provisioning, the VM, bare-metal, API-credit
@@ -597,9 +666,11 @@ and inference storefronts, the API-credit and inference services, and the
 registry — migrates its database
 through its own command before its application starts, and its application
 refuses a database its command has not migrated
-(["Migrations at startup"](development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)
+([`migrations-at-startup.md`, "The command and its phase"](guidance/repository/migrations-at-startup.md#the-command-and-its-phase)
 names each command and where it runs). A release can therefore fail to start a
-service; it never starts one on a database it does not understand.
+service; it never starts one on a database it does not understand. A release that
+retires configuration settings is also cut over to a migrated configuration
+(["Migrating settlement and publication configuration"](#migrating-settlement-and-publication-configuration)).
 
 ### Supported databases
 
@@ -635,6 +706,87 @@ For each service, in its own deployment:
 To roll back, deploy the earlier image over the backup taken in step 1, never
 over the migrated database.
 
+### Rolling back past pool constraints
+
+A storefront or provisioning service of a release without pool constraints holds
+a pool whose hint carries a constraint, and refuses any write that keeps one
+(`storefront-publication`'s
+["Storefront listing shapes and pool overrides"](../openspec/specs/storefront-publication/configuration.md#storefront-listing-shapes-and-pool-overrides)).
+Before rolling sites and storefronts back to such a release, remove every
+constraint mapping from the pools' hints and from the storefronts' stored
+overrides, then roll back both together.
+
+### Migrating settlement and publication configuration
+
+The VM and bare-metal storefronts' and the buyer's `config migrate` rewrite
+retired settlement and publication settings; the API-credit storefront has no
+migration command, and its operators edit its configuration by hand. What the
+settlement migration maps and refuses is `settlement-configuration`'s
+["Settlement consumer configuration and cutover"](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)
+and
+["Alkahest release models"](../openspec/specs/settlement-configuration/configuration.md#alkahest-release-models),
+and what the publication migration converts and refuses is
+`storefront-publication`'s
+["Migrating publication configuration"](../openspec/specs/storefront-publication/configuration.md#migrating-publication-configuration).
+For each buyer and storefront configuration overlay, use this production
+sequence:
+
+1. Stage the release containing the migration commands without activating the
+   new workload.
+2. Preview every mounted or generated file. Select a storefront file with the
+   root `--config` option; select a buyer overlay through its normal
+   `XDG_CONFIG_HOME` mount.
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope settlement --check
+   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
+     --scope settlement --check
+   ```
+
+3. Resolve every reported conflict and legacy environment-name rename. Then
+   create backups and migrate every overlay atomically.
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope settlement --write --backup
+   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
+     --scope settlement --write --backup
+   ```
+
+   Preview and migrate storefront publication defaults:
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --check
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --write --backup
+   ```
+
+4. Repeat `--check` for every file and render the Helm or Compose deployment.
+   Do not proceed if a migration, typed configuration validation, generated
+   schema check or image/config schema check fails.
+   Validation reaches beyond what `config migrate` reads: rendering applies the
+   values schema, and at startup
+   the storefront applies its typed validation — refusing, for example, a
+   settlement schema version other than its own. Untyped settings are not
+   checked key by key.
+5. Quiesce publication, negotiation, settlement, and recovery automation.
+   Deploy the coordinated marketplace configuration, wheels, image, Secret,
+   and ConfigMap set. Keep automation quiesced while every storefront reports
+   at least one ready mechanism:
+
+   ```console
+   market-storefront --config /path/storefront.toml settlement status --json
+   ```
+
+6. Resume automation only after the configured ready mechanisms and blocker
+   set match the intended overlay. Before activation or new settlement effects,
+   rollback restores each same-directory `.bak` and the previous pinned
+   artifacts together. After effects resume, recover forward from accepted
+   settlement plans and operation identities; never change mechanism priority
+   to redirect an accepted deal.
+
 ### What the upgrade from v0.3.0 changes
 
 - **Host connections.** Compute provisioning rewrites every host's `ssh`
@@ -645,9 +797,38 @@ over the migrated database.
   host from the backup's values, or remove it, then upgrade again. After the
   upgrade a host submission must state its connection's `version`; one stating
   none is refused, as is version 1.
+- **The stalled-teardown grace.** `lease_watchdog_grace_period_seconds` defaults
+  to 3600 in the service and both charts, sized for teardowns of expected length:
+  a lease still `releasing` past it is marked `release_failed` with
+  `teardown_timeout`. A deployment that pinned 300 should raise it, else a
+  teardown that succeeds on a job retry, or on a rerun, is timed out first. Raise
+  it, and `relay_grant_expiry_grace_seconds` with it, when you raise
+  `teardown_rerun_limit`, the job retries (`default_max_retries` and the retry
+  backoff) or `ansible_timeout_seconds`, or when your teardowns run long.
+- **Teardowns that never started are run again.** A teardown job refused before
+  anything acted on its host is run again under a new job, up to
+  `teardown_rerun_limit` times (3 by default; 0 disables it), and its lease stays
+  `releasing` meanwhile. A lease that reaches `release_failed` with a failure
+  saying the teardown's execution never started and how many reruns were spent
+  is not helped by retry-release, which re-observes the same spent teardown.
+  Its workload is still on the host: read the last teardown job's error (as in
+  step 1 of the version-1 steps below), fix its cause, remove from the host what
+  the domain's teardown would have removed (step 2), and force-release the
+  lease with a `reason` and `evidence` (step 3).
+- **A lease timed out while its teardown went on.** A lease marked
+  `release_failed` with `teardown_timeout` whose teardown later finished is
+  released by one retry-release
+  (`POST /api/v1/contract/leases/<reservation>/retry-release`) once its
+  fulfillment is torn down; the retry re-observes the same fulfillment and
+  begins no second teardown. One retried while a rerun is pending returns to
+  `releasing` and waits for it.
 - **Leases left `release_failed` on a version-1 host.** The migration repairs the
-  host, not a release that already failed on it: a fulfillment's teardown is one
-  job, and retry-release re-observes that failed job rather than running another.
+  host, not a release that already failed on it. A teardown job is run again only
+  when its record proves its execution never started, and these jobs finished
+  before the service recorded a job's start or finish: v0.3.0 recorded only a
+  handle, after spawning the playbook, so nothing on them proves their playbooks
+  never ran. Retry-release therefore re-observes the failed job rather than
+  running another.
   A teardown that failed this way never ran, so the deal's guest or tenant account
   is still on the host, and a force-release alone would return the capacity while
   that workload still runs. For each provisioning lease `release_failed` at the
@@ -712,6 +893,23 @@ over the migrated database.
   listing again only when the listing next changes. Roll back only by deploying
   the earlier image over that backup; a deal negotiated after the upgrade
   cannot be carried back.
+- **Bare-metal lease bounds.** A bare-metal pool resolving no positive maximum
+  lease duration — from its storefront override, its `capacity_bounds.bare_metal`
+  hint, or `[pricing].default_max_duration_seconds` — is no longer held as
+  `pool_lease_bound_missing`: its listings publish with no relative maximum, and
+  each reserved deal is bounded only by the duration its buyer names and the
+  pool's `available_until_utc`. To keep a ceiling, set
+  `[pricing].default_max_duration_seconds`, the pool's override, or its hint
+  before upgrading. The derivation no longer reports that hold.
+- **Bare-metal clauses from the pool's `pricing` hint.** A bare-metal storefront
+  resolves a listing's settlement clauses as a VM storefront does: its pool's
+  override, then the pool's `pricing.gpu.<model>.settlements` hint for the
+  machine's GPU model, then the pool's `pricing.settlements`, then
+  `[pricing.defaults.gpu.<model>].settlements`, then `[pricing].settlements`,
+  each list whole. A pool advertising both VM and bare metal whose `pricing`
+  hint states clauses for VM therefore publishes them on its bare-metal
+  listings too; give the bare-metal storefront an override for that pool to
+  keep its own.
 - **Storefront tables.** A storefront creates the tables v0.3.0 created only when
   a store first opened, where they are absent, and drops the inventory tables
   v0.3.0 kept frozen, with their rows; inventory is declared at provisioning

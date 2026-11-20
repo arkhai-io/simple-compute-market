@@ -431,6 +431,21 @@ follows; where an earlier entry said otherwise, this one supersedes it.
   alone (D9). The lane's runner takes a profile of its own,
   `docker,payments-lane,inference-lane`, as the lane-profile requirement
   states for every lane. This supersedes D10's amendment of 2026-11-09.
+  The lane also runs every party on injected lane time, as the lane-time
+  requirement states for every Compose lane: the storefront from a lane
+  configuration (`storefront.inference.lane.toml`), the inference service and
+  the gateway from the environment `compose.inference-lane.yml` gives them,
+  and the three registries and both doubles from the shared lane profile and
+  overlay. The service and the storefront take the signed time route the
+  API-credits ones do, the service trusting the lane's operator as `admin`;
+  the gateway, whose gate signs toward the service at the process's time
+  source, serves a time route and status on the lane doubles' control wire
+  behind a control token under injected time alone, bound from the time
+  component's route service so the published gateway imports no test tool;
+  the harness drives it through the doubles' typed client. The
+  lane's profile names every one of them in its `lane_time` section. The model
+  stub signs nothing and reads no time a party checks, so it has no time
+  source. The full local stack stays on wall time.
 - **A baseline ID per family storefront.** Each family storefront root names
   its own family baseline migration ID: API credits
   `v0_3_0_baseline_apicredits_storefront`, inference

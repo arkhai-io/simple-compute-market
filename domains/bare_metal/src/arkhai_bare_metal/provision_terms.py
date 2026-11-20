@@ -16,7 +16,8 @@ class BareMetalProvisionPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    duration_seconds: int = Field(ge=1)
+    duration_seconds: int | None = Field(default=None, ge=1)
+    start_utc: str | None = None
     # "none" is the non-provisioning shape: a settlement that completes with
     # no machine access (an introduction deal). Every provisioning path
     # re-requires SSH credentials at its own admission arm.
@@ -58,7 +59,7 @@ class BareMetalProvisionTerms(BaseModel):
 
 def make_bare_metal_provision_terms(
     *,
-    duration_seconds: int,
+    duration_seconds: int | None,
     ssh_public_key: str,
 ) -> BareMetalProvisionTerms:
     """Build the canonical v1 envelope for buyer negotiation input."""

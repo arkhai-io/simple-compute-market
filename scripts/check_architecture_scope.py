@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail if a package depends on, or names, something outside its scope.
 
-Rules (docs/development/ARCHITECTURE.md, "Scope"):
+Rules (docs/guidance/repository/package-layers.md, "Scope"):
 
 - ``scope``: a dependency, imported or declared, whose scope is not a subset of
   the package's own; a composition's scope includes the mechanisms of what it

@@ -2,6 +2,8 @@
 
 ### Requirement: Class discovery uses public billing and release projections
 
+> **Stale.** The Arkhai payments billing-kind projection already exists as `arkhai_payments.billing_kind` beside `arkhai_payments.period` (`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`), landed by the archived `negotiate-open-ended-compute-terms`; task 1.2 confirms it. The Alkahest release eligibility and the class compiler stay here. "`arkhai_payments.approval_window`" is current: the registration now uses that name (design D2).
+
 Mechanism registrations used for compute class discovery MUST expose the public
 billing-kind and release-condition eligibility needed to distinguish prepaid,
 recurring and legacy prepaid-interruptible options. The shared class compiler MUST

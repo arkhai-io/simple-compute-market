@@ -686,6 +686,14 @@ def test_a_payments_key_named_by_variable_is_refused() -> None:
     )
 
 
+def test_the_time_source_is_admitted_as_wall_or_injected_and_refused_otherwise() -> None:
+    """`[Time] source` is one of the storefront's two sources; the generated
+    definition refuses any other, naming the key."""
+    for source in ("wall", "injected"):
+        _ok(_render(_with_config(Time={"source": source})))
+    _refused_at(_render(_with_config(Time={"source": "injectd"})), "config.Time.source")
+
+
 # A development dispute authority's public binding, on a reserved domain.
 DISPUTE_CREDENTIAL = {
     "interface": "arkhai.mediation.v1",

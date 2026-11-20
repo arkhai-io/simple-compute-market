@@ -40,4 +40,4 @@ EXPOSE 8090
 HEALTHCHECK --interval=10s --timeout=5s --retries=12 --start-period=10s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')" || exit 1
 
-CMD ["uvicorn", "--factory", "inference_gateway_service.main:create_app", "--host", "0.0.0.0", "--port", "8090"]
+CMD ["uvicorn", "--factory", "inference_gateway_service.main:configured_app", "--host", "0.0.0.0", "--port", "8090"]

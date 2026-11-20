@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import time
 from typing import Any, Optional
 
+import injected_time
 import typer
 from core_buyer.cli import assume_yes_option, parse_key_value_options, register_policy_verb
 from core_buyer.deal_helpers import load_negotiation_resume_point, settlement_acceptance_fields
@@ -381,7 +381,7 @@ def register(
                 )
                 selected_settlement = settlement_policy.select(
                     listing_dict,
-                    expiration_unix=int(time.time()) + 3600,
+                    expiration_unix=injected_time.now() + 3600,
                 )
                 if selected_settlement is None:
                     raise ValueError(

@@ -21,9 +21,11 @@ LOCAL_VALUES := local-values.yaml
 # `make topology-secrets` creates them). Enabling api-credits-registry adds
 # arkhai-api-credits-registry-identity. Under $(LOCAL_VALUES), which configures
 # Bob for payments, arkhai-bob-runtime's overlay also holds his payments key and
-# his credential toward the mediation double the release's registry recommends.
-LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
-	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
+# his credential toward the mediation double the release's registry recommends,
+# and the registry reads its administrator key from arkhai-registry-runtime.
+LOCAL_SECRETS := arkhai-registry-identity arkhai-registry-runtime arkhai-bob-identity \
+	arkhai-bob-runtime arkhai-provisioning-identity arkhai-provisioning-runtime \
+	arkhai-provisioning-ssh
 # ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
 # creates, provisioned out of band the same way: the storefronts' CA bundle,
 # which holds the lane doubles' committed lane CA.
@@ -83,8 +85,9 @@ template:
 ## Deployment mounts both at /etc/arkhai/ with independent checksums,
 ## and no sensitive keys leak across the boundary. Stable across
 ## cosmetic chart edits (no byte-level snapshots).
-# Repackage every local subchart first: a stale charts/*.tgz would otherwise be
-# rendered in place of the chart directory beside it.
+# init first resolves every dependency Chart.yaml declares against its subchart.
+# The lock and archives it writes are in .helmignore, so the render, like every
+# package, reads the subcharts' directories and never a stale archive.
 test-render: init
 	@./scripts/test-render.sh
 
@@ -99,8 +102,8 @@ endif
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
 ## Deploy keeping the release's volumes when it is uninstalled. For a local
-## development cluster use deploy-local instead (docs/development/DEPLOYMENT_AND_CONFIG.md,
-## "Stateful service persistence").
+## development cluster use deploy-local instead (docs/guidance/repository/local-clusters.md,
+## "A local cluster is deployed with deploy-local").
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
@@ -135,6 +138,13 @@ ifeq ($(CHANGE),)
 	$(error teardown needs CHANGE=<change>: it deletes that change's validation namespace, never $(NAMESPACE))
 endif
 	kubectl delete namespace $(NAMESPACE) --context $(HELM_CONTEXT) --ignore-not-found --wait
+	@# A cluster whose kubelet runs on this Docker daemon, as Docker Desktop's does,
+	@# leaves the namespace's exited pod containers until its own collection removes
+	@# them, and an image a container still references cannot be removed: remove
+	@# them first, each labelled with the namespace it ran in.
+	@for container in $$(docker ps -aq --filter label=io.kubernetes.pod.namespace=$(NAMESPACE)); do \
+		docker rm -f "$$container" >/dev/null; \
+	done
 	@status=0; \
 	for image in $$(python3 ../scripts/change_namespace.py $(CHANGE) --images); do \
 		if docker image inspect "$$image" >/dev/null 2>&1; then \
@@ -205,13 +215,16 @@ TOPOLOGY_ROLLOUT_ORDER := registry provisioning storefront bare-metal-storefront
 # Development values topology-secrets derives every key from, never for a public
 # network: Foundry's published default mnemonic, and the Anvil account index of
 # each principal values.yaml, $(LOCAL_VALUES), and $(TOPOLOGY_VALUES) pin. Change
-# an index only together with the principal those files pin to it.
+# an index only together with the principal those files pin to it. The
+# registry's administrator key is a bearer string no file pins, derived at an
+# index no principal these releases run uses.
 DEV_MNEMONIC := test test test test test test test test test test test junk
 DEV_ACCOUNT_PROVISIONING            := 0
 DEV_ACCOUNT_BUYER                   := 1
 DEV_ACCOUNT_BOB                     := 2
 DEV_ACCOUNT_REGISTRY                := 3
 DEV_ACCOUNT_PROVISIONING_ADMIN      := 5
+DEV_ACCOUNT_REGISTRY_ADMIN          := 6
 DEV_ACCOUNT_BARE_METAL_STOREFRONT   := 8
 DEV_ACCOUNT_BARE_METAL_PROVISIONING := 9
 # The SSH key both provisioning services mount. Mock provisioning never opens a
@@ -282,6 +295,7 @@ topology-secrets:
 	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
 	DEV_ACCOUNT_BOB="$(DEV_ACCOUNT_BOB)" DEV_ACCOUNT_REGISTRY="$(DEV_ACCOUNT_REGISTRY)" \
 	DEV_ACCOUNT_PROVISIONING_ADMIN="$(DEV_ACCOUNT_PROVISIONING_ADMIN)" \
+	DEV_ACCOUNT_REGISTRY_ADMIN="$(DEV_ACCOUNT_REGISTRY_ADMIN)" \
 	DEV_ACCOUNT_BARE_METAL_STOREFRONT="$(DEV_ACCOUNT_BARE_METAL_STOREFRONT)" \
 	DEV_ACCOUNT_BARE_METAL_PROVISIONING="$(DEV_ACCOUNT_BARE_METAL_PROVISIONING)" \
 	PROVISIONING_SSH_KEY_FILE="$(PROVISIONING_SSH_KEY_FILE)" \

@@ -26,6 +26,7 @@ AUTHORITY = Ed25519Signer(AUTHORITY_SEED)
 STOREFRONT_SIGNER = Ed25519Signer(b"inference-storefront-seed-32-by!")
 GATEWAY_SIGNER = Ed25519Signer(b"inference-gateway-seed-32-bytes!")
 IMPOSTOR_SIGNER = Ed25519Signer(b"inference-impostor-seed-32-byte!")
+OPERATOR_SIGNER = Ed25519Signer(b"inference-operator-seed-32-byte!")
 
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
 IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
@@ -57,6 +58,7 @@ def load_signed_app(directory: Path, monkeypatch) -> Any:
             {
                 "seller": [STOREFRONT_SIGNER.identity.model_dump(mode="json")],
                 "service": [GATEWAY_SIGNER.identity.model_dump(mode="json")],
+                "admin": [OPERATOR_SIGNER.identity.model_dump(mode="json")],
             }
         ),
     )

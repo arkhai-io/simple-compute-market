@@ -6,10 +6,12 @@ import json
 from importlib.metadata import version as installed_version
 from pathlib import Path
 
+import injected_time
 import pytest
 from arkhai_api.issuance import KeyDisposition, issuance_request
 from arkhai_api.labels import IssuanceLabel
 from arkhai_api_authority import AuthorityRouteService, IssuanceError, RouteRefusal, SystemRouteService
+from injected_time import InjectedTime, WallTime
 from market_identity import Identity
 
 REFUSALS = json.loads(
@@ -18,6 +20,7 @@ REFUSALS = json.loads(
         / "contracts" / "tests" / "fixtures" / "baseline" / "refusals.json"
     ).read_text(encoding="utf-8")
 )
+T = 1794821400
 OWNER = Identity(scheme="eip191", identifier="0xabcdef0000000000000000000000000000000001")
 
 
@@ -134,6 +137,32 @@ def test_the_version_route_reports_the_configured_distribution_and_its_installed
         "version": installed_version("pytest"),
     }
     assert SystemRouteService("no-such-distribution").version()["version"] == "dev"
+
+
+@pytest.fixture
+def source():
+    """The process's time source, injected at ``T`` and restored afterwards."""
+    before = injected_time.installed()
+    yield injected_time.install(InjectedTime(start=T))
+    injected_time.install(before)
+
+
+def test_the_status_reports_the_installed_time_source(source):
+    system = SystemRouteService("pytest")
+    assert system.status() == {"time": {"source": "injected", "now": T}}
+    injected_time.install(WallTime())
+    assert system.status() == {"time": {"source": "wall"}}
+
+
+def test_the_time_route_sets_the_injected_source_and_refuses_without_changing_it(source):
+    system = SystemRouteService("pytest")
+    assert system.set_time(b'{"now": %d}' % (T + 900)) == {"source": "injected", "now": T + 900}
+    assert source.now() == T + 900
+    earlier = _refusal(lambda: system.set_time(b'{"now": %d}' % T))
+    invalid = _refusal(lambda: system.set_time(b'{"now": true}'))
+    assert (earlier[0], earlier[1]["code"]) == (409, "time_moves_forward")
+    assert (invalid[0], invalid[1]["code"]) == (422, "invalid_time")
+    assert source.now() == T + 900
 
 
 @pytest.mark.parametrize(("reason", "status"), [("key_out_of_scope", 409), ("terms_digest_mismatch", 422)])

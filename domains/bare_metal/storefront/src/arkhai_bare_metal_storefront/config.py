@@ -13,7 +13,9 @@ Dynaconf would read as TOML, such as a hex identifier, a string). That layer is
 an operator's escape hatch and is never
 refused: whether a deployment supplies a value through its environment is a
 compliance check of its charts and Compose files, not a decision the storefront
-makes at startup. See docs/development/DEPLOYMENT_AND_CONFIG.md.
+makes at startup (docs/guidance/engineering/configuration.md, "The configuration
+system carries every value"). See docs/development/DEPLOYMENT_AND_CONFIG.md for
+how the storefronts' files are mounted.
 
 The signing credential never enters these settings. ``ARKHAI_IDENTITY_CREDENTIAL``
 is read by the composition root and handed to the signer factory alone, and the
@@ -45,6 +47,13 @@ from market_config.config_loader import storefront_config_files
 from market_config.registry_url import normalize_registry_url
 from market_config.setting_types import PositiveSeconds, positive_seconds
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_resource_pools_contracts import UtcAvailability
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    PenaltyPeriods,
+)
+from market_storefront_kit import TimeSourceSetting
+from market_storefront_kit import configured_time_source as kit_configured_time_source
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -218,16 +227,45 @@ class CapacitySettings(_Section):
         return _CONFIRMATION_POLL_INTERVALS * self.poll_interval
 
 
-class PricingSettings(_Section):
-    """``[pricing]``: the storefront's publication clauses and default lease bound.
+class ModelPricingSettings(_Section):
+    """One ``[pricing.defaults.gpu.<model>]``: the publication clauses for the
+    listings of machines with that GPU model, replacing ``[pricing].settlements``
+    for them as a whole list; absent defers to it."""
 
-    A pool's override replaces either for that pool; a pool whose maximum lease
-    duration resolves to nothing positive from either tier is held at
-    publication, so neither is required here.
+    settlements: list[dict[str, Any]] | None = None
+
+    @field_validator("settlements", mode="before")
+    @classmethod
+    def _clauses_in_any_case(cls, value: Any) -> Any:
+        return _lowered(value)
+
+
+class PricingDefaultsSettings(_Section):
+    """``[pricing.defaults]``: configured terms per GPU model, keyed by the model
+    as a machine's shape names it."""
+
+    gpu: dict[str, ModelPricingSettings] = Field(default_factory=dict)
+
+
+class PricingSettings(_Section):
+    """``[pricing]``: the storefront's publication clauses, default lease bounds,
+    and default premature-stop penalty multiple.
+
+    A listing's clauses resolve through the pool's override, the pool's hint for
+    its GPU model and then for the whole pool, ``[pricing.defaults.gpu.<model>]``,
+    and last ``settlements`` here; a pool's override or hint may supply every
+    clause, so none is required here. A pool whose maximum lease duration
+    resolves to nothing positive publishes with no relative limit. An on-demand
+    option whose clause states no premature-stop penalty is published with its
+    per-period price times ``default_premature_stop_penalty_periods``; a
+    clause's own penalty, even ``"0"``, wins.
     """
 
     settlements: list[dict[str, Any]] = Field(default_factory=list)
+    defaults: PricingDefaultsSettings = Field(default_factory=PricingDefaultsSettings)
     default_max_duration_seconds: StrictInt | None = None
+    default_available_until_utc: UtcAvailability | None = None
+    default_premature_stop_penalty_periods: PenaltyPeriods = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
 
     @field_validator("settlements", mode="before")
     @classmethod
@@ -247,6 +285,25 @@ class WalletSettings(_Section):
 
     address: str = ""
     private_key: str = Field(default="", repr=False, json_schema_extra={"secret": True})
+
+
+class TimeSettings(_Section):
+    """``[Time]``: the process's time source, ``"wall"`` unless set ``"injected"``.
+
+    Startup installs it before anything reads the time, through
+    :func:`configured_time_source`, and refuses any other value naming it.
+    """
+
+    source: TimeSourceSetting = "wall"
+
+
+def configured_time_source(source: Dynaconf | None = None) -> Any:
+    """The value ``[Time] source`` states, or ``None`` when unset.
+
+    Read alone, ahead of the whole model, since the source is installed before
+    the application is built.
+    """
+    return kit_configured_time_source(source or settings_source())
 
 
 class ChainSettings(_Section):
@@ -274,6 +331,10 @@ class BareMetalStorefrontSettings(_Section):
     negotiation_watchdog_interval: PositiveSeconds
     settlement_servicing_interval_seconds: PositiveSeconds
     payment_reconciliation_interval: PositiveSeconds
+    #: The kit's servicing cycle's interval; unstated, ``payment_reconciliation_interval``.
+    deal_servicing_interval_seconds: PositiveSeconds | None = None
+    #: The delivery re-drive's interval; unstated, ``payment_reconciliation_interval``.
+    delivery_recovery_interval_seconds: PositiveSeconds | None = None
     identity: StorefrontIdentitySettings = Field(default_factory=StorefrontIdentitySettings)
     # The payments key and the dispute credentials' tokens sit in these two when
     # the overlay states them.
@@ -289,6 +350,7 @@ class BareMetalStorefrontSettings(_Section):
     delivery: dict[str, Any] | None = Field(default=None, repr=False)
     wallet: WalletSettings = Field(default_factory=WalletSettings)
     chains: dict[str, ChainSettings] = Field(default_factory=dict)
+    time: TimeSettings = Field(default_factory=TimeSettings)
 
     @field_validator("settlement", mode="before")
     @classmethod

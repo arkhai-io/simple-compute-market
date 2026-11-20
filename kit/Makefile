@@ -2,6 +2,7 @@
 
 # Every uv command the api family's recipes run uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
+export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath ../build-constraints.txt)),$(error ../build-constraints.txt not found))
 
 DIST_DIR ?= ../.dist
 API_DIST_DIR = $(abspath $(DIST_DIR))

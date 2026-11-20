@@ -1,9 +1,11 @@
 """The wire models of the lane doubles' controls.
 
 A scenario programs a double through when→then rules and moves it through a few
-direct controls: the perceived clock, funding and signer rotation at payments,
-and an operator's decision or close at mediation. Every refusal a control gives
-has one body, ``{"code", "message"}``, and is raised and carried as one error,
+direct controls: its injected time, funding, signer rotation and a rate part's
+further reservation at payments, and an operator's decision or close at
+mediation. The API-credits lane's sample app
+serves the time control and the status alone. Every refusal a control gives has
+one body, ``{"code", "message"}``, and is raised and carried as one error,
 ``ControlError``, on both sides of the wire.
 
 A rule always states its ``match``: ``{}`` is a stated scope, every call of its
@@ -17,11 +19,22 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from jsonschema import ValidationError as SchemaValidationError
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
+from injected_time import check_instant
 from market_arkhai_mediation import contract
 
 Double = Literal["payments", "mediation"]
+#: Every party serving control routes: the two doubles, and the API-credits lane's
+#: sample app, which serves only the time control and the status.
+ControlParty = Literal["payments", "mediation", "sample-app"]
 
 #: The request properties each double's rules may match on. Payments matches its
 #: API route (``transactions``, ``snapshot``, ``mandate``, ``attachments``,
@@ -56,6 +69,14 @@ ControlCode = Literal[
     # A control that must reach payments and could not, such as closing a
     # mediation case whose extensions payments did not lift.
     "payments_unavailable",
+    # The time control's refusals, the time component's own: a body that is not
+    # exactly {"now": <instant>}, and an instant earlier than the party's.
+    "invalid_time",
+    "time_moves_forward",
+    # The payments double's reservation control's refusals: a transaction it
+    # does not hold, and one with no started, unstopped rate part to reserve.
+    "transaction_not_found",
+    "no_running_rate_part",
 ]
 
 # A rule id sits in a control route's path, so it is restricted to characters
@@ -213,15 +234,24 @@ class RuleList(_Model):
     rules: list[RuleView]
 
 
-class ClockAdvance(_Model):
-    seconds: Annotated[int, Field(gt=0)]
+class TimeView(_Model):
+    """A party's time: ``{"source": "injected", "now": <instant>}``, or ``{"source": "wall"}``.
 
+    The answer to a time setting, and the time section of a status, as the time
+    component's route service shapes both. ``now`` is Unix seconds, stated for
+    an injected source alone; a boolean is never an instant.
+    """
 
-class ClockView(_Model):
-    """A double's perceived now, in Unix seconds, and its offset from wall time."""
+    source: Literal["wall", "injected"]
+    # Strict, so a string, a float or a boolean is never taken for an instant;
+    # the component's one rule then refuses a value out of range.
+    now: Annotated[int, Field(strict=True), AfterValidator(check_instant)] | None = None
 
-    perceived_now: int
-    offset_seconds: Annotated[int, Field(ge=0)]
+    @model_validator(mode="after")
+    def _now_with_injected_time(self) -> TimeView:
+        if (self.source == "injected") != (self.now is not None):
+            raise ValueError("an injected time states its now, and a wall time none")
+        return self
 
 
 class Funding(_Model):
@@ -234,6 +264,42 @@ class Funding(_Model):
 class Funded(_Model):
     account: str
     amount: str
+
+
+#: An instant on the wire, Unix seconds: strict, so a string, a float or a boolean
+#: is never taken for one, then held to the time component's range.
+Instant = Annotated[int, Field(strict=True), AfterValidator(check_instant)]
+
+
+class Reservation(_Model):
+    """Reserve a transaction's running rate parts' further periods through ``through``.
+
+    The payments service's scheduler decides when a started rate part is
+    reserved further; at the double a scenario programs that decision.
+    """
+
+    through: Instant
+
+
+class ReservedPart(_Model):
+    """One running rate part a reservation reached: the instant it is then
+    reserved through, as the signed snapshot reports it, and the periods added,
+    which the part's end and the payer's balance may hold to zero."""
+
+    part: Annotated[int, Field(strict=True, ge=0)]
+    reserved_through: Instant
+    periods_added: Annotated[int, Field(strict=True, ge=0)]
+
+
+class Reserved(_Model):
+    """A reservation's answer: every running rate part of ``transaction``.
+
+    A transaction with no running rate part is refused, never answered with no
+    parts, so a reservation that reached nothing cannot read as one that did.
+    """
+
+    transaction: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    parts: Annotated[list[ReservedPart], Field(min_length=1)]
 
 
 class SignerIdentity(_Model):
@@ -260,14 +326,14 @@ class CaseList(_Model):
 
 
 class Status(_Model):
-    """A double's perceived clock and the contract resources it serves.
+    """A party's time and the contract resources it serves.
 
     ``contracts`` maps each installed contract resource to its SHA-256, read from
-    the kit wheel the double runs, for a run's record; nothing compares them.
+    the kit wheel the double runs, for a run's record; nothing compares them. The
+    sample app serves no contract, so its mapping is empty.
     """
 
-    perceived_now: int
-    offset_seconds: Annotated[int, Field(ge=0)]
+    time: TimeView
     contracts: dict[str, str]
 
 
@@ -282,21 +348,24 @@ __all__ = [
     "ACTIONS",
     "CaseList",
     "CaseView",
-    "ClockAdvance",
-    "ClockView",
     "ControlCode",
     "ControlError",
     "ControlErrorBody",
+    "ControlParty",
     "Double",
     "FilingAnswer",
     "Funded",
     "Funding",
     "MATCH_KEYS",
     "Refusal",
+    "Reservation",
+    "Reserved",
+    "ReservedPart",
     "Rule",
     "RuleList",
     "RuleView",
     "Ruling",
     "SignerIdentity",
     "Status",
+    "TimeView",
 ]

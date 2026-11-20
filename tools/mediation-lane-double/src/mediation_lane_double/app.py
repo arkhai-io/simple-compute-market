@@ -18,16 +18,18 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import injected_time
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from injected_time import TimeSource
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from lane_double_controls import routes as controls
-from lane_double_controls.clock import PerceivedClock, WallClock, wall_clock
 from lane_double_controls.middleware import TransportFaultMiddleware
-from lane_double_controls.models import ClockAdvance, ClockView, ControlError, Rule, Ruling, Status
+from lane_double_controls.models import ControlError, Rule, Ruling, Status
+from lane_double_controls.time_control import TimeControl
 from market_arkhai_mediation.contract import resource_bytes
 
 from mediation_lane_double.authority import AuthorityFixture
@@ -47,19 +49,20 @@ async def _control_body(request: Request, model: type[BaseModel]) -> Any:
 
 
 def create_app(authority: AuthorityFixture, payments: PaymentsPeer, *,
-               clock: WallClock = wall_clock) -> FastAPI:
+               source: TimeSource | None = None) -> FastAPI:
     """The double's ASGI app over fresh state, calling ``payments`` as the authority.
 
-    ``clock`` is the wall clock the perceived clock adds its offset to.
+    ``source`` is the time the double reads, the process's installed source unless
+    given; the time route is served only when it is injected.
     """
 
-    perceived = PerceivedClock(clock)
+    time_control = TimeControl(source or injected_time.installed())
     rules = RuleBook()
-    double = MediationDouble(authority, payments, clock=perceived, rules=rules)
+    double = MediationDouble(authority, payments, clock=time_control.source.now, rules=rules)
     app = FastAPI(title="mediation lane double", docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.state.double = double
-    app.state.clock = perceived
+    app.state.time_control = time_control
     app.add_middleware(TransportFaultMiddleware, classify=double.fault_for)
 
     @app.exception_handler(ApiRefusal)
@@ -114,16 +117,13 @@ def create_app(authority: AuthorityFixture, payments: PaymentsPeer, *,
         actor = double.authenticate(request.headers.get("authorization"))
         return await run_in_threadpool(double.respondent, actor, dict(request.query_params))
 
-    _add_controls(app, authority, double, perceived, rules)
+    _add_controls(app, authority, double, time_control, rules)
     return app
 
 
 def _add_controls(app: FastAPI, authority: AuthorityFixture, double: MediationDouble,
-                  perceived: PerceivedClock, rules: RuleBook) -> None:
+                  time_control: TimeControl, rules: RuleBook) -> None:
     """Register a handler for each control route the mediation double serves."""
-
-    def clock_view() -> ClockView:
-        return ClockView(perceived_now=perceived(), offset_seconds=perceived.offset)
 
     async def install(request: Request) -> Response:
         view = rules.install(await _control_body(request, Rule))
@@ -140,19 +140,15 @@ def _add_controls(app: FastAPI, authority: AuthorityFixture, double: MediationDo
         view = await run_in_threadpool(double.resume, request.path_params["rule_id"])
         return view.model_dump(mode="json", exclude_none=True)
 
-    async def advance(request: Request) -> Any:
-        perceived.advance((await _control_body(request, ClockAdvance)).seconds)
-        return clock_view().model_dump(mode="json")
-
-    async def reset(request: Request) -> Any:
-        perceived.reset()
-        return clock_view().model_dump(mode="json")
+    async def set_time(request: Request) -> Any:
+        answer = time_control.set_time(await request.body())
+        return answer.model_dump(mode="json", exclude_none=True)
 
     async def status(request: Request) -> Any:
-        return Status(perceived_now=perceived(), offset_seconds=perceived.offset, contracts={
+        return Status(time=time_control.view(), contracts={
             f"contract_data/{name}": hashlib.sha256(resource_bytes(name)).hexdigest()
             for name in _CONTRACT
-        }).model_dump(mode="json")
+        }).model_dump(mode="json", exclude_none=True)
 
     async def cases(request: Request) -> Any:
         transaction = request.query_params.get("transaction")
@@ -171,13 +167,15 @@ def _add_controls(app: FastAPI, authority: AuthorityFixture, double: MediationDo
 
     handlers: dict[controls.ControlRoute, Callable[[Request], Awaitable[Any]]] = {
         controls.RULES: install, controls.RULE_LIST: listing, controls.RULE_DELETE: delete,
-        controls.RULE_RESUME: resume, controls.CLOCK_ADVANCE: advance,
-        controls.CLOCK_RESET: reset, controls.STATUS: status, controls.CASE_LIST: cases,
+        controls.RULE_RESUME: resume, controls.STATUS: status, controls.CASE_LIST: cases,
         controls.CASE_DECIDE: decide, controls.CASE_CLOSE: close,
     }
+    if time_control.settable:
+        handlers[controls.TIME] = set_time
     # Every control route the contract gives the mediation double has its handler,
     # so a route the contract adds cannot go unserved.
-    if set(handlers) != set(controls.routes_for("mediation")):
+    if set(handlers) != set(controls.routes_for("mediation",
+                                                time_settable=time_control.settable)):
         raise RuntimeError("the mediation double serves a different set of control routes "
                            "than the control contract gives it")
 

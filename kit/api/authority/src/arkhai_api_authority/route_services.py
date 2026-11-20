@@ -7,7 +7,9 @@ from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version as _distribution_version
 from typing import Any
 
+import injected_time
 from arkhai_api_contracts.models import IssuanceRequest
+from injected_time import TimeRouteError, TimeRouteService
 
 from arkhai_api_authority.keys_service import (
     FULFILLMENT_CONFLICT,
@@ -179,7 +181,11 @@ class AuthorityRouteService:
 
 
 class SystemRouteService:
-    """The version route: the composing distribution's name and installed version."""
+    """The version, status and time routes of the composing distribution.
+
+    The status and the time setting read the process's installed time source at
+    each call.
+    """
 
     def __init__(self, distribution: str) -> None:
         self._distribution = distribution
@@ -190,3 +196,21 @@ class SystemRouteService:
         except PackageNotFoundError:
             installed = "dev"
         return {"service": self._distribution, "version": installed}
+
+    def status(self) -> dict[str, Any]:
+        """The administrator's status: the time source, in either mode."""
+        return {"time": TimeRouteService(injected_time.installed()).status()}
+
+    def set_time(self, body: bytes) -> dict[str, Any]:
+        """Set the injected source to the instant ``body`` carries, and answer it.
+
+        A body other than ``{"now": <Unix seconds>}`` is refused 422
+        ``invalid_time`` and an earlier instant 409 ``time_moves_forward``. A
+        root binds this only while its source is injected.
+        """
+        try:
+            return TimeRouteService(injected_time.installed()).set_time(body)
+        except TimeRouteError as error:
+            raise RouteRefusal(
+                error.status_code, {"code": error.code, "detail": error.detail}
+            ) from error

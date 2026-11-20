@@ -89,7 +89,7 @@ from vm_provisioning_adapter.codec import VM_RESULT_FACTS
 from vm_provisioning_adapter.services.mock_output import shipped_output
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
-from compute_provisioning_contracts import HostCreate
+from compute_provisioning_contracts import HostCreate, RelayCreate
 
 _PLAYBOOK_PATH = "playbooks/vm-operations.yaml"
 _PROVIDER_CONFIG = {"playbook_path": _PLAYBOOK_PATH, "extra_vars": {"region": "eu"}}
@@ -107,7 +107,9 @@ class FulfillmentApi:
     Every request below goes through the client production code uses. That is
     the point: a helper that built its own request bodies would prove the
     server accepts *those* bodies, and could then drift from the shipped client
-    indefinitely while staying green — the failure `TESTING.md` names.
+    indefinitely while staying green — the failure
+    `docs/guidance/engineering/integration-tests.md`, "No raw calls: the typed
+    client is the contract", names.
 
     What remains here is argument shape and unwrapping. A refused request
     raises ``ComputeProvisioningError`` carrying the HTTP status, so rejection
@@ -1071,6 +1073,86 @@ class TestRelayPortLifecycleOverTheApi:
         assert RelayPortAllocator(
             _container_module.resolved_session_factory
         ).held_ports("site-keyless") == []
+
+    @pytest.mark.parametrize(
+        "host_placed", [True, False], ids=["host-under-another-relay", "unplaced-host"]
+    )
+    async def test_a_create_is_leased_on_its_declarations_pools_relay(
+        self, fulfillment: FulfillmentApi, client_and_queue, host_placed: bool
+    ):
+        """A relayed create's port is leased on the relay its declaration's
+        pool references, whatever pool its host is placed in, and the job it
+        dispatches carries that relay.
+
+        Relays R1 and R2 and two pools, one on each; the host is placed in the
+        pool on R2 or in none, and its declaration sits in the pool on R1.
+        Everything is set up, accepted and read through the canonical clients.
+        Addresses are documentation-range values, and the relay token and key
+        path are fixtures; none is ever for a public network."""
+        clients, _ = client_and_queue
+        relay_ids = {relay.id for relay in (await clients.family.list_relays()).relays}
+        for relay_id, address, start in (
+            ("site-r1", "203.0.113.21", 6400), ("site-r2", "203.0.113.22", 6500),
+        ):
+            # This module's container outlives a test, and its relays with it.
+            if relay_id not in relay_ids:
+                await clients.family.create_relay(RelayCreate(
+                    id=relay_id, relay_addr=address, relay_port=7000,
+                    vm_port_range_start=start, vm_port_range_count=10,
+                    token="admission-token",
+                ))
+        suffix = uuid.uuid4().hex[:8]
+        declaration_pool, host_pool = f"pool-r1-{suffix}", f"pool-r2-{suffix}"
+        for pool_id, relay_id in ((declaration_pool, "site-r1"), (host_pool, "site-r2")):
+            await clients.pools.create_pool(PoolCreate(
+                id=pool_id, label=pool_id, provider="vm.ansible",
+                policy_tags={
+                    "advertisable_modes": ["vm"], "capacity_backing": "backed",
+                    "deliverable_modes": ["vm"],
+                },
+                provider_config={**_PROVIDER_CONFIG, "relay_id": relay_id},
+            ))
+        host_id = f"kvm-relayed-{suffix}"
+        await clients.family.register_host(HostCreate(
+            host_id=host_id,
+            connection=ssh_connection(ssh_host="192.0.2.31", key_path="/keys/id"),
+            pool_id=host_pool if host_placed else None,
+        ))
+        declaration = f"declaration-{suffix}"
+        await clients.site_admin.register_resource(
+            declaration, pool_id=declaration_pool, host_id=host_id, total_units=4,
+        )
+        reserved = await clients.site.reserve(
+            claim={"offering_mode": "vm", "gpu_count": 1, "resource_id": declaration},
+            deal_ref={"agreement_id": f"agreement-{suffix}", "market": "vms"},
+        )
+        assert reserved is not None
+        capacity_reservation_id = reserved["capacity_reservation_id"]
+        # A lease end, from which the port's lease fixes its grants' expiry.
+        await clients.site.commit(
+            capacity_reservation_id=capacity_reservation_id,
+            resource_id=declaration,
+            lease_end_utc="2031-06-01T12:00:00+00:00",
+        )
+        await fulfillment.schedule(capacity_reservation_id, "vms")
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+
+        (lease,) = [
+            lease for lease in (await clients.family.list_relay_leases("site-r1")).leases
+            if lease.owner_id == capacity_reservation_id
+        ]
+        assert lease.released_at is None
+        assert not [
+            other for other in (await clients.family.list_relay_leases("site-r2")).leases
+            if other.owner_id == capacity_reservation_id
+        ]
+        (job,) = (await clients.family.list_jobs(
+            capacity_reservation_id=capacity_reservation_id
+        )).jobs
+        assert job.params["relay_id"] == "site-r1"
+        assert job.params["vm_remote_port"] == lease.remote_port
+        assert job.host_id == host_id
 
     async def test_acceptance_takes_exactly_one_port(
         self, fulfillment: FulfillmentApi

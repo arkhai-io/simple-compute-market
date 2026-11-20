@@ -19,12 +19,29 @@
 # never be used on a public network; see dev-env/identities/README.md, "The
 # API-credit lane" and "The payments lane double". Paths are relative to the
 # repository root, the project directory of the lane's first compose file.
+#
+# Every party of the lane runs injected time, set by the lane-time fixture
+# (e2e-tests/config/config-apicredits-lane.yml names them), from configuration
+# only the lanes load: the registries' lane profile
+# (dev-env/registry/config-payments-lane.env), the storefront's lane
+# configuration, and below, in the environment each takes its settings from, the
+# credits service's and the sample app's. The full local stack stays on wall time.
 services:
   # Both registries the buyer reads layer the lane's profile recommending its
   # mediation double as the dispute authority over their own.
   api-credits-registry:
     environment:
       - ACTIVE_PROFILES=api-credits-registry,payments-lane
+
+  credits-service:
+    environment:
+      - APICREDITS_TIME__SOURCE=injected
+      # The full stack's principals and the lane's operator, `admin`: the
+      # lane-time fixture reads the service's time and, under injected time,
+      # sets it, signed as that role. Anvil 9, a well-known development key never
+      # for a public network; e2e-tests/config/config-apicredits-lane.yml holds
+      # its credential.
+      - APICREDITS_TRUSTED_PRINCIPALS=@json {"seller":[{"scheme":"eip191","identifier":"0x90f79bf6eb2c4f870365e785982e1f101e93b906"}],"service":[{"scheme":"ed25519","identifier":"w75DsOFODAFDR0gVcITNTSeEvG_SRQU9GyTulF2w7IM"}],"admin":[{"scheme":"eip191","identifier":"0xa0ee7a142d267c1f36714e4a8f75612f20a79720"}]}
 
   credits-storefront:
     depends_on:
@@ -46,10 +63,16 @@ services:
       # The cache's own behaviour, including no service call on a key known
       # to be exhausted, is proven by the middleware conformance trace.
       - APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0
+      # The app's time, which its gate signs by, set with every other party's
+      # through its time control behind this public development token, never
+      # for a public network.
+      - APICREDITS_SAMPLE_APP_TIME_SOURCE=injected
+      - APICREDITS_SAMPLE_APP_CONTROL_TOKEN=sample-app-lane-control-public-development-token
 
   compute-registry:
-    # The registry image's default filter specification is the compute one.
-    image: arkhai:registry
+    # The registry image's default filter specification is the compute one. It is
+    # a release image, so a lane run with RELEASE_IMAGES=1 runs the candidate's.
+    image: arkhai:registry${IMAGE_SUFFIX:-}
     # The migration before the application, which refuses a database it has
     # not migrated.
     command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]

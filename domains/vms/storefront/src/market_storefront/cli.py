@@ -38,6 +38,7 @@ from market_deal_lifecycle.configuration import DisputeCredential, dispute_confi
 from .cli_logs import logs_app
 from .cli_publish import register as register_publish_command
 from .groups.config import config_app
+from .groups.deals import deals_app
 from .groups.escrow import escrow_app
 from .groups.network import network_app
 from .groups.pool_overrides import pool_override_app
@@ -253,6 +254,7 @@ app.add_typer(
     name="pool-override",
     help="Set, show, list, or delete the storefront's own terms for one site's pool.",
 )
+app.add_typer(deals_app, name="deals", help="Submit seller notice under the accepted Agreement.")
 register_publish_command(app)
 
 

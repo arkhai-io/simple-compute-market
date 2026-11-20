@@ -220,7 +220,12 @@ only request-priced rate cards are publishable until then.
   issuance subject may carry accepted terms"; the lane doubles and the
   inference lane's runner profile — `docs/development/TESTING.md`, the
   `test-compatibility` capability's `spec.md`, and
-  `dev-env/identities/README.md`, "The inference stack"; a baseline ID per
+  `dev-env/identities/README.md`, "The inference stack"; the inference lane's
+  injected lane time — `docs/development/TESTING.md`, "Lane time", the
+  `test-compatibility` capability's `spec.md` and `architecture.md`, "Lane time
+  and the doubles' controls", the `injected-time` capability's
+  `architecture.md`, and `dev-env/identities/README.md`, "The inference
+  stack"; a baseline ID per
   family storefront — the `api-family` capability's `architecture.md`, "Current limits"; the sweep kept
   for inference and its one-identity assumption — the `inference` capability's `architecture.md`,
   "Current limits".

@@ -185,9 +185,25 @@ def test_settlement_is_closed_to_registered_mechanisms_for_the_role() -> None:
     )
 
     assert fragment["additionalProperties"] is False
-    assert _allowed(fragment, "schema_version", "priority", "escrow")
+    assert _allowed(fragment, "schema_version", "priority", "escrow", "rate_servicing")
     assert _withheld(fragment, "payer_only")
     assert _withheld(_field(fragment, "escrow"), "api_key")
+    # A seller declares rate servicing only for the mechanisms it registers.
+    servicing = _field(fragment, "rate_servicing")
+    assert servicing["additionalProperties"] is False
+    assert _allowed(servicing, "escrow")
+    table = _field(servicing, "escrow")
+    assert table["additionalProperties"] is False
+    assert _allowed(table, "treatments", "setup")
+    assert _field(table, "treatments")["items"]["enum"] == ["charged", "returned", "prorated"]
+
+
+def test_a_buyer_settlement_root_takes_no_rate_servicing() -> None:
+    fragment = values_schema.settlement_fragment(
+        [Mechanism("escrow", Escrow, frozenset({"seller", "buyer"}))], role="buyer",
+    )
+
+    assert _allowed(fragment, "schema_version", "priority", "escrow")
 
 
 # --- sink typing --------------------------------------------------------------

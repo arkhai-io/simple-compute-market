@@ -59,7 +59,8 @@ A storefront composes `ComputeDeliveryPath` with its end service, its guarded
 six outcomes: `waiting(wake_at)`, `pending`, `repair_required(reason)`, `available`,
 `converged` or `ended`. Callers are each domain's fulfillment hook, which maps the
 outcome to fulfilled, deferred or failed (`DeliveryOutcome.hook_disposition`), and
-each domain's existing recovery worker. Six outcomes suffice because a first drive is
+each domain's re-drive of unfinished deliveries ([dispatch and
+recovery](#dispatch-and-recovery)). Six outcomes suffice because a first drive is
 the start of the normal path, and a missing deal and unreadable progress ask the same
 of a caller; the closed repair reason distinguishes them.
 
@@ -105,9 +106,10 @@ lease's end. Late settlement shortens service and never moves the end.
 
 Capacity is committed at settlement. Before the start nothing physical, financial or
 disclosed happens: `drive` returns `waiting(wake_at=start)` and releases the
-convergence claim, and the domain's existing worker brings the deal back — VM's
-periodic resume pass, bare metal's lifecycle cycle, the servicing worker for Alkahest
-deals — rechecking admission, so an end recorded while the deal waited stops it before
+convergence claim, and each storefront's `delivery-recovery` loop brings the deal back
+through the family's re-drive ([dispatch and recovery](#dispatch-and-recovery)), as
+the settlement servicing worker's ready step also does for a bare-metal Alkahest
+deal, rechecking admission, so an end recorded while the deal waited stops it before
 dispatch. Hardware is therefore never used outside the window the site admitted, and
 the deadline end service measures from `max(committed, start)` measures from where
 delivery begins. A provisioning lead time before the start would need the site to
@@ -140,6 +142,27 @@ nothing is released, since the site answers a found and a newly placed reservati
 alike. A reservation the site holds is recorded even when an end won meanwhile,
 because the end operation releases what is recorded.
 
+Commit authorization comes first, before any reserve or hold adoption, so a commit
+end service refuses touches no capacity. Any refusal when no end is due is
+`repair_required(no_accepted_deal)`: the payment authority's refusal of the
+commitment, which no retry changes, never read from the free-text reason. The refused
+deal holds nothing delivery reserved; an acceptance hold the domain placed at
+negotiation, VM's under a positive `hold_ttl_seconds`, is left to lapse at its TTL.
+
+End service journals one authorization answer per phase and admission revision: the
+first `allow` or `refuse` journaled for a phase at a revision stands for that
+revision, and a later drive asking again receives it. A rate deal's payment adapter
+reads a fresh signed snapshot every time, so its answer can change while the revision
+stands still — a slow or stale read, or a stop the payment watch has not yet
+recorded. End service then answers `pending`, journaling nothing, and the path
+returns `pending` with nothing further done, so a later drive asks again. A changed
+answer therefore only holds a phase back, never advances one: the watch's record of
+an end moves the revision, and admission then answers. Once the delivery deadline
+passes, end service's deadline rule, behind its payment observation barrier, records
+seller non-delivery and journals the filing; the path answers `pending` while
+admission awaits that observation. A refusal by end service is not a site refusal:
+only the site's refusal of a commit enters [the end hand-off](#the-end-hand-off).
+
 ### Dispatch and recovery
 
 Dispatch is recorded through the progress port before `begin_fulfillment` is called.
@@ -150,6 +173,28 @@ admission before polling, so a create that never settles cannot outlast a due en
 the window. Each lost acknowledgement recovers the same resource: reserve through the
 placement key, dispatch through the recorded step and identity, activation by
 repeating it for the same reservation, billing start under the same key.
+
+A delivery that waits, defers or loses its caller is driven again by one routine,
+`recover_deliveries` (`compute_delivery.recovery`), which each storefront's
+`delivery-recovery` loop runs over three ports its domain fills (`DeliveryRecovery`):
+`unfinished_deliveries`, the deals whose delivery started and has not finished;
+`claim`, the deal under the domain's own serialization; and `revalidate`, its
+settlement stage's re-check of the deal's evidence against its authority. The routine
+owns the order — list, claim, re-check, drive — so the two domains cannot drift apart
+in it, and the path's own reconciliation decides what each drive does. A deal is
+driven only when the claim admits it and its evidence re-checks, since every drive
+may take a protected step: a deal another worker holds, or whose evidence does not
+re-check, an unreachable authority included, waits for a later pass, and a failure on
+one deal is logged without holding back the rest.
+
+VM supplies its incomplete-deliveries query, its durable claim lease, held for the
+re-check and the drive, and its selected stage's evidence re-check, and drives
+through `drive_vm_delivery`, the drive its hook runs, which records the outcome in its
+delivery record and runs the seller's failure policy. Bare metal supplies its
+lifecycle-row query, an answer whether the deal's lock is free, since its hook takes
+that lock for the drive itself, and its settlement service's `verified_evidence`, the
+accepted entry's recovery gate, and drives through its fulfillment service's
+`deliver`, and so through the hook, which runs the same gate again before the drive.
 
 ### Activation, then billing, then availability
 
@@ -231,13 +276,13 @@ material from recorded bodies by shape at startup (see
 
 | | VM | Bare metal |
 |---|---|---|
-| Entry | Core's `fulfill_domain` hook, from payment settle, the resume pass and the Alkahest continuation | Core's `fulfill_domain` hook, from payment settle and the Alkahest ready step; the hook refuses without the storefront's lifecycle in `domain_input` |
+| Entry | Core's `fulfill_domain` hook, from payment settle and the Alkahest settlement job's fulfill step; the re-drive calls `drive_vm_delivery`, the hook's own drive, directly | Core's `fulfill_domain` hook, through the fulfillment service's `deliver`, from payment settle, the Alkahest ready step, the re-drive and a status read; the hook refuses without the storefront's lifecycle in `domain_input` |
 | Progress row | `vm_delivery_records` | `bare_metal_fulfillment_lifecycle` |
 | Hold | Its acceptance hold, placed under `:hold` with its exact request recorded | None; reserves carry `escrow_uid` beside the placement key |
 | Scheduling | Inside its `SiteFulfillment.begin_fulfillment`, because its request names no resource | In `fulfillment_request`, before the dispatch authorization, because its request names the assigned resource; assignment is idempotent by reservation and is not provider execution |
 | Ready evidence | `vm.connection-details.v1` over the endpoint, readiness and resource identities | `bare_metal.ssh-access.v1`, a digest of the SSH endpoint, tenant account and readiness |
 | Continuation | The Alkahest stage's claim; recording connection details and the fulfilled listing | Recording the result and receipt; for Alkahest, whether settlement recorded the obligation's fulfillment |
-| Recovery worker | The periodic resume pass, revalidating through the stage | `BareMetalLifecycle.cycle`; the settlement gate revalidates (rechecking the Alkahest chain) on every drive |
+| Recovery worker | The `delivery-recovery` loop's re-drive over its incomplete-deliveries query and claim lease, revalidating through the selected stage's `recover_evidence` | The `delivery-recovery` loop's re-drive over its lifecycle-row query and per-deal lock, revalidating through `verified_evidence`; the settlement gate revalidates (rechecking the Alkahest chain) on every drive |
 
 Each storefront's payment-adapter table holds `kit/alkahest`'s once-only adapter with
 its own commitment validator, because the commitments differ: VM's is the escrow
@@ -262,7 +307,7 @@ deal whose end took effect before delivery.
 - The lanes show a restart as one recovery-loop step and a seller failure before
   dispatch as a settlement placement that finds no capacity; acknowledgement gaps and
   a refused live commit are proven by library and application integration, since no
-  lane control injects them ([`TESTING.md`](../../../docs/development/TESTING.md#the-discipline-every-scenario-follows)).
+  lane control injects them ([`deal-scenarios.md`](../../../docs/guidance/repository/deal-scenarios.md#the-discipline-every-scenario-follows)).
 - A payment deal's `delivery_end` filing is not dispatched in a lane until the lanes
   run a mediation double; an Alkahest deal's filing is unsupported.
 

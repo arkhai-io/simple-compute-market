@@ -30,9 +30,10 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
+import injected_time
 from arkhai_vms_listings.listing_comparison import REFUSE, compare_listing
 from arkhai_vms_listings.reconciler import (
     PoolHintResolutionSettings,
@@ -178,7 +179,7 @@ async def check_listing_source(
             if confirmation_window_seconds is None
             else confirmation_window_seconds
         ),
-        now=(clock or _utc_now)(),
+        now=(clock or injected_time.now_datetime)(),
     )
     if verdict.outcome == "declared_mismatch":
         logger.warning(
@@ -294,10 +295,6 @@ async def _check_listing_source(
 
     verdict = await binding.backing.judge_async(declared, available)
     return verdict if verdict is not None else ListingSourceVerdict("matches")
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 __all__ = ["check_listing_source", "stored_listing_resource"]

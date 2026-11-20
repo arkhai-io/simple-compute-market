@@ -16,7 +16,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import Identity, IdentityScheme, canonical_json
 
 from .evidence import EvidenceSession, RetentionObservation, in_transaction, transaction
-from .journal import Classification, EndSession, FinalRequest, atomic, stable_ref
+from .journal import Classification, EndSession, FilingIntent, FinalRequest, atomic, stable_ref
 
 
 class WatchSession:
@@ -52,6 +52,15 @@ class WatchSession:
             """INSERT INTO servicing_observations VALUES (?,?,?)
                ON CONFLICT(negotiation_id,record_ref) DO UPDATE SET view=excluded.view""",
             (negotiation_id, record_ref, view.model_dump_json()),
+        )
+
+    def record_payment_observation(self, negotiation_id: str, commitment_ref: str, observed_at: int) -> None:
+        """Record a successful payment observation's instant, keeping the latest."""
+        self.conn.execute(
+            """INSERT INTO servicing_payment_observations VALUES (?,?,?)
+               ON CONFLICT(negotiation_id,commitment_ref) DO UPDATE
+               SET observed_at=MAX(observed_at,excluded.observed_at)""",
+            (negotiation_id, commitment_ref, observed_at),
         )
 
     def save(self, negotiation_id: str, record_ref: str, sequence: int, view: AuthorityView) -> None:
@@ -103,9 +112,53 @@ class DealWatch:
         ):
             raise ValueError("watch binding names another deal")
 
+    def _record_payment_stop(self, end: EndSession, event: PaymentEvent) -> None:
+        if (event.negotiation_id, event.commitment_ref) != (self.negotiation_id, self.commitment_ref):
+            raise ValueError("authority stop names another deal")
+        request = FinalRequest(
+            negotiation_id=self.negotiation_id, source_ref="payment-stop:" + event.authority_record_ref,
+            ended_at=event.at, observed_at=self.clock(), actor=self.actor(event.actor),
+            cause=event.cause, source=event.authority_record_ref, evidence_refs=[event.authority_record_ref],
+        )
+        prior = next((item for item in end.requests(self.negotiation_id)
+                      if item.source_ref == request.source_ref), None)
+        if prior is not None:
+            if request.model_copy(update={"observed_at": prior.observed_at}) != prior:
+                raise ValueError("controlling payment stop changes its recorded end")
+            # A stop recorded with its classification pending, because no
+            # classifier was composed or it could not classify the stop, keeps
+            # its recorded end; only the pending slot is resolved, once, when
+            # the classifier classifies it.
+            if end.classification(self.negotiation_id, prior.source_ref) is None:
+                classification = self.classify_payment_end(event)
+                if classification is not None:
+                    end.resolve_correction(
+                        self.negotiation_id, prior.source_ref, end.read(self.negotiation_id).revision,
+                        evidence=prior.evidence_refs, classification=classification,
+                        filing_intent=self._failure_filing(end, prior, classification),
+                    )
+            return
+        classification = self.classify_payment_end(event)
+        end.record_end(
+            request, now=self.clock(), classification=classification,
+            pending_classification=classification is None,
+            filing_intent=self._failure_filing(end, request, classification),
+        )
+
+    def _failure_filing(
+        self, end: EndSession, request: FinalRequest, classification: Classification | None,
+    ) -> FilingIntent | None:
+        """A seller failure's filing, journaled with its classification; a lawful end files nothing."""
+        if classification is None or classification.lawful:
+            return None
+        return end.failure_filing(
+            request, now=self.clock(), delivered=end.read(self.negotiation_id).available_at is not None,
+        )
+
     def _observe(
-        self, record_ref: str, view: AuthorityView, *, dispute: bool,
+        self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None,
     ) -> list[PaymentEvent | DisputeEvent]:
+        """Journal what one accepted view shows; ``observed_at`` is a payment read's instant."""
         if not isinstance(view.outcome, Accepted):
             return []
         events: list[PaymentEvent | DisputeEvent] = []
@@ -122,6 +175,11 @@ class DealWatch:
             cursor = watch.cursor(self.negotiation_id, record_ref)
             if max((event.sequence for event in events), default=-1) < cursor:
                 raise ValueError("authority read regresses below its durable cursor")
+            # A scheduled request can mature without a new event sequence. Read
+            # its controlling per-part record independently of the event cursor.
+            for part in view.parts:
+                if part.final_stop is not None:
+                    self._record_payment_stop(end, part.final_stop)
             fresh: list[PaymentEvent | DisputeEvent] = []
             for event in events:
                 if event.negotiation_id != self.negotiation_id or event.commitment_ref != self.commitment_ref:
@@ -199,31 +257,19 @@ class DealWatch:
                                 intent.intent_ref, {"reason": "authority confirmed closed case"}, state="skipped",
                             )
                 elif event.kind == "stop":
-                    request = FinalRequest(
-                        negotiation_id=self.negotiation_id, source_ref="payment-stop:" + event.authority_record_ref,
-                        ended_at=event.at, observed_at=self.clock(),
-                        actor=self.actor(event.actor), cause=event.cause, source=event.authority_record_ref,
-                        evidence_refs=[event.authority_record_ref],
-                    )
-                    classification = self.classify_payment_end(event)
-                    end.record_end(
-                        request, now=self.clock(), classification=classification,
-                        pending_classification=classification is None,
-                        filing_intent=(
-                            end.failure_filing(
-                                request, now=self.clock(),
-                                delivered=end.read(self.negotiation_id).available_at is not None,
-                            ) if classification is not None and not classification.lawful else None
-                        ),
-                    )
+                    self._record_payment_stop(end, event)
                 cursor = event.sequence
                 fresh.append(event)
+            if observed_at is not None:
+                # In the transaction that recorded every final stop the view
+                # carried, so admission never reads the instant without them.
+                watch.record_payment_observation(self.negotiation_id, self.commitment_ref, observed_at)
             watch.save(self.negotiation_id, record_ref, cursor, view)
             return fresh
 
-    def _refresh(self, record_ref: str, view: AuthorityView, *, dispute: bool):
+    def _refresh(self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None = None):
         try:
-            fresh = self._observe(record_ref, view, dispute=dispute)
+            fresh = self._observe(record_ref, view, dispute=dispute, observed_at=observed_at)
         except ValueError as exc:
             view = AuthorityView(outcome=Rejected(reason=str(exc)))
             fresh = []
@@ -232,11 +278,20 @@ class DealWatch:
         return view, fresh
 
     async def poll(self) -> tuple[list[AuthorityView], list[PaymentEvent | DisputeEvent]]:
+        """Read each authority and journal what it shows.
+
+        A verified payment read also records its instant, taken before the read
+        is sent: the authority answers no earlier, so a stop it had recorded by
+        then is in the view. A failed, unverified or refused read records none.
+        """
         views = []
         fresh: list[PaymentEvent | DisputeEvent] = []
         if self.payment is not None:
+            observed_at = self.clock()
             payment = await self.payment.read()
-            payment, events = await asyncio.to_thread(self._refresh, self.payment_record, payment, dispute=False)
+            payment, events = await asyncio.to_thread(
+                self._refresh, self.payment_record, payment, dispute=False, observed_at=observed_at,
+            )
             views.append(payment)
             fresh.extend(events)
         if self.dispute is not None and self.dispute_record is not None:

@@ -33,7 +33,7 @@ from arkhai_api_contracts.headers import (
     TIMESTAMP_HEADER,
 )
 from arkhai_api_contracts.models import IssuanceLabel, KeyDisposition
-from arkhai_api_contracts.routes import AUTHORITY_ROUTES, SELLER_ROLE, route
+from arkhai_api_contracts.routes import ADMIN_ROLE, AUTHORITY_ROUTES, SELLER_ROLE, route
 
 LABEL = IssuanceLabel("example")
 # Deterministic development seed for this test only; never used on any network.
@@ -94,7 +94,7 @@ def test_query_parameters_ride_outside_the_envelope():
     assert module._keys_list(None, None, 10.0).params is None
 
 
-def _verified(call, prepared, body) -> bool:
+def _verified(call, prepared, body, role: str = SELLER_ROLE) -> bool:
     headers = prepared.headers
     envelope = AuthenticatedRequest(
         protocol=headers[SIGNATURE_VERSION_HEADER],
@@ -115,7 +115,7 @@ def _verified(call, prepared, body) -> bool:
         body=body,
         now=int(time.time()),
         max_skew=300,
-        expected_role=SELLER_ROLE,
+        expected_role=role,
         expected_method=call.method,
         expected_operation=call.operation,
         expected_resource=call.resource,
@@ -127,7 +127,9 @@ def _verified(call, prepared, body) -> bool:
 
 def test_a_signed_request_verifies_against_its_declaration():
     call = module._key_adjust("k1", -3, "rollback:s1", 10.0)
-    prepared = module._prepare(call, service_url="http://authority", admin_key="", signer=SELLER)
+    prepared = module._prepare(
+        call, service_url="http://authority", admin_key="", signer=SELLER, caller_role=SELLER_ROLE
+    )
 
     assert prepared.url == "http://authority/api/v1/keys/k1/adjust"
     assert prepared.content == canonical_json(call.body)
@@ -139,7 +141,9 @@ def test_a_signed_request_verifies_against_its_declaration():
 
 def test_a_bodyless_signed_request_hashes_the_empty_body():
     call = module._key_get("k1", 10.0)
-    prepared = module._prepare(call, service_url="http://authority", admin_key="", signer=SELLER)
+    prepared = module._prepare(
+        call, service_url="http://authority", admin_key="", signer=SELLER, caller_role=SELLER_ROLE
+    )
     assert prepared.content is None and "Content-Type" not in prepared.headers
     assert _verified(call, prepared, EMPTY_BODY)
     assert not _verified(call, prepared, {"not": "empty"})
@@ -147,11 +151,44 @@ def test_a_bodyless_signed_request_hashes_the_empty_body():
 
 def test_the_shared_secret_path_sends_the_admin_header_and_json_body():
     call = module._key_adjust("k1", -3, "rollback:s1", 10.0)
-    keyed = module._prepare(call, service_url="http://authority/", admin_key="secret", signer=None)
+    keyed = module._prepare(
+        call, service_url="http://authority/", admin_key="secret", signer=None, caller_role=SELLER_ROLE
+    )
     assert keyed.headers == {ADMIN_KEY_HEADER: "secret"}
     assert keyed.json == call.body and keyed.content is None and keyed.request_id is None
-    unkeyed = module._prepare(call, service_url="http://authority", admin_key="", signer=None)
+    unkeyed = module._prepare(
+        call, service_url="http://authority", admin_key="", signer=None, caller_role=SELLER_ROLE
+    )
     assert unkeyed.headers == {}
+
+
+def test_the_operators_status_and_time_calls_bind_their_declarations_and_sign_as_admin():
+    status = module._system_status(10.0)
+    setting = module._set_time(1794821400, 10.0)
+    assert (status.method, status.path, status.resource, status.body) == (
+        "GET", "/api/v1/system/status", "", None
+    )
+    assert (setting.method, setting.path, setting.resource, setting.body) == (
+        "POST", "/api/v1/system/time", "", {"now": 1794821400}
+    )
+    for call in (status, setting):
+        assert route(call.operation)["roles"] == ()
+        prepared = module._prepare(
+            call, service_url="http://authority", admin_key="", signer=SELLER, caller_role=ADMIN_ROLE
+        )
+        assert prepared.headers[ROLE_HEADER] == ADMIN_ROLE
+        body = EMPTY_BODY if call.body is None else call.body
+        assert _verified(call, prepared, body, role=ADMIN_ROLE)
+        assert not _verified(call, prepared, body)
+
+
+def test_a_time_refusal_maps_its_code_to_the_reason():
+    refusal = module._service_error(
+        httpx.Response(409, json={"code": "time_moves_forward", "detail": "earlier"})
+    )
+    assert (refusal.reason, refusal.detail, refusal.status_code) == (
+        "time_moves_forward", "earlier", 409
+    )
 
 
 def test_a_refusal_maps_to_the_authoritys_reason_and_detail():

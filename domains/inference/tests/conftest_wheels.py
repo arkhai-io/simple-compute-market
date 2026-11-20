@@ -21,6 +21,8 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "api-contracts": (REPO / "kit" / "api" / "contracts", "arkhai_api_contracts-*.whl"),
         "core": (REPO / "core", "arkhai_core-*.whl"),
         "identity": (REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
+        # The process time source, which the identity kit imports.
+        "injected_time": (REPO / "tools" / "injected-time", "arkhai_injected_time-*.whl"),
     }
     built: dict[str, Path] = {}
     for name, (project, pattern) in projects.items():

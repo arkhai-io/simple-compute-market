@@ -20,6 +20,10 @@ services:
   payments-double:
     image: arkhai:payments-lane-double
     restart: unless-stopped
+    environment:
+      # Every party of a Compose lane runs one injected time, which the
+      # lane-time fixture sets through each double's time control.
+      - PAYMENTS_LANE_DOUBLE_TIME_SOURCE=injected
     deploy:
       resources:
         limits:
@@ -41,6 +45,8 @@ services:
     depends_on:
       payments-double:
         condition: service_healthy
+    environment:
+      - MEDIATION_LANE_DOUBLE_TIME_SOURCE=injected
     deploy:
       resources:
         limits:

@@ -8,8 +8,9 @@ from typing import Callable, Protocol
 
 from market_deal_lifecycle.adapters import PaymentAdapter
 from market_deal_lifecycle.delivery import (
-    BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase,
+    BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase, JournaledBillingStart,
 )
+from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle_contracts.models import (
     Accepted, Reference, Rejected, WireModel,
 )
@@ -98,7 +99,8 @@ class EndService:
 
         The optional callback shares admission\'s transaction and performs no I/O.
         Financial evidence only narrows admission; a concurrent end invalidates
-        the expected revision before the protected write can run.
+        the expected revision before the protected write can run. The payment
+        adapter is asked for every phase of every deal, whatever its parts.
         """
         if adapter is None:
             return DeliveryAuthorization(
@@ -106,7 +108,12 @@ class EndService:
                 operation_id=f"{evidence.negotiation_id}:{phase.value}",
                 evidence_refs=[evidence.commitment_ref],
             )
-        financial = await adapter.authorize(phase, evidence)
+        billing = None
+        if phase == DeliveryPhase.DISCLOSE:
+            billing = await in_transaction(self.path, lambda conn: self._journaled_billing(
+                EndSession(conn), evidence.negotiation_id,
+            ))
+        financial = await adapter.authorize(phase, evidence, billing)
 
         def authorize(conn):
             session = EndSession(conn)
@@ -116,6 +123,16 @@ class EndService:
             return result
 
         return await in_transaction(self.path, authorize)
+
+    @staticmethod
+    def _journaled_billing(session: EndSession, negotiation_id: str) -> JournaledBillingStart | None:
+        """The deal's one billing-start intent, with its result once one is recorded."""
+
+        intent = next((item for item in session.intents(negotiation_id) if item.kind == "billing"), None)
+        if intent is None:
+            return None
+        result = BillingStartResult.model_validate(intent.result) if intent.result is not None else None
+        return JournaledBillingStart(operation_key=intent.operation_key, result=result)
 
     def _authorize_delivery(
         self, phase: DeliveryPhase, evidence: DeliveryEvidence, financial: DeliveryAuthorization,
@@ -137,7 +154,14 @@ class EndService:
         admission = session.admit(
             evidence.negotiation_id, phase, expected_revision, now=self.clock(),
         )
-        if admission.status != "admitted":
+        if admission.status == "awaiting_observation":
+            # Nothing is admitted at the revision the deadline passed under,
+            # so an allow is held back; an answer that admits nothing stands.
+            if financial.status == "allow":
+                financial = financial.model_copy(update={
+                    "status": "pending", "reason": "the missed delivery deadline awaits a payment observation",
+                })
+        elif admission.status != "admitted":
             financial = financial.model_copy(update={
                 "status": "pending" if admission.status == "retry" else "refuse",
                 "reason": "stale admission revision" if admission.status == "retry" else "delivery ended",
@@ -151,9 +175,31 @@ class EndService:
                 financial = financial.model_copy(update={
                     "status": "pending", "reason": "billing start requires same-key resolution",
                 })
+        key = f"{financial.operation_id}:{admission.revision}"
+        standing = session.intent(stable_ref(evidence.negotiation_id, "authorization", key))
+        if standing is not None and standing.state == "done":
+            # The first allow or refuse journaled for a phase at a revision
+            # stands for that revision. A rate adapter reads a fresh signed
+            # snapshot each time, so its answer can change while the revision
+            # stands still: a slow or stale read, or a stop the watch has not
+            # yet recorded. Answering pending, with nothing journaled, lets a
+            # changed answer only hold the phase back; the watch's record of an
+            # end moves the revision, and admission then answers. An end due by
+            # now is admission's own answer, not a changed one, and is returned
+            # as it is. Answers are compared by status alone, since a fresh
+            # read's evidence references differ every time.
+            answered = DeliveryAuthorization.model_validate(standing.result)
+            if answered.status == financial.status:
+                return answered.model_copy(update={"operation_id": standing.intent_ref})
+            if admission.status == "ended":
+                return financial.model_copy(update={"operation_id": standing.intent_ref})
+            return financial.model_copy(update={
+                "status": "pending", "operation_id": standing.intent_ref,
+                "reason": f"the answer journaled at this revision changed from {answered.status} to "
+                          f"{financial.status} ({financial.reason}); awaiting its observation",
+            })
         intent = session.journal(
-            evidence.negotiation_id, "authorization",
-            f"{financial.operation_id}:{admission.revision}",
+            evidence.negotiation_id, "authorization", key,
             {"phase": phase.value, "evidence": evidence.model_dump(mode="json")},
             not_before=record.committed_at,
         )
@@ -205,8 +251,11 @@ class EndService:
         if isinstance(intent, BillingIntentResult):
             return intent
         # A retry of an unknown result uses the adapter's same-key resolution;
-        # no generic servicing code guesses from a mechanism snapshot.
-        result = await adapter.start_billing(operation_key, evidence)
+        # no generic servicing code guesses from a mechanism snapshot. The
+        # adapter records each operation it derives through this journal's own
+        # replay guard before it calls the authority.
+        keys = OperationKeys(evidence.negotiation_id, operation_key, SQLiteOperationStore(self.path))
+        result = await adapter.start_billing(keys, evidence)
         await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
             intent.intent_ref, result.model_dump(mode="json"),
             state="done" if isinstance(result.outcome, (Accepted, Rejected)) else "pending",

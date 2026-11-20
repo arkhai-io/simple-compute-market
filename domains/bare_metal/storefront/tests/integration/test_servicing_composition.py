@@ -1,5 +1,7 @@
-"""Bare-metal authority observation retains its actor in the durable end."""
+"""Bare-metal authority observation retains its actor in the durable end, and a
+withdrawn treatment leaves running deals serviced."""
 
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -11,7 +13,42 @@ from market_deal_servicing import Classification, EndSession, FinalRequest, Sell
 from market_deal_servicing.evidence import EvidenceSession, transaction
 from market_identity import Identity
 
+from market_arkhai_payments.fixtures import FakePaymentsClient
+
 from integration.test_payment_settlement_client import BUYER, SELLER, harness, enabled
+from integration.test_rate_delivery import PAYER as RATE_PAYER
+from integration.test_rate_delivery import accepted_recurring_deal, approve
+from recurring_world import PAYMENTS_SERVICE, recurring_world
+
+
+@pytest.mark.asyncio
+async def test_a_running_rate_deal_is_still_serviced_after_its_treatment_is_withdrawn(tmp_path):
+    payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
+    async with recurring_world(tmp_path, payments=payments) as world:
+        # The on-demand option names `returned` at its term end.
+        negotiation_id, data = await accepted_recurring_deal(world)
+        approve(payments, data)
+
+        # `returned` leaves the declaration, as a storefront restarted without
+        # it; `tests/test_http_publication_rates.py` shows no new option naming
+        # it publishes.
+        world.declare(frozenset({"charged"}))
+
+        # The accepted deal is still delivered, and its buyer's stop serviced.
+        await world.buyer.settle_agreement(negotiation_id)
+        payments.observed_at = int(time.time())
+        payments.engine.submit(data.transaction_id, {
+            "account": RATE_PAYER, "requestId": "buyer-stop", "event": {"kind": "stop"},
+        })
+        await world.admin.admin_run_lifecycle_cycle("deal-servicing")
+        with transaction(world.db.db_path) as conn:
+            end = EndSession(conn)
+            record = end.read(negotiation_id)
+            stop = end.selected_end(negotiation_id)
+            classification = end.classification(negotiation_id, stop.source_ref)
+
+    assert record.available_at is not None
+    assert (stop.cause, classification.kind) == ("payer", "entitled_stop")
 
 
 @pytest.mark.asyncio

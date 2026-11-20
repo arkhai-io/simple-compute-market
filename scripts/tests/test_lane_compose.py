@@ -103,7 +103,6 @@ PROVISIONING_MODE_NAMES = {
     "PROVISIONING_MODE",
 }
 
-
 def _compose() -> list[str]:
     binary = os.environ.get("E2E_COMPOSE_BINARY")
     command = [binary] if binary else ["docker", "compose"]
@@ -246,6 +245,34 @@ def test_the_gateway_fronts_the_stub_unless_the_vllm_upstream_is_named() -> None
     assert gateway["INFERENCE_GATEWAY_UPSTREAM_BASE_URL"] == "http://model-server:8000/v1"
 
 
+def test_only_the_inference_lane_runs_its_service_gateway_and_storefront_on_injected_time() -> None:
+    """The lane sets the service's and the gateway's source in their
+    environment, trusts its operator as the service's `admin`, gives the gateway
+    its control token, and mounts the storefront's lane configuration; the full
+    local stack does none of it, so its gateway serves no time control."""
+    lane, full = _render("inference")["services"], _render("full")["services"]
+    storefront = "/etc/arkhai/storefront.toml"
+    profiles = REPO_ROOT / "domains/inference/storefront"
+
+    assert lane["inference-service"]["environment"]["INFERENCE_TIME__SOURCE"] == "injected"
+    assert lane["inference-gateway"]["environment"]["INFERENCE_GATEWAY_TIME_SOURCE"] == "injected"
+    assert lane["inference-gateway"]["environment"]["INFERENCE_GATEWAY_CONTROL_TOKEN"]
+    assert '"admin"' in lane["inference-service"]["environment"]["INFERENCE_TRUSTED_PRINCIPALS"]
+    assert _mounts(lane["inference-storefront"])[storefront] == str(
+        profiles / "storefront.inference.lane.toml")
+
+    assert "INFERENCE_TIME__SOURCE" not in full["inference-service"]["environment"]
+    assert not {name for name in full["inference-gateway"]["environment"]
+                if name.endswith(("_TIME_SOURCE", "_CONTROL_TOKEN"))}
+    assert '"admin"' not in full["inference-service"]["environment"]["INFERENCE_TRUSTED_PRINCIPALS"]
+    assert _mounts(full["inference-storefront"])[storefront] == str(
+        profiles / "storefront.inference.toml")
+    # The model stub has no time source in either stack.
+    for services in (lane, full):
+        assert not {name for name in services["model-stub"].get("environment") or {}
+                    if "TIME" in name}
+
+
 def test_only_the_api_credit_lane_runs_the_sample_app_with_no_verify_cache() -> None:
     """The lane's scenario makes one request after a top-up and expects it
     served, which holds whatever the top-up's duration only if the gate
@@ -279,10 +306,26 @@ def test_vm_provisioning_takes_its_site_profile_then_the_run_mode(
     for name, site in (("provisioning", "vms-bob-site"), ("alice-provisioning", "vms-alice-site")):
         environment = services[name]["environment"]
         assert environment["CONFIG_DIRECTORY"] == "/app/config"
-        assert environment["ACTIVE_PROFILES"] == f"docker,{site},{last}"
+        # The lane's injected time is its own profile, between the site's and
+        # the run's mode; the full local stack never loads it.
+        lane = "lane-time," if stack == "vm" else ""
+        assert environment["ACTIVE_PROFILES"] == f"docker,{site},{lane}{last}"
+        assert ("/app/config/config-lane-time.yml" in _mounts(services[name])) == bool(lane)
         assert not {key for key in environment if key.startswith("PROVISIONING_")} - {
             "PROVISIONING_DATABASE_URL", "PROVISIONING_STOREFRONT_URL",
         }, name
+
+
+def test_the_full_local_stack_runs_wall_time() -> None:
+    """Only the lanes inject time: the full local stack loads no lane profile,
+    mounts no lane configuration, and states no injected source."""
+    for name, service in _render("full")["services"].items():
+        environment = service.get("environment") or {}
+        assert "injected" not in environment.values(), name
+        assert "lane-time" not in environment.get("ACTIVE_PROFILES", ""), name
+        assert "payments-lane" not in environment.get("ACTIVE_PROFILES", ""), name
+        assert not [source for source in _mounts(service).values()
+                    if source.endswith((".lane.toml", "config-lane-time.yml"))], name
 
 
 @pytest.mark.parametrize("stack", sorted(STACKS))

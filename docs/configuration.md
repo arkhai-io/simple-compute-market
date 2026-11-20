@@ -119,7 +119,7 @@ fulfillments. Provisioning
 provider failures retain capacity until fulfillment teardown succeeds or an
 operator performs explicit recovery. The VM storefront runs the policy on its
 pull path, when it reads a failed fulfillment: settlement's provisioning step
-when starting the fulfillment fails, and the fulfillment-resume loop when the
+when starting the fulfillment fails, and the delivery-recovery loop when the
 provisioning service reports the fulfillment failed. No callback runs it; the
 provisioning service's only callback to the storefront is capacity-released.
 The policy may emit events or run configured commercial actions:

@@ -19,6 +19,8 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     for name, project, pattern in (
         ("api", REPO / "kit" / "api", "arkhai_api-*.whl"),
         ("identity", REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
+        # The process time source, which the identity kit imports.
+        ("injected_time", REPO / "tools" / "injected-time", "arkhai_injected_time-*.whl"),
     ):
         subprocess.run(
             ["uv", "build", "--wheel", "--out-dir", str(output)],

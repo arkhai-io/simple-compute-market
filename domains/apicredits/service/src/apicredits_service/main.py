@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+import injected_time
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,13 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 import apicredits_service.container as _container_module
 from apicredits_service.config import settings
 from apicredits_service.controllers.keys_controller import make_keys_router
-from apicredits_service.controllers.system_controller import make_health_router, make_system_router
+from apicredits_service.controllers.system_controller import (
+    make_health_router,
+    make_system_router,
+    make_time_router,
+)
 from apicredits_service.identity import (
     expected_principals,
     require_signer,
     signed_authentication_enabled,
 )
 from arkhai_api_authority import load_pool_directory, site_route_contracts
+from arkhai_api_contracts import operations
 from market_site.auth import (
     CAPACITY_ROUTE_CONTRACTS,
     EXCLUDED_PATHS,
@@ -35,10 +41,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# The process's time source, installed before the application is built and
+# before anything reads the time: `time.source`, "wall" unless set "injected";
+# any other value refuses startup naming the setting and the value. The site
+# ledger this service hosts reads it too.
+injected_time.install(
+    injected_time.source_for(
+        injected_time.WALL
+        if settings.configured_time_source is None
+        else settings.configured_time_source,
+        setting="time.source",
+    )
+)
+
+
+def announce_time_source(source: injected_time.TimeSource) -> None:
+    """Log an injected source at startup; a wall-time service logs nothing here."""
+    if source.name == injected_time.INJECTED:
+        logger.info(
+            '[STARTUP] time.source is "injected": time is held at %s until set '
+            "through POST /api/v1/system/time",
+            source.now(),
+        )
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("Starting API-credits service...")
+    announce_time_source(injected_time.installed())
     _container_module.init()
     logger.info("Database initialised")
     yield
@@ -79,7 +109,7 @@ app = FastAPI(
                 "reserve/commit/release, and the versioned event feed."
             ),
         },
-        {"name": "system", "description": "Health and version."},
+        {"name": "system", "description": "Health, version, status, and time."},
     ],
     lifespan=lifespan,
 )
@@ -107,6 +137,7 @@ if signed_authentication_enabled():
         contracts=CREDITS_ROUTE_CONTRACTS + CAPACITY_ROUTE_CONTRACTS,
         max_timestamp_skew=int(settings.get("max_timestamp_skew", 300)),
         excluded_paths=_UNSIGNED_PATHS,
+        time_setting_operation=operations.SYSTEM_TIME,
     )
 else:
     # No identity provisioned. Keeping the shared-secret gate is the honest
@@ -135,7 +166,7 @@ app.add_middleware(
 #
 # URL hierarchy:
 #   /health                          <- bare liveness probe (no prefix)
-#   /api/v1/system/*                 <- versioned health + version
+#   /api/v1/system/*                 <- versioned health + version, status, time
 #   /api/v1/issuance                 <- deal fulfillment (storefront)
 #   /api/v1/keys/*                   <- consume/verify, admin, guard lookup
 #   /api/v1/capacity/*               <- site quota ledger (market_site)
@@ -160,6 +191,14 @@ app.include_router(                                                            #
     ),
     prefix="/api/v1",
 )
+# The time-setting route, mounted only while the source installed above is
+# injected: a wall-time service serves no such route, and its time is changed
+# only by reconfiguring and restarting it.
+if injected_time.TimeRouteService(injected_time.installed()).settable:
+    app.include_router(                                                        # /api/v1/system/time
+        make_time_router(lambda: _container_module.resolved_system_service),
+        prefix="/api/v1",
+    )
 
 
 if __name__ == "__main__":

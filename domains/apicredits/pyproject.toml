@@ -39,5 +39,5 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23.8,<1.0.0",
     # The principals the pin and trust-pin tests build. Test-only.
-    "arkhai-kit-identity==0.4.0",
+    "arkhai-kit-identity==0.5.0",
 ]

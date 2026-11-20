@@ -58,6 +58,9 @@ class BareMetalHealthResponse(BaseModel):
     paused: bool | None = None
     principal: Identity
     sites: list[dict[str, object]] = Field(default_factory=list)
+    # The process's time source: ``{"source": "injected", "now": <Unix seconds>}``
+    # or ``{"source": "wall"}``; system status only.
+    time: dict[str, object] | None = None
     # Reported per site and outside ``checks``: one site's projection being
     # unavailable is not a storefront-wide degradation.
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
@@ -84,6 +87,9 @@ class BareMetalHealthResponse(BaseModel):
     # Each composed settlement mechanism's readiness as its registration
     # projects it, each blocker with its kind; on status.
     settlement: list[dict[str, object]] | None = None
+    # Each open deal the configuration composes no adapter for, with the
+    # configuration that would; on status.
+    unserviceable_deals: list[dict[str, str]] | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):
@@ -226,3 +232,30 @@ class BareMetalCapacityReleasedEvent(BaseModel):
 class BareMetalCapacityEventResponse(BaseModel):
     capacity_reservation_id: str
     state: str
+
+
+class BareMetalInterruptDealRequest(BaseModel):
+    """An administrator's interruption of a committed payments deal.
+
+    It takes the canonical storefront client's interrupt body. The end is the
+    storefront's receipt time, so a caller-supplied ``interrupted_at_utc`` is
+    refused; the operation key, when omitted, is derived from the request.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = None
+    interruption_kind: Literal["preemption", "failure"] | None = None
+    operation_key: str | None = Field(default=None, min_length=1)
+    interrupted_at_utc: str | None = None
+    dry_run: bool = False
+
+
+class BareMetalInterruptDealResponse(BaseModel):
+    escrow_uid: str
+    listing_id: str
+    status: str
+    interrupted_at_utc: str
+    settlement_action: Literal["notice_stop", "delivery_end_filing"]
+    lifecycle_outcome: dict[str, object]
+    delivery: dict[str, object]

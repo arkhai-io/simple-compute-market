@@ -200,7 +200,8 @@ async def test_a_ready_step_returning_without_the_mark_takes_the_error_backoff(c
         on_ready=_returns,
     )
     ref = _ready_without_fulfillment()["obligation_ref"]
-    before = time.time()
+    # The worker reads the process time source, in whole seconds.
+    before = int(time.time())
 
     with caplog.at_level(logging.WARNING, logger="market_settlement_runtime.servicing"):
         await worker.service_obligation(ref)

@@ -17,9 +17,9 @@ per-deal monotonicity.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any, Optional
 
+import injected_time
 import typer
 from rich.console import Console
 
@@ -127,7 +127,7 @@ async def _service_loop(
 
     seller_principal = _deal_seller_principal(deal)
     while True:
-        now = time.time()
+        now = injected_time.now()
         if expiration is not None and now >= expiration:
             console.print(
                 f"[yellow]deal expired[/yellow] (expiration_unix={int(expiration)})"
@@ -163,10 +163,13 @@ async def _service_loop(
                 return 1
         if once:
             return 0
-        # Sleep toward the next beat, but wake at expiration if sooner.
+        # Sleep toward the next beat, but wake at expiration if sooner. The
+        # expiration is the escrow's instant, so the time left to it is read
+        # from the process time source; held there, the loop still wakes at
+        # least once a beat.
         delay = interval_seconds
         if expiration is not None:
-            delay = max(0.0, min(delay, expiration - time.time()))
+            delay = max(0.0, min(delay, expiration - injected_time.now()))
         await asyncio.sleep(delay)
 
     if not reclaim:

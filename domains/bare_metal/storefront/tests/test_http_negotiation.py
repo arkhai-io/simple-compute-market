@@ -12,6 +12,7 @@ from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
+    build_bare_metal_settlement_registry,
 )
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -33,10 +34,15 @@ from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core.schemas import (
     RateValue,
     SettlementOption,
+    SettlementPrice,
     derive_settlement_option_id,
+)
+from market_deal_lifecycle.terms import (
+    Adjudication, DisputeAuthority, EarlyTermination, Entitlement, LifecycleTerms, encode_terms,
 )
 from market_identity import (
     AuthenticatedResponse,
+    Ed25519Signer,
     Eip191Signer,
     RequestEnvelope,
     TrustedIdentitySet,
@@ -45,10 +51,19 @@ from market_identity import (
     verify_response,
 )
 from market_resource_pools_contracts.backing import UNBACKED
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
 
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
-from settlement_compositions import alkahest_composition
+from settlement_compositions import ALKAHEST_SECTION, alkahest_composition
 from held_loops import held_loop_controller
+from recurring_world import (
+    APPROVAL_WINDOW_SECONDS,
+    DELIVERY_DEADLINE_SECONDS,
+    MECHANISM as RECURRING_MECHANISM,
+    PAYEE as RECURRING_PAYEE,
+    PERIOD_SECONDS,
+    recurring_world,
+)
 from source_sites import (
     SourceSite,
     SourceSites,
@@ -544,7 +559,7 @@ async def test_an_opening_on_a_refused_generation_is_refused_as_retryable(
 
 
 async def test_an_expired_confirmation_refuses_until_a_poll_confirms_the_site(
-    tmp_path,
+    tmp_path, injected_source
 ) -> None:
     """With the loops held and trading live, an opening more than the window
     after the site's last confirmed poll is refused as retryable, with no site
@@ -572,6 +587,8 @@ async def test_an_expired_confirmation_refuses_until_a_poll_confirms_the_site(
                     await _open_countered(buyer)
             refused_calls = site.calls - calls
 
+            # The step's poll is stamped a second after the startup one.
+            injected_source.set(int(loaded.timestamp()) + 1)
             await admin.admin_run_lifecycle_cycle("site-projections")
             polled = _confirmed_at(await admin.get_system_status())
             now[0] = polled + timedelta(seconds=1)
@@ -1267,6 +1284,220 @@ async def test_an_exact_alkahest_selection_is_refused_with_nothing_accepted(
     assert "settlement_selection_requires_plan" in str(refused.value)
     assert threads.count == 0
     _nothing_accepted(runtime)
+
+
+# ---------------------------------------------------------------------------
+# A cached rate option the servicing declaration in force does not qualify
+# ---------------------------------------------------------------------------
+
+# Arkhai payments added to the storefront's settlement composition: the real
+# registry resolves the seller's payments configuration. Every account, key and
+# address here is a deterministic development value; none may be used on a
+# public network.
+_PAYMENTS = "arkhai.payments.v1"
+_PAYEE = "22222222-2222-4222-8222-222222222222"
+_PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
+# A fictional authority: the origin is a reserved name that resolves nowhere.
+_AUTHORITY = DisputeAuthority(
+    interface="fixture.mediation.v1", origin="https://mediation.invalid",
+    account="fixture-account", record_key="fixture-record", params={},
+)
+
+
+def _payments_runtime(path: str, rate_servicing: RateServicing) -> BareMetalStorefrontRuntime:
+    """The storefront with Arkhai payments composed under ``rate_servicing``.
+
+    The selection door refuses an unqualified rate option before reading the
+    composition's recurring encoder or term timing.
+    """
+    runtime = _runtime(path)
+    configured = runtime.settlement_composition
+    registry = build_bare_metal_settlement_registry()
+    settlement = {
+        "schema_version": 1,
+        "priority": ["alkahest.v1", _PAYMENTS],
+        "alkahest": dict(ALKAHEST_SECTION),
+        "arkhai_payments": {
+            "enabled": True,
+            "service_url": "http://127.0.0.1:9",
+            "service_identity": _PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+            "fee_bps": 250,
+            "development_auth": True,
+        },
+    }
+    return replace(
+        runtime,
+        settlement_composition=replace(
+            configured,
+            registry=registry,
+            config=registry.resolve(settlement, role="seller"),
+            rate_servicing=rate_servicing,
+        ),
+    )
+
+
+def _on_demand_option() -> dict:
+    """A rate option whose payer's stop charges its started period and whose term
+    end returns the last one, as a storefront declaring ``returned`` published it."""
+    lifecycle = encode_terms(LifecycleTerms(
+        adjudication=Adjudication(version=1, dispute=_AUTHORITY, dispute_window_seconds=604800,
+                                  case_hold_max_seconds=None),
+        early_termination=EarlyTermination(version=1, settles_through="last_boundary", entitlements={
+            "payer": Entitlement(notice_seconds=0, settles_through="started_period"),
+        }),
+        delivery_deadline_seconds=1200,
+    ))
+    price = SettlementPrice(asset="USD/6", rates=[RateValue(field="amount", per="hour", value=2_500_000)])
+    settlement = {
+        "schema": _PAYMENTS, "payee_account": _PAYEE, "window": "PT5M",
+        "period": "PT15M", "reserve_ahead_seconds": 1800,
+    }
+    return SettlementOption(
+        option_id=derive_settlement_option_id(price=price, settlement=settlement, lifecycle=lifecycle),
+        price=price, settlement=settlement, lifecycle=lifecycle,
+    ).model_dump(mode="json")
+
+
+async def test_a_cached_rate_option_whose_treatment_is_withdrawn_is_refused_through_the_app(
+    tmp_path,
+) -> None:
+    """The listing record is seeded with a rate option a storefront declaring
+    ``returned`` publishes, while this storefront declares only ``charged``. A
+    buyer selecting it is answered with the signed 409 asking for a refetch, and
+    nothing is kept."""
+    narrowed = RateServicing({_PAYMENTS: RateServicingDeclaration(
+        _PAYMENTS, frozenset({"charged"}), False,
+    )})
+    runtime = _payments_runtime(str(tmp_path / "storefront.db"), narrowed)
+    option = _on_demand_option()
+    await _insert_listing(runtime, settlement_options=[option])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.negotiate_new(
+                    listing_id="listing-1",
+                    initial_amount=625_000,
+                    provision_terms=_opening()["provision_terms"],
+                    settlement_selection={
+                        "option_id": option["option_id"],
+                        "settlement": {"schema": _PAYMENTS, "payer_account": _PAYEE},
+                        "expiration_unix": int(time.time()) + 3600,
+                    },
+                    selection_only=True,
+                )
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            threads = await admin.list_negotiations("listing-1")
+
+    assert refused.value.status_code == 409
+    assert "settlement_option_withdrawn_refetch" in str(refused.value)
+    assert "does not declare returned" in str(refused.value)
+    assert threads.count == 0
+    _nothing_accepted(runtime)
+
+
+# A recurring selection over ``recurring_world``: options the composition's
+# installed recurring encoder published, then selected through the app.
+
+
+def _negotiation_rows(db) -> list[tuple]:
+    with sqlite3.connect(db.db_path) as connection:
+        return connection.execute(
+            "SELECT * FROM negotiation_threads ORDER BY negotiation_id"
+        ).fetchall()
+
+
+async def test_a_cached_recurring_selection_whose_treatment_is_withdrawn_is_refused(
+    tmp_path,
+) -> None:
+    """A buyer holding a recurring option published under the full declaration
+    selects it after the storefront stops declaring one of its treatments: the
+    seller answers the signed 409 asking for a refetch, and writes no negotiation."""
+    async with recurring_world(tmp_path) as world:
+        report = await world.publish()
+        (listing_id,) = [
+            item["listing_id"] for item in report["actions"] if item["action"] == "publish"
+        ]
+        options = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
+        on_demand = next(
+            option for option in options
+            if "period" in option["settlement"]
+            and "payee" not in option["lifecycle"]["early_termination"]["entitlements"]
+        )
+        world.declare(frozenset({"charged"}))
+        before = _negotiation_rows(world.db)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await world.buyer.negotiate_new(
+                listing_id=listing_id,
+                initial_amount=1,
+                provision_terms={"kind": "bare_metal.v2", "version": 1, "payload": {
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "ssh-ed25519 fixture",
+                    "access_method": "ssh",
+                }},
+                settlement_selection={
+                    "option_id": on_demand["option_id"],
+                    "settlement": {"schema": RECURRING_MECHANISM, "payer_account": RECURRING_PAYEE},
+                },
+                selection_only=True,
+            )
+
+        assert refused.value.status_code == 409
+        assert "settlement_option_withdrawn_refetch" in str(refused.value)
+        assert "does not declare returned" in str(refused.value)
+        assert _negotiation_rows(world.db) == before
+
+
+#: The shortest recurring horizon the runway admits for a buyer naming no start:
+#: the approval window, then the delivery deadline, then one whole period.
+_MINIMUM_HORIZON = APPROVAL_WINDOW_SECONDS + DELIVERY_DEADLINE_SECONDS + PERIOD_SECONDS
+
+
+async def test_a_horizon_leaving_no_runway_is_refused_naming_the_minimum_that_passes(
+    tmp_path,
+) -> None:
+    """A recurring horizon must leave the delivery deadline and one period after
+    the latest approval the option permits: 300 + 1200 + 900 seconds here. One
+    second short is refused before any negotiation is written, naming that
+    minimum so the buyer can re-propose it."""
+    async with recurring_world(tmp_path) as world:
+        report = await world.publish()
+        (listing_id,) = [
+            item["listing_id"] for item in report["actions"] if item["action"] == "publish"
+        ]
+        options = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
+        on_demand = next(
+            option for option in options
+            if "period" in option["settlement"]
+            and "payee" not in option["lifecycle"]["early_termination"]["entitlements"]
+        )
+        before = _negotiation_rows(world.db)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await world.buyer.negotiate_new(
+                listing_id=listing_id,
+                # One period at the clause's 2.5 an hour, in base units.
+                initial_amount=625_000,
+                provision_terms={"kind": "bare_metal.v2", "version": 1, "payload": {
+                    "duration_seconds": _MINIMUM_HORIZON - 1,
+                    "ssh_public_key": "ssh-ed25519 fixture",
+                    "access_method": "ssh",
+                }},
+                settlement_selection={
+                    "option_id": on_demand["option_id"],
+                    "expiration_unix": 2_147_483_647,
+                    "settlement": {"schema": RECURRING_MECHANISM, "payer_account": RECURRING_PAYEE},
+                },
+                selection_only=True,
+            )
+
+        assert (
+            f"The horizon leaves no runway: minimum duration_seconds is {_MINIMUM_HORIZON}"
+            in str(refused.value)
+        )
+        assert _negotiation_rows(world.db) == before
 
 
 # -- unbacked listings ---------------------------------------------------------

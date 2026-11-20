@@ -32,4 +32,4 @@ The release workflow lists 22 packages; only a subset has matching live PyPI pro
 
 ## Permanent Documentation Promotion
 
-Accepted publication inventory, build guarantees, and external setup procedure belong in `openspec/specs/deployment-state/spec.md`/`architecture.md` and `docs/development/RELEASING.md`. External credentials/secrets are never recorded in repository artifacts.
+Accepted publication inventory, build guarantees, and external setup procedure belong in `openspec/specs/deployment-state/spec.md`/`architecture.md`, `docs/guidance/repository/published-packages.md` (the publication inventory), and `docs/release-handbook.md` (the setup procedure). External credentials/secrets are never recorded in repository artifacts.

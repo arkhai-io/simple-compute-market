@@ -20,6 +20,17 @@ class PaymentsAPIError(PaymentsError):
         super().__init__(f"payments service returned {status_code}: {code}")
 
 
+class PaymentApprovalInsufficientFunds(PaymentsAPIError):
+    """The payer must fund its account before approving the initial reservation."""
+
+    def __init__(self) -> None:
+        super().__init__(409, "insufficient_funds")
+
+    def __str__(self) -> str:
+        return ("payment approval refused (insufficient_funds): payer balance cannot cover "
+                "the initial reservation; fund the payer account and retry approval")
+
+
 class PaymentsTransportError(PaymentsError):
     """The service could not be reached or its response could not be read."""
 

@@ -7,10 +7,11 @@ storefront, naming every problem: no registry to publish to, or one without its
 authority pin; no enabled settlement mechanism; or no configured site, or a site
 not bound to exactly one service peer.
 
-Terms a pool's override may supply instead of the storefront's defaults -- its
-settlement clauses and its maximum lease duration -- are not checked here:
-publication holds a pool that resolves no lease bound, and refuses, closing any
-open listing, a candidate whose pool resolves no settlement clause. See the
+Terms a pool's override or hint may supply instead of the storefront's defaults
+-- its settlement clauses and its maximum lease duration -- are not checked here:
+a pool that resolves no lease bound publishes with no relative limit, and
+publication refuses, closing any open listing, a candidate whose pool resolves
+no settlement clause. See the
 requirement "A storefront that cannot publish refuses to start" in
 openspec/specs/storefront-publication/spec.md.
 """

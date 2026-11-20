@@ -122,10 +122,15 @@ def test_a_floor_database_whose_store_never_opened_gains_its_tables(tmp_path) ->
     fresh = tmp_path / "fresh.db"
     migrate_storefront_database(fresh)
     assert _snapshot(path) == _snapshot(fresh)
-    assert "bare_metal_lifecycle_cursor" in _snapshot(path)["tables"]
+    tables = _snapshot(path)["tables"]
+    assert "servicing_page_position" in tables
+    assert "bare_metal_lifecycle_cursor" not in tables
 
 
-def test_store_open_tables_already_present_are_left_as_they_are(tmp_path) -> None:
+def test_a_store_opened_cursor_is_tolerated_then_dropped_for_the_kits_page_position(tmp_path) -> None:
+    """A v0.3.0 database whose store opened holds the lifecycle's cursor: the
+    store-open migration tolerates it, and the page-position migration drops
+    it, its rotation position lost, beside the kit's empty position table."""
     path = create_floor_database(tmp_path / "opened.db")
     connection = sqlite3.connect(path)
     with connection:
@@ -136,13 +141,19 @@ def test_store_open_tables_already_present_are_left_as_they_are(tmp_path) -> Non
         connection.execute("INSERT INTO bare_metal_lifecycle_cursor VALUES (1, 'page-7')")
     connection.close()
 
-    migrate_storefront_database(path)
+    report = migrate_storefront_database(path)
 
+    assert report.applied == _LATER
+    assert _LATER[-1] == "bare-metal-storefront-0020-servicing-page-position"
+    fresh = tmp_path / "fresh.db"
+    migrate_storefront_database(fresh)
+    assert _snapshot(path) == _snapshot(fresh)
     connection = sqlite3.connect(path)
     try:
         assert connection.execute(
-            "SELECT continuation FROM bare_metal_lifecycle_cursor"
-        ).fetchall() == [("page-7",)]
+            "SELECT name FROM sqlite_master WHERE name='bare_metal_lifecycle_cursor'"
+        ).fetchall() == []
+        assert connection.execute("SELECT * FROM servicing_page_position").fetchall() == []
     finally:
         connection.close()
 

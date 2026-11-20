@@ -452,8 +452,11 @@ identities, or when a registered provider declares differently from it.
 A composition that supplies a host requirement and registers hosts SHALL also
 supply the site authority, for admission and for its projections, and settlement
 scheduling one report of the hosts taking new delivery: the identifiers of registered, enabled hosts,
-read in the caller's session. A lower layer receiving it SHALL NOT import the host
-registry to obtain it.
+less any host the composition withholds from new delivery, read in the caller's
+session. The compute composition withholds every host placed in, or with a
+declaration in, a pool referencing a disabled relay. A lower layer receiving the
+report SHALL NOT import the host registry, or what the composition withholds by,
+to obtain it.
 
 #### Scenario: Composition collects every registered provider's declaration
 
@@ -477,8 +480,8 @@ registry to obtain it.
 - **WHEN** the compute provisioning composition is built
 - **THEN** the site authority and settlement scheduling each receive the same
   report of hosts taking new delivery, and a host disabled
-  through the host authority is absent from it in the next transaction that reads
-  it
+  through the host authority, or placed or declared in a pool whose relay is
+  disabled, is absent from it in the next transaction that reads it
 
 ### Requirement: Versioned envelopes
 
@@ -620,6 +623,16 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 - **WHEN** the provisioning client begins teardown more than once
 - **THEN** every accepted response SHALL identify the same fulfillment aggregate
 - **AND** only one durable teardown operation SHALL exist
+
+### Requirement: An equivalent acceptance that waited on another returns the first
+
+Fulfillment acceptance MUST judge the aggregate as the row lock it takes shows it, not as an earlier read in the same transaction held it. An equivalent `begin_fulfillment` for a reservation that waited on that lock while another acceptance of the same reservation committed MUST return that acceptance's fulfillment, with its `fulfillment_id`, and MUST NOT accept, prepare, or persist the fulfillment a second time.
+
+#### Scenario: A retry waited on the first acceptance's commit
+
+- **GIVEN** an acceptance that read a reservation's aggregate before another acceptance of it committed
+- **WHEN** it then takes the aggregate's row lock and accepts an equivalent request
+- **THEN** it returns the committed acceptance's `fulfillment_id`, and the aggregate keeps that identity and its prepared operation
 
 ## Evidence
 

@@ -13,6 +13,7 @@ from market_identity import (
     sign_request, verify_request,
 )
 
+from market_deal_servicing import create_payment_observations, create_schema
 from market_deal_servicing.evidence import (
     EvidenceSession, RetentionObservation, SQLiteEvidenceStore, transaction,
 )
@@ -32,6 +33,10 @@ async def main():
     })
     with TemporaryDirectory(prefix="seller-evidence-") as root:
         path = Path(root) / "storefront.sqlite"
+        with transaction(path) as conn:
+            # The storefront chain's migrations, which no session runs.
+            create_schema(conn)
+            create_payment_observations(conn)
         store = SQLiteEvidenceStore(path)
         for route in ("opening", "counteroffer", "administrative"):
             body = b'{"offer": "exact bytes, including whitespace"}'

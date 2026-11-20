@@ -101,6 +101,10 @@ class AnsibleJobExecutor:
         inventory = None
         try:
             inventory = runner.write_inventory([host], group=self._codec.inventory_group)
+            # The last step before the playbook can act on the host: a refusal
+            # above, by the codec or the inventory, records no start, and if
+            # the start cannot be recorded this raises and nothing is spawned.
+            run.report_starting()
             playbook_run = runner.start_playbook(
                 playbook_path=plan.playbook_path or self._playbook_path,
                 inventory_path=inventory.path,

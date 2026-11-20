@@ -20,10 +20,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time
 from dataclasses import dataclass
 from typing import Any
 
+import injected_time
 from market_arkhai_payments import PaymentApproval, PaymentSettlementData
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage, LifecycleRead, SubmitResponse
@@ -120,7 +120,7 @@ def commit_hosted_deal(
             "option_id": option["option_id"],
             "settlement": {"schema": "arkhai.payments.v1",
                            "payer_account": str(payment_setting("BUYER_ACCOUNT"))},
-            "expiration_unix": int(time.time()) + 300,
+            "expiration_unix": injected_time.now() + 300,
         },
     )
     negotiation_id = opened["negotiation_id"]

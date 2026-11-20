@@ -18,7 +18,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts import ConnectionCodecs, ConnectionEnvelope, ExecutionHost
+from compute_provisioning.jobs import JobRun
 from compute_provisioning.relays import (
     PoolRelay,
     RelayExecutionResolver,
@@ -40,6 +41,16 @@ _PLAYBOOK_PATH = "/configured/playbook.yaml"
 # A development-only Fernet key. Generated for this fixture, never used on any
 # network, and safe to read here precisely because it protects nothing.
 _KEY = Fernet.generate_key().decode()
+# A registered host reached over ssh. Documentation addresses only.
+_HOST = ExecutionHost(
+    host_id="kvm1",
+    pool_id="gpu-pool",
+    connection=ConnectionEnvelope(
+        kind="ssh",
+        version=2,
+        public={"ssh_host": "192.0.2.1", "ssh_port": 22, "ssh_user": "root"},
+    ),
+)
 
 
 @pytest.fixture
@@ -229,3 +240,37 @@ class TestRelayInputsReachTheJob:
 
         assert 'frp_auth_token: "rotated"' in rendered.splitlines()
         assert "original" not in rendered
+
+    def test_a_teardown_on_a_disabled_relay_is_prepared(
+        self, session_factory, relays, settings
+    ):
+        """Disabling a relay drains it, so a guest's teardown on it is prepared
+        with the relay's address and token, by the codec through the family's
+        resolver: refused, the guest would stay up and its buyer keep access
+        past the lease end."""
+        _make_relay(relays, token="admission-secret")
+        relays.set_enabled("site-a", False)
+        run = JobRun(
+            job_id="job-1",
+            offering_mode="vm",
+            action="vm_remove",
+            host=_HOST,
+            parameters={
+                "host_id": "kvm1", "vm_action": "vm_remove", "offering_mode": "vm",
+                "relay_id": "site-a", "escrow_uid": "cr-1",
+            },
+            report_starting=lambda: None,
+            report_handle=lambda handle: None,
+            report_logs=lambda logs: None,
+        )
+        codec = VmAnsibleCodec(
+            relay_resolver=RelayExecutionResolver(
+                session_factory=session_factory, settings=settings
+            )
+        )
+
+        plan = codec.prepare(run)
+
+        assert plan.variables["frp_server_addr"] == "10.0.0.9"
+        assert plan.variables["frp_auth_token"] == "admission-secret"
+        assert "relay_grant" not in plan.variables

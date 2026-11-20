@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from arkhai_api_authority import site_route_contracts
+from arkhai_api_contracts import operations
 from arkhai_api_contracts.routes import AUTHORITY_ROUTES
 from market_site.auth import SiteRouteContract
 
@@ -45,3 +46,12 @@ def test_the_adapted_contracts_are_the_declarations_field_for_field_in_order():
 
 def test_the_adapted_contracts_equal_the_services_recorded_table():
     assert [_as_recorded(c) for c in site_route_contracts()] == RECORDED
+
+
+def test_the_status_and_time_contracts_admit_the_administrator_alone():
+    contracts = {c.operation: c for c in site_route_contracts()}
+    for operation in (operations.SYSTEM_STATUS, operations.SYSTEM_TIME):
+        contract = contracts[operation]
+        assert contract.permits("admin")
+        assert not contract.permits("seller") and not contract.permits("service")
+        assert contract.path_resource is None and contract.body_resource is None

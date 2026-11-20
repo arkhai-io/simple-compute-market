@@ -21,15 +21,18 @@ from .seller import SellerSession
 
 
 class RespondentPoller:
-    """One bounded cycle per accepted authority/account, under the loop controller.
+    """One bounded cycle per accepted dispute authority, under the loop controller.
 
-    Resolve only exact accepted Agreements at this authority, using payee
-    credentials. Discovery owns counterparty answers; watches never preempt
-    concurrence with plain appends. Unknown writes retry after listing omission.
+    Resolve only exact accepted Agreements at this authority, using the seller's
+    credential there, which scopes the listing. Discovery owns counterparty
+    answers; watches never preempt concurrence with plain appends. Unknown
+    writes retry after listing omission. The poller holds nothing beyond its
+    tables and its inputs, so a servicing cycle builds it afresh; its cursor
+    record is derived from the authority alone.
     """
 
     def __init__(
-        self, path: str | Path, *, authority: DisputeAuthority, account: str,
+        self, path: str | Path, *, authority: DisputeAuthority,
         read: Callable[[str, int], Awaitable[RespondentPage]],
         resolve: Callable[[RespondentCase], tuple[str, DisputeAdapter] | None],
         signer: Signer, clock: Callable[[], int],
@@ -40,7 +43,7 @@ class RespondentPoller:
         self.resolve = resolve
         self.signer = signer
         self.clock = clock
-        self.record = stable_ref(account, "respondent", canonical_json(authority.identity).decode())
+        self.record = stable_ref("authority", "respondent", canonical_json(authority.identity).decode())
 
     async def _database(self, operation):
         # Its tables are the storefront chain's (market_deal_servicing.schema):
@@ -143,7 +146,7 @@ class RespondentPoller:
                         (case.commitment_ref,),
                     ).fetchone())
                     if local is None:
-                        # Account discovery spans storefronts. Only a locally
+                        # An authority's listing spans storefronts. Only a locally
                         # registered commitment can owe a repair on this worker.
                         await in_transaction(self.path, lambda conn: conn.execute(
                             "DELETE FROM servicing_respondent_repairs WHERE record=? AND case_ref=?",
@@ -162,9 +165,13 @@ class RespondentPoller:
                 ).rowcount)
                 skipped += 1
                 continue
+            # Repairs clear by case and commitment rather than by this poller's
+            # record, so a repair kept for the same local case under another
+            # record, such as one derived from a payee account as well as the
+            # authority, which no poller reads, clears once the case resolves.
             await in_transaction(self.path, lambda conn: conn.execute(
-                "DELETE FROM servicing_respondent_repairs WHERE record=? AND case_ref=?",
-                (self.record, case.case_ref),
+                "DELETE FROM servicing_respondent_repairs WHERE case_ref=? AND commitment_ref=?",
+                (case.case_ref, case.commitment_ref),
             ).rowcount)
             if intent.state == "pending":
                 command = LifecycleCommand.model_validate(intent.payload)

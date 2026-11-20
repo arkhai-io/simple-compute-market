@@ -52,6 +52,7 @@ from the lease ``09c`` compares it with.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import subprocess
 from dataclasses import dataclass
@@ -159,8 +160,37 @@ class PurchaseDriver(ComputeDealDriver, Protocol):
         """Assert what the domain's purchase command records as it ends."""
 
 
-def _available(balance: Any) -> dict[str, int]:
+def available_balances(balance: Any) -> dict[str, int]:
+    """An account's available balance by asset, from the payments service's balance read."""
     return {asset: int(amount.root) for asset, amount in balance.available.items()}
+
+
+def accepted_purchase(
+    run: Any, *, listing_id: str, option_id: str,
+) -> tuple[str, dict[str, Any], PaymentSettlementData]:
+    """The run's negotiation, its Agreement and the seller's settlement data,
+    correlated as one paid deal.
+
+    Read from the run-log events every domain's purchase command writes: the
+    accepted negotiation, carrying the Agreement's exact bytes and the seller's
+    settlement data, and the approval naming its transaction. The Agreement
+    names the listing and option the buyer discovered, which a command
+    selecting its listing by discovery must have bought.
+    """
+    started, accepted, approved = ordered_events(
+        run.read_events(), "run_started", "negotiation_completed", "payment_approved",
+    )
+    assert all(event["run_id"] == run.run_id for event in (started, accepted, approved))
+    assert accepted["status"] == "agreed", accepted
+    negotiation_id = accepted["negotiation_id"]
+    agreement = agreement_from_bytes(base64.b64decode(accepted["agreement_bytes"], validate=True))
+    data = PaymentSettlementData.parse(accepted["settlement_data"])
+    data.require_bound_to(agreement)
+    assert agreement["negotiation_id"] == negotiation_id, agreement
+    assert agreement["listing_id"] == listing_id, agreement
+    assert agreement["settlement"]["option_id"] == option_id, agreement
+    assert approved["transaction_id"] == data.transaction_id, approved
+    return negotiation_id, agreement, data
 
 
 # ===========================================================================
@@ -173,13 +203,15 @@ class Purchase01_PayerBalanceBefore:
     ):
         """The payer's own available balance, before the scenario's first approval.
 
-        Read with the buyer's token, as the payments service answers a balance
-        only for the caller's own account. ``Purchase05`` compares the drop
-        with the purchase's debit.
+        The payer is the run's buyer account, unless an earlier stage of the
+        scenario named another, as one that funds its own payer does. Read
+        with the payer's token, as the payments service answers a balance only
+        for the caller's own account. ``Purchase05`` compares the drop with the
+        purchase's debit.
         """
-        payer = str(payment_setting("BUYER_ACCOUNT"))
+        payer = str(deal_state.payer_account or payment_setting("BUYER_ACCOUNT"))
         with buyer_payments_client(payments_config, payer) as client:
-            before = _available(client.get_balance(payer))
+            before = available_balances(client.get_balance(payer))
         deal_state.payer_account = payer
         deal_state.payer_available_before = before
         log.info("[p01] Payer %s available before the purchase: %s", payer, before)
@@ -271,31 +303,16 @@ class Purchase04_PurchaseCorrelated:
     ):
         """The run's Agreement, settlement data, transaction and fulfillment name one deal.
 
-        Read from the run-log events every domain's purchase command writes:
-        the accepted negotiation, carrying the Agreement's exact bytes and the
-        seller's settlement data, and the approval naming its transaction. The
-        Agreement names the listing and option the buyer discovered, which a
-        command selecting its listing by discovery must have bought.
-
-        The fulfillment is the one the seller reports to the buyer, read in
+        The run's events correlate one paid deal (``accepted_purchase``). The
+        fulfillment is the one the seller reports to the buyer, read in
         provisioning dispatched and not yet converged: fulfillment convergence
         is held for the module, so only ``Stage09a``'s advance moves it.
         """
         require_state(deal_state, "purchase_run", "seller_listing_id", "purchase_option_id")
         run = deal_state.purchase_run
-        started, accepted, approved = ordered_events(
-            run.read_events(), "run_started", "negotiation_completed", "payment_approved",
+        negotiation_id, agreement, data = accepted_purchase(
+            run, listing_id=deal_state.seller_listing_id, option_id=deal_state.purchase_option_id,
         )
-        assert all(event["run_id"] == run.run_id for event in (started, accepted, approved))
-        assert accepted["status"] == "agreed", accepted
-        negotiation_id = accepted["negotiation_id"]
-        agreement = agreement_from_bytes(base64.b64decode(accepted["agreement_bytes"], validate=True))
-        data = PaymentSettlementData.parse(accepted["settlement_data"])
-        data.require_bound_to(agreement)
-        assert agreement["negotiation_id"] == negotiation_id, agreement
-        assert agreement["listing_id"] == deal_state.seller_listing_id, agreement
-        assert agreement["settlement"]["option_id"] == deal_state.purchase_option_id, agreement
-        assert approved["transaction_id"] == data.transaction_id, approved
 
         status = deal_driver.purchase_fulfillment(negotiation_id)
         fulfillment_id = str(status.get("fulfillment_id") or "")
@@ -348,7 +365,7 @@ class Purchase05_PaymentRecordsChecked:
         mandate = deal_state.payment_settlement.mandate
         with buyer_payments_client(payments_config, payer) as client:
             signed = client.get_transaction(str(deal_state.settlement_id))
-            after = _available(client.get_balance(payer))
+            after = available_balances(client.get_balance(payer))
         snapshot = signed.snapshot
         assert snapshot.transaction.root == deal_state.settlement_id, snapshot.transaction
         # The receipt keys the buyer and seller trust, retiring keys included.
@@ -455,7 +472,8 @@ class Purchase10_BuyerTeardown:
         run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
         assert_market_run_succeeded(run, command=deal_driver.teardown_command)
         if mediation_if_configured() is not None:
-            progress = EndDeliveryProgress.model_validate_json(run.stdout().strip().splitlines()[-1])
+            ended = json.loads(run.stdout().strip().splitlines()[-1])
+            progress = EndDeliveryProgress.model_validate(ended["progress"])
             case = progress.case
             assert isinstance(case, Accepted) and case.filing is not None, progress
             assert case.filing.parts and all(

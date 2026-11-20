@@ -10,7 +10,7 @@ from market_deal_lifecycle.adapters import (
 )
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
-    Accepted, EndDeliveryAcknowledgement, LifecycleCommand, SignedEndDeliveryReceipt, SubmitResponse,
+    Accepted, EndDeliveryAcknowledgement, LifecycleCommand, SignedEndDeliveryReceipt, SubmitResponse, Unknown, PaymentEvent,
 )
 from market_identity import (
     Ed25519Signer, RequestEnvelope, ResponseEnvelope, canonical_body_hash, canonical_json, sign_request, sign_response,
@@ -94,11 +94,12 @@ class Peer:
         return self.receipt
 
 
-def half(root, peer, dispute):
+def half(root, peer, dispute, *, rate=False, payment=None):
     evidence = FileEvidenceStore(root)
     deal = BuyerDeal("deal", "commitment", PaymentBinding("deal", PaymentSelector("fixture.payment")),
-                     DisputeBinding("deal", "commitment", AUTHORITY), BUYER.identity, SELLER.identity)
-    return BuyerLifecycle(deal=lambda _: deal, payments=PaymentAdapterTable([]),
+                     DisputeBinding("deal", "commitment", AUTHORITY), BUYER.identity, SELLER.identity, rate=rate)
+    return BuyerLifecycle(deal=lambda _: deal, payments=PaymentAdapterTable(
+                              [(deal.payment.selector, lambda _: payment)] if payment else []),
                           disputes=DisputeAdapterTable([(AUTHORITY.interface, lambda _: dispute)]),
                           operations=evidence, peer=peer, evidence=evidence,
                           end_journal=evidence.end_journal, clock=lambda: 100)
@@ -135,4 +136,66 @@ def test_an_earlier_seller_end_never_automatically_files_a_payer_claim(tmp_path)
         assert result.delivery.status == "accepted"
         assert result.acknowledgement.selected_end.cause == "operator_end"
         assert result.case.status == "rejected" and dispute.commands == []
+    asyncio.run(drive())
+
+
+class RateStop:
+    supported_commands = frozenset({"stop"})
+
+    def __init__(self, root, outcomes):
+        self.root, self.outcomes, self.commands = root, list(outcomes), []
+
+    def validate(self, command):
+        return None
+
+    async def submit(self, command, keys):
+        with sqlite3.connect(self.root / "evidence.sqlite3") as db:
+            plan = json.loads(db.execute("SELECT plan FROM buyer_delivery_ends").fetchone()[0])
+        assert plan["stop"] == command.model_dump(mode="json")
+        self.commands.append(command)
+        return self.outcomes.pop(0)
+
+
+def test_normal_rate_end_restarts_stop_then_hint_without_surrender_or_case(tmp_path):
+    async def drive():
+        peer, dispute = Peer(), Dispute()
+        hints = []
+
+        async def unavailable_hint(message):
+            hints.append(message)
+            raise OSError("storefront down")
+
+        peer.hint = unavailable_hint
+        accepted = Accepted(records=[PaymentEvent(
+            negotiation_id="deal", commitment_ref="commitment", part="0", kind="stop_request",
+            actor="payer", cause="payer", at=400, sequence=1, authority_record_ref="stop-record",
+        )])
+        payment = RateStop(tmp_path, [Unknown(reason="payment authority down"), accepted])
+        first = await half(tmp_path, peer, dispute, rate=True, payment=payment).end("deal")
+        assert first.mode == "normal_stop" and first.payment.status == "unknown"
+        assert first.hint.status == "unknown" and peer.keys == [] and dispute.commands == []
+        second = await half(tmp_path, peer, dispute, rate=True, payment=payment).end("deal")
+        assert second.payment == accepted and second.hint.status == "unknown"
+        replay = await half(tmp_path, peer, dispute, rate=True, payment=payment).end("deal")
+        assert replay.payment == accepted and len(payment.commands) == 2
+        assert payment.commands[0] == payment.commands[1]
+        assert all(message == hints[0] for message in hints)
+        assert replay.delivery.status == "pending" and replay.acknowledgement is None
+        assert peer.keys == [] and dispute.commands == []
+    asyncio.run(drive())
+
+
+def test_explicit_rate_surrender_reuses_the_stop_and_keeps_foundation_receipt_filing(tmp_path):
+    async def drive():
+        peer, dispute = Peer(), Dispute()
+        payment = RateStop(tmp_path, [Accepted()])
+        normal = await half(tmp_path, peer, dispute, rate=True, payment=payment).end("deal")
+        assert normal.mode == "normal_stop" and peer.keys == []
+        surrendered = await half(tmp_path, peer, dispute, rate=True, payment=payment).end("deal", surrender=True)
+        assert surrendered.mode == "immediate_surrender"
+        assert surrendered.delivery.status == surrendered.case.status == "accepted"
+        assert len(payment.commands) == len(peer.keys) == len(dispute.commands) == 1
+        assert surrendered.acknowledgement.receipt_at == 102
+        await half(tmp_path, peer, dispute, rate=True, payment=payment).end("deal")
+        assert len(payment.commands) == len(peer.keys) == len(dispute.commands) == 1
     asyncio.run(drive())

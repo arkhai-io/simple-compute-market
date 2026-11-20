@@ -23,7 +23,7 @@ inference = "arkhai_inference_buyer.cli:domain"
 dev = [
   "pytest>=8.0.0",
   # Test-only: types the tests build and the filter-spec reader.
-  "arkhai-kit-identity==0.4.0",
+  "arkhai-kit-identity==0.5.0",
   "arkhai-core-registry-client>=0.12.0",
   "arkhai-kit-settlement-runtime>=0.4.0",
   "pyyaml>=6",

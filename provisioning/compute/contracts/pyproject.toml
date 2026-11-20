@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.14.0"
+version = "0.16.0"
 license = "MIT"
 description = "Wire models and route contracts of the compute provisioning family, without its service code."
 requires-python = ">=3.12"
@@ -11,7 +11,7 @@ dependencies = [
     "arkhai-core>=0.4.0",
     # The empty-body sentinel the route contracts canonicalize with, and the
     # principal a rotation answer names.
-    "arkhai-kit-identity==0.4.0",
+    "arkhai-kit-identity==0.5.0",
     # Field(exclude_if=...), with which a schedule response omits an absent host.
     "pydantic>=2.12",
 ]
@@ -36,6 +36,6 @@ dev = [
 
 # The package allowlist: every distribution this package may declare or import
 # beyond the standard library, because its lightness is part of its contract.
-# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+# make check-architecture holds it; see docs/guidance/repository/package-layers.md, "Kind".
 [tool.arkhai.architecture]
 allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "pydantic"]

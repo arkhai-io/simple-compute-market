@@ -9,6 +9,9 @@ where re-executing a signed request would apply a relative change twice.
 Two caller roles: ``seller`` is the storefront, which issues against settled
 deals and administers keys; ``service`` is the gated application, which only
 spends and checks, so a compromised one cannot mint grants or revoke keys.
+Request authentication admits ``admin``, the operator, on every route whatever
+its declaration names, so the status and time-setting routes, which name no
+role, admit the operator alone.
 """
 
 from __future__ import annotations
@@ -18,9 +21,12 @@ from arkhai_api_contracts import operations
 SELLER_ROLE = "seller"
 SERVICE_ROLE = "service"
 
+ADMIN_ROLE = "admin"
+
 _SELLER = (SELLER_ROLE,)
 _GATED = (SERVICE_ROLE,)
 _SELLER_OR_GATED = (SELLER_ROLE, SERVICE_ROLE)
+_ADMIN_ONLY: tuple[str, ...] = ()
 
 AUTHORITY_ROUTES: tuple[dict, ...] = (
     {
@@ -95,6 +101,20 @@ AUTHORITY_ROUTES: tuple[dict, ...] = (
         "operation": operations.KEY_GET,
         "roles": _SELLER,
         "path_resource": "key_id",
+    },
+    {
+        "method": "GET",
+        "path": r"/api/v1/system/status",
+        "operation": operations.SYSTEM_STATUS,
+        "roles": _ADMIN_ONLY,
+    },
+    # Mounted only under injected time; a wall-time authority serves no such
+    # route. Its requests alone are verified without their timestamp's freshness.
+    {
+        "method": "POST",
+        "path": r"/api/v1/system/time",
+        "operation": operations.SYSTEM_TIME,
+        "roles": _ADMIN_ONLY,
     },
 )
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+import injected_time
 import uvicorn
 from arkhai_api_authority import load_pool_directory, site_route_contracts
+from arkhai_api_contracts import operations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from market_site.auth import (
@@ -17,7 +19,11 @@ from market_site.router import make_capacity_router
 import inference_service.container as _container_module
 from inference_service.config import settings
 from inference_service.controllers.keys_controller import make_keys_router
-from inference_service.controllers.system_controller import make_health_router, make_system_router
+from inference_service.controllers.system_controller import (
+    make_health_router,
+    make_system_router,
+    make_time_router,
+)
 from inference_service.identity import (
     expected_principals,
     require_signer,
@@ -33,6 +39,29 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# The process's time source, installed before the application is built and
+# before anything reads the time: `time.source`, "wall" unless set "injected";
+# any other value refuses startup naming the setting and the value. The site
+# ledger this service hosts reads it too.
+injected_time.install(
+    injected_time.source_for(
+        injected_time.WALL
+        if settings.configured_time_source is None
+        else settings.configured_time_source,
+        setting="time.source",
+    )
+)
+
+
+def announce_time_source(source: injected_time.TimeSource) -> None:
+    """Log an injected source at startup; a wall-time service logs nothing here."""
+    if source.name == injected_time.INJECTED:
+        logger.info(
+            '[STARTUP] time.source is "injected": time is held at %s until set '
+            "through POST /api/v1/system/time",
+            source.now(),
+        )
 
 
 class MissingSiteIdentity(RuntimeError):
@@ -51,6 +80,7 @@ def require_signed_authentication() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("Starting inference service...")
+    announce_time_source(injected_time.installed())
     require_signed_authentication()
     _container_module.init()
     logger.info("Database initialised")
@@ -87,7 +117,7 @@ app = FastAPI(
                 "reserve/commit/release, and the versioned event feed."
             ),
         },
-        {"name": "system", "description": "Health and version."},
+        {"name": "system", "description": "Health, version, status, and time."},
     ],
     lifespan=lifespan,
 )
@@ -107,6 +137,7 @@ app.add_middleware(
     contracts=INFERENCE_ROUTE_CONTRACTS + CAPACITY_ROUTE_CONTRACTS,
     max_timestamp_skew=int(settings.get("max_timestamp_skew", 300)),
     excluded_paths=_UNSIGNED_PATHS,
+    time_setting_operation=operations.SYSTEM_TIME,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -136,6 +167,14 @@ app.include_router(
     ),
     prefix="/api/v1",
 )
+# The time-setting route, mounted only while the source installed above is
+# injected: a wall-time service serves no such route, and its time is changed
+# only by reconfiguring and restarting it.
+if injected_time.TimeRouteService(injected_time.installed()).settable:
+    app.include_router(
+        make_time_router(lambda: _container_module.resolved_system_service),
+        prefix="/api/v1",
+    )
 
 
 if __name__ == "__main__":

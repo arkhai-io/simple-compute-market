@@ -124,6 +124,9 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # The change's task list, whose sections and checks say how far implementation got.
 TASKS_FILE = "tasks.md"
 _SECTION = re.compile(r"^## (?P<id>[0-9]+[A-Za-z]?)\. (?P<title>.+?)\s*$")
+# The title of the closeout section, the task list's last: closeout implements it,
+# and no round does.
+CLOSEOUT_TITLE = "Closeout"
 # A task is numbered for its section, `N.m`, when it is numbered at all.
 _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
                    r"(?P<number>(?P<section>[0-9]+[A-Za-z]?)\.[0-9]+\b)?")
@@ -212,8 +215,9 @@ class Section:
 
     @property
     def closeout(self) -> bool:
-        # Plans title it "Closeout", "Plan closeout", "Repository closeout", …
-        return "closeout" in self.title.lower()
+        # Known by its exact title alone: a section whose title merely mentions
+        # closeout, such as a pre-closeout review's preparation, is implemented.
+        return self.title == CLOSEOUT_TITLE
 
 
 @dataclass
@@ -350,6 +354,31 @@ def task_problems(text: str) -> list[str]:
     return problems
 
 
+def closeout_problems(text: str) -> list[str]:
+    """Why a task list's closeout section cannot be told apart: a list with
+    sections has none titled `Closeout`, has more than one, or has one followed by
+    another section. Routing leaves the closeout section out of every round, so a
+    list naming it otherwise would have it implemented by a round, or a section
+    after it skipped. A list with no `## N.` sections is unaffected."""
+    sections = [(number, match) for number, line in enumerate(text.splitlines(), start=1)
+                if (match := _SECTION.match(line))]
+    if not sections:
+        return []
+    closeouts = [(number, match) for number, match in sections
+                 if match["title"] == CLOSEOUT_TITLE]
+    if not closeouts:
+        return [f"line {sections[-1][0]}: no section is titled `{CLOSEOUT_TITLE}`; the "
+                f"task list ends with its closeout section, `## N. {CLOSEOUT_TITLE}`"]
+    problems = [f"line {number}: a second section is titled `{CLOSEOUT_TITLE}`"
+                for number, _ in closeouts[1:]]
+    first = closeouts[0][0]
+    problems += [f"line {number}: section {match['id']} follows the closeout section; "
+                 "the closeout section is the task list's last"
+                 for number, match in sections if number > first
+                 and match["title"] != CLOSEOUT_TITLE]
+    return problems
+
+
 def _git_head(root: Path) -> str | None:
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
                           text=True)
@@ -364,9 +393,10 @@ def _merging(root: Path) -> bool:
     return merge.returncode == 0
 
 
-def _inert_paths(root: Path) -> tuple[str, ...] | None:
-    """The repository's inert paths, from its workflow configuration."""
-    return config.load(root).inert_paths
+def _inert_paths(root: Path) -> tuple[str, ...]:
+    """The repository's inert paths, from its workflow configuration: the workflow's
+    default where it declares none."""
+    return config.load(root).repository_inert_paths()
 
 
 def _uncommitted(root: Path, path: Path) -> bool:
@@ -583,8 +613,11 @@ def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
                       + (f"; its {waits} waits after that" if waits else ""),
                       denials=denials, outcome=outcome)
     if outcome == "question":
+        # A reviewer is never resumed, its final message being taken for another
+        # review, so a review's question is the owner's to settle by their direction.
         return _owner(f"the {step} step asks: {entry.get('message', '')}",
-                      awaiting=entry.get("awaiting"), resume=step)
+                      awaiting=entry.get("awaiting"),
+                      **({"resume": step} if step != "review" else {}))
     if outcome == "returned":
         target = _exit_of(entry)
         return _owner(f"the {step} step proposes returning to "
@@ -608,7 +641,7 @@ class Computation:
                  bootstrap: Callable[[Path], Bootstrap] = bootstrap_state,
                  merging: Callable[[Path], bool] = _merging,
                  join: Join = ROUND_JOIN,
-                 inert_paths: Callable[[Path], Sequence[str] | None] = _inert_paths) -> None:
+                 inert_paths: Callable[[Path], Sequence[str]] = _inert_paths) -> None:
         self.root = root
         self.state = State(change)
         # Read once, and checked whole as the configuration always is: a malformed
@@ -845,7 +878,7 @@ class Computation:
                 f"{state.change}'s branch is not checked out here, but its records are in "
                 "this workspace's reviews/, which a clone would start without: check out "
                 f"its branch here and go on in the workspace, or move it into a clone by "
-                "hand as docs/agents/change-workflow.md describes",
+                "hand as docs/change-workflow-handbook.md describes",
                 routes=["work it in the workspace", "move it into a clone by hand"])
         return self.clone_step(
             f"{state.change}'s branch is checked out neither here nor in a clone of its own",
@@ -1195,14 +1228,15 @@ class Computation:
     # The round.
 
     def sections_problem(self) -> Result | None:
-        """Why the task list cannot be routed on: it has no sections, or a task sits
-        under another section's heading. The skills check the task list before
+        """Why the task list cannot be routed on: it has no sections, a task sits
+        under another section's heading, or its closeout section is missing,
+        repeated, or not its last. The skills check the task list before
         acting on it; this is the backstop for routing on its sections, since a
         list missing a heading would have whole sections repeated or skipped."""
         state = self.state
         if not state.sections:
             return self.unclassified("the task list has no sections")
-        if problems := task_problems(state.tasks):
+        if problems := task_problems(state.tasks) + closeout_problems(state.tasks):
             return self.unclassified("the task list is malformed: " + "; ".join(problems))
         return None
 
@@ -1285,8 +1319,11 @@ class Computation:
         review are no evidence that the owner read the round.
         """
         state = self.state
-        mine = [r for r in state.records if r.number > current.get("after", 0)]
-        kinds = {r.review_kind or r.kind for r in mine}
+        own = [r for r in state.records if r.number > current.get("after", 0)]
+        # Notes the round carries are triaged with it but are not its reading.
+        carried = set(current.get("carries") or ())
+        mine = [r for r in state.records if r.number in carried and not r.triaged] + own
+        kinds = {r.review_kind or r.kind for r in own}
         in_clone = state.workspace is not None
         base = again.reviewed_commit if again and self.fixed_since(again) else None
         if again is None:
@@ -1349,7 +1386,11 @@ class Computation:
         if unknown := [s for s in round_sections if s not in by_id]:
             return self.unclassified(f"the agreed round names sections the task list lacks: "
                                      f"{', '.join(unknown)}")
-        if ROUND in members:
+        # A review awaiting its triage is triaged before the round's open sections
+        # are implemented: its findings may change what is left to do.
+        awaiting = any(r.review_kind == "implementation" and not r.triaged
+                       for r in state.records if r.number > current.get("after", 0))
+        if ROUND in members and not awaiting:
             for session in current["sections"]:
                 # The closeout section is closeout's, never a round's to implement.
                 if any(not by_id[str(s)].complete and not by_id[str(s)].closeout

@@ -47,9 +47,9 @@ from market_core.schemas import (
     SettlementSelection,
     derive_settlement_option_id,
 )
-from market_policy.negotiation_middleware import load_negotiation_chain
+from market_policy.negotiation_middleware import NegotiationDecision, load_negotiation_chain
 
-from arkhai_vms_buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome, ResumeState, negotiate_with_seller
 
 
 # Canonical provision / escrow proposals used by every negotiate test —
@@ -323,6 +323,33 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
     assert outcome.negotiation_id == "neg-1"
 
 
+@pytest.mark.parametrize("listing", [None, {"listing_id": "seller-1", "max_duration_seconds": 7200}],
+                         ids=["without-a-listing", "with-a-listing"])
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_the_accepted_disclosure_names_the_run_s_waivers(mock_urlopen, listing, capsys):
+    mock_urlopen.side_effect = _urlopen_fake(
+        [{"negotiation_id": "neg-1", "action": "accept", "proposal": _seller_proposal(50)}]
+    )
+    outcome = negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        escrow_proposal=_escrow_proposal(),
+        listing=listing,
+        waivers=frozenset({"no_penalty"}),
+    )
+
+    assert outcome.status == "agreed"
+    shown = capsys.readouterr().err
+    assert "Accepted Agreement" in shown
+    assert "Waivers in force: --allow-no-penalty" in shown
+
+
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
     seen_body = {}
@@ -357,6 +384,7 @@ def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
         provision_terms=_provision(3600),
         settlement_selection=selection,
         policy_params={"_selected_settlement_option": option.model_dump(mode="json")},
+        validate_acceptance=None,  # This synthetic option exercises core's selection pin, not an escrow codec.
     )
 
     assert seen_body["proposal"]["settlement_selection"] == selection.model_dump()
@@ -409,10 +437,59 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
         settlement_selection=selection,
         policy_params={"_selected_settlement_option": option.model_dump(mode="json")},
         validate_advertised_plan=lambda plan: validated.append(plan),
+        validate_acceptance=None,  # Domain-owned validation is the injected plan hook above.
     )
 
     assert outcome.status == "agreed"
     assert validated == [outcome.settlement_plan]
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_a_purchase_holds_the_signed_horizon_to_the_listing_it_negotiated(mock_urlopen):
+    mock_urlopen.side_effect = _urlopen_fake(
+        [{"negotiation_id": "neg-1", "action": "accept", "proposal": _seller_proposal(50)}]
+    )
+    with pytest.raises(RuntimeError, match="accepted horizon refused: .*bound of 1800"):
+        negotiate_with_seller(
+            seller_url="http://seller:8001",
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
+            listing_id="seller-1",
+            initial_price=50,
+            max_price=100,
+            provision_terms=_provision(3600),
+            escrow_proposal=_escrow_proposal(),
+            listing={"listing_id": "seller-1", "max_duration_seconds": 1800},
+        )
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_a_resumed_purchase_holds_the_horizon_to_the_terms_it_opened_with(mock_urlopen):
+    # The seller signs the default 3600-second terms; the run opened with 7200.
+    mock_urlopen.side_effect = _urlopen_fake(
+        [{"negotiation_id": "neg-1", "action": "accept", "proposal": _seller_proposal(50)}]
+    )
+
+    def accept(_history, context):
+        return NegotiationDecision(action="accept", proposal=_seller_proposal(50)), context
+
+    with pytest.raises(RuntimeError, match="differs from the requested 7200"):
+        negotiate_with_seller(
+            seller_url="http://seller:8001",
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
+            listing_id="seller-1",
+            initial_price=0,
+            max_price=100,
+            chain=[accept],
+            resume=ResumeState(
+                negotiation_id="neg-1", transcript=[], last_seller_proposal=_seller_proposal(50),
+                rounds_completed=1, accepted_provision_terms=_provision(7200).model_dump(mode="json"),
+            ),
+            listing={"listing_id": "seller-1", "max_duration_seconds": 7200},
+        )
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")

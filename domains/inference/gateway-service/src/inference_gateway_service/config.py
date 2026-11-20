@@ -1,4 +1,4 @@
-"""The gateway's settings: the listing it fronts, the model server behind it, and its gate."""
+"""The gateway's settings: the listing it fronts, the model server behind it, its gate, and its time source."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import injected_time
 from arkhai_api_gate import GateConfig
 
 PREFIX = "INFERENCE_GATEWAY_"
 AUTHORITY_LABEL = "inference-service"
+TIME_SOURCE_SETTING = PREFIX + "TIME_SOURCE"
+CONTROL_TOKEN_SETTING = PREFIX + "CONTROL_TOKEN"
 
 _REQUIRED = ("STOREFRONT_URL", "RESOURCE_ID", "SERVED_MODEL_NAME", "UPSTREAM_BASE_URL")
 
@@ -22,6 +25,10 @@ class GatewaySettings:
     The listing is the storefront's one open listing whose card names
     ``resource_id`` and ``served_model_name``; ``listing_id`` names it directly
     instead, and must still name both.
+
+    ``time_source`` is the time of the world the process reads and the gate
+    signs by: ``"wall"`` unless set ``"injected"``, under which the gateway
+    serves a time control behind the bearer token ``control_token``.
     """
 
     storefront_url: str
@@ -32,6 +39,8 @@ class GatewaySettings:
     registry_url: str | None = None
     upstream_credential_file: Path | None = None
     listing_retry_seconds: float = 5.0
+    time_source: str = injected_time.WALL
+    control_token: str | None = None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> GatewaySettings:
@@ -52,6 +61,8 @@ class GatewaySettings:
             registry_url=get("REGISTRY_URL") or None,
             upstream_credential_file=Path(credential) if credential else None,
             listing_retry_seconds=float(retry) if retry else 5.0,
+            time_source=get("TIME_SOURCE") or injected_time.WALL,
+            control_token=get("CONTROL_TOKEN") or None,
         )
 
 

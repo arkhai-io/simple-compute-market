@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 from market_core import SettlementEvidence
 from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH
 
@@ -111,7 +111,7 @@ class SettlementRepository:
         public = dict(public_result or {})
         if "secret" in public or "tenant_credentials" in public:
             raise ValueError("credentials belong in private results")
-        now = datetime.now(timezone.utc).isoformat()
+        now = injected_time.now_datetime().isoformat()
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.execute("BEGIN IMMEDIATE")
             old = conn.execute(
@@ -190,7 +190,7 @@ class SettlementRepository:
         Succeeds only while the evidence is verified, including for a delivery
         already under way, so an interrupted delivery resumes under the same grant.
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = injected_time.now_datetime().isoformat()
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             cursor = conn.execute(
                 f"UPDATE {self._progress} "

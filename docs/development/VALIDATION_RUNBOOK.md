@@ -211,6 +211,14 @@ make test-render
 cd ..
 ```
 
+Helm's official binaries are served from `get.helm.sh`. An environment that cannot
+reach it can use a redistribution such as the npm package `helm-binary-linux`, which
+ships one binary with no install scripts. Such a copy is unverified and may be an
+older release: inspect the package before running it, and keep it out of the
+repository. The supported release is the one CI pins
+([`chart-render-tests.md`, "The supported Helm"](../guidance/repository/chart-render-tests.md#the-supported-helm));
+the render log records whichever version actually ran.
+
 Policy training/RL dependencies are not part of the standard local validation.
 The old `domains/vms/tests` integration suite was removed in the latest pull;
 future training or RL validation should be documented separately when runnable
@@ -1062,9 +1070,9 @@ and the log records:
 
 A second run against the same stack passes too: it reconciles the host's
 registration and adopts, paused, the listing the first run left, rather than
-creating another. A listing on the scenario's resource that it cannot adopt —
-several, a closed one, or one of another shape, as after the target's capacity
-changes — fails the run naming them; rerun with the target they were made for,
+creating another. Listings on the scenario's resource that it cannot adopt —
+several open ones, only closed ones, one of unknown status, or an open one of
+another shape, as after the target's capacity changes — fail the run naming them; rerun with the target they were made for,
 or against a fresh stack.
 
 The lane keeps the first guest's SSH heartbeat process open while a second guest
@@ -1340,16 +1348,20 @@ A changed program/unit restarts the plugin. A config-only issuer/key/range
 change HUP-reloads an already-running unchanged program without restarting
 frps. Initial/program startup does not immediately send HUP. The role waits for
 the listener before preparing frps. frps's first plugin entry requires one
-restart: drain existing leases before introducing it to an active relay.
+restart, and a restart ends every session the server carries. Before
+introducing it to an active relay, drain the server: disable the relay in every
+provisioning service that registers this server, one per operator on a shared
+relay, and wait until each reads `drained: true`. Enable them again once
+admission is proven.
 
 An ordinary role run refuses an existing listener change before publishing
 configuration or switching `current`. HUP retains the bound socket. To relocate
-the native listener, stop admission and drain all affected leases, stop both
-services, preserve the old protected configuration/program selection, and
-perform an explicit operator-managed reinstallation with the new listener and
-matching frps entry. Verify both services and admission before reopening. This
-is separate maintenance, not an automatic role/API migration. Do not delete
-active configuration simply to bypass the refusal during normal operation.
+the native listener, drain the server as above, stop both services, preserve
+the old protected configuration/program selection, and perform an explicit
+operator-managed reinstallation with the new listener and matching frps entry.
+Verify both services and admission before enabling the relays again. This is
+separate maintenance, not an automatic role/API migration. Do not delete active
+configuration simply to bypass the refusal during normal operation.
 
 ### Container relay
 
@@ -1378,9 +1390,12 @@ ops = ["NewProxy"]
 
 There is no repository frps deployment manifest to apply. The operator supplies
 the deployment, namespace and image reference. Wait for the plugin listener,
-then start frps. Changes to frps configuration/version require a drained restart;
-changes to plugin issuer/key/range configuration use HUP. Listener relocation
-requires drained coordinated restart and a matching frps address.
+then start frps. Changes to frps configuration/version require a restart of a
+drained server: disable the relay in every provisioning service that registers
+this server, wait until each reads `drained: true`, restart, and enable them
+again. Changes to plugin issuer/key/range configuration use HUP. Listener
+relocation requires the same drain, a coordinated restart, and a matching frps
+address.
 
 Native installer tests exercise installation/config publication and syntax in
 disposable fixtures. A container campaign proves its actual image/namespace
@@ -1447,19 +1462,49 @@ grant-validity bound has passed.
 
 Read retired keys' `grants_valid_until`. Match a key by the thumbprint printed
 by `frp-grant-admission check <path>`; remove it only once that time has passed,
-or is null because no unreleased lease remains. Drain affected grants before
-narrowing a range, removing an issuer/key, or changing an audience. A registered
-proxy is not rechecked until registration/reconnect: HUP is not revocation.
-Adding a key/issuer or widening a range is non-destructive, but still requires
-the deployed refusal check.
+or is null because no unreleased lease remains. Before narrowing a range,
+removing a key or issuer that still has grants in use, or changing an audience,
+drain the relay: disable it and wait until its read reports `drained: true`,
+then enable it again after the change. A registered proxy is not rechecked
+until registration/reconnect: HUP is not revocation. Adding a key/issuer or
+widening a range is non-destructive, but still requires the deployed refusal
+check.
 
 For a compromised signing key, choose explicitly: remove it immediately and
 refuse affected tenants at their next reconnect until their leases end, or keep
-it through lease drain while the attacker can sign within that issuer's range
-and audience. Neither choice reissues live grants. A leaked client token has no
-live-rotation shortcut: stop new admission, drain every lease across all
-operators sharing it, rotate the token on frps and every client baseline, then
-verify before reopening. Coordinated live credential reissue is not provided.
+it until the leases it signed have ended, as its `grants_valid_until` reports,
+while the attacker can sign within that issuer's range and audience. Neither
+choice reissues live grants. A leaked client token has no live-rotation
+shortcut: disable the relay in every operator's provisioning service that
+registers this server, wait until each reads `drained: true`, rotate the token
+on frps and every client baseline, send each service the signed
+`POST /api/v1/relays/{relay_id}/token`, verify, then enable the relays again.
+Coordinated live credential reissue is not provided.
+
+### Retire a relay
+
+Nothing in the provisioning service deletes a relay; disabling one drains it.
+Retiring one takes the site's administrator, who administers the relay in the
+provisioning service, and the relay's operator, who runs its server; one person
+may be both. Step 3 is the relay operator's:
+
+1. Disable the relay, through its definition entry's `enabled: false` when the
+   mounted document lists it, since an API disable is reverted when the
+   document next changes. Its pools' hosts then take no new delivery, and every
+   delivery it carries runs to its end.
+2. Wait until `GET /api/v1/relays/{relay_id}` reports `drained: true`.
+   `active_lease_count` shows the leases remaining, and
+   `GET /api/v1/relays/{relay_id}/leases` names what holds it open. `drained`
+   does not wait for released grants to expire: a released lease has no proxy
+   left, and no grant admits anything once the server or its keys are gone.
+3. Remove the relay server. On a shared relay, remove instead this relay's
+   active and retired keys and its port range from the admission plugin's
+   issuer configuration, check and reload it, and leave the other operators'
+   issuers in place.
+4. Point any pool still referencing the relay at another relay.
+5. Enable the relay again only once a server runs at its rendezvous. The
+   service never checks that a server exists, so an enabled relay with no
+   server sells capacity nothing can deliver.
 
 ### Contain access when teardown cannot reach a host
 
@@ -1498,7 +1543,7 @@ claims are sender-controlled; do not treat them as authenticated identities.
 
 ## 29. Qualify an ordinary Arkhai purchase
 
-Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence.
+Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Do not import a payment-specific full-deal driver merely to obtain operator visibility. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence, and correlate there the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations; leave credentials, private service records, and raw deployment data out of any public summary. What the evidence must rest on is [`qualification-evidence.md`](../guidance/repository/qualification-evidence.md).
 
 Before rollout, check the rebuilt consumer against both the currently deployed payment authority responses and the selected publication. If one check is reused for both, establish that the contracts are identical; if they differ, record a compatible rollout order before making a change. Separately verify retained historical signed bytes. Do not deploy or downgrade the authority to match the consumer.
 
@@ -1534,7 +1579,7 @@ market --config <buyer.toml> bare-metal access --run-id <run-id> --config <buyer
 Check the delivered host key, tenant identity and privilege, wrong-key refusal, and the workload on the paid guest. After the ordinary lease expires, independently observe successful teardown, absence of the guest/access, and restored capacity. A bare-metal buyer can request the ordinary teardown/recovery path with:
 
 ```bash
-market --config <buyer.toml> bare-metal teardown --run-id <run-id> --config <buyer.toml>
+market --config <buyer.toml> bare-metal end --run-id <run-id> --config <buyer.toml>
 ```
 
 Do not equate an accepted receipt with successful delivery or a payment hold with a refund. Keep raw authority responses and deployment data restricted; publish sanitized findings and explicit unrun items. A supplemental network-policy result is admissible only from an actual operator-only CPU guest on the same paid deployment, with the pinned guest base, actual default bridge and virtio NIC, and loaded policy structure bound to that deployment. A namespace-only probe is not a substitute. That guest proves only finite policy selectors it exercises and none of the paid tenant's identity, payment, grant, GPU, delivery, or lifecycle facts. Reusing this method does not claim that an older named marker ran.

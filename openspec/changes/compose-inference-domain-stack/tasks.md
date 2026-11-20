@@ -745,7 +745,7 @@ library"; inference delta "The buyer's credential stops at the gateway" and
       depending on `arkhai-api-gate[signed]` and `httpx` and on the ASGI
       framework the API-credits sample app already uses (`fastapi`,
       `uvicorn`), a `Makefile` with the one-line `reinit` target
-      (`docs/development/BUILD_AND_PACKAGING.md`, "Project environments"), and
+      (`docs/guidance/repository/project-environments.md`, "Project environments"), and
       `tests/unit/` and `tests/integration/` roots. The architecture check
       reads `kit/api/gateway` as a family library under `kit/api`
       (`docs/development/ARCHITECTURE.md`, "Package and dependency layers");
@@ -885,7 +885,7 @@ library"; inference delta "The buyer's credential stops at the gateway" and
       gains an `api-gateway` matrix row with `predist`;
       `manifests/published-distributions.json` gains `api-gateway` after
       `api-gate`; `.github/workflows/publish-pypi.yml` gains its filter and
-      matrix entries; `docs/development/RELEASING.md`'s "Published packages"
+      matrix entries; `docs/guidance/repository/published-packages.md`'s "Published packages"
       table gains its row (`scripts/tests/test_publish_matrix.py` holds the
       three in agreement).
       *Note:* all seven entries; the root `dist-api-gateway` depends on
@@ -1225,7 +1225,7 @@ cards are publishable without metered consumption").
       wheels it installs) and `test-inference-storefront`, in the `dist`,
       `test-inference`, and root `test` aggregates; `.github/workflows/tests.yml`
       gains `inference-storefront`; `manifests/published-distributions.json`,
-      `.github/workflows/publish-pypi.yml`, and `docs/development/RELEASING.md`
+      `.github/workflows/publish-pypi.yml`, and `docs/guidance/repository/published-packages.md`
       gain `arkhai-inference-storefront` after the family distributions it
       depends on.
       *Note:* all seven entries. The root `dist-inference-storefront` builds

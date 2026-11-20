@@ -41,8 +41,8 @@ from __future__ import annotations
 
 import base64
 import logging
-import time
 
+import injected_time
 import pytest
 from compute_provisioning_contracts.lease_ends import SignedLeaseEndedReport, verify_lease_end
 from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
@@ -375,7 +375,7 @@ class TestStage12b_SecondDealAccepted:
         require_state(deal_state, "_listing_reopened")
         # The second deal's jobs run as a buyer's would, with no gate held.
         deal_driver.disarm_gates()
-        deal_state._second_escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+        deal_state._second_escrow_expiration_unix = injected_time.now() + ESCROW_TTL_SECONDS
         _option, escrow = alkahest_opening(
             registry_client.get_listing(deal_state.seller_listing_id)
         )
@@ -457,7 +457,7 @@ class TestStage12d_BuyerTeardownSentTwice:
         assert again["delivery"]["progress"] == "tearing_down", again
         for name in ("negotiation_id", "operation_key", "receipt_at", "selected_end"):
             assert again[name] == first[name], (name, first, again)
-        advance_storefront(storefront_admin_client, "delivery-recovery")
+        advance_storefront(storefront_admin_client, "deal-servicing")
         delivery = buyer_fulfillment.delivery(negotiation_id)["delivery"]
         assert delivery["progress"] == "tearing_down", delivery
         assert delivery["site_reports"], delivery

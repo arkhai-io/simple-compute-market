@@ -22,9 +22,9 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Optional
 
+import injected_time
 import pytest
 from compute_provisioning_contracts import ConnectionSubmission
 from storefront_client import StorefrontClientError
@@ -471,8 +471,9 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
             # The lease is recorded once the fulfillment is active; the read
             # fails for one that never was, which is reported below.
             lease = self.provisioning_client.get_lease(reservation)
-            if lease.status == "active" and lease.lease_end_utc > datetime.now(timezone.utc):
-                end = datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+            now = injected_time.now_datetime()
+            if lease.status == "active" and lease.lease_end_utc > now:
+                end = now - E2E_LEASE_EXPIRY_BACKDATE
                 assert self.site_capacity.truncate_lease(
                     reservation, end.isoformat().replace("+00:00", "Z")
                 ) is not None, f"the site refused to truncate lease {reservation}"

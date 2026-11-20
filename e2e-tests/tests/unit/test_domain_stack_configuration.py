@@ -262,6 +262,8 @@ def _without_lane_payments(config: dict, settlement: str) -> dict:
     stripped = copy.deepcopy(config)
     table = stripped[settlement]
     table.pop("arkhai_payments", None)
+    # The lane's rate servicing declaration, which only payments reads.
+    table.pop("rate_servicing", None)
     table["priority"] = [item for item in table["priority"] if item != _PAYMENTS]
     stripped.pop("DisputeCredential", None)
     pricing = stripped.get("pricing", {})
@@ -281,12 +283,17 @@ def test_a_lane_storefront_configuration_is_its_stack_profile_plus_payments(
     lane, settlement, profile
 ):
     """The VM and API-credit lanes run their own copy of a profile the full local
-    stack also runs, so the stack runs no payments; the copy differs only in
-    what payments adds."""
-    assert _without_lane_payments(_toml(lane), settlement) == _without_lane_payments(
+    stack also runs, so the stack runs no payments and wall time; the copy
+    differs only in what payments adds and in the lane's injected time."""
+    copy = _toml(lane)
+    assert copy.pop("Time") == {"source": "injected"}
+    assert "Time" not in _toml(profile)
+    assert _without_lane_payments(copy, settlement) == _without_lane_payments(
         _toml(profile), settlement
     )
     assert not (_toml(profile)[settlement].get("arkhai_payments") or {}).get("enabled")
+    # Rate servicing is declared in a lane's configuration alone.
+    assert "rate_servicing" not in _toml(profile)[settlement]
 
 
 @pytest.mark.parametrize(("lane", "settlement"), [item[:2] for item in _LANE_STOREFRONTS])
@@ -379,11 +386,12 @@ def test_a_lane_runner_loads_a_complete_payments_section(lane):
 
 
 def test_the_inference_lane_profile_adds_only_inference_settings():
-    """The inference lane's profile states what its overlay alone declares and
-    no payments setting, and the runner merges it into the `inference` section."""
+    """The inference lane's profile states what its overlay alone declares, the
+    lane's time and no payments setting, and the runner merges it into the
+    `inference` section."""
     config = _REPO_ROOT / "e2e-tests/config"
     profile = yaml.safe_load((config / "config-inference-lane.yml").read_text(encoding="utf-8"))
-    assert set(profile) == {"inference"}
+    assert set(profile) == {"inference", "lane_time"}
     assert _runner_payments("docker,payments-lane,inference-lane") == _runner_payments(
         "docker,payments-lane"
     )

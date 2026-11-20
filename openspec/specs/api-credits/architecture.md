@@ -149,7 +149,7 @@ See `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup".
 
 Every API-credit package resolves its internal dependencies from built wheels,
 not repository-relative editable paths or `pythonpath` fallbacks — see
-[The wheelhouse](../../../docs/development/BUILD_AND_PACKAGING.md#the-wheelhouse).
+[The wheelhouse](../../../docs/guidance/repository/wheelhouse.md#the-wheelhouse).
 
 ### Listing bindings and the bound pool
 

@@ -28,13 +28,13 @@ import asyncio
 import hashlib
 import json
 import re
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
+import injected_time
 import pytest
 import pytest_asyncio
 from arkhai_bare_metal import (
@@ -56,7 +56,11 @@ from market_identity import (
 
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from compute_provisioning.relays import RelayExecutionResolver, RelayService
+from compute_provisioning.relays import (
+    RelayDeliverableHosts,
+    RelayExecutionResolver,
+    RelayService,
+)
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
@@ -229,7 +233,9 @@ def _install_signed_asgi_transport(monkeypatch) -> None:
                 operation=route.operation,
                 resource=resource,
                 request_id=uuid.uuid4().hex,
-                timestamp=int(time.time()),
+                # The process time source the service checks it against, so a
+                # test that moves that source signs at the instant it set.
+                timestamp=injected_time.now(),
                 body_hash=canonical_body_hash(body),
             ),
         )
@@ -606,6 +612,12 @@ def job_retry_options():
 
 
 @pytest.fixture
+def teardown_rerun_limit():
+    """The service's default; a module overrides this fixture to vary it."""
+    return 3
+
+
+@pytest.fixture
 def bare_metal_plan_options():
     return {"reclaim_policy": "remove_lease_key", "working_data_policy_id": None}
 
@@ -617,6 +629,7 @@ async def client_and_queue(
     bare_metal_runner,
     bare_metal_plan_options,
     job_retry_options,
+    teardown_rerun_limit,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
@@ -624,6 +637,7 @@ async def client_and_queue(
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
         **job_retry_options,
+        teardown_rerun_limit=teardown_rerun_limit,
         ansible_timeout_seconds=30,
         additional_non_retryable_errors=["UNREACHABLE", "Domain not found"],
         frp_server_addr="",
@@ -683,16 +697,18 @@ async def client_and_queue(
             connection_codecs
         ),
     )
+    # The hosts taking new delivery as the production container reports them:
+    # the host authority's, less the hosts of every pool on a disabled relay.
+    deliverable_hosts = RelayDeliverableHosts(host_authority)
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         site_id=identity_context.storefront_site_id,
         lease_end_effect=lease_end_reports.record,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
-        # The hosts taking new delivery, reported by the host authority as the
-        # production container wires it, so a declaration naming a disabled or
-        # unregistered host is refused and not offered here as it is there.
-        deliverable_hosts=host_authority,
+        # So a declaration naming a disabled or unregistered host, or a host
+        # on a disabled relay, is refused and not offered here as it is there.
+        deliverable_hosts=deliverable_hosts,
         # The release guard exactly as the production container composes it,
         # so capacity is freed here only on the proof it needs there.
         release_guard=FulfillmentReleaseGuard(SettlementRepository()),
@@ -753,7 +769,7 @@ async def client_and_queue(
             session_factory,
             resource_pool_service,
             capacity_ledger_service,
-            deliverable_hosts=host_authority,
+            deliverable_hosts=deliverable_hosts,
         ),
     )
 
@@ -781,6 +797,9 @@ async def client_and_queue(
         connection_codecs=connection_codecs,
     )
 
+    # The one rerun policy both providers and the release status hold, built
+    # as the container builds it.
+    teardown_rerun_policy = _container_module._make_teardown_rerun_policy(mock_settings)
     ansible_fulfillment_provider = JobFulfillmentProvider(
         plan=VmFulfillmentPlan(
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
@@ -793,6 +812,7 @@ async def client_and_queue(
         ),
         submission=job_submission,
         jobs=job_engine,
+        rerun_policy=teardown_rerun_policy,
     )
     fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
         session_factory=session_factory,
@@ -833,6 +853,7 @@ async def client_and_queue(
                     ),
                     submission=job_submission,
                     jobs=job_engine,
+                    rerun_policy=teardown_rerun_policy,
                 ),
                 pool_config_handler=resource_pool_service_handlers["bare_metal.ansible"],
                 job_executor=bare_metal_executor,
@@ -863,6 +884,8 @@ async def client_and_queue(
         release_status=FulfillmentReleaseStatusPort(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
+            rerun_policy=teardown_rerun_policy,
+            jobs=job_engine,
         ),
         capacity_released_notifier=AsyncMock(return_value=True),
         capacity_release_outbox=capacity_release_outbox,
@@ -886,6 +909,7 @@ async def client_and_queue(
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=relay_port_allocator,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
 
     fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(

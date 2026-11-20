@@ -1,8 +1,8 @@
 """Where one ``drive`` left a deal.
 
 Six outcomes suffice: a first drive is the start of the normal path, and a
-missing deal and unreadable progress ask the same of a caller, which the
-repair reason distinguishes. A ``repair_required`` or ``ended`` outcome names
+missing deal, unreadable progress and a refused commitment ask the same of a
+caller, which the repair reason distinguishes. A ``repair_required`` or ``ended`` outcome names
 the deal's recorded reservation and fulfillment and the authority evidence it
 rests on, so a repair or an end report is explained without re-reading the
 deal. See openspec/specs/compute-delivery/spec.md, "Delivery is driven one

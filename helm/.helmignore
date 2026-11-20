@@ -1,0 +1,25 @@
+# Local state Git ignores, which no package or render may read: the chart's
+# content digest must not change with it (scripts/release_bom.py refuses a
+# package storing a file Git ignores).
+# `helm dependency update` writes the lock, with a timestamp, and an archive of
+# each subchart, which would store its files a second time beside the
+# subchart's directory; the chart's Python tests leave their caches.
+Chart.lock
+charts/*.tgz
+# The files under helm/ that are not the chart, kept out of every package so a
+# change to one changes no packaged file and takes no chart version: the
+# tooling that deploys and tests the chart, the release values a deployment
+# layers on it, and its render tests and their fixtures.
+/Makefile
+charts/*/Makefile
+/scripts/
+/tests/
+charts/*/tests/
+/fixtures/
+/local-values.yaml
+/bare-metal-release-values.yaml
+/validation-capacity.toml
+__pycache__/
+*.pyc
+.pytest_cache/
+.port-forward.pids

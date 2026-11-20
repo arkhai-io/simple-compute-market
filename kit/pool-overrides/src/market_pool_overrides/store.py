@@ -17,7 +17,10 @@ import asyncio
 import json
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+
+import injected_time
 
 from market_pool_overrides.records import PoolOverrideAddress, PoolOverrideRecord
 
@@ -94,6 +97,13 @@ def read_pool_overrides(
     return overrides
 
 
+def _timestamp(value: datetime) -> str:
+    """An aware instant in the table's text form: UTC with milliseconds, the form
+    of its columns' DDL default, ``STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')``."""
+    utc = value.astimezone(timezone.utc)
+    return f"{utc.strftime('%Y-%m-%dT%H:%M:%S')}.{utc.microsecond // 1000:03d}Z"
+
+
 def _row(row: tuple[Any, ...]) -> dict[str, Any]:
     record = dict(zip(_COLUMNS, row))
     for column in _JSON_COLUMNS:
@@ -133,17 +143,24 @@ class SQLitePoolOverrideStore:
             values[column] = None if value is None else json.dumps(value, sort_keys=True)
 
         def _save() -> dict[str, Any]:
-            columns = list(values)
-            updates = ", ".join(f"{column} = excluded.{column}" for column in _JSON_COLUMNS)
+            # Both times are returned to the operator, so they are the process
+            # time source's instant rather than the database's clock. A
+            # replacement keeps the stored `created_at`: the conflict clause
+            # leaves it out.
+            stamp = _timestamp(injected_time.now_datetime())
+            row = {**values, "created_at": stamp, "updated_at": stamp}
+            columns = list(row)
+            updates = ", ".join(
+                f"{column} = excluded.{column}" for column in (*_JSON_COLUMNS, "updated_at")
+            )
             conn = sqlite3.connect(self.db_path)
             try:
                 with conn:
                     conn.execute(
                         f"INSERT INTO {POOL_OVERRIDES_TABLE} ({', '.join(columns)}) "
                         f"VALUES ({', '.join('?' for _ in columns)}) "
-                        "ON CONFLICT(site_id, pool_id, offering_mode) DO UPDATE SET "
-                        f"{updates}, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                        [values[column] for column in columns],
+                        f"ON CONFLICT(site_id, pool_id, offering_mode) DO UPDATE SET {updates}",
+                        [row[column] for column in columns],
                     )
             finally:
                 conn.close()

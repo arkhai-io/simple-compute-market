@@ -7,10 +7,13 @@ real run log under one temporary state directory, and the deal is recovered from
 it, so a change to what the producer records that the consumer cannot read fails
 this test.
 
-Only the command module's own factories are replaced, as the command-module
-convention in ``docs/development/TESTING.md`` asks: ``fresh_identity``,
-``registry_client``, and ``payment_approval`` for the purchase, and
-``recovery_identity`` for the recovery. Configuration is a real file read by the
+Only the command module's own factories are replaced, as
+``docs/guidance/engineering/testing-python.md``, "A command module's factories
+are its seam", asks: ``fresh_identity``,
+``registry_client``, and ``payment_approval`` for the purchase,
+``recovery_identity`` for the recovery, ``watchdog_probe`` where a purchase
+opts into the watchdog, and ``wait_clock`` where a purchase waits out a timeout.
+Configuration is a real file read by the
 real loader. The seller is a fake served over loopback HTTP: it verifies each
 request's version 2 proof against the buyer's principal, derives the payment
 mandate through the payments kit's seller stage, accepts the buyer's lifecycle
@@ -44,6 +47,7 @@ from market_arkhai_payments import (
 )
 from market_arkhai_payments.fixtures.payments_client import FakePaymentsClient
 from market_arkhai_payments.seller import PaymentSellerStage
+from market_deal_lifecycle_buyer import WaitClock
 from market_core.schemas import (
     Agreement,
     RateValue,
@@ -133,6 +137,9 @@ class _Seller:
         self.transaction_id: str | None = None
         self.requests: list[tuple[str, str]] = []
         self.refusals: list[str] = []
+        #: How the seller answers the buyer's commit: ``pending`` plays a seller
+        #: that has not yet observed the verified receipt.
+        self.commit_status = "accepted"
 
     def route(self, method: str, path: str, body: Any) -> tuple[str, str, dict[str, Any]]:
         """The operation and resource a route binds, and its answer."""
@@ -141,8 +148,9 @@ class _Seller:
             return "negotiate_new", body["listing_id"], self._accept(body)
         lifecycle = f"/api/v1/negotiations/{_NEGOTIATION_ID}/lifecycle"
         if method == "POST" and path == lifecycle and body.get("kind") == "commit":
-            # The seller has observed the verified receipt: the commit is accepted.
-            return "lifecycle_peer", _NEGOTIATION_ID, {"outcome": {"status": "accepted"}}
+            outcome = ({"status": "accepted"} if self.commit_status == "accepted"
+                       else {"status": "pending", "reason": "receipt not yet observed"})
+            return "lifecycle_peer", _NEGOTIATION_ID, {"outcome": outcome}
         access = f"/api/v1/fulfillments/{_NEGOTIATION_ID}/access"
         if method == "GET" and path == access:
             return "bare_metal_fulfillment_access", _NEGOTIATION_ID, dict(_ACCESS)
@@ -357,11 +365,12 @@ def test_a_deal_bought_is_recovered_from_the_run_log_buy_wrote(
 
             yield Registry()
 
-        def payment_approval(buyer_config: Any) -> PaymentApproval:
+        def payment_approval(buyer_config: Any, *, terms_policy: Any = None) -> PaymentApproval:
             return PaymentApproval(
                 buyer_config.arkhai_payments,
                 buyer_config.payer_account,
                 client_for_owner=payments,
+                terms_policy=terms_policy,
             )
 
         def no_fresh_identity() -> ResolvedBuyerIdentity:
@@ -437,3 +446,99 @@ def test_a_deal_bought_is_recovered_from_the_run_log_buy_wrote(
         ("POST", f"/api/v1/negotiations/{_NEGOTIATION_ID}/lifecycle"),
         ("GET", f"/api/v1/fulfillments/{_NEGOTIATION_ID}/access"),
     ]
+
+
+class _FakeWaits:
+    """``buy``'s waits in fake time: sleeping advances the clock at once."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def clock(self) -> WaitClock:
+        return WaitClock(now=lambda: int(self.now), monotonic=lambda: self.now, sleep=self.sleep)
+
+
+def _purchase(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, seller: _Seller, *options: str) -> Any:
+    """Run ``buy`` against ``seller`` with ``options``, recovering as the same buyer,
+    its waits in fake time."""
+    monkeypatch.setattr(cli, "wait_clock", _FakeWaits().clock)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    config = _config_file(tmp_path / "bare-metal-buyer.toml")
+    payments = FakePaymentsClient(signer=_PAYMENTS_SERVICE)
+
+    with _served(seller) as seller_url:
+        listing = ListingSummary(
+            id=_LISTING_ID, status="open", publisher_id=_PUBLISHER_ID,
+            publisher_principals=TrustedIdentitySet(identities=(_SELLER.identity,)),
+            storefront_url=seller_url, settlement_options=[_OPTION.model_dump(mode="json")],
+        )
+
+        @contextmanager
+        def registry_client(buyer_config: Any, identity: ResolvedBuyerIdentity) -> Iterator[Any]:
+            yield type("Registry", (), {"get_listing": lambda self, listing_id: listing})()
+
+        monkeypatch.setattr(cli, "fresh_identity", lambda: _identity("fresh"))
+        monkeypatch.setattr(cli, "recovery_identity", lambda run_id: _identity("recovery"))
+        monkeypatch.setattr(cli, "registry_client", registry_client)
+        monkeypatch.setattr(cli, "payment_approval", lambda buyer_config, *, terms_policy=None: PaymentApproval(
+            buyer_config.arkhai_payments, buyer_config.payer_account, client_for_owner=payments,
+            terms_policy=terms_policy,
+        ))
+        return CliRunner().invoke(cli.bare_metal_app, [
+            "buy", _LISTING_ID, "--option-id", _OPTION.option_id,
+            # A placeholder key, never a credential.
+            "--ssh-public-key", "ssh-ed25519 AAAAPLACEHOLDER",
+            "--duration-seconds", "3600", *options, "--config", str(config),
+        ])
+
+
+def test_a_monitored_purchase_persists_its_opt_in_and_never_watches_an_unavailable_deal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``buy --watchdog`` persists the opt-in, interval and threshold for the deal
+    before approval, then waits for availability. The fake seller answers no
+    delivery read, so the deal never becomes available: the command exits at its
+    timeout with nothing probed and the bound never stated."""
+    probed: list[Any] = []
+    monkeypatch.setattr(cli, "watchdog_probe", lambda access: probed.append(access))
+
+    bought = _purchase(
+        monkeypatch, tmp_path, _Seller(), "--payment-timeout-seconds", "5",
+        "--watchdog", "--watchdog-interval", "7", "--watchdog-threshold", "2",
+        "--delivery-timeout-seconds", "10", "--poll-interval", "5",
+    )
+
+    assert bought.exit_code == cli.UNAVAILABLE_EXIT_CODE, bought.output
+    purchase, watched = (json.loads(line) for line in bought.stdout.strip().splitlines()[-2:])
+    assert watched == {"run_id": purchase["run_id"], "negotiation_id": _NEGOTIATION_ID,
+                       "available": False, "watchdog": None}
+    state = cli.watchdog_journal().state(_NEGOTIATION_ID)
+    assert (state.settings.interval_seconds, state.settings.threshold) == (7, 2)
+    assert state.last_probe_at is None and state.stop is None
+    assert probed == [] and "Watchdog running" not in bought.stderr
+    events = [event["event"] for event in read_run(purchase["run_id"], signer=_BUYER, profile_id=_PROFILE_ID)]
+    assert events.index("watchdog_opted_in") < events.index("payment_approved")
+
+
+def test_a_commit_the_seller_never_acknowledges_ends_the_run_at_its_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A commit still pending when the payment timeout runs out ends the run
+    ``timeout`` with exit status 4, its approved payment kept at the authority."""
+    seller = _Seller()
+    seller.commit_status = "pending"
+
+    bought = _purchase(monkeypatch, tmp_path, seller, "--payment-timeout-seconds", "5")
+
+    assert bought.exit_code == cli.UNAVAILABLE_EXIT_CODE, bought.output
+    ended = json.loads(bought.stdout.strip().splitlines()[-1])
+    assert ended["status"] == "timeout" and ended["negotiation_id"] == _NEGOTIATION_ID
+    events = read_run(ended["run_id"], signer=_BUYER, profile_id=_PROFILE_ID)
+    assert [event["event"] for event in events][-2:] == ["payment_approved", "run_ended"]
+    assert events[-1]["status"] == "timeout"

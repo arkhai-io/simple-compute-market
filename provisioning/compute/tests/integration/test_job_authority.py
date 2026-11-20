@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -19,8 +20,9 @@ from compute_provisioning.jobs import (
     JobActionRequest,
     ProvisioningErrorEnvelope,
 )
-from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.db import JobCredential, JobRecord
+from compute_provisioning.jobs.migrations import BASELINE as JOBS_BASELINE
+from compute_provisioning.jobs.migrations import MIGRATIONS as JOBS_MIGRATIONS
 from compute_provisioning.jobs.engine import JobEngine, JobIdentityConflictError
 
 _HOST = ExecutionHost("h1", "default", ConnectionEnvelope(kind="fake", version=1))
@@ -35,7 +37,9 @@ class _Queue:
 
 
 class _Executor:
-    """Reports a handle, then waits for ``release`` before reporting ``outcome``."""
+    """Reports its start, then its handle, as a real executor does on either
+    side of starting its execution, then waits for ``release`` before
+    reporting ``outcome``."""
 
     def __init__(self, outcome=None, *, hold: bool = False) -> None:
         self.outcome = outcome or JobSuccess(
@@ -57,6 +61,7 @@ class _Executor:
 
     async def execute(self, run):
         self.runs += 1
+        run.report_starting()
         if not self.handle_before_start:
             run.report_handle({"pid": 7})
         self.started.set()
@@ -72,12 +77,51 @@ class _Executor:
         self.cancel_requested.set()
 
 
-def _engine(executor, *, hosts=None, database=None):
+class _GatedStart:
+    """Waits at ``gate`` before reporting its start, then spawns only if the
+    start was recorded; ``spawned`` says whether it was asked to start."""
+
+    def __init__(self, outcome=None) -> None:
+        self.outcome = outcome or JobSuccess(result=None)
+        self.at_gate = asyncio.Event()
+        self.gate = asyncio.Event()
+        self.spawned = False
+
+    async def execute(self, run):
+        self.at_gate.set()
+        await self.gate.wait()
+        run.report_starting()
+        self.spawned = True
+        return self.outcome
+
+    async def cancel(self, handle):
+        raise AssertionError("an execution that never started has no handle to cancel")
+
+
+class _UnrecordableHandle:
+    """Spawns once its start is recorded, then reports a handle whose write
+    fails, as a playbook running before its handle is stored does."""
+
+    async def execute(self, run):
+        run.report_starting()
+        run.report_handle({"pid": object()})
+        raise AssertionError("the handle's failed write must end the attempt")
+
+    async def cancel(self, handle):
+        pass
+
+
+def _engine(executor, *, hosts=None, database=None, migrate=True):
+    """An engine over ``database``, its job tables built by the package's own
+    migrations unless ``migrate`` is false, for a database already built."""
     if database is None:
         database = create_engine(
             "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
         )
-    JobsBase.metadata.create_all(database)
+    if migrate:
+        with database.begin() as connection:
+            for migration in (JOBS_BASELINE, *JOBS_MIGRATIONS):
+                migration.apply(connection)
     factory = sessionmaker(bind=database)
     table = JobExecutorTable()
     table.register("fake", "make", executor)
@@ -145,6 +189,189 @@ async def test_the_executor_decides_whether_a_failure_is_retried() -> None:
     failed = engine.get_job(job.job_id)
     assert failed.status == "failed"
     assert failed.error == "Job failed (non-retryable error): boom"
+
+
+@pytest.mark.asyncio
+async def test_a_job_s_creation_and_retry_are_the_process_source_s_instants(source) -> None:
+    """A job is stamped, its retry scheduled and the retry found due by the
+    process's time source: the retry is due only once the source reaches it."""
+    engine, factory = _engine(_Executor(JobFailure(
+        error=ProvisioningErrorEnvelope(code="x", message="boom", retryable=True),
+        logs="failed",
+    )))
+    start = source.now()
+    job = await _submit(engine, _Queue())
+    await engine.process_job(job.job_id)
+
+    with factory() as db:
+        row = db.get(JobRecord, job.job_id)
+        assert row.created_at == _naive_utc(start)
+        assert row.next_retry_at == _naive_utc(start + 60)
+
+    queue = _Queue()
+    source.set(start + 59)
+    assert await engine.requeue_due_retries(queue) == 0
+    source.set(start + 60)
+    assert await engine.requeue_due_retries(queue) == 1
+    assert queue.enqueued == [job.job_id]
+
+
+def _naive_utc(instant: int) -> datetime:
+    """An instant as SQLite returns a stored time: UTC with no zone."""
+    return datetime.fromtimestamp(instant, timezone.utc).replace(tzinfo=None)
+
+
+def _instants(factory, job_id: str) -> tuple:
+    with factory() as db:
+        row = db.get(JobRecord, job_id)
+        return row.execution_started_at, row.finished_at, row.execution_handle
+
+
+def _failing(retryable: bool) -> _Executor:
+    return _Executor(JobFailure(
+        error=ProvisioningErrorEnvelope(code="x", message="boom", retryable=retryable),
+        logs="failed",
+    ))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", ["no host", "unregistered host", "unsupported action"])
+async def test_a_job_refused_before_its_executor_runs_records_no_start_and_its_finish(
+    source, refusal
+) -> None:
+    executor = _Executor()
+    engine, factory = _engine(executor, hosts={} if refusal == "unregistered host" else None)
+    job = await _submit(
+        engine, _Queue(), **({"action": "unknown"} if refusal == "unsupported action" else {})
+    )
+    if refusal == "no host":
+        with factory() as db, db.begin():
+            db.get(JobRecord, job.job_id).host_id = None
+    source.set(source.now() + 30)
+
+    await engine.process_job(job.job_id)
+
+    assert executor.runs == 0
+    status = engine.get_job(job.job_id)
+    assert status.status == "failed"
+    assert status.execution_started_at is None
+    assert status.finished_at == _naive_utc(source.now())
+    assert _instants(factory, job.job_id) == (None, _naive_utc(source.now()), None)
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_execution_started_and_then_failed_records_both(source) -> None:
+    engine, factory = _engine(_failing(False))
+    job = await _submit(engine, _Queue())
+
+    await engine.process_job(job.job_id)
+
+    status = engine.get_job(job.job_id)
+    assert status.status == "failed"
+    assert status.execution_started_at == status.finished_at == _naive_utc(source.now())
+    assert _instants(factory, job.job_id)[2] == {"pid": 7}
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_cannot_be_recorded_spawns_nothing(tmp_path, source) -> None:
+    """The database refuses the start's write, as a failed commit would: the
+    report raises, the executor spawns nothing, and the attempt fails."""
+    database = create_engine(f"sqlite:///{tmp_path / 'jobs.db'}")
+    executor = _GatedStart()
+    executor.gate.set()
+    engine, _ = _engine(executor, database=database)
+    with database.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TRIGGER refuse_start BEFORE UPDATE OF execution_started_at "
+            "ON ansible_jobs WHEN NEW.execution_started_at IS NOT NULL "
+            "BEGIN SELECT RAISE(ABORT, 'start refused'); END"
+        )
+    job = await _submit(engine, _Queue())
+
+    await engine.process_job(job.job_id)
+
+    assert executor.spawned is False
+    status = engine.get_job(job.job_id)
+    assert status.status == "failed"
+    assert status.error.startswith("Internal error:")
+    assert (status.execution_started_at, status.finished_at) == (
+        None, _naive_utc(source.now())
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_job_cancelled_between_its_claim_and_its_start_stays_cancelled(
+    source,
+) -> None:
+    executor = _GatedStart()
+    engine, _ = _engine(executor)
+    job = await _submit(engine, _Queue())
+
+    running = asyncio.create_task(engine.process_job(job.job_id))
+    await asyncio.wait_for(executor.at_gate.wait(), timeout=5)
+    await engine.cancel_job(job.job_id)
+    executor.gate.set()
+    await asyncio.wait_for(running, timeout=5)
+
+    assert executor.spawned is False
+    status = engine.get_job(job.job_id)
+    assert status.status == "cancelled"
+    assert status.error == "Job cancelled by user"
+    assert (status.execution_started_at, status.finished_at) == (
+        None, _naive_utc(source.now())
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_retried_job_keeps_its_first_start(source) -> None:
+    executor = _failing(True)
+    engine, _ = _engine(executor)
+    first = source.now()
+    job = await _submit(engine, _Queue())
+    await engine.process_job(job.job_id)
+    assert engine.get_job(job.job_id).finished_at is None
+
+    source.set(first + 60)
+    executor.outcome = JobSuccess(result=None)
+    assert await engine.requeue_due_retries(_Queue()) == 1
+    await engine.process_job(job.job_id)
+
+    status = engine.get_job(job.job_id)
+    assert (status.status, status.retry_count) == ("succeeded", 1)
+    assert status.execution_started_at == _naive_utc(first)
+    assert status.finished_at == _naive_utc(first + 60)
+
+
+@pytest.mark.asyncio
+async def test_a_spawned_job_whose_handle_cannot_be_recorded_keeps_its_start(source) -> None:
+    engine, factory = _engine(_UnrecordableHandle())
+    job = await _submit(engine, _Queue())
+
+    await engine.process_job(job.job_id)
+
+    status = engine.get_job(job.job_id)
+    assert status.status == "failed"
+    assert status.error.startswith("Internal error:")
+    assert _instants(factory, job.job_id) == (
+        _naive_utc(source.now()), _naive_utc(source.now()), None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_job_s_finish_does_not_move(source) -> None:
+    engine, _ = _engine(_Executor())
+    finished = source.now()
+    job = await _submit(engine, _Queue())
+    await engine.process_job(job.job_id)
+
+    source.set(finished + 600)
+    refused = await engine.cancel_job(job.job_id)
+    await engine.process_job(job.job_id)
+
+    assert refused["status"] == "succeeded"
+    status = engine.get_job(job.job_id)
+    assert (status.status, status.finished_at) == ("succeeded", _naive_utc(finished))
+    assert status.execution_started_at == _naive_utc(finished)
 
 
 @pytest.mark.asyncio
@@ -363,7 +590,7 @@ async def test_a_cancellation_from_another_process_holds_against_a_late_success(
     url = f"sqlite:///{tmp_path / 'jobs.db'}"
     executor = _Executor(hold=True)
     worker, factory = _engine(executor, database=create_engine(url))
-    other, _ = _engine(executor, database=create_engine(url))
+    other, _ = _engine(executor, database=create_engine(url), migrate=False)
     job = await _submit(worker, _Queue())
 
     running = asyncio.create_task(worker.process_job(job.job_id))

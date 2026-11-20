@@ -8,6 +8,10 @@ helpers must honour:
   - dict input (the JSON shape coming out of SQLite + the wire),
   - Pydantic ``AcceptedEscrow`` input (the in-memory typed shape),
   - empty/missing inputs return ``None`` rather than raising.
+
+``agreed_price`` labels an Agreement's accepted money as a total or one
+period's price, never recomputing it: a reader that assumed a total would
+charge or cap a recurring deal wrongly.
 """
 
 from __future__ import annotations
@@ -16,11 +20,17 @@ import pytest
 
 from market_core.schemas import (
     AcceptedEscrow,
+    AgreedPrice,
+    Agreement,
     PER_UNIT_SECONDS,
+    PriceBasis,
     RateValue,
+    SettlementOption,
     accepted_token_address,
+    agreed_price,
     compute_rate_total,
     compute_rate_unit_total,
+    derive_settlement_option_id,
     primary_rate_value,
     rate_scales_by_time,
 )
@@ -157,3 +167,94 @@ def test_compute_rate_unit_total_guards_uint256_overflow():
     rate = RateValue(field="amount", per="credit", value=2**255)
     with pytest.raises(ValueError, match="uint256"):
         compute_rate_unit_total(rate, 4)
+
+
+# ---------------------------------------------------------------------------
+# agreed_price: the accepted money, labelled with its billing unit
+# ---------------------------------------------------------------------------
+
+#: 2.5 USD an hour in six-decimal minor units, accepted at 1.0x (10,000 bps):
+#: two hours prepaid is 5,000,000 in total; a PT15M period is 625,000 and a
+#: PT1M period 41,667, each rounded up once by the seller's quote.
+_HOURLY = 2_500_000
+
+
+def _rated_option(settlement: dict) -> SettlementOption:
+    fields = {
+        "price": {"asset": "USD/6", "rates": [{"field": "amount", "per": "hour", "value": str(_HOURLY)}]},
+        "settlement": settlement,
+    }
+    return SettlementOption(option_id=derive_settlement_option_id(**fields), **fields)
+
+
+def _agreement(option: SettlementOption | None, amount: int, *, duration_seconds: int = 7200) -> dict:
+    return Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer={"scheme": "ed25519", "identifier": "buyer"},
+        seller={"scheme": "ed25519", "identifier": "seller"},
+        settlement=option, amount=amount, asset=option.price_asset if option else None,
+        duration_seconds=duration_seconds, start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z",
+    ).model_dump(mode="json", exclude_none=True)
+
+
+def _per_period(period: str, seconds: int):
+    return lambda option: PriceBasis(unit="per_period", period=period, period_seconds=seconds)
+
+
+def test_a_prepaid_agreement_reads_its_whole_term_total_unchanged():
+    option = _rated_option({"schema": "fixture.once.v1"})
+    quote = agreed_price(_agreement(option, 5_000_000), project_billing=lambda _: PriceBasis(unit="total"))
+    assert quote == AgreedPrice(unit="total", amount=5_000_000, asset="USD/6")
+    assert quote.model_dump(mode="json")["amount"] == "5000000"
+
+
+@pytest.mark.parametrize(("period", "seconds", "amount"), [
+    ("PT15M", 900, 625_000), ("PT1M", 60, 41_667),
+])
+@pytest.mark.parametrize("duration_seconds", [7200, 172_800])
+def test_a_per_period_agreement_reads_one_periods_price_whatever_its_horizon(
+    period, seconds, amount, duration_seconds,
+):
+    option = _rated_option({"schema": "fixture.rate.v1", "period": period})
+    agreement = _agreement(option, amount, duration_seconds=duration_seconds)
+    quote = agreed_price(agreement, project_billing=_per_period(period, seconds))
+    # Neither rescaled by the horizon nor re-rounded: the accepted amount is
+    # already the seller's one upward-rounded period quote.
+    assert quote == AgreedPrice(
+        unit="per_period", period=period, period_seconds=seconds, amount=amount, asset="USD/6",
+    )
+
+
+def test_a_selected_option_without_a_billing_projection_is_refused():
+    option = _rated_option({"schema": "fixture.once.v1"})
+    with pytest.raises(ValueError, match="requires a billing projection"):
+        agreed_price(_agreement(option, 5_000_000))
+
+
+def test_an_agreement_with_no_selected_option_keeps_its_absolute_amount():
+    # A legacy raw escrow acceptance names no option; its amount was always a
+    # whole-term total, and no projection is asked for.
+    assert agreed_price(_agreement(None, 123)) == AgreedPrice(unit="total", amount=123)
+
+
+def test_a_projection_that_contradicts_its_unit_is_refused():
+    option = _rated_option({"schema": "fixture.rate.v1", "period": "PT1M"})
+    agreement = _agreement(option, 41_667)
+    for basis in (
+        {"unit": "per_period"},
+        {"unit": "per_period", "period": "PT1M"},
+        {"unit": "per_period", "period": "PT1M", "period_seconds": 0},
+        {"unit": "total", "period": "PT1M"},
+        {"unit": "total", "period_seconds": 60},
+    ):
+        with pytest.raises(ValueError):
+            agreed_price(agreement, project_billing=lambda _option, basis=basis: basis)
+
+
+def test_an_amount_beyond_uint256_is_refused():
+    option = _rated_option({"schema": "fixture.once.v1"})
+    agreement = _agreement(option, 1)
+    agreement["amount"] = str(2**256)
+    with pytest.raises(ValueError):
+        agreed_price(agreement, project_billing=lambda _: PriceBasis(unit="total"))

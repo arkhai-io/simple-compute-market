@@ -364,7 +364,7 @@ def _flatten(table: dict[str, Any], prefix: str = "") -> list[str]:
 _SETTINGS_GET = re.compile(r'settings\.get\(\s*"([A-Za-z_][A-Za-z0-9_.]*)"')
 _SETTINGS_ATTR = re.compile(r"settings\.([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*)")
 _ENVIRON = re.compile(r'environ(?:\.get)?\(\s*"([A-Z_][A-Z0-9_]*)"|environ\["([A-Z_][A-Z0-9_]*)"\]')
-_SETTINGS_METHODS = {"get", "set", "unset", "toml", "is_sqlite"}
+_SETTINGS_METHODS = {"get", "set", "unset", "toml", "is_sqlite", "configured_time_source"}
 
 
 def capture_configuration() -> dict[str, Any]:

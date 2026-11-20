@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import injected_time
+from injected_time import InjectedTime
 from arkhai_api_selling.system import SystemService, SystemSettings, lifecycle_status
 
 NOTHING = SystemSettings(registry_urls=(), registry_auth={}, authority_url="")
@@ -42,3 +44,16 @@ async def test_the_status_read_carries_the_pause_and_every_loop(tmp_path):
         "unconfigured",
     )
     assert lifecycle_status(None) is None
+
+
+async def test_the_status_read_carries_the_process_time_source(tmp_path):
+    before = injected_time.installed()
+    injected_time.install(InjectedTime(start=1_794_822_300))
+    try:
+        injected = await _service(tmp_path, {}).status(paused=False, loops=None)
+    finally:
+        injected_time.install(before)
+    wall = await _service(tmp_path, {}).status(paused=False, loops=None)
+
+    assert injected["time"] == {"source": "injected", "now": 1_794_822_300}
+    assert wall["time"] == {"source": "wall"}

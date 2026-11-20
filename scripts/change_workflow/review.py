@@ -31,29 +31,46 @@ direction to the review in the workflow log, until a review of that kind has run
 it. Every review but the design's reads the change against the branch it lands on,
 `--base` or the one its clone recorded, and refuses with neither. The review's
 outcome is `finished`,
-naming the record this run published and, as its exit, the triage of its kind, or
-`stopped` with the runner's reason; an earlier record never counts.
+naming the record this run published and, as its exit, the triage of its kind;
+`question`, naming that record, when a hook after it failed; or `stopped` with the
+runner's reason. An earlier record never counts.
+
+A review runs through this runner rather than the wrapper, and its reviewer is
+read-only, so the runner holds the review's hooks (`around`). Each review run has an
+inputs directory, named on its line. Once every guard has passed and before the
+reviewer starts, the runner runs `before-review`, given `{kind}`, and the reviewer's
+first prompt names the directory, which is all a read-only reviewer needs: a hook
+may hand it what it knows there. Once the record is published, and before the
+outcome is logged, it runs `after-review`, which may read the record. A failing
+`after-review` resumes no reviewer, whose final message would be taken for another
+review and who can fix nothing: the run ends as a question to the owner naming the
+hook, the published record standing, never published again. A review run
+interactively is no run, so it runs no hooks.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-p2b2, CW-2nb2, CW-5e24, CW-r9d2,
-CW-r8fb, CW-clhl, CW-d1sm, and CW-gqav.
+CW-r8fb, CW-clhl, CW-d1sm, CW-gqav, CW-h3ks, CW-a4fl, and CW-i9np.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import config
+from .around import (Around, Ran, claim_inputs, failures, guarded, hook_question, inputs_note,
+                     named)
 from .common import Clock, Entry, StepError, repository_root, utc_now
 from .cost import review_cost
 from .find import ChangeNotFound, change_directory, is_archived, landing_branch
-from .graph import ARCHIVED, KINDS, NODES, Node
+from .graph import AFTER, ARCHIVED, BEFORE, KINDS, NODES, Node
 from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_command,
                       codex_command, missing_program, resume_command, run_claude, run_codex,
                       unreachable)
@@ -246,6 +263,15 @@ def refusal_prompt(kind: str, change: str, base: str | None, problems: Sequence[
     return prompt
 
 
+def with_direction(prompt: str, direction: str | None) -> str:
+    """`prompt` carrying the owner's direction to the review, in their words."""
+    if not direction:
+        return prompt
+    return (f"{prompt} The owner's direction to this review, in their words: "
+            f"{direction!r}. Look harder where it points, and still review the whole "
+            "change in the skill's format.")
+
+
 def review_prompt(kind: str, change: str, base: str | None) -> str:
     prompt = f"Use the change-review skill. Review kind: {kind}. Change: {change}."
     if kind != "design":
@@ -425,14 +451,20 @@ def _marker_text(text: str) -> str:
 def run_review(change: str, kind: str, *, base: str | None = None, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path | None = None,
                runner: CodexRunner = run_codex, claude: Runner = run_claude,
-               unvalidated: bool = False, head: Callable[[Path], str] = _reviewed_head,
+               unvalidated: bool = False, direction: str | None = None,
+               head: Callable[[Path], str] = _reviewed_head,
                changed_since: ChangedSince = changed_since, steps_path: Path | None = None,
                clock: Clock = utc_now,
                echo: Callable[[str], None] | None = lambda shown: print(
                    shown, file=sys.stderr, flush=True),
                interrupted: Callable[[Entry], None] = lambda _: None,
-               sent_back: Callable[[list[str]], None] = lambda _: None) -> Path:
+               sent_back: Callable[[list[str]], None] = lambda _: None,
+               hooks: ReviewHooks | None = None) -> Path:
     """Run the review on the first available of its models, and publish it.
+
+    Given the run's `hooks`, the engine's actions and `before-review` run once every
+    guard has passed and before the reviewer starts, and the reviewer's first prompt
+    names their directory, which a read-only reviewer may read.
 
     A review continues the previous reviewer's session only on the same harness,
     since a session cannot move between harnesses; on another it starts fresh. A
@@ -446,7 +478,9 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     change and the step table are the repository's the command runs in, unless
     `root` and `steps_path` name others. A reviewer interrupted, or whose runner
     failed, is passed on as it was raised, once `interrupted` is given what its log
-    line records beside its reason.
+    line records beside its reason. The owner's `direction`, when given, rides on
+    the prompt that starts or continues the reviewer, never on a correction of its
+    format.
     """
     started = clock()
     root = repository_root() if root is None else root
@@ -489,7 +523,7 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
         # it, closeout is next and its own checks read the documentation again.
         earlier = any(entry.name.endswith(".triage.md")
                       for entry in reviews.glob("[0-9]*-pre-closeout*.md"))
-        exempt = exempting(configuration.inert_paths) if earlier else is_record
+        exempt = exempting(configuration.repository_inert_paths()) if earlier else is_record
         if problem := validation_problem(reviews, reviewed, root, changed_since, exempt=exempt):
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
                               f"{problem}; validate first, or override it: UNVALIDATED=1, or "
@@ -498,6 +532,10 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     if "review" not in steps:
         raise ReviewError(f"{steps_path} has no review row naming the review's skill and "
                           "rules")
+    note = None
+    if hooks is not None:
+        hooks.run_before()
+        note = inputs_note(hooks.inputs / BEFORE, reviews)
     transcripts = reviews / TRANSCRIPTS
     transcripts.mkdir(parents=True, exist_ok=True)
     provisional = f"pending-{kind}-{uuid.uuid4().hex[:12]}"
@@ -548,6 +586,9 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
                 prompt = continuation_prompt(kind, change, base, prior[2])
             else:
                 continuing, prompt = None, review_prompt(kind, change, base)
+            prompt = with_direction(prompt, direction)
+            if note:
+                prompt = f"{prompt} {note}"
             status, reached, session = attempt(ran, prompt, continuing)
             if reached is None or reached[0] != "unavailable":
                 break
@@ -694,8 +735,10 @@ def review_and_log(change: str, kind: str, *, root: Path | None = None,
     the commit it reads.
 
     It is `finished` only when this run published its own record, named with the
-    commit it reviewed; any other end is `stopped` with the runner's reason, so an
-    earlier record of the same kind never stands in for this run's. A stop's
+    commit it reviewed, and every hook after it passed; a question to the owner,
+    naming that record, when one failed; any other end is `stopped` with the
+    runner's reason, so an earlier record of the same kind never stands in for this
+    run's. A stop's
     SIGTERM is held for as long as the run is recorded and ends it only while its
     reviewer runs, so a review published before the signal is logged `finished`.
     """
@@ -711,20 +754,31 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     log = log_path(root, change)
     head = options.get("head", _reviewed_head)
     started = clock()
-    # The owner's choice of reviewer marks every line of the run, however it ends.
-    override: Entry = {"override": True} if options.get("model") or options.get("effort") else {}
+    # The owner's choice of reviewer, their direction to the review, and the run's
+    # inputs directory mark every line of the run, however it ends.
+    marks: Entry = {"override": True} if options.get("model") or options.get("effort") else {}
+    if options.get("direction"):
+        marks["direction"] = options["direction"]
+    reviews = log.parent
+    inputs = claim_inputs(reviews, "review", clock)
+    marks["inputs"] = named(inputs, reviews)
+    environ = options.pop("environ", None)
+    hooks = review_hooks(root, change, kind, inputs, options.get("base"),
+                         os.environ if environ is None else environ, invocations)
 
     def logged(outcome: Entry, session: str | None, commit: str | None, extra: Entry) -> Entry:
-        """The line, with what a reviewer on Claude invoked through `run`: a Codex
-        reviewer's commands see no session of their own, so keep nothing."""
+        """The line, with what ran before the reviewer, what a reviewer on Claude
+        invoked through `run` — a Codex reviewer's commands see no session of their
+        own, so keep nothing — and what ran after its record."""
         ran = session.removeprefix("claude:") if session and session.startswith(
             "claude:") else None
         directory = invocations(root)
-        invoked = kept_invocations(directory, ran, change)
+        kept = kept_invocations(directory, ran, change)
+        invoked = hooks.invoked(kept) if hooks is not None else kept
         line = record_outcome(log, "review", outcome, session=session, commit=commit,
                               extra={**extra, **({"invoked": invoked} if invoked else {})},
                               clock=clock)
-        drop_invocations(directory, ran, invoked)
+        drop_invocations(directory, ran, kept)
         return line
 
     def stopped(reason: str, record: Entry | None = None) -> Entry:
@@ -732,7 +786,7 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
             commit = head(root)
         except ReviewError:
             commit = None
-        record = {**(record or {}), **override}
+        record = {**(record or {}), **marks}
         denials = record.pop("denials", [])
         session = record.pop("session", None)
         return logged({"outcome": "stopped", "message": reason, "reason": reason,
@@ -744,7 +798,8 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     sent: list[list[str]] = []
     try:
         path = run_review(change, kind, root=root, clock=clock,
-                          interrupted=interrupted.append, sent_back=sent.append, **options)
+                          interrupted=interrupted.append, sent_back=sent.append,
+                          hooks=hooks, **options)
     except ReviewError as exc:
         return stopped(str(exc), {**exc.record, **({"sent_back": sent} if sent else {})})
     except BaseException as exc:
@@ -768,4 +823,61 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
             + "); the corrected review passed.")
     reviewer.update(review_cost(path.parent / TRANSCRIPTS / path.with_suffix(".log").name,
                                 log, session, reviewer.get("harness"), started))
-    return logged(outcome, session, commit, {"kind": kind, "record": path.name, **reviewer})
+    # Once the record is published and before the outcome is logged, so a hook may
+    # read the record.
+    if hooks is not None:
+        hooks.run_after()
+        if failures(hooks.after):
+            outcome = {**after_review_question(path, inputs / AFTER, reviews, hooks.after),
+                       "denials": outcome.get("denials", [])}
+    return logged(outcome, session, commit,
+                  {"kind": kind, "record": path.name, **reviewer, **marks})
+
+
+def after_review_question(record: Path, directory: Path, reviews: Path,
+                          ran: Sequence[Ran]) -> Entry:
+    """A review's outcome when a hook after its record failed: a question to the
+    owner naming the hook. No reviewer is resumed: its final message would be taken
+    for another review, and a read-only reviewer can fix nothing. The published
+    record stands, and is never published again."""
+    return hook_question(directory, reviews, ran, lambda names, closings: (
+        f"{record.name} is published and stands, and {names} failed after it: {closings}. "
+        "No reviewer is resumed for it."))
+
+
+@dataclass
+class ReviewHooks:
+    """The actions and hooks around one review run, in its inputs directory, and what
+    each moment came to."""
+
+    around: Around
+    inputs: Path
+    before: list[Ran] = field(default_factory=list)
+    after: list[Ran] = field(default_factory=list)
+
+    def run_before(self) -> None:
+        self.before = guarded(self.around.before, self.inputs / BEFORE, BEFORE)
+
+    def run_after(self) -> None:
+        self.after = guarded(self.around.after, self.inputs / AFTER, AFTER)
+
+    def invoked(self, reviewer: Sequence[Entry]) -> list[Entry]:
+        """What the run invoked, in order: before the reviewer, the reviewer's own,
+        and after its record."""
+        return [*(entry for one in self.before for entry in one.invoked), *reviewer,
+                *(entry for one in self.after for entry in one.invoked)]
+
+
+def review_hooks(root: Path, change: str, kind: str, inputs: Path, base: str | None,
+                 environ: Mapping[str, str],
+                 invocations: Callable[[Path], Path | None]) -> ReviewHooks | None:
+    """The review run's hooks, given `{kind}` and the review's base, or the branch
+    the change lands on; None when the configuration cannot be read, which the
+    review itself then refuses, naming why."""
+    try:
+        configuration = config.load(root)
+    except config.ConfigError:
+        return None
+    return ReviewHooks(Around(root, configuration, change, "review", kind=kind,
+                              base=base or landing_branch(root, change), environ=environ,
+                              invocations=invocations), inputs)

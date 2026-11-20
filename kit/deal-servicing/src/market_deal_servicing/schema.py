@@ -1,10 +1,14 @@
 """The tables deal servicing reads and writes, as DDL a storefront's chain applies.
 
-No session creates a table: a storefront composing deal servicing applies
-:data:`SERVICING_SCHEMA` in a migration of its own chain, so opening a session
-issues no DDL. Every statement is ``IF NOT EXISTS``, since a storefront
-database a release built while sessions still created these tables when they
-first opened may hold some, all, or none of them.
+No session creates a table: a storefront composing deal servicing applies each
+set below in a migration of its own chain, so opening a session issues no DDL.
+
+:data:`SERVICING_SCHEMA` is the set a release created while sessions still
+created their tables when they first opened, so a storefront database may hold
+some, all, or none of it: every statement is ``IF NOT EXISTS``, and the one
+migration that applies it is the only migration that tolerates objects already
+present. Every table added since is its own set, created by an ordinary
+migration appended to the chain after that one, which tolerates nothing.
 See openspec/specs/deployment-state/spec.md.
 """
 
@@ -86,6 +90,27 @@ SERVICING_SCHEMA: tuple[str, ...] = (
 )
 
 
+#: The storefront-clock instant of the latest successful payment observation of
+#: each deal's commitment, written by the payment watch in the transaction that
+#: records what the observation showed and read by admission's deadline rule.
+PAYMENT_OBSERVATIONS_SCHEMA: tuple[str, ...] = (
+    """CREATE TABLE servicing_payment_observations (
+        negotiation_id TEXT NOT NULL, commitment_ref TEXT NOT NULL, observed_at INTEGER NOT NULL,
+        PRIMARY KEY (negotiation_id,commitment_ref)
+    )""",
+)
+
+
+#: Each servicing loop's page position: the continuation of the next page its
+#: cycle services, or ``NULL`` to start from the first deal, written by
+#: ``ServicingCycle`` once a page is serviced.
+PAGE_POSITION_SCHEMA: tuple[str, ...] = (
+    """CREATE TABLE servicing_page_position (
+        loop TEXT PRIMARY KEY, continuation TEXT
+    )""",
+)
+
+
 def create_schema(conn: sqlite3.Connection) -> None:
     """Apply :data:`SERVICING_SCHEMA` inside the caller's transaction, committing nothing.
 
@@ -93,4 +118,26 @@ def create_schema(conn: sqlite3.Connection) -> None:
     """
 
     for statement in SERVICING_SCHEMA:
+        conn.execute(statement)
+
+
+def create_payment_observations(conn: sqlite3.Connection) -> None:
+    """Apply :data:`PAYMENT_OBSERVATIONS_SCHEMA` inside the caller's transaction.
+
+    The body of a storefront migration after the one applying
+    :data:`SERVICING_SCHEMA`; it fails on a database that already holds the table.
+    """
+
+    for statement in PAYMENT_OBSERVATIONS_SCHEMA:
+        conn.execute(statement)
+
+
+def create_page_position(conn: sqlite3.Connection) -> None:
+    """Apply :data:`PAGE_POSITION_SCHEMA` inside the caller's transaction.
+
+    The body of a storefront migration after the one applying
+    :data:`SERVICING_SCHEMA`; it fails on a database that already holds the table.
+    """
+
+    for statement in PAGE_POSITION_SCHEMA:
         conn.execute(statement)

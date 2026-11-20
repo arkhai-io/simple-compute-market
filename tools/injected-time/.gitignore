@@ -1,0 +1,8 @@
+# The component's environment.
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+
+# The wheel `make build` writes when no DIST_DIR is given.
+dist/

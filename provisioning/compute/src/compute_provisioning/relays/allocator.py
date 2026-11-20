@@ -18,6 +18,11 @@ One allocator serves every domain: pools on one relay draw from its one window,
 whatever their provider, so two allocators over that namespace would issue one
 port twice.
 
+The allocator is also the one place a lease is created, so it is where a
+disabled relay's drain is enforced: no new owner is given a port on a disabled
+relay, whoever asks, so the set of its active leases only shrinks, and once
+none remains none appears.
+
 Each lease records when the grants for it expire, and a released port is not
 reissued until that expiry plus a reuse margin has passed. A relay admits a
 proxy carrying an unexpired grant for its port, so a grant copied from a host
@@ -35,6 +40,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+import injected_time
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 from market_site.db import CapacityReservation
 from market_site.ledger import parse_utc
@@ -47,11 +53,14 @@ from .db import Relay, RelayPortLease
 
 logger = logging.getLogger(__name__)
 
-#: How long a lease's grants outlive its scheduled end, by default: the lease
-#: watchdog's grace period (300 seconds by default) and a teardown job's
-#: retries (three by default, backing off 60, 120, and 240 seconds) with their
-#: runs, so a grant never expires while the teardown that revokes it is still
-#: due. The service's ``relay_grant_expiry_grace_seconds`` sets it.
+#: How long a lease's grants outlive its scheduled end, by default: the
+#: teardown still due after the lease ends — the reruns' spacing for a teardown
+#: that never started (60, 120 and 240 seconds by default), a teardown job's
+#: retries with their backoff (60, 120 and 240 seconds again), and the runs a
+#: teardown is expected to take — so a grant does not expire while a working
+#: teardown that revokes it is still due. Past the lease watchdog's grace no
+#: teardown is due: the lease is release_failed for an operator. The service's
+#: ``relay_grant_expiry_grace_seconds`` sets it.
 DEFAULT_GRANT_EXPIRY_GRACE = timedelta(hours=1)
 
 #: How long a released port is held past its grant's expiry, by default. The
@@ -61,6 +70,14 @@ DEFAULT_PORT_REUSE_MARGIN = timedelta(seconds=300)
 
 class RelayWindowExhaustedError(RuntimeError):
     """Every port in a relay's configured window is currently leased."""
+
+
+class RelayDisabledError(RuntimeError):
+    """The relay is disabled, so it leases no port to a new owner.
+
+    Disabling a relay drains it: deliveries already holding a lease on it run
+    to their end, and no new delivery is leased a port on it.
+    """
 
 
 @dataclass(frozen=True)
@@ -165,34 +182,54 @@ class RelayPortAllocator:
         forward turns a slow leak into an outage sooner. A port still in its
         quarantine is not free.
 
-        The unique constraint is the arbiter, not the read that precedes it.
-        Two allocations racing on one relay both see the same free port; the
-        second flush fails and retries against a set that now excludes it.
-        Savepoints contain a uniqueness conflict without rolling back the
-        caller's other writes. The caller owns the outer write transaction and
-        its commit; fulfillment acceptance reserves SQLite's writer slot before
-        calling this method.
+        The relay's lock serializes allocations on one relay, and the unique
+        constraints decide what that lock does not cover: a port scan that is
+        stale, and a claim for the same owner on another relay. Savepoints
+        contain a uniqueness conflict without rolling back the caller's other
+        writes. The caller owns the outer write transaction and its commit;
+        fulfillment acceptance reserves SQLite's writer slot before calling
+        this method.
+
+        Idempotent for one owner, so retrying dispatch never orphans a port:
+        an owner already holding an active lease receives it. The owner is read
+        after the relay's lock, so an allocation that waited on that lock sees
+        a lease committed for the same owner meanwhile. A claim that fails a
+        uniqueness constraint reads the owner again before trying another
+        port, because the failure may be the one-active-lease-per-owner index
+        rather than the port's: a concurrent claim for the owner on another
+        relay, which this relay's lock does not serialize, committed its
+        lease. That read, not a constraint name, which SQLite and PostgreSQL
+        report differently, tells the two apart, so for a relay that exists
+        ``RelayWindowExhaustedError`` means every port in its window is held or
+        quarantined. A relay that does not exist is refused with the same
+        error, since no port can be leased on it.
+
+        A new owner is refused on a disabled relay with ``RelayDisabledError``.
+        An owner already holding a lease receives it whether or not the relay
+        is disabled, since it is the same lease, and its delivery is among the
+        work a drain lets finish.
         """
-        # Idempotent for one owner: retrying dispatch must not orphan a port.
-        existing = (
-            db.query(RelayPortLease)
-            .filter(
-                RelayPortLease.owner_kind == owner_kind,
-                RelayPortLease.owner_id == owner_id,
-                RelayPortLease.released_at.is_(None),
-            )
-            .one_or_none()
-        )
-        if existing is not None:
-            return PortLease(
-                id=existing.id,
-                relay_id=existing.relay_id,
-                remote_port=existing.remote_port,
-            )
-        relay = db.get(Relay, relay_id)
+        # Locked, so a disable cannot commit between this read and the claim's
+        # commit: on PostgreSQL the disable waits for this transaction, and a
+        # disable already committed is seen here. An unlocked read could see
+        # the relay enabled, let the disable commit, and then commit a lease
+        # on a relay already disabled and holding none. Read afresh rather than
+        # from the session's identity map, where preparation's earlier read of
+        # this relay may hold a value from before the disable. SQLite ignores
+        # the lock; there the caller holds the database's one writer slot, so
+        # the disable's write waits all the same.
+        relay = db.get(Relay, relay_id, with_for_update=True, populate_existing=True)
+        held = self._owner_lease(db, owner_kind=owner_kind, owner_id=owner_id)
+        if held is not None:
+            return held
         if relay is None:
             raise RelayWindowExhaustedError(
                 f"relay '{relay_id}' does not exist, so no port can be leased on it"
+            )
+        if not relay.enabled:
+            raise RelayDisabledError(
+                f"relay '{relay_id}' ({relay.relay_addr}:{relay.relay_port}) is "
+                "disabled: it is draining, and leases no port to a new delivery"
             )
         window = range(
             relay.vm_port_range_start,
@@ -216,9 +253,29 @@ class RelayPortAllocator:
                     )
                     db.flush()
             except IntegrityError:
+                held = self._owner_lease(db, owner_kind=owner_kind, owner_id=owner_id)
+                if held is not None:
+                    return held
                 continue
             return PortLease(id=lease.id, relay_id=relay_id, remote_port=port)
         raise self._exhausted(relay)
+
+    def _owner_lease(
+        self, db: Session, *, owner_kind: str, owner_id: str
+    ) -> PortLease | None:
+        """The active lease the owner holds, read in the caller's transaction."""
+        row = (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.owner_kind == owner_kind,
+                RelayPortLease.owner_id == owner_id,
+                RelayPortLease.released_at.is_(None),
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return PortLease(id=row.id, relay_id=row.relay_id, remote_port=row.remote_port)
 
     @staticmethod
     def _claim(
@@ -264,7 +321,7 @@ class RelayPortAllocator:
             existing.host_id = host_id
             existing.pool_id = pool_id
             existing.released_at = None
-            existing.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            existing.created_at = injected_time.now_datetime().replace(tzinfo=None)
             existing.grant_expires_at = grant_expires_at
             existing.grant_key_id = None
             return existing
@@ -276,9 +333,10 @@ class RelayPortAllocator:
             pool_id=pool_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
-            # Set here rather than by the database's clock, so it is UTC as
-            # every time a retired key's validity is compared against is.
-            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            # Set here, from the process's time source, rather than by the
+            # database's clock: the reconciliation's grace and a retired key's
+            # validity are compared with it, in UTC.
+            created_at=injected_time.now_datetime().replace(tzinfo=None),
             grant_expires_at=grant_expires_at,
         )
         db.add(lease)
@@ -302,7 +360,7 @@ class RelayPortAllocator:
             )
             .all()
         )
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         for lease in held:
             lease.released_at = now
         return len(held)
@@ -315,20 +373,7 @@ class RelayPortAllocator:
         describes it.
         """
         with self._session_factory() as db:
-            row = (
-                db.query(RelayPortLease)
-                .filter(
-                    RelayPortLease.owner_kind == owner_kind,
-                    RelayPortLease.owner_id == owner_id,
-                    RelayPortLease.released_at.is_(None),
-                )
-                .one_or_none()
-            )
-            if row is None:
-                return None
-            return PortLease(
-                id=row.id, relay_id=row.relay_id, remote_port=row.remote_port
-            )
+            return self._owner_lease(db, owner_kind=owner_kind, owner_id=owner_id)
 
     def release(self, *, owner_kind: str, owner_id: str) -> int:
         """Release every lease held by one owner. Returns how many were released.
@@ -362,7 +407,7 @@ class RelayPortAllocator:
         release effect decides, so this never returns a port that decision
         would hold.
         """
-        cutoff = datetime.now(timezone.utc) - grace
+        cutoff = injected_time.now_datetime() - grace
         released = 0
         with self._session_factory() as db, db.begin():
             candidates: Iterable[RelayPortLease] = (
@@ -373,7 +418,7 @@ class RelayPortAllocator:
                 )
                 .all()
             )
-            now = datetime.now(timezone.utc)
+            now = injected_time.now_datetime()
             for lease in candidates:
                 if not is_owner_released(lease.owner_kind, lease.owner_id):
                     continue
@@ -438,7 +483,7 @@ class RelayPortAllocator:
         the reuse margin, read now rather than when it was released.
         """
         reusable_before = (
-            datetime.now(timezone.utc).replace(tzinfo=None) - self._reuse_margin
+            injected_time.now_datetime().replace(tzinfo=None) - self._reuse_margin
         )
         held = {
             row.remote_port
@@ -580,6 +625,7 @@ __all__ = [
     "DEFAULT_PORT_REUSE_MARGIN",
     "FULFILLMENT_OWNER_KIND",
     "PortLease",
+    "RelayDisabledError",
     "RelayPortAllocator",
     "RelayWindowExhaustedError",
     "fulfillment_lease_owner_is_released",

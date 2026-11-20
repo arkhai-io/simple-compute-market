@@ -118,6 +118,31 @@ class TestPublishOrder:
         assert listing.accepted_escrows == []
         assert listing.settlement_options == [option]
 
+    async def test_rate_option_naming_approval_window_round_trips(self, registry_client):
+        # A rate option names approval expiry `approval_window` where a once
+        # option names it `window`. The registry holds mechanism parameters
+        # opaquely, so it accepts and returns either name unchanged.
+        option = {
+            "option_id": "b" * 64,
+            "price": {"asset": "USD/6", "rates": [{"field": "amount", "per": "hour", "value": "1000000"}]},
+            "settlement": {
+                "schema": "arkhai.payments.v1",
+                "payee_account": "22222222-2222-4222-8222-222222222222",
+                "approval_window": "PT10M", "deposit_agreement": False,
+                "period": "PT1H", "reserve_ahead_seconds": 3600, "setup_amount": "500000",
+            },
+        }
+        request = ListingRequest(
+            listing_id="pub-rate-option",
+            listing_resource={"gpu_model": "A100", "region": "us-west"},
+            accepted_escrows=[],
+            settlement_options=[option],
+            storefront_url="http://localhost:8001/",
+        )
+        await registry_client.publish_listing(request)
+        listing = await registry_client.get_listing("pub-rate-option")
+        assert listing.settlement_options == [option]
+
     async def test_republish_reuses_stable_publisher(self, registry_client):
         first = await registry_client.publish_listing(_listing_request("pub-a"))
         second = await registry_client.publish_listing(_listing_request("pub-b"))

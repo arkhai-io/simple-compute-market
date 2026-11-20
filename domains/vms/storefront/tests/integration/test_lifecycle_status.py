@@ -1,6 +1,8 @@
 """System status reports every lifecycle loop and its last cycle's outcome.
 
-Driven through the typed client against ``tests.publication_app``. The
+Driven through the typed client against ``tests.publication_app``; the
+deal-servicing case runs on ``tests.recurring_world``, whose served storefront
+settles a deal through the typed buyer client. The
 publication cases make the cycle fail where it composes what it reads, through
 the capacity runtime the cycle takes from the container, and read system
 status: the publication loop's state and its last outcome, whether the
@@ -22,9 +24,15 @@ from market_alkahest import AlkahestChainProbe, ProbedChain
 from market_capacity_publication import CapacityConfigurationError
 from storefront_client import StorefrontClientError
 
+from market_deal_servicing import EndSession
+from market_deal_servicing.evidence import transaction
+
 import market_storefront.container as container
 from market_storefront import lifecycle, lifecycle_steps, startup
+from tests._settings_overrides import settings_overrides
+from tests.integration.test_rate_delivery import accepted_recurring_deal, approve
 from tests.publication_app import SITE, publication_app
+from tests.recurring_world import recurring_world, settlement
 
 pytestmark = pytest.mark.asyncio
 
@@ -140,8 +148,10 @@ async def test_every_loop_is_reported_with_its_state(world):
 
     for name in (
         lifecycle.NEGOTIATION_WATCHDOG,
+        lifecycle.DEAL_SERVICING,
+        lifecycle.DELIVERY_RECOVERY,
+        lifecycle.PAYMENT_RECONCILIATION,
         lifecycle.SETTLEMENT_SERVICING,
-        lifecycle.FULFILLMENT_RESUME,
         lifecycle.SITE_PROJECTION_POLLER,
         lifecycle.PUBLICATION,
         lifecycle.CAPACITY_EVENTS_POLLER,
@@ -150,6 +160,57 @@ async def test_every_loop_is_reported_with_its_state(world):
     ):
         assert loops[name]["state"] == "paused", name
         assert loops[name]["last_outcome"] is None, name
+
+
+async def test_unstated_servicing_intervals_are_those_their_jobs_ran_at(world):
+    """``deal-servicing`` runs at the settlement servicing interval and
+    ``delivery-recovery`` at ``fulfillment_resume_sweep_interval`` until each
+    states its own key; the other two loops keep their keys."""
+    with settings_overrides(settlement_servicing_interval_seconds=45, fulfillment_resume_sweep_interval=20):
+        unstated = lifecycle_steps.register_vm_loops()
+    await lifecycle.reset_for_tests()
+    with settings_overrides(
+        settlement_servicing_interval_seconds=45, fulfillment_resume_sweep_interval=20,
+        deal_servicing_interval_seconds=7, delivery_recovery_interval_seconds=9,
+    ):
+        stated = lifecycle_steps.register_vm_loops()
+
+    servicing = (
+        lifecycle.DEAL_SERVICING, lifecycle.DELIVERY_RECOVERY,
+        lifecycle.PAYMENT_RECONCILIATION, lifecycle.SETTLEMENT_SERVICING,
+    )
+    assert [unstated[name] for name in servicing] == [45, 20, 20, 45]
+    assert [stated[name] for name in servicing] == [7, 9, 20, 45]
+
+
+async def test_a_servicing_interval_that_is_not_positive_seconds_is_refused_by_key(world):
+    with settings_overrides(deal_servicing_interval_seconds=0):
+        with pytest.raises(ValueError, match="deal_servicing_interval_seconds"):
+            lifecycle_steps.register_vm_loops()
+
+
+async def test_stepping_deal_servicing_runs_one_cycle_and_re_drives_no_delivery(tmp_path, lifecycle_registry):
+    """A deal left undelivered by an unreachable site is serviced by a step of
+    ``deal-servicing`` — its payment authority read — and not re-driven, though
+    the site answers again: re-driving is ``delivery-recovery``'s alone."""
+    async with recurring_world(tmp_path) as world, settlement(world) as settled:
+        negotiation_id, data = await accepted_recurring_deal(world)
+        approve(settled, data)
+        settled.site.unreachable = True
+        await world.app.buyer.settle_agreement(negotiation_id)
+        await settled.delivered(negotiation_id)
+        assert settled.site.rows == {}
+        settled.site.unreachable = False
+        await world.app.client.admin_pause_lifecycle_loops()
+        reads = settled.payments.count("get_transaction")
+
+        stepped = await world.app.client.admin_run_lifecycle_cycle("deal-servicing")
+
+        with transaction(world.app.db.db_path) as conn:
+            record = EndSession(conn).read(negotiation_id)
+    assert stepped["loop"] == lifecycle.DEAL_SERVICING and stepped["processed"] >= 1
+    assert settled.payments.count("get_transaction") > reads
+    assert settled.site.rows == {} and record.available_at is None
 
 
 class _FailedCycleSeen(logging.Handler):

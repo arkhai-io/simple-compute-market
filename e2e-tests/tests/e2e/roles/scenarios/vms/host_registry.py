@@ -65,6 +65,7 @@ E2E_DEAL_HOST = "kvm-deal"
 E2E_DEAL_CLI_HOST = "kvm-deal-cli"
 E2E_PAYMENT_DEAL_HOST = "kvm-payment-deal"
 E2E_PAYMENT_PURCHASE_HOST = "kvm-payment-purchase"
+E2E_RECURRING_PURCHASE_HOST = "kvm-recurring-purchase"
 E2E_MULTI_REGISTRY_HOST = "kvm-multi"
 E2E_NON_ERC20_HOST = "kvm-non-erc20"
 E2E_DYNAMIC_HOST = "kvm-dynamic"
@@ -78,6 +79,12 @@ E2E_DISPUTE_LOST_FILING_HOST = "kvm-dispute-lost-filing"
 E2E_DISPUTE_MEDIATION_UNAVAILABLE_HOST = "kvm-dispute-mediation-unavailable"
 E2E_DISPUTE_PAYMENTS_HOLD_HOST = "kvm-dispute-payments-hold"
 E2E_DISPUTE_HOLD_PASSED_HOST = "kvm-dispute-hold-passed"
+#: The VM rate servicing rows, each on its own deal and so its own executor.
+E2E_RATE_FUNDS_EXHAUSTED_HOST = "kvm-rate-funds-exhausted"
+E2E_RATE_PREEMPTION_HOST = "kvm-rate-preemption"
+E2E_RATE_MAXIMUM_TERM_HOST = "kvm-rate-maximum-term"
+#: The VM buyer watchdog's delivered-deal cases, on a deal of their own.
+E2E_RATE_WATCHDOG_HOST = "kvm-rate-watchdog"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
@@ -88,6 +95,7 @@ E2E_DEAL_POOL_ID = "compute-e2e-deal-pool"
 E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
 E2E_PAYMENT_DEAL_POOL_ID = "compute-e2e-payment-deal-pool"
 E2E_PAYMENT_PURCHASE_POOL_ID = "compute-e2e-payment-purchase-pool"
+E2E_RECURRING_PURCHASE_POOL_ID = "compute-e2e-recurring-purchase-pool"
 E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
 E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
@@ -98,6 +106,10 @@ E2E_DISPUTE_LOST_FILING_POOL_ID = "compute-e2e-dispute-lost-filing-pool"
 E2E_DISPUTE_MEDIATION_UNAVAILABLE_POOL_ID = "compute-e2e-dispute-mediation-unavailable-pool"
 E2E_DISPUTE_PAYMENTS_HOLD_POOL_ID = "compute-e2e-dispute-payments-hold-pool"
 E2E_DISPUTE_HOLD_PASSED_POOL_ID = "compute-e2e-dispute-hold-passed-pool"
+E2E_RATE_FUNDS_EXHAUSTED_POOL_ID = "compute-e2e-rate-funds-exhausted-pool"
+E2E_RATE_PREEMPTION_POOL_ID = "compute-e2e-rate-preemption-pool"
+E2E_RATE_MAXIMUM_TERM_POOL_ID = "compute-e2e-rate-maximum-term-pool"
+E2E_RATE_WATCHDOG_POOL_ID = "compute-e2e-rate-watchdog-pool"
 
 #: The resource each VM dispute scenario lists. A listing's binding to its
 #: resource outlives the listing, so no two scenarios on one stack list the same.
@@ -107,6 +119,20 @@ E2E_DISPUTE_LOST_FILING_RESOURCE_ID = "compute-e2e-dispute-lost-filing-001"
 E2E_DISPUTE_MEDIATION_UNAVAILABLE_RESOURCE_ID = "compute-e2e-dispute-mediation-unavailable-001"
 E2E_DISPUTE_PAYMENTS_HOLD_RESOURCE_ID = "compute-e2e-dispute-payments-hold-001"
 E2E_DISPUTE_HOLD_PASSED_RESOURCE_ID = "compute-e2e-dispute-hold-passed-001"
+#: The resource each VM rate servicing row and the watchdog cases list, and the
+#: GPU model only it declares, which the module's ``market buy`` discovers it
+#: by. Each model is one the registry's filter spec admits
+#: (``core_registry/filter-spec.yaml``): its publication route refuses a listing
+#: naming a model outside that list, so the storefront holds the listing open
+#: while the registry answers a read of it 404.
+E2E_RATE_FUNDS_EXHAUSTED_RESOURCE_ID = "compute-e2e-rate-funds-exhausted-001"
+E2E_RATE_PREEMPTION_RESOURCE_ID = "compute-e2e-rate-preemption-001"
+E2E_RATE_MAXIMUM_TERM_RESOURCE_ID = "compute-e2e-rate-maximum-term-001"
+E2E_RATE_FUNDS_EXHAUSTED_GPU_MODEL = "RTX 4080 Super"
+E2E_RATE_PREEMPTION_GPU_MODEL = "RTX 4070 Super"
+E2E_RATE_MAXIMUM_TERM_GPU_MODEL = "RTX 4070 Ti"
+E2E_RATE_WATCHDOG_RESOURCE_ID = "compute-e2e-rate-watchdog-001"
+E2E_RATE_WATCHDOG_GPU_MODEL = "RTX 4070 Ti Super"
 
 
 def resource_gpus(resource: dict[str, Any]) -> tuple[int, str] | None:

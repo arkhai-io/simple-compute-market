@@ -6,6 +6,8 @@ from .access_check import (
     check_payments_access,
 )
 from .adapter import PaymentAdapter, SnapshotVerifier, pinned_snapshot_verifier
+from .operations import PaymentOperation
+from .presets import PaymentsRatePresetHelper, rate_term_timing
 from .reconciliation import (
     ReconciliationPass,
     reconcile_accepted_payments,
@@ -22,7 +24,7 @@ from market_arkhai_payments.buyer import ConfirmPayment, PaymentApproval
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.errors import (
     MandatePolicyError,
-    PaymentApprovalDeclined,
+    PaymentApprovalDeclined, PaymentApprovalInsufficientFunds,
     PaymentsAPIError,
     PaymentsBlocked,
     PaymentsError,
@@ -85,6 +87,7 @@ from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsPublicationInput,
     create_arkhai_payments_registration,
     payments_client_for_owner,
+    payments_livemode,
     resolve_payments_api_key,
 )
 
@@ -105,8 +108,12 @@ __all__ = [
     "NotPaid",
     "NothingToReverse",
     "PaymentAdapter",
+    "PaymentOperation",
+    "PaymentsRatePresetHelper",
+    "rate_term_timing",
     "PaymentApproval",
     "PaymentApprovalDeclined",
+    "PaymentApprovalInsufficientFunds",
     "PaymentSellerStage",
     "PaymentSettlementData",
     "PaymentsAPIError",
@@ -149,6 +156,7 @@ __all__ = [
     "format_duration",
     "mandate_policy_for_agreement",
     "payments_client_for_owner",
+    "payments_livemode",
     "pinned_snapshot_verifier",
     "receipt_message",
     "snapshot_message",

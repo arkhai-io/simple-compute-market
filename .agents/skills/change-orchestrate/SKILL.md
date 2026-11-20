@@ -17,7 +17,7 @@ whose entry check wants a clean worktree. Tracked work a finished step
 leaves uncommitted is a defect of that step: bring it to the owner as one, and
 commit it only on their word. You also maintain the workflow the change runs on:
 you create the change's clone and branch, and commit workflow maintenance, what the
-owner instructs, and merges of `dev` on their word ("Maintain the workflow",
+owner instructs, and merges of the branch it lands on on their word ("Maintain the workflow",
 below); never write the change's feature work of your own accord. This session
 uses the owner's interactive permissions; the step table limits unattended runs
 only.
@@ -144,7 +144,7 @@ The computation names where the change is worked before any step:
   `reviews/` though its branch is checked out nowhere, so a clone would start
   without them. Relay both routes as the reason gives them: check out its branch
   in the workspace and go on there without a clone, or move it into a clone by
-  hand, as `docs/agents/change-workflow.md` describes. Both are the owner's to
+  hand, as the workflow's handbook for the owner describes. Both are the owner's to
   carry out; recompute once they say it is done.
 - **`owner`, naming the workspace** — you were started in a clone of another
   change: tell the owner to start you in their workspace.
@@ -161,9 +161,11 @@ Rules the owner grants for a fresh run go on its target as
 records them as `granted`, and the step's next run is held to its table again.
 Always start a fresh run through its target, never the script directly: the target
 checks the change, refuses while a round view is open, and passes `SECTIONS`,
-`FRESH`, `SESSION_ID`, and `HELM_ALL_SCENARIOS` on.
+`FRESH`, and `SESSION_ID` on. A value of the owner's machine reaches a command
+through the environment, which the run inherits; never put one on a target.
 An implementation run's `ARGUMENTS` carries a merge's conflicts to resolve or the
-owner's direction to its sections, in their words, with any routing note beside it
+owner's direction to its sections, and a merge run's (`make merge ARGUMENTS=<text>`)
+the owner's direction to the merge, in their words, with any routing note beside it
 marked as yours (where a stopped session's work waits, the path a granted rule
 names); the same direction goes in the log through `note` as well.
 Each implementation run starts a fresh session unless the owner directs the work to
@@ -172,11 +174,21 @@ enough, or a fix to the session that made the edits. Then pass that run's `sessi
 from its log line as `SESSION_ID=<id>` beside `SECTIONS` or `ARGUMENTS`; the wrapper
 continues it on its model and refuses one waiting on the owner, which is resumed
 with the answer instead. Never continue a session on your own judgement.
+An implementation run whose `question` asks only whether its remaining sections go
+to a fresh session or continue in its own — its work committed, nothing else
+awaiting the owner — is answered by the owner's standing direction: a fresh
+session. Resume the waiting `seq` with that choice, quoting the option the
+question names for it, and record it through `note --by orchestrator`, naming this
+standing direction; once the run has logged its line, start the next session fresh
+as the computation names it. A question that also asks anything else goes to the
+owner as any other.
 For `review`, run `make review CHANGE=<change> KIND=<computed-kind>`, in the clone
 likewise: the review runs on its row's models, Codex first and Claude when Codex is
 unavailable. Never set `REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's
-choice for a review run by hand, outside the row's policy. For
-`validate-and-review`, start validation with `UNATTENDED=1` and the review with its
+choice for a review run by hand, outside the row's policy. The owner's direction
+to a review — where it should look harder — goes on its run as `ARGUMENTS`, in
+their words, and in the log through `note` as well; the review's line records it.
+For `validate-and-review`, start validation with `UNATTENDED=1` and the review with its
 computed `KIND` side by side. When a validation, a review, or both carry `reading`,
 the owner reads the round in the workspace while they run ("Carry an
 implementation round"). Wait for both outcomes before triage and keep their
@@ -248,6 +260,15 @@ when `usd_partial` is set, or a Codex review's tokens — and, for a resumed
 session, its `gap_s` and whether it read the cache (`cache_hit`). `make change-cost
 CHANGE=<change>` totals them by step and by round.
 
+Each run's line names its inputs directory (`inputs`, under the change's
+`reviews/`), whose `before/status.md` and `after/status.md` say what the engine's
+actions and the repository's hooks around the step did. When you report a run, say
+in one sentence for each hook it ran without — `status.md` saying "Not declared;
+nothing ran." or "Declared empty; nothing ran." — that the step ran with no such
+hook, naming it: "the review ran with no `before-review` hook declared". A hook
+that failed is the step's to explain: relay what its message says of it. An
+interactive review runs no hooks, and says so.
+
 Planning resumes the design session through the wrapper. Offer a fresh planning
 session (`make plan CHANGE=<change> UNATTENDED=1 FRESH=1`) only when the owner
 asks for one; you judge no session's size. Closeout and archive cleanup are
@@ -294,11 +315,20 @@ review ending beside a validation question must not receive its answer. Recheck
 that the run still waits before resuming. Pass the owner's answer faithfully,
 with proper shell quoting or structured command arguments.
 
+A run whose `after-<step>` hook failed again once its session was resumed with the
+failure ends as a question naming the hook and where its status and logs are; a
+review whose `after-review` failed ends so at once, its published record standing.
+Relay it as written, judging neither the hook nor the work: whether the hook or the
+step is wrong is the owner's to say. A step's such question is resumed with the
+owner's answer as any question is. A review's names no resume, since a review
+resumes no reviewer: the computation brings it to the owner, and their word is
+recorded as their direction ("The owner's directions"), never sent to the review.
+
 ### The owner's directions
 
 Every direction is the owner's: a confirmed return, a repeat review, a waiver of a
 step, and an intervention sending the change to any node of the graph; a waiver of
-parts of validation is a decision with no target (below). Record one only on
+evidence kinds of validation is a decision with no target (below). Record one only on
 their word, `--by owner`, its target as `--next <step>`, with `--kind <kind>` for
 a review or a triage (the kind of review it triages), `--sections '1,2;3'` for
 sections out of the plan's order, and `--target <step>` — itself qualified by
@@ -335,8 +365,8 @@ direction with no `resolves`, since no run waits on it: `--by owner --next revie
 
 After a confirmed return to design, once the design step has finished, the
 computation names a design review of what it settled. The owner may waive that
-review; the design step's message recommends it when a criterion of the guide's
-"Waivers" holds. A recommendation the owner declines is a ledger line too, in the
+review; the design step's message recommends it when a criterion of
+`change-workflow`'s CW-q3dm holds. A recommendation the owner declines is a ledger line too, in the
 form below with their reason, appended uncommitted for the design review's triage
 to commit with its own (`change-triage`, step 6). Only on the owner's word, record a waiver as their
 direction to planning, naming no run:
@@ -362,13 +392,15 @@ the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
 the paths in its reason; archive cleanup finds the direction in the log and writes
 the waiver to the ledger.
 
-When the owner waives parts of validation for later validations — "skip Helm and
-the pipeline for the rest of this change" — record their decision with no `--next`,
-naming the parts and the condition they are waived on, so validation finds it in the
-log ("Waivers" in the guide, "Waiving parts of validation"):
+When the owner waives evidence kinds of validation for later validations — "skip
+the deployment and the end-to-end run for the rest of this change" — record their
+decision with no `--next`, naming the evidence kinds it waives, as
+`scripts/change-workflow evidence <change>` lists them, and the condition they are
+waived on, so the gathering skips them and validation finds the decision in the log
+(`change-workflow`'s CW-e7lm):
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+scripts/change-workflow note <change> orchestrator --by owner --waives <kind>,<kind> --decision "waive the <kind> and <kind> kinds of validation for the rest of this change, while <the condition>" --reason <the owner's words>
 ```
 
 Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only
@@ -438,7 +470,7 @@ detects it once the pull request is open.
 ### Interrupting and revisiting
 
 You stay free while a step runs, so the owner can reach you mid-step
-(`docs/agents/change-workflow.md`, "Interrupting a running step"). On their word
+(`change-workflow`'s CW-k2rv). On their word
 only, stop the run, naming the step when validation and a review run side by side:
 
 ```text
@@ -463,7 +495,7 @@ elsewhere. A stop commits nothing, and an interrupted review published nothing a
 is rerun, never resumed; a review the format check refused is rerun as above.
 
 The owner may revisit a finding a triage accepted by default, or the advancing exit
-it took (`docs/agents/change-workflow.md`, "Revisiting a default acceptance").
+it took (`change-workflow`'s CW-r8vz).
 Before its fixes, the revisit is their reply to the triage's question: relay it as
 any. After the triage finished, on their word, in this order:
 
@@ -505,8 +537,9 @@ Never run it yourself: a step's exit is the step's, or the owner's, to record.
 
 A prerequisite `blocked` outcome halts this workflow. Relay what the owner must
 do; never orchestrate the prerequisite. Design writes its proposal in a separate
-worktree branched from dev. The owner commits and merges it to dev, then merges
-dev here before this change records its dependency. After the prerequisite is
+worktree branched from the branch this change lands on. The owner commits and
+merges it there, then merges that branch here before this change records its
+dependency. After the prerequisite is
 archived and merged here, propose releasing the dependency. Only on the owner's
 word remove it from this change's row, keep `in design`, run
 `scripts/change-workflow check index`, record the decision, and recompute. An absent
@@ -530,7 +563,8 @@ first. Removing a clone is
 the owner's alone: never run it.
 
 Open the pull request from the drafts archive cleanup wrote to the archived
-change's `reviews/pull-request.md`: from the change's branch into `dev`, titled
+change's `reviews/pull-request.md`: from the change's branch into the branch it
+lands on — the `landing` its last merge recorded — titled
 with the merge commit message's subject, its body the pull request description.
 When a pull request from the branch already exists, open no second one; give its
 link, and relay the notes a merge after the archive and archive cleanup appended to
@@ -669,8 +703,12 @@ run `make round-done`. Recompute only after the view closes; the computation the
 names validation and the implementation review, side by side.
 
 Save the owner's answer verbatim as the next `reviews/NN-implementation-owner.md`
-in the change's directory — the clone's, for a change worked there — choosing a
-number after all numbered records and transcripts and using exclusive creation.
+in the change's directory — the clone's, for a change worked there — at the path
+`scripts/change-workflow find --next-record implementation-owner <change>` prints
+there, never a number counted or taken from the log's `seq`, using exclusive
+creation. Save it only once every validation and review of the round has published
+its record, and ask for the path at that moment: a run still in progress takes its
+number when it publishes, so a path asked for earlier can collide with it.
 Never overwrite a record. If there are no findings, save the owner's actual reply
 so the reading is recorded. On restart with a view open, recover its round head
 from Git's view state and finish that reading; preserve notes already saved.
@@ -710,10 +748,10 @@ declined one for that review's triage, the commit waits too. Never write the cha
 finding's code to decide what to change.
 
 The merge before closeout is a step of the graph (`merge`), not maintenance: run it
-when the computation names it. Merging `dev` at any other time, or another branch whose workflow tooling the change's later rounds need, into the
+when the computation names it. Merging the branch the change lands on at any other time, or another branch whose workflow tooling the change's later rounds need, into the
 change's branch is workflow maintenance, done only on the owner's word — and, after
 the pre-closeout triage, name the merge step to the owner instead, since it
-validates what it brings in and a merge of yours does not: `git -C <clone> pull --no-rebase origin dev`, or `workspace
+validates what it brings in and a merge of yours does not: `git -C <clone> pull --no-rebase <remote> <landing>`, the landing branch as `scripts/change-workflow find --json <change>` gives it as `base`, or `workspace
 <branch>` for another branch, then `make -C <clone> push-branch`. Make it only
 between the change's steps, never while its round view is open, and never between
 a round's sections being committed and that round's triage, so the merge never
@@ -782,8 +820,9 @@ Misbehaviour of the workflow's own tooling that shows across steps — an answer
 delivered to the wrong session, a denial missing from a line, a table rule several
 steps trip, a computation result that contradicts the files — is yours to report,
 since no step sees it. Write it as the change's next numbered record,
-`reviews/NN-orchestrator.md`, in the clone for a change worked there, numbered
-after every record and transcript with an exclusive create, opening "Observations
+`reviews/NN-orchestrator.md`, in the clone for a change worked there, at the path
+`scripts/change-workflow find --next-record orchestrator <change>` prints there,
+with an exclusive create, opening "Observations
 of the orchestrating session", each observation with the log lines or files that
 show it. The next triage reads it as it reads the owner's notes. It is never
 commentary on a step's finding or a design question.

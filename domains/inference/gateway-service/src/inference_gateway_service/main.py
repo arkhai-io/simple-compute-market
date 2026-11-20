@@ -1,4 +1,14 @@
-"""The inference gateway's entry point: not ready until its listing loads, then the family gateway."""
+"""The inference gateway's entry point: not ready until its listing loads, then the family gateway.
+
+The process reads the time of the world from one source, installed by
+``configured_app`` from ``INFERENCE_GATEWAY_TIME_SOURCE``: ``"wall"`` by default,
+``"injected"`` in a lane whose every party shares one time a scenario sets. The
+gate signs every call to the inference authority at that source's instant.
+Under injected time the gateway serves a time control and status
+(``inference_gateway_service.time_control``) behind the bearer token
+``INFERENCE_GATEWAY_CONTROL_TOKEN``, ahead of the gate and whether or not the
+listing has loaded; a wall-time gateway serves neither.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +19,21 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+import injected_time
 from arkhai_api_gate import GateConfig, PurchasePointer, TokensClient
 from arkhai_api_gateway import GatewayOffering, admit_all, create_gateway_app, read_upstream_credential
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from storefront_client.client import StorefrontClient
 
-from inference_gateway_service.config import GatewaySettings, gate_config
+from inference_gateway_service.config import (
+    CONTROL_TOKEN_SETTING,
+    TIME_SOURCE_SETTING,
+    GatewaySettings,
+    gate_config,
+)
 from inference_gateway_service.offering import OfferingUnavailable, load_offering
+from inference_gateway_service.time_control import CONTROL_PATHS, control_app
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +48,22 @@ class GatewayService:
     The gateway can start before the storefront has published its listing, so
     ``OfferingUnavailable`` is reported by ``/health`` and retried. Any other
     error ends the loading: it is not one waiting can cure.
+
+    ``control`` answers ``control_paths`` whatever the loading's state, so a
+    gateway on injected time can be set before its listing is published.
     """
 
-    def __init__(self, load: Callable[[], Awaitable[FastAPI]], *, retry_seconds: float) -> None:
+    def __init__(
+        self,
+        load: Callable[[], Awaitable[FastAPI]],
+        *,
+        retry_seconds: float,
+        control: FastAPI | None = None,
+        control_paths: frozenset[str] = frozenset(),
+    ) -> None:
         self._load = load
+        self._control = control
+        self._control_paths = control_paths
         self._retry_seconds = retry_seconds
         self._app: FastAPI | None = None
         self._reason = "the listing has not loaded yet"
@@ -51,6 +80,8 @@ class GatewayService:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
             await self._lifespan(receive, send)
+        elif self._control is not None and scope["type"] == "http" and scope["path"] in self._control_paths:
+            await self._control(scope, receive, send)
         elif self._app is not None:
             await self._app(scope, receive, send)
         elif scope["type"] == "http":
@@ -110,10 +141,17 @@ def create_app(
     storefront_transport: httpx.AsyncBaseTransport | None = None,
     authority: TokensClient | None = None,
     http: httpx.AsyncClient | None = None,
+    source: injected_time.TimeSource | None = None,
 ) -> GatewayService:
-    """The gateway for the listing ``settings`` names, signing toward its authority as ``service``."""
+    """The gateway for the listing ``settings`` names, signing toward its authority as ``service``.
+
+    ``source`` is the time the gateway reads, the process's installed source
+    unless given; when it is injected the time control is served, and
+    ``settings.control_token`` is required.
+    """
     settings = settings or GatewaySettings.from_env()
     gate = gate or gate_config()
+    control, control_paths = _time_control(source or injected_time.installed(), settings.control_token)
     # Everything the listing does not supply is checked here, before serving,
     # so a configuration error stops startup rather than every retry.
     if authority is None:
@@ -144,4 +182,35 @@ def create_app(
             await storefront.close()
         return create_gateway_app(offering, gate, authority=authority, verification=admit_all, http=http)
 
-    return GatewayService(load, retry_seconds=settings.listing_retry_seconds)
+    return GatewayService(
+        load, retry_seconds=settings.listing_retry_seconds, control=control, control_paths=control_paths,
+    )
+
+
+def _time_control(source: injected_time.TimeSource, token: str | None) -> tuple[FastAPI | None, frozenset[str]]:
+    """The time control over an injected ``source`` and the paths it serves; none on wall time."""
+    if not injected_time.TimeRouteService(source).settable:
+        return None, frozenset()
+    if not token:
+        raise ValueError(
+            f"{CONTROL_TOKEN_SETTING} is required when {TIME_SOURCE_SETTING} is "
+            '"injected": the time control is served behind it'
+        )
+    return control_app(source, token), CONTROL_PATHS
+
+
+def configured_app() -> GatewayService:
+    """The gateway as its environment configures it, its time source installed first.
+
+    Any time source but ``"wall"`` or ``"injected"`` refuses the start, naming
+    the setting; an injected source is announced.
+    """
+    settings = GatewaySettings.from_env()
+    source = injected_time.install(injected_time.source_for(settings.time_source, setting=TIME_SOURCE_SETTING))
+    if source.name != injected_time.WALL:
+        # A warning, so it is shown under the server's default logging.
+        logger.warning(
+            "%s is %s: the gateway holds %s until its time control sets it",
+            TIME_SOURCE_SETTING, source.name, source.now(),
+        )
+    return create_app(settings, source=source)

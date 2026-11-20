@@ -5,11 +5,12 @@ license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
 dependencies = [
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-resource-pools-contracts>=0.3.0",
     # The site authority signs its own responses and verifies its callers'
     # requests, so the identity primitives are a runtime dependency of the
     # router package, not only of its clients.
-    "arkhai-kit-identity>=0.4.0",
+    "arkhai-kit-identity>=0.5.0",
     "arkhai-kit-resource-pools>=0.9.0",
     # The migration type the ledger's baseline and later migrations are
     # exported as.

@@ -27,7 +27,7 @@ services:
   # the inference filter specification it already carries through the
   # deployment's registry profile.
   inference-registry:
-    image: arkhai:registry
+    image: arkhai:registry${IMAGE_SUFFIX:-}
     depends_on:
       anvil:
         condition: service_healthy

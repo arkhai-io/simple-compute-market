@@ -43,6 +43,7 @@ from market_config.config_loader import (
 )
 from market_config.setting_types import positive_seconds
 from market_storefront_kit import NegotiationWatchdogPolicy
+from market_storefront_kit import configured_time_source as kit_configured_time_source
 
 from apicredits_storefront.settings_source import settings_source
 
@@ -98,6 +99,11 @@ def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Settlement must be a table")
     return value
+
+
+def configured_time_source(source: Dynaconf | None = None) -> Any:
+    """The value ``[Time] source`` states, or ``None`` when unset."""
+    return kit_configured_time_source(source or settings)
 
 
 def settlement_publication_defaults(

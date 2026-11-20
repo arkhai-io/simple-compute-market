@@ -124,7 +124,11 @@ class SellingSettlementComposition:
     ) -> tuple[MechanismReadiness, ...]:
         """Each mechanism's readiness; ``accepted_escrows`` are escrows a listing
         request supplies, whose chains the escrow mechanism's readiness is then judged on."""
-        resources: Mapping[str, Any] = self.mechanism_resources
+        # Each registry whose recommendations could not be read is reported
+        # in the mechanisms' readiness, and blocks none of them.
+        resources: Mapping[str, Any] = {
+            **self.mechanism_resources, **self.disputes.readiness_resources(),
+        }
         if accepted_escrows:
             resources = {
                 **resources,
@@ -186,7 +190,12 @@ class SellingSettlementComposition:
         A clause whose mechanism is unready compiles nothing, so with none ready
         no artifact is returned; the readiness returned beside them says why,
         which the caller judges.
+
+        A listing's options are composed when the listing is created, so a
+        registry whose recommendations could not be read is read again first:
+        the authorities it recommends reach the next listing without a restart.
         """
+        await self.disputes.reread()
         merged_resources = {
             **self.mechanism_resources, **resources,
             "dispute_authorities": self.disputes.for_publication(),
@@ -205,7 +214,9 @@ class SellingSettlementComposition:
             if clauses is not None
             else None
         )
-        readiness_resources = merged_resources
+        # Each registry whose recommendations could not be read is reported
+        # in the mechanisms' readiness, and blocks none of them.
+        readiness_resources = {**merged_resources, **self.disputes.readiness_resources()}
         if compiled is not None:
             projected: dict[str, Any] = {}
             for mechanism, stage in self.stages.items():
@@ -213,7 +224,7 @@ class SellingSettlementComposition:
                     [clause for clause in compiled if clause.mechanism == mechanism],
                     merged_resources,
                 ))
-            readiness_resources = {**merged_resources, **projected}
+            readiness_resources = {**readiness_resources, **projected}
         readiness = await self.configuration_registry.ordered_readiness(
             self.settlement_config,
             role="seller",

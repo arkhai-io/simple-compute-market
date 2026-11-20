@@ -120,6 +120,10 @@ class HealthResponse(BaseModel):
     #: and the public details the mechanism reports. Present on system status,
     #: not on the liveness probes.
     settlement: tuple[dict[str, Any], ...] | None = None
+    #: The process's time source: ``{"source": "injected", "now": <Unix
+    #: seconds>}`` or ``{"source": "wall"}``. Present on system status, not on
+    #: the liveness probes.
+    time: dict[str, Any] | None = None
 
 
 class AdminPauseResponse(BaseModel):

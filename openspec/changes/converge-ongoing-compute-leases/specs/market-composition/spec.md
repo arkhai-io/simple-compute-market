@@ -2,6 +2,8 @@
 
 ### Requirement: Rate-part servicing is storefront-side and mechanism-neutral
 
+> **Owned in part by `serve-running-rate-deals`.** Both compositions wiring the shared servicing, with their own lease, activation and teardown ports (the scenario "Both domains compose rate servicing"), through the MVP's kit-owned per-deal step order; kept until that change's design writes its delta. The one loop in `kit/deal-servicing` that replaces both cycles stays here.
+
 The shared storefront servicing loop MUST live in kit/deal-servicing, receive payment/dispute adapters through lifecycle protocols, and receive physical effects through injected domain ports. It MUST NOT import mechanism kits, dispute kits or domain implementations. VM and bare-metal compositions MUST wire the same servicing behavior into the storefront loop controller, retaining domain-owned physical semantics.
 
 #### Scenario: Both domains compose rate servicing
@@ -10,6 +12,8 @@ The shared storefront servicing loop MUST live in kit/deal-servicing, receive pa
 - **THEN** both use the shared end service and their own injected lease/activation/teardown ports without a copied convergence state machine
 
 ### Requirement: Accepted rate commitments retain their servicing composition
+
+> **Owned by `serve-running-rate-deals`.** Startup coherence and declaration withdrawal in both compute domains; kept until that change's design writes its delta. Its last sentence is stale: no proposed contract exists; per-period servicing is declared on in lanes and off elsewhere until a hosted switch-on qualifies it.
 
 A storefront with accepted rate-part commitments MUST refuse startup if its servicing loop is absent. Withdrawal of new publication MUST NOT remove servicing from existing commitments. An authority outage alone MUST NOT cause this local-coherence refusal. Proposed-contract declarations MUST remain lane-only until production activation qualifies the hosted contract deployment.
 

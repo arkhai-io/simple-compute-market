@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 def advance_storefront(storefront_admin_client, loop: str) -> dict:
     """Run one cycle of a paused storefront loop and return what it reports.
 
-    `loop` is the loop's route name, such as `settlement-servicing`,
+    `loop` is the loop's route name, such as `deal-servicing`,
     `capacity-events`, or `site-projections`. Each calls the operation the
     timer was already invoking, so a stage advances production behaviour rather
     than a test-only path.
@@ -308,7 +308,7 @@ def advance_fulfillment_to(
 ) -> dict:
     """Advance convergence until a fulfillment reaches ``expected``.
 
-    No sleeps, per `docs/development/TESTING.md`'s async test discipline:
+    No sleeps, per `docs/guidance/engineering/test-determinism.md#no-sleeps`:
     each iteration is one *explicit* advance, and the only thing between
     iterations is a request the test made.
 

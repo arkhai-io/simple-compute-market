@@ -51,6 +51,12 @@ can reach, and gives people and bots the same small set of verbs to drive it.
   as waiving the next round's validation because only comments changed, is
   recorded when it is given, not held only in a session's memory. It then
   survives the session, and the next round reads it from the records.
+  Evidence it is needed before any hosting: in
+  `spot-deals-through-arkhai-payments`, the owner waived their reading of round
+  after round, and each pass needed their word afresh, since the orchestrating
+  session's harness rightly refuses to save an earlier waiver as a later pass's
+  owner record. A standing waiver recorded once, which each pass's record cites,
+  is the case for landing standing directions apart and first.
 - **An advisory status on the change's pull request.** It shows whether the change
   went through the workflow and where it stands. It is visible, not enforced:
   nothing blocks a merge.
@@ -94,7 +100,7 @@ can reach, and gives people and bots the same small set of verbs to drive it.
 - A pull-request status published by the engine.
 - The remote entry point.
 - The workflow's specification, architecture companion, and
-  `docs/agents/change-workflow.md`.
+  `docs/change-workflow-handbook.md`.
 
 ## Dependencies and Related Changes
 

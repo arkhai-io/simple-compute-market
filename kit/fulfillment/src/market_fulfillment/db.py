@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import enum
 
+import injected_time
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -114,7 +115,16 @@ class SettlementRecord(Base):
     claim_expires_at = Column(DateTime(timezone=True), nullable=True)
     attempt_count = Column(Integer, nullable=False, default=0)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Recovery claims rows oldest first and reports the oldest row's age against
+    # the process's time, so the application stamps creation from its time
+    # source rather than leaving it to the database's clock. Nothing reads
+    # `updated_at`, which keeps the database default.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
@@ -168,7 +178,14 @@ class ProvisionedResource(Base):
     )
     fulfillment_id = Column(String, nullable=False, index=True)
     status = Column(String, nullable=False, default="active")
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # A fulfillment's resources are listed in creation order, so creation is
+    # stamped from the process's time source; `updated_at` is audit-only.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

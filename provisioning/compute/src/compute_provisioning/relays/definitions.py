@@ -126,6 +126,16 @@ def parse_relay_definitions(yaml_text: str) -> tuple[RelayDefinition, ...]:
             )
         seen_endpoints.add(endpoint)
 
+        # A listed relay is drained through this field, so a value that is not
+        # a YAML boolean is refused, as a host entry's is, rather than coerced:
+        # a quoted "false" would otherwise leave the relay selling.
+        enabled = entry.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise RelayDefinitionError(
+                f"relays[{index}] ('{relay_id}') has a non-boolean enabled: "
+                f"{enabled!r}; write true or false, unquoted"
+            )
+
         definitions.append(
             RelayDefinition(
                 id=relay_id,
@@ -136,7 +146,7 @@ def parse_relay_definitions(yaml_text: str) -> tuple[RelayDefinition, ...]:
                 grant_key_secret_key=str(entry["grant_key_secret_key"]),
                 label=entry.get("label"),
                 token_secret_key=entry.get("token_secret_key"),
-                enabled=bool(entry.get("enabled", True)),
+                enabled=enabled,
             )
         )
     return tuple(definitions)
@@ -330,10 +340,11 @@ def relay_definitions_document(
         diff = import_relay_definitions_in_session(
             db, yaml_text, relay_service=relay_service, settings=settings
         )
-        # No "disabled" count: a relay the document stops naming is retained.
-        # Disabling one would break every pool referencing it and every live
-        # tunnel on it, which is not what an operator editing an unrelated
-        # entry is asking for.
+        # No "disabled" count: a relay the document stops naming is left as it
+        # is. Relays are also created through the API, outside any document, so
+        # omission cannot mean drain: it would disable every relay the API
+        # created at the next reconciliation. A listed relay is drained through
+        # its entry's ``enabled``.
         return (
             f"created={len(diff.created)} updated={len(diff.updated)} "
             f"unchanged={len(diff.unchanged)}"
