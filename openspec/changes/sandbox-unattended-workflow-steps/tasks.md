@@ -2070,16 +2070,35 @@ the archive (repository obligation: `docs/guidance/workflow/change-references.md
 `docs/guidance/engineering/comments.md#comments-describe-the-current-system`). File:
 `scripts/tests/test_change_workflow_harness.py`.
 
-- [ ] 11b.1 Drop the `D15: ` prefix from the docstring of
+- [x] 11b.1 Drop the `D15: ` prefix from the docstring of
   `test_the_unattended_prompt_is_one_harness_neutral_paragraph`, so it opens "The
   prompt says the step runs in a sandbox scoped to it, …", the rest unchanged, as the
   owner directed the return. Verify: a search of the comments and docstrings the
   change added under `scripts/` since the landing branch finds no decision id (`D`
   and a number, with or without a letter, before a colon or in parentheses).
-- [ ] 11b.2 Verification point: `test_change_workflow_harness.py` (unit) passes; `make
+  - Done: the docstring opens "The prompt says the step runs in a sandbox scoped to
+    it, what a refused write means, …", its lines rewrapped, its words otherwise
+    unchanged. The search, over the lines `git diff 024f3a039 -- scripts/` adds
+    (`024f3a039` the merge base with `origin/dev`), finds no `D` and a number before a
+    colon or in parentheses, and none at all as a bare word.
+- [x] 11b.2 Verification point: `test_change_workflow_harness.py` (unit) passes; `make
   check-comment-hygiene` passes; `scripts/change-workflow run pre-commit
   sandbox-unattended-workflow-steps` passes. End-to-end: none; no scenario exercises
   the workflow's tooling, and none is owed.
+  - `make test-release-tooling TESTS=scripts/tests/test_change_workflow_harness.py`
+    (unit): 20 passed. `make check-comment-hygiene` passed; it catches change names,
+    not decision ids, so 11b.1's search is what shows none remains.
+    `scripts/change-workflow run pre-commit sandbox-unattended-workflow-steps` passed,
+    on the tree `156fa2df119a`, which differs from what this commit holds only by this
+    note: `after-functional-change` passed with the locks unchanged;
+    `pre-commit-functional` passed, local evidence PASSED (dist-clean, check-packaging,
+    `make test` in 1014 s; attempt `20261120T115512.852114Z`); `pre-commit` passed,
+    strict OpenSpec validation and `make check-repository` among it. No test changed in
+    behaviour, so no test-before run applies. End-to-end: confirmed none, and nothing
+    is owed by validation. A fresh-context check of the diff found no breach and no
+    overstated claim; it noted only that the docstring now cites no requirement id,
+    which "State the rule locally" does not ask for. Handoff: 12.1 can be run again from
+    the start; nothing else in closeout was touched.
 
 ## 12. Closeout
 

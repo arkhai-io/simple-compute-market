@@ -173,9 +173,9 @@ def test_every_adapters_settings_are_protected_whichever_harness_runs() -> None:
 
 
 def test_the_unattended_prompt_is_one_harness_neutral_paragraph() -> None:
-    """D15: the prompt says the step runs in a sandbox scoped to it, what a refused
-    write means, how to stop or go on, and how to wait, and names no rule, no chain,
-    no harness's permission mode, and no `-C` form."""
+    """The prompt says the step runs in a sandbox scoped to it, what a refused write
+    means, how to stop or go on, and how to wait, and names no rule, no chain, no
+    harness's permission mode, and no `-C` form."""
     lowered = UNATTENDED.lower()
 
     for absent in ("rule", "chain", "don't ask mode", "bash call"):
