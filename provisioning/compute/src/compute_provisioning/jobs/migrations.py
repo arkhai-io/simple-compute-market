@@ -1,6 +1,7 @@
 """The job authority's migrations, for the chain of the database holding it.
 
-The provisioning service composes :data:`BASELINE` into its chain. The baseline
+The provisioning service composes :data:`BASELINE` and, after it,
+:data:`MIGRATIONS` into its chain. The baseline
 is fixed DDL reproducing the job tables as the marketplace v0.3.0 release
 built them, the index that release still carried under the reservation's
 earlier column name included; a later change to a table is a migration after
@@ -63,7 +64,28 @@ def _create_baseline(connection: Connection) -> None:
         connection.exec_driver_sql(statement)
 
 
+def _add_execution_instants(connection: Connection) -> None:
+    """Add ``ansible_jobs.execution_started_at`` and ``finished_at``.
+
+    Nothing is backfilled: no stored job recorded either instant, so every
+    existing row reads null in both. A terminal job with no ``finished_at`` is
+    never classified as never started, so a null start on such a row is not
+    read as proof that its execution never started.
+    """
+    connection.exec_driver_sql(
+        "ALTER TABLE ansible_jobs ADD COLUMN execution_started_at DATETIME"
+    )
+    connection.exec_driver_sql("ALTER TABLE ansible_jobs ADD COLUMN finished_at DATETIME")
+
+
 BASELINE: Migration[Connection] = Migration(
     "v0_3_0_baseline_compute_provisioning_jobs", _create_baseline
 )
 """``ansible_jobs`` and ``credentials`` as the v0.3.0 release built them."""
+
+EXECUTION_INSTANTS: Migration[Connection] = Migration(
+    "20261118_001_ansible_jobs_execution_instants", _add_execution_instants
+)
+
+MIGRATIONS: tuple[Migration[Connection], ...] = (EXECUTION_INSTANTS,)
+"""Every migration after :data:`BASELINE`, in the order a chain applies them."""

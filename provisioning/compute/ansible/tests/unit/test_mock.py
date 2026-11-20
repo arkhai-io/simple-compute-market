@@ -69,6 +69,7 @@ def _run(**parameters) -> JobRun:
         action=parameters.get("action", "grant"),
         host=_HOST,
         parameters={"action": "grant", "host_id": "node-1", **parameters},
+        report_starting=lambda: None,
         report_handle=lambda handle: None,
         report_logs=lambda logs: None,
     )
@@ -256,6 +257,7 @@ class TestExecutorIntegration:
         run = JobRun(
             job_id="job-1", offering_mode="test", action="grant", host=_HOST,
             parameters={"action": "grant", "host_id": "node-1"},
+            report_starting=lambda: None,
             report_handle=handles.append, report_logs=lambda logs: None,
         )
 

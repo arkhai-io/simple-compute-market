@@ -1378,13 +1378,14 @@ class TestStage09c_LeaseRecorded:
 #:
 #: Bounded on both sides, which is why it is not simply "a long time ago". The
 #: lease must be past its end for the watchdog to begin releasing, but it must
-#: NOT be past `lease_watchdog_grace_period_seconds` (300s), because the release
-#: path marks `release_failed` the moment grace elapses with `vm_remove`
-#: unfinished — and stages 11a/11b deliberately hold `vm_remove` at a mock gate.
-#: Back-dating two hours put the lease past grace immediately, so the first cycle
-#: both dispatched the removal and timed it out.
+#: NOT be past `lease_watchdog_grace_period_seconds` (the configured grace, 3600s
+#: in the charts' values), because the release path marks `release_failed` the
+#: moment grace elapses with `vm_remove` unfinished — and stages 11a/11b
+#: deliberately hold `vm_remove` at a mock gate. A back-date past grace puts the
+#: lease past it immediately, so the first cycle both dispatches the removal and
+#: times it out.
 #:
-#: One minute expires the lease and leaves roughly four minutes for the gated
+#: One minute expires the lease and leaves the rest of the grace for the gated
 #: stages, which is ample for three stages that make no network waits.
 E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
 

@@ -88,6 +88,7 @@ def test_a_reclaim_on_a_disabled_relay_is_prepared(session_factory):
         action=params.action,
         host=_HOST,
         parameters=params.model_dump(mode="json"),
+        report_starting=lambda: None,
         report_handle=lambda handle: None,
         report_logs=lambda logs: None,
     )

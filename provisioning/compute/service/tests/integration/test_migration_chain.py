@@ -118,6 +118,33 @@ def test_adoption_keeps_every_row_the_database_holds(tmp_path):
         )).all() == [("r-1", "leased", None)]
 
 
+def test_a_v0_3_0_job_gains_execution_instants_that_read_null(tmp_path):
+    """Nothing is backfilled: a job the release recorded has no recorded start
+    or finish, whatever its status or handle, and a fresh database builds both
+    columns."""
+    path = create_floor_database(tmp_path / "provisioning.db")
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO ansible_jobs (id, status, params, retry_count, max_retries, "
+            "execution_handle) VALUES "
+            "('j-failed', 'failed', '{}', 0, 3, NULL), "
+            "('j-ran', 'failed', '{}', 0, 3, '{\"pid\": 7}')"
+        ))
+
+    migrate_database(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT id, status, execution_started_at, finished_at FROM ansible_jobs "
+            "ORDER BY id"
+        )).all() == [("j-failed", "failed", None, None), ("j-ran", "failed", None, None)]
+    fresh = create_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
+    migrate_database(fresh)
+    columns = {column["name"] for column in inspect(fresh).get_columns("ansible_jobs")}
+    assert {"execution_started_at", "finished_at"} <= columns
+
+
 def test_every_mapped_table_and_column_is_one_the_chain_creates(tmp_path):
     """The models are read against the migrated schema and create none of it,
     so a column added to a model without a migration fails here."""

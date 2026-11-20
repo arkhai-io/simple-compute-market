@@ -214,6 +214,11 @@ async def test_the_storefront_starts_degraded_and_recovers_its_chain_without_a_r
     assert [(b["code"], b["kind"]) for b in alkahest["blockers"]] == [
         ("alkahest.chain_unreachable", "reachability")
     ]
+    # The registry's recommended dispute authorities could not be read, at
+    # startup or at the publication step: Alkahest reports it, adding no
+    # blocker, and the health check above answered all the same.
+    assert [entry["registry"] for entry in
+            alkahest["public_details"]["dispute_authorities_unread"]] == [_REFUSED]
     # Publication runs, holding the unloaded site's listings rather than closing
     # them: it closes nothing.
     outcome = degraded.lifecycle[lifecycle.PUBLICATION]["last_outcome"]

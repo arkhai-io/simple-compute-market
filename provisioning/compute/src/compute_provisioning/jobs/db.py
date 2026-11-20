@@ -4,7 +4,8 @@ The tables keep their names, ``ansible_jobs`` and ``credentials``. A job row
 holds its identity, state, route key (``offering_mode`` and ``executor_action``),
 ``host_id``, its opaque parameters, retry bookkeeping, the contract identity it
 was submitted under if any, the opaque cancellation handle its executor
-reported, its logs, and its result as a ``ResultEnvelope``. A credential row
+reported, when its execution started and when it finished, its logs, and its
+result as a ``ResultEnvelope``. A credential row
 holds one ``CredentialEnvelope``. Nothing here interprets a parameter, a
 handle, a result, or a credential.
 """
@@ -56,6 +57,19 @@ class JobRecord(Base):
     error = Column(Text, nullable=True)
     # The opaque cancellation handle the executor reported, returned to it as is.
     execution_handle = Column(JSON, nullable=True)
+    # When an executor first reported that the job's execution was starting,
+    # committed before it starts anything that can act on the host; a retry
+    # keeps the first instant. A failed, uncancelled job recording
+    # ``finished_at`` but neither this nor a handle never started an execution.
+    # A job with no ``finished_at`` is never so classified, whatever this
+    # column holds: its null start is not evidence. See the
+    # physical-provisioning specification, "A job records that its execution
+    # is starting before it starts".
+    execution_started_at = Column(DateTime(timezone=True), nullable=True)
+    # When the job reached a terminal status, from the process's time source.
+    # A terminal job is never transitioned again, so it is written once. Null
+    # on a job not yet finished, or on one whose finish was never recorded.
+    finished_at = Column(DateTime(timezone=True), nullable=True)
     retry_count = Column(Integer, default=0, nullable=False)
     max_retries = Column(Integer, default=3, nullable=False)
     next_retry_at = Column(DateTime(timezone=True), nullable=True)

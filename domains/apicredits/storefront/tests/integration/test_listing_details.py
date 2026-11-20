@@ -45,14 +45,15 @@ METADATA = {"acme.tier": "gold", "acme.region-count": 3, "acme.batch": True}
 class _RecordingRegistries:
     """Stands where ``MultiRegistryClient`` wraps the configured registries.
     Each registry's descriptor reads as unavailable, as the client reports a
-    registry it could not read, so none recommends a dispute authority; each
+    registry it could not read, so none recommends a dispute authority, and
+    ``descriptor_reads`` records the registries each read selected; each
     accepts every publication, which is recorded per registry."""
 
     urls = REGISTRIES
 
     def __init__(self) -> None:
         self.published: dict[str, list[dict]] = {url: [] for url in REGISTRIES}
-        self.descriptor_reads = 0
+        self.descriptor_reads: list[list[str]] = []
 
     async def __aenter__(self):
         return self
@@ -60,9 +61,10 @@ class _RecordingRegistries:
     async def __aexit__(self, *_exc):
         return False
 
-    async def get_descriptors(self):
-        self.descriptor_reads += 1
-        return {url: None for url in REGISTRIES}
+    async def get_descriptors(self, registries=None):
+        selected = [url for url in self.urls if registries is None or url in registries]
+        self.descriptor_reads.append(selected)
+        return {url: None for url in selected}
 
     async def publish_listing_per_registry(self, *, payloads):
         for url, request in payloads.items():
@@ -113,8 +115,8 @@ async def test_a_publish_stating_details_sends_them_beside_the_envelope_and_the_
         listing = await public.get_listing(created.listing_id)
 
     assert (created.status, created.registry_status) == ("created", "published")
-    # Startup read the registries' recommendations from the double too.
-    assert registries.descriptor_reads == 1
+    # Startup read both registries' recommendations from the double too.
+    assert registries.descriptor_reads == [list(REGISTRIES)]
     assert (listing.title, listing.description, listing.metadata) == (
         TITLE,
         DESCRIPTION,

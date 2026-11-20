@@ -796,9 +796,38 @@ sequence:
   host from the backup's values, or remove it, then upgrade again. After the
   upgrade a host submission must state its connection's `version`; one stating
   none is refused, as is version 1.
+- **The stalled-teardown grace.** `lease_watchdog_grace_period_seconds` defaults
+  to 3600 in the service and both charts, sized for teardowns of expected length:
+  a lease still `releasing` past it is marked `release_failed` with
+  `teardown_timeout`. A deployment that pinned 300 should raise it, else a
+  teardown that succeeds on a job retry, or on a rerun, is timed out first. Raise
+  it, and `relay_grant_expiry_grace_seconds` with it, when you raise
+  `teardown_rerun_limit`, the job retries (`default_max_retries` and the retry
+  backoff) or `ansible_timeout_seconds`, or when your teardowns run long.
+- **Teardowns that never started are run again.** A teardown job refused before
+  anything acted on its host is run again under a new job, up to
+  `teardown_rerun_limit` times (3 by default; 0 disables it), and its lease stays
+  `releasing` meanwhile. A lease that reaches `release_failed` with a failure
+  saying the teardown's execution never started and how many reruns were spent
+  is not helped by retry-release, which re-observes the same spent teardown.
+  Its workload is still on the host: read the last teardown job's error (as in
+  step 1 of the version-1 steps below), fix its cause, remove from the host what
+  the domain's teardown would have removed (step 2), and force-release the
+  lease with a `reason` and `evidence` (step 3).
+- **A lease timed out while its teardown went on.** A lease marked
+  `release_failed` with `teardown_timeout` whose teardown later finished is
+  released by one retry-release
+  (`POST /api/v1/contract/leases/<reservation>/retry-release`) once its
+  fulfillment is torn down; the retry re-observes the same fulfillment and
+  begins no second teardown. One retried while a rerun is pending returns to
+  `releasing` and waits for it.
 - **Leases left `release_failed` on a version-1 host.** The migration repairs the
-  host, not a release that already failed on it: a fulfillment's teardown is one
-  job, and retry-release re-observes that failed job rather than running another.
+  host, not a release that already failed on it. A teardown job is run again only
+  when its record proves its execution never started, and these jobs finished
+  before the service recorded a job's start or finish: v0.3.0 recorded only a
+  handle, after spawning the playbook, so nothing on them proves their playbooks
+  never ran. Retry-release therefore re-observes the failed job rather than
+  running another.
   A teardown that failed this way never ran, so the deal's guest or tenant account
   is still on the host, and a force-release alone would return the capacity while
   that workload still runs. For each provisioning lease `release_failed` at the

@@ -189,6 +189,8 @@ class RecurringWorld:
     provisioning: WorldProvisioning
     #: The app's loopback base URL when it is served, for a buyer's own commands.
     url: str | None = None
+    #: The registry double the storefront publishes and reads descriptors through.
+    registries: Any = None
     #: The runtime the app composes, whose site trust a test seeds before a
     #: site calls the app, and whose lifecycle clock it reads.
     runtime: Any = None
@@ -223,6 +225,7 @@ async def recurring_world(
     clock: Callable[[], int] | None = None,
     serve: bool = False,
     payments_section: bool = True,
+    registry_recommendations: bool = False,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -243,7 +246,9 @@ async def recurring_world(
     over HTTP; the world's clients then use that port too. Without
     ``payments_section`` the settlement configures no payments section and
     publishes no payment clause, as a storefront whose payments section was
-    removed restarts. A settled deal is
+    removed restarts. ``registry_recommendations`` composes no local dispute
+    entry and uses the registry's recommendations alone, which startup reads
+    from the world's registry double. A settled deal is
     delivered through the real delivery path: the world's site places,
     commits and activates its reservation, and provisioning reports its
     fulfillment active, so billing starts at the payments engine and the deal
@@ -271,7 +276,11 @@ async def recurring_world(
             configured,
             registry=registry,
             config=registry.resolve(root, role="seller"),
-            disputes=RegistryDisputePolicy(DisputeConfig(entries=[DISPUTE_ENTRY])),
+            disputes=RegistryDisputePolicy(
+                DisputeConfig(use_registry_dispute_authorities=True)
+                if registry_recommendations
+                else DisputeConfig(entries=[DISPUTE_ENTRY])
+            ),
             # One declaration object for every door: publication, acceptance and
             # the payments stage the composition builds over it.
             rate_servicing=RateServicing(declarations),
@@ -306,6 +315,7 @@ async def recurring_world(
                 ) as buyer, LifecycleClient(url, BUYER_SIGNER, publisher) as buyer_lifecycle:
                     world = RecurringWorld(
                         admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning, url,
+                        registries=runtime.registry_configuration.recording,
                         runtime=runtime, app=app,
                     )
                     world.declare(treatments)
@@ -324,6 +334,7 @@ async def recurring_world(
             ) as buyer_lifecycle:
                 world = RecurringWorld(
                     admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning,
+                    registries=runtime.registry_configuration.recording,
                     runtime=runtime, app=app,
                 )
                 world.declare(treatments)
