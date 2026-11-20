@@ -1,7 +1,6 @@
 """Every make target and repository path the workflow's skills name is the workflow's
-own; every one its step table and its make fragment name is one this repository says
-it provides; and each role the workflow asks of an adopting repository has a provision
-here.
+own; every one its make fragment names is one this repository says it provides; and
+each role the workflow asks of an adopting repository has a provision here.
 
 A skill is shared by every repository that adopts the workflow, so it names no
 repository's target or path (CW-n8tr): only the workflow's own — its guidance and the
@@ -11,10 +10,10 @@ targets — or one this repository's table of exemptions lists, each owned by th
 change that removes it. What a repository does not hold in common reaches a skill
 through its configuration and its guides, never through the skill's text.
 
-The step table and the make fragment are this repository's. The roles are
-stated twice: in `change-workflow`'s `README.md`, what any adopting repository
-provides, and in `market-change-workflow`'s, how this one provides each. This
-repository provides them in two places: its workflow configuration,
+The make fragment is this repository's. The roles are stated twice: in
+`change-workflow`'s `README.md`, what any adopting repository provides, and in
+`market-change-workflow`'s, how this one provides each. This repository provides
+them in two places: its workflow configuration,
 `.agents/workflow.toml`, whose hooks' and evidence kinds' commands are provisions as
 they stand, and its statement of what the configuration does not hold. This test reads
 the configuration's commands and the two documents' tables, never the engine's
@@ -22,9 +21,8 @@ modules: whether the table of the engine's own assumptions is complete is review
 judge, and the engine checks the configuration itself whenever it reads it.
 
 A name is collected from code, never from prose: a skill's code spans and fenced
-blocks, each rule of the step table, and the fragment's text and the targets it
-defines. A make target is the first word after `make` and its flags, kept with the
-directory `-C` names; a repository path is a word under a directory Git tracks at the
+blocks, and the fragment's text and the targets it defines. A make target is the
+first word after `make` and its flags, kept with the directory `-C` names; a repository path is a word under a directory Git tracks at the
 repository's root, or a file there, its heading anchor or line number dropped. A path
 the repository does not track, such as validation's output directory, is listed by
 the documents but not collected, since whether it exists depends on the checkout. A
@@ -48,7 +46,6 @@ SKILLS = ROOT / ".agents/skills"
 # The workflow's skills: one per step, and the guidance review, which no step runs.
 # The `openspec-*` skills beside them are OpenSpec's own, not the workflow's.
 WORKFLOW_SKILLS = ("change-*/SKILL.md", "guidance-review/SKILL.md")
-STEP_TABLE = ROOT / ".claude/change-steps.toml"
 FRAGMENT = ROOT / "scripts/change_workflow/workflow.mk"
 ROLES = ROOT / "openspec/specs/change-workflow/README.md"
 PROVISIONS = ROOT / "openspec/specs/market-change-workflow/README.md"
@@ -254,16 +251,11 @@ def not_the_workflows(where: dict[str, set[str]], targets: frozenset[str],
             if not workflows_own(name, targets) and name not in exempted]
 
 
-def collected(root: Root, step_table: Path = STEP_TABLE,
-              fragment: Path = FRAGMENT) -> dict[str, set[str]]:
-    """Every make target and repository path the step table and the fragment name, the
-    targets the fragment defines among them, each with where it is named."""
-    table = tomllib.loads(step_table.read_text("utf-8"))
-    # A step's rules are under `[steps.<name>]`, the shared ones under `[common]`.
-    rows = [table.get("common", {}), *table.get("steps", {}).values()]
-    rules = [rule for row in rows for key in ("allow", "deny") for rule in row.get(key, [])]
+def collected(root: Root, fragment: Path = FRAGMENT) -> dict[str, set[str]]:
+    """Every make target and repository path the fragment names, the targets it defines
+    among them, each with where it is named."""
     text = fragment.read_text("utf-8")
-    where = _named([(_shown(step_table), rules), (_shown(fragment), text.splitlines())], root)
+    where = _named([(_shown(fragment), text.splitlines())], root)
     for target in fragment_targets(fragment):
         where[f"make {target}"].add(_shown(fragment))
     return where
@@ -319,8 +311,8 @@ def provided(markdown: str, heading: str, root: Root) -> set[str]:
 
 def configured(text: str, root: Root) -> set[str]:
     """Every make target and path the configuration's commands name: each hook's, the
-    validation preflight's, and each evidence kind's `run`, `start`, `collect`, and
-    `cleanup`, each a command or a list of them."""
+    OpenSpec command, the validation preflight's, and each evidence kind's `run`,
+    `start`, `collect`, and `cleanup`, each a command or a list of them."""
     def each(value: object) -> list[str]:
         if isinstance(value, str):
             return [value]
@@ -331,6 +323,7 @@ def configured(text: str, root: Root) -> set[str]:
     validation = configuration.get("validation", {})
     commands = [command for value in configuration.get("hooks", {}).values()
                 for command in each(value)]
+    commands += each(configuration.get("openspec", {}).get("command"))
     commands += each(validation.get("preflight"))
     for kind in validation.get("evidence", {}).values():
         for key in ("run", "start", "collect", "cleanup"):
@@ -398,13 +391,14 @@ def test_every_exemption_is_named_by_a_skill_and_owned_by_an_open_change() -> No
     change owning its removal is archived, which moves its directory away."""
     exempted, named = exemptions(PROVISIONS.read_text("utf-8")), skill_names(tracked_root())
 
-    assert exempted
+    # None need stand: the section then holds no table, and the skills name only the
+    # workflow's own, which the test above checks.
     assert [name for name in exempted if name not in named] == []
     assert [f"{name}: {owner or 'no owner'}" for name, owner in exempted.items()
             if not owner or not (ROOT / "openspec/changes" / owner).is_dir()] == []
 
 
-def test_every_target_and_path_the_step_table_and_the_fragment_name_is_provided_here() -> None:
+def test_every_target_and_path_the_fragment_names_is_provided_here() -> None:
     root = tracked_root()
 
     missing = unlisted(collected(root), listed_here(root),
@@ -466,10 +460,9 @@ def _skill(tmp_path: Path, text: str) -> dict[str, set[str]]:
     return skill_names(ROOT_OF_TEST, tmp_path / "skills")
 
 
-def _sources(tmp_path: Path, table: str = "", fragment: str = "") -> dict[str, set[str]]:
-    (tmp_path / "table.toml").write_text(table, "utf-8")
+def _sources(tmp_path: Path, fragment: str) -> dict[str, set[str]]:
     (tmp_path / "workflow.mk").write_text(fragment, "utf-8")
-    return collected(ROOT_OF_TEST, tmp_path / "table.toml", tmp_path / "workflow.mk")
+    return collected(ROOT_OF_TEST, tmp_path / "workflow.mk")
 
 
 FRAGMENT_OF_TEST = frozenset({"validate", "check-change-index"})
@@ -537,12 +530,12 @@ def test_a_skill_naming_a_repositorys_paths_is_named(tmp_path: Path) -> None:
 def test_an_exempted_name_is_admitted(tmp_path: Path) -> None:
     exempted = exemptions(f"## {EXEMPTIONS_HEADING}\n\n| Named in a skill | Owned by |\n"
                           "|---|---|\n| `make -C <package> test` | `some-change` |\n"
-                          "| `.claude/` and `.claude/change-steps.toml` | `some-change` |\n")
+                          "| `.claude/` and `.claude/settings.json` | `some-change` |\n")
     where = _skill(tmp_path, "Run `make -C <package> test`, then `make -C <package> lint`; "
                              "an edit under `.claude/` is the orchestrator's.\n")
 
     assert exempted == {"make -C <package> test": "some-change", ".claude/": "some-change",
-                        ".claude/change-steps.toml": "some-change"}
+                        ".claude/settings.json": "some-change"}
     assert _shown_names(not_the_workflows(where, FRAGMENT_OF_TEST, exempted)) == [
         "make -C <package> lint"]
 
@@ -576,16 +569,15 @@ def test_the_guidance_review_is_read_and_openspecs_own_skills_are_not(tmp_path: 
     assert set(where) == {"openspec/changes/archive/x.jsonl"}
 
 
-def test_the_step_table_and_the_fragment_name_their_targets_and_paths(tmp_path: Path) -> None:
+def test_the_fragment_names_its_targets_and_paths(tmp_path: Path) -> None:
     where = _sources(
         tmp_path,
-        table='[common]\nallow = ["Bash(make lock*)", "Edit(openspec/**)"]\n'
-              '[steps.plan]\ndeny = ["Bash(make -C helm teardown*)"]\n',
-        fragment="# Included by a repository's Makefile.\nCHANGE_WORKFLOW ?= x\n"
-                 "design: ## A step\n\t@$(CHANGE_WORKFLOW) start design\n")
+        "# Included by a repository's Makefile.\nCHANGE_WORKFLOW ?= x\n"
+        "design: ## A step\n\t@$(CHANGE_WORKFLOW) start design\n"
+        "lock-all:\n\tmake lock && cat openspec/README.md\n")
 
-    assert set(where) == {"make lock*", "openspec/**", "make -C helm teardown*", "Makefile",
-                          "make design"}
+    assert set(where) == {"make lock", "openspec/README.md", "Makefile", "make design",
+                          "make lock-all"}
     assert where["make design"] == {str(tmp_path / "workflow.mk")}
 
 

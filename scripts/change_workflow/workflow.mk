@@ -8,17 +8,17 @@
 # openspec/specs/change-workflow/spec.md.
 #
 # With UNATTENDED=1, a step's target runs it through the command's wrapper: a
-# headless Claude Code session held to the step's permissions in the step table,
-# ending with an outcome logged to the change's workflow log. Without it, the
-# target opens an interactive session as the owner's own permission settings
-# allow. ALLOW holds rules the owner grants for that one unattended run, several
-# separated by `;`; each reaches the command as its own `--allow`, single-quoted
-# so the shell passes a rule's spaces, `*`, and quotes as they are (a `$` is
-# make's own, written `$$`).
+# headless session inside the step's sandbox, which lets it write only the step's
+# scope — or unconfined, with a warning, where the sandbox cannot run — ending with
+# an outcome logged to the change's workflow log. Without it, the
+# target opens an interactive session, unconfined, under the owner's own settings.
+# WRITE holds paths the owner grants for that one unattended run, several separated
+# by `;`; each reaches the command as its own `--write`, single-quoted so the shell
+# passes a path's spaces and quotes as they are (a `$` is make's own, written `$$`).
 
 CHANGE_WORKFLOW ?= scripts/change-workflow
 
-ALLOW ?=
+WRITE ?=
 # The branch a review reads the change against (REVIEW_BASE), and the branch the
 # merge before closeout brings in (FROM), for one run: unset, each is the branch the
 # change lands on, as its clone recorded it, and with none recorded the merge, and
@@ -36,9 +36,9 @@ REVIEW_EFFORT ?=
 # recipe, so a variable of that name would erase the marker in every recipe an
 # unattended run starts, and with it the engine's hook table.
 CHANGE_WORKFLOW_HEADLESS = $(filter 1,$(UNATTENDED))
-CHANGE_WORKFLOW_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
-# How a step's target ends its command: unattended, with the rules granted for the
-# run, or nothing for an interactive session, which no table restricts.
+CHANGE_WORKFLOW_GRANTS = $(if $(strip $(WRITE)), --write '$(subst ;,' --write ',$(subst ','\'',$(WRITE)))')
+# How a step's target ends its command: unattended, with the paths granted for the
+# run, or nothing for an interactive session, which no sandbox confines.
 CHANGE_WORKFLOW_RUN = $(if $(CHANGE_WORKFLOW_HEADLESS), --unattended$(CHANGE_WORKFLOW_GRANTS))
 CHANGE_WORKFLOW_ARGUMENTS = $(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')
 
@@ -47,31 +47,31 @@ CHANGE_WORKFLOW_ARGUMENTS = $(if $(strip $(ARGUMENTS)), --arguments '$(subst ','
 .PHONY: change-watch change-cost change-history check-change-index check-tasks
 .PHONY: check-agent-skills check-change-workflow-config check-review check-push-ready push-branch change-graph
 
-design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
+design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start design "$(CHANGE)"$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
 
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start plan "$(CHANGE)"$(if $(CHANGE_WORKFLOW_HEADLESS),$(if $(filter 1,$(FRESH)), --fresh)$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
 
-implement: ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve or the owner's direction to the sections, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
+implement: ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve or the owner's direction to the sections, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS)$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))'))$(CHANGE_WORKFLOW_RUN)
 
 review: ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude; ARGUMENTS is the owner's direction to the review, where to look harder (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout|merge [ARGUMENTS=<text>] [REVIEW_BASE=<branch>] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
 	@$(CHANGE_WORKFLOW) review "$(CHANGE)" --kind "$(KIND)" $(if $(strip $(REVIEW_BASE)),--base "$(REVIEW_BASE)") $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)$(CHANGE_WORKFLOW_ARGUMENTS)
 
-triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start triage "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
 
-validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change; ARGUMENTS follows the change in the skill's invocation (CHANGE=<change> [ARGUMENTS=<text>] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change; ARGUMENTS follows the change in the skill's invocation (CHANGE=<change> [ARGUMENTS=<text>] [UNATTENDED=1 [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start validate "$(CHANGE)"$(CHANGE_WORKFLOW_ARGUMENTS)$(CHANGE_WORKFLOW_RUN)
 
-merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, or again after its archive, resolving the conflicts and repairing what that branch's changes broke; ARGUMENTS follows the branch in the skill's invocation, as the owner's direction to the merge (CHANGE=<change> [FROM=<branch>, default the branch the change lands on] [ARGUMENTS=<text>] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, or again after its archive, resolving the conflicts and repairing what that branch's changes broke; ARGUMENTS follows the branch in the skill's invocation, as the owner's direction to the merge (CHANGE=<change> [FROM=<branch>, default the branch the change lands on] [ARGUMENTS=<text>] [UNATTENDED=1 [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start merge "$(CHANGE)"$(if $(strip $(FROM)$(ARGUMENTS)), --arguments '$(subst ','\'',$(strip $(if $(strip $(FROM)),from $(strip $(FROM))) $(ARGUMENTS)))')$(CHANGE_WORKFLOW_RUN)
 
-closeout: ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+closeout: ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start closeout "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
 
-archive-cleanup: ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it, or again after a merge after its archive (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+archive-cleanup: ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it, or again after a merge after its archive (CHANGE=<change> [UNATTENDED=1 [WRITE='<path>;<path>']])
 	@$(CHANGE_WORKFLOW) start archive-cleanup "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
 
 orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on the model and effort the workflow configuration's models.orchestrator names (CHANGE=<change>)

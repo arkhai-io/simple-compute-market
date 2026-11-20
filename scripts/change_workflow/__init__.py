@@ -8,7 +8,8 @@ siblings by relative import:
   the working directory, the engine's error, and its clock;
 - `graph` — the workflow's graph: its nodes, their exits, joins, and guards, which
   the next-step computation interprets, and the steps and review kinds it declares,
-  the engine's only list of either;
+  the engine's only list of either; and beside it each step's definition: its skill,
+  the session it resumes, its profile, and the paths it writes;
 - `diagram` — the architecture's hand-laid diagram of the graph, held to the table
   (`scripts/change-workflow check graph`);
 - `outcome` — the outcome a step ends with, checked against its schema, and the
@@ -36,13 +37,17 @@ siblings by relative import:
   `HEAD` lacks (`evidence`);
 - `gather` — gathering the evidence a change's `HEAD` lacks, or a new attempt of one
   kind (`gather`);
-- `steps` — the step table: each step's skill and the permission rules an
-  unattended run of it is held to, and what a model a step runs on is; which models
-  it runs on are the configuration's;
-- `stream` — a Claude Code run's event stream, transcript, progress, and denials;
+- `stream` — a Claude Code run's event stream, transcript, progress, denials, and
+  refusals;
 - `subagents` — the denials a run's subagents met, read from their transcripts;
-- `harness` — the Claude Code and Codex commands, and how each harness says it
-  cannot serve a model;
+- `harness` — what the engine needs of a harness, which each adapter states, a model
+  a step runs on, how a harness says it cannot serve one, and the error a refused
+  write fails with;
+- `claude_code` — Claude Code's adapter: a step's headless command, the state and
+  settings its harness writes and loads, and its run;
+- `codex` — Codex's adapter: a review's commands, its state and settings, its
+  progress, its refusals, and its run;
+- `adapters` — each harness's adapter, by harness;
 - `cost` — what each run cost;
 - `cost_report` — what a change's runs cost, by step and by round;
 - `running` — the record of each run in progress in a checkout, held locked while
@@ -51,6 +56,14 @@ siblings by relative import:
   run's `stopped` line while its agent or reviewer runs, and holds it for the rest
   of the run, for steps and reviews alike; and each session's invocations through
   `run` and the guarded push, kept until the session's log line records them;
+- `scope` — a step's scope for one run: the paths its sandbox lets it write and the
+  paths it keeps read-only inside them, each with its source;
+- `sandbox` — the bubblewrap sandbox a scope is rendered as around any program, its
+  probe, and the unconfined fallback;
+- `sandbox_git` — the engine's `git`, which the sandbox mounts over the system's to
+  refuse every push of an unattended run but the guarded push's;
+- `invariants` — the state a run's session starts from, and the seven checks
+  against it after the session, whose violation stops the run;
 - `wrapper` — running a step unattended, and resuming a waiting run;
 - `review` — a review run read-only and published as a numbered record;
 - `watch` — following the steps as they run, and a run's denials report;
@@ -59,6 +72,8 @@ siblings by relative import:
 - `clone` — a change's own clone of the owner's workspace: creating, reading, and
   removing it;
 - `history` — a change's history copied from its clone into the owner's workspace;
+- `propose` — a prerequisite's proposal worktree, made beside the checkout for a
+  design that needs another change first;
 - `round_view` — an implementation round shown as uncommitted changes for the owner
   to read;
 - `push` — the guarded push of a change's own branch;

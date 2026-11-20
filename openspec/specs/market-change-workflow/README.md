@@ -548,10 +548,10 @@ Each role is the workflow's, as
 states it; the provision is what fills it here: a field of this repository's
 workflow configuration, `.agents/workflow.toml`, or what the configuration does not
 hold. A test (`scripts/tests/test_change_workflow_assumptions.py`) fails when a make
-target or repository path the workflow's step table or its make fragment names, the
-fragment's own targets among them, is missing from these two tables and from the
+target or repository path the workflow's make fragment names, its own targets among
+them, is missing from these two tables and from the
 configuration's commands, or when the two documents' roles differ. The workflow's
-skills name none of this repository's targets or paths but the exemptions below
+skills name none of this repository's targets or paths
 ([What the workflow's skills name of this repository](#what-the-workflows-skills-name-of-this-repository)).
 This repository declares no step hook, `before-<step>` or `after-<step>`: the engine's
 own gathering before validation and cleanup before archive cleanup are all it needs
@@ -559,14 +559,14 @@ around a step.
 
 | Role | Provided by |
 |---|---|
-| Local validation of a commit: the repository's own checks and suites against the commit, built from it | the configuration's validation preflight, then its `local` evidence kind, which `pre-commit-functional` also runs, and its guide `.agents/evidence/local.md`; `scripts/validate_slice.py`, which runs the local and Helm kinds against the tree, clearing the wheelhouse first, and writes their evidence under `.snapshot/evidence/`; the family `make validate-*` the step table grants the steps that fix code |
+| Local validation of a commit: the repository's own checks and suites against the commit, built from it | the configuration's validation preflight, then its `local` evidence kind, which `pre-commit-functional` also runs, and its guide `.agents/evidence/local.md`; `scripts/validate_slice.py`, which runs the local and Helm kinds against the tree, clearing the wheelhouse first, and writes their evidence under `.snapshot/evidence/`; the family `make validate-*` the steps that fix code run |
 | Validation in a deployed environment: the change's services built and run as the repository deploys them | the configuration's `helm` kind, after `local`, and its guide `.agents/evidence/helm.md`; `make validate-parallel*`, and the chart's render checks `make -C helm test-render`, in the change's own namespace, within the capacity `helm/validation-capacity.toml` records |
-| The end-to-end pipeline: a run whose head is the commit, its logs fetched | the configuration's `pipeline` kind, dispatching the run and collecting its logs into `.snapshot/evidence/`, and its guide `.agents/evidence/pipeline.md`; the scenarios under `e2e-tests/`; the step table denies `make run-e2e*` to the steps that fix code |
+| The end-to-end pipeline: a run whose head is the commit, its logs fetched | the configuration's `pipeline` kind, dispatching the run and collecting its logs into `.snapshot/evidence/`, and its guide `.agents/evidence/pipeline.md`; the scenarios under `e2e-tests/`; `make run-e2e*`, which the steps that fix code leave to validation's gathering |
 | CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | the configuration's owed `ci` kind, dispatching only the workflows `scripts/ci_evidence.py` lists, and its guide `.agents/evidence/ci.md` |
 | Removing a change's validation resources, and recording what they used, at archive cleanup | the `helm` kind's `cleanup`, recording the capacity measured into `helm/validation-capacity.toml`, then removing the change's namespace and images |
-| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change`, `make lock`, and `pre-commit-functional`, `make validate-local`, which clears the wheelhouse, checks packaging, and runs every suite; the step table's grants for engineering work: `make test` and `make test*`, validation's `make test-release-tooling` (`make test-release-tooling TESTS=*`, one failing test of the scripts' suite run alone), `make -C * test*` in a project (`make -C <package> test`), and one project's tests run directly as `uv run --directory * pytest *`, `uv run --project * pytest *`, or `uv run --find-links * pytest *`; `make lock`, `make lock*`; `make dist*`, `make -C * dist*`; `make init*`, `make -C * init*`; `make reinit*`, `make -C * reinit*`, and `make typecheck*`, `make -C * typecheck*`, and `make -C * first-use*`, the targets of a project's own `Makefile`; `uv lock --directory *`, a new project's first lock; a section's local bring-up, `make -C * migrate*` (`make -C <package> migrate`), `docker run --rm *`, and `docker compose -p *` up, down, ps, and logs under a project name of the session's own; `make build-*`, the images a lane runs, `make -C * e2e-*-down`, a lane's teardown, and `make -C e2e-tests e2e-*-logs`, its containers' logs; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
+| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change`, `make lock`, and `pre-commit-functional`, `make validate-local`, which clears the wheelhouse, checks packaging, and runs every suite; and its `[sandbox]`, whose `writable.common` gives every step, the review included, the tool state those write outside the checkout: uv's `~/.local/share/uv`, the cluster client's `~/.kube/cache`, the cloud CLI's `~/.config/gcloud`, Docker's `~/.docker`, and npm's `~/.npm`, the cache of the OpenSpec command `scripts/openspec` runs through `npx`. The steps that fix code write the whole checkout, where they run `make test`, the scripts' suite as `make test-release-tooling` (`make test-release-tooling TESTS=*`, one failing test run alone), a project's tests as `make -C <package> test` or `uv run --directory <package> pytest`, `make lock`, `make dist`, `make init`, `make reinit`, and a project's own `make -C <package> typecheck` and `make -C <package> first-use`; `uv lock --directory <package>`, a new project's first lock; a section's local bring-up, `make -C <package> migrate`, `docker run --rm`, and `docker compose -p` under a project name of the session's own; `make build-*`, the images a lane runs, `make -C e2e-tests e2e-*-down`, a lane's teardown, and `make -C e2e-tests e2e-*-logs`, its containers' logs; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
 | The packaging check before closeout | the configuration's `pre-commit-functional` and `pre-archive`: `make check-packaging`, which runs `make check-architecture` over `docs/development/ARCHITECTURE.toml`, and `make check-architecture-change` |
-| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `scripts/change-workflow run pre-commit`; the checks they run and the step table grants as `make check-*` and `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index`; and `scripts/openspec`, the pinned OpenSpec CLI, granted as `scripts/openspec validate` |
+| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `scripts/change-workflow run pre-commit`; the checks they run, each through its own target, `make check-*`, or `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index`; and `scripts/openspec`, the pinned OpenSpec CLI, run directly as `scripts/openspec validate` |
 | The change index at a known path | `openspec/changes/README.md`, checked in a prerequisite's proposal checkout beside this one by `make -C ../<prerequisite>-proposal check-change-index` (`make -C ../*-proposal check-change-index`) |
 | The guidance documents every step reads | `AGENTS.md`, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, its closeout parts `openspec/README.md#this-repositorys-closeout-parts`, and the shared guidance under `docs/guidance/`, every Markdown file beneath it: the workflow's under `docs/guidance/workflow/` and the engineering guidance under `docs/guidance/engineering/`; the roadmap `docs/development/ROADMAP.md`, which design loads too; and `openspec/config.yaml`. The owner's handbook, `docs/change-workflow-handbook.md`, is no guidance and no step reads it |
 | Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` and its guidance under `docs/guidance/`, the workflow's under `docs/guidance/workflow/`, the engineering guidance under `docs/guidance/engineering/`, and this repository's rules spanning its systems under `docs/guidance/repository/` |
@@ -587,29 +587,23 @@ review.
 |---|---|
 | The change index's path | `openspec/changes/README.md` |
 | Its command and package, beside each other under `scripts/` | `scripts/change-workflow` and `scripts/change_workflow/`, whose computation and graph the orchestrating skill cites, `scripts/change_workflow/next_step.py` and `scripts/change_workflow/graph.py` |
-| The repository's workflow configuration, at a fixed path, checked whenever it is read | `.agents/workflow.toml`, which the step table denies every step to edit |
-| The step table, at a fixed path, in Claude Code's permission-rule syntax | `.claude/change-steps.toml`, its rules guarding `.claude/**` and `.agents/workflow.toml`, and granting the engine's `scripts/change-workflow run` for the hooks, `scripts/change-workflow gather` to validation, `scripts/change-workflow evidence` to the steps reading a validation, `scripts/change-workflow openspec` for the configured OpenSpec command, `scripts/openspec validate`, that command run directly, and `scripts/change-workflow config` |
+| The repository's workflow configuration, at a fixed path, checked whenever it is read | `.agents/workflow.toml`, which no step's sandbox lets it write: read-only under the root, or, inside a writable checkout, mounted read-only, as `.git/config` is |
 | The outcome schema, at a fixed path | `.agents/change-outcome.schema.json` |
 | The skills' one source, linked into each harness's directory | `.agents/skills`, under `.agents/`, linked from `.claude/` and `.codex/` |
-| The harness's local settings, which a clone links to the workspace's | `.claude/settings.local.json` |
-| The changes' directory, its archive, and each change's records under `reviews/` | `openspec/changes/`, each change at `openspec/changes/<change>/`, archived under `openspec/changes/archive/` as `openspec/changes/archive/<date>-<change>/`, beside the guidance reviews' untracked period ledger `openspec/changes/archive/guidance-reviews.jsonl`, which no reader of the archive takes for a change; the step table names `openspec/changes/**/reviews/*-validation.md`, `openspec/changes/archive/*/interventions.jsonl`, and `openspec/changes/archive/*/reviews/pull-request.md` |
+| The harness's local settings, which a clone links to the workspace's | `.claude/settings.local.json`, which the sandbox protects where the link leads: the workspace's file, outside the clone's scope and so read-only in it. The link itself, in the clone's writable checkout, is no mount: a step that removes it or renames a file over it leaves a file there the sandbox does not protect |
+| The changes' directory, its archive, and each change's records under `reviews/` | `openspec/changes/`, each change at `openspec/changes/<change>/`, archived under `openspec/changes/archive/` as `openspec/changes/archive/<date>-<change>/`, beside the guidance reviews' untracked period ledger `openspec/changes/archive/guidance-reviews.jsonl`, which no reader of the archive takes for a change |
 | The graph diagram's place in this capability | `openspec/specs/change-workflow/diagrams/`, the workflow's own specification being `openspec/specs/change-workflow/spec.md` |
 | The `workspace` remote a clone names the owner's workspace by | `workspace`, set by `scripts/change-workflow clone` |
 | The harness's session id in the environment, `CLAUDE_CODE_SESSION_ID` | Claude Code's |
-| The tools it invokes, `git`, `claude`, `codex`, and `sh`, which runs every command the configuration declares | each on the owner's path; the configuration's commands run `make`, and its `ci` and `pipeline` kinds `gh` |
+| The tools it invokes, `git`, `claude`, `codex`, `bwrap`, which confines every unattended step, and `sh`, which runs every command the configuration declares | each on the owner's path, `bwrap` from Ubuntu's `bubblewrap` package, without which an unattended step runs unconfined; the configuration's commands run `make`, and its `ci` and `pipeline` kinds `gh` |
 
 ## What the workflow's skills name of this repository
 
 The workflow's skills name no make target or path of an adopting repository, only the
-workflow's own (CW-n8tr), but for the exemptions below, each owned by the open change
-that removes it. The same test reads this table: it fails on a skill naming anything
-else, on an exemption no skill names, and on one whose owner is no open change.
-
-| Named in a skill | Owned by | Why |
-|---|---|---|
-| `make -C <package> test` | `sandbox-unattended-workflow-steps` | Implementation's command form for one project's tests, which the step table's allowlist matches and which goes with it |
-| `make -C <package> migrate` | `sandbox-unattended-workflow-steps` | A section's local bring-up, matched by the allowlist likewise |
-| `.claude/change-steps.toml` and `.claude/` | `sandbox-unattended-workflow-steps` | The step table, whose rules the skills cite and which denies every step edits under `.claude/`, so a plan gives such an edit to the orchestrator |
+workflow's own (CW-n8tr). An exemption would be a row of a table here — what a skill
+names, the open change that owns its removal, and why — and none stands. The same
+test reads this section: it fails on a skill naming anything else, on an exemption
+no skill names, and on one whose owner is no open change.
 
 ## Current limits
 
@@ -618,8 +612,12 @@ else, on an exemption no skill names, and on one whose owner is no open change.
   fraction of its cost. It would be reopened when a validation fails because two
   changes' releases contend for one node, or two changes need cluster-scoped
   resources a namespace cannot separate; when side-by-side validations become
-  routine, with several changes orchestrated from one session; or when unattended
-  steps are to be sandboxed from the owner's files.
+  routine, with several changes orchestrated from one session. Unattended steps are
+  kept from the owner's files by the engine's sandbox, one per step run
+  ([`change-workflow`'s restrictions](../change-workflow/README.md#restrictions-bind-unattended-runs-only)),
+  not by a container; the container that holds an orchestrator and every session it
+  starts is
+  [`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)'s.
 - Teardown removes a change's images from the machine's daemon but not from a kind
   node, which keeps every change's loaded images until the cluster is recreated.
 - Two releases at once may exhaust the node's memory: the capacity preflight is an

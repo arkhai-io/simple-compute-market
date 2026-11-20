@@ -1,12 +1,15 @@
-"""A Claude Code run's event stream: its transcript, its progress, and its denials.
+"""A Claude Code run's event stream: its transcript, its progress, its denials, and
+its refusals.
 
 Every line a run prints is kept in its transcript, `reviews/transcripts/NN-<step>.jsonl`,
 events or not, with a progress file of its tool calls beside it. The stream is read
-for the run's session, its results, and every tool call it was denied: each denial
-as the harness lists it, with the harness's reason for it, gathered over every turn
-of the run, since a background task finishing can wake a session for another turn
-after its first `result` event. A line's denials are always this record, never the
-step's own account of them.
+for the run's session, its results, every tool call it was denied, and every write
+the sandbox refused it: each denial as the harness lists it, with the harness's
+reason for it, gathered over every turn of the run, since a background task
+finishing can wake a session for another turn after its first `result` event; and
+each failed call whose result says a write failed as a read-only file system, or
+busy, with the call's tool, its command or path, and that line (CW-w3oa). A line's
+denials and refusals are always this record, never the step's own account of them.
 
 Both files stay open from the run's first line to its end. Closeout archives the
 change it runs for, which renames the change's directory, `reviews/` with it, while
@@ -22,6 +25,10 @@ from pathlib import Path
 from typing import Any, Callable, TextIO
 
 from .common import Clock, utc_now
+from .harness import refused
+
+# The fields of a call's input naming the path a file tool wrote.
+_PATH_FIELDS = ("file_path", "notebook_path", "path")
 
 
 def tool_summary(tool: dict[str, Any]) -> str:
@@ -44,6 +51,39 @@ def _tool_uses(event: dict[str, Any]) -> list[dict[str, Any]]:
     content = message.get("content") if isinstance(message, dict) else None
     return [item for item in content if isinstance(item, dict) and item.get("type") == "tool_use"
             ] if isinstance(content, list) else []
+
+
+def _tool_results(event: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tool results a user event carries back to the session."""
+    message = event.get("message") if event.get("type") == "user" else None
+    content = message.get("content") if isinstance(message, dict) else None
+    return [item for item in content
+            if isinstance(item, dict) and item.get("type") == "tool_result"
+            ] if isinstance(content, list) else []
+
+
+def _result_text(result: dict[str, Any]) -> str:
+    """A tool result's output, given as text or as a list of parts."""
+    content = result.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(part["text"] for part in content
+                         if isinstance(part, dict) and isinstance(part.get("text"), str))
+    return ""
+
+
+def _refusal(call: dict[str, Any], error: str) -> dict[str, Any]:
+    """A refused write as a line records it: the call's tool, the command it ran or
+    the path it wrote, and the error."""
+    given = call.get("tool_input", {})
+    named: dict[str, Any] = {}
+    if isinstance(given.get("command"), str):
+        named["command"] = given["command"]
+    elif path := next((given[key] for key in _PATH_FIELDS if isinstance(given.get(key), str)),
+                      None):
+        named["path"] = path
+    return {"tool": call.get("tool_name", "?"), **named, "error": error}
 
 
 def _denial_key(denial: dict[str, Any]) -> str:
@@ -100,6 +140,8 @@ class Stream:
         # and the tool a `permission_denied` event names, for a call never shown.
         self._calls: dict[str, dict[str, Any]] = {}
         self._denied_tools: dict[str, str] = {}
+        # Each write the sandbox refused, by the call whose result says so.
+        self._refusals: dict[str, dict[str, Any]] = {}
         self._files: dict[Path, TextIO] = {}
 
     def close(self) -> None:
@@ -126,6 +168,11 @@ class Stream:
         return [{**denial, **({"reason": self._reasons[key]} if key in self._reasons else {})}
                 for key, denial in {**self._denials, **unlisted}.items()]
 
+    @property
+    def refusals(self) -> list[dict[str, Any]]:
+        """Every write the sandbox refused the run, in order, once per call."""
+        return list(self._refusals.values())
+
     def feed(self, line: str) -> None:
         self._append(self.transcript, line if line.endswith("\n") else line + "\n")
         try:
@@ -144,7 +191,8 @@ class Stream:
                 self.echo(shown)
 
     def take(self, event: dict[str, Any]) -> None:
-        """Read an event for the run's session, its results, and its denials."""
+        """Read an event for the run's session, its results, its denials, and its
+        refusals."""
         if isinstance(event.get("session_id"), str):
             self.session = event["session_id"]
         for item in _tool_uses(event):
@@ -154,6 +202,13 @@ class Stream:
                 self._calls[item["id"]] = {"tool_name": item.get("name", "?"),
                                            "tool_use_id": item["id"],
                                            "tool_input": given if isinstance(given, dict) else {}}
+        for result in _tool_results(event):
+            key = result.get("tool_use_id")
+            # Only a failed call: a read, or a search, whose output quotes such an
+            # error met none.
+            if isinstance(key, str) and key not in self._refusals and result.get("is_error") and (
+                    error := refused(_result_text(result))):
+                self._refusals[key] = _refusal(self._calls.get(key, {}), error)
         if event.get("type") == "assistant" and self.first_usage is None:
             message = event.get("message")
             usage = message.get("usage") if isinstance(message, dict) else None
@@ -208,3 +263,8 @@ def read_transcript(path: Path) -> Stream:
 def transcript_denials(path: Path) -> list[dict[str, Any]]:
     """The denials a Claude run's transcript records, gathered as its stream was."""
     return read_transcript(path).denials
+
+
+def transcript_refusals(path: Path) -> list[dict[str, Any]]:
+    """The refusals a Claude run's transcript records, gathered as its stream was."""
+    return read_transcript(path).refusals

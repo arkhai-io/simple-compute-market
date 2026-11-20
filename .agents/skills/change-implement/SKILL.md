@@ -34,49 +34,24 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed, so
-  if a chained command is denied, run its commands one call at a time. If a single
-  command or any other tool call is denied, finish every part of the work that does
-  not depend on it. If the step cannot complete without that call, end with
-  `stopped`, `reason` naming that exact call and why the step needed it, and
-  `denials` listing the calls as you saw them; the wrapper replaces them with the
-  run's own record. Otherwise go on and end as the step ends: the wrapper records
-  the denial on the outcome whatever it is, and the orchestrating session reads it
-  before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it, except where the rule exists only to keep file writes on the Edit and
-  Write tools — the step table's comments name those rules: sed's in-place forms,
-  find's deleting, running, and writing actions, and the diff family's
-  output-to-file forms — whose refused shell write may be made with the Edit or
-  Write tool this step's rules allow. A call denied because no rule allows it —
-  the harness reports it as don't ask mode — may be done instead by a tool this
-  step's rules allow for the same work, such as the Edit tool for a shell write or
-  Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
-  the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`: `-C` names only a subdirectory a skill names, such as a package's,
-  `make -C <package> test`. Remove a tracked file with
-  `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
-  Spell every command relative to the checkout's root, never with its absolute
-  path: the rules match the relative forms only.
-- **Commands in the forms the rules name.** Run one package's tests with `make -C
-  <package> test`, `cd <package> && uv run pytest …`, or `uv run --directory
-  <package> pytest …`, never a virtual environment's `pytest` or `python -m pytest`
-  directly. Never redirect a command's output to a file or chain a read after it:
-  run a long command with `run_in_background` and wait on its output file as below.
-  A section's local bring-up runs a service's `make -C <package> migrate`, its image
-  once with `docker run --rm`, or a Compose stack with `docker compose -p
-  <change>-local …`, and takes the stack down before the turn ends.
-- **Helpers carry these rules.** A subagent you start does not load this skill, so
-  its prompt states the rules above that bear on its work: commands relative to the
-  checkout, Git and Make without `-C <a checkout>`, tests in the forms named here,
-  no redirects. A helper that breaks one is denied, as you would be.
+- **A project's tests and bring-up, by role.** Run one project's tests as the
+  repository's guidance names its test entry point, never a virtual environment's
+  runner directly. A section's local bring-up — a service's migrations, its image
+  run once, or a stack under a project name of the change's own, so it never
+  touches another change's — is taken down before the turn ends. Remove a tracked
+  file with `git rm`, which Git can restore. A subagent you start runs in the same
+  sandbox, and its prompt says so.
 - **A turn's end is its outcome.** Never end a turn with work still running: the
   wrapper logs that turn's report as the run's end, and what the work later finds
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
@@ -216,8 +191,8 @@ and it checks no task.
   `Depends on` gates implementation while unlanded. A change `in closeout` whose
   return to implementation the owner has confirmed is set `in implementation`.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
-  section's, or the edit under `.claude/` that a task of this section gives the
-  orchestrator (section 3). `scripts/change-workflow check round-view` passes:
+  section's, or the edit that a task of this section gives the orchestrator
+  (section 3). `scripts/change-workflow check round-view` passes:
   while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
   uncommitted, so committing a section then would squash the round into it.
@@ -262,9 +237,11 @@ Work through the section's tasks in order. For each:
   understood well enough to fix without a design of its own, is recorded where
   deferred work goes (`docs/guidance/workflow/working-model.md#deferred-work`,
   `docs/guidance/workflow/changes.md#defects-found-during-a-change`).
-- A task the plan gives the orchestrator — an edit under `.claude/`, which every
-  step is denied — is never attempted: check that its edit is in the worktree and
-  commit it with the section. When it is missing, stop and name the edit.
+- A task the plan gives the orchestrator — an edit of a protected path, which no
+  step writes: the harness's settings, the workflow's configuration, or one the
+  repository protects, as `scripts/change-workflow config --json` lists them — is
+  never attempted: check that its edit is in the worktree and commit it with the
+  section. When it is missing, stop and name the edit.
 - Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
   `test-levels.md`), through the seams and injected dependencies the code already
   offers rather than brute-force patching (`test-seams.md`).

@@ -42,7 +42,8 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### A design blocked on a prerequisite
 
-- [CW-dtpz](spec.md#requirement-cw-dtpz-a-design-blocked-on-a-prerequisite-ends-blocked) — design defines the prerequisite with the owner, proposes it from the development branch, and ends blocked.
+- [CW-dtpz](spec.md#requirement-cw-dtpz-a-design-blocked-on-a-prerequisite-ends-blocked) — design defines the prerequisite with the owner, writes its proposal in the worktree `propose` made from the landing branch, and ends blocked.
+- [CW-k8dn](spec.md#requirement-cw-k8dn-the-engine-creates-a-prerequisites-worktree) — `propose` creates the prerequisite's worktree on a new untracked branch from the landing branch, and a design run's sandbox makes it writable.
 - [CW-p7xk](spec.md#requirement-cw-p7xk-a-blocked-design-waits-until-its-prerequisite-is-released) — the blocked change stays `in design` until the prerequisite is archived, merged in, and released by the owner.
 
 ### The owner's directions
@@ -77,6 +78,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-gd24](spec.md#requirement-cw-gd24-added-deleted-and-binary-paths-are-carried-only-as-the-round-left-them) — added, deleted, binary, symlink, or mode-changed paths carry only as the round left them.
 - [CW-rgws](spec.md#requirement-cw-rgws-a-view-is-not-moved-over-the-owners-work) — a view is not moved to a new head over the owner's commits or uncommitted edits.
 - [CW-te38](spec.md#requirement-cw-te38-the-owners-commits-reach-the-clone-only-by-a-fast-forward) — the owner's reading commits reach the clone only through a fast-forward triage makes.
+- [CW-p3vz](spec.md#requirement-cw-p3vz-no-unattended-step-opens-or-ends-a-round-view) — `round-view` and `round-done` refuse under an unattended run's marker, naming its step, and move nothing.
 
 ### Validation
 
@@ -172,9 +174,9 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-5jlj](spec.md#requirement-cw-5jlj-the-orchestrating-session-runs-what-the-computation-names) — the orchestrating session runs the step the computation names, without the owner where one is named.
 - [CW-yvo1](spec.md#requirement-cw-yvo1-the-orchestrating-session-relays-and-takes-no-position) — it relays every step's questions and messages as written, and takes no position on findings or design.
 - [CW-mkwj](spec.md#requirement-cw-mkwj-the-orchestrating-session-reads-only-what-routing-needs) — it reads only what routing and recovery need: the computation's inputs, the log, and denials.
-- [CW-op72](spec.md#requirement-cw-op72-what-the-orchestrating-session-may-commit) — it may create the clone and commit workflow changes, owner-requested work, and merges; never feature work.
+- [CW-op72](spec.md#requirement-cw-op72-what-the-orchestrating-session-may-commit) — it may create the clone and commit workflow changes — skills, the configuration — owner-requested work, and merges; never feature work.
 - [CW-bsmk](spec.md#requirement-cw-bsmk-when-the-orchestrating-session-commits-and-merges-nothing) — it commits nothing while a step runs, merges nothing during a round, and leaves leftover work to the owner.
-- [CW-tax4](spec.md#requirement-cw-tax4-the-orchestrating-session-resolves-a-merges-conflicts-but-codes) — it resolves merge conflicts in workflow documents itself; code conflicts go to the owner or implementation.
+- [CW-tax4](spec.md#requirement-cw-tax4-the-orchestrating-session-resolves-a-merges-conflicts-but-codes) — it resolves merge conflicts in the index, change documents, the configuration, and skills itself; code conflicts go to the owner or implementation.
 - [CW-6scj](spec.md#requirement-cw-6scj-the-orchestrating-session-may-report-the-toolings-misbehaviour) — it may report the workflow tooling's observed misbehaviour as its own numbered record for the next triage.
 - [CW-6fi2](spec.md#requirement-cw-6fi2-a-waived-design-review-after-a-return-is-a-direction-to-planning) — an owner's waiver of another design review after a return is recorded as a direction to planning.
 - [CW-k2rv](spec.md#requirement-cw-k2rv-the-owner-stops-a-running-step-through-the-command) — on the owner's word, the command stops the change's running step, naming it when two run; the interrupt resolves no run.
@@ -189,15 +191,18 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-4vma](spec.md#requirement-cw-4vma-a-triage-outcome-names-the-records-it-triaged) — a triage outcome names its distinct triaged records, at least one review; otherwise it is recorded stopped.
 - [CW-1a4d](spec.md#requirement-cw-1a4d-the-wrapper-logs-every-outcome-of-a-run) — the wrapper logs every outcome with session and commit, recording stopped for a run that gives none.
 - [CW-4c3e](spec.md#requirement-cw-4c3e-the-files-prevail-over-the-log-on-a-changes-state) — a change's files hold and prevail on its state; the log holds exits and the owner's decisions.
-- [CW-k5mk](spec.md#requirement-cw-k5mk-a-runs-denials-come-from-its-own-record) — every unattended outcome carries the run's own recorded denials across all turns, with the harness's reasons.
+- [CW-k5mk](spec.md#requirement-cw-k5mk-a-runs-denials-and-refusals-come-from-its-own-record) — every unattended outcome carries the run's own recorded denials across all turns, with the harness's reasons, and its line the refusals its adapter read from its events.
 - [CW-xgq3](spec.md#requirement-cw-xgq3-a-question-resumes-its-session-and-a-return-waits-for-the-owner) — a question resumes its session; a proposed return changes nothing until the owner's logged confirmation.
 - [CW-ht4h](spec.md#requirement-cw-ht4h-a-decision-names-the-run-it-resolves-and-a-direction-is-the-owners) — a decision names exactly the run it resolves or reads; a decision directing a step is the owner's.
 - [CW-q5fy](spec.md#requirement-cw-q5fy-each-runs-log-line-records-what-it-invoked) — a run's log line records as `invoked` each hook, kind, and command the run or its gathering ran through the engine, with its exit status and timing, and names the run's inputs directory.
+- [CW-q7ub](spec.md#requirement-cw-q7ub-the-engine-checks-a-runs-invariants-after-its-session) — after every unattended session the engine checks history, validation's and review's tree, the log and ledger, review records, the stash, the remote, and closeout's paths against the state it recorded at the start.
+- [CW-f9le](spec.md#requirement-cw-f9le-an-invariant-violation-stops-the-run) — a run whose checks find a violation is logged stopped, naming each in `invariants`, and nothing after the session runs.
 
 ### Interactive runs
 
-- [CW-mzyz](spec.md#requirement-cw-mzyz-an-interactive-run-records-its-outcome-through-the-command) — an interactive run is unrestricted but records its outcome through `record`; an interactive review records nothing.
+- [CW-mzyz](spec.md#requirement-cw-mzyz-an-interactive-run-records-its-outcome-through-the-command) — an interactive run is unconfined but records its outcome through `record`; an interactive review records nothing.
 - [CW-gnqh](spec.md#requirement-cw-gnqh-the-record-command-checks-and-attributes-an-outcome) — `record` schema-checks an outcome and attributes it to session, commit, and interactive; refused without a session id.
+- [CW-g5ry](spec.md#requirement-cw-g5ry-interactive-runs-are-not-confined) — an interactive run is launched in no sandbox and its invariants are not checked.
 
 ### The log and its format
 
@@ -239,32 +244,36 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-9tzd](spec.md#requirement-cw-9tzd-archive-cleanup-ends-at-the-terminal-node) — archive cleanup exits to the terminal node `done`, which has no exits or step and no direction reaches; the merge after the archive leaves it.
 - [CW-66kx](spec.md#requirement-cw-66kx-the-graph-diagram-is-held-to-the-table) — `check graph` holds the diagram's source and embedded copy to the table's structure, whatever its layout.
 
-### Permissions
+### What a step may do
 
-- [CW-qu42](spec.md#requirement-cw-qu42-an-unattended-run-is-limited-to-its-steps-table) — an unattended run uses only its table's tools, pushes only by the guarded push, never resets or rebases.
+- [CW-x3pf](spec.md#requirement-cw-x3pf-the-engine-launches-each-unattended-step-inside-its-sandbox) — the engine starts every unattended step's harness inside an OS sandbox it owns, bubblewrap on Linux, leaving the network, the environment but `TMPDIR`, and reads but the host's `/tmp` as they are, and ending it with the wrapper.
+- [CW-m8wq](spec.md#requirement-cw-m8wq-each-step-writes-only-its-scope) — each step writes only its scope, with a private `/tmp`, its adapter's state, `~/.cache`, and the repository's additions; the review writes nothing it reviews; a file or pattern entry mounts each match's directory.
+- [CW-r6kd](spec.md#requirement-cw-r6kd-no-step-writes-the-protected-paths) — the configuration, `.git/config`, the engine's `git`, and the adapter's and repository's protected paths are mounted read-only where their links lead, created first when absent, and never granted; their names are not guarded.
+- [CW-v5ny](spec.md#requirement-cw-v5ny-where-the-sandbox-cannot-run-a-step-runs-unconfined-and-says-so) — where the probe fails, a step runs unconfined, warned and recorded as `unconfined: true`, the owner told, held only by the checks after it.
+- [CW-w3oa](spec.md#requirement-cw-w3oa-a-runs-refusals-come-from-its-own-events) — the adapter reads the sandbox's refused writes from the run's events, and the wrapper records them, and the pushes the sandbox's `git` refused, as `refusals`; a step treats such an error as outside its scope.
+- [CW-t6mb](spec.md#requirement-cw-t6mb-a-harnesss-adapter-states-what-the-engine-needs-of-it) — each harness's adapter states its launch inside the sandbox, its state and protected paths, its reading of refusals and denials, its steps, and its command rules; the engine reaches a harness only through it.
+- [CW-qu42](spec.md#requirement-cw-qu42-an-unattended-run-is-limited-to-its-steps-scope) — an unattended run is limited to its step's scope, pushes only by the guarded push, and never resets, checks out, switches, rebases, stashes, or cleans.
 - [CW-pehu](spec.md#requirement-cw-pehu-writing-steps-commit-and-push-their-work-and-validation-and-review-commit-nothing) — steps that write tracked work commit and push it through the guarded push; validation and review commit nothing.
 - [CW-ajo9](spec.md#requirement-cw-ajo9-a-returning-run-commits-its-work-in-progress-and-a-stopped-run-commits-nothing) — a returning run commits and pushes its work in progress; a stopped run leaves its work uncommitted.
-- [CW-4yhk](spec.md#requirement-cw-4yhk-a-denied-run-stops-or-goes-on-only-by-allowed-calls) — a run blocked by a denial stops naming it; going on uses only calls its rules allow.
-- [CW-2lvd](spec.md#requirement-cw-2lvd-a-deny-rules-refusal-stands-except-a-write-steering-rules) — a deny rule's refusal is not worked around, except write-steering rules, whose write may use Edit or Write.
-- [CW-2h9t](spec.md#requirement-cw-2h9t-a-call-no-rule-allows-may-be-done-by-an-allowed-tool) — a call denied for want of an allow rule may be done by an allowed tool, named in the message.
-- [CW-b5cf](spec.md#requirement-cw-b5cf-an-unattended-steps-calls-take-the-forms-its-rules-match) — an unattended step runs one command per call, names paths from its root, reads refused files through a tool, and waits through `wait`.
-- [CW-svng](spec.md#requirement-cw-svng-the-orchestrating-session-reads-and-classifies-each-denial) — the orchestrating session reads denials from the run's record and classifies each as a table gap or forbidden.
-- [CW-5rmh](spec.md#requirement-cw-5rmh-the-orchestrating-session-checks-a-deny-rules-denial-for-a-workaround) — after a deny rule's denial it checks later calls for a workaround; an Edit-made steered write is a gap.
-- [CW-vdqj](spec.md#requirement-cw-vdqj-the-orchestrating-session-proposes-a-rule-for-each-gap-and-records-its-reading) — for each gap it proposes the narrowest rule, as grant or tracked change, and logs its reading.
-- [CW-jqi7](spec.md#requirement-cw-jqi7-a-waiting-outcome-is-settled-after-its-denials-are-read) — a waiting outcome is answered only after its denials are read, and the reading does not settle it.
-- [CW-drf6](spec.md#requirement-cw-drf6-a-steps-permissions-change-only-on-the-owners-word) — permissions change only by the owner, as a tracked change or a one-run grant; deny rules are never granted.
-- [CW-tl5v](spec.md#requirement-cw-tl5v-a-grant-holds-for-one-run) — a grant passes on the run's command line and is logged as `granted`, never added to the table.
-- [CW-56zq](spec.md#requirement-cw-56zq-a-file-rule-names-a-path-from-the-checkouts-root) — a file-tool rule's relative path is from the root of the checkout the run started in.
+- [CW-4yhk](spec.md#requirement-cw-4yhk-a-refused-run-stops-or-goes-on-within-its-scope) — a run that cannot go on without a refused write or a denied call stops naming it; one that goes on stays within its scope.
+- [CW-b5cf](spec.md#requirement-cw-b5cf-an-unattended-step-waits-on-a-background-command-through-wait) — an unattended step waits on a background command through `wait`, never by following its output.
+- [CW-svng](spec.md#requirement-cw-svng-the-orchestrating-session-reads-and-classifies-each-refusal) — the orchestrating session reads refusals and denials from the run's record and classifies each as a finding or a gap; a harness guard's own denial is a finding or neither.
+- [CW-5rmh](spec.md#requirement-cw-5rmh-the-orchestrating-session-checks-a-findings-run-for-a-workaround) — after a refusal or denial read as a finding, it checks the run's later calls for the same work done another way and reports it.
+- [CW-vdqj](spec.md#requirement-cw-vdqj-the-orchestrating-session-proposes-a-path-for-each-gap-and-records-its-reading) — for each gap it proposes the narrowest writable path from the step's resolved scope, as a one-run grant or a tracked edit of the configuration, and logs its reading.
+- [CW-jqi7](spec.md#requirement-cw-jqi7-a-waiting-outcome-is-settled-after-its-refusals-and-denials-are-read) — a waiting outcome is answered only after its refusals and denials are read, and the reading does not settle it; the computation treats either alike.
+- [CW-drf6](spec.md#requirement-cw-drf6-a-steps-scope-changes-only-on-the-owners-word) — a step's scope changes only by the owner, as a tracked edit of the configuration or a one-run grant; a protected path and an adapter's denied call are never granted.
+- [CW-tl5v](spec.md#requirement-cw-tl5v-a-grant-holds-for-one-run) — a grant is a writable path on the run's command line, `--write`, fresh or resumed, logged as `writes_granted` and never kept; a pattern, a protected path, and `/tmp` itself are refused.
 
 ### The guarded push
 
-- [CW-59c7](spec.md#requirement-cw-59c7-the-guarded-push-of-a-change-branch) — an agent may push the change's own branch, none of the configured protected branches, attached and clean, sending exactly `HEAD` to its upstream's remote or one given, never forced.
+- [CW-59c7](spec.md#requirement-cw-59c7-the-guarded-push-of-a-change-branch) — an agent may push the change's own branch, none of the configured protected branches, attached and clean, sending exactly `HEAD` to its upstream's remote or one given, never forced; under a run each push is recorded, and a missing upstream is set by the engine after the session.
 - [CW-p7kq](spec.md#requirement-cw-p7kq-the-guarded-push-runs-the-repositorys-pre-push-hook) — the guarded push runs the configuration's `pre-push` as Git runs a pre-push hook; failure refuses the push, and none declared skips it.
+- [CW-j4cs](spec.md#requirement-cw-j4cs-no-git-push-but-the-guarded-pushs-leaves-a-checkout-during-an-unattended-run) — the engine's `git`, mounted over the system's two, refuses and records any push but the guarded push's under an unattended run, whatever its options.
 
 ### Models
 
 - [CW-ebmo](spec.md#requirement-cw-ebmo-each-step-runs-on-its-ordered-models) — the configuration lists each step's ordered models; the wrapper runs the first available, falling back only on unavailability, and logs it.
-- [CW-zq4h](spec.md#requirement-cw-zq4h-the-step-models-policy) — a step's models name no two of one vendor, and another harness only where it can enforce the step's limits; the engine refuses violations.
+- [CW-zq4h](spec.md#requirement-cw-zq4h-the-step-models-policy) — a step's models name no two of one vendor, and a model only for a step its harness's adapter can run; the engine refuses violations.
 - [CW-1dld](spec.md#requirement-cw-1dld-a-run-with-no-available-model-stops-and-a-waiting-run-resumes-on-its-own) — a run with no available model stops; network errors retry without fallback; waiting runs resume on their model.
 - [CW-clhl](spec.md#requirement-cw-clhl-a-review-names-a-reviewer-other-than-its-rows-first) — a review on a fallback model names its reviewer; a reviewer session continues only on the same harness.
 - [CW-d1sm](spec.md#requirement-cw-d1sm-the-owner-may-override-one-reviews-model) — the owner may name any model or effort for one hand-run review, marked as an override, without fallback.
@@ -283,7 +292,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-8jyb](spec.md#requirement-cw-8jyb-creating-a-clone-is-safe-to-repeat) — clone creation is repeatable, finishing an incomplete clone and refusing a foreign or dirty directory, deleting nothing; its remotes come from Git's record in the workspace.
 - [CW-s3ju](spec.md#requirement-cw-s3ju-the-branch-a-change-lands-on-is-recorded-where-its-orchestration-began) — the clone records the branch the change lands on, the workspace's or `--from`, printed as `find --json`'s `base`; a merge given no branch brings in the last finished merge's recorded branch before it, and an argument overrides both.
 - [CW-8npg](spec.md#requirement-cw-8npg-a-clones-bootstrap-gates-implementation-and-validation) — implementation and validation wait on the clone's `post-clone` bootstrap succeeding, its state recording its command; a failure goes to the owner.
-- [CW-hak6](spec.md#requirement-cw-hak6-archive-cleanup-copies-a-changes-history-into-the-workspace) — archive cleanup last copies the change's records and evidence into the workspace, repeated after its outcome.
+- [CW-hak6](spec.md#requirement-cw-hak6-archive-cleanups-history-is-copied-into-the-workspace) — once archive cleanup's session finishes the engine copies the change's records and evidence into the workspace, and the orchestrating session repeats the copy after its outcome.
 - [CW-rf50](spec.md#requirement-cw-rf50-copying-a-changes-history-overwrites-nothing) — the history copy is repeatable, extends prefix files, and refuses to overwrite a differing file.
 - [CW-c3he](spec.md#requirement-cw-c3he-a-step-looks-for-records-in-its-checkout-then-in-the-workspace) — a step looks for other changes' records in its own checkout, then in the owner's workspace.
 - [CW-xx5f](spec.md#requirement-cw-xx5f-a-clone-is-removed-only-once-its-work-is-safe) — a clone is removed only on the owner's command, once its records are copied and its work is merged into its landing branch on its upstream's remote.
@@ -315,8 +324,9 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-n7ra](spec.md#requirement-cw-n7ra-the-repositorys-inert-paths) — the repository's inert paths name what validation would prove nothing about; with none declared, `openspec/` and every Markdown file, and an empty declaration makes none inert.
 - [CW-l7hn](spec.md#requirement-cw-l7hn-a-steps-documents-to-load-come-from-the-configuration) — a step loads `load.common` and `load.<step>` through `config load`, an entry ending in `/` expanding to its Markdown files and refused when it yields none; the post-compaction hook re-reads `load.common`.
 - [CW-i2we](spec.md#requirement-cw-i2we-the-openspec-cli-runs-through-the-configured-command) — the OpenSpec validation and archive run through `openspec.command`, or `openspec` on the path.
-- [CW-o6kc](spec.md#requirement-cw-o6kc-the-configurations-resolution-is-listed) — `config` lists how every field resolved, each evidence kind's guide among them, and `config --json` the same as structured output.
-- [CW-z5me](spec.md#requirement-cw-z5me-no-step-edits-the-configuration) — no unattended step edits the configuration; it changes only as a tracked edit by the owner, or by the orchestrating session on the owner's word.
+- [CW-h2zt](spec.md#requirement-cw-h2zt-a-repository-extends-a-steps-scope-in-its-configuration) — `[sandbox]` adds writable paths per step or for every step, the review taking only those outside its checkout, and protected paths; the check refuses a writable path at or under a protected one, as written or where its links lead.
+- [CW-o6kc](spec.md#requirement-cw-o6kc-the-configurations-resolution-is-listed) — `config` lists how every field resolved, each evidence kind's guide among them, and each step's resolved scope with each path's source; `config --json` the same as structured output.
+- [CW-z5me](spec.md#requirement-cw-z5me-no-step-edits-the-configuration) — no unattended step edits the configuration, which its sandbox mounts read-only; it changes only as a tracked edit by the owner, or by the orchestrating session on the owner's word.
 - [CW-d1nj](spec.md#requirement-cw-d1nj-a-repository-injects-into-the-workflow-through-its-configuration-and-its-guides) — the configuration holds every value the engine reads and the guides what an agent is told; a skill learns a shared value from the engine's output.
 - [CW-g2rs](spec.md#requirement-cw-g2rs-a-guide-restates-nothing-the-configuration-holds) — an evidence kind's guide restates none of its configuration entry, held by review.
 - [CW-k7gd](spec.md#requirement-cw-k7gd-an-evidence-kind-has-a-guide-the-steps-read) — each kind names a non-empty guide the steps handling it read; a kind without one is refused by every reader.
@@ -333,8 +343,10 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### What an adopting repository provides
 
-- [CW-m4ps](spec.md#requirement-cw-m4ps-an-adopting-repository-provides-the-workflows-roles) — the workflow describes each configuration field and each role outside it; a test fails on a target or path the step table or make fragment names that both the statement and the configuration omit.
+- [CW-m4ps](spec.md#requirement-cw-m4ps-an-adopting-repository-provides-the-workflows-roles) — the workflow describes each configuration field and each role outside it; a test fails on a target or path the make fragment names that both the statement and the configuration omit.
 
 ## Retired ids
 
-None.
+- CW-2lvd — a deny rule's refusal stood, except a write-steering rule's; no write-steering rule remains, and every refusal is read as a finding or a gap (CW-svng, CW-5rmh).
+- CW-2h9t — a call no rule allowed could be done by an allowed tool; no allow rules remain, and a refused write is outside the step's scope (CW-4yhk).
+- CW-56zq — a file rule named a path from the checkout's root; no file rules remain, and a repository's relative paths resolve as `[sandbox]` states (CW-h2zt).
