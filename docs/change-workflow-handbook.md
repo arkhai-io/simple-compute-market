@@ -210,8 +210,8 @@ scripts/change-workflow note <change> orchestrator --by owner --waives deploymen
 `--waives` names the kinds, which `scripts/change-workflow evidence` then reports as
 waived and the engine's gathering skips. A waived kind is gathered anyway, the record
 saying the waiver lapsed, when the commits since the last validation that ran it
-include a merge, which the gathering notices itself, or when validation judges the
-condition no longer holds; the engine refuses a new attempt of a waived kind unless
+include a merge made after you waived it, which `evidence` and the gathering notice
+themselves, or when validation judges the condition no longer holds; the engine refuses a new attempt of a waived kind unless
 validation says the waiver lapsed.
 
 **Directing a change.** You can send a change to any step outside the exits its
