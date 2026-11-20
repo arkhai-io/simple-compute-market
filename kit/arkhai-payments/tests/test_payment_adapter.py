@@ -3,8 +3,8 @@
 import asyncio
 
 import pytest
-from market_deal_lifecycle.adapters import OnceAccountingRead
 from market_deal_lifecycle.delivery import ActivatedDeliveryRef, DeliveryEvidence
+from market_deal_lifecycle.fixtures.once_accounting import validate_once_accounting_read
 from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand
 
@@ -131,15 +131,24 @@ def test_a_once_only_reverse_without_a_store_falls_back_to_the_authoritys_refusa
     asyncio.run(drive())
 
 
-def test_once_accounting_uses_one_verified_read_and_preserves_public_read():
+@pytest.mark.parametrize("reversed_once", [False, True])
+def test_once_accounting_uses_one_verified_read_and_preserves_public_read(reversed_once):
     async def drive():
         peer, adapter = once_only()
+        minimum_sequence = 0
+        if reversed_once:
+            keys = OperationKeys(adapter.negotiation_id, "refund")
+            result = await adapter.submit(command(adapter, "reverse", "refund", part="0", amount="10000"), keys)
+            assert result.status == "accepted"
+            minimum_sequence = 1
         peer.observed_at += 8 * 86400
         adapter._clock = lambda: peer.observed_at
         before = peer.count("get_transaction")
-        read = await adapter.read_with_once_accounting(minimum_sequence=0, read_started_at=peer.observed_at)
-        assert type(read) is OnceAccountingRead
-        assert isinstance(read.view.outcome, Accepted)
+        read = await adapter.read_with_once_accounting(minimum_sequence=minimum_sequence, read_started_at=peer.observed_at)
+        validate_once_accounting_read(
+            read, negotiation_id=adapter.negotiation_id, commitment_ref=adapter.commitment_ref,
+            seller_account=adapter.account, minimum_sequence=minimum_sequence,
+        )
         assert read.projection is not None
         assert read.projection.accounting["classification"] == "ACCOUNTING_TERMINAL"
         assert read.projection.accounting["returnAdmitted"] is False
