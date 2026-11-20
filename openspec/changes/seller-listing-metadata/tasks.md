@@ -715,9 +715,13 @@ currency.
   `make check-architecture-change CHANGE=seller-listing-metadata`; resolve every
   failure, leaving no exception owned by this change.
 - [ ] 7.8 **End-to-end pipeline.** Record the passing run the latest validation
-  names, its result, and the scenarios that exercise this change's unchanged path
-  (`e2e_deal`, `e2e_bare_metal_publication`, `e2e_credits_deal`,
-  `e2e_credits_payment_deal`), stating that no scenario states details; or an
+  names, its result, and the coverage as it is: `e2e_credits_deal` and
+  `e2e_credits_payment_deal` publish the API-credit seed's `description` beside the
+  envelope and inside `listing_resource` through a real registry; `e2e_deal` and
+  `e2e_bare_metal_publication` state no details and cover the unchanged path only;
+  `title`, `metadata`, an override's `details`, and the seller's create route are
+  proven at the integration and application-integration levels by the tests of
+  sections 3–6. Or an
   explicit blocker naming its cause and owning change, with the validations it
   gates treated as unrun.
 - [ ] 7.9 **Promotion.** Write: `openspec/specs/registry-discovery/architecture.md`,
