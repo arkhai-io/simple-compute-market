@@ -612,8 +612,12 @@ no skill names, and on one whose owner is no open change.
   fraction of its cost. It would be reopened when a validation fails because two
   changes' releases contend for one node, or two changes need cluster-scoped
   resources a namespace cannot separate; when side-by-side validations become
-  routine, with several changes orchestrated from one session; or when unattended
-  steps are to be sandboxed from the owner's files.
+  routine, with several changes orchestrated from one session. Unattended steps are
+  kept from the owner's files by the engine's sandbox, one per step run
+  ([`change-workflow`'s restrictions](../change-workflow/README.md#restrictions-bind-unattended-runs-only)),
+  not by a container; the container that holds an orchestrator and every session it
+  starts is
+  [`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)'s.
 - Teardown removes a change's images from the machine's daemon but not from a kind
   node, which keeps every change's loaded images until the cluster is recreated.
 - Two releases at once may exhaust the node's memory: the capacity preflight is an

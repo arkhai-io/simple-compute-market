@@ -718,6 +718,75 @@ configuration's commands omit.
 - **WHEN** the workflow states a role this repository's statement does not provide
 - **THEN** the test fails, naming the role
 
+### Requirement: CW-op72 What the orchestrating session may commit
+
+The orchestrating session MAY create the change's clone and branch, and MAY commit
+changes to the workflow itself (skills, the repository's configuration), what else
+the owner explicitly asks for, and merges the owner asks for of the branch the change
+lands on, in the change's clone, on its branch, pushing each through the guarded
+push. It MUST NOT write the change's feature work of its own accord.
+
+#### Scenario: The owner asks for a permission fix
+
+- **WHEN** a run's write is refused for want of a path, and the owner asks the
+  orchestrating session to add the path to the step's scope
+- **THEN** it edits the configuration's `[sandbox]` in the change's clone and commits
+  the edit on the change's branch, so the step's next run writes the new path
+
+### Requirement: CW-tax4 The orchestrating session resolves a merge's conflicts but code's
+
+The orchestrating session MUST resolve a merge's conflicts in the change index,
+change documents, the repository's configuration, and skills itself, and MUST bring
+a conflict in code to the owner; one the owner does not rule on MUST go to an
+implementation run, named the conflicted files. While a merge is in progress the
+next-step computation MUST name the owner.
+
+#### Scenario: A merge conflicts in a skill and in code
+
+- **WHEN** the owner asks the orchestrating session to merge the branch the change
+  lands on between steps, and the merge conflicts in a skill and in a script
+- **THEN** it resolves the skill's conflict itself and brings the script's to the
+  owner; when the owner does not rule on it, it starts an implementation run naming
+  the conflicted script, which resolves it, concludes the merge, and pushes
+
+### Requirement: CW-mzyz An interactive run records its outcome through the command
+
+An interactive run of a step MUST behave as it does without the wrapper, unconfined
+by any sandbox (CW-g5ry), except that it MUST end by recording its outcome through
+the command's `record`. A review MUST record nothing: an interactive review
+publishes no record, and its text is saved as an external review by the triage it
+is pasted into.
+
+#### Scenario: An interactive triage finishes
+
+- **WHEN** the owner triages a review in an interactive session, and the triage
+  ends by recording its outcome naming the review it triaged and its exit
+- **THEN** the workflow log holds that outcome with the session's id, `HEAD`, and
+  `interactive`, and the computation routes on it
+
+#### Scenario: An interactive review is pasted into a triage
+
+- **WHEN** the owner asks for a review in an interactive session and pastes it into
+  a triage
+- **THEN** the review's session records no outcome, the triage saves the review as
+  the change's next `NN-<kind>-external.md`, and the triage's outcome names it in
+  `triaged`
+
+#### Scenario: An interactive session ends without recording
+
+- **WHEN** the owner closes an interactive session of any step but a review before it
+  recorded its outcome, and the last exit or direction names that step
+- **THEN** the computation names the step as in progress, its reason saying that if
+  no session of it is open, an interactive session ended without recording, to be
+  resumed or recorded by hand
+
+#### Scenario: An interactive plan sets its status and records nothing
+
+- **WHEN** an interactive planning session wrote the task list and set the status
+  `ready for implementation`, and was closed before it recorded its outcome
+- **THEN** the computation names planning as in progress, and no round, its result
+  carrying a `disagreement` naming the missing plan outcome and the record command
+
 ## REMOVED Requirements
 
 ### Requirement: CW-2lvd A deny rule's refusal stands, except a write-steering rule's

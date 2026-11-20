@@ -7,7 +7,8 @@ implementation, when the sandbox's identity mapping failed the bare-metal ledger
 suite (D17–D21; D1, D4, D5, D6, D8, D12 and the cadence restated); revised on the
 triage of design review 48 (D6, D13, D19, the cadence); revised on the triage of the
 implementation round on 2026-11-20, its review 62, the orchestrator's records 58 and
-64, and the sections' handoffs (D2, D4, D5, D5a, D6, D7, D8, D12, D13, D15, D21). Some
+64, and the sections' handoffs (D2, D4, D5, D5a, D6, D7, D8, D12, D13, D15, D21);
+D16 extended at closeout, 2026-11-20. Some
 decisions are expected to be
 reconsidered when `extract-change-workflow-repository` moves the workflow out of this
 repository; each stands until then.
@@ -528,6 +529,14 @@ CW-m4ps, like MCW-5tgp, names the step table among what its test reads; with D11
 removing the table it names only the make fragment. Planning recorded that delta as
 a consequence of D11, with no choice in it.
 
+Closeout's promotion found three requirements the deltas did not touch still naming
+the step table — CW-op72 (what the orchestrating session may commit, and its
+scenario of a rule added to the table), CW-tax4 (the files whose merge conflicts it
+resolves), and CW-mzyz (an interactive run "unrestricted by the step table") — and
+added each to the delta as a modification, the table read as the configuration, or
+as the sandbox for CW-mzyz: a consequence of D11, with no choice in it. CW-op72's
+scenario keeps its title, since the validator refuses a modification that drops one.
+
 ### D17 — Every step gets a private `/tmp` of its own
 
 The sandbox gives every step, the review included, a `/tmp` of its own, owned by the
@@ -680,6 +689,101 @@ restraint systems at once, which D10 rejects as a fallback; one session for ever
 launch and guard change — a review slice much larger than the others. After the
 return: a second round for the private `/tmp`, reviewed apart — a slice smaller than
 its review, which the first round's verification point cannot pass without.
+
+## Settled during implementation
+
+Refinements implementation made within the decisions above, kept here as its task
+notes were compressed:
+
+- **Only protected paths inside a writable path are mounted** (3.1), and only those
+  are created when absent: one outside every writable path is already read-only under
+  the root. D20's rule for links is the same reasoning.
+- **The engine's `git` is a module, not an executable** (4.1): a program mounted at
+  the system's Git path could not find the engine's package, and a session could not
+  set a new file's mode. A small program runs it with `-I` from the engine's
+  directory. It is read live from that directory, so a step whose scope holds the
+  engine — implementation working on the engine itself — could change what its own
+  `git` refuses: a workaround outside P1, which its review sees in the diff.
+- **The real Git is mounted under the sandbox's own `/dev`** (4.2), because
+  bubblewrap cannot make a mount point on the read-only root, and a fresh `/dev`
+  leaves nothing on the owner's disk.
+- **A protected branch's new tip counts as the run's** (5.2) when `HEAD`'s reflog
+  gained that commit during the run, which is how check 6 tells "a commit made in the
+  run" without walking the branch's history.
+- **"Every tool allowed" is the list of built-in tools a step works with** (6.1);
+  tools that wait for a later turn — a monitor, a wake-up, a scheduled task — stay
+  denied, since an unattended turn's end is its outcome and no wildcard rule could be
+  confirmed to allow only the rest.
+- **`propose` fetches into the remote-tracking branch** (9.1), never `FETCH_HEAD`,
+  which a fetch run beside it could replace before the worktree reads it.
+- **`/` is refused as a grant or `[sandbox]` entry** (11a.2), beside `/tmp`, since it
+  would hide the private `/tmp` just as surely.
+- **The real probe's own test was dropped** (3.2): it was skipped exactly when the
+  probe fails, so it could not fail.
+- **Points the sections' fresh-context checks raised and implementation declined**:
+  reading the push, wrapper, and adapter comments as describing a sandbox no step yet
+  launched in (4.5, 6), since the branch lands whole; a detached-`HEAD` start skipping
+  the branch checks (5.4), since no step starts detached; walking a protected
+  branch's history for a commit built over (5.4), which needs the fetch check 6 does
+  without; dropping `prepare` from the launch (7.6), which is idempotent and keeps
+  the launch whole; reusing the hooks' timing for the history copy's one invocation
+  entry (9.5); and guarding `~/.cache` against a checkout beneath it (11a.8).
+
+Small consequences noted in the notes and not acted on: every Git call inside the
+sandbox starts a Python process first, a cost not measured (4.5); the placeholder
+`.claude/settings.local.json` shows as an untracked file in a repository that does
+not ignore it (6.6); the harness inherits the engine's inheritable descriptors, such
+as a make jobserver's pipes (7.1); the denials report, `scripts/change-workflow
+denials`, reads denials alone, refusals being read from the line (10.4); and the
+delta's CW-tl5v
+scenario keeps the title "The owner grants rules before a fresh run", which the
+validator will not let a modification rename.
+
+## Design promotion record
+
+`change-workflow/README.md` is `openspec/specs/change-workflow/README.md` and
+`market-change-workflow/README.md` its sibling; each requirement reaches
+`openspec/specs/change-workflow/spec.md` or `market-change-workflow/spec.md`
+through the archive, and its entry in that capability's `index.md` was written at
+closeout.
+
+| Accepted decision | Permanent location |
+|---|---|
+| P1, P2 — mistakes, not a malicious agent; ambient credentials | `change-workflow/README.md#restrictions-bind-unattended-runs-only`; CW-x3pf |
+| P3 — read every change's checkout, write only one's own | `change-workflow/README.md#restrictions-bind-unattended-runs-only`; CW-m8wq |
+| P5, P7 — enforcement below the harness; one container for an orchestrator and its sessions | `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#current-limits` |
+| P6 — coupling to a harness only in its adapter | `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#models-are-policy-with-no-same-vendor-fallback`; CW-t6mb |
+| P8 — the review catches what the sandbox does not cheaply prevent | `change-workflow/README.md#restrictions-bind-unattended-runs-only` |
+| P9 — compatibility owed only by a newer reader to older lines | `change-workflow/README.md#a-changes-records-carry-one-format-version` |
+| D1 — the threat model, with ambient credentials | CW-x3pf; `change-workflow/README.md#restrictions-bind-unattended-runs-only` |
+| D2 — the push stays in the session; the sandbox's `git` refuses any other | CW-j4cs and CW-59c7; `change-workflow/README.md#pushing-is-guarded-never-repaired` |
+| D3 — enforcement below the harness | CW-x3pf and CW-t6mb; `change-workflow/README.md#restrictions-bind-unattended-runs-only` |
+| D4 — bubblewrap | CW-x3pf and CW-r6kd; `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#the-engines-own-assumptions` (`bwrap`, the overflow uid) |
+| D5 — a scope per step | CW-m8wq, CW-r6kd, and CW-hak6; `change-workflow/README.md#restrictions-bind-unattended-runs-only` (its scope table) and `#history-lives-in-the-owners-workspace` |
+| D5a — a file or pattern entry mounts its directory | CW-m8wq; `change-workflow/README.md#restrictions-bind-unattended-runs-only` |
+| D5b — the engine creates a prerequisite's worktree | CW-k8dn and CW-dtpz; `change-workflow/README.md#a-prerequisite-is-proposed-apart-and-halts-its-dependent` and `#the-command-and-its-tiers`; `docs/change-workflow-handbook.md#interventions`; the design skill, `.agents/skills/change-design/SKILL.md` |
+| D5c — validation writes the checkout, and the check holds it | CW-m8wq and CW-q7ub; `change-workflow/README.md#validation-observes-a-committed-slice` |
+| D6 — seven checks after every run; a violation stops it | CW-q7ub and CW-f9le; `change-workflow/README.md#a-step-runs-life` |
+| D7 — refusals come from the run's events | CW-w3oa, CW-k5mk, CW-svng, CW-5rmh, CW-vdqj, and CW-jqi7; `change-workflow/README.md#restrictions-bind-unattended-runs-only`; `docs/change-workflow-handbook.md#interventions`; the orchestrating skill, `.agents/skills/change-orchestrate/SKILL.md` |
+| D8 — a grant is a writable path for one run | CW-tl5v and CW-drf6; `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#the-command-and-its-tiers`; `docs/change-workflow-handbook.md#interventions` |
+| D9 — interactive runs stay unconfined | CW-g5ry and CW-mzyz; `change-workflow/README.md#interactive-runs-record-their-own-outcome` |
+| D10 — without the sandbox, a step runs unconfined and says so | CW-v5ny; `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#current-limits`; `docs/change-workflow-handbook.md#interventions` |
+| D11 — each step's definition lives in the engine | CW-m4ps, CW-op72, and CW-tax4; `change-workflow/README.md#its-parts`, `#a-repositorys-configuration`, and `#the-engines-own-assumptions`; `market-change-workflow/README.md#the-engines-own-assumptions`; `docs/change-workflow-handbook.md#the-engine` and `#customization` |
+| D12 — repository extension in `[sandbox]` | CW-h2zt and CW-o6kc; `change-workflow/README.md#a-repositorys-configuration`; MCW-s4bx and `market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles` |
+| D13 — internal adapters for Claude Code and Codex | CW-t6mb and CW-zq4h; `change-workflow/README.md#restrictions-bind-unattended-runs-only`, `#models-are-policy-with-no-same-vendor-fallback`, and `#current-limits` |
+| D14 — no deny rules survive | CW-p3vz and CW-z5me; `change-workflow/README.md#restrictions-bind-unattended-runs-only` and its hook table |
+| D15 — the skills | Each skill's "Running unattended" section under `.agents/skills/`, and the wrapper's prompt in `scripts/change_workflow/harness.py`; `market-change-workflow/README.md#what-the-workflows-skills-name-of-this-repository`, where no exemption stands |
+| D16 — the specification | The requirements it lists, through the archive, with CW-op72, CW-tax4, and CW-mzyz added at closeout; both capabilities' `index.md`; the log's new fields in `change-workflow/README.md#a-changes-records-carry-one-format-version` |
+| D17 — every step gets a private `/tmp` | CW-m8wq; `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#the-engines-own-assumptions` |
+| D18 — the private `/tmp` is a tmpfs; `TMPDIR`; named paths bound inside | CW-x3pf, CW-m8wq, CW-h2zt, and CW-tl5v; `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#a-repositorys-configuration` |
+| D19 — the protected mounts' names are not guarded | CW-r6kd; `change-workflow/README.md#restrictions-bind-unattended-runs-only` and `#current-limits`; `market-change-workflow/README.md#the-engines-own-assumptions` |
+| D20 — paths are mounted where their symlinks lead | CW-r6kd; `change-workflow/README.md#restrictions-bind-unattended-runs-only`; `market-change-workflow/README.md#the-engines-own-assumptions` (a clone's linked settings) |
+| D21 — `~/.npm` for every step | MCW-s4bx; `market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles` |
+| Implementation cadence | No permanent destination: the cadence is the change's own |
+| Settled during implementation (above) | The engine's `git` reaching the real one at a path of its own, `change-workflow/README.md#pushing-is-guarded-never-repaired`; `HEAD`'s reflog in a run's recorded state, `#a-step-runs-life`; the tools a step works with, `#restrictions-bind-unattended-runs-only`; the rest, and the consequences not acted on, are the change's own |
+| The specifications' Evidence | `openspec/specs/change-workflow/spec.md` and `market-change-workflow/spec.md`, "Evidence", by hand: the modules that replace the step table, and `propose` |
+| Roadmap currency | No goal of `docs/development/ROADMAP.md` affected; the change serves the lesser goal "Make the change workflow a tool any repository can adopt" in the change index |
+| Campaign index currency | `openspec/changes/README.md`, that goal's section: the change's row; "Current state" (the contract, the configuration, the sandbox, and the harnesses); the gap "Unattended permissions are allowlists of this repository's commands" closed; the harness adapters' gap reworded for the internal adapters |
 
 ## Open Questions
 

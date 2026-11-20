@@ -8,7 +8,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ## 1. The workflow's roles
 
-- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — `.agents/workflow.toml` declares the workflow's fields, and the repository states how it fills each role outside them; every target and path the step table and make fragment name appears in one or the other, and the skills name none.
+- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — `.agents/workflow.toml` declares the workflow's fields, and the repository states how it fills each role outside them; every target and path the make fragment names appears in one or the other, and the skills name none.
 
 ## 2. Validation
 
@@ -46,7 +46,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [MCW-k3vy](spec.md#requirement-mcw-k3vy-the-pre-push-checks-are-one-make-target) — the pre-push checks are one target, `make pre-push`, which the configuration's `pre-push` and the Git hook both run.
 - [MCW-r4tx](spec.md#requirement-mcw-r4tx-this-repositorys-hooks-and-validation-parts) — the configuration relocks, runs `make check-repository` before every commit, clears the wheelhouse, packages, and tests before a functional one, leaving `local` evidence for its tree, and declares the evidence kinds `local`, `helm`, `pipeline`, and owed `ci`, keyed by tree or commit, each with its guide.
 - [MCW-uqlq](spec.md#requirement-mcw-uqlq-a-clones-bootstrap-is-make-init) — a clone's bootstrap is `make init`, run as the clone is made; implementation and validation wait on it.
-- [MCW-s4bx](spec.md#requirement-mcw-s4bx-this-repositorys-sandbox-extensions) — the configuration gives design and planning `docs/`, every step, the review included, the tool state its suites, builds, and deployments write outside the checkout, and protects nothing more.
+- [MCW-s4bx](spec.md#requirement-mcw-s4bx-this-repositorys-sandbox-extensions) — the configuration gives design and planning `docs/`, and every step, the review included, the tool state its suites, builds, deployments, and OpenSpec command write outside the checkout, and protects nothing more.
 
 ## 5. This repository's checks
 
