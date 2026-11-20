@@ -1497,9 +1497,12 @@ its seventh position. Closed out 2026-11-20 at `e71e69a47`, after 11b's fix.
     No scenario exercises the workflow's tooling; the change's evidence is the local
     kind (`make test`, 1018 s, attempt `20261120T130125.711971Z`) and the owed
     `tests.yml` job: §11a owed `test · test-deployment-packaging` under
-    `SANDBOX_REQUIRED=1`, which passed in run 44743459934 (3578 passed, 1 skipped; the
-    skip is read as no sandbox test, since under that variable they fail rather than
-    skip). Helm passed too. No commit waiver was needed.
+    `SANDBOX_REQUIRED=1`, which passed in run 44743459934 (3578 passed, 1 skipped;
+    under that variable the bubblewrap-gated sandbox tests fail rather than skip, so
+    the skip is none of them — it is almost certainly the Codex confinement test,
+    `test_codex_runs_in_the_reviews_scope`, which skips where Codex is absent, as on
+    the runner, and which passed in the local kind at the same tree, 3579 passed with
+    no skip; closeout review 96 F2). Helm passed too. No commit waiver was needed.
 - [x] 12.9 Promotion — write, beside the deltas the archive merges into
   `openspec/specs/change-workflow/spec.md` and `market-change-workflow/spec.md`:
   - `openspec/specs/change-workflow/index.md`: the entries 1.1 added, their summary

@@ -8,8 +8,8 @@ its validation has — local, Helm, the end-to-end pipeline, and CI — and what
 builds and compares; the isolation of each change's Helm validation in a namespace
 of its own, under its change's image tag, and the memory those namespaces share;
 and its workflow values — its protected branches, the pre-push check its guarded
-push runs, the branch a change lands on, the models it forbids, and a clone's
-bootstrap.
+push runs, the branch a change lands on, the models it prefers for each step, and a
+clone's bootstrap.
 
 Requirements are organized by `index.md`; their order here carries no meaning.
 
