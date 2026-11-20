@@ -247,10 +247,11 @@ change's `specs/registry-discovery/spec.md`.
   3.2 at application-integration level through the typed client;
   `scripts/change-workflow run pre-commit seller-listing-metadata` and
   `make check-packaging` pass.
-  End-to-end: no scenario states details. `e2e_bare_metal_publication`, `e2e_deal`
-  and `e2e_credits_deal` publish listings stating none through a real registry, so
-  the pipeline is evidence for the unchanged path only; no scenario is owed, since
-  3.2 proves the stated path against the real registry through its typed client.
+  End-to-end: `e2e_bare_metal_publication` and `e2e_deal` publish listings stating
+  no details through a real registry, evidence for the unchanged path only;
+  `e2e_credits_deal` publishes the API-credit seed's `description` (6.3). No
+  scenario is owed, since 3.2 proves the stated path against the real registry
+  through its typed client.
   After `make dist`: registry 162 unit and 181 integration passed; `core` unit
   (`make -C core test-core`) 161; registry-client 37. `scripts/change-workflow run
   pre-commit seller-listing-metadata --base origin/dev`: its `pre-commit` hook
@@ -647,16 +648,14 @@ seller's prose". Touches `domains/apicredits/storefront`
 - [x] 6.3 Verification point: API-credit storefront unit and integration suites
   pass, 6.2 being the application-integration case; `scripts/change-workflow run
   pre-commit seller-listing-metadata` and `make check-packaging` pass.
-  End-to-end: `e2e_credits_deal` and `e2e_credits_payment_deal` publish without a
-  description, evidence for the unchanged path only; no scenario is owed.
   `scripts/change-workflow run pre-commit seller-listing-metadata --base
   origin/dev` passes every hook: its `make lock` rewrote no lock, its `make
   validate-local` passed `make check-packaging` and the whole `make test`, and
   the `pre-commit` checks passed. In that `make test` the API-credit storefront
   ran 292 passed, unit and integration: 285 before this section and its 7 new
   cases.
-  End-to-end corrected: those scenarios discover the listing the API-credit
-  lane's storefront seeds (`storefront.credits.lane.toml`, `[seed]`, as
+  End-to-end: `e2e_credits_deal` and `e2e_credits_payment_deal` discover the
+  listing the API-credit lane's storefront seeds (`storefront.credits.lane.toml`, `[seed]`, as
   `storefront.credits.toml` does for the full local stack), and the seed states
   `description = "Prepaid weather-API credits"`. They therefore publish that
   description beside the envelope and inside `listing_resource` through a real
