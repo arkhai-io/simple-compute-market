@@ -591,27 +591,38 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
     return route
 
 
+def _unread(entry: Mapping[str, Any]) -> bool:
+    """Whether a run's line carries what the orchestrating session reads before the
+    change moves on: denials, or refusals, alike (CW-jqi7)."""
+    return bool(entry.get("denials") or entry.get("refusals"))
+
+
 def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
     """The owner result for a step whose last run waits on the owner, if it does.
 
-    A stopped run waits, its denials on the result, until a decision resolves it
-    or its resumed run supersedes it; its reading alone settles nothing, since
-    the resume is refused for a resolved run. Any other run whose denials are
-    not yet `read` waits for their reading first, whatever its outcome: a run
-    can be denied a call and still ask a question or propose a return, and the
-    reading answers neither, so the question or return waits after it as it
-    would without the denial.
+    A stopped run waits, its denials and refusals on the result, until a decision
+    resolves it or its resumed run supersedes it; its reading alone settles
+    nothing, since the resume is refused for a resolved run. Any other run whose
+    denials or refusals are not yet `read` waits for their reading first, whatever
+    its outcome: a run can be denied a call, or refused a write, and still ask a
+    question or propose a return, and the reading answers neither, so the question
+    or return waits after it as it would without them.
     """
     step, outcome = entry.get("step"), entry.get("outcome")
+    recorded = {"denials": entry.get("denials", []),
+                **({"refusals": entry["refusals"]} if entry.get("refusals") else {})}
     if outcome == "stopped":
-        return _owner(f"the {step} step stopped: {entry.get('reason', '')}",
-                      denials=entry.get("denials", []))
-    if (denials := entry.get("denials")) and not read:
+        return _owner(f"the {step} step stopped: {entry.get('reason', '')}", **recorded)
+    if _unread(entry) and not read:
         waits = {"question": "question", "returned": "return", "blocked": "block"}.get(outcome)
-        return _owner(f"the {step} step ended {outcome} but was denied {len(denials)} tool "
-                      "call(s): read them against its rules and record the reading"
+        counts = " and ".join(
+            f"{len(entry[key])} {noun}" for key, noun in (
+                ("denials", "denied tool call(s)"), ("refusals", "refusal(s)"))
+            if entry.get(key))
+        return _owner(f"the {step} step ended {outcome} with {counts}: read each as a "
+                      "finding or a gap and record the reading"
                       + (f"; its {waits} waits after that" if waits else ""),
-                      denials=denials, outcome=outcome)
+                      **recorded, outcome=outcome)
     if outcome == "question":
         # A reviewer is never resumed, its final message being taken for another
         # review, so a review's question is the owner's to settle by their direction.
@@ -1476,23 +1487,24 @@ class Computation:
 
         A question is answered by resuming its session; a returned, blocked, or
         stopped run is decided by the owner or the orchestrating session; none is
-        routed past by running the step afresh. A run that went on past a denial
-        waits first for the orchestrating session's reading of it, an
-        `orchestrator` line that `reads` the run, and then for its outcome's
-        answer or decision as any other. A decision line names the run it
-        resolves, and only that run stops waiting: a decision about one step's
-        run says nothing about another's, and a line that resolves a run counts
-        as having read it. A design that ended blocked on a prerequisite is the
-        prerequisite rules', not this one's, once its denials, if any, are read.
+        routed past by running the step afresh. A run that went on past a denial or
+        a refusal, which wait alike, waits first for the orchestrating session's
+        reading of it, an `orchestrator` line that `reads` the run, and then for
+        its outcome's answer or decision as any other. A decision line names the
+        run it resolves, and only that run stops waiting: a decision about one
+        step's run says nothing about another's, and a line that resolves a run
+        counts as having read it. A design that ended blocked on a prerequisite is
+        the prerequisite rules', not this one's, once its denials and refusals, if
+        any, are read.
 
-        A question, return, block, or stop without unread denials waits only in
-        `phases`, the phase it was raised in — the status's, or that of the step
-        the log routes to: a crashed design triage must not hold implementation.
-        Unread denials wait whatever the phase, since the step
-        that recorded them may be the one that moved the change on — a design
-        triage that advances sets the status to the next phase in the same run —
-        and the reading is owed before any step runs; a stopped run with
-        denials waits, in any phase, until a line resolves it or its resumed run
+        A question, return, block, or stop without unread denials or refusals waits
+        only in `phases`, the phase it was raised in — the status's, or that of the
+        step the log routes to: a crashed design triage must not hold
+        implementation. Unread denials and refusals wait whatever the phase, since
+        the step that recorded them may be the one that moved the change on — a
+        design triage that advances sets the status to the next phase in the same
+        run — and the reading is owed before any step runs; a stopped run with
+        either waits, in any phase, until a line resolves it or its resumed run
         supersedes it as its step's latest. The result names the waiting run's
         `seq`, which a resume must give.
         """
@@ -1516,7 +1528,7 @@ class Computation:
                 continue
             latest[name] = entry
         waiting = [(entry["seq"], result) for entry in latest_any.values()
-                   if entry.get("denials")
+                   if _unread(entry)
                    and entry["seq"] not in (resolved if entry.get("outcome") == "stopped"
                                             else read)
                    and (result := _waiting(entry, read=False))]

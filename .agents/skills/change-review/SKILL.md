@@ -28,21 +28,19 @@ settles a finding for you, and never excuses a question you would otherwise ask.
 
 ## Running unattended
 
-A review runs unattended through `make review`, on the review's models in order:
-in Codex's read-only sandbox, or, when Codex is unavailable, on Claude, whose rules
-let it read the repository and its history and edit nothing. Nothing in this
-skill changes for either: your final message is the review, and nothing else —
-on Claude too, where no outcome schema is given. It carries no structured
-outcome; `scripts/change-workflow review` checks it, publishes it, and logs an outcome
-from the record it publishes, naming as its exit a review's one successor, the
-triage of its kind (`{"step": "triage", "kind": "<kind>"}`), or a stopped one when
-your message is not a review.
+A review runs unattended through `make review`, on the review's models in order, in
+Codex or, when Codex is unavailable, on Claude, either way inside a sandbox scoped
+to the review: it reads the repository and its history, and every file it reviews
+stays read-only. Nothing in this skill changes for either: your final message is
+the review, and nothing else — on Claude too, where no outcome schema is given. It
+carries no structured outcome; `scripts/change-workflow review` checks it,
+publishes it, and logs an outcome from the record it publishes, naming as its exit
+a review's one successor, the triage of its kind (`{"step": "triage", "kind":
+"<kind>"}`), or a stopped one when your message is not a review.
 Nobody can answer a question in the session; where this skill would ask, say so
-in the review instead. Run one command per Bash call: on Claude, a chained command
-runs only when every command in it is allowed. Run Git in the current checkout,
-never with `-C`: the review already runs in the checkout it reads, and no rule
-allows `git -C`, since a wildcard after `-C` would also span a push. Run Make here
-too, never `make -C <a checkout>`: `-C` names only a subdirectory a skill names.
+in the review instead. A write that fails as a read-only file system is outside the
+review's scope: a check that cannot write its cache is evidence you could not
+gather, said in the review, never worked around.
 
 ## Running interactively
 

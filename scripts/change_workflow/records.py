@@ -55,8 +55,14 @@ def inert(path: str, inert_paths: Sequence[str]) -> bool:
 _GLOB = re.compile(r"[*?\[]")
 
 
+def is_pattern(entry: str) -> bool:
+    """Whether a path entry is a glob pattern, holding a glob character, rather than a
+    directory or a file named whole."""
+    return bool(_GLOB.search(entry))
+
+
 def _matches(path: str, entry: str) -> bool:
-    if _GLOB.search(entry):
+    if is_pattern(entry):
         return PurePosixPath(path).full_match(entry)
     return path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
 
