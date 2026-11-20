@@ -573,6 +573,8 @@ class Container(containers.DeclarativeContainer):
 
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
+        adopt_host_key=providers.Callable(_runtime_value, runtime=host_authority,
+                                         name=providers.Object("adopt_host_key")),
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
         connection_codecs=connection_codecs,

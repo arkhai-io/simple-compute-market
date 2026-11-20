@@ -18,6 +18,8 @@ none is ever used on a network.
 from __future__ import annotations
 
 import os
+from base64 import b64encode
+
 from types import SimpleNamespace
 
 import pytest
@@ -129,9 +131,12 @@ class TestAKeyProtectedUnderAnotherKey:
     ):
         client, _ = client_and_queue
         rotated = _seed(session_factory, "rotated", key=Fernet.generate_key().decode())
+        # Deterministic test-only key, never a public-network identity.
+        blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"p" * 32
+        pin = "ssh-ed25519 " + b64encode(blob).decode("ascii")
         await client.family.register_host(
             HostCreate(host_id="current", connection=ssh_connection(
-                ssh_host="198.51.100.21", ssh_user="ops", private_key=_PEM,
+                ssh_host="198.51.100.21", ssh_user="ops", private_key=_PEM, host_keys=[pin],
             ))
         )
         with session_factory() as db:

@@ -44,8 +44,8 @@ dependencies = [
 [project.optional-dependencies]
 adapters = [
     # Both runtimes take the service's teardown rerun policy.
-    "arkhai-vms-provisioning-adapter>=0.20.0",
-    "arkhai-bare-metal-provisioning-adapter>=0.14.0",
+    "arkhai-vms-provisioning-adapter>=0.21.0",
+    "arkhai-bare-metal-provisioning-adapter>=0.15.0",
 ]
 
 [project.scripts]

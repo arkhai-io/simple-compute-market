@@ -159,7 +159,7 @@ are adopted before their first job" (the job path). Touches
 use of the executor's start report where it needs the refusal to count as never
 started (`provisioning/compute/src/compute_provisioning/jobs/`).
 
-- [ ] 3.1 Give `InventoryTarget` the host's pin, and in `AnsibleRunner.write_inventory`
+- [x] 3.1 Give `InventoryTarget` the host's pin, and in `AnsibleRunner.write_inventory`
   write, for each host, an owner-only transient `known_hosts` holding its pin under
   `[ssh_host]:ssh_port`, owned and removed by `MaterializedInventory` with any
   decrypted key file, and render on its inventory line `ansible_host_key_checking=true`,
@@ -172,7 +172,7 @@ started (`provisioning/compute/src/compute_provisioning/jobs/`).
   against an operator `ansible.cfg` stating `host_key_checking = False` and its own
   `ssh_args`, showing the command checks strictly against the job's file ("An
   operator's configuration turns checking off").
-- [ ] 3.2 In `AnsibleExecutor`, before reporting the execution's start, refuse a host
+- [x] 3.2 In `AnsibleExecutor`, before reporting the execution's start, refuse a host
   with no pin that is not pending adoption without connecting, and otherwise make one
   SSH connection that runs nothing on the host, against the pin; for a pending host,
   connect accepting the presented key into an empty file and record it through the
@@ -189,20 +189,20 @@ started (`provisioning/compute/src/compute_provisioning/jobs/`).
   carrying no key material, no playbook spawned, and no start reported; a unit test in
   `provisioning/compute/tests/unit/test_executor_mock.py` that the mock executor runs
   a job against an unpinned host.
-- [ ] 3.3 Prove that a teardown refused for its host key counts as never started and
+- [x] 3.3 Prove that a teardown refused for its host key counts as never started and
   is run again once the host is pinned. (D5; executor requirement, "A teardown is
   refused for its host key".) Verify: a library-integration test in
   `provisioning/compute/tests/integration/test_teardown_rerun.py` with an executor
   refusing for the host key, then a pin captured, and the rerun dispatched under
   `{reservation}:teardown:rerun-{n}`.
-- [ ] 3.4 In `readiness.py`, once any Ansible executor is real, report not ready naming
+- [x] 3.4 In `readiness.py`, once any Ansible executor is real, report not ready naming
   every enabled host with no pin that is not pending adoption, and list pending hosts
   as information without reporting not ready for them, bumping the detail envelope's
   schema version. (D5, D6; executor and adoption requirements.) Verify: unit tests in
   `test_readiness.py`; an application-integration case in
   `provisioning/compute/service/tests/integration/test_system_api.py` reading system
   status with one pinned, one unpinned and one pending host under a real executor.
-- [ ] 3.5 Verification point. Unit: `test_runner.py`, `test_executor.py`,
+- [x] 3.5 Verification point. Unit: `test_runner.py`, `test_executor.py`,
   `test_readiness.py`, `test_probes.py` (the probe's inventory carries verification),
   `test_executor_mock.py`. Library integration: `test_teardown_rerun.py`,
   `test_host_authority.py`. Application integration through the typed client:
@@ -211,6 +211,14 @@ started (`provisioning/compute/src/compute_provisioning/jobs/`).
   `e2e_vm_real_provisioning`, `e2e_bare_metal_real_provisioning`,
   `e2e_vm_qualification` and `e2e_bare_metal_qualification` do against a real target
   and run in no lane.
+
+**Section evidence.** The Ansible suites passed (209 tests), the job and
+teardown suites passed (29 tests), and the service status and unreadable-key
+suites passed (28 tests). The SSH command-builder case uses Ansible's own plugin
+with an operator configuration that disables host-key checking. The mock
+executor case lives with the concrete executor in the Ansible package.
+The release test programs a pre-start host-key refusal and verifies that the
+job engine schedules the named teardown rerun.
 
 ## 4. The connectivity check reports a host's key, and an operator captures it
 

@@ -243,7 +243,7 @@ class SshConnectionCodec:
             ) from exc
 
     @staticmethod
-    def parse(envelope: ConnectionEnvelope) -> SshConnection:
+    def parse(envelope: ConnectionEnvelope, *, include_host_keys: bool = True) -> SshConnection:
         """The typed public fields an executor reads from a stored envelope.
 
         The kind and version are checked before any field, so a host stored at
@@ -256,7 +256,10 @@ class SshConnectionCodec:
                 f"{envelope.kind!r} at {envelope.version}; re-register the host "
                 f"at version {SSH_CONNECTION_VERSION}"
             )
-        return SshConnectionCodec._public(envelope.public)
+        if include_host_keys:
+            return SshConnectionCodec._public(envelope.public)
+        public = {name: envelope.public[name] for name in envelope.public if name != "host_keys"}
+        return SshConnectionCodec._public(public)
 
     @staticmethod
     def _public(public: Mapping[str, Any]) -> SshConnection:
