@@ -1,9 +1,11 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
+from market_deal_lifecycle.adapters import (
+    DisputeAdapterTable, PaymentAdapterTable, PaymentSelector, OnceAccountingProjection, OnceAccountingRead,
+)
 from market_deal_lifecycle.terms import DisputeAuthority
-from market_deal_lifecycle_contracts.models import Accepted, AuthorityView
+from market_deal_lifecycle_contracts.models import Accepted, AuthorityView, PaymentEvent, PaymentPartObservation
 from market_identity import Ed25519Signer
 
 from market_deal_servicing import (
@@ -60,3 +62,38 @@ def rig(tmp_path):
         )
 
     return locals()
+
+
+@pytest.fixture
+def once_accounting(rig):
+    """Neutral opt-in adapter fixture; it asserts no payment signature authority."""
+    stop = PaymentEvent(
+        negotiation_id="deal", commitment_ref="commitment", part="0", kind="stop",
+        actor="fixture-payer", at=140, cause="payer", sequence=1,
+        authority_record_ref="fixture-stop", settles_through="started_period",
+    )
+    view = AuthorityView(outcome=Accepted(), state="ended", events=[stop], parts=[
+        PaymentPartObservation(part="0", started_at=100, final_stop=stop,
+                               evidence_ref="fixture-payment-observation"),
+    ])
+    projection = OnceAccountingProjection(
+        negotiation_id="deal", commitment_ref="commitment", seller_account="seller-account",
+        minimum_sequence=0, latest_event_sequence=1, provider_observed_at=150,
+        verified_signature_sha256="a" * 64, financial_facts_sha256="b" * 64,
+        part_count=1, livemode=False, all_parts_terminal=True,
+        accounting={"classification": "ACCOUNTING_TERMINAL", "returnAdmitted": False},
+    )
+
+    class Payment:
+        async def read(self):
+            return view
+
+        async def read_with_once_accounting(self, *, minimum_sequence, read_started_at):
+            return OnceAccountingRead(view, self.projection)
+
+    payment = Payment()
+    payment.projection = projection
+    payment.read = AsyncMock(wraps=payment.read)
+    payment.read_with_once_accounting = AsyncMock(wraps=payment.read_with_once_accounting)
+    watch = rig["watch"](payment=payment)
+    return payment, watch

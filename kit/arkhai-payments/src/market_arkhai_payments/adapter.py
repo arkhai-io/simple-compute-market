@@ -12,10 +12,15 @@ and its billing start is a no-op.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
+from pathlib import Path
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 import injected_time
+from market_identity import canonical_json
+from market_deal_lifecycle.adapters import OnceAccountingRead, OnceAccountingProjection
 from market_deal_lifecycle.delivery import (
     BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase, JournaledBillingStart,
     OnceDeliveryPolicy,
@@ -85,6 +90,7 @@ class PaymentAdapter:
         self.commitment_ref = data.transaction_id
         self.data = data
         self.account = account
+        self._clock = clock
         self.snapshots = VerifiedSnapshots(
             data.transaction_id, len(data.mandate.parts), account=account,
             client_for_owner=client_for_owner, verify=verify_snapshot, minimum_sequence=minimum_sequence,
@@ -311,11 +317,91 @@ class PaymentAdapter:
                              payouts=payouts, parts=observations, deadline=deadline)
 
     async def read(self) -> AuthorityView:
+        view, _ = await self._read_with_snapshot()
+        return view
+
+    async def _read_with_snapshot(self) -> tuple[AuthorityView, SignedTransactionSnapshot | None]:
+        # Exactly the ordinary verified read; no cached/caller-supplied object.
         try:
-            return self._view(await asyncio.to_thread(self.snapshots.now))
+            signed = await asyncio.to_thread(self.snapshots.now)
+            return self._view(signed), signed
         except READ_FAILURES as exc:
             return AuthorityView(outcome=classify_failure(exc, kind="read", attempted=False,
-                                                          reread=self.snapshots.now))
+                                                          reread=self.snapshots.now)), None
+
+    async def read_with_once_accounting(self, *, minimum_sequence: int, read_started_at: int) -> OnceAccountingRead:
+        """One normal read; only bounded once facts leave this adapter."""
+        view, signed = await self._read_with_snapshot()
+        projection = None
+        try:
+            if signed is None or self.rate is not None or not isinstance(view.outcome, Accepted):
+                return OnceAccountingRead(view, None)
+            snapshot = signed.snapshot
+            floor = max(minimum_sequence, self.snapshots.minimum_sequence)
+            if (snapshot.livemode is not False or type(snapshot.latestEventSequence) is not int
+                    or not 0 <= snapshot.latestEventSequence <= 128
+                    or not 1 <= len(snapshot.parts) <= 32
+                    or signed.proof.scheme != "ed25519"
+                    or re.fullmatch(r"[A-Za-z0-9_-]{85}[AQgw]", signed.proof.value) is None):
+                return OnceAccountingRead(view, None)
+            facts = []
+            for part in snapshot.parts:
+                numbers = [getattr(part, key).root for key in ("gross", "held", "released", "reversed", "feePaid")]
+                if (type(part.part) is not int or not 0 <= part.part < 32
+                        or not 0 < len(part.asset.root) <= 128
+                        or any(re.fullmatch(r"0|[1-9][0-9]{0,37}", value) is None for value in numbers)):
+                    return OnceAccountingRead(view, None)
+                facts.append([part.part, part.asset.root, *numbers, part.status.value])
+            if len({row[0] for row in facts}) != len(facts):
+                return OnceAccountingRead(view, None)
+            projected = self._accounting_from_same_read(signed, minimum_sequence=floor,
+                now=self._clock(), read_started_at=read_started_at)
+            projection = OnceAccountingProjection(
+                self.negotiation_id, self.commitment_ref, self.account, floor,
+                snapshot.latestEventSequence, snapshot.observedAt,
+                hashlib.sha256(signed.proof.value.encode("ascii")).hexdigest(),
+                hashlib.sha256(canonical_json(sorted(facts))).hexdigest(), len(snapshot.parts), snapshot.livemode,
+                all(part.held.root == "0" and part.status.value in {"released", "reversed", "settled"}
+                    for part in snapshot.parts), projected,
+            )
+        except Exception:
+            pass  # Optional projection cannot change the ordinary authority outcome.
+        return OnceAccountingRead(view, projection)
+
+    def _accounting_from_same_read(self, signed, *, minimum_sequence, now, read_started_at):
+        """Private normal-poll RAM consumer. Never fetches, persists or admits."""
+        out = {"schema": "bm-test-paid-accounting/v1", "classification": "UNKNOWN",
+               "reason": "SAME_NORMAL_READ_ACCOUNTING_UNQUALIFIED", "parts": [], "returnAdmitted": False}
+        try:
+            # Deliberate lazy load: bind the optional helper source before interpreting amounts.
+            from . import _closeout_accounting as accounting
+            with Path(accounting.__file__).open("rb") as source:
+                accounting_source = source.read(32769)
+            if len(accounting_source) > 32768 or hashlib.sha256(accounting_source).hexdigest() != "287afd6c94b3390a3b1fbd0b3a48224d8cd8414d82f02146673a11e7d0db2eb6":
+                return out
+            if (type(minimum_sequence) is not int or minimum_sequence < 0
+                    or type(now) is not int or type(read_started_at) is not int
+                    or not 0 <= now - read_started_at <= 60):
+                return out
+            if self.rate is not None:
+                return out  # This evidence scope never interprets rate obligations.
+            floor = max(minimum_sequence, self.snapshots.minimum_sequence)
+            if (signed.snapshot.livemode is not False
+                    or signed.snapshot.transaction.root != self.commitment_ref
+                    or signed.snapshot.latestEventSequence is None
+                    or signed.snapshot.latestEventSequence < floor
+                    or not self.snapshots.verify(signed, floor)):
+                return out
+            # Same already-fetched verified object; full wire remains RAM only.
+            snapshot = signed.snapshot.model_dump(mode="json", by_alias=True)
+            mandate = self.data.mandate.model_dump(mode="json", by_alias=True)
+            parts = accounting._amounts(snapshot, mandate, now, read_started_at)
+            out.update(classification="ACCOUNTING_TERMINAL", reason="NONE", parts=parts,
+                       transactionBindingSHA256=hashlib.sha256(self.commitment_ref.encode()).hexdigest(),
+                       observedAt=snapshot["observedAt"], latestEventSequence=snapshot["latestEventSequence"])
+        except Exception:
+            pass
+        return out
 
     # Delivery -------------------------------------------------------------------
 

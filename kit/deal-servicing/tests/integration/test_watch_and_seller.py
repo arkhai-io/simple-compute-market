@@ -1,10 +1,13 @@
+import pytest
 from unittest.mock import AsyncMock, Mock
 
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_arkhai_mediation.models import Filing
-from market_deal_lifecycle.adapters import DisputeAdapterTable, InterfaceRequest, PaymentAdapterTable, PaymentSelector
+from market_deal_lifecycle.adapters import (
+    DisputeAdapterTable, InterfaceRequest, OnceAccountingRead, PaymentAdapterTable, PaymentSelector,
+)
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CaseRecord, DisputeEvent, LifecycleCommand, ListDealsRequest,
@@ -415,3 +418,30 @@ async def test_each_outstanding_condition_is_named_and_a_later_case_returns_a_de
     await rig["watch"]().poll()
 
     assert await listed(rig, "deal") == ("ending", ["case_open"])
+
+
+@pytest.mark.parametrize("scope", ["legacy", "malformed", "failed"])
+async def test_optional_accounting_never_retries_or_turns_unknown_into_observation(rig, once_accounting, scope):
+    payment, watch = once_accounting
+    if scope == "legacy":
+        watch = rig["watch"]()
+    elif scope == "malformed":
+        payment.read_with_once_accounting.return_value = object()
+    else:
+        payment.read_with_once_accounting.return_value = OnceAccountingRead(
+            AuthorityView(outcome=Unknown(reason="fixture unreadable authority")), None,
+        )
+    views, _, accounting, _ = await watch._poll_with_accounting()
+    assert accounting is None
+    if scope == "legacy":
+        assert isinstance(views[0].outcome, Accepted)
+        assert rig["payment"].read.await_count == 1
+        payment.read_with_once_accounting.assert_not_awaited()
+    else:
+        assert isinstance(views[0].outcome, Unknown)
+        payment.read.assert_not_awaited()
+        assert payment.read_with_once_accounting.await_count == 1
+        with transaction(rig["path"]) as conn:
+            assert EndSession(conn).payment_observed_at("deal", "commitment") is None
+            assert WatchSession(conn).cursor("deal", watch.payment_record) == -1
+            assert conn.execute("SELECT count(*) FROM servicing_evidence_items").fetchone()[0] == 0

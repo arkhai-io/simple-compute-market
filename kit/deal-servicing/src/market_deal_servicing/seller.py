@@ -25,7 +25,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import Identity, canonical_json
 
 from .end import SQLiteOperationStore
-from .evidence import EvidenceSession, in_transaction, transaction
+from .evidence import EvidenceSession, RetentionObservation, in_transaction, transaction
 from .journal import Classification, EndSession, FinalRequest, JournalIntent, PhysicalProgress, atomic, stable_ref
 from .projection import SellerDeal, read_seller_deal
 from .watch import DealWatch, WatchSession
@@ -93,6 +93,13 @@ def interrupt_operation_key(
         "negotiation_id": negotiation_id, "administrator": actor.model_dump(mode="json"),
         "reason": reason, "interruption_kind": interruption_kind,
     })).hexdigest()
+
+
+class _NormalReadAccounting(NamedTuple):
+    """One actual normal invocation; private typed values, never wire authority."""
+    lifecycle: LifecycleRead
+    accounting: dict | None
+    retention: RetentionObservation | None
 
 
 class SellerSession:
@@ -326,16 +333,22 @@ class SellerServicing:
         )
 
     async def read(self, negotiation_id: str) -> LifecycleRead:
+        lifecycle, _, _ = await self._read_with_accounting(negotiation_id)
+        return lifecycle
+
+    async def _read_with_accounting(self, negotiation_id: str) -> _NormalReadAccounting:
         deal = await asyncio.to_thread(self._deal, negotiation_id)
         watch = await asyncio.to_thread(self._watch, deal)
-        views, _ = await watch.poll()
+        views, _, accounting, retention = await watch._poll_with_accounting()
         authority = await asyncio.to_thread(self._authority, deal, watch, views)
         delivery = await in_transaction(self.path, lambda conn: EndSession(conn).view(negotiation_id))
         filings = await asyncio.to_thread(self._filings, negotiation_id)
-        return LifecycleRead(
+        lifecycle = LifecycleRead(
             negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
             authority=authority, delivery=delivery, filings=filings,
         )
+
+        return _NormalReadAccounting(lifecycle, accounting, retention)
 
     async def list(self, request: ListDealsRequest = ListDealsRequest()) -> DealPage:
         """Bounded local views; the registered watch step refreshes authority state."""
