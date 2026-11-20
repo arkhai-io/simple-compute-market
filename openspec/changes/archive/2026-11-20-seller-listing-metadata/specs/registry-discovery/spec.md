@@ -48,7 +48,7 @@ the field. An explicit null MUST be judged as an unstated field.
 #### Scenario: A listing without seller details
 
 - **WHEN** a publisher submits a listing stating none of the three fields
-- **THEN** it publishes, stores, and reads exactly as before the fields existed
+- **THEN** it publishes and stores as any listing does, and its reads carry none of the three fields
 
 ## ADDED Requirements
 

@@ -20,9 +20,9 @@ A domain's publication cycle MUST treat a pool override's `details` as a term of
 
 ### Requirement: An API-credit listing carries its seller's prose
 
-A quota-backed API-credit publish SHALL treat its request's `description` as both the seller's prose beside the listing envelope and the service description inside the listing resource, so established consumers read it where they always have.
+A quota-backed API-credit publish SHALL treat its request's `description` as both the seller's prose beside the listing envelope and the service description inside the listing resource, so a consumer of the resource reads the same prose.
 
 #### Scenario: A quota-backed publish states a description
 
 - **WHEN** a quota-backed publish request states `description`
-- **THEN** the description publishes beside the listing envelope and, unchanged, inside the listing resource its established consumers already read
+- **THEN** the description publishes beside the listing envelope and, unchanged, inside the listing resource

@@ -179,7 +179,7 @@ pool at one site, in one offering mode, through the administrator API or
 `market-storefront pool-override` (`set --file`, `get`, `list`, and `delete`,
 with `--mode` never defaulted). An override states listing shapes, settlement
 clauses, asking rates, and the market's terms (for VM: `sla`,
-`max_duration_seconds`, and `pricing` family rates); it cannot state region or
+`max_duration_seconds`, `pricing` family rates, and `details`); it cannot state region or
 capacity backing. A write stating the retired `min_price` or `token` is refused; a
 stored override that still carries them keeps applying its other terms, and
 system status names the retired keys.
@@ -210,6 +210,24 @@ system status names the retired keys.
   override the storefront cannot read holds that pool's listings and is named in
   system status, as is a rate for a shape the pool does not publish. A changed or
   withdrawn rate refreshes the listing in place.
+
+- **Seller details are a term of sale.** An override's `details` states the
+  seller-authored `title` (plain text, at most 200 characters), `description`
+  (plain text, at most 4000), and `metadata` (at most 50 keys, each 1–40
+  characters of `[A-Za-z0-9_.-]`, each value a string of at most 500 characters,
+  a finite number, or a boolean) that every listing of the pool publishes beside
+  its envelope. They sit in the record's `terms`, as the market's other terms do:
+
+  ```json
+  {"terms": {"details": {"title": "H100 hosts in a Tier III hall",
+                         "metadata": {"acme.tier": "gold", "nvlink": true}}}}
+  ```
+
+  A write stating a value past a limit, or a null, array, or object metadata
+  value, is refused, naming the field under `terms.details`. No pool hint or
+  storefront setting supplies details. A change refreshes the pool's listings in
+  place, and an override that stops stating them republishes each listing with
+  none.
 
 - **A stated shape may bound what an agreed shape states.** In a pool's
   `listing_shapes` or an override's, any quantity field may take a constraint
@@ -400,7 +418,8 @@ error's type.
 
 - **A bare-metal override states no shapes.** It states settlement clauses, which
   replace every lower tier's clauses for that pool whole; asking rates; and the
-  terms `min_duration_seconds`, `max_duration_seconds` and `available_until_utc`.
+  terms `min_duration_seconds`, `max_duration_seconds`, `available_until_utc`, and
+  `details`, read as VM's are.
 - **Each lease bound replaces its counterpart on its own.** The pair a listing
   would publish must still be ordered: a minimum above the effective maximum (the
   override's, else the pool's `capacity_bounds.bare_metal` hint read from the live

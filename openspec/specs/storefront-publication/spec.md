@@ -3543,6 +3543,33 @@ is not. While the lease is active, a result read under a delivery conflict is re
   was recorded
 - **THEN** the read answers that the result is not ready
 
+### Requirement: A seller may state details beside the listing envelope
+
+A storefront MUST accept the seller-authored detail fields — `title`, `description`, and `metadata` — on its seller create surfaces, validates them against the limits the registry serves, stores them on the local listing row, and publishes them to every registry. Stored values survive resume and reconciliation-driven republication.
+
+#### Scenario: A storefront create request carries seller details
+
+- **WHEN** a seller's create request states `title`, `description`, or `metadata`
+- **THEN** the storefront stores and publishes them, and a registry GET returns them unchanged under the listing signature
+
+### Requirement: A compute listing derives its details from the pool override
+
+A domain's publication cycle MUST treat a pool override's `details` as a term of sale: every listing the pool publishes carries them.
+
+#### Scenario: A pool override states details
+
+- **WHEN** a domain's publication cycle derives a listing from a pool whose storefront override states `details`
+- **THEN** the listing publishes with those details, a cycle refreshes them in place when the override's details change, and an override that stops stating them clears them from its listings
+
+### Requirement: An API-credit listing carries its seller's prose
+
+A quota-backed API-credit publish SHALL treat its request's `description` as both the seller's prose beside the listing envelope and the service description inside the listing resource, so a consumer of the resource reads the same prose.
+
+#### Scenario: A quota-backed publish states a description
+
+- **WHEN** a quota-backed publish request states `description`
+- **THEN** the description publishes beside the listing envelope and, unchanged, inside the listing resource
+
 ## Evidence
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
@@ -3591,5 +3618,6 @@ is not. While the lease is active, a result read under a delivery conflict is re
 - The whole-unit claim and its admission by the site's own matcher: `domains/bare_metal/storefront/tests/test_claims.py`, `integration/test_site_reservation.py`, and `test_http_settlement.py`.
 - The bare-metal opening recheck: `domains/bare_metal/tests/test_inventory_guard.py` and `domains/bare_metal/storefront/tests/test_http_negotiation.py`, through the canonical client.
 - A settlement request restates no negotiated term: `domains/vms/storefront/tests/unit/test_settlement_start_authority.py`, `domains/vms/buyer/tests/test_vm_settlement_helpers.py`, `core/storefront-client/tests/test_negotiate_new_payload.py`, and `domains/bare_metal/storefront/tests/test_http_settlement.py`.
+- Seller-authored listing details — the core storefront's detail migration, stored and updated details, and a fan-out sending only stated ones: `core/storefront/tests/integration/test_listing_details.py`; the create request's limits: `core/storefront/tests/unit/test_listing_models.py`; both storefront clients' bodies and the parsed listing: `core/storefront-client/tests/test_lifecycle_auth.py` and `core/storefront-client/tests/test_listing_details.py`; a VM create stating them, republished on resume, a create stating none, and a refused create: `domains/vms/storefront/tests/integration/test_listings_api.py` (`TestCreateListingDetails`); an override's details published, refreshed in place, and withdrawn: `domains/vms/storefront/tests/integration/test_publication_loop.py` and `domains/bare_metal/storefront/tests/integration/test_pool_override_details.py` (`test_an_overrides_details_publish_refresh_in_place_and_clear_when_withdrawn`), with the override terms refusing through the shared model in `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py` and `domains/bare_metal/storefront/tests/test_pool_override_terms.py`; the API-credit quota publish beside the envelope and inside its resource, its refusal, and a refused seed given up with no listing: `domains/apicredits/storefront/tests/integration/test_listing_details.py`, the request's limit in `tests/unit/test_publish_from_quota_request.py`, and the command's usage error in `tests/unit/test_listing_publication_entry_points.py`; across running services, the credits lane's seeded description published through a real registry: `e2e-tests/tests/e2e/roles/scenarios/apicredits/` (`e2e_credits_deal`, `e2e_credits_payment_deal`).
 
 The installed bare-metal contribution supplies an independently runnable seller composition. Shared shells consume that contribution and the common immutable binding and lifecycle contexts; they do not replace the domain-owned codecs, seller policy, provisioning adapters, or fulfillment hook.
