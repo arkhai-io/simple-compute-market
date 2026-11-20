@@ -132,9 +132,10 @@ class HostDefinitionConnection(BaseModel):
     """A host definitions entry's connection: its public fields and no secret.
 
     ``version`` is required because a document's meaning must not depend on a
-    default; a service refuses a kind or version it does not serve. A key is
-    named by its file path among the public fields, never carried: the model
-    refuses a ``secrets`` field like any field it does not define, and a
+    default; a service refuses a kind or version it does not serve. For SSH
+    version 3 the public fields can include the provisioner's key file path
+    and the host's public key pins. The model refuses private key submissions
+    in a ``secrets`` field like any field it does not define, and a
     document's validation reports it under its own code,
     ``HostDefinitionProblemCode.CONNECTION_SECRETS``.
 

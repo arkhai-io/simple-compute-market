@@ -1,7 +1,7 @@
 """The migration rewriting stored ``ssh`` version-1 connections to version 2, over
 file-backed SQLite.
 
-A host stored at version 1 runs no work, since the ``ssh`` codec serves version 2
+A host stored at version 1 runs no work, since the ``ssh`` codec serves version 3
 alone. Each test starts from a v0.3.0 database holding such hosts, as that
 release's chain wrote them, and runs the migration command's chain over it: the
 database is adopted at the baseline and the migrations after it apply. These
@@ -137,7 +137,7 @@ def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_store
     jobs_before = _rows(engine, "ansible_jobs", "id")
     # Before the rewrite, each job's host is refused where the runner reads it.
     for job_id, job in jobs_before.items():
-        with pytest.raises(ValueError, match="not an ssh connection at version 2"):
+        with pytest.raises(ValueError, match="not an ssh connection at version 3"):
             inventory_target(_authority(engine).lookup(job["host_id"]))
 
     report = migrate_database(engine)
@@ -156,11 +156,8 @@ def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_store
     assert json.loads(hosts_after["kvm1"]["connection_protected"]) == _HOSTS["kvm1"]["protected"]
     assert _recorded(engine)
 
-    # The unfinished jobs hold no connection of their own: their rows are
-    # unchanged but for the chain's later job columns, which read null, and
-    # the host each stored job names now reads at the served version through
-    # the host lookup the job engine is given for dispatch and the runner's
-    # inventory target, which refused it above.
+    # The unfinished jobs hold no connection of their own. This migration
+    # leaves the rows unchanged except for the later nullable job fields.
     assert _rows(engine, "ansible_jobs", "id") == {
         job_id: {**row, "execution_started_at": None, "finished_at": None}
         for job_id, row in jobs_before.items()
@@ -171,12 +168,6 @@ def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_store
         execution_host = authority.lookup(job["host_id"])
         assert execution_host is not None, job_id
         assert execution_host.connection.version == 2, job_id
-        target = inventory_target(execution_host)
-        stored = _HOSTS[job["host_id"]]["public"]
-        assert (target.ssh_host, target.ssh_port) == (
-            stored["ssh_host"],
-            stored["ssh_port"],
-        ), job_id
         assert execution_host.connection.protected_schemes() == {
             name: value["scheme"]
             for name, value in _HOSTS[job["host_id"]]["protected"].items()

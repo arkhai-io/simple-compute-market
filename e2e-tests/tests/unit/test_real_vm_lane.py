@@ -184,13 +184,13 @@ def test_without_a_connection_a_new_host_gets_the_placeholder_and_an_old_one_kee
     assert body.connection.public == {
         "ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"
     }
-    assert body.connection.version == 2
+    assert body.connection.version == 3
     (update,) = hosts.updates
     assert update.connection is None and update.pool_id == "pool"
 
 
 def test_the_target_connection_is_at_the_version_the_service_accepts():
-    assert target_connection(TARGET).version == 2
+    assert target_connection(TARGET).version == 3
     hosts = FakeHosts(**{HOST: _host(
         HOST, REAL_POOL_ID,
         ConnectionSubmission(kind="ssh", version=1, public=target_connection(TARGET).public),
@@ -199,7 +199,7 @@ def test_the_target_connection_is_at_the_version_the_service_accepts():
         assert_registered_as_target(hosts.get_host(HOST), TARGET)
     register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
     (update,) = hosts.updates
-    assert update.connection.version == 2
+    assert update.connection.version == 3
     assert_registered_as_target(hosts.get_host(HOST), TARGET)
 
 
@@ -207,7 +207,7 @@ def test_a_host_registered_otherwise_is_not_the_target():
     hosts = FakeHosts(**{HOST: _host(
         HOST, REAL_POOL_ID,
         ConnectionSubmission(
-            kind="ssh", version=2, public={**target_connection(TARGET).public, "ssh_port": 2200}
+            kind="ssh", version=3, public={**target_connection(TARGET).public, "ssh_port": 2200}
         ),
     )})
     with pytest.raises(AssertionError, match="not the target's"):

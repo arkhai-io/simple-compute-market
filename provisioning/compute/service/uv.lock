@@ -204,7 +204,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.29.0"
+version = "0.29.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -223,12 +223,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.29.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.8.2"
+version = "0.9.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -239,7 +239,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.8.2-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -260,7 +260,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.16.0"
+version = "0.16.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -268,12 +268,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.16.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.16.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.27.0"
+version = "0.28.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -331,8 +331,8 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-bare-metal-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.14.0" },
-    { name = "arkhai-compute-provisioning", specifier = ">=0.29.0" },
-    { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.8.2" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.29.1" },
+    { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.9.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.16.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-storefront-client", specifier = "==0.30.0" },

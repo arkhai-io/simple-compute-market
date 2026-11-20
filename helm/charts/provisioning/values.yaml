@@ -70,7 +70,7 @@ mockMode: false
 #         pool_id: default
 #         connection:
 #           kind: ssh
-#           version: 2
+#           version: 3
 #           public:
 #             ssh_host: 10.0.0.5
 #             ssh_user: ubuntu

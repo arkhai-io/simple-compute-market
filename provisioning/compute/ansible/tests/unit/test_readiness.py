@@ -33,7 +33,7 @@ def _host(
     embedded: bool = False,
     protected_under: str = _KEY,
     ciphertext: str | None = None,
-    version: int = 2,
+    version: int = 3,
 ) -> ExecutionHost:
     """An enabled host as the host authority's internal read returns it."""
     public = {"ssh_host": "10.0.0.1", "ssh_port": 22, "ssh_user": "ops", "key_path": key_path}
@@ -335,7 +335,7 @@ def test_a_host_stored_at_version_1_is_refused_as_execution_refuses_it(tmp_path)
     assert component.ready is False
     (reason,) = detail.not_ready_reasons
     assert reason.startswith("host 'legacy' cannot be executed against: ")
-    assert "'ssh' at 1" in reason and "re-register the host at version 2" in reason
+    assert "'ssh' at 1" in reason and "re-register the host at version 3" in reason
     assert [(key.raw_path, key.referenced_by, key.exists) for key in detail.ssh_keys] == [
         (str(key_file), ["current"], True)
     ]

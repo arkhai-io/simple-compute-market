@@ -119,14 +119,14 @@ def target_connection(target: VmHost) -> ConnectionSubmission:
     """The connection the provisioning service reaches the target's host by.
 
     The key is named by where the service reads it; the target never carries
-    key material. The service accepts an `ssh` connection only at version 2. A
+    key material. The service accepts an `ssh` connection only at version 3. A
     guest is reached at its own forwarded or relayed port, never the host's
     tenant-facing port, so none is stated.
     """
     host = target
     return ConnectionSubmission(
         kind="ssh",
-        version=2,
+        version=3,
         public={
             "ssh_host": host.connection.ssh_host,
             "ssh_port": host.connection.ssh_port,

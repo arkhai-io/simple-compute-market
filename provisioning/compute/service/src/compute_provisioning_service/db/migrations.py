@@ -161,11 +161,8 @@ def _rewrite_ssh_connections_to_version_2(connection: Connection) -> None:
     decrypts; if it refuses any, the migration fails naming every refused host
     and rewrites none.
 
-    The target version is fixed at 2 rather than read from the codec: this
-    mapping is exact only from version 1 to version 2. A codec serving another
-    version refuses every version-2 envelope it is asked to check, so the
-    migration then fails naming each host instead of stamping a version whose
-    fields it never mapped.
+    This step writes version 2. Validation uses only the fields that version
+    2 and version 3 share; a version-1 row cannot already carry a host pin.
 
     Only the host row holds a connection: a job names its host and reads the
     host's connection when it is dispatched, so an unfinished job runs against
@@ -190,10 +187,12 @@ def _rewrite_ssh_connections_to_version_2(connection: Connection) -> None:
                 row["connection_protected"],
                 label=f"hosts {row['host_id']} connection_protected",
             )
+            if "host_keys" in public:
+                raise ValueError("host_keys is not a version-2 field")
             codec.validate(
                 ConnectionEnvelope(
                     kind=SSH_CONNECTION_KIND,
-                    version=_SSH_VERSION_2,
+                    version=3,
                     public=public,
                     protected={
                         name: ProtectedValue.from_stored(value)
@@ -206,8 +205,8 @@ def _rewrite_ssh_connections_to_version_2(connection: Connection) -> None:
     if refused:
         raise MigrationDataError(
             f"{len(refused)} ssh connection(s) stored at version 1 are not valid at "
-            f"version {_SSH_VERSION_2}, so none was rewritten; submit each "
-            f"host again at version {_SSH_VERSION_2}, then rerun the migration:\n  "
+            f"version {_SSH_VERSION_2}, so none was rewritten; restore a database "
+            f"backup with valid connection records for these hosts, then rerun the migration:\n  "
             + "\n  ".join(refused)
         )
     for row in rows:

@@ -1024,7 +1024,7 @@ operator-verified `ssh_host_public_key`, and omits `listing_shape`. At most one
 host per domain is allowed. Direct and relay access fields cannot be mixed.
 The target names no relay token or grant key and carries no private host key.
 
-The scenario registers its host with an `ssh` connection at version 2, naming
+The scenario registers its host with an `ssh` connection at the version the service accepts, naming
 `connection.ssh_key_path` as the service's `key_path`. It reconciles an earlier
 registration with the target; the key itself remains in the service filesystem.
 Git ignores the real target file; never commit it. The model in

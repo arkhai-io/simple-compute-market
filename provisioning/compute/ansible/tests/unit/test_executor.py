@@ -44,7 +44,7 @@ _HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={
             "ssh_host": "10.0.0.1",
             "public_host": "203.0.113.1",
@@ -354,7 +354,7 @@ def test_no_file_outlives_its_run(ending) -> None:
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", encrypt_secret("PEM", key))},
         ),
@@ -392,7 +392,7 @@ def test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host(
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", ciphertext)},
         ),

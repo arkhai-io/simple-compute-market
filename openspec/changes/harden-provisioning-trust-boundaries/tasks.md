@@ -19,7 +19,7 @@ and resubmitted). Touches `provisioning/compute/ansible/` (the `ssh` codec),
 document equality and export), `provisioning/compute/contracts/`,
 `provisioning/compute/client/`, and the chart's example host document.
 
-- [ ] 1.1 In `compute_provisioning_ansible/connection.py`, serve the `ssh` kind at
+- [x] 1.1 In `compute_provisioning_ansible/connection.py`, serve the `ssh` kind at
   version 3 alone, add `host_keys` to `SshConnection` as an optional non-empty list of
   OpenSSH public keys, each parsed and stored as its key type and base64 with any
   comment dropped, refusing `[]`, a malformed key, or an unknown key type, naming the
@@ -29,7 +29,7 @@ document equality and export), `provisioning/compute/contracts/`,
   an empty pin, a malformed key, a comment dropped, a version-2 submission refused
   naming version 3, and the existing carry-forward of a protected key from a stored
   version-2 connection.
-- [ ] 1.2 In the `ssh` codec's `build`, keep the previous connection's `host_keys` when
+- [x] 1.2 In the `ssh` codec's `build`, keep the previous connection's `host_keys` when
   a submission omits them, whatever else it changes, `ssh_host` and `ssh_port`
   included, and replace them when it states others; in the host authority
   (`hosts/service.py`), take equality after the codec with the stored connection as
@@ -40,7 +40,7 @@ document equality and export), `provisioning/compute/contracts/`,
   `provisioning/compute/tests/integration/test_host_authority.py` and
   `test_host_definitions.py` for an update omitting the pin at a new port, an INI
   import of a pinned host, and a document entry omitting the pin applying nothing.
-- [ ] 1.3 Carry `host_keys` through the host definitions document's parsing and
+- [x] 1.3 Carry `host_keys` through the host definitions document's parsing and
   validation (`hosts/definitions.py`) and the canonical export
   (`HostAuthority.host_definitions()`), and update the contracts' host-document models
   and examples (`compute_provisioning_contracts/hosts.py`, the `definitions.py`
@@ -48,7 +48,7 @@ document equality and export), `provisioning/compute/contracts/`,
   key".) Verify: `provisioning/compute/contracts/tests/unit/test_host_definitions.py`
   and `provisioning/compute/tests/unit/test_host_definitions.py` round-trip a pinned
   entry through import and export.
-- [ ] 1.4 Move every in-repository registration and fixture that states `ssh`
+- [x] 1.4 Move every in-repository registration and fixture that states `ssh`
   version 2 to version 3: the client's helpers (`compute_provisioning_client`), the
   mock executor's fixtures (`compute_provisioning_ansible/mock.py`), the chart's
   example host document (`helm/charts/provisioning/values.yaml`) and its render test
@@ -56,7 +56,7 @@ document equality and export), `provisioning/compute/contracts/`,
   and the provisioning, contract and e2e unit suites that build connections. (D4.)
   Verify: `git grep -n '"version": 2\|version: 2'` over `provisioning/`, `helm/` and
   `e2e-tests/` lists no `ssh` connection; `make -C helm test-render` passes.
-- [ ] 1.5 Verification point. Unit: the ansible package's
+- [x] 1.5 Verification point. Unit: the ansible package's
   `test_ssh_connection.py`, `test_inventory.py`, `test_host_import.py`; the contracts'
   `test_host_definitions.py`, `test_contracts.py`. Library integration:
   `provisioning/compute/tests/integration/test_host_authority.py`,
@@ -68,6 +68,28 @@ document equality and export), `provisioning/compute/contracts/`,
   End-to-end: `e2e_deal`, `e2e_bare_metal_mock_deal` and `e2e_bare_metal_publication`
   register hosts at version 3 through the API under the mock executor;
   `e2e_real_provisioning_reapply` reapplies registrations but runs in no lane.
+
+**Section evidence.** The Ansible unit suite passed (198 tests), the contracts
+unit suite passed (163 tests), and the focused host authority and definitions
+suites passed (86 tests). Typed API integration covers registering and reading
+pins, refusal of an empty pin, preservation across a port change and INI
+re-import, and pin export with an unchanged re-import that omits it. Those pin
+round trips ran through the typed application API in place of the planned
+lower-level cases; the unchanged library and unit tests cover the existing
+generic paths. Focused API and SQLite migration checks passed. The chart's rendered
+host document passed the provisioning parser and SSH codec check. A detached
+baseline run fails the new pin test at the missing helper argument. The
+existing migration still writes version 2, validating the fields shared with
+version 3; the next section advances the resulting rows to version 3.
+
+**End-to-end coverage.** The VM deal, bare-metal mock deal and bare-metal
+publication lanes exercise version-3 host registration. Neither those lanes
+nor the real reapply scenario supplies evidence of host verification for this
+section.
+
+The execution snapshot returns an isolated copy of nested public fields. A
+two-session SQLite test overlaps an omitted-field update with explicit pin
+rotation. Existing hosts in a batch are locked in host ID order.
 
 ## 2. Version-2 connections migrate to version 3, and deployed hosts are marked for adoption
 

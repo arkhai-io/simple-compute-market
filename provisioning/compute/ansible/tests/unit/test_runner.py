@@ -45,7 +45,7 @@ def _host(**protected) -> ExecutionHost:
     public = {"ssh_host": "10.0.0.1", "ssh_port": 2201, "ssh_user": "ops", "public_host": None}
     public["key_path"] = None if protected else "/keys/id"
     return ExecutionHost(
-        "kvm1", "default", ConnectionEnvelope(kind="ssh", version=2, public=public, protected=protected)
+        "kvm1", "default", ConnectionEnvelope(kind="ssh", version=3, public=public, protected=protected)
     )
 
 
@@ -140,7 +140,7 @@ def test_a_host_stored_at_version_1_never_reaches_an_inventory() -> None:
     legacy = ExecutionHost(
         "kvm1", "default", ConnectionEnvelope(kind="ssh", version=1, public=stored.public)
     )
-    with pytest.raises(ValueError, match="re-register the host at version 2"):
+    with pytest.raises(ValueError, match="re-register the host at version 3"):
         inventory_target(legacy)
 
 
@@ -148,7 +148,7 @@ def test_a_tenant_facing_route_is_carried_into_the_rendered_inventory() -> None:
     """``public_host=`` and ``public_port=`` render as host variables when the
     connection states them, and neither renders when it does not."""
     public = {**_host().connection.public, "public_host": "192.0.2.10", "public_port": 2222}
-    routed = ExecutionHost("kvm1", "default", ConnectionEnvelope(kind="ssh", version=2, public=public))
+    routed = ExecutionHost("kvm1", "default", ConnectionEnvelope(kind="ssh", version=3, public=public))
     runner = AnsibleRunner(SimpleNamespace())
 
     target = inventory_target(routed)

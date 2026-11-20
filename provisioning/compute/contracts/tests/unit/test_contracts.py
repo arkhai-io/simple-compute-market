@@ -287,7 +287,7 @@ def test_a_lease_view_without_the_field_reads_as_no_activation_recorded():
 
 
 _GPU_FIELDS = {"gpu_count": 8, "gpu_model": "H200"}
-_CONNECTION = {"kind": "ssh", "version": 2, "public": {"ssh_host": "192.0.2.1"}}
+_CONNECTION = {"kind": "ssh", "version": 3, "public": {"ssh_host": "192.0.2.1"}}
 
 
 @pytest.mark.parametrize("model", [HostCreate, HostUpdate])

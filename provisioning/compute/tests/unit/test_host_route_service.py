@@ -19,7 +19,7 @@ from compute_provisioning.hosts.service import HostNotFoundError, PoolChangeRefu
 from compute_provisioning.route_errors import ProvisioningRouteError
 
 _CREATE = HostCreate(
-    host_id="node-1", connection={"kind": "ssh", "version": 2, "public": {"ssh_host": "192.0.2.1"}}
+    host_id="node-1", connection={"kind": "ssh", "version": 3, "public": {"ssh_host": "192.0.2.1"}}
 )
 
 

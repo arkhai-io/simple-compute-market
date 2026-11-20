@@ -331,6 +331,11 @@ fi
 # The registry chart's rendered profile is read with the registry's own loader
 # when its environment exists (make init-arkhai-core-registry); without it the
 # check says so and skips.
+PROVISIONING_ENV_PYTHON="$CHART_DIR/../provisioning/compute/service/.venv/bin/python"
+if [[ -z "${PROVISIONING_PYTHON:-}" && -x "$PROVISIONING_ENV_PYTHON" ]]; then
+    export PROVISIONING_PYTHON="$PROVISIONING_ENV_PYTHON"
+fi
+
 REGISTRY_ENV_PYTHON="$CHART_DIR/../core/registry/.venv/bin/python"
 if [[ -z "${REGISTRY_PYTHON:-}" && -x "$REGISTRY_ENV_PYTHON" ]]; then
     export REGISTRY_PYTHON="$REGISTRY_ENV_PYTHON"

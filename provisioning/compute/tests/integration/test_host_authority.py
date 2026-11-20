@@ -7,12 +7,14 @@ and never letting a protected value reach a response.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Event, get_ident
 
 import pytest
 from market_resource_pools.db import Base as PoolsBase
 from market_resource_pools.db import ResourcePool
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -691,3 +693,56 @@ def test_an_inventory_naming_an_unknown_pool_applies_nothing(authority, session_
 
     with session_factory() as db:
         assert db.query(Host).count() == 0
+
+def test_update_omitting_a_field_does_not_restore_its_stale_value(file_session_factory):
+    """A port edit and an explicit pin rotation overlap at the authority."""
+    port_read = Event()
+    rotation_submitted = Event()
+    rotation_threads = set()
+
+    class _PreservingCodec(_Codec):
+        def build(self, public, protected, *, previous=None):
+            if public.get("port") == 2222:
+                port_read.set()
+                assert rotation_submitted.wait(5)
+            values = dict(public)
+            if previous is not None and "pin" not in values:
+                values["pin"] = previous.public["pin"]
+            return super().build(values, protected, previous=previous)
+
+    authority = HostAuthority(file_session_factory, codecs=ConnectionCodecs([_PreservingCodec()]))
+
+    def submission(port, *, pin=None):
+        public = {"address": "192.0.2.2", "port": port}
+        if pin is not None:
+            public["pin"] = pin
+        return ConnectionSubmission(kind="fake", version=1, public=public)
+
+    authority.register_host(HostCreate(host_id="racing", connection=submission(22, pin="initial")))
+
+    def on_execute(_connection, _cursor, statement, *_args):
+        if get_ident() in rotation_threads and statement == "BEGIN IMMEDIATE":
+            rotation_submitted.set()
+
+    def rotate():
+        rotation_threads.add(get_ident())
+        try:
+            authority.update_host("racing", HostUpdate(connection=submission(2222 + 1, pin="rotated")))
+        finally:
+            rotation_submitted.set()
+
+    engine = file_session_factory.kw["bind"]
+    event.listen(engine, "before_cursor_execute", on_execute)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            edit = workers.submit(
+                authority.update_host, "racing", HostUpdate(connection=submission(2222)),
+            )
+            assert port_read.wait(5)
+            rotation = workers.submit(rotate)
+            edit.result(timeout=10)
+            rotation.result(timeout=10)
+    finally:
+        event.remove(engine, "before_cursor_execute", on_execute)
+
+    assert authority.lookup("racing").connection.public["pin"] == "rotated"

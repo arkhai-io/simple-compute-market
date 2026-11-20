@@ -44,7 +44,7 @@ _PUBLIC = {
 }
 
 
-def _seed(session_factory, host_id: str, *, key: str, version: int = 2) -> str:
+def _seed(session_factory, host_id: str, *, key: str, version: int = 3) -> str:
     """Store an enabled host whose private key is protected under ``key``;
     return its ciphertext."""
     ciphertext = encrypt_secret(_PEM, key)
@@ -159,7 +159,7 @@ async def test_status_names_a_host_stored_at_version_1_and_the_version_served(
 
     (reason,) = [reason for reason in detail.not_ready_reasons if "'legacy'" in reason]
     assert reason.startswith("host 'legacy' cannot be executed against: ")
-    assert "at version 2" in reason and "'ssh' at 1" in reason
+    assert "at version 3" in reason and "'ssh' at 1" in reason
     assert not any(key.referenced_by == ["legacy"] for key in detail.ssh_keys)
 
 

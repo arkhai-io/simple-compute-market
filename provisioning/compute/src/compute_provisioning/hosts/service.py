@@ -32,7 +32,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, Optional
 
+from market_fulfillment import begin_sqlite_write_transaction
 from market_resource_pools import ResourcePool
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .connection import ConnectionCodecs, ConnectionEnvelope
@@ -301,6 +303,14 @@ class HostAuthority:
         """
         return self._session_factory()
 
+    def lock_existing_hosts_in_session(self, db: Session, host_ids: Sequence[str]) -> None:
+        """Take overlapping batches' row locks in host ID order."""
+        if host_ids and db.get_bind().dialect.name != "sqlite":
+            db.execute(
+                select(Host.host_id).where(Host.host_id.in_(host_ids))
+                .order_by(Host.host_id).with_for_update()
+            ).all()
+
     def put_host_in_session(
         self,
         db: Session,
@@ -340,7 +350,9 @@ class HostAuthority:
         stated = pool_id is not POOL_UNSTATED
         if stated and pool_id is not None:
             self._require_pool_exists(db, pool_id)
-        existing = db.query(Host).filter(Host.host_id == host_id).one_or_none()
+        existing = (
+            db.query(Host).filter(Host.host_id == host_id).with_for_update().one_or_none()
+        )
         if existing is None:
             host = Host(
                 host_id=host_id,
@@ -355,6 +367,15 @@ class HostAuthority:
                 db.flush()
                 self._move_to_pool(db, host, pool_id)
             return "created"
+        connection_db = db.connection()
+        # SQLite does not lock rows on SELECT. Reserve the writer before using
+        # the stored pin as the basis of an update, then refresh the snapshot.
+        if (
+            connection_db.dialect.name == "sqlite"
+            and not connection_db.connection.driver_connection.in_transaction
+        ):
+            begin_sqlite_write_transaction(db)
+            db.refresh(existing)
         stored = existing.connection()
         built = self._build(connection, previous=stored)
         target_pool = pool_id if stated else existing.pool_id
@@ -404,7 +425,10 @@ class HostAuthority:
         explicitly, it unplaces the host, through the pool-change hooks.
         """
         with self._session_factory() as db:
-            host = self._require_host(db, host_id)
+            begin_sqlite_write_transaction(db)
+            host = db.get(Host, host_id, with_for_update=True)
+            if host is None:
+                raise HostNotFoundError(host_id)
             if data.connection is not None:
                 host.set_connection(
                     self._build(data.connection, previous=host.connection())
@@ -448,6 +472,8 @@ class HostAuthority:
             return []
         applied: list[str] = []
         with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            self.lock_existing_hosts_in_session(db, [entry.host_id for entry in entries])
             for entry in entries:
                 # An inventory entry cannot state ``enabled``, so an existing
                 # host keeps its own.
