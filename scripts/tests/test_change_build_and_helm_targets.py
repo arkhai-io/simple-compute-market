@@ -34,9 +34,11 @@ _TAGS = re.compile(r"docker build .*?-t (\S+)|docker tag \S+ (\S+)")
 def _environment(path: Path | None = None) -> dict[str, str]:
     # A make that ran these tests passes its command-line variables, CHANGE among
     # them, down through MAKEFLAGS; none of them may reach the targets read here.
+    # HELM_CONTEXT is an owner's environment on a machine validating on kind
+    # (.agents/evidence/helm.md); the tests state the context they expect.
     env = {key: value for key, value in os.environ.items()
            if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL", "CHANGE",
-                          "IMAGE_SUFFIX", "NAMESPACE")}
+                          "IMAGE_SUFFIX", "NAMESPACE", "HELM_CONTEXT")}
     if path is not None:
         env["PATH"] = f"{path}:{env['PATH']}"
     return env
