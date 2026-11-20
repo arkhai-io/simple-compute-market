@@ -13,18 +13,22 @@ from __future__ import annotations
 import json
 import os
 import select
+import shlex
 import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
 from change_workflow import adapters, sandbox, scope
 from change_workflow.sandbox import BWRAP, Launch
 from change_workflow.scope import ADAPTER, ENGINE, GRANT, Scope, ScopedPath
+from change_workflow_fixtures import with_test_directory
 
 BASE = [BWRAP, "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
 # The engine's `git` over the system's two, read from descriptors 7 and 8, and the
@@ -32,6 +36,9 @@ BASE = [BWRAP, "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev", "--proc"
 GIT = ["--ro-bind", "/usr/bin/git", "/dev/change-workflow-git",
        "--perms", "0755", "--ro-bind-data", "7", "/usr/bin/git",
        "--perms", "0755", "--ro-bind-data", "8", "/usr/lib/git-core/git"]
+# The step's private `/tmp`: a tmpfs of mode 0700 with `TMPDIR` pointing at it.
+TMPFS = ["--perms", "0700", "--tmpfs", "/tmp", "--setenv", "TMPDIR", "/tmp"]
+PRIVATE = ScopedPath(Path("/tmp"), ENGINE, "<temporary directory>", private=True)
 
 
 def _paths(source: str, *paths: Path, create: bool = False) -> tuple[ScopedPath, ...]:
@@ -43,7 +50,7 @@ def _paths(source: str, *paths: Path, create: bool = False) -> tuple[ScopedPath,
 def test_a_scope_renders_writable_paths_then_the_protected_ones_inside_them() -> None:
     root, home = Path("/work/checkout"), Path("/user-home")
     design = Scope("design",
-                   _paths(ENGINE, root / "openspec", home / ".cache", Path("/tmp"), root / ".git"),
+                   (PRIVATE, *_paths(ENGINE, root / "openspec", home / ".cache", root / ".git")),
                    _paths(ENGINE, root / ".agents/workflow.toml", root / ".git/config",
                           Path("/usr/bin/git")))
 
@@ -54,8 +61,10 @@ def test_a_scope_renders_writable_paths_then_the_protected_ones_inside_them() ->
 
     assert command == [
         *BASE,
+        # The private `/tmp`, made rather than bound, before every bind.
+        *TMPFS,
         # Shallower paths first, so no mount hides one inside it.
-        *bind("--bind", "/tmp"), *bind("--bind", "/user-home/.cache"),
+        *bind("--bind", "/user-home/.cache"),
         *bind("--bind", "/work/checkout/.git"), *bind("--bind", "/work/checkout/openspec"),
         # Only the protected path inside a writable one: the configuration and Git's
         # executable lie outside design's, read-only under the root already.
@@ -64,6 +73,36 @@ def test_a_scope_renders_writable_paths_then_the_protected_ones_inside_them() ->
         # writable directory holding an executable hides it.
         *GIT,
         "--die-with-parent", "--", "claude", "-p", "go"]
+
+
+def test_a_path_under_the_hosts_tmp_is_bound_inside_the_private_one() -> None:
+    """CW-m8wq: a path under the host's `/tmp` that the scope names, as the review's
+    drafts directory or a grant, is bound at its own path after the tmpfs, so it lands
+    inside the private `/tmp`; a protected path inside it is bound read-only after
+    it."""
+    drafts = Path("/tmp/change-workflow-review-x")
+    review = Scope("review", (*_paths(ENGINE, Path("/work/checkout/.git/change-invocations"),
+                                      drafts), PRIVATE),
+                   _paths(ADAPTER, drafts / "settings.json"))
+
+    command = sandbox.arguments(review, ["codex"], git=(7, 8))
+
+    assert command[len(BASE):-3] == [
+        *TMPFS, "--bind", str(drafts), str(drafts),
+        "--bind", "/work/checkout/.git/change-invocations",
+        "/work/checkout/.git/change-invocations",
+        "--ro-bind", str(drafts / "settings.json"), str(drafts / "settings.json"), *GIT]
+
+
+def test_the_private_tmp_is_not_bound_from_the_host(tmp_path: Path) -> None:
+    """The private `/tmp` is the sandbox's own: it is none of the paths bound from the
+    host, which are all `prepare` creates."""
+    found = Scope("design", (PRIVATE, *_paths(GRANT, tmp_path / "build", create=True)), ())
+
+    assert sandbox.mounted_writable(found) == list(_paths(GRANT, tmp_path / "build",
+                                                          create=True))
+    sandbox.prepare(found)
+    assert (tmp_path / "build").is_dir()
 
 
 def test_a_checkout_wide_scope_mounts_the_configuration_read_only_after_the_checkout() -> None:
@@ -233,14 +272,16 @@ def test_with_the_sandbox_the_program_runs_inside_it(tmp_path: Path) -> None:
 
 def test_inside_the_engines_sandbox_the_git_it_finds_is_kept(tmp_path: Path) -> None:
     """The enclosing sandbox's `git` cannot be mounted over, so a sandbox started
-    inside it keeps that `git` and mounts the system's Git from where it sits there."""
-    found = Scope("triage", _paths(GRANT, tmp_path / "build", create=True), ())
+    inside it keeps that `git` and mounts the system's Git from where it sits there;
+    its private `/tmp` is made as outside, and a path under `/tmp` bound inside it from
+    the enclosing sandbox's."""
+    found = Scope("triage", (PRIVATE, *_paths(GRANT, tmp_path / "build", create=True)), ())
 
     with sandbox.launch(found, ["claude"], probing=lambda: None,
                         inside=lambda: True) as launched:
         assert launched.fds == ()
         assert launched.command[len(BASE):] == (
-            "--bind", str(tmp_path / "build"), str(tmp_path / "build"),
+            *TMPFS, "--bind", str(tmp_path / "build"), str(tmp_path / "build"),
             "--ro-bind", "/dev/change-workflow-git", "/dev/change-workflow-git",
             "--die-with-parent", "--", "claude")
 
@@ -253,8 +294,7 @@ INERT = ("openspec/", "docs/", "**/README.md", "AGENTS.md")
 
 
 def _scope(step: str, root: Path, **more) -> Scope:
-    return scope.resolve(step, root, inert_paths=INERT, home=root.parent / "home",
-                         temporary=root.parent / "tmp", **more)
+    return scope.resolve(step, root, inert_paths=INERT, home=root.parent / "home", **more)
 
 
 @pytest.fixture
@@ -267,10 +307,16 @@ def checkout(tmp_path: Path) -> Path:
     return root
 
 
-def _run(found: Scope, script: str, root: Path) -> subprocess.CompletedProcess:
+def _run(found: Scope, script: str, root: Path, *,
+         hiding: bool = False) -> subprocess.CompletedProcess:
+    """`script` in the scope's sandbox, from `root`, the test's directory around it
+    read-only unless `hiding`, when the private `/tmp` hides it as it hides the
+    host's."""
     with sandbox.launch(found, ["sh", "-c", script]) as launched:
         assert launched.unconfined is None
-        return subprocess.run(launched.command, cwd=root, capture_output=True, text=True,
+        command = (list(launched.command) if hiding
+                   else with_test_directory(launched.command, root.parent))
+        return subprocess.run(command, cwd=root, capture_output=True, text=True,
                               pass_fds=launched.fds)
 
 
@@ -333,9 +379,10 @@ def test_a_step_cannot_create_an_absent_settings_file(checkout: Path) -> None:
 @needs_bwrap
 def test_a_settings_file_linked_to_the_workspace_launches_and_stays_read_only(
         checkout: Path) -> None:
-    """A clone links its `.claude/settings.local.json` to the owner's workspace by an
-    absolute symlink: the sandbox launches, and a write through the link fails, the
-    workspace's file unchanged."""
+    """CW-r6kd's "A clone's settings file is a link": a clone links its
+    `.claude/settings.local.json` to the owner's workspace by an absolute symlink; the
+    sandbox launches, and a write through the link fails as a read-only file system,
+    the workspace's file and the link unchanged."""
     workspace = checkout.parent / "workspace"
     (workspace / ".claude").mkdir(parents=True)
     (workspace / ".claude/settings.local.json").write_text("{}", "utf-8")
@@ -389,13 +436,13 @@ def test_an_adapters_state_file_is_written_in_place_and_its_directory_is_not(
     """Claude Code's `~/.claude.json` is mounted alone: written in place it changes,
     while the home directory beside it stays read-only, and a file moved over it from
     another directory, which crosses a mount, fails and leaves it as it was."""
-    home, temporary = checkout.parent / "home", checkout.parent / "tmp"
+    home = checkout.parent / "home"
     found = _scope("design", checkout, adapter_files=("~/.claude.json",))
 
     written = _run(found, f"echo '{{\"n\": 1}}' > {home}/.claude.json", checkout)
     beside = _run(found, f"echo x > {home}/other", checkout)
-    renamed = _run(found, f"echo x > {temporary}/state.json && "
-                          f"mv {temporary}/state.json {home}/.claude.json", checkout)
+    renamed = _run(found, f"echo x > /tmp/state.json && "
+                          f"mv /tmp/state.json {home}/.claude.json", checkout)
 
     assert written.returncode == 0, written.stderr
     assert "Read-only file system" in beside.stderr
@@ -410,25 +457,23 @@ needs_codex = pytest.mark.skipif(CODEX is None, reason="Codex is not installed h
 
 @needs_bwrap
 @needs_codex
-def test_codex_runs_in_the_reviews_scope_and_its_own_sandbox_nests(checkout: Path) -> None:
+def test_codex_runs_in_the_reviews_scope(checkout: Path) -> None:
     """Codex starts in the review's scope, its state writable but its configuration,
-    and Codex's own sandbox, which `codex sandbox` starts as `codex exec --sandbox`
-    does, starts inside the engine's and runs a command there. The home directory is
-    the test's own; the temporary directory is the system's, as a review's is, since
-    Codex's sandbox keeps a lock there."""
+    and runs Git there through the engine's `git`. The home directory is the test's
+    own."""
     home = checkout.parent / "home"
     adapter = adapters.ADAPTERS["codex"]
     found = scope.resolve("review", checkout, inert_paths=INERT, home=home,
                           adapter_writable=adapter.state, adapter_protected=adapter.protected)
 
     version = _run(found, "codex --version", checkout)
-    nested = _run(found, "codex sandbox -- cat src/main.py", checkout)
+    toplevel = _run(found, "git rev-parse --show-toplevel", checkout)
     state = _run(found, f"echo x > {home}/.codex/session.json", checkout)
     configuration = _run(found, f"echo x > {home}/.codex/config.toml", checkout)
 
     assert version.returncode == 0, version.stderr
     assert version.stdout.startswith("codex"), version.stdout
-    assert (nested.returncode, nested.stdout) == (0, "x\n"), nested.stderr
+    assert (toplevel.returncode, toplevel.stdout) == (0, f"{checkout}\n"), toplevel.stderr
     assert state.returncode == 0, state.stderr
     assert "Read-only file system" in configuration.stderr
     assert (home / ".codex/config.toml").read_text("utf-8") == ""
@@ -462,6 +507,80 @@ def test_a_file_outside_the_scope_is_read(checkout: Path) -> None:
     read = _run(_scope("review", checkout), "cat src/main.py", checkout)
 
     assert (read.returncode, read.stdout) == (0, "x\n")
+
+
+# The ancestor check the bare-metal working-data helper makes of a directory it keeps
+# files in: each ancestor below `/` owned by root or the caller and writable by no
+# one else, `/tmp` exempt only where it is root's and sticky.
+ANCESTORS = r"""
+import os, stat, sys
+path, failed = "/", []
+for part in sys.argv[1].split("/")[1:]:
+    path = os.path.join(path, part)
+    info = os.stat(path, follow_symlinks=False)
+    sticky_tmp = path == "/tmp" and info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+    if not sticky_tmp and (info.st_uid not in (0, os.getuid()) or info.st_mode & 0o022):
+        failed.append(f"{path} {info.st_uid} {oct(info.st_mode & 0o7777)}")
+print("unsafe ancestor: " + ", ".join(failed) if failed else "safe")
+"""
+
+
+@needs_bwrap
+def test_a_suites_temporary_directory_passes_an_owner_check(checkout: Path) -> None:
+    """CW-m8wq's "A suite checks its temporary directory's owner": inside the sandbox
+    `/tmp` is the owner's with mode 0700, so each ancestor of a directory made under it
+    is root's or the caller's and writable by no one else, though the host's `/tmp`,
+    root's, would show there as the overflow uid's."""
+    script = (f"mkdir -p /tmp/ledger/work && stat -c '%u %a' /tmp && "
+              f"{shlex.join([sys.executable, '-I', '-c', ANCESTORS, '/tmp/ledger/work'])}")
+
+    checked = _run(_scope("implement", checkout), script, checkout)
+
+    assert checked.returncode == 0, checked.stderr
+    assert checked.stdout.splitlines() == [f"{os.getuid()} 700", "safe"]
+
+
+@needs_bwrap
+def test_tmpdir_names_the_private_tmp(checkout: Path) -> None:
+    """A `TMPDIR` the owner set elsewhere is replaced by `/tmp`, so a program's
+    temporary files land in the private one."""
+    found = _scope("review", checkout)
+    with sandbox.launch(found, ["sh", "-c", "echo $TMPDIR"]) as launched:
+        said = subprocess.run(launched.command, capture_output=True, text=True,
+                              pass_fds=launched.fds, env={**os.environ, "TMPDIR": "/var/tmp"})
+
+    assert (said.returncode, said.stdout) == (0, "/tmp\n"), said.stderr
+
+
+@pytest.fixture
+def host_tmp() -> Iterator[Path]:
+    """A directory of the test's own under the host's `/tmp` itself, wherever pytest
+    keeps its temporary directories."""
+    made = Path(tempfile.mkdtemp(prefix="change-workflow-host-tmp-", dir="/tmp"))
+    yield made
+    shutil.rmtree(made, ignore_errors=True)
+
+
+@needs_bwrap
+def test_the_hosts_tmp_is_hidden_but_for_the_paths_the_scope_names(
+        checkout: Path, host_tmp: Path) -> None:
+    """A file under the host's `/tmp` outside the scope is not visible inside; a path
+    under it the scope names — here a grant — is written at the same host path, and a
+    file written to the private `/tmp` is left nowhere on the host."""
+    hidden, granted = host_tmp / "hidden.txt", host_tmp / "granted"
+    hidden.write_text("x\n", "utf-8")
+    marker = f"{host_tmp.name}-private"
+    found = _scope("implement", checkout, grants=(str(granted),))
+
+    looked = _run(found, f"test -e {hidden} && echo seen || echo hidden", checkout,
+                  hiding=True)
+    written = _run(found, f"echo y > {granted}/entry && echo z > /tmp/{marker}", checkout,
+                   hiding=True)
+
+    assert (looked.returncode, looked.stdout) == (0, "hidden\n"), looked.stderr
+    assert written.returncode == 0, written.stderr
+    assert (granted / "entry").read_text("utf-8") == "y\n"
+    assert not (Path("/tmp") / marker).exists()
 
 
 PING = ("import socket, sys\n"

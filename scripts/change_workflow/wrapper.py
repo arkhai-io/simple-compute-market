@@ -268,12 +268,10 @@ class Wrapper:
     echo: Callable[[str], None] | None = lambda shown: print(shown, file=sys.stderr, flush=True)
     # The outcome schema; None reads the repository's own.
     schema_path: Path | None = None
-    # The sandbox each run's session is launched in, the home directory its scope's
-    # `~` paths name, and the temporary directory it writes; None is the user's, and
-    # the system's.
+    # The sandbox each run's session is launched in, and the home directory its
+    # scope's `~` paths name; None is the user's.
     confinement: Confinement = BUBBLEWRAP
     home: Path | None = None
-    temporary: Path | None = None
     # Where Claude Code keeps a session's conversation, read for the turns it gained
     # outside the wrapper and the time of its last turn.
     conversation: Callable[[Path, str], Path] = conversation_file
@@ -359,7 +357,7 @@ class Wrapper:
         confined = confine(self.confinement, [model.harness for model in models],
                            lambda harness: configuration.scope(
                                step, self.root, harness=harness, grants=writes,
-                               home=self.home, temporary=self.temporary), step)
+                               home=self.home), step)
         if granted := [path for _, path in grant_paths(writes)]:
             extra["writes_granted"] = granted
         return confined

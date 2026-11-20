@@ -1,9 +1,13 @@
 """Codex's adapter: how a review runs in Codex, what its harness writes and loads, and
 how its refusals are read.
 
-A review runs in Codex's own read-only sandbox (`codex exec --sandbox read-only`),
-kept inside the engine's: the reviewer must never change what it reviews, and the
-two nest. Its plain output is condensed into progress. Codex writes its sessions
+A review confined by the engine's sandbox runs Codex without Codex's own (`--sandbox
+danger-full-access`): Codex's sandbox mounts a fresh `/dev`, which hides the system's
+Git where the engine's `git` runs it (`sandbox_git.REAL_GIT`), so every Git command
+of a reviewer inside both would fail. The review's scope keeps every file it reviews
+read-only there. A review the engine cannot confine runs in Codex's own read-only
+sandbox (`--sandbox read-only`), its only guard: the reviewer must never change what
+it reviews. Its plain output is condensed into progress. Codex writes its sessions
 and state under `~/.codex`, and loads `~/.codex/config.toml`, which no step writes
 (CW-r6kd). It runs only the review: a writing step needs the denial record Claude
 Code keeps, and Codex keeps none. It has no command rules.
@@ -48,18 +52,26 @@ def _options(output: Path, model: str | None, effort: str | None) -> list[str]:
     return options
 
 
+def _sandbox_mode(confined: bool) -> str:
+    """Codex's own sandbox: none inside the engine's, and read-only outside it."""
+    return "danger-full-access" if confined else "read-only"
+
+
 def command(prompt: str, output: Path, root: Path, model: str | None,
-            effort: str | None = None) -> list[str]:
-    return ["codex", "exec", "--sandbox", "read-only", "--cd", str(root),
+            effort: str | None = None, *, confined: bool) -> list[str]:
+    """A fresh review, `confined` when the engine's sandbox runs it."""
+    return ["codex", "exec", "--sandbox", _sandbox_mode(confined), "--cd", str(root),
             *_options(output, model, effort), prompt]
 
 
 def resume_command(session: str, prompt: str, output: Path, model: str | None,
-                   effort: str | None = None) -> list[str]:
-    # `exec resume` takes no --sandbox flag, so the read-only sandbox is set through
-    # configuration; the reviewer must never be able to change what it reviews.
-    return ["codex", "exec", "resume", session, "--config", 'sandbox_mode="read-only"',
-            *_options(output, model, effort), prompt]
+                   effort: str | None = None, *, confined: bool) -> list[str]:
+    """A review continuing `session`, `confined` when the engine's sandbox runs it.
+    `exec resume` takes no `--sandbox` flag, so Codex's sandbox is set through its
+    configuration."""
+    return ["codex", "exec", "resume", session, "--config",
+            f'sandbox_mode="{_sandbox_mode(confined)}"', *_options(output, model, effort),
+            prompt]
 
 
 def _command_line(line: str) -> str:
@@ -151,15 +163,19 @@ def refusals(text: str) -> list[Entry]:
     return found
 
 
-def run(command: Sequence[str], log: Path) -> int:
+def run(command: Sequence[str], log: Path, session: str | None = None) -> int:
     """Run a review in Codex, every command it starts seeing in its environment that
     it is the unattended run of the review (`UNATTENDED_RUN`). Codex names no
     session in its commands' environment, so the session of whatever started the
-    review is withheld: what the reviewer runs is no part of that session's line. The
-    process keeps the descriptors the sandbox reads as it starts, the only inheritable
-    ones the engine opens (`sandbox.Launch`)."""
+    review is withheld, what the reviewer runs being no part of that session's line,
+    and `session`, the engine's key for the attempt, given in its place where there is
+    one: what the reviewer invokes through `run` and the guarded push, and each push
+    the engine's `git` refuses it, is kept under that key for the review's line. The process keeps the descriptors the sandbox reads as it starts, the only
+    inheritable ones the engine opens (`sandbox.Launch`)."""
     progress = Progress()
     environment = {key: value for key, value in os.environ.items() if key != SESSION_ID}
+    if session:
+        environment[SESSION_ID] = session
     # Appended: a review's attempts on each of its models share one transcript.
     with log.open("a", encoding="utf-8") as stream:
         process = subprocess.Popen(list(command), cwd=repository_root(), stdin=subprocess.DEVNULL,

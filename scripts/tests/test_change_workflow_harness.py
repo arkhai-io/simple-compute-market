@@ -45,6 +45,24 @@ def test_the_process_a_codex_review_starts_sees_it_is_the_reviews(tmp_path: Path
     assert log.read_text("utf-8") == "review\n"
 
 
+_SESSION = "import os; print(os.environ.get('CLAUDE_CODE_SESSION_ID', 'none'))"
+
+
+def test_a_codex_reviews_commands_keep_what_they_invoke_under_the_runs_key(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CW-w3oa: Codex names no session in its commands' environment, so the starting
+    session's is withheld from them, and the engine's key for the review's run given
+    in its place where there is one."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "the-starting-session")
+    keyed, unkeyed = tmp_path / "keyed.log", tmp_path / "unkeyed.log"
+
+    assert codex.run([sys.executable, "-c", _SESSION], keyed, "review-codex-1") == 0
+    assert codex.run([sys.executable, "-c", _SESSION], unkeyed) == 0
+
+    assert keyed.read_text("utf-8") == "review-codex-1\n"
+    assert unkeyed.read_text("utf-8") == "none\n"
+
+
 # A process that writes its id to the file it is given, signals the run that
 # started it as a stop would, and runs on until it is ended.
 _SIGNALLING = ("import os, signal, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); "
@@ -119,16 +137,23 @@ def test_claude_codes_adapter_declares_its_state_settings_and_steps() -> None:
     assert adapter.rules == ("Bash(git push*)",)
 
 
-def test_codexs_commands_keep_its_own_read_only_sandbox(tmp_path: Path) -> None:
+@pytest.mark.parametrize("confined,mode", [(True, "danger-full-access"), (False, "read-only")],
+                         ids=["confined", "unconfined"])
+def test_codex_runs_without_its_own_sandbox_only_inside_the_engines(
+        tmp_path: Path, confined: bool, mode: str) -> None:
+    """CW-t6mb's "Codex runs a review" and "Codex runs a review without the sandbox":
+    inside the engine's sandbox Codex runs without its own, whose fresh `/dev` would
+    hide the system's Git the engine's `git` runs; outside it, in its own read-only
+    sandbox, fresh and resumed alike."""
     draft = tmp_path / "draft.md"
 
-    fresh = codex.command("review it", draft, tmp_path, "gpt-6", "high")
-    resumed = codex.resume_command("abc", "again", draft, "gpt-6")
+    fresh = codex.command("review it", draft, tmp_path, "gpt-6", "high", confined=confined)
+    resumed = codex.resume_command("abc", "again", draft, "gpt-6", confined=confined)
 
-    assert fresh == ["codex", "exec", "--sandbox", "read-only", "--cd", str(tmp_path),
+    assert fresh == ["codex", "exec", "--sandbox", mode, "--cd", str(tmp_path),
                      "--output-last-message", str(draft), "--model", "gpt-6",
                      "--config", 'model_reasoning_effort="high"', "review it"]
-    assert resumed == ["codex", "exec", "resume", "abc", "--config", 'sandbox_mode="read-only"',
+    assert resumed == ["codex", "exec", "resume", "abc", "--config", f'sandbox_mode="{mode}"',
                        "--output-last-message", str(draft), "--model", "gpt-6", "again"]
 
 

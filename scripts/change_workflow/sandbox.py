@@ -10,9 +10,22 @@ every writable path is read-only already, under the root, so it needs no mount o
 its own. Writing to a protected file fails as a read-only file system, and replacing
 it by renaming another file over it fails busy, since the target is a mount point: so
 `git config`, which writes a lock file and renames it over `.git/config`, cannot
-rewire Git's hooks. The network and the environment are shared, and reads
-are open everywhere: the sandbox bounds what a step writes, not what it sees. A Unix
-socket on a read-only mount stays connectable, so Docker needs no mount of its own.
+rewire Git's hooks. The network is shared, and so is the environment but `TMPDIR`;
+reads are open everywhere but the host's `/tmp`: the sandbox bounds what a step
+writes, not what it sees. A Unix socket on a read-only mount stays connectable, so
+Docker needs no mount of its own.
+
+The scope's temporary entry is the step's private `/tmp`: a tmpfs the sandbox mounts
+at `/tmp` before every bind, owned by the owner with mode `0700`, with `TMPDIR`
+pointing at it, so a `TMPDIR` set elsewhere does not lead out of it. Inside the
+sandbox's user namespace only the owner's uid is mapped, and the host's `/tmp`,
+root's, shows as the overflow uid's and open to everyone, so a suite trusting only
+root-owned or its own ancestors refuses it; the private one passes. Each writable path
+under the host's `/tmp` the scope names is bound after the tmpfs, at its own path
+inside it, so it means the same file on both sides, and a protected path inside one
+of them read-only after it; the rest of the host's `/tmp` is hidden. The tmpfs ends
+with the sandbox, leaving nothing on the host.
+
 The sandbox has its own process namespace and dies with the process that launched it
 (`--unshare-pid`, `--die-with-parent`): when the launcher ends, bubblewrap is killed,
 and with it, as the namespace's first process, every process the session started,
@@ -44,7 +57,9 @@ A sandbox started inside the engine's sandbox, as a step's suite starts one, fin
 an engine's `git` already over the system's two, mounted from a file bubblewrap
 removed once it was mounted, so no mount over it can be made. There the sandbox keeps
 the `git` it finds, which refuses pushes alike, and mounts the system's Git at
-`REAL_GIT` again from where the enclosing sandbox put it.
+`REAL_GIT` again from where the enclosing sandbox put it. Its own private `/tmp` is
+made the same way, and each path under `/tmp` it binds is read from the enclosing
+sandbox's.
 
 A mount needs something to mount, so before launch each absent writable path is
 created as a directory, and each absent file an adapter's state mounts alone, and
@@ -76,7 +91,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .sandbox_git import REAL_GIT
-from .scope import GIT_EXECUTABLES, Scope, ScopedPath, within
+from .scope import ENGINE, GIT_EXECUTABLES, PRIVATE_TEMPORARY, Scope, ScopedPath, within
 
 BWRAP = "bwrap"
 # The namespaces and mounts every sandbox starts from, the probe's included.
@@ -140,9 +155,18 @@ def _followed(path: ScopedPath) -> ScopedPath:
 
 
 def mounted_writable(scope: Scope) -> list[ScopedPath]:
-    """The scope's writable paths as the sandbox mounts them, each where its symlinks
-    lead."""
-    return [_followed(writable) for writable in scope.writable]
+    """The scope's writable paths the sandbox binds from the host, each where its
+    symlinks lead: every one but the private `/tmp`, which it makes."""
+    return [_followed(writable) for writable in scope.writable if not writable.private]
+
+
+def _private_temporary(scope: Scope) -> list[str]:
+    """The private `/tmp`, where the scope names it: a tmpfs of mode `0700`, with
+    `TMPDIR` pointing at it."""
+    if not any(writable.private for writable in scope.writable):
+        return []
+    return ["--perms", "0700", "--tmpfs", str(PRIVATE_TEMPORARY),
+            "--setenv", "TMPDIR", str(PRIVATE_TEMPORARY)]
 
 
 def mounted_protected(scope: Scope) -> list[ScopedPath]:
@@ -158,8 +182,9 @@ def mounted_protected(scope: Scope) -> list[ScopedPath]:
 
 def arguments(scope: Scope, program: Sequence[str], *, git: Sequence[int]) -> list[str]:
     """`program` inside the scope's sandbox, as a `bwrap` command: the read-only root,
-    then each writable path, a directory before any path inside it, so no mount hides
-    another; then each protected path inside them, read-only; then the system's Git
+    then the private `/tmp`, then each writable path, a directory before any path
+    inside it, so no mount hides another, those under `/tmp` landing inside the private
+    one; then each protected path inside them, read-only; then the system's Git
     where the engine's `git` finds it, and the engine's `git`, read from the
     descriptors `git`, one for each of the system's Git executables, over each. With
     no descriptors, inside the engine's sandbox (`nested`), the engine's `git` already
@@ -167,7 +192,7 @@ def arguments(scope: Scope, program: Sequence[str], *, git: Sequence[int]) -> li
 
     Bubblewrap reads a mount's source from outside the sandbox, so the system's Git
     is the one it mounts at `REAL_GIT` whatever is mounted over it after."""
-    command = [BWRAP, *_BASE]
+    command = [BWRAP, *_BASE, *_private_temporary(scope)]
     for path in sorted(mounted_writable(scope), key=_depth):
         command += ["--bind", str(path.path), str(path.path)]
     for path in sorted(mounted_protected(scope), key=_depth):
@@ -285,6 +310,12 @@ class Confined:
         """The command that runs `program`, on `harness`, as this run is confined."""
         return confinement.launch(self.scopes[harness], program,
                                   probing=lambda: self.unconfined)
+
+    def writing(self, path: Path) -> Confined:
+        """This run with `path`, an existing directory the engine made for it, writable
+        in each of its scopes, from the engine."""
+        return replace(self, scopes={harness: found.writing(path, ENGINE)
+                                     for harness, found in self.scopes.items()})
 
     def prepare(self, confinement: Confinement) -> None:
         """Create what each of the run's scopes mounts and does not exist, unless the

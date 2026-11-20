@@ -78,9 +78,10 @@ class Runner(Protocol):
                  step: str) -> int: ...
 
 
-# Runs a Codex command, writing its output to the transcript, and returns its exit
-# status.
-CodexRunner = Callable[[Sequence[str], Path], int]
+# Runs a Codex command, writing its output to the transcript, its commands keeping
+# what they invoke under the engine's key for the attempt where one is given, and
+# returns its exit status.
+CodexRunner = Callable[[Sequence[str], Path, str | None], int]
 # Whether a run's model could not be reached, and what it said: `unavailable` or
 # `network`, or None.
 Reached = tuple[str, str] | None

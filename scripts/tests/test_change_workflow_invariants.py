@@ -248,7 +248,8 @@ def test_a_push_reaching_a_protected_branch_is_found(repo: Path) -> None:
 
 def test_a_commit_pushed_to_a_protected_branch_from_a_branch_since_deleted_is_found(
         repo: Path) -> None:
-    """`HEAD`'s reflog keeps the commit after the branch that held it is gone."""
+    """CW-q7ub: a protected branch's tip is compared with the commits made in the run,
+    which `HEAD`'s reflog keeps after the branch that held one is gone."""
     start = _start(repo)
     _git(repo, "checkout", "-q", "-b", "aside")
     _write(repo, "src/main.py", "aside\n")
@@ -262,8 +263,9 @@ def test_a_commit_pushed_to_a_protected_branch_from_a_branch_since_deleted_is_fo
 
 def test_another_partys_commit_on_a_protected_branch_is_not_the_runs(
         repo: Path, tmp_path: Path) -> None:
-    """A commit pushed to `dev` by someone else during the run, which the step's fetch
-    brought in, was not made in the run."""
+    """CW-q7ub: a protected branch is held only to have no commit made in the run at
+    its tip; a commit pushed to `dev` by someone else during the run, which the step's
+    fetch brought in, was not made in the run."""
     start = _start(repo)
     other = tmp_path / "other"
     _git(tmp_path, "clone", "-q", "-b", "dev", str(tmp_path / "remote.git"), str(other))
@@ -288,9 +290,24 @@ def test_the_change_branch_moved_but_by_the_guarded_push_is_found(repo: Path) ->
 
 
 def test_an_unreachable_remote_is_not_checked(repo: Path, tmp_path: Path) -> None:
+    """CW-q7ub: a remote unreadable at the end of the run is not checked."""
     start = _start(repo)
     (tmp_path / "remote.git").rename(tmp_path / "gone.git")
 
+    assert _checks(repo, start) == []
+
+
+def test_a_remote_unreadable_at_the_start_is_not_checked(repo: Path, tmp_path: Path) -> None:
+    """CW-q7ub: a remote unreadable as the run starts has no state to compare the end
+    with, so it is not checked, though a commit made in the run reached its `dev`."""
+    (tmp_path / "remote.git").rename(tmp_path / "gone.git")
+    start = _start(repo)
+    (tmp_path / "gone.git").rename(tmp_path / "remote.git")
+    _write(repo, "src/main.py", "more code\n")
+    _commit(repo, "section")
+    _git(repo, "push", "-q", "origin", "HEAD:dev")
+
+    assert start.remotes == {"origin": None}
     assert _checks(repo, start) == []
 
 

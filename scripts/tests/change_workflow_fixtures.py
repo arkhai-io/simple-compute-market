@@ -13,6 +13,7 @@ from typing import Sequence
 from change_workflow.around import inputs_note
 from change_workflow.harness import Model
 from change_workflow.log import Checkout
+from change_workflow import sandbox
 from change_workflow.sandbox import Confinement, Launch
 from change_workflow.wrapper import Wrapper
 
@@ -223,6 +224,27 @@ def review_text(kind: str = "design", findings: str = FINDING) -> str:
             f"Yes.\n\n## Findings\n\n{findings}\n## Readiness\n\nNot yet.\n")
 
 
+def with_test_directory(command: Sequence[str], base: Path) -> list[str]:
+    """A sandbox's `command` with `base`, a test's directory under the host's `/tmp`,
+    bound read-only inside the step's private `/tmp`, before the scope's own binds: the
+    files beside a test's checkout, its stand-in home directory, and a checkout the
+    scope does not write are then read-only, as the real ones outside `/tmp` are,
+    rather than hidden by the private `/tmp`."""
+    after = list(command).index("--setenv") + 3
+    return [*command[:after], "--ro-bind", str(base), str(base), *command[after:]]
+
+
+def reading(base: Path) -> Confinement:
+    """The engine's sandbox, each confined launch reading the test's directory `base`
+    (`with_test_directory`)."""
+    def launch(found, program: Sequence[str], **options) -> Launch:
+        launched = sandbox.launch(found, program, **options)
+        if launched.unconfined is not None:
+            return launched
+        return Launch(tuple(with_test_directory(launched.command, base)), fds=launched.fds)
+    return Confinement(launch=launch)
+
+
 def repository(tmp_path: Path, *records: str) -> Path:
     """A repository holding the change's `records`, and the least configuration."""
     reviews = tmp_path / "openspec/changes" / CHANGE / "reviews"
@@ -235,7 +257,7 @@ def repository(tmp_path: Path, *records: str) -> Path:
 
 def writing(text: str, status: int = 0, calls: list[list[str]] | None = None,
             session: str = "s-1"):
-    def runner(command: Sequence[str], log: Path) -> int:
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
         if calls is not None:
             calls.append(list(command))
         log.write_text(f"--------\nsession id: {session}\n--------\nsession output\n", "utf-8")
@@ -262,7 +284,7 @@ def claude_review(text: str, session: str = "c-1", denials: list | None = None,
 
 
 def codex_saying(said: str, status: int = 1):
-    def runner(command: Sequence[str], log: Path) -> int:
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
         with log.open("a", encoding="utf-8") as stream:
             stream.write(f"OpenAI Codex v0.157.0\n{said}\n")
         return status
@@ -274,7 +296,7 @@ def not_installed(program: str) -> FileNotFoundError:
     return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
 
 
-def codex_missing(command: Sequence[str], log: Path) -> int:
+def codex_missing(command: Sequence[str], log: Path, key: str | None = None) -> int:
     raise not_installed("codex")
 
 

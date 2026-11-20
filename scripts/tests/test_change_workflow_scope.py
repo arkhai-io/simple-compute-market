@@ -15,7 +15,10 @@ from pathlib import Path
 import pytest
 
 from change_workflow import scope
+from change_workflow.graph import STEP_DEFINITIONS
 from change_workflow.scope import ADAPTER, ENGINE, GRANT, REPOSITORY, ScopeError
+
+TMP = Path("/tmp")
 
 INERT = ("openspec/", "docs/", "**/README.md", "AGENTS.md")
 
@@ -82,8 +85,7 @@ def checkout(tmp_path: Path) -> Path:
 
 def _resolve(step: str, root: Path, **more) -> scope.Scope:
     more.setdefault("inert_paths", INERT)
-    return scope.resolve(step, root, home=root.parent / "home",
-                         temporary=root.parent / "tmp", **more)
+    return scope.resolve(step, root, home=root.parent / "home", **more)
 
 
 def _writable(found: scope.Scope) -> dict[Path, str]:
@@ -101,7 +103,7 @@ def test_designs_scope_is_openspec_and_git_with_the_repositorys_documents(
     found = _resolve("design", checkout, writable=("docs/",))
 
     assert _writable(found) == {checkout / "openspec": ENGINE, checkout / ".git": ENGINE,
-                                checkout.parent / "tmp": ENGINE, home / ".cache": ENGINE,
+                                TMP: ENGINE, home / ".cache": ENGINE,
                                 checkout / "docs": REPOSITORY}
     assert _protected(found) == {checkout / ".agents/workflow.toml": ENGINE,
                                  checkout / ".git/config": ENGINE,
@@ -114,10 +116,23 @@ def test_the_reviews_scope_holds_no_path_of_its_checkout_but_the_invocation_reco
     found = _resolve("review", checkout, writable=())
     record = checkout / ".git/change-invocations"
 
-    assert _writable(found) == {record: ENGINE, checkout.parent / "tmp": ENGINE}
+    assert _writable(found) == {record: ENGINE, TMP: ENGINE}
     # Absent until a session first invokes something, so created before launch.
     (invocations,) = [path for path in found.writable if path.path == record]
     assert invocations.create
+
+
+@pytest.mark.parametrize("step", sorted(STEP_DEFINITIONS))
+def test_every_steps_temporary_entry_is_its_private_tmp(checkout: Path, step: str) -> None:
+    """CW-m8wq: every step, the review included, writes a private `/tmp` of its own,
+    from the engine, which resolves to no path of the host's temporary directory."""
+    found = _resolve(step, checkout)
+
+    (private,) = [path for path in found.writable if path.private]
+    assert (private.path, private.source, private.entry) == (TMP, ENGINE,
+                                                             "<temporary directory>")
+    assert private.shown() == {"path": "/tmp", "source": "engine",
+                               "entry": "<temporary directory>", "private": True}
 
 
 def test_closeouts_scope_mounts_each_inert_files_directory(checkout: Path) -> None:
@@ -127,7 +142,7 @@ def test_closeouts_scope_mounts_each_inert_files_directory(checkout: Path) -> No
 
     assert set(_writable(found)) == {checkout / "openspec", checkout / "docs",
                                      checkout / "kit/site", checkout, checkout / ".git",
-                                     checkout.parent / "tmp", checkout.parent / "home/.cache"}
+                                     TMP, checkout.parent / "home/.cache"}
     assert checkout / "kit/site/.venv/lib" not in _writable(found)
     entries = {path.path: path.entry for path in found.writable}
     assert entries[checkout / "kit/site"] == "**/README.md"
@@ -206,6 +221,37 @@ def test_a_grant_names_a_pattern(checkout: Path) -> None:
     with pytest.raises(ScopeError, match=r"the grant 'kit/\*/.venv' names kit/\*/.venv, a "
                                          "pattern"):
         _resolve("implement", checkout, grants=("kit/*/.venv",))
+
+
+@pytest.mark.parametrize("value", ["/tmp", "/tmp/", "/tmp/x/..", "/"])
+def test_a_grant_names_the_hosts_temporary_directory(checkout: Path, value: str) -> None:
+    """CW-tl5v's "A grant names the host's temporary directory": the scope is refused,
+    naming the value, since the step writes a private `/tmp` already; a directory
+    holding `/tmp` would hide it as well."""
+    with pytest.raises(ScopeError, match=rf"the grant '{value}' names {value}, which is or "
+                                         "holds the host's temporary directory; every step "
+                                         "writes a private /tmp of its own"):
+        _resolve("implement", checkout, grants=(value,))
+
+
+def test_a_grant_of_a_link_to_the_hosts_temporary_directory_is_refused(checkout: Path) -> None:
+    (checkout / "scratch").symlink_to("/tmp")
+
+    with pytest.raises(ScopeError, match="the grant 'scratch' names scratch, which is or "
+                                         "holds the host's"):
+        _resolve("implement", checkout, grants=("scratch",))
+
+
+def test_a_grant_under_the_hosts_temporary_directory_is_admitted(checkout: Path) -> None:
+    """A path under `/tmp` is granted as any path is, and mounted at its own path inside
+    the private `/tmp` (the sandbox's rendering)."""
+    under = Path(f"/tmp/change-workflow-grant-{checkout.parent.name}")
+
+    found = _resolve("implement", checkout, grants=(str(under),))
+
+    assert _writable(found)[under] == GRANT
+    assert _writable(found)[TMP] == ENGINE
+    assert not under.exists()
 
 
 def test_a_grant_of_a_protected_path_is_refused_naming_it(checkout: Path) -> None:

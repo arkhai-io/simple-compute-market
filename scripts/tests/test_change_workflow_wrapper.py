@@ -18,7 +18,7 @@ import pytest
 from change_workflow import claude_code, sandbox
 from change_workflow.common import StepError
 from change_workflow.claude_code import TOOLS
-from change_workflow.sandbox import BUBBLEWRAP, BWRAP, Confinement
+from change_workflow.sandbox import BWRAP, Confinement
 from change_workflow.harness import Model
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
@@ -28,7 +28,8 @@ from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT,
                                       NETWORK, OPUS, SESSION, VALID, FakeClaude, clock,
                                       configured,
                                       event_lines, failed_run, make_wrapper, not_installed,
-                                      option, option_rules, prompted, without_session_id)
+                                      option, option_rules, prompted, reading,
+                                      without_session_id)
 
 
 def test_a_run_is_headless_through_its_adapter_and_given_the_schema(tmp_path: Path) -> None:
@@ -1301,12 +1302,11 @@ class _StandIn:
 
 
 def _confined(root: Path, harness: _StandIn,
-              confinement: Confinement = BUBBLEWRAP) -> Wrapper:
-    # The test's own home and temporary directories: the checkout lies in the system's
-    # temporary directory, which a scope would otherwise make writable whole.
-    (root.parent / "tmp").mkdir(exist_ok=True)
-    return replace(make_wrapper(root, FakeClaude()), runner=harness, confinement=confinement,
-                   home=root.parent / "home", temporary=root.parent / "tmp")
+              confinement: Confinement | None = None) -> Wrapper:
+    """A wrapper launching `harness` in the engine's sandbox, with the test's own home
+    directory, the test's directory read-only inside the private `/tmp` (`reading`)."""
+    return replace(make_wrapper(root, FakeClaude()), runner=harness,
+                   confinement=confinement or reading(root.parent), home=root.parent / "home")
 
 
 @needs_bwrap

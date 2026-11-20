@@ -50,8 +50,9 @@ field is absent, never when it is 0.
 of the harness running the step hold (`scope`): `writable.common` paths every step
 but the review writes, `writable.<step>` paths one step writes, and `protected` paths
 no step writes. A repository only adds: the check refuses a writable path that is or
-lies under a protected one, the engine's, any adapter's, or its own, and any writable
-path for the review.
+lies under a protected one, the engine's, any adapter's, or its own; `/tmp` or a
+directory holding it, which would hide the private `/tmp` every step writes; and any
+writable path for the review.
 
 `config` lists every field and how it resolved, each kind's guide among them, and
 each step's resolved scope, every path with its source; `config load <step>` the
@@ -82,7 +83,8 @@ from .adapters import ADAPTERS, HARNESSES
 from .adapters import PROTECTED as ADAPTER_PROTECTED
 from .harness import Model
 from .records import is_pattern
-from .scope import PROTECTED, Scope, protected_by, resolve
+from .scope import (PRIVATE_TEMPORARY, PROTECTED, Scope, hides_temporary, protected_by,
+                    resolve)
 
 # The configuration's place in the repository the command acts on.
 CONFIGURATION = Path(".agents/workflow.toml")
@@ -267,8 +269,8 @@ class Configuration:
         """A step's scope in the checkout at `root`, with the paths of the adapter of
         `harness` — by default the harness of the step's first model, and no adapter's
         where the configuration names none — and the repository's additions and inert
-        paths; `launch` gives what a run adds, its grants, and where its home and
-        temporary directories are."""
+        paths; `launch` gives what a run adds, its grants, and where its home
+        directory is."""
         if harness is None and self.models.get(step):
             harness = self.models[step][0]["harness"]
         adapter = ADAPTERS.get(harness) if harness else None
@@ -630,11 +632,13 @@ def _sandbox(table: dict[str, Any], root: Path,
     field: a key that is neither `common` nor a step; `writable.review`, since the
     review writes nothing it reviews; a pattern outside the checkout, since a pattern
     is matched against the checkout's files; a protected pattern, since a protected
-    path is mounted read-only whole; and a writable path that is or lies under a
-    protected one, the engine's or the repository's, which the sandbox could not
-    honour; the protected paths are the engine's, every adapter's, whichever harness
-    runs the step, and the repository's. A writable directory containing a protected
-    path is admitted: the protected path stays read-only inside it."""
+    path is mounted read-only whole; `/tmp` or a directory holding it, which would
+    hide the private `/tmp` every step writes, though a path under it is admitted;
+    and a writable path that is or lies under a protected one, the engine's or the repository's, which the
+    sandbox could not honour; the protected paths are the engine's, every adapter's,
+    whichever harness runs the step, and the repository's. A writable directory
+    containing a protected path is admitted: the protected path stays read-only inside
+    it."""
     protected = (_strings("sandbox.protected", table["protected"])
                  if "protected" in table else None)
     for entry in protected or ():
@@ -660,6 +664,10 @@ def _sandbox(table: dict[str, Any], root: Path,
             if is_pattern(entry) and entry.startswith(("~", "/")):
                 raise ConfigError(f"{where} names {entry}, a pattern outside the checkout; "
                                   "only a path from the checkout's root may be a pattern")
+            if hides_temporary(entry, root, home):
+                raise ConfigError(f"{where} names {entry}, which is or holds the host's "
+                                  "temporary directory; every step writes a private "
+                                  f"{PRIVATE_TEMPORARY} of its own, which it would hide")
             if guarded := protected_by(entry, root, home,
                                        (*PROTECTED, *ADAPTER_PROTECTED, *(protected or ()))):
                 raise ConfigError(f"{where} names {entry}, which is or lies under the "
@@ -926,8 +934,9 @@ def resolution_lines(configuration: Configuration, resolved: Mapping[str, Scope]
         for kind, paths in (("writable", scope.writable), ("protected", scope.protected)):
             for path in paths:
                 shown = _shown_path(path.path, root)
-                absent = " (absent)" if path.create else ""
-                lines.append(f"{f'scope.{step}.{kind}':<44} {path.source:<9} {shown}{absent}")
+                note = (" (private)" if path.private else "") + (" (absent)" if path.create
+                                                                 else "")
+                lines.append(f"{f'scope.{step}.{kind}':<44} {path.source:<9} {shown}{note}")
     return lines
 
 

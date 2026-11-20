@@ -25,6 +25,14 @@ holding a glob character is a pattern, matched against the checkout's files as G
 lists them, tracked or untracked but not ignored, as an inert path is matched
 (`records.inert`): a file inside an environment Git ignores is no match.
 
+Every step writes a private `/tmp` of its own (`PRIVATE_TEMPORARY`), which the sandbox
+makes fresh for the run, owned by the owner and open to no one else, in place of the
+host's: the baseline's temporary entry names it, and resolves to no host path. A path
+under the host's `/tmp` that the scope writes besides — a grant, the review's drafts
+directory — is mounted at its own path inside it, so it names the same file on both
+sides. `/tmp` itself, or a directory holding it, is refused as a writable entry or a
+grant (`hides_temporary`): mounting the host's there would hide the private one.
+
 A scope is made of directories, never a single writable file: a tool replaces a file
 by writing another and renaming it over the first, which a file bound on its own
 refuses. So a file entry, and each file a pattern matches, makes its directory
@@ -42,8 +50,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -58,29 +65,35 @@ ENGINE, ADAPTER, REPOSITORY, GRANT = "engine", "adapter", "repository", "grant"
 GIT_EXECUTABLES = ("/usr/bin/git", "/usr/lib/git-core/git")
 # The paths no step writes, whatever its scope.
 PROTECTED = (".agents/workflow.toml", ".git/config", *GIT_EXECUTABLES)
+# Where every step's private temporary directory sits inside its sandbox.
+PRIVATE_TEMPORARY = Path("/tmp")
 _GIT = ".git"
 
 
 class ScopeError(StepError):
-    """A grant a scope cannot hold: a pattern, or a protected path."""
+    """A grant a scope cannot hold: a pattern, `/tmp` or a directory holding it, or a
+    protected path."""
 
 
 @dataclass(frozen=True)
 class ScopedPath:
     """One path of a scope, absolute, with its source and the entry it resolved from;
     `create` when it is absent, to be created before launch, as a directory unless it
-    is a file mounted `alone`."""
+    is a file mounted `alone`; `private` for the step's own `/tmp`, which the sandbox
+    makes rather than mounts from the host."""
 
     path: Path
     source: str
     entry: str
     create: bool = False
     alone: bool = False
+    private: bool = False
 
     def shown(self) -> dict[str, Any]:
         return {"path": str(self.path), "source": self.source, "entry": self.entry,
                 **({"absent": True} if self.create else {}),
-                **({"file": True} if self.alone else {})}
+                **({"file": True} if self.alone else {}),
+                **({"private": True} if self.private else {})}
 
 
 @dataclass(frozen=True)
@@ -94,6 +107,11 @@ class Scope:
     def shown(self) -> dict[str, Any]:
         return {"writable": [path.shown() for path in self.writable],
                 "protected": [path.shown() for path in self.protected]}
+
+    def writing(self, path: Path, source: str) -> Scope:
+        """This scope with `path`, an existing directory, writable too, from `source`."""
+        return replace(self, writable=_unique((*self.writable,
+                                               ScopedPath(path, source, str(path)))))
 
 
 def _home_relative(entry: str) -> bool:
@@ -128,6 +146,14 @@ def fixed_part(entry: str) -> str:
             break
         fixed.append(segment)
     return "/".join(fixed)
+
+
+def hides_temporary(entry: str, root: Path, home: Path) -> bool:
+    """Whether `entry`, as a writable path, would mount the host's `/tmp` over the
+    step's private one: it is `/tmp` or a directory holding it, as it is written or
+    where its links lead."""
+    path = absolute(entry, root, home)
+    return any(within(PRIVATE_TEMPORARY, found) for found in (path, path.resolve()))
 
 
 def grant_paths(values: Sequence[str]) -> list[tuple[str, str]]:
@@ -237,15 +263,20 @@ def protected_by(entry: str, root: Path, home: Path, protected: Iterable[str]) -
 def granted(values: Sequence[str], checkout: _Checkout,
             protected: Sequence[str]) -> list[ScopedPath]:
     """The writable directories a run's grants give, refused, naming the value, where
-    one names a pattern, or a path that is or lies under one of the `protected`
-    entries. A grant answers a gap with the narrowest path, so it names a path and never
-    a pattern; a directory containing a protected path is granted, the protected path
-    staying read-only inside it."""
+    one names a pattern, `/tmp` or a directory holding it (`hides_temporary`), or a path
+    that is or lies under one of the `protected` entries. A grant answers a gap with the
+    narrowest path, so it names a path and never a pattern; a directory containing a
+    protected path is granted, the protected path staying read-only inside it; a path
+    under `/tmp` is granted, mounted at its own path inside the private one."""
     paths: list[ScopedPath] = []
     for value, part in grant_paths(values):
         if is_pattern(part):
             raise ScopeError(f"the grant {value!r} names {part}, a pattern; a grant names "
                              "a path")
+        if hides_temporary(part, checkout.root, checkout.home):
+            raise ScopeError(f"the grant {value!r} names {part}, which is or holds the "
+                             "host's temporary directory; every step writes a private "
+                             f"{PRIVATE_TEMPORARY} of its own, which it would hide")
         if guarded := checkout.protecting(part, protected):
             raise ScopeError(f"the grant {value!r} names {part}, which is or lies under the "
                              f"protected path {guarded}")
@@ -257,23 +288,23 @@ def resolve(step: str, root: Path, *, inert_paths: Sequence[str],
             writable: Sequence[str] = (), protected: Sequence[str] = (),
             adapter_writable: Sequence[str] = (), adapter_files: Sequence[str] = (),
             adapter_protected: Sequence[str] = (), grants: Sequence[str] = (),
-            home: Path | None = None, temporary: Path | None = None) -> Scope:
+            home: Path | None = None) -> Scope:
     """The scope of one run of `step` in the checkout at `root`, as absolute paths:
-    its baseline, the adapter's state — its directories, and its files mounted alone —
-    and protected paths, the repository's writable paths for the step and its
-    protected ones, and the run's grants, each grant refused before anything launches
-    where the scope cannot hold it (`granted`). `inert_paths` are the repository's,
+    its baseline, its temporary entry the private `/tmp`; the adapter's state — its
+    directories, and its files mounted alone — and protected paths; the repository's
+    writable paths for the step and its protected ones; and the run's grants, each
+    grant refused before anything launches where the scope cannot hold it
+    (`granted`). `inert_paths` are the repository's,
     which closeout's baseline names."""
     definition = STEP_DEFINITIONS[step]
     checkout = _Checkout(root, Path.home() if home is None else home)
-    temporary = Path(tempfile.gettempdir()) if temporary is None else temporary
     sources = ((ENGINE, PROTECTED), (ADAPTER, adapter_protected), (REPOSITORY, protected))
     guarded = _unique([ScopedPath(path, source, entry) for source, entries in sources
                        for entry in entries for path in checkout.paths(entry)])
     paths: list[ScopedPath] = []
     for entry in definition.baseline:
         if entry == TEMPORARY:
-            paths.append(ScopedPath(temporary, ENGINE, entry))
+            paths.append(ScopedPath(PRIVATE_TEMPORARY, ENGINE, entry, private=True))
         elif entry == PROPOSALS:
             paths.extend(ScopedPath(path, ENGINE, entry) for path in checkout.proposals())
         elif entry == INERT_PATHS:

@@ -1701,7 +1701,7 @@ binds the host's `/tmp`: its own `run pre-commit` meets the ledger suite's failu
 until the commit's engine launches the next step (design, "Implementation
 cadence"). Its evidence for D17 is the change's sandbox launched from inside its own.
 
-- [ ] 11a.1 The private `/tmp` (D17, D18; CW-m8wq, CW-x3pf). The scope's temporary
+- [x] 11a.1 The private `/tmp` (D17, D18; CW-m8wq, CW-x3pf). The scope's temporary
   entry renders as `--perms 0700 --tmpfs /tmp`, mounted before every bind; the
   sandbox sets `TMPDIR` to `/tmp` (`--setenv`); each writable path under the host's
   temporary directory the scope names — a grant, the review's drafts directory — is
@@ -1722,7 +1722,49 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
     written at the same host path; the bubblewrap tests of sections 3, 6, 7 and 11
     still pass, each giving the inner sandbox what it reads under `tmp_path` where
     the private `/tmp` now hides it.
-- [ ] 11a.2 The listing and the refusals (D18, D8, D12; CW-o6kc, CW-h2zt, CW-tl5v).
+  Done. The baseline's temporary entry resolves to `scope.PRIVATE_TEMPORARY`, a
+  `ScopedPath` marked `private`, from the engine, never a host path, so
+  `scope.resolve`, `Configuration.scope`, the wrapper and `review_confined` lost their
+  `temporary` parameter (the review keeps its own, for its drafts directory, 11a.3).
+  `sandbox.arguments` renders `--perms 0700 --tmpfs /tmp --setenv TMPDIR /tmp` right
+  after the base mounts; `mounted_writable` leaves the private entry out, so `prepare`
+  creates nothing for it and every bind follows the tmpfs. Docstrings of `scope.py`,
+  `sandbox.py` and `graph.py`'s baseline comment describe the private `/tmp`. Tests,
+  all passing:
+  - unit, `test_change_workflow_sandbox.py`: the rendered command with the tmpfs, its
+    mode and `TMPDIR` before every bind; a path under the host's `/tmp` bound after it
+    with a protected path inside bound read-only after that; the nested command the
+    same; the private `/tmp` none of the paths bound from the host, which are all
+    `prepare` creates;
+  - library integration (real Git), `test_change_workflow_scope.py`: each of the nine
+    steps' temporary entry, review included, is the private `/tmp` from the engine, as
+    `shown()` lists it;
+  - external-process integration through real bubblewrap,
+    `test_change_workflow_sandbox.py` (the plan said library integration): CW-m8wq's
+    "A suite
+    checks its temporary directory's owner" (`/tmp` is the owner's, `700`, and the
+    bare-metal helper's ancestor check, replicated in the test, passes for a directory
+    under it); `TMPDIR` is `/tmp` though the caller set `/var/tmp`; a host file under
+    `/tmp` outside the scope is hidden, a granted path under it is written at the same
+    host path, and a file written to the private `/tmp` is not at that path on the
+    host; the hidden file and the grant lie in a directory the test makes under `/tmp`
+    itself, wherever pytest keeps its own.
+  These ran in this session's own sandbox, which the engine as committed before this
+  section launched, so every bubblewrap launch here took the nested path
+  (`sandbox.nested()`); the unnested launch is shown by the unit rendering alone until
+  the round's triage, the first step the engine launches with the private `/tmp`.
+  The earlier bubblewrap tests (sections 3, 6, 7 and 11) kept passing once given the
+  test's directory: their checkouts and stand-in homes lie under pytest's `/tmp`, which
+  the private `/tmp` hides. `change_workflow_fixtures.with_test_directory` binds the
+  test's directory read-only right after the tmpfs, as a real checkout outside `/tmp`
+  is read-only under the root, and `reading(base)` is the engine's sandbox doing so on
+  each launch, used by the wrapper's and the review's confined tests; the sandbox tests
+  pass `hiding=True` where they show the hiding itself. The rename test of Claude
+  Code's state file now moves its file from the private `/tmp`. The sandbox's Codex
+  test no longer starts Codex's own sandbox inside the engine's, which a confined
+  review no longer does (11a.4); it runs `git rev-parse` in the review's scope
+  instead.
+- [x] 11a.2 The listing and the refusals (D18, D8, D12; CW-o6kc, CW-h2zt, CW-tl5v).
   `config` and `config --json` list each scope's temporary entry as the private
   `/tmp`, from the engine (in JSON, `path` `/tmp` and `"private": true`); the
   configuration's check refuses `/tmp` itself in any `writable` key, and `granted`
@@ -1732,14 +1774,51 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
   repository opens the host's temporary directory", CW-tl5v's "A grant names the
   host's temporary directory", a grant of `/tmp/x` admitted and bound inside, and
   the listing in both forms.
-- [ ] 11a.3 The review's drafts directory (D18; CW-m8wq's "A Codex review writes its
+  Done. `scope.hides_temporary` is the one test, asked by `granted` and by the
+  configuration's `_sandbox`: an entry that is `/tmp` or a directory holding it,
+  lexically or where its links lead, since a link is mounted where it leads (D20).
+  Refusing a directory holding `/tmp`, which is only `/`, is beyond the plan's "`/tmp`
+  itself": bound after the tmpfs, `/` would hide the private `/tmp` as surely. Each
+  refusal names the value and says the step writes a private `/tmp` of its own.
+  `config` lists the entry as `/tmp (private)`, `config --json` with `"private":
+  true`. Tests, all passing:
+  - `test_change_workflow_scope.py`, library integration (real Git; the plan said
+    unit): CW-tl5v's "A grant names the host's temporary directory" for `/tmp`, `/tmp/`,
+    `/tmp/x/..` and `/`; a grant of a link leading to `/tmp` refused, beyond the plan;
+    a grant under `/tmp` admitted beside the private `/tmp`. Its binding inside is the
+    sandbox's unit rendering and bubblewrap test of 11a.1;
+  - `test_change_workflow_config.py`: CW-h2zt's "A repository opens the host's
+    temporary directory" through each of `check config`, `config --json`, `config` and
+    `config load design`, the commands driven in process on a configuration file
+    outside a Git checkout, as the sibling scenario for a protected path is, each
+    refusing naming the field and `/tmp`; `/tmp/` and `/` among the malformed tables
+    (unit); a repository's path under `/tmp` admitted (library integration, real Git);
+    the listing in both forms, every step's private `/tmp` in JSON and review's in
+    text, in CW-o6kc's listing test (library integration, real Git). The test helper
+    `_writes` no longer counts the private `/tmp` as writing a host path, since the
+    tests' stand-in home lies under the host's `/tmp`.
+- [x] 11a.3 The review's drafts directory (D18; CW-m8wq's "A Codex review writes its
   final message"). `review.py` keeps making the drafts directory in the host's
   temporary directory and adds it to the review's scope as an engine writable path,
   so it is bound inside the private `/tmp` at its own path. Verify, library
   integration in `test_change_workflow_review.py` through real bubblewrap with the
   Codex harness doubled by a program writing its `-o` file: the draft written
   inside reaches the transcripts after the run, and the drafts directory is gone.
-- [ ] 11a.4 Codex in a confined review (D13; CW-t6mb; 48 F1). A confined review runs
+  Done. Once the drafts directory exists, `run_review` widens every scope of the run
+  by it, from the engine (`Confined.writing`, `Scope.writing`); it was made last before
+  the reviewer and already exists, so nothing is prepared for it. Test,
+  external-process integration through real bubblewrap (the plan said library
+  integration) with Codex doubled through Codex's own runner, passing:
+  `test_a_codex_reviewers_final_message_written_inside_is_the_review_published` — the
+  drafts directory lies in the system's temporary directory, the launched command
+  binds it at its own path, the draft written inside is the review the engine
+  publishes, and the directory is gone after. The test makes the drafts directory
+  under `/tmp` itself (`temporary=/tmp`), so it shows the binding inside the private
+  `/tmp` wherever `TMPDIR` points. The draft passed the format check, so it
+  was published rather than kept in the transcripts; a refused draft's move into the
+  transcripts is the existing unit tests'. The real Codex run of 11a.4 wrote its draft
+  the same way.
+- [x] 11a.4 Codex in a confined review (D13; CW-t6mb; 48 F1). A confined review runs
   Codex without its own sandbox — `--sandbox danger-full-access` on `exec`, and
   `sandbox_mode="danger-full-access"` on `exec resume` — and an unconfined one keeps
   `read-only` in both; `codex.py`'s module docstring says which and why. Verify:
@@ -1752,7 +1831,36 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
     `run pre-commit`, where the owner grants this session `~/.codex` (`WRITE=~/.codex`);
     without the grant the note says so, and the round's review, on Codex, is its
     first real run (design, "Implementation cadence").
-- [ ] 11a.5 The Codex review's run key (D13, D2, D5, D7; CW-w3oa; 48 F3). Each Codex
+  Done. `codex.command` and `codex.resume_command` take `confined`; `_codex_attempt`
+  passes whether the run's sandbox confines it. Tests, all passing:
+  - unit, `test_change_workflow_harness.py`: CW-t6mb's two scenarios, fresh and
+    resumed, `danger-full-access` confined and `read-only` unconfined. The review's
+    wiring of each: two review tests that asserted `read-only` under `NO_SANDBOX`,
+    whose probe reports a confined run, now assert `danger-full-access`, and the
+    unconfined review's test asserts `read-only` (unit, the runner doubled);
+  - external-process integration through real bubblewrap (the plan said library
+    integration), `test_change_workflow_review.py`:
+    `test_a_confined_codex_reviewers_git_commands_reach_the_systems_git` — a Codex
+    double running `git rev-parse --show-toplevel` and the engine's `run pre-commit`
+    in a repository whose check is that command: each prints the checkout's root, and
+    the check is on the line's `invoked`. The double now works in Codex's `--cd`
+    directory; it had run in the engine's own checkout;
+  - a real `codex exec` (codex-cli 0.157.0, `gpt-6-sol`, effort low), launched by a
+    script of the session's own, not kept, through `sandbox.launch` with the review's
+    scope as `scope.resolve` gives it with Codex's adapter, `codex.command(...,
+    confined=True)` and `codex.run` with a run key — not through `run_review`, whose
+    choice of the flag and passing of the key are the tests above — nested in this
+    session's sandbox, granted `~/.codex` (`WRITE=~/.codex`), its drafts directory under
+    `/tmp` added as the engine adds it:
+    told to run `git rev-parse --show-toplevel` and `scripts/change-workflow run
+    pre-commit probe` in a throwaway repository, it exited 0; Git printed the
+    repository's root, the check passed, its invocation was kept under the run key
+    (11a.5), and its final message reached the draft on the host; observed in the
+    session, not reproducible from the repository. A first attempt with the repository
+    under `/tmp` ended "Not inside a trusted directory": Codex refuses a directory its
+    configuration does not trust, here anything outside the owner's home directory, so
+    the throwaway repository sat under `~/.cache`, removed after.
+- [x] 11a.5 The Codex review's run key (D13, D2, D5, D7; CW-w3oa; 48 F3). Each Codex
   review attempt runs with an engine run key in its commands' environment, distinct
   from the starting session's id and from Codex's thread id; the engine's `git`
   keeps a refused push under it and `run` keeps the reviewer's checks under it; the
@@ -1762,12 +1870,38 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
   Codex double that runs `git push` and `run pre-commit` leaves the refused push in
   the line's `refusals` and the check among its invocations (CW-w3oa's "A Codex
   reviewer pushes"); the starting session's line holds neither.
-- [ ] 11a.6 The `[models]` comment of `.agents/workflow.toml` says the review runs on
+  Done. Each Codex attempt makes a key of its own, `review-codex-<hex>`, and passes it
+  to Codex's runner (`CodexRunner` gains it as a third argument); `run_review` adds
+  each to the `run_keys` list `_review_and_log` gives it, and the line takes what was
+  kept under the Claude reviewer's session and under each key, then drops them. A
+  `run_review` given no list gives no key, the starting session withheld as before.
+  `codex.run` gives the key as `CLAUDE_CODE_SESSION_ID`, the variable the engine
+  already gives its own actions' and hooks' keys in (`around.Around.environment`), so
+  `run`, the guarded push and the engine's `git` keep under it unchanged;
+  `common.SESSION_ID`'s comment says so. Tests, all passing:
+  - external-process integration, `test_change_workflow_harness.py`: Codex's runner,
+    starting a real process, withholds the starting session and gives the key where
+    one is given;
+  - library integration (real Git, Codex doubled), `test_change_workflow_review.py`:
+    a draft and its correction run under two distinct keys, neither the starting
+    session's nor Codex's, and the line takes what each kept, dropping both;
+  - external-process integration through real bubblewrap (the plan said library
+    integration), `test_change_workflow_review.py`: CW-w3oa's "A Codex
+    reviewer pushes" — a Codex double's `git push --no-verify` refused, on the line's
+    `refusals` as `git`, its `run pre-commit` on `invoked`, the starting session's
+    record empty, and nothing on the remote;
+  - external-process integration through real bubblewrap,
+    `test_change_workflow_sandbox_git.py`: the engine's `git` under a review's marker
+    keeps a refused push under the key.
+  Every Codex runner double in the scripts tests takes the key.
+- [x] 11a.6 The `[models]` comment of `.agents/workflow.toml` says the review runs on
   Codex, which a confined review runs without its own sandbox, falling back to Claude
   (D13). The configuration is protected: this task is the orchestrator's, on the
   owner's word before the section's session starts, and the session commits it with
   the section. Verify: `scripts/change-workflow check config` passes.
-- [ ] 11a.7 What the delta now states of the built behaviour, each proven by a test
+  Done. The orchestrator's edit was in the worktree, as the task gives it, and is
+  committed with the section; `check config` passes.
+- [x] 11a.7 What the delta now states of the built behaviour, each proven by a test
   that names its scenario or, where one exists, checked to name it (D6, D19, D20,
   D21; CW-q7ub, CW-r6kd, MCW-s4bx):
   - check 6 as built (D6; 48 F4): a remote unreadable at either end unchecked, and a
@@ -1779,7 +1913,14 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
   - MCW-s4bx's "Design validates the change" (D21): the scope test of 11.1 extended
     to `~/.npm` for design.
   D19 changes no code. Verify: those tests pass.
-- [ ] 11a.8 Verification point, completing 11.6: the whole scripts suite (`-rs`, no
+  Done, all passing. `test_change_workflow_invariants.py`: the protected-branch tests
+  name CW-q7ub's comparison with the run's commits, the unreachable-remote test the
+  end, and `test_a_remote_unreadable_at_the_start_is_not_checked` is added (library
+  integration on real Git, as the file's others). The bubblewrap test
+  of 11.6 is named CW-r6kd's "A clone's settings file is a link". MCW-s4bx's "Design
+  validates the change" is named on the tool-state test, which since 11.6 holds
+  `~/.npm` writable for every step but the review, design among them.
+- [x] 11a.8 Verification point, completing 11.6: the whole scripts suite (`-rs`, no
   skip on this machine); `make check-agent-skills`; `make check-comment-hygiene`;
   `scripts/change-workflow run pre-commit sandbox-unattended-workflow-steps`, whose
   `make validate-local` in this session's own sandbox may fail only on the
@@ -1788,6 +1929,55 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
   through `sandbox.launch` with implementation's resolved scope, passing, the
   ledger suite among its suites — the command and its result recorded in the note.
   End-to-end: none; no scenario exercises the workflow's tooling, and none is owed.
+  Done, on the tree `3d0f3fb2b860`, which differs from what this section commits only
+  by this note:
+  - `make validate-local` inside the change's sandbox launched from this session's,
+    through `sandbox.launch` with implementation's scope as `config.load(root).scope(
+    "implement", root)` resolves it — a script of the session's own, under `~/.cache`,
+    running `sh -c "stat -c 'tmp %u %a' /tmp; echo TMPDIR=$TMPDIR; exec make
+    validate-local"` in the launched command: unconfined `None`, nested; `/tmp` the
+    owner's, `700`, `TMPDIR=/tmp`; local evidence for the tree PASSED (tree before,
+    dist-clean, check-packaging, `make test` in 990 s, tree after), the bare-metal
+    IaC suite 126 passed and 10 deselected, the scripts suite 3558 passed with none
+    skipped. Evidence: `.snapshot/evidence/3d0f3fb2b8607055b540dbbb2f5f4475fb789c20/local/20261120T003746.321024Z`;
+  - `scripts/change-workflow run pre-commit sandbox-unattended-workflow-steps` in this
+    session's own sandbox, which binds the host's `/tmp`: `after-functional-change`
+    passed, the locks unchanged; `pre-commit` passed (the default checks, strict
+    OpenSpec validation among them, and `make check-repository`);
+    `pre-commit-functional` failed only as the plan foresaw, `make test` stopping at
+    the bare-metal ledger suite, 44 passed and 82 errors at setup, each "unsafe
+    ancestor" (attempt `20261120T005539.406611Z` beside the one above). `make test`
+    stops at its first failing target, so the suites after it ran here only in the
+    nested run above;
+  - the whole scripts suite with `-rs`, before the fresh-context fixes: 3550 passed,
+    none skipped; after them, the nested run's 3558, and every file the fixes touched
+    again (passing);
+  - `make check-agent-skills` and `make check-comment-hygiene` pass; `check tasks` and
+    `check config` pass.
+  `run test-before` was not run: it runs a test file as `HEAD` holds it, and the
+  section's tests are uncommitted until its commit.
+
+  Handoff:
+  - The round's triage is the first step the engine launches with the private `/tmp`,
+    and the first unnested launch of it outside a test's rendering; its `run
+    pre-commit` is the check that the ledger suite passes in a step's own sandbox.
+  - Found, for the triage: the review's scope cannot run this repository's OpenSpec
+    check. `npx` writes npm's cache at `~/.npm`, which `writable.common` gives every
+    step but the review, and `[sandbox]` refuses a `writable.review`: a probe here ran
+    `scripts/change-workflow openspec validate sandbox-unattended-workflow-steps
+    --strict` in the review's resolved scope, launched as above, and npm failed
+    `EROFS` on `~/.npm/_cacache`. A reviewer's `run pre-commit` (CW-m8wq's "A review
+    runs the checks before a commit") therefore fails its `openspec` default check
+    here, and the line carries the refusal. Which path the review may write for it is a
+    design question (D5, D12, D21), not settled here.
+  - Codex refuses to run in a directory its configuration does not trust ("Not inside a
+    trusted directory"); a review of a clone outside the owner's trusted directories
+    would end with Codex's exit, not as unavailable, so it would not fall back to
+    Claude. Unchanged by this section; observed in 11a.4's real run.
+  - Tests whose checkout lies under pytest's `/tmp` and that launch the real sandbox
+    read the test's directory through `change_workflow_fixtures.reading` or
+    `with_test_directory`; a new such test needs one of them, or its scope must write
+    what it reads.
 
 ## 12. Closeout
 

@@ -744,7 +744,7 @@ sys.path.insert(0, sys.argv[1])
 root, runs, started = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
 from change_workflow.codex import run
 from change_workflow.review import review_and_log
-def runner(command, log):
+def runner(command, log, key=None):
     Path(command[command.index("--output-last-message") + 1]).write_text(sys.argv[7])
     return run([sys.executable, "-c", sys.argv[5], started], log)
 review_and_log(sys.argv[6], "design", root=root, runner=runner,

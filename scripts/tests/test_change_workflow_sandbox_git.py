@@ -138,7 +138,6 @@ def _in_sandbox(repo: Path, script: str, **environ: str) -> subprocess.Completed
     remote stands in for a remote across the network, so the sandbox lets it be written:
     a push that does not reach it was refused, not stopped by a read-only file system."""
     found = scope.resolve("implement", repo, inert_paths=(), home=repo.parent / "home",
-                          temporary=repo.parent / "tmp",
                           writable=(str(repo.parent / "remote.git"),))
     with sandbox.launch(found, ["sh", "-c", script]) as launched:
         assert launched.unconfined is None
@@ -174,6 +173,22 @@ def test_a_steps_own_push_is_refused_and_nothing_reaches_the_remote(repo: Path,
     assert kept["hook"] == REFUSED_PUSH
     # Kept as Git read it, by the name it was run as.
     assert kept["command"] == "git " + push.split(" ", 1)[1]
+
+
+@needs_bwrap
+def test_a_codex_reviewers_refused_push_is_kept_under_the_runs_key(repo: Path) -> None:
+    """CW-w3oa's "A Codex reviewer pushes": a Codex review's commands name the engine's
+    key for the run where Claude Code's name its session, and the refused push is kept
+    under that key."""
+    key = "review-codex-0123"
+
+    pushed = _in_sandbox(repo, "git push origin HEAD:dev",
+                         **{SESSION_ID: key, UNATTENDED_RUN: "review"})
+
+    assert pushed.returncode == 1, pushed.stderr
+    assert "git push is refused during an unattended review run" in pushed.stderr
+    (kept,) = kept_invocations(invocations_directory(repo), key)
+    assert (kept["hook"], kept["command"]) == (REFUSED_PUSH, "git push origin HEAD:dev")
 
 
 @needs_bwrap

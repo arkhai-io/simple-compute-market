@@ -588,10 +588,11 @@ def step_actions(when: str, step: str) -> tuple[str, ...]:
 # work changes.
 READ_ONLY, WRITING = "read-only", "writing"
 # The baseline entries the workflow names by role, which a step's scope resolves as a
-# run starts: the repository's inert paths, from its configuration, and the
-# temporary directory. Every other entry is a path from the checkout's root — one
-# under `.git/` a path in its Git directory, wherever Git keeps it — or from the home
-# directory where it begins with `~`.
+# run starts: the repository's inert paths, from its configuration, and the step's
+# private temporary directory, a `/tmp` of its own that its sandbox makes in place of
+# the host's (`scope.PRIVATE_TEMPORARY`). Every other entry is a path from the
+# checkout's root — one under `.git/` a path in its Git directory, wherever Git keeps
+# it — or from the home directory where it begins with `~`.
 INERT_PATHS = "<inert paths>"
 TEMPORARY = "<temporary directory>"
 # A third, design's: each worktree registered in its checkout whose directory, beside

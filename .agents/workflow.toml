@@ -82,8 +82,8 @@ protected = []
 # Engine, `start orchestrate`: the orchestrating session's model and effort.
 orchestrator = { model = "claude-opus-5-5", effort = "medium" }
 # Engine, the wrapper and the review: each step's models in order of preference.
-# The review runs on Codex in its read-only sandbox, falling back to Claude when
-# Codex is unavailable.
+# The review runs on Codex, which a confined review runs without its own sandbox,
+# falling back to Claude when Codex is unavailable.
 review          = [{ harness = "codex",  model = "gpt-6-sol",         effort = "high" },
                    { harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
 design          = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]

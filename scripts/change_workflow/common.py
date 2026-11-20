@@ -32,7 +32,9 @@ GUARDED_PUSH = "CHANGE_WORKFLOW_GUARDED_PUSH"
 # Where Claude Code gives every command it starts the id of its session. The
 # variable is not documented, so a run where it is unset is refused rather than
 # recorded without a session, and `record --session` gives the id instead; what a
-# command invoked outside any session is kept for no line.
+# command invoked outside any session is kept for no line. The engine gives it a key
+# of its own in the commands of an action or hook it runs, and of a Codex review,
+# whose harness names no session, so what they invoke is kept for the run's line.
 SESSION_ID = "CLAUDE_CODE_SESSION_ID"
 
 Clock = Callable[[], datetime]

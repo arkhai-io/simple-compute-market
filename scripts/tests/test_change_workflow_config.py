@@ -738,6 +738,11 @@ def test_an_absent_or_empty_list_loads_nothing(tmp_path: Path) -> None:
     ("[sandbox]\nwritable.plan = ['secrets/key']\nprotected = ['secrets/']\n",
      "sandbox.writable.plan names secrets/key, which is or lies under the protected path "
      "secrets/"),
+    ("[sandbox]\nwritable.design = ['/tmp/']\n",
+     "sandbox.writable.design names /tmp/, which is or holds the host's temporary "
+     "directory; every step writes a private /tmp of its own"),
+    ("[sandbox]\nwritable.merge = ['/']\n",
+     "sandbox.writable.merge names /, which is or holds the host's temporary directory"),
 ])
 def test_a_malformed_sandbox_table_is_refused_naming_the_field(text: str, named: str) -> None:
     with pytest.raises(ConfigError) as refused:
@@ -796,6 +801,35 @@ def test_a_repository_opens_a_protected_path(tmp_path: Path, capsys: pytest.Capt
     assert REFUSED_OPENING in capsys.readouterr().err
 
 
+REFUSED_TEMPORARY = ("sandbox.writable.common names /tmp, which is or holds the host's "
+                     "temporary directory; every step writes a private /tmp of its own, "
+                     "which it would hide")
+
+
+@pytest.mark.parametrize("command", [["check", "config"], ["config", "--json"], ["config"],
+                                     ["config", "load", "design"]], ids=" ".join)
+def test_a_repository_opens_the_hosts_temporary_directory(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], command: list[str]) -> None:
+    """CW-h2zt's "A repository opens the host's temporary directory": every reader
+    refuses, naming the field and `/tmp`, the commands driven in process."""
+    configured(tmp_path, "[sandbox]\nwritable.common = ['/tmp']\n")
+
+    assert main(command, root=tmp_path) == 1
+
+    assert REFUSED_TEMPORARY in capsys.readouterr().err
+
+
+def test_a_path_under_the_hosts_temporary_directory_is_admitted(tmp_path: Path) -> None:
+    """A repository may name a path under `/tmp`, which the sandbox mounts at its own
+    path inside the private one. Library integration: a real Git checkout."""
+    root = _git_checkout(tmp_path, "[sandbox]\nwritable.implement = ['/tmp/shared-cache']\n")
+
+    found = config.load(root).scope("implement", root)
+
+    assert {(path.path, path.source) for path in found.writable} >= {
+        (Path("/tmp/shared-cache"), "repository"), (Path("/tmp"), "engine")}
+
+
 def test_a_writable_path_under_a_protected_home_path_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="sandbox.writable.common names ~/.ssh/keys, which "
                                           "is or lies under the protected path ~/.ssh/"):
@@ -843,6 +877,10 @@ def test_config_lists_each_steps_scope_with_each_paths_source(
     state = next(entry for entry in shown["scopes"]["plan"]["writable"]
                  if entry["entry"] == "~/.claude.json")
     assert (state["path"], state["file"]) == (str(Path.home() / ".claude.json"), True)
+    # Every step's temporary entry is its private `/tmp`, from the engine.
+    for step, found in shown["scopes"].items():
+        assert {"path": "/tmp", "source": "engine", "entry": "<temporary directory>",
+                "private": True} in found["writable"], step
     protected = {(entry["entry"], entry["source"])
                  for entry in shown["scopes"]["plan"]["protected"]}
     assert protected == {(".agents/workflow.toml", "engine"), (".git/config", "engine"),
@@ -869,6 +907,8 @@ def test_config_lists_each_steps_scope_with_each_paths_source(
     assert ["scope.plan.protected", "engine", ".agents/workflow.toml"] in [
         line.split() for line in lines]
     assert ["scope.plan.writable", "adapter", "~/.claude"] in [line.split() for line in lines]
+    assert ["scope.review.writable", "engine", "/tmp", "(private)"] in [
+        line.split() for line in lines]
 
 
 @pytest.mark.parametrize("models,problem", [
@@ -958,12 +998,14 @@ def test_each_step_runs_on_the_models_its_work_needs() -> None:
 
 
 def _repository_scope(step: str, home: Path) -> Scope:
-    return config.load(REPOSITORY).scope(step, REPOSITORY, home=home,
-                                         temporary=home.parent / "tmp")
+    return config.load(REPOSITORY).scope(step, REPOSITORY, home=home)
 
 
 def _writes(found: Scope, path: Path) -> bool:
-    return (any(within(path, open_.path) for open_ in found.writable)
+    """Whether a step of scope `found` writes the host's `path`: the private `/tmp` is
+    the sandbox's own, writing no host path, though the test's home lies under the
+    host's `/tmp`."""
+    return (any(within(path, open_.path) for open_ in found.writable if not open_.private)
             and not any(within(path, guarded.path) for guarded in found.protected))
 
 
@@ -982,10 +1024,11 @@ def test_design_and_planning_write_the_repositorys_documents(tmp_path: Path) -> 
 
 def test_every_writing_step_writes_the_tool_state_its_suites_and_deployments_need(
         tmp_path: Path) -> None:
-    """MCW-s4bx's "Implementation syncs an environment": uv's Pythons, and the cluster
-    client's cache, the cloud CLI's configuration, Docker's client configuration, and
-    npm's cache for the OpenSpec command, for every step but the review; and nothing
-    protected beyond the engine's and the adapters'."""
+    """MCW-s4bx's "Implementation syncs an environment" and "Design validates the
+    change": uv's Pythons, and the cluster client's cache, the cloud CLI's
+    configuration, Docker's client configuration, and npm's cache, which the
+    configured OpenSpec command's `npx` writes, for every step but the review, design
+    among them; and nothing protected beyond the engine's and the adapters'."""
     home = tmp_path / "home"
     tools = [home / ".local/share/uv/python", home / ".kube/cache", home / ".config/gcloud",
              home / ".docker", home / ".npm/_cacache"]
@@ -1011,8 +1054,7 @@ def test_no_step_writes_the_configuration_or_the_harnesss_settings(tmp_path: Pat
 
     for step in config.STEPS:
         for harness in (model["harness"] for model in loaded.models[step]):
-            found = loaded.scope(step, REPOSITORY, harness, home=home,
-                                 temporary=tmp_path / "tmp")
+            found = loaded.scope(step, REPOSITORY, harness, home=home)
             assert not any(_writes(found, path) for path in settings), (step, harness)
     assert _writes(_repository_scope("implement", home),
                    REPOSITORY / ".agents/skills/change-plan/SKILL.md")
