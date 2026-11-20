@@ -1842,6 +1842,24 @@ after campaign index currency.
         mode earns its own scenario only where it makes the external party run different
         code, with an example); `TESTING.md`, "Live verification" (the requirements in
         `e2e-tests/README.md`).
+      - Three principles the owner stated on 2026-11-20 and directed into this
+        closeout. They are no design decision of this change:
+        - `docs/guidance/engineering/helm.md`, a new section: every component of an
+          umbrella chart can be switched off on its own, so a deployment of fewer
+          components is a values file that switches the others off, never a separate
+          chart.
+        - `docs/guidance/engineering/configuration.md`, "Application settings stay out
+          of the environment": a third-party process that reads no configuration file
+          of its own is started by a wrapper on the shared configuration loader. The
+          wrapper resolves the process's profiles as a service resolves its own, and
+          passes their values to it through its environment, never its arguments.
+          Where the process reads configuration files of its own, those are preferred.
+        - `configuration.md`, "Secrets travel in a secret profile or overlay file":
+          where a stack's secret values come from. A local cluster takes them from
+          gitignored values files, or from committed public development values for
+          unattended local validation. A cloud deployment takes them from the
+          operator's tooling, which populates the cloud's secret store, and the
+          cluster's secret store writes them into the pods' secret profiles.
       Run `make check-spec-index CHANGE=switch-on-hosted-per-period-vm`; neither touched
       capability has an `index.md`, and `openspec/specs/README.md` needs no row.
 - [ ] 10.10 Guidance placement: read the paragraphs promoted in 10.9 against the layer
