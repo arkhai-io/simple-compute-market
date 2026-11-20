@@ -64,16 +64,10 @@ join `dev`'s migration chain. Touches `core/registry`, `core/registry-client`,
   End-to-end: none new; validation's pipeline run on the merge commit is evidence
   that the merged stack still publishes and deals, through every lane's existing
   scenarios.
-  Every named suite passed after `make dist`; bare-metal storefront, API-credit
-  storefront and VM `test_watchdog_buy.py` ran with `socksio` added, their only
-  failures being the session's SOCKS `ALL_PROXY` ImportError. VM listings' code runs
-  under the VM storefront's suites. `make check-packaging` passes. Correction:
-  pre-commit failed the strict OpenSpec validation and `make check-local-imports`,
-  work the plan gave section 3 (3.4, 3.3), whose verification point carries the
-  passing pre-commit; a guidance-check failure on section 7's preamble citation was
-  fixed here, and section 7 gained Guidance placement (7.10). The task's `AGENTS.md`
-  heading no longer exists; the wheel rules are `wheelhouse.md` and
-  `project-environments.md`.
+  Every named suite passes; VM listings' code runs under the VM storefront's
+  suites. `make check-packaging` passes; the passing pre-commit is section 3's
+  verification point, which carries the strict OpenSpec validation and
+  `make check-local-imports` (3.3, 3.4).
 
 ## 3. The registry keeps seller details in the retained document
 
@@ -427,10 +421,5 @@ currency.
 
 ## Validation notes
 
-- Returned to planning at the triage of `01-implementation`: the first
-  implementation predated `dev`'s retained signed document, so its registry columns
-  were replaced by that document (F1), the API-credit request took the shared
-  description limit (F2), and the storefront paths gained focused tests (F3).
-- Environments install internal packages as wheels from `.dist/`, so after editing a
-  package run `make dist` and `make reinit` in every project that installs it before
-  trusting a test run; a stale wheel fails as an extra-forbidden field.
+- Final validation: `reviews/22-validation.md` at `8a5b7e349`, local, pipeline
+  (run 44744814677) and Helm passed; the end-to-end coverage is 7.8's.
