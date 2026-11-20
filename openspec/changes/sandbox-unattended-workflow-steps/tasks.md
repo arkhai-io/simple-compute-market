@@ -2062,6 +2062,25 @@ cadence"). Its evidence for D17 is the change's sandbox launched from inside its
   earlier run failed one scripts test, the graph's, still asserting the review wrote
   no `~/.cache`; it was corrected before this run.
 
+## 11b. Closeout's returned fix: a test docstring citing a design decision
+
+Delivers the one fix closeout's comment hygiene (12.1) returned: a docstring the
+change added names `D15`, a decision of this change's `design.md`, which leaves with
+the archive (repository obligation: `docs/guidance/workflow/change-references.md`;
+`docs/guidance/engineering/comments.md#comments-describe-the-current-system`). File:
+`scripts/tests/test_change_workflow_harness.py`.
+
+- [ ] 11b.1 Drop the `D15: ` prefix from the docstring of
+  `test_the_unattended_prompt_is_one_harness_neutral_paragraph`, so it opens "The
+  prompt says the step runs in a sandbox scoped to it, …", the rest unchanged, as the
+  owner directed the return. Verify: a search of the comments and docstrings the
+  change added under `scripts/` since the landing branch finds no decision id (`D`
+  and a number, with or without a letter, before a colon or in parentheses).
+- [ ] 11b.2 Verification point: `test_change_workflow_harness.py` (unit) passes; `make
+  check-comment-hygiene` passes; `scripts/change-workflow run pre-commit
+  sandbox-unattended-workflow-steps` passes. End-to-end: none; no scenario exercises
+  the workflow's tooling, and none is owed.
+
 ## 12. Closeout
 
 The workflow's closeout parts (`docs/guidance/workflow/closeout.md`), in order, with
