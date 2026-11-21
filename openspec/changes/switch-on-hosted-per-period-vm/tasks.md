@@ -1860,6 +1860,22 @@ after campaign index currency.
           unattended local validation. A cloud deployment takes them from the
           operator's tooling, which populates the cloud's secret store, and the
           cluster's secret store writes them into the pods' secret profiles.
+      - A fourth the owner agreed on 2026-11-21, likewise directed into this closeout:
+        `docs/guidance/engineering/deployment.md`, amending "A deployment does not wait
+        on a service's dependencies".
+        - A service serves degraded only where it has meaningful work to do without the
+          dependency. A service that has such work starts with the dependency
+          unreachable, reports it degraded, and retries. A service that can do no
+          meaningful work without it exits when it is unreachable, and the
+          orchestrator's restarts are its retries.
+        - Either way, configuration that can never work, an absent or malformed setting,
+          is refused at startup, naming it. A well-formed address that reaches nothing
+          is unreachable, never refused as wrong.
+        - Native sidecars that are part of one service's own unit, such as its own state
+          store or its database connection, may hold the service back until their
+          startup probes pass. Each must refuse configuration it cannot use and exit on
+          what it cannot reach, so the wait hides no failure that cannot heal. A
+          dependency outside the unit is never waited on.
       Run `make check-spec-index CHANGE=switch-on-hosted-per-period-vm`; neither touched
       capability has an `index.md`, and `openspec/specs/README.md` needs no row.
 - [ ] 10.10 Guidance placement: read the paragraphs promoted in 10.9 against the layer
