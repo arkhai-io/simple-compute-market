@@ -530,7 +530,9 @@ def test_a_suites_temporary_directory_passes_an_owner_check(checkout: Path) -> N
     `/tmp` is the owner's with mode 0700, so each ancestor of a directory made under it
     is root's or the caller's and writable by no one else, though the host's `/tmp`,
     root's, would show there as the overflow uid's."""
-    script = (f"mkdir -p /tmp/ledger/work && stat -c '%u %a' /tmp && "
+    # The umask is pinned: under a group-writable one, such as Debian's 002, the
+    # directories made here would be writable by others for that reason alone.
+    script = (f"umask 022 && mkdir -p /tmp/ledger/work && stat -c '%u %a' /tmp && "
               f"{shlex.join([sys.executable, '-I', '-c', ANCESTORS, '/tmp/ledger/work'])}")
 
     checked = _run(_scope("implement", checkout), script, checkout)
