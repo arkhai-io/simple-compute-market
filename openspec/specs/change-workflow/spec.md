@@ -582,7 +582,9 @@ first round with a section not yet complete; a change with no mapping for its ne
 incomplete section MUST ask the owner, once per round. A round recorded while the
 latest round is open — no implementation triage has finished or returned since it
 — MUST continue that round, whatever sections it names, keeping its last record and
-starting commit.
+starting commit, and the computation naming the plan's next round while one is open
+MUST say that recording it continues that round, naming the round and its starting
+commit.
 
 #### Scenario: A round is recorded after the fact
 
@@ -607,6 +609,15 @@ starting commit.
   and 6
 - **THEN** the round recorded for sections 5 and 6 continues the open round, and its
   round view, validation, and review read every commit since the open round's base
+
+#### Scenario: The computation names the open round a plan's added section continues
+
+- **WHEN** a round naming sections 1 to 11 is open, a return to design ends in
+  planning adding section 11a and mapping `[[["11a"]]]`, and the computation names
+  the plan's next round
+- **THEN** its result names section 11a, the open round's line as the round it
+  continues, and that round's starting commit, so the orchestrating session records
+  it as named rather than taking it for a new round over 11a alone
 
 ### Requirement: CW-tc82 Each section is checked, handed off, and committed alone
 
@@ -862,7 +873,8 @@ condition they are waived on; validation MUST read it before assessing any kind,
 MUST gather a waived kind, saying in the record that the waiver lapsed and why, when
 the condition does not hold over the commits since the last validation that assessed
 that kind, or when the commits since the last validation that ran it — or since the
-latest validation, when none ran it — include a merge (CW-g6th).
+latest validation, when none ran it — include a merge the waiver was not recorded
+after (CW-g6th).
 
 #### Scenario: A kind has no evidence for an environmental reason
 
@@ -4204,7 +4216,10 @@ there is more than one owed kind. A waiver MUST name kinds.
 `evidence <change>`, and its `--json`, MUST list for `HEAD`'s tree or commit, as
 each kind's pattern keys it, each required kind and an owed kind's argument, its
 pattern, and the evidence matching it, as present, missing, waived with the
-decision's `seq`, or not required. When several files match one kind and argument,
+decision's `seq`, or not required. A required kind whose waiver a merge lapsed
+(CW-g6th) MUST be listed present or missing as if unwaived, naming the lapsed
+decision's `seq` and why it lapsed, never as waived. When several files match one
+kind and argument,
 it MUST list them all and mark the last in path order as current; validation MUST
 assess the current one and name its path in the record.
 
@@ -4220,6 +4235,13 @@ assess the current one and name its path in the record.
   `20261117T1003Z/` and the rerun the owner allowed under `20261117T1140Z/`
 - **THEN** `evidence` lists both, the rerun as current, and validation assesses the
   rerun
+
+#### Scenario: A waiver a merge lapsed
+
+- **WHEN** the owner's decision waives the local kind and a merge since local last
+  ran lapses it, and local has no evidence for `HEAD`'s tree
+- **THEN** `evidence` lists local missing, naming the decision's `seq` and the
+  merge, and the gathering gathers it
 
 ### Requirement: CW-a8ss Validation gathers what is missing and assesses all of it
 
@@ -4239,13 +4261,18 @@ Before validation's session starts, the engine MUST run the preflight, push `HEA
 through the guarded push, start every missing `start` kind, run the missing `run`
 kinds in order, keeping each `after`, then collect each started kind. A gathering's
 failure MUST NOT prevent the session. A waived kind MUST be skipped unless a merge
-since it last ran lapses the waiver.
+lapses the waiver: a merge among the commits since the kind last ran that the waiver
+was not recorded after. A decision waiving kinds MUST record the commit `HEAD` was at
+as it was made; one recorded before that is taken at the commit of the latest
+logged line before it naming one.
 
 `gather <change>` MUST gather only the required kinds and owed arguments that are
 missing and not waived, and MUST NOT gather a kind whose evidence is present. `gather
 <change> --kind <kind>` MUST gather a new attempt of that kind whatever is present: of
 the one owed argument `--owed <argument>` names, or of each argument the kind is owed
-without it. It MUST refuse a waived kind unless `--lapsed` is given. The skill MUST
+without it. It MUST refuse a kind `evidence` lists as waived unless `--lapsed` is
+given, which the skill gives for a kind whose waiver's condition it judges no longer
+holds. The skill MUST
 write the reason for a new attempt in the record beside the attempt's path.
 
 #### Scenario: The local suite fails during gathering
@@ -4265,6 +4292,13 @@ write the reason for a new attempt in the record beside the attempt's path.
 - **THEN** `gather --kind ci --owed docker.yml` starts and collects a new attempt of
   `docker.yml` alone, which `evidence` marks current, and the record names the
   reason beside its path
+
+#### Scenario: A merge the owner waived after
+
+- **WHEN** the local kind last ran before a merge, and the owner then waived it at
+  the merge's commit
+- **THEN** that merge does not lapse the waiver, and the gathering skips local; a
+  later merge lapses it
 
 ### Requirement: CW-h3ks Each step has a hook before and after it
 

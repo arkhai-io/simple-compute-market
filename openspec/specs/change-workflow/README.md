@@ -640,8 +640,13 @@ the latest validation, when none did — include a merge, which brings in code t
 change did not write, or when the commits since it was last assessed break the
 condition. The merge is measured from the last run because a run's record of what it
 invoked names what its gathering ran, not what it found present; the error is only
-toward gathering a waived kind again. The engine's gathering skips a waived kind
-unless such a merge lapses it, which is mechanical; whether the condition still holds
+toward gathering a waived kind again. A merge the waiver was recorded after is no
+lapse, since the owner waived with it in view: the decision records the commit `HEAD`
+was at, and an older one is taken at the latest logged line before it naming a
+commit. `evidence` reads the lapse, listing a lapsed kind present or missing as if
+unwaived, so the report, the gathering, and the record agree. The engine's gathering
+skips a waived kind unless such a merge lapses it, which is mechanical; whether the
+condition still holds
 is the skill's judgement, which gathers a lapsed kind with `gather --kind <kind>
 --lapsed`. Waiving every kind is no validation at all, but the owner's direction past
 the guard it remedies.

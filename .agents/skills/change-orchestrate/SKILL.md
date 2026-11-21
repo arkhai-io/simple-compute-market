@@ -676,10 +676,12 @@ For a round recorded after the fact add `--after <highest-record-before-round>`;
 do not count that round's own records as preceding it. Recompute and run its
 sessions without another question about them. A round noted as it starts records
 `HEAD` on its line, and `make round-view` shows the round against that commit. A
-round recorded while the latest round is open, over sections it already names —
-a resumed or redirected session, a plan amended mid-round — continues it: the
-line keeps the open round's base and names it as `continues`, so the round's
-reading and review still cover its finished sections.
+round recorded while the latest round is open — a resumed or redirected session,
+a plan amended mid-round, even one adding sections the open round never named —
+continues it, whatever sections it names: the line keeps the open round's base and
+names it as `continues`, so the round's reading and review still cover its
+finished sections. The computation's `round` result says so beforehand, carrying
+`continues` and the open round's `base`; record it as named, as for any round.
 
 No step writes a protected path — the harness's settings, the workflow's
 configuration, or one the repository protects, as `scripts/change-workflow config

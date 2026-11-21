@@ -63,7 +63,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-5h8e](spec.md#requirement-cw-5h8e-evidence-only-a-push-produces-is-owed-by-validation) — evidence only a push produces is owed by validation, named by the evidence kind producing it, and never gates a task's completion.
 - [CW-0ia3](spec.md#requirement-cw-0ia3-an-implementation-session-starts-fresh-unless-the-owner-continues-one) — implementation starts in a fresh session unless the owner names an earlier one to continue.
 - [CW-al17](spec.md#requirement-cw-al17-the-implementation-cadence-is-settled-in-design-and-mapped-by-the-plan) — design settles the cadence of sessions and rounds; planning orders sections by it and reports the mapping.
-- [CW-v6nj](spec.md#requirement-cw-v6nj-each-round-is-recorded-as-it-starts) — each round is recorded as it starts from the plan's mapping; an unmapped round asks the owner; a round recorded while one is open continues it.
+- [CW-v6nj](spec.md#requirement-cw-v6nj-each-round-is-recorded-as-it-starts) — each round is recorded as it starts from the plan's mapping; an unmapped round asks the owner; a round recorded while one is open continues it, and the computation says so.
 - [CW-tc82](spec.md#requirement-cw-tc82-each-section-is-checked-handed-off-and-committed-alone) — each section is handed off, compliance-checked by a fresh-context agent, and committed on its own.
 - [CW-1u53](spec.md#requirement-cw-1u53-a-failed-premise-returns-the-change-with-its-work-in-progress) — a plan invalidated by discovered code returns the change, its work committed and pushed as in progress.
 

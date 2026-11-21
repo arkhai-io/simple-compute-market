@@ -172,7 +172,8 @@ moves nothing here, and validation runs beside it.
   order: its requirement — `always`; an owed kind once for each argument a complete
   section's `Owed by validation:` line owes it, named by the kind and the argument
   with the sections owing it, or once as `not required`; or `waived`, naming the
-  owner's decision's `seq` — the tree or commit its evidence describes, its pattern
+  owner's decision's `seq`, unless a merge lapsed the waiver, when the kind is
+  present or missing as if unwaived, naming the lapsed decision and why — the tree or commit its evidence describes, its pattern
   filled, every path matching it in path order, the last `current`, and whether it
   is present or missing; an owed line the reader refuses is listed in place of a
   status. `--json` gives the same, structured. Record it: the kinds below are its,
@@ -188,7 +189,9 @@ moves nothing here, and validation runs beside it.
   kinds it waives (`waives`) and the condition they are waived on, such as "nothing
   the change touches affects the services the end-to-end tests validate"; an
   instruction in the invocation is not a waiver. `evidence` marks each waived kind
-  with the decision's `seq` and words, so read them there. An older decision
+  with the decision's `seq` and words, so read them there; a kind whose waiver a
+  merge lapsed it lists present or missing instead, naming the decision and the
+  merge. An older decision
   recorded before waivers named their kinds is free text in `workflow.jsonl`:
   read the log's owner decisions for one too. For each kind such a decision
   waives, find the last validation record of the change whose `Evidence:` line —
@@ -197,11 +200,12 @@ moves nothing here, and validation runs beside it.
   what the commits since then change (`git diff --stat <that commit> HEAD`); with no
   such record, judge the condition over the change's own diff. It lapses too when
   the commits since the last validation that ran the kind — whose logged `invoked`
-  names it — or since the latest validation, when none ran it, include a merge
-  (`git log --merges <that commit>..HEAD`), since a merge brings in code the change
-  did not write. The gathering lapses a waiver on a merge itself, its
-  closing line for the kind saying so; whether the condition still holds is yours
-  to judge. Otherwise the kind is `waived`: it is not gathered, and the record
+  names it — or since the latest validation, when none ran it, include a merge the
+  waiver was not recorded after, since a merge brings in code the change did not
+  write; a merge the owner waived after was theirs to weigh. The engine reads that
+  lapse itself — `evidence` names it, and the gathering's closing line for the kind
+  says so — so never derive it again by hand; whether the condition still holds is
+  yours to judge. Otherwise the kind is `waived`: it is not gathered, and the record
   names the decision's `seq`, its condition, and what you checked. A lapsed waiver
   is written in the kind's section too, naming the decision's `seq` and why it
   lapsed — the merge, or how the condition broke — and a kind the gathering
@@ -233,7 +237,8 @@ everything else does; then every missing kind that runs here, one after another 
 the configuration's order, never one beside another; then each started kind's
 collect, which waits for the run of `HEAD` newer than the marker its start printed
 — a commit validated before never collects its earlier run — and for it to finish.
-A waived kind was skipped, saying so, unless a merge lapsed its waiver (step 1). A
+A waived kind was skipped, saying so, unless a merge lapsed its waiver, when it was
+gathered if missing (step 1). A
 failing kind failed the gathering, and every other kind still ran; a refused push
 dispatched nothing and still ran the kinds that run here.
 
