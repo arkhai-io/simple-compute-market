@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from market_deal_lifecycle_contracts.models import (
     AuthorityView, EvidenceItem, Instant, LifecycleCommand, LifecycleOutcome, Reference, Rejected, WireModel,
@@ -38,6 +38,39 @@ class DeliveryEndIntent(WireModel):
 class InterfaceRequest(WireModel):
     interface: Reference
     payload: dict[str, JsonValue]
+
+
+@dataclass(frozen=True)
+class OnceAccountingProjection:
+    """Opt-in private normal-read projection, not proof from supplied JSON.
+
+    The configured payment adapter owns verification and never sends provider
+    envelopes across this boundary. Consumers still require source/case custody.
+    """
+    negotiation_id: str
+    commitment_ref: str
+    seller_account: str
+    minimum_sequence: int
+    latest_event_sequence: int
+    provider_observed_at: int
+    verified_signature_sha256: str
+    financial_facts_sha256: str
+    part_count: int
+    livemode: Literal[False]
+    all_parts_terminal: bool
+    accounting: dict[str, JsonValue]
+
+
+@dataclass(frozen=True)
+class OnceAccountingRead:
+    view: AuthorityView
+    projection: OnceAccountingProjection | None
+
+
+@runtime_checkable
+class OnceAccountingReader(Protocol):
+    """Optional local capability; normal read remains the required baseline."""
+    async def read_with_once_accounting(self, *, minimum_sequence: int, read_started_at: int) -> OnceAccountingRead: ...
 
 
 class PaymentAdapter(Protocol):

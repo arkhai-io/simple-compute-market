@@ -69,7 +69,7 @@ class PushTarget:
 
     def command(self) -> list[str]:
         return ["git", "push", *(["--set-upstream"] if self.set_upstream else []),
-                self.remote, f"HEAD:refs/heads/{self.branch}"]
+                self.remote, f"refs/heads/{self.branch}:refs/heads/{self.branch}"]
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -210,6 +210,8 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
               file=sys.stderr)
         return 1
     assert target is not None
+    checked_target = target
+    checked_head = _git(root, "rev-parse", "--verify", "HEAD").stdout.strip()
     unattended = bool(environ.get(UNATTENDED_RUN))
     untracked = target.set_upstream
     if unattended:
@@ -221,6 +223,14 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
         print("REFUSED: the repository's pre-push hook refused the push; nothing was pushed.",
               file=sys.stderr)
         return 1
+    current_target, current_problems = check(
+        root, configuration.protected_branches or (), args.remote,
+    )
+    head = _git(root, "rev-parse", "--verify", "HEAD").stdout.strip()
+    if current_problems or current_target != checked_target or not checked_head or head != checked_head:
+        print("REFUSED: the checked branch, target, tip or worktree changed during the pre-push hook; "
+              "nothing was pushed.", file=sys.stderr)
+        return 1
     if args.action == "check":
         upstream = ("upstream matches" if not untracked
                     else "no upstream yet; the engine sets it once the session ends" if unattended
@@ -229,7 +239,6 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
         return 0
     command = target.command()
     print("+ " + " ".join(command), flush=True)
-    head = _git(root, "rev-parse", "--verify", "HEAD").stdout.strip()
     started, begun = clock().strftime("%Y-%m-%dT%H:%M:%SZ"), time.monotonic()
     status = subprocess.run(command, cwd=root, env={**os.environ, GUARDED_PUSH: "1"}).returncode
     if unattended:

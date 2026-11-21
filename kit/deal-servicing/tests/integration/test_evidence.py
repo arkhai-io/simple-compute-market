@@ -1,11 +1,17 @@
+import base64
+import json
+from dataclasses import replace
+import sqlite3
+
 import pytest
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_lifecycle.terms import LifecycleTerms
 from market_deal_lifecycle_contracts.models import (
-    Accepted, AuthorityView, CaseRecord, DisputeEvent,
+    Accepted, AuthorityView, CaseRecord, DisputeEvent, EvidenceItem,
 )
 from market_deal_servicing import (
     Classification, EndSession, FinalRequest, SQLiteEvidenceStore, seller_retention,
+    WatchSession,
 )
 from market_deal_servicing.evidence import EvidenceSession, RetentionObservation, transaction
 
@@ -110,3 +116,101 @@ async def test_no_terms_or_missing_adapter_never_prunes(rig):
     ))
     assert not await store.prune("deal", now=10000, has_adapter=False)
     assert not await store.prune("deal", now=10000, has_adapter=True)
+
+
+async def test_once_observation_repeats_keep_first_receipt_and_one_conflict(rig, once_accounting):
+    payment, watch = once_accounting
+    _, _, accounting, _ = await watch._poll_with_accounting()
+    assert accounting["classification"] == "ACCOUNTING_TERMINAL"
+    with transaction(rig["path"]) as conn:
+        original = conn.execute("SELECT item FROM servicing_evidence_items").fetchone()[0]
+    payment.projection = replace(payment.projection, provider_observed_at=151,
+                                 verified_signature_sha256="c" * 64)
+    rig["clock"][0] = 151
+    _, _, accounting, _ = await watch._poll_with_accounting()
+    assert accounting["classification"] == "ACCOUNTING_TERMINAL"
+    with transaction(rig["path"]) as conn:
+        rows = conn.execute("SELECT item FROM servicing_evidence_items ORDER BY position").fetchall()
+    assert rows == [(original,)]
+    item = EvidenceItem.model_validate_json(original)
+    assert isinstance(item.body, bytes)
+    assert base64.b64decode(item.model_dump(mode="json")["body"]) == item.body
+    assert json.loads(item.body)["saved_cursor"] == 1
+    assert item == EvidenceItem.model_validate_json(item.model_dump_json())
+    payment.projection = replace(payment.projection, financial_facts_sha256="d" * 64)
+    for _ in range(2):
+        _, _, accounting, _ = await watch._poll_with_accounting()
+        assert accounting is None
+    with transaction(rig["path"]) as conn:
+        rows = conn.execute("SELECT evidence_id,item FROM servicing_evidence_items ORDER BY position").fetchall()
+    assert len(rows) == 2
+    assert rows[0][1] == original
+    assert rows[1][0].startswith("normal-payment-read-conflict:")
+    assert payment.read.await_count == 0
+    assert payment.read_with_once_accounting.await_count == 4
+
+
+@pytest.mark.parametrize("failure", ["capture", "outer"])
+async def test_receipt_and_normal_state_obey_savepoint_and_outer_rollback(rig, once_accounting, failure):
+    payment, watch = once_accounting
+    # SQLite itself fails after the actual evidence insert, beyond a successful
+    # observation/end/cursor update. No imported transaction function is replaced.
+    action = "FAIL" if failure == "capture" else "ROLLBACK"
+    with transaction(rig["path"]) as conn:
+        conn.execute(f"""CREATE TRIGGER fixture_capture_failure AFTER INSERT ON servicing_evidence_items
+            WHEN NEW.evidence_id LIKE 'normal-payment-read:%'
+            BEGIN SELECT RAISE({action}, 'fixture evidence failure'); END""")
+    if failure == "outer":
+        with pytest.raises(sqlite3.Error, match="transaction|savepoint|fixture"):
+            await watch._poll_with_accounting()
+    else:
+        views, _, accounting, _ = await watch._poll_with_accounting()
+        assert isinstance(views[0].outcome, Accepted)
+        assert accounting is None
+    with transaction(rig["path"]) as conn:
+        assert conn.execute("SELECT count(*) FROM servicing_evidence_items").fetchone()[0] == 0
+        assert WatchSession(conn).cursor("deal", watch.payment_record) == (-1 if failure == "outer" else 1)
+        assert len(EndSession(conn).requests("deal")) == (0 if failure == "outer" else 1)
+        assert EndSession(conn).payment_observed_at("deal", "commitment") == (None if failure == "outer" else 150)
+        conn.execute("DROP TRIGGER fixture_capture_failure")
+    rig["clock"][0] = 151
+    _, _, accounting, _ = await watch._poll_with_accounting()
+    assert accounting["classification"] == "ACCOUNTING_TERMINAL"
+    assert payment.read_with_once_accounting.await_args.kwargs["minimum_sequence"] == (0 if failure == "outer" else 1)
+    with transaction(rig["path"]) as conn:
+        assert conn.execute("SELECT count(*) FROM servicing_evidence_items").fetchone()[0] == 1
+        assert WatchSession(conn).cursor("deal", watch.payment_record) == 1
+        assert len(EndSession(conn).requests("deal")) == 1
+        assert EndSession(conn).payment_observed_at("deal", "commitment") == 151
+
+
+async def test_failed_conflict_insert_cannot_qualify_changed_finance(rig, once_accounting):
+    payment, watch = once_accounting
+    _, _, accounting, _ = await watch._poll_with_accounting()
+    assert accounting["classification"] == "ACCOUNTING_TERMINAL"
+    with transaction(rig["path"]) as conn:
+        original = conn.execute("SELECT item FROM servicing_evidence_items").fetchone()[0]
+        conn.execute("""CREATE TRIGGER fixture_conflict_failure AFTER INSERT ON servicing_evidence_items
+            WHEN NEW.evidence_id LIKE 'normal-payment-read-conflict:%'
+            BEGIN SELECT RAISE(FAIL, 'fixture conflict failure'); END""")
+    payment.projection = replace(payment.projection, financial_facts_sha256="d" * 64)
+    for observed_at in (151, 152):
+        rig["clock"][0] = observed_at
+        views, _, accounting, _ = await watch._poll_with_accounting()
+        assert isinstance(views[0].outcome, Accepted)
+        assert accounting is None
+        with transaction(rig["path"]) as conn:
+            assert conn.execute("SELECT item FROM servicing_evidence_items").fetchall() == [(original,)]
+            assert WatchSession(conn).cursor("deal", watch.payment_record) == 1
+            assert EndSession(conn).payment_observed_at("deal", "commitment") == observed_at
+            assert len(EndSession(conn).requests("deal")) == 1
+    payment.read.assert_not_awaited()
+    assert payment.read_with_once_accounting.await_count == 3
+    with transaction(rig["path"]) as conn:
+        conn.execute("DROP TRIGGER fixture_conflict_failure")
+    _, _, accounting, _ = await watch._poll_with_accounting()
+    assert accounting is None
+    with transaction(rig["path"]) as conn:
+        rows = conn.execute("SELECT item FROM servicing_evidence_items ORDER BY position").fetchall()
+    assert len(rows) == 2 and rows[0] == (original,)
+    assert payment.read_with_once_accounting.await_count == 4

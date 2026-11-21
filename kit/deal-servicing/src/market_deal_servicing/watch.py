@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import json
+import re
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-from market_deal_lifecycle.adapters import DisputeAdapter, DisputeBinding, PaymentAdapter
+from market_deal_lifecycle.adapters import (DisputeAdapter, DisputeBinding, PaymentAdapter, OnceAccountingReader, OnceAccountingRead, OnceAccountingProjection)
 from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle.respondent import RespondentAdapter
 from market_deal_lifecycle_contracts.models import (
-    Accepted, AuthorityView, DisputeEvent, EvidenceItem, LifecycleCommand, PaymentEvent, Rejected,
+    Accepted, AuthorityView, DisputeEvent, EvidenceItem, LifecycleCommand, PaymentEvent, Rejected, Unknown,
 )
 from market_identity import Identity, IdentityScheme, canonical_json
 
@@ -156,7 +161,7 @@ class DealWatch:
         )
 
     def _observe(
-        self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None,
+        self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None, payment_projection=None,
     ) -> list[PaymentEvent | DisputeEvent]:
         """Journal what one accepted view shows; ``observed_at`` is a payment read's instant."""
         if not isinstance(view.outcome, Accepted):
@@ -173,6 +178,7 @@ class DealWatch:
             watch = WatchSession(conn)
             end = EndSession(conn)
             cursor = watch.cursor(self.negotiation_id, record_ref)
+            prior_cursor = cursor
             if max((event.sequence for event in events), default=-1) < cursor:
                 raise ValueError("authority read regresses below its durable cursor")
             # A scheduled request can mature without a new event sequence. Read
@@ -265,11 +271,122 @@ class DealWatch:
                 # carried, so admission never reads the instant without them.
                 watch.record_payment_observation(self.negotiation_id, self.commitment_ref, observed_at)
             watch.save(self.negotiation_id, record_ref, cursor, view)
+            if payment_projection is not None and not dispute:
+                try:
+                    with atomic(conn):
+                        self._retain_verified_payment(conn, payment_projection, view, prior_cursor, cursor)
+                except (ValueError, TypeError, AttributeError, sqlite3.Error):
+                    pass  # No capture means unqualified; normal servicing continues.
             return fresh
 
-    def _refresh(self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None = None):
+    def _payment_capture_semantics(self, projection: OnceAccountingProjection, cursor: int) -> dict:
+        """Financial invariants; a refreshed observation or signature is not a change."""
+        return {
+            "schema": "normal-payment-read-capture/v1",
+            "negotiation_sha256": hashlib.sha256(self.negotiation_id.encode()).hexdigest(),
+            "commitment_sha256": hashlib.sha256(self.commitment_ref.encode()).hexdigest(),
+            "seller_account_sha256": hashlib.sha256(self.seller_account.encode()).hexdigest(),
+            "latest_event_sequence": projection.latest_event_sequence, "saved_cursor": cursor,
+            "livemode": projection.livemode, "part_count": projection.part_count,
+            "all_parts_terminal": projection.all_parts_terminal,
+            "financial_facts_sha256": projection.financial_facts_sha256,
+        }
+
+    def _payment_capture_matches(self, item: EvidenceItem, projection: OnceAccountingProjection, cursor: int) -> bool:
+        if item.kind != "normal_verified_payment_read" or item.classification != "seller_assertion":
+            raise ValueError("existing capture has unsupported provenance")
+        prior = json.loads(item.body)
+        expected = self._payment_capture_semantics(projection, cursor)
+        return all(type(prior.get(key)) is type(value) and prior.get(key) == value
+                   for key, value in expected.items())
+
+    def _retain_verified_payment(self, conn, projection, view, prior_cursor, cursor):
+        """Atomic evidence from THIS normal verified read, not a new service call.
+
+        Capture-only failure rolls back its nested evidence savepoint, not the
+        ordinary cursor/servicing transaction. Missing/conflicting capture is
+        unqualified; no capture proves full poll success or stop readiness.
+        """
+        if (type(projection) is not OnceAccountingProjection
+                or projection.negotiation_id != self.negotiation_id
+                or projection.commitment_ref != self.commitment_ref
+                or projection.seller_account != self.seller_account
+                or not isinstance(view.outcome, Accepted)):
+            raise ValueError("once projection differs from normal case")
+        floor = max(0, prior_cursor, projection.minimum_sequence)
+        if (type(prior_cursor) is not int or type(cursor) is not int
+                or type(projection.minimum_sequence) is not int or projection.minimum_sequence < 0
+                or type(projection.latest_event_sequence) is not int
+                or not floor <= projection.latest_event_sequence <= 128
+                or type(projection.provider_observed_at) is not int or projection.provider_observed_at < 0
+                or type(projection.part_count) is not int or not 1 <= projection.part_count <= 32
+                or projection.livemode is not False or type(projection.all_parts_terminal) is not bool
+                or any(type(value) is not str or re.fullmatch(r"[a-f0-9]{64}", value) is None
+                       for value in (projection.verified_signature_sha256, projection.financial_facts_sha256))
+                or cursor != max((event.sequence for event in view.events), default=prior_cursor)
+                or WatchSession(conn).cursor(self.negotiation_id, self.payment_record) != cursor):
+            raise ValueError("once projection sequence or scope differs")
+        terminal = projection.all_parts_terminal
+        proof_hash = projection.verified_signature_sha256
+        body = canonical_json({
+            **self._payment_capture_semantics(projection, cursor),
+            "minimum_sequence": floor, "prior_cursor": prior_cursor,
+            "provider_observed_at": projection.provider_observed_at,
+            "verified_signature_sha256": proof_hash,
+        })
+        if len(body) > 4096:
+            raise ValueError("payment read capture exceeds fixed projection")
+        commitment_hash = hashlib.sha256(self.commitment_ref.encode()).hexdigest()
+        evidence_id = "normal-payment-read:" + commitment_hash + ":" + str(projection.latest_event_sequence)
+        conflict_id = "normal-payment-read-conflict:" + commitment_hash
+        # Exact capture-only ceiling already inherited from <=128 events.
+        # It has NO effect on normal user, payment, watch or lifecycle limits.
+        count = 0
+        for prefix in ("normal-payment-read:", "normal-payment-read-conflict:"):
+            count += conn.execute(
+                "SELECT count(*) FROM (SELECT 1 FROM servicing_evidence_items "
+                "WHERE negotiation_id=? AND evidence_id>=? AND evidence_id<? LIMIT 131)",
+                (self.negotiation_id, prefix, prefix[:-1] + ";"),
+            ).fetchone()[0]
+        if type(count) is not int or count > 130:
+            raise ValueError("capture history exceeds narrow scope")
+        row = conn.execute(
+            "SELECT length(item),substr(item,1,8193) FROM servicing_evidence_items "
+            "WHERE negotiation_id=? AND evidence_id=?", (self.negotiation_id, evidence_id),
+        ).fetchone()
+        if row:
+            if type(row[0]) is not int or not 0 < row[0] <= 8192:
+                raise ValueError("existing capture exceeds scope")
+            previous = EvidenceItem.model_validate_json(row[1])
+            if self._payment_capture_matches(previous, projection, cursor):
+                return  # Same finance: keep first verified observation, no write.
+            if conn.execute("SELECT 1 FROM servicing_evidence_items WHERE negotiation_id=? AND evidence_id=?",
+                            (self.negotiation_id, conflict_id)).fetchone():
+                return  # The original unqualified marker is already durable.
+            conflict = canonical_json({"schema": "normal-payment-read-conflict/v1",
+                "commitment_sha256": commitment_hash,
+                "classification": "SAME_SEQUENCE_FINANCIAL_FACTS_UNQUALIFIED"})
+            EvidenceSession(conn).put(self.negotiation_id, EvidenceItem(
+                evidence_id=conflict_id, kind="normal_verified_payment_read_conflict",
+                classification="seller_assertion", recorded_at=self.clock(),
+                body=base64.b64encode(conflict), context={"schema": "normal-payment-read-conflict/v1"},
+            ))
+            return  # Stable single marker; no row overwrite, pruning or rearm.
+        if not terminal:
+            return  # A pending normal poll produces no terminal closeout receipt.
+        if count >= 129:
+            raise ValueError("capture count excludes additional terminal row")
+        EvidenceSession(conn).put(self.negotiation_id, EvidenceItem(
+            evidence_id=evidence_id,
+            kind="normal_verified_payment_read", classification="seller_assertion",
+            recorded_at=self.clock(), body=base64.b64encode(body),
+            context={"schema": "normal-payment-read-capture/v1"},
+        ))
+
+
+    def _refresh(self, record_ref: str, view: AuthorityView, *, dispute: bool, observed_at: int | None = None, payment_projection=None):
         try:
-            fresh = self._observe(record_ref, view, dispute=dispute, observed_at=observed_at)
+            fresh = self._observe(record_ref, view, dispute=dispute, observed_at=observed_at, payment_projection=payment_projection)
         except ValueError as exc:
             view = AuthorityView(outcome=Rejected(reason=str(exc)))
             fresh = []
@@ -278,6 +395,10 @@ class DealWatch:
         return view, fresh
 
     async def poll(self) -> tuple[list[AuthorityView], list[PaymentEvent | DisputeEvent]]:
+        views, fresh, _, _ = await self._poll_with_accounting()
+        return views, fresh
+
+    async def _poll_with_accounting(self):
         """Read each authority and journal what it shows.
 
         A verified payment read also records its instant, taken before the read
@@ -286,11 +407,36 @@ class DealWatch:
         """
         views = []
         fresh: list[PaymentEvent | DisputeEvent] = []
+        payment_projection = None
+        observation = None
+        accounting = None
         if self.payment is not None:
             observed_at = self.clock()
-            payment = await self.payment.read()
+            can_capture = isinstance(self.payment, OnceAccountingReader)
+            minimum_sequence = 0
+            if can_capture:
+                try:
+                    def prior_floor():
+                        with transaction(self.path) as conn:
+                            value = WatchSession(conn).cursor(self.negotiation_id, self.payment_record)
+                            if type(value) is not int:
+                                raise ValueError("normal prior cursor unavailable")
+                            return max(0, value)
+                    minimum_sequence = await asyncio.to_thread(prior_floor)
+                except Exception:
+                    can_capture = False  # Before I/O; retain ordinary single read.
+            if can_capture:
+                captured = await cast(OnceAccountingReader, self.payment).read_with_once_accounting(
+                    minimum_sequence=minimum_sequence, read_started_at=observed_at)
+                if type(captured) is not OnceAccountingRead or not isinstance(captured.view, AuthorityView):
+                    payment = AuthorityView(outcome=Unknown(reason="optional once read result is unqualified"))
+                else:
+                    payment, payment_projection = captured.view, captured.projection
+            else:
+                payment = await self.payment.read()
             payment, events = await asyncio.to_thread(
                 self._refresh, self.payment_record, payment, dispute=False, observed_at=observed_at,
+                payment_projection=payment_projection,
             )
             views.append(payment)
             fresh.extend(events)
@@ -304,7 +450,48 @@ class DealWatch:
             observation = await asyncio.to_thread(self.observe_retention, views)
             if observation is not None:
                 await in_transaction(self.path, lambda conn: EvidenceSession(conn).observe(self.negotiation_id, observation))
-        return views, fresh
+        if payment_projection is not None and views and isinstance(views[0].outcome, Accepted):
+            try:
+                def same_read_floor():
+                    with transaction(self.path) as conn:
+                        session = WatchSession(conn)
+                        if (session.view(self.negotiation_id, self.payment_record) != views[0]
+                                or session.observation(self.negotiation_id, self.payment_record) != views[0]
+                                or EndSession(conn).payment_observed_at(self.negotiation_id, self.commitment_ref) != observed_at):
+                            raise ValueError("normal payment observation changed")
+                        conflict_id = "normal-payment-read-conflict:" + hashlib.sha256(self.commitment_ref.encode()).hexdigest()
+                        if conn.execute("SELECT 1 FROM servicing_evidence_items WHERE negotiation_id=? AND evidence_id=?",
+                                        (self.negotiation_id, conflict_id)).fetchone():
+                            raise ValueError("same-sequence payment facts remain unqualified")
+                        floor = session.cursor(self.negotiation_id, self.payment_record)
+                        if type(floor) is not int:
+                            raise ValueError("normal cursor unavailable")
+                        evidence_id = ("normal-payment-read:"
+                                       + hashlib.sha256(self.commitment_ref.encode()).hexdigest()
+                                       + ":" + str(payment_projection.latest_event_sequence))
+                        row = conn.execute(
+                            "SELECT length(item),substr(item,1,8193) FROM servicing_evidence_items "
+                            "WHERE negotiation_id=? AND evidence_id=?", (self.negotiation_id, evidence_id),
+                        ).fetchone()
+                        if (row is None or type(row[0]) is not int or not 0 < row[0] <= 8192
+                                or not self._payment_capture_matches(
+                                    EvidenceItem.model_validate_json(row[1]), payment_projection, floor)):
+                            raise ValueError("normal payment capture is missing or differs")
+                        return max(0, floor)
+                floor = await asyncio.to_thread(same_read_floor)
+                if (type(payment_projection) is not OnceAccountingProjection
+                        or payment_projection.negotiation_id != self.negotiation_id
+                        or payment_projection.commitment_ref != self.commitment_ref
+                        or payment_projection.seller_account != self.seller_account
+                        or payment_projection.latest_event_sequence < floor
+                        or payment_projection.livemode is not False
+                        or payment_projection.accounting.get("returnAdmitted") is not False
+                        or not 0 <= self.clock() - observed_at <= 60):
+                    raise ValueError("normal once accounting projection changed")
+                accounting = payment_projection.accounting
+            except Exception:
+                accounting = None
+        return views, fresh, accounting, observation
 
     async def watch(self) -> AsyncIterator[AuthorityView | PaymentEvent | DisputeEvent]:
         """One controller cycle: current verified views, then newly journaled events."""

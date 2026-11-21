@@ -1,7 +1,10 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
+from market_deal_lifecycle.adapters import (
+    DisputeAdapterTable, OnceAccountingRead, PaymentAdapterTable, PaymentSelector,
+)
+from market_deal_lifecycle.fixtures.once_accounting import build_once_accounting_read
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import Accepted, AuthorityView
 from market_identity import Ed25519Signer
@@ -60,3 +63,24 @@ def rig(tmp_path):
         )
 
     return locals()
+
+
+@pytest.fixture
+def once_accounting(rig):
+    """Neutral opt-in adapter fixture; it asserts no payment signature authority."""
+    canonical = build_once_accounting_read()
+    view, projection = canonical.view, canonical.projection
+
+    class Payment:
+        async def read(self):
+            return view
+
+        async def read_with_once_accounting(self, *, minimum_sequence, read_started_at):
+            return OnceAccountingRead(view, self.projection)
+
+    payment = Payment()
+    payment.projection = projection
+    payment.read = AsyncMock(wraps=payment.read)
+    payment.read_with_once_accounting = AsyncMock(wraps=payment.read_with_once_accounting)
+    watch = rig["watch"](payment=payment)
+    return payment, watch
