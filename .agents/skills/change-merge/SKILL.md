@@ -62,28 +62,21 @@ reads as written:
   owner, end the turn with `question`: `message` says what you found, the options,
   and your recommendation; `awaiting` names what you need. The owner's answer
   resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed. If a
-  call is denied, finish every part of the work that does not depend on it. If the
-  step cannot complete without it, end with `stopped`, `reason` naming that exact
-  call and why the step needed it, and `denials` listing the calls as you saw them.
-  A call a deny rule refused is forbidden: no other tool does it, except where the
-  rule exists only to keep file writes on the Edit and Write tools — the step
-  table's comments name those rules: sed's in-place forms, find's deleting,
-  running, and writing actions, and the diff family's output-to-file forms —
-  whose refused shell write may be made with the Edit or Write tool this step's
-  rules allow. A call denied because no rule allows it — the harness reports it
-  as don't ask mode — may be done instead by a tool this step's rules allow for
-  the same work, such as the Edit tool for a shell write or Read or Grep for a
-  shell read. Either way, name the substitute in your message. Never ask about a
-  denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop — a
   repository guard refusing, `HEAD` moving under you — end with `stopped`, `reason`
   saying why, and `denials` empty.
-- **Git runs in this checkout**, never with `-C`, and Make here too. The merge you
-  start is never abandoned: no rule allows `git merge --abort`, `git reset`, or
-  `git checkout`, and a merge stopped at a conflict you ask about stays in progress
-  for the owner's answer.
+- **The merge you start is never abandoned.** Never run `git merge --abort`, `git
+  reset`, or `git checkout`: a merge stopped at a conflict you ask about stays in
+  progress for the owner's answer, and the checks after the run stop one that
+  rewrote the branch's history.
 - **A turn's end is its outcome.** Never end a turn with work still running. Wait
   for a background command inside one Bash call, with `scripts/change-workflow wait
   <output-file> '<pattern>'` matching the line it prints when it ends, repeated when
@@ -154,9 +147,12 @@ and follow this skill.
   and the run follows "After the archive" as well. When a merge is in progress it
   names the owner, `merging`;
   that is yours to continue only when this session started it and is resumed with
-  the owner's answer. Otherwise, when it names anything else, stop: its reason says
+  the owner's answer, or when this session stopped because the base changed a
+  protected path (step 3) and the owner or the orchestrating session started the
+  merge after that stop. Otherwise, when it names anything else, stop: its reason says
   what comes first.
-- **Worktree.** It is clean, but for a merge this session started, and
+- **Worktree.** It is clean, but for a merge this session started or one started
+  after its protected-path stop, and
   `scripts/change-workflow check round-view` passes.
 - **Repair or merge.** Read the latest validation record in `reviews/`. When it
   names `HEAD` and failed, this run repairs it: go to "Repairing a failed
@@ -195,8 +191,22 @@ guidance — which the merge reconciles, with the code, against both sides.
    - `git diff --stat <merge-base> <base>` and `git log --oneline
      <merge-base>..<base>`;
    - the change's own diff, `git diff --stat <merge-base> HEAD`.
-3. `git merge --no-edit <base>`. A merge with no conflict concludes itself as a
-   commit: go to step 4, and add its repairs as a commit of their own (step 6).
+
+   Unattended, compare what the base changed, `git diff --name-only <merge-base>
+   <base>`, with the protected paths of this step's scope, which
+   `scripts/change-workflow config --json` lists under `scopes.merge.protected`,
+   each by its `entry` for one in the checkout.
+   Your sandbox mounts them read-only, so a merge that must write one fails partway.
+   When the base changed any, do not merge: end `stopped` with nothing started,
+   `reason` naming each protected path the base changed. The orchestrating session
+   brings the owner the merge outside the sandbox, and this step is resumed to
+   resolve and conclude it. Interactively, with no sandbox, go on.
+3. `git merge --no-edit <base>`, unless the merge is already in progress because the
+   owner or the orchestrating session started it after such a stop: then go on to
+   resolve it, and, once no conflict is left, commit it with `git commit --no-edit`,
+   since it was started without committing. A merge with no conflict concludes
+   itself as a commit: go to step 4, and add its repairs as a commit of their own
+   (step 6).
 
 **Resolve each conflict** (`git diff --name-only --diff-filter=U`) so both sides
 hold: the change's behaviour as its sections built it, and the base's as its

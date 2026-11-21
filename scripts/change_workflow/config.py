@@ -5,9 +5,8 @@ Each field configures one operation of a skill or the engine, and a value Git or
 the invocation supplies is never one. The workflow defines every table and key; an
 adopting repository changes what a field holds and adds none, so an unknown table
 or key is a typo or a newer workflow's, and is refused, naming it. Every reader
-checks the whole file as it loads it (`load`), as the step table's loader refuses
-a malformed table, so a subcommand never acts on half a configuration; with no
-file, every field is absent.
+checks the whole file as it loads it (`load`), so a subcommand never acts on half a
+configuration; with no file, every field is absent.
 
 A hook, an evidence kind's command, or the preflight holds one shell command or a
 list of them. A command names the values it needs as placeholders the engine
@@ -39,19 +38,30 @@ deliberately, but an evidence kind always names a command.
 
 Each step's models, in order of preference, and the orchestrating session's model
 are held to the workflow's model policy as they are read: no step names two models
-of one vendor, and only the review names a Codex model. No model is forbidden: a
-repository that never wants one does not list it.
+of one vendor, and a model appears only for a step its harness's adapter can run
+(`adapters`). No model is forbidden: a repository that never wants one does not list
+it.
 
 A review's draft the format check refuses is sent back to the reviewer that wrote
 it, for correction, as many times as `review.format-retries` says: once when the
 field is absent, never when it is 0.
 
+`[sandbox]` adds to each step's scope, which the engine's baseline and the adapter
+of the harness running the step hold (`scope`): `writable.common` paths every step
+writes, the review only those outside its checkout, `writable.<step>` paths one step
+writes, and `protected` paths
+no step writes. A repository only adds: the check refuses a writable path that is or
+lies under a protected one, the engine's, any adapter's, or its own; `/tmp` or a
+directory holding it, which would hide the private `/tmp` every step writes; and any
+writable path for the review.
+
 `config` lists every field and how it resolved, each kind's guide among them, and
-`config load <step>` the documents a step's skill reads.
+each step's resolved scope, every path with its source; `config load <step>` the
+documents a step's skill reads.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
 CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-t3ev, CW-g1gn, CW-r5qk, CW-k7gd, CW-h3ks,
-CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, and CW-r8fb.
+CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, CW-r8fb, and CW-h2zt.
 """
 
 from __future__ import annotations
@@ -70,7 +80,12 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .common import ORCHESTRATOR, StepError, repository_root
 from .graph import STEPS
-from .steps import HARNESSES, Model
+from .adapters import ADAPTERS, HARNESSES
+from .adapters import PROTECTED as ADAPTER_PROTECTED
+from .harness import Model
+from .records import is_pattern
+from .scope import (PRIVATE_TEMPORARY, PROTECTED, Scope, hides_temporary,
+                    outside_checkout, protected_by, resolve)
 
 # The configuration's place in the repository the command acts on.
 CONFIGURATION = Path(".agents/workflow.toml")
@@ -96,6 +111,9 @@ COMMON_DOCUMENTS = "common"
 DEFAULT_INERT_PATHS = ("openspec/", "**/*.md")
 # The send-backs a review's refused draft is given when the configuration names none.
 DEFAULT_FORMAT_RETRIES = 1
+# The writable paths every step adds, the review only those outside its checkout,
+# which a step's own add to.
+COMMON_WRITABLE = "common"
 # An evidence kind's fields, in the order `config` lists them.
 KIND_KEYS = ("required", "evidence", "run", "start", "collect", "after", "cleanup", "guide")
 # What an evidence kind may be required as.
@@ -112,6 +130,7 @@ _TABLES: dict[str, tuple[str, ...]] = {
     "models": (ORCHESTRATOR, *STEPS),
     "validation": ("preflight", "evidence"),
     "review": ("format-retries",),
+    "sandbox": ("writable", "protected"),
 }
 # The placeholders every command may use, but `pre-push`'s: the guarded push pushes a
 # branch, not a change, so it has the remote alone to give.
@@ -236,6 +255,40 @@ class Configuration:
     preflight: tuple[str, ...] | None = None
     kinds: tuple[Kind, ...] | None = None
     format_retries: int | None = None
+    # `[sandbox]`: the writable paths `writable.common` and each `writable.<step>`
+    # declares, by their key, and the protected paths.
+    sandbox_writable: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    sandbox_protected: tuple[str, ...] | None = None
+
+    def repository_writable(self, step: str, root: Path | None = None,
+                            home: Path | None = None) -> tuple[str, ...]:
+        """The writable paths the repository adds to a step's scope in the checkout at
+        `root`: `writable.common`, then the step's own. The review takes only the
+        common paths outside its checkout, such as a tool's cache in the home
+        directory, since every file it reviews stays read-only; with no `root`, none."""
+        common = self.sandbox_writable.get(COMMON_WRITABLE, ())
+        if step == "review":
+            common = () if root is None else tuple(
+                entry for entry in common
+                if outside_checkout(entry, root, Path.home() if home is None else home))
+        return tuple(dict.fromkeys((*common, *self.sandbox_writable.get(step, ()))))
+
+    def scope(self, step: str, root: Path, harness: str | None = None,
+              **launch: Any) -> Scope:
+        """A step's scope in the checkout at `root`, with the paths of the adapter of
+        `harness` — by default the harness of the step's first model, and no adapter's
+        where the configuration names none — and the repository's additions and inert
+        paths; `launch` gives what a run adds, its grants, and where its home
+        directory is."""
+        if harness is None and self.models.get(step):
+            harness = self.models[step][0]["harness"]
+        adapter = ADAPTERS.get(harness) if harness else None
+        if adapter is not None:
+            launch = {"adapter_writable": adapter.state, "adapter_files": adapter.state_files,
+                      "adapter_protected": adapter.protected, **launch}
+        return resolve(step, root, inert_paths=self.repository_inert_paths(),
+                       writable=self.repository_writable(step, root, launch.get("home")),
+                       protected=self.sandbox_protected or (), **launch)
 
     def hook(self, name: str) -> tuple[str, ...] | None:
         """The hook's commands, or None when it is not declared."""
@@ -390,8 +443,7 @@ def _models(table: dict[str, Any]) -> dict[str, Any]:
 
     A harness is one vendor's, so two entries of one harness are two models of one
     vendor: an outage or a usage limit takes both down, and the second is no
-    fallback. Codex runs only the review, the one step its read-only sandbox can
-    hold to its limits; a writing sandbox cannot refuse a commit or a relock.
+    fallback. A model is named only for a step its harness's adapter can run.
     """
     models: dict[str, Any] = {}
     for key, value in table.items():
@@ -407,9 +459,11 @@ def _models(table: dict[str, Any]) -> dict[str, Any]:
         if len(set(harnesses)) != len(harnesses):
             raise ConfigError(f"{where} names two models of one vendor for the {key} step, "
                               "which an outage or a usage limit takes down together")
-        if "codex" in harnesses and key != "review":
-            raise ConfigError(f"{where} names a Codex model for the {key} step; Codex runs "
-                              "only the review")
+        for harness in harnesses:
+            if key in STEPS and not ADAPTERS[harness].runs(key):
+                raise ConfigError(f"{where} names a {harness} model for the {key} step, "
+                                  f"which the {harness} adapter cannot run; it runs only: "
+                                  + ", ".join(sorted(ADAPTERS[harness].steps)))
         models[key] = entries
     return models
 
@@ -581,6 +635,56 @@ def _kinds(value: Any, root: Path, unignored: Unignored) -> tuple[Kind, ...]:
     return tuple(kinds)
 
 
+def _sandbox(table: dict[str, Any], root: Path,
+             home: Path) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...] | None]:
+    """`[sandbox]`'s writable paths by key and its protected paths, refused naming the
+    field: a key that is neither `common` nor a step; `writable.review`, since the
+    review writes nothing it reviews; a pattern outside the checkout, since a pattern
+    is matched against the checkout's files; a protected pattern, since a protected
+    path is mounted read-only whole; `/tmp` or a directory holding it, which would
+    hide the private `/tmp` every step writes, though a path under it is admitted;
+    and a writable path that is or lies under a protected one, the engine's or the repository's, which the
+    sandbox could not honour; the protected paths are the engine's, every adapter's,
+    whichever harness runs the step, and the repository's. A writable directory
+    containing a protected path is admitted: the protected path stays read-only inside
+    it."""
+    protected = (_strings("sandbox.protected", table["protected"])
+                 if "protected" in table else None)
+    for entry in protected or ():
+        if is_pattern(entry):
+            raise ConfigError(f"sandbox.protected names {entry}, a pattern; a protected path "
+                              "is named whole")
+    declared = table.get("writable", {})
+    if not isinstance(declared, dict):
+        raise ConfigError("sandbox.writable must be a table of path lists, keyed by "
+                          f"{COMMON_WRITABLE} or a step; got {declared!r}")
+    writable: dict[str, tuple[str, ...]] = {}
+    for key, value in declared.items():
+        where = f"sandbox.writable.{key}"
+        if key == "review":
+            raise ConfigError(f"{where} is refused: the review writes nothing it reviews, so "
+                              "no repository widens its scope")
+        if key != COMMON_WRITABLE and key not in STEPS:
+            raise ConfigError(f"{where} names no step; sandbox.writable takes "
+                              f"{COMMON_WRITABLE} or one of: "
+                              + ", ".join(step for step in STEPS if step != "review"))
+        entries = _strings(where, value)
+        for entry in entries:
+            if is_pattern(entry) and entry.startswith(("~", "/")):
+                raise ConfigError(f"{where} names {entry}, a pattern outside the checkout; "
+                                  "only a path from the checkout's root may be a pattern")
+            if hides_temporary(entry, root, home):
+                raise ConfigError(f"{where} names {entry}, which is or holds the host's "
+                                  "temporary directory; every step writes a private "
+                                  f"{PRIVATE_TEMPORARY} of its own, which it would hide")
+            if guarded := protected_by(entry, root, home,
+                                       (*PROTECTED, *ADAPTER_PROTECTED, *(protected or ()))):
+                raise ConfigError(f"{where} names {entry}, which is or lies under the "
+                                  f"protected path {guarded}")
+        writable[key] = entries
+    return writable, protected
+
+
 def _hook_placeholders(name: str) -> frozenset[str]:
     """The placeholders the hook `name` may use."""
     if name == "pre-push":
@@ -610,12 +714,13 @@ def _hooks_table(value: Any) -> dict[str, Any]:
 
 
 def check(text: str, path: Path, *, root: Path | None = None,
-          unignored: Unignored = git_unignored) -> Configuration:
+          unignored: Unignored = git_unignored, home: Path | None = None) -> Configuration:
     """The configuration `text` holds, checked whole; refused, naming the field, on
     an unknown table or key, a wrong type, a placeholder unknown or unavailable
-    where it is used, an evidence pattern under a directory Git does not ignore, or
-    a guide missing or empty. Paths are read from `root`, the repository's, which is
-    the configuration's own by default."""
+    where it is used, an evidence pattern under a directory Git does not ignore, a
+    guide missing or empty, or a `[sandbox]` path its check refuses (`_sandbox`).
+    Paths are read from `root`, the repository's, which is the configuration's own by
+    default, and `~` from `home`, the user's by default."""
     if root is None:
         depth = len(CONFIGURATION.parts)
         root = path.parents[depth - 1] if len(path.parents) >= depth else path.parent
@@ -635,6 +740,8 @@ def check(text: str, path: Path, *, root: Path | None = None,
     validation = tables.get("validation", {})
     load = {key: _strings(f"load.{key}", value)
             for key, value in tables.get("load", {}).items()}
+    sandbox_writable, sandbox_protected = _sandbox(tables.get("sandbox", {}), root,
+                                                   Path.home() if home is None else home)
     return Configuration(
         path=path, exists=True,
         protected_branches=(_strings(PROTECTED_BRANCHES, repository["protected-branches"])
@@ -656,6 +763,7 @@ def check(text: str, path: Path, *, root: Path | None = None,
                else None),
         format_retries=(_count("review.format-retries", tables["review"]["format-retries"])
                         if "format-retries" in tables.get("review", {}) else None),
+        sandbox_writable=sandbox_writable, sandbox_protected=sandbox_protected,
     )
 
 
@@ -781,6 +889,12 @@ def resolution(configuration: Configuration) -> list[dict[str, Any]]:
         None if configuration.preflight is None else list(configuration.preflight))
     add("review.format-retries", DEFAULT if configuration.format_retries is None else DECLARED,
         configuration.review_format_retries())
+    for key in (COMMON_WRITABLE, *(step for step in STEPS if step != "review")):
+        paths = configuration.sandbox_writable.get(key)
+        add(f"sandbox.writable.{key}", ABSENT if paths is None else DECLARED,
+            None if paths is None else list(paths))
+    add("sandbox.protected", ABSENT if configuration.sandbox_protected is None else DECLARED,
+        None if configuration.sandbox_protected is None else list(configuration.sandbox_protected))
     if not configuration.kinds:
         add(EVIDENCE, ABSENT)
     for kind in configuration.kinds or ():
@@ -797,13 +911,41 @@ def _shown_value(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def resolution_lines(configuration: Configuration) -> list[str]:
+def scopes(configuration: Configuration, root: Path) -> dict[str, Scope]:
+    """Each step's scope in the checkout at `root` as a run of it on its first model
+    would start now, with that model's adapter's paths, before any grant adds its
+    own."""
+    return {step: configuration.scope(step, root) for step in STEPS}
+
+
+def _shown_path(path: Path, root: Path) -> str:
+    """A scope's path as `config` lists it: from the checkout's root where it lies there,
+    from `~` where it lies in the home directory, and whole otherwise."""
+    for base, prefix in ((root, ""), (Path.home(), "~/")):
+        if path == base:
+            return prefix or "."
+        if base in path.parents:
+            return prefix + path.relative_to(base).as_posix()
+    return str(path)
+
+
+def resolution_lines(configuration: Configuration, resolved: Mapping[str, Scope],
+                     root: Path) -> list[str]:
+    """`config`'s listing: every field and how it resolved, then each step's scope in
+    `resolved`, its paths shown from the checkout at `root`."""
     lines = [f"{configuration.shown}: " + ("read" if configuration.exists
                                            else "no such file; every field is absent")]
     for entry in resolution(configuration):
         detail = (f"— {entry['reason']}" if "reason" in entry
                   else _shown_value(entry["value"]) if "value" in entry else "")
         lines.append(f"{entry['field']:<44} {entry['status']:<9} {detail}".rstrip())
+    for step, scope in resolved.items():
+        for kind, paths in (("writable", scope.writable), ("protected", scope.protected)):
+            for path in paths:
+                shown = _shown_path(path.path, root)
+                note = (" (private)" if path.private else "") + (" (absent)" if path.create
+                                                                 else "")
+                lines.append(f"{f'scope.{step}.{kind}':<44} {path.source:<9} {shown}{note}")
     return lines
 
 
@@ -827,6 +969,7 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         # A directory entry is resolved here, before anything is printed, so a
         # refused one prints no partial list.
         documents = configuration.documents(args.step, root) if args.action == "load" else []
+        resolved = scopes(configuration, root) if args.action == "show" else {}
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -839,7 +982,9 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
             print(document)
     elif args.json:
         print(json.dumps({"file": configuration.shown, "exists": configuration.exists,
-                          "fields": resolution(configuration)}, ensure_ascii=False))
+                          "fields": resolution(configuration),
+                          "scopes": {step: scope.shown() for step, scope in resolved.items()}},
+                         ensure_ascii=False))
     else:
-        print("\n".join(resolution_lines(configuration)))
+        print("\n".join(resolution_lines(configuration, resolved, root)))
     return 0

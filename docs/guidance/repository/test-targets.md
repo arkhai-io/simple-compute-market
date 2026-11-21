@@ -26,7 +26,8 @@ whenever `GITHUB_ACTIONS` is set, which a local run never sees.
 A session runs some of the scripts' tests through the target that runs all of them,
 `make test-release-tooling TESTS=<files or node ids> PYTEST_ARGS=<options>`, which
 builds the wheels they import and runs pytest with the dependencies the whole suite
-has; a hand-written `uv run … pytest` naming its own dependencies is refused by the
-step table. A repository check runs through its Make target — `make
-check-comment-hygiene`, `make check-change-workflow-config` — never its script
-directly, and a helper a session starts is told so in its prompt.
+has, never a hand-written `uv run … pytest` naming its own dependencies, which
+tests against an environment no other run of the suite has. A repository check runs
+through its Make target — `make check-comment-hygiene`, `make
+check-change-workflow-config` — never its script directly, and a helper a session
+starts is told so in its prompt.

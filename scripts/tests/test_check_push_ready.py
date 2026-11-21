@@ -21,7 +21,7 @@ from change_workflow import cli
 from change_workflow import clone as clones
 from change_workflow import push as guard
 from change_workflow.common import SESSION_ID, UNATTENDED_RUN
-from change_workflow.running import invocations_directory, kept_invocations
+from change_workflow.running import ATTEMPTED_PUSH, invocations_directory, kept_invocations
 from change_workflow_fixtures import (CHANGE, SESSION, VALID, FakeClaude, configured, event_lines,
                                       make_wrapper)
 
@@ -355,6 +355,149 @@ def test_a_steps_push_refused_by_the_pre_push_hook_is_on_the_runs_line(repo: Pat
     assert invoked["command"].endswith(f"{PUBLIC_CONTENT} --pre-push origin")
     assert {"started", "seconds"} <= invoked.keys()
     assert kept_invocations(invocations_directory(repo), SESSION) == []
+
+
+RUN = {SESSION_ID: SESSION, UNATTENDED_RUN: "design"}
+
+
+def _upstream(repo: Path) -> tuple[str, str]:
+    """The change branch's upstream remote and merge ref, each empty where unset."""
+    return tuple(subprocess.run(["git", "config", f"branch.feat/change.{key}"], cwd=repo,
+                                capture_output=True, text=True).stdout.strip()
+                 for key in ("remote", "merge"))
+
+
+def _kept_pushes(repo: Path) -> list[dict]:
+    return [entry for entry in kept_invocations(invocations_directory(repo), SESSION)
+            if entry["hook"] == ATTEMPTED_PUSH]
+
+
+def test_an_unattended_push_sets_no_upstream_and_is_kept_with_its_commit(repo: Path) -> None:
+    """CW-59c7: under a run, a branch with no upstream is pushed to the remote given
+    without setting one, since the sandbox keeps `.git/config` read-only, and the push
+    is kept for the session's line with the commit sent and Git's status."""
+    _untrack(repo)
+    head = _git(repo, "rev-parse", "HEAD")
+
+    assert guard.main(["push", "--remote", "origin"], root=repo, environ=RUN) == 0
+
+    assert _remote_head(repo, "feat/change") == head
+    assert _upstream(repo) == ("", "")
+    (kept,) = _kept_pushes(repo)
+    assert kept == {"hook": ATTEMPTED_PUSH, "command": "git push origin HEAD:refs/heads/feat/change",
+                    "branch": "feat/change", "remote": "origin", "commit": head,
+                    "exit_status": 0, "started": kept["started"], "seconds": kept["seconds"]}
+
+
+def test_an_unattended_push_git_fails_is_kept_with_its_failing_status(
+        repo: Path, tmp_path: Path) -> None:
+    """CW-59c7's "An unattended push fails": the pre-push hook passes, Git then fails,
+    and the push's record carries Git's failing status."""
+    _provide_check(repo, "import sys\nsys.exit(0)\n")
+    _untrack(repo)
+    _move_remote_branch(tmp_path)
+
+    assert guard.main(["push", "--remote", "origin"], root=repo, environ=RUN) == 1
+
+    (kept,) = _kept_pushes(repo)
+    # Git's own status for a rejected push.
+    assert kept["exit_status"] == 1
+    assert [entry["hook"] for entry in
+            kept_invocations(invocations_directory(repo), SESSION)] == ["pre-push", ATTEMPTED_PUSH]
+
+
+def _move_remote_branch(tmp_path: Path) -> str:
+    """Someone else's commit on the remote's `feat/change`, which a push of the change's
+    own commits does not descend from."""
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", "-b", "dev", str(tmp_path / "remote.git"), str(other))
+    moved = _commit(other, "someone-else")
+    _git(other, "push", "-q", "origin", "HEAD:refs/heads/feat/change")
+    return moved
+
+
+class _Pushing(FakeClaude):
+    """A design run whose step makes the guarded push with the remote given."""
+
+    def __init__(self, repo: Path, *runs) -> None:
+        super().__init__(*runs)
+        self.repo, self.pushed = repo, []
+
+    def __call__(self, command, cwd, feed, step) -> int:
+        self.pushed.append(cli.main(["push", "--remote", "origin"], root=self.repo,
+                                    environ={**RUN, UNATTENDED_RUN: step}))
+        return super().__call__(command, cwd, feed, step)
+
+
+def _designing(repo: Path) -> None:
+    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write("/openspec/changes/*/reviews/\n")
+    configured(repo, (repo / ".agents/workflow.toml").read_text("utf-8")
+               + '\n[models]\ndesign = [{ harness = "claude", model = "claude-opus-5-5" }]\n')
+
+
+def test_after_an_unattended_run_the_engine_sets_the_upstream_its_push_left_unset(
+        repo: Path) -> None:
+    """CW-59c7's "An unattended run pushes a branch with no upstream": once the session
+    ends, the engine sets the upstream to that remote's branch of its name."""
+    _designing(repo)
+    _untrack(repo)
+    pushing = _Pushing(repo, (event_lines(VALID["blocked"]), 0))
+
+    line = make_wrapper(repo, pushing).run("design", CHANGE)
+
+    assert pushing.pushed == [0]
+    assert _git(repo, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/feat/change"
+    # The pre-push hook, skipped as not declared, then the push.
+    assert [entry["hook"] for entry in line["invoked"]] == ["pre-push", ATTEMPTED_PUSH]
+
+
+def test_after_an_unattended_run_whose_push_failed_no_upstream_is_set(
+        repo: Path, tmp_path: Path) -> None:
+    _designing(repo)
+    _untrack(repo)
+    _move_remote_branch(tmp_path)
+    pushing = _Pushing(repo, (event_lines(VALID["blocked"]), 0))
+
+    line = make_wrapper(repo, pushing).run("design", CHANGE)
+
+    assert pushing.pushed == [1]
+    assert _upstream(repo) == ("", "")
+    (pushed,) = [entry for entry in line["invoked"] if entry["hook"] == ATTEMPTED_PUSH]
+    assert pushed["exit_status"] != 0
+
+
+def test_after_an_unattended_run_that_broke_an_invariant_no_upstream_is_set(
+        repo: Path) -> None:
+    """Nothing runs after a session whose checks found a violation: here the session
+    pushed, then stashed an edit."""
+    _designing(repo)
+    _untrack(repo)
+
+    class Stashing(_Pushing):
+        def __call__(self, command, cwd, feed, step) -> int:
+            status = super().__call__(command, cwd, feed, step)
+            (self.repo / "slice").write_text("half done", "utf-8")
+            _git(self.repo, "stash", "-q")
+            return status
+
+    line = make_wrapper(repo, Stashing(repo, (event_lines(VALID["blocked"]), 0))).run(
+        "design", CHANGE)
+
+    assert [entry["check"] for entry in line["invariants"]] == ["stash"]
+    assert _upstream(repo) == ("", "")
+
+
+def test_a_branch_with_an_upstream_keeps_it_after_an_unattended_push(repo: Path,
+                                                                      tmp_path: Path) -> None:
+    other = tmp_path / "other.git"
+    _git(tmp_path, "init", "-q", "--bare", str(other))
+    _git(repo, "remote", "add", "mirror", str(other))
+
+    assert guard.main(["push", "--remote", "mirror"], root=repo, environ=RUN) == 0
+    assert guard.set_upstreams(repo, _kept_pushes(repo)) == []
+
+    assert _upstream(repo) == ("origin", "refs/heads/feat/change")
 
 
 def test_a_push_outside_any_session_keeps_nothing(repo: Path) -> None:

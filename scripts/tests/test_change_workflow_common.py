@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from change_workflow import (cli, clone, cost_report, diagram, find, graph, history, hook, index,
-                             next_step, push, round_view, skills, tasks)
+                             next_step, propose, push, round_view, skills, tasks)
 from change_workflow.common import NotInRepository, repository_root
 
 PACKAGE = Path(__file__).resolve().parents[1] / "change_workflow"
@@ -87,6 +87,7 @@ def test_outside_any_repository_the_root_is_refused_naming_the_directory(
     lambda: cli.main(["log", "a-change"]),
     lambda: clone.main(["create", "a-change"]),
     lambda: history.main(["sync", "a-change"]),
+    lambda: propose.main(["a-change", "a-prerequisite"]),
     lambda: round_view.main(["check"]),
     lambda: cost_report.main(["a-change"]),
     lambda: index.main(),

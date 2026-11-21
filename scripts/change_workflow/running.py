@@ -39,7 +39,11 @@ and command a session invoked through `run`, `gather`, or the guarded push, unti
 session's line takes them: the wrapper's for an unattended run, the review's for a
 review on Claude, `record`'s for one the owner holds. Each entry names its change,
 and a line takes only its own change's and the guarded push's, which names none.
-Each session leaves its own file, emptied as its lines take what it holds.
+Each session leaves its own file, emptied as its lines take what it holds. Two
+entries name no change either: each push the guarded push attempted under an
+unattended run (`ATTEMPTED_PUSH`), with its branch, remote, the commit sent, and Git's
+exit status, from which the engine sets a missing upstream once the session ends;
+and each push the sandbox's `git` refused (`REFUSED_PUSH`), with its command line.
 """
 
 from __future__ import annotations
@@ -56,12 +60,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Sequence
 
 from .common import Clock, StepError, utc_now
 
 RUNS = "change-runs"
 INVOCATIONS = "change-invocations"
+# The `hook` of a kept push: one the guarded push attempted under an unattended run,
+# and one the sandbox's `git` refused.
+ATTEMPTED_PUSH = "guarded push"
+REFUSED_PUSH = "refused push"
 
 
 @dataclass(frozen=True)
@@ -221,6 +229,13 @@ def kept_invocations(directory: Path | None, session: str | None,
         if isinstance(entry, dict) and (change is None or entry.get("change") in (None, change)):
             entries.append(entry)
     return entries
+
+
+def refused_pushes(invoked: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each push the sandbox's `git` refused among what a run's sessions invoked, as a
+    refusal on the run's line: the engine's own record, whatever the harness."""
+    return [{"tool": "git", "command": entry.get("command"), "error": entry.get("error")}
+            for entry in invoked if entry.get("hook") == REFUSED_PUSH]
 
 
 def drop_invocations(directory: Path | None, session: str | None,
