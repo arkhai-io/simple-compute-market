@@ -66,6 +66,9 @@ TERM_LISTING_FIELDS: tuple[str, ...] = (
     "max_duration_seconds",
     "available_until_utc",
     "rate_structure",
+    "title",
+    "description",
+    "metadata",
 )
 
 BACKING_FIELD = "capacity_backing"

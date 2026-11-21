@@ -835,7 +835,9 @@ async def seller_auth_alkahest_ready_client(db):
 _SELLER_WALLET = "0x" + "33" * 20
 
 
-async def _full_client(db, *, readiness):
+async def _accepted_escrow_listing_service(db, *, readiness) -> ListingService:
+    """A real listing service whose composition publishes the supplied escrows."""
+
     class _AcceptedEscrowComposition:
         async def publication_artifacts(self, resources, *, clauses=None):
             assert clauses is None
@@ -846,7 +848,7 @@ async def _full_client(db, *, readiness):
         signer=_TEST_MARKETPLACE_SIGNER,
         authorities=_TEST_PROVISIONING_AUTHORITIES,
     )
-    listing_svc = ListingService(
+    return ListingService(
         registry=collaborators.registry,
         binding=collaborators.binding,
         domain=collaborators.domain,
@@ -857,6 +859,10 @@ async def _full_client(db, *, readiness):
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
         settlement_composition_provider=lambda: _AcceptedEscrowComposition(),
     )
+
+
+async def _full_client(db, *, readiness):
+    listing_svc = await _accepted_escrow_listing_service(db, readiness=readiness)
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
@@ -1209,3 +1215,126 @@ class TestCreateListingReleaseConditions:
             )
         assert exc_info.value.status_code == 400
         assert "demands are derived" in str(exc_info.value)
+
+
+_DETAILS = {
+    "title": "One H200 in California",
+    "description": "A dedicated GPU; scratch disks are wiped between deals.",
+    "metadata": {"acme.tier": "gold", "rack": 7, "ecc": True, "uptime": 99.95},
+}
+_DETAIL_KEYS = frozenset(_DETAILS)
+
+
+@pytest_asyncio.fixture
+async def publishing_clients(db, monkeypatch):
+    """The listing app publishing to two registries, which ``RecordingRegistries``
+    stands for: a seller client creates and reads, an administrator client
+    pauses and resumes."""
+    _container.resolved_sqlite_client = db
+    _container.resolved_listing_service = await _accepted_escrow_listing_service(
+        db, readiness=()
+    )
+    _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
+
+    app = FastAPI()
+    app.include_router(listings_router)
+    app.middleware("http")(listing_lifecycle_middleware)
+    _configure_administrator_auth(app, db, monkeypatch)
+
+    transport = httpx.ASGITransport(app=app)
+    with recorded_registries() as registries:
+        async with StorefrontClient(
+            "http://test",
+            signer=_TEST_MARKETPLACE_SIGNER,
+            caller_role="seller",
+            expected_publishers=_TEST_PUBLISHERS,
+            transport=transport,
+        ) as seller, StorefrontClient(
+            "http://test",
+            signer=_TEST_ADMIN_SIGNER,
+            caller_role="admin",
+            expected_publishers=_TEST_PUBLISHERS,
+            transport=transport,
+        ) as admin:
+            yield seller, admin, db, registries
+
+    _container.resolved_sqlite_client = None
+    _container.resolved_listing_service = None
+    _container.resolved_marketplace_signer = None
+
+
+class TestCreateListingDetails:
+    """A seller's create states details beside the listing envelope; the
+    storefront stores them and publishes exactly what was stated."""
+
+    async def test_stated_details_are_stored_read_and_sent_to_every_registry(
+        self, publishing_clients
+    ):
+        seller, admin, _db, registries = publishing_clients
+
+        created = await seller.create_listing(
+            listing_resource=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            **_DETAILS,
+        )
+        read = await seller.get_listing(created.listing_id)
+        published = registries.to("publish", created.listing_id)
+
+        assert (read.title, read.description, read.metadata) == (
+            _DETAILS["title"],
+            _DETAILS["description"],
+            _DETAILS["metadata"],
+        )
+        assert sorted(url for url, _ in published) == sorted(registries.urls)
+        for _, body in published:
+            assert {key: body[key] for key in _DETAIL_KEYS} == _DETAILS
+
+        # A republication reads the listing back from the storefront's own row.
+        registries.sent.clear()
+        await admin.pause_listing(created.listing_id)
+        resumed = await admin.resume_listing(created.listing_id)
+
+        republished = registries.to("publish", created.listing_id)
+        assert resumed.registry_status == "published"
+        assert sorted(url for url, _ in republished) == sorted(registries.urls)
+        for _, body in republished:
+            assert {key: body[key] for key in _DETAIL_KEYS} == _DETAILS
+
+    async def test_a_create_stating_no_details_sends_no_detail_key(
+        self, publishing_clients
+    ):
+        seller, _admin, _db, registries = publishing_clients
+
+        created = await seller.create_listing(
+            listing_resource=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+        )
+        read = await seller.get_listing(created.listing_id)
+        published = registries.to("publish", created.listing_id)
+
+        assert (read.title, read.description, read.metadata) == (None, None, None)
+        assert sorted(url for url, _ in published) == sorted(registries.urls)
+        for _, body in published:
+            assert not body.keys() & _DETAIL_KEYS
+
+    async def test_a_detail_over_its_limit_is_refused_before_a_listing_exists(
+        self, publishing_clients
+    ):
+        # The typed client carries details as plain values and leaves their
+        # limits to the storefront, so it sends the refused body itself. Each
+        # field's limit is the create model's unit suite's.
+        seller, _admin, db, registries = publishing_clients
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await seller.create_listing(
+                listing_resource=_OFFER,
+                capacity_source=_CAPACITY_SOURCE,
+                accepted_escrows=_ACCEPTED_ESCROWS,
+                description="x" * 4001,
+            )
+
+        assert refused.value.status_code == 422
+        assert await db.list_listings() == []
+        assert registries.sent == []

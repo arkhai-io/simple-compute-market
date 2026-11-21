@@ -272,6 +272,9 @@ class ListingSummary:
     updated_at: str = ""
     listing_resource: dict[str, Any] = field(default_factory=dict)
     demand_resource: dict[str, Any] = field(default_factory=dict)
+    title: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -292,6 +295,7 @@ class ListingSummary:
             "listing_id", "status", "paused", "max_duration_seconds", "seller",
             "buyer", "escrow_uid", "created_at", "updated_at",
             "listing_resource", "demand_resource",
+            "title", "description", "metadata",
         }
         max_dur = d.get("max_duration_seconds")
         return cls(
@@ -306,6 +310,9 @@ class ListingSummary:
             updated_at=d.get("updated_at", ""),
             listing_resource=_parse_resource(d.get("listing_resource")),
             demand_resource=_parse_resource(d.get("demand_resource")),
+            title=d.get("title"),
+            description=d.get("description"),
+            metadata=d.get("metadata"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

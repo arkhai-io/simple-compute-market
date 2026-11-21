@@ -285,3 +285,50 @@ def test_create_listing_settlement_config_sync_async_contract_is_byte_equivalent
         expected_principals=TrustedIdentitySet(identities=(_SIGNER.identity,)),
     )
     assert result.verified
+
+
+def test_create_listing_details_sync_async_contract_is_byte_equivalent(held_time):
+    """Stated details travel beside the envelope's fields; a create stating none
+    sends the body above, with no detail key."""
+    async_transport = _AsyncCreateTransport()
+    sync_transport = _SyncCreateTransport()
+    details = {
+        "title": "One H200",
+        "description": "A dedicated GPU.",
+        "metadata": {"acme.tier": "gold", "rack": 7},
+    }
+    kwargs = {
+        "listing_resource": {"gpu_model": "H200", "gpu_count": 1},
+        "capacity_source": {"site_id": "site-1", "resource_id": "resource-1"},
+        "request_id": "create-1",
+        **details,
+    }
+    publishers = TrustedIdentitySet(identities=(_SIGNER.identity, _PUBLISHER.identity))
+
+    async def _run():
+        async with StorefrontClient(
+            "http://test",
+            signer=_SIGNER,
+            caller_role="seller",
+            expected_publishers=publishers,
+            transport=async_transport,
+        ) as client:
+            await client.create_listing(**kwargs)
+
+    asyncio.run(_run())
+    with SyncStorefrontClient(
+        "http://test",
+        signer=_SIGNER,
+        caller_role="seller",
+        expected_publishers=publishers,
+        transport=sync_transport,
+    ) as client:
+        client.create_listing(**kwargs)
+
+    async_request = async_transport.requests[0]
+    sync_request = sync_transport.requests[0]
+    body = json.loads(async_request.content)
+    assert {key: body[key] for key in details} == details
+    assert async_request.content == sync_request.content
+    for name in AUTH_HEADERS:
+        assert async_request.headers[name] == sync_request.headers[name]

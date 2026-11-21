@@ -184,6 +184,9 @@ class SQLiteClient(CoreSQLiteClient):
         settlement_options: list[dict[str, Any]] | None = None,
         publication_clauses: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
         paused: bool = False,
         oracle_address: str | None = None,
         site_id: str,
@@ -249,6 +252,9 @@ class SQLiteClient(CoreSQLiteClient):
             settlement_options=settlement_options or [],
             publication_clauses=publication_clauses or [],
             demands=demands or [],
+            title=title,
+            description=description,
+            metadata=metadata,
         )
 
     async def load_bare_metal_listing_payload(

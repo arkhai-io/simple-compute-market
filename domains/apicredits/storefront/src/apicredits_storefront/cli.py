@@ -30,7 +30,10 @@ from market_arkhai_payments import check_configured_payments_access
 from market_identity import Signer, TrustedIdentitySet
 from storefront_client import StorefrontClientError, SyncStorefrontClient
 
-from apicredits_storefront.listing_publication import SyncApiCreditListingClient
+from apicredits_storefront.listing_publication import (
+    PublishFromQuotaRequest,
+    SyncApiCreditListingClient,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -154,6 +157,12 @@ def publish_cmd(
         help="Alkahest escrow contract; resolved from the chain config when omitted.",
     ),
     description: str | None = typer.Option(None, "--description"),
+    title: str | None = typer.Option(None, "--title"),
+    metadata_json: str | None = typer.Option(
+        None,
+        "--metadata",
+        help="Seller metadata as a JSON object of string keys to scalars.",
+    ),
     openapi_url: str | None = typer.Option(None, "--openapi-url"),
     base_url: str | None = typer.Option(
         None,
@@ -225,17 +234,35 @@ def publish_cmd(
             }
         ]
 
+    metadata: dict[str, Any] | None = None
+    if metadata_json is not None:
+        try:
+            metadata = json.loads(metadata_json)
+        except json.JSONDecodeError as exc:
+            typer.echo(f"--metadata is not valid JSON: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+    # The request model holds the seller details' limits, so a request it
+    # refuses is a usage error, named before the credential is read or any
+    # storefront contacted.
+    try:
+        request = PublishFromQuotaRequest.model_validate(
+            {
+                "resource_id": resource_id,
+                "service_name": service_name,
+                "accepted_escrows": accepted_escrows,
+                "description": description,
+                "title": title,
+                "metadata": metadata,
+                "openapi_url": openapi_url,
+                "base_url": base_url,
+                "paused": paused,
+            }
+        )
+    except ValueError as exc:
+        typer.echo(f"the listing request is invalid: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
     signer = resolve_identity_signer()
     url = _storefront_url(storefront_url)
-    request = {
-        "resource_id": resource_id,
-        "service_name": service_name,
-        "accepted_escrows": accepted_escrows,
-        "description": description,
-        "openapi_url": openapi_url,
-        "base_url": base_url,
-        "paused": paused,
-    }
     try:
         with _open_storefront(url, signer) as client:
             result = SyncApiCreditListingClient(

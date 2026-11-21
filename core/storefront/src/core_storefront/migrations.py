@@ -650,6 +650,16 @@ def _add_listing_availability(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE listings ADD COLUMN available_until_utc TEXT")
 
 
+def _add_listing_details(connection: sqlite3.Connection) -> None:
+    """Add the seller-authored details a listing publishes beside its envelope.
+
+    ``title`` and ``description`` hold text; ``metadata`` holds a JSON object.
+    Existing listings state none, so every column starts null.
+    """
+    for column in ("title", "description", "metadata"):
+        connection.execute(f"ALTER TABLE listings ADD COLUMN {column} TEXT")
+
+
 MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = (
     Migration("20261106_001_negotiation_message_terms", _add_negotiation_message_terms),
     Migration(
@@ -661,5 +671,6 @@ MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = (
         _name_negotiated_scalar,
     ),
     Migration("20261111_003_listing_availability", _add_listing_availability),
+    Migration("20261118_001_listing_details", _add_listing_details),
 )
 """Core's migrations after the baseline, composed by every storefront chain."""

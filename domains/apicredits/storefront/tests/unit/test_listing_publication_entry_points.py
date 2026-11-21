@@ -34,6 +34,9 @@ from apicredits_storefront.utils import sqlite_client as sqlite_module
 from tests._settings_overrides import replaced_setting
 
 SELLER = Ed25519Signer(b"\x22" * 32)
+# Far past the envelope's description limit, whose edges `market_core`'s own
+# tests hold.
+OVERLONG_DESCRIPTION = "d" * 20_000
 
 
 class _ListingService:
@@ -178,6 +181,38 @@ def test_a_refused_create_fails_with_the_storefronts_reason(monkeypatch):
 
     assert result.exit_code == 1
     assert "refused: settlement mechanism alkahest.v1 cannot be reached yet" in result.output
+
+
+def test_a_description_past_its_limit_fails_as_usage_before_any_storefront_is_opened(
+    monkeypatch,
+):
+    """Refused before the credential is read: only the command module's own
+    storefront factory is replaced, and nothing reaches it."""
+    storefront = _Storefront()
+    monkeypatch.setattr(cli, "_open_storefront", storefront.open)
+    # With no credential, a command that read it first would fail otherwise.
+    monkeypatch.delenv("ARKHAI_IDENTITY_CREDENTIAL", raising=False)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "publish",
+            "--resource-id",
+            "svc-quota",
+            "--service-name",
+            "Acme",
+            "--description",
+            OVERLONG_DESCRIPTION,
+            "-a",
+            "http://seller.test",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "the listing request is invalid" in result.output
+    assert "description" in result.output
+    assert storefront.opened == []
+    assert storefront.requests == []
 
 
 def test_publishing_an_alkahest_rate_refuses_a_retired_address_book_key(monkeypatch):

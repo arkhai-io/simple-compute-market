@@ -248,12 +248,16 @@ def write_listing_update(
     closed_by: str | None = None,
     reopened_by: str | None = None,
     rate_structure: Any = UNSET,
+    title: Any = UNSET,
+    description: Any = UNSET,
+    metadata: Any = UNSET,
 ) -> None:
     """Update the supplied listing columns inside the caller's transaction.
 
-    ``None`` on a column means "not supplied", except the capacity bounds and
-    ``rate_structure``, which are written whenever passed: withdrawing a term
-    must clear it rather than keep advertising the previous value.
+    ``None`` on a column means "not supplied", except the capacity bounds,
+    ``rate_structure`` and the seller details (``title``, ``description``,
+    ``metadata``), which are written whenever passed: withdrawing a term must
+    clear it rather than keep advertising the previous value.
 
     A change to ``closed`` must name who closed the listing; any other status
     change clears the reason. A change to ``open`` on a listing its seller
@@ -317,6 +321,13 @@ def write_listing_update(
     if rate_structure is not UNSET:
         updates.append("rate_structure=?")
         values.append(None if rate_structure is None else _serialize_json(rate_structure))
+    for name, value in (("title", title), ("description", description)):
+        if value is not UNSET:
+            updates.append(f"{name}=?")
+            values.append(value)
+    if metadata is not UNSET:
+        updates.append("metadata=?")
+        values.append(None if metadata is None else _serialize_json(metadata))
     conn.execute(
         f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
         (*values, listing_id),
@@ -513,6 +524,9 @@ class SQLiteClient:
         closed_by: str | None = None,
         rate_structure: Any | None = None,
         available_until_utc: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Any | None = None,
     ) -> None:
         _require_consistent_closure(status, closed_by)
         # An upsert names no reopener, so it may never overwrite a seller's
@@ -544,9 +558,12 @@ class SQLiteClient:
               demands,
               closed_by,
               rate_structure,
-              available_until_utc
+              available_until_utc,
+              title,
+              description,
+              metadata
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
               closed_by=excluded.closed_by,
@@ -564,7 +581,10 @@ class SQLiteClient:
               publication_clauses=excluded.publication_clauses,
               demands=excluded.demands,
               rate_structure=excluded.rate_structure,
-              available_until_utc=excluded.available_until_utc
+              available_until_utc=excluded.available_until_utc,
+              title=excluded.title,
+              description=excluded.description,
+              metadata=excluded.metadata
             """,
             (
                 listing_id,
@@ -586,6 +606,9 @@ class SQLiteClient:
                 closed_by,
                 self._serialize_resource(rate_structure),
                 available_until_utc,
+                title,
+                description,
+                self._serialize_resource(metadata),
             ),
         )
 
@@ -610,6 +633,9 @@ class SQLiteClient:
         closed_by: str | None = None,
         rate_structure: Any | None = None,
         available_until_utc: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Any | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -633,6 +659,9 @@ class SQLiteClient:
                     closed_by=closed_by,
                     rate_structure=rate_structure,
                     available_until_utc=available_until_utc,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
 
         await asyncio.to_thread(_save)
@@ -658,6 +687,9 @@ class SQLiteClient:
         closed_by: str | None = None,
         rate_structure: Any | None = None,
         available_until_utc: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        metadata: Any | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
@@ -695,6 +727,9 @@ class SQLiteClient:
                     closed_by=closed_by,
                     rate_structure=rate_structure,
                     available_until_utc=available_until_utc,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
                 conn.execute(
                     """
@@ -858,6 +893,9 @@ class SQLiteClient:
         closed_by: str | None = None,
         reopened_by: str | None = None,
         rate_structure: Any = UNSET,
+        title: Any = UNSET,
+        description: Any = UNSET,
+        metadata: Any = UNSET,
     ) -> None:
         """Update the supplied listing columns.
 
@@ -890,6 +928,9 @@ class SQLiteClient:
                     closed_by=closed_by,
                     reopened_by=reopened_by,
                     rate_structure=rate_structure,
+                    title=title,
+                    description=description,
+                    metadata=metadata,
                 )
                 conn.commit()
             except Exception:
@@ -924,7 +965,10 @@ class SQLiteClient:
                            demands,
                            closed_by,
                            rate_structure,
-                           available_until_utc
+                           available_until_utc,
+                           title,
+                           description,
+                           metadata
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -952,6 +996,9 @@ class SQLiteClient:
                     "closed_by",
                     "rate_structure",
                     "available_until_utc",
+                    "title",
+                    "description",
+                    "metadata",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -973,6 +1020,7 @@ class SQLiteClient:
                     d.get("demands"),
                 )
                 d["rate_structure"] = _deserialize_json_object(d.get("rate_structure"))
+                d["metadata"] = _deserialize_json_object(d.get("metadata"))
                 return d
             finally:
                 conn.close()
@@ -3809,7 +3857,10 @@ class SQLiteClient:
                            demands,
                            closed_by,
                            rate_structure,
-                           available_until_utc
+                           available_until_utc,
+                           title,
+                           description,
+                           metadata
                     FROM listings {where}
                     ORDER BY created_at DESC, rowid DESC
                     LIMIT ? OFFSET ?
@@ -3836,6 +3887,9 @@ class SQLiteClient:
                     "closed_by",
                     "rate_structure",
                     "available_until_utc",
+                    "title",
+                    "description",
+                    "metadata",
                 ]
                 rows = cur.fetchall()
                 result = []
@@ -3862,6 +3916,7 @@ class SQLiteClient:
                     d["rate_structure"] = _deserialize_json_object(
                         d.get("rate_structure")
                     )
+                    d["metadata"] = _deserialize_json_object(d.get("metadata"))
                     result.append(d)
                 return result
             finally:

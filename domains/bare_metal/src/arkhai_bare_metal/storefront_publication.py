@@ -261,6 +261,9 @@ TERM_LISTING_FIELDS = (
     "demands",
     "max_duration_seconds",
     "available_until_utc",
+    "title",
+    "description",
+    "metadata",
 )
 
 UNCHANGED = "unchanged"

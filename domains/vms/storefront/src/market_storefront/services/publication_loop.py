@@ -462,6 +462,11 @@ class VmPublicationCycle:
                 pricing.get("max_duration_seconds")
             ),
             available_until_utc=pricing.get("available_until_utc"),
+            **{
+                field: value
+                for field, value in (candidate.get("details") or {}).items()
+                if field in VmCreateListingRequest.model_fields
+            },
         )
         return request, composed.rate_structure, ruled_out
 
@@ -602,6 +607,9 @@ class VmPublicationCycle:
             max_duration_seconds=fresh.get("max_duration_seconds"),
             available_until_utc=fresh.get("available_until_utc"),
             rate_structure=derived.rate_structure,
+            title=fresh.get("title"),
+            description=fresh.get("description"),
+            metadata=fresh.get("metadata"),
         )
         refreshed = await self._db.load_listing(listing_id=listing_id)
         publication = await _candidate(self._db, refreshed)

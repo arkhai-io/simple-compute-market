@@ -218,6 +218,9 @@ class ListingRequest:
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
     storefront_url: str = ""
+    title: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
 
     # Domain-owned listing-level terms travel without registry-client vocabulary.
     extra: dict[str, Any] = field(default_factory=dict)
@@ -231,6 +234,13 @@ class ListingRequest:
             "demands": self.demands,
             "max_duration_seconds": self.max_duration_seconds,
             "storefront_url": self.storefront_url,
+            **({"title": self.title} if self.title is not None else {}),
+            **(
+                {"description": self.description}
+                if self.description is not None
+                else {}
+            ),
+            **({"metadata": self.metadata} if self.metadata is not None else {}),
         }
         collisions = set(common).intersection(self.extra)
         if collisions:
@@ -259,6 +269,9 @@ class ListingSummary:
     settlement_options: list[dict[str, Any]] = field(default_factory=list)
     demands: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
+    title: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
     created_at: str | int | None = None
     updated_at: str | int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -276,6 +289,9 @@ class ListingSummary:
             "settlement_options",
             "max_duration_seconds",
             "demands",
+            "title",
+            "description",
+            "metadata",
             "created_at",
             "updated_at",
             "status",
@@ -307,6 +323,9 @@ class ListingSummary:
             demands=demands,
             max_duration_seconds=d.get("max_duration_seconds")
             or d.get("maxDurationSeconds"),
+            title=d.get("title"),
+            description=d.get("description"),
+            metadata=d.get("metadata"),
             created_at=d.get("created_at") or d.get("createdAt"),
             updated_at=d.get("updated_at"),
             extra={k: v for k, v in d.items() if k not in known},
@@ -329,6 +348,17 @@ class ListingSummary:
                 "settlement_options": self.settlement_options,
                 "demands": self.demands,
                 "max_duration_seconds": self.max_duration_seconds,
+                **(
+                    {"title": self.title} if self.title is not None else {}
+                ),
+                **(
+                    {"description": self.description}
+                    if self.description is not None
+                    else {}
+                ),
+                **(
+                    {"metadata": self.metadata} if self.metadata is not None else {}
+                ),
                 "status": self.status,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
@@ -414,6 +444,9 @@ class ValidatePublishRequest:
     settlement_options: list[dict] = field(default_factory=list)
     max_duration_seconds: int | None = None
     storefront_url: str = ""
+    title: str | None = None
+    description: str | None = None
+    metadata: dict | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -426,6 +459,12 @@ class ValidatePublishRequest:
         }
         if self.max_duration_seconds is not None:
             d["max_duration_seconds"] = self.max_duration_seconds
+        if self.title is not None:
+            d["title"] = self.title
+        if self.description is not None:
+            d["description"] = self.description
+        if self.metadata is not None:
+            d["metadata"] = self.metadata
         collisions = set(d).intersection(self.extra)
         if collisions:
             raise ValueError(f"extra listing terms collide with common fields: {sorted(collisions)}")

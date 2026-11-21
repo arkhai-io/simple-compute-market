@@ -31,6 +31,7 @@ from core_storefront.models.listing_models import (
 from core_storefront.publication_runner import NoSettlementOption
 from core_storefront.sqlite_client import store_timestamp
 from core_storefront.stage_log import stage_event
+from market_core.listing_details import supplied_listing_details
 from market_core.schemas import settlement_option_schema
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.resources import parse_resource_from_dict
@@ -731,6 +732,7 @@ class ListingService:
             max_duration_seconds=request.max_duration_seconds,
             available_until_utc=request.available_until_utc,
             oracle_address=None,
+            **supplied_listing_details(request.model_dump()),
         )
         binding = prepare_vm_listing_binding(
             listing_id=listing.listing_id,
@@ -796,6 +798,7 @@ class ListingService:
                 oracle_address=listing_dict.get("oracle_address"),
                 paused=paused,
                 rate_structure=derived.rate_structure,
+                **supplied_listing_details(listing_dict),
             )
         except Exception as exc:
             conflict = await self._describe_source_conflict(binding, exc)

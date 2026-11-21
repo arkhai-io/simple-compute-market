@@ -26,6 +26,9 @@ class PublicationPayload:
     publication_clauses: tuple[dict[str, Any], ...] = ()
     demands: tuple[dict[str, Any], ...] = ()
     max_duration_seconds: int | None = None
+    title: str | None = None
+    description: str | None = None
+    metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.max_duration_seconds is not None and self.max_duration_seconds <= 0:
@@ -399,6 +402,9 @@ def publish_round(
                 publication_clauses = list(payload.publication_clauses)
                 demands = list(payload.demands)
                 max_duration_seconds = payload.max_duration_seconds
+                title = payload.title
+                description = payload.description
+                metadata = payload.metadata
             else:
                 accepted_escrows, demands, max_duration_seconds = payload
                 settlement_options = []
@@ -416,6 +422,9 @@ def publish_round(
                         max_duration_seconds,
                         settlement_options=settlement_options,
                         publication_clauses=publication_clauses,
+                        title=title,
+                        description=description,
+                        metadata=metadata,
                     )
                 else:
                     reopened = source.reopen_existing(
@@ -468,6 +477,9 @@ def publish_round(
                         max_duration_seconds,
                         settlement_options=settlement_options,
                         publication_clauses=publication_clauses,
+                        title=title,
+                        description=description,
+                        metadata=metadata,
                     )
                 else:
                     response = publish_listing(

@@ -533,6 +533,9 @@ def test_listing_terms_reads_only_term_fields():
         "demands": None,
         "max_duration_seconds": 5,
         "available_until_utc": None,
+        "title": None,
+        "description": None,
+        "metadata": None,
     }
 
 

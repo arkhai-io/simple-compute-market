@@ -94,6 +94,7 @@ def publication_payload_builder(
                 f"{backing.label} listings may publish"
                 + (f" (dropped: {', '.join(dropped)})" if dropped else "")
             )
+        details = candidate.get("details") or {}
         return await composition.publication_payload(
             candidate=candidate,
             clauses=admissible,
@@ -101,6 +102,9 @@ def publication_payload_builder(
             max_duration_seconds=candidate.get(
                 "max_duration_seconds", candidate.get("override_max_duration_seconds", default_max_duration)
             ),
+            title=details.get("title"),
+            description=details.get("description"),
+            metadata=details.get("metadata"),
         )
 
     return build

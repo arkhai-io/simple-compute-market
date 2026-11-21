@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from market_core.listing_details import ListingDetails
 from market_core.schemas import settlement_option_schema
 from core_storefront.sqlite_client import store_timestamp
 from core_storefront.stage_log import stage_event
@@ -185,6 +186,8 @@ class ListingService:
         accepted_escrows: list[dict[str, Any]],
         settlement_clauses: list[dict[str, Any]] | None = None,
         description: str | None = None,
+        title: str | None = None,
+        metadata: dict[str, Any] | None = None,
         openapi_url: str | None = None,
         base_url: str | None = None,
         paused: bool = False,
@@ -206,7 +209,13 @@ class ListingService:
         is raised only once the resource and its pool have been read, and only
         for a mechanism the pool's backing lets the listing publish, so a create
         refused as retryable is one that publishes once the mechanism answers.
+
+        Details past the envelope's limits raise ``ValueError`` before anything
+        is read or written: the seed passes its configured prose here without
+        the request model the route validates, and a listing row holding prose
+        the registry refuses would never publish.
         """
+        ListingDetails(title=title, description=description, metadata=metadata)
         clauses = (
             settlement_publication_defaults()
             if settlement_clauses is None
@@ -358,6 +367,12 @@ class ListingService:
             storefront_url=BASE_URL_OVERRIDE,
             seller_principal=self._seller_principal,
             oracle_address=None,
+            title=title,
+            # The seller's prose describes the listing and the service it
+            # offers, so it publishes beside the envelope and inside the
+            # resource its established consumers already read.
+            description=description,
+            metadata=metadata,
             paused=paused,
         )
         stage_event(

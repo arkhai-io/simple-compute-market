@@ -2357,6 +2357,72 @@ async def test_withdrawn_capacity_bounds_are_cleared_from_the_listing_and_its_pu
     assert "available_until_utc" not in sent
 
 
+# A pool override's seller details, a term of sale of every listing it covers.
+
+_DETAILS = {
+    "title": "Two H100s in us-west",
+    "description": "Dedicated hosts; no oversubscription.",
+    "metadata": {"acme.tier": "gold", "nvlink": True, "max_jobs": 4},
+}
+_DETAIL_FIELDS = ("title", "description", "metadata")
+
+
+async def _state_details(world, details: dict | None) -> None:
+    """Replace the pool's override, stating ``details`` beside a lease maximum
+    every version keeps, since an override must state something."""
+    terms = {"max_duration_seconds": 7200}
+    if details is not None:
+        terms["details"] = details
+    await PoolOverrideClient(world.client).put_pool_override(
+        {"site_id": SITE, "pool_id": "broker-a", "offering_mode": "vm", "terms": terms}
+    )
+
+
+async def test_an_overrides_details_publish_refresh_in_place_and_clear_when_withdrawn(world):
+    """Spec scenario "A pool override states details": the listing publishes the
+    override's details, a change to them refreshes that listing in place at every
+    registry, and an override that stops stating them republishes it with no
+    detail key and the storefront's listing carries none."""
+    world.pools.append(pool("broker-a", backing="unbacked"))
+    await _state_details(world, _DETAILS)
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    stated = await _listing(world, listing_id)
+    added = world.registries.to("publish", listing_id)
+    world.registries.sent.clear()
+
+    changed_details = {**_DETAILS, "title": "Two H100s, now with NVMe"}
+    await _state_details(world, changed_details)
+    changed = await _cycle(world)
+    changed_sent = world.registries.to("publish", listing_id)
+    changed_updates = world.registries.to("update", listing_id)
+    world.registries.sent.clear()
+
+    await _state_details(world, None)
+    withdrawn = await _cycle(world)
+    withdrawn_sent = world.registries.to("publish", listing_id)
+    withdrawn_updates = world.registries.to("update", listing_id)
+    cleared = await _listing(world, listing_id)
+
+    assert {field: stated[field] for field in _DETAIL_FIELDS} == _DETAILS
+    assert sorted(url for url, _ in added) == sorted(world.registries.urls)
+    assert all({f: body[f] for f in _DETAIL_FIELDS} == _DETAILS for _, body in added)
+
+    assert changed["counts"] == {"refresh": 1}
+    assert sorted(url for url, _ in changed_sent) == sorted(world.registries.urls)
+    assert all(
+        {f: body[f] for f in _DETAIL_FIELDS} == changed_details for _, body in changed_sent
+    )
+    assert changed_updates == []
+
+    assert withdrawn["counts"] == {"refresh": 1}
+    assert sorted(url for url, _ in withdrawn_sent) == sorted(world.registries.urls)
+    assert all(not set(_DETAIL_FIELDS) & set(body) for _, body in withdrawn_sent)
+    assert withdrawn_updates == []
+    assert {field: cleared[field] for field in _DETAIL_FIELDS} == dict.fromkeys(_DETAIL_FIELDS)
+    assert list(await _listings(world)) == [listing_id]
+
+
 # The servicing declaration at the publication and cached-acceptance doors, through
 # ``recurring_world``: the real settlement composition with the payments kit's
 # installed recurring encoder and term timing, under a declaration each test sets.

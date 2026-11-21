@@ -19,6 +19,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
+from market_core.listing_details import ListingDetails
+from pydantic import ValidationError as ModelValidationError
 
 from core_registry.api.filter_spec import compute_etag, get_loaded_spec
 from core_registry.api.validate_model import ValidatePublishRequest, ValidatePublishResponse
@@ -102,15 +104,42 @@ RESERVED_LISTING_FIELDS = frozenset({
 })
 
 
+def listing_detail_errors(candidate: dict[str, Any]) -> list[str]:
+    """The seller-authored details' limits, from the model that defines them.
+
+    The served schema states the same limits, but JSON Schema's ``number``
+    admits NaN and infinity, which the model refuses as metadata values.
+    """
+    try:
+        ListingDetails.model_validate(candidate)
+    except ModelValidationError as exc:
+        return [
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors(include_url=False)
+        ]
+    return []
+
+
 def listing_validation_errors(candidate: dict[str, Any]) -> list[str]:
-    """Use the complete candidate, including opaque terms, without model defaults."""
+    """Use the complete candidate, including opaque terms, without model defaults.
+
+    A detail field stated as null is unstated: it is kept in the retained
+    document as sent, but the served schema, which requires a present detail
+    to be a valid value, does not judge it.
+    """
     errors = [
         f"{name}: reserved registry metadata"
         for name in sorted(RESERVED_LISTING_FIELDS.intersection(candidate))
     ]
+    errors.extend(listing_detail_errors(candidate))
+    judged = {
+        name: value
+        for name, value in candidate.items()
+        if not (name in ListingDetails.model_fields and value is None)
+    }
     errors.extend(
         f"{_format_path(err)}: {err.message}"
-        for err in sorted(_validator().iter_errors(candidate), key=lambda e: str(e.absolute_path))
+        for err in sorted(_validator().iter_errors(judged), key=lambda e: str(e.absolute_path))
     )
     return errors
 

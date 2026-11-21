@@ -1,8 +1,9 @@
 """Storefront pool overrides for the ``bare_metal`` offering mode.
 
 The pool-override kit stores, checks, and reports overrides for any market. For
-bare metal an override may state settlement clauses, lease-duration bounds, and
-asking rates. It states no shapes: a whole machine has no shape to choose, so a
+bare metal an override may state settlement clauses, lease-duration bounds,
+asking rates, and the seller details every listing of the pool publishes. It
+states no shapes: a whole machine has no shape to choose, so a
 record stating ``listing_shapes`` is refused. Region and capacity backing remain
 the site's. An override's clauses replace the configured publication clauses for
 that pool as a whole, and each bound replaces its configured counterpart, as
@@ -37,18 +38,21 @@ from market_resource_pools_contracts import (
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
+from market_core.listing_details import ListingDetails
 
 from .site_reading import resolve_bare_metal_asking_rates
 
 
 class BareMetalPoolOverrideTerms(BaseModel):
-    """What a bare-metal override may say about a pool's lease bounds."""
+    """What a bare-metal override may say about a pool's lease bounds and seller details."""
 
     model_config = ConfigDict(extra="forbid")
 
     min_duration_seconds: StrictInt | None = Field(default=None, gt=0)
     max_duration_seconds: StrictInt | None = None
     available_until_utc: UtcAvailability | None = None
+    #: Seller-authored details every listing of the pool publishes beside its shape.
+    details: ListingDetails | None = None
 
     @model_validator(mode="after")
     def _ordered(self) -> "BareMetalPoolOverrideTerms":
@@ -199,6 +203,7 @@ class BareMetalPoolOverride:
     max_duration_seconds: int | None = None
     available_until_utc: str | None = None
     asking_rates: Any = None
+    details: Mapping[str, Any] | None = None
     problems: tuple[str, ...] = ()
     term_conflicts: tuple[str, ...] = ()
 
@@ -244,6 +249,9 @@ def read_bare_metal_pool_overrides(
             max_duration_seconds=terms.max_duration_seconds,
             available_until_utc=terms.available_until_utc,
             asking_rates=item.asking_rates,
+            details=(
+                terms.details.model_dump() if terms.details is not None else None
+            ),
         )
     return overrides
 

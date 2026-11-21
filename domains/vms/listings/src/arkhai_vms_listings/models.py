@@ -523,6 +523,18 @@ class Listing(BaseModel):
         default=None,
         description="The oracle wallet address used for arbitration and escrow workflows",
     )
+    title: str | None = Field(
+        default=None,
+        description="Seller's short plain-text name for the listing.",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Seller's plain-text prose about the listing.",
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Seller's flat string-key to scalar-value facts about the listing.",
+    )
 
     @model_validator(mode="after")
     def validate_compute_listing_identity(self) -> "Listing":

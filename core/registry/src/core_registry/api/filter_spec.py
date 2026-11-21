@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from market_core.listing_details import ListingDetails
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -252,10 +253,34 @@ def _dump_filter(declaration: FilterDecl) -> dict[str, Any]:
 _served_settings: Settings | None = None
 
 
+def _listing_detail_properties() -> dict[str, Any]:
+    """The served schemas for the seller-authored detail fields.
+
+    Each field is optional, so its model schema admits null; the served shape
+    says instead that a present value must be a valid one, matching the
+    publish boundary, which treats an explicit null as absent.
+    """
+    served: dict[str, Any] = {}
+    for name, schema in ListingDetails.model_json_schema()["properties"].items():
+        variants = schema.get("anyOf")
+        served[name] = (
+            next(v for v in variants if v.get("type") != "null")
+            if variants
+            else schema
+        )
+    return served
+
+
 @lru_cache(maxsize=1)
 def get_loaded_spec() -> FilterSpec:
     """Module-level cache of the served spec (one read per process)."""
-    return load_filter_spec(settings=_served_settings)
+    spec = load_filter_spec(settings=_served_settings)
+    shape = spec.listing_shape
+    shape["properties"] = {
+        **shape.get("properties", {}),
+        **_listing_detail_properties(),
+    }
+    return spec
 
 
 def reset_cache(settings: Settings | None = None) -> None:
