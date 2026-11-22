@@ -9,6 +9,20 @@ The system SHALL allow a buyer to publish a compute request with a requested qua
 - **WHEN** a buyer requests 100 B300 nodes for six months and sets a response deadline two weeks from publication
 - **THEN** the request preserves both time constraints and does not appear in searches for available machines
 
+### Requirement: The registry validates compute requests through a registered contract
+
+The registry SHALL admit the compute RFQ kind only when its compute-family contract is registered. The contract SHALL validate structured hardware, node counts, terms and search filters before serving the operation. The core registry SHALL own record lifecycle and account authorization. Descriptive metadata SHALL remain independent of structured matching and validation.
+
+#### Scenario: A registry serves a registered compute RFQ kind
+
+- **WHEN** a buyer publishes a valid typed compute request with an optional descriptive budget
+- **THEN** a respondent can search by the hardware and quantity fields and sees the original budget wording
+
+#### Scenario: The compute contract is unavailable
+
+- **WHEN** an authenticated account attempts to publish a compute RFQ at a registry without the registered compute contract
+- **THEN** the registry refuses the unsupported RFQ kind without creating a record
+
 ### Requirement: Buyers may state a budget in descriptive details
 
 An RFQ MAY include an optional plain-text description and optional bounded flat metadata with scalar values. A buyer MAY state a target budget in either. The registry SHALL preserve these details on authenticated RFQ reads. Omission of a budget SHALL leave the request valid.
@@ -119,19 +133,25 @@ When the buyer closes an RFQ or its response deadline is reached, the registry S
 - **WHEN** the registry evaluates a new selection at or after the response deadline, even if the buyer opened the response earlier
 - **THEN** it refuses the selection and creates no introduction, even if an expiry cleanup job has yet to run
 
-### Requirement: An ended response retains no contact payload
+### Requirement: Contact payload cleanup respects the cutoff
 
-When a pending response ends without an introduction, the registry SHALL delete its stored contact payload, including the encrypted value. The registry MAY retain the response outcome without contact details. Retrying a completed operation SHALL NOT restore the payload.
+The registry SHALL delete the affected contact payload, including ciphertext, in the same transaction as an explicit withdrawal, dismissal, close, supersession or early termination. A time-based cutoff SHALL immediately end eligibility even while expired ciphertext remains. The registry SHALL delete expired pending and completed contact payloads from live storage within one hour during healthy operation and SHALL clear overdue payloads before admitting RFQ traffic after downtime. The registry MAY retain contact-free outcomes. Retrying a completed operation SHALL NOT restore payloads.
 
 #### Scenario: The respondent withdraws
 
 - **WHEN** a pending response is withdrawn and its original submission is retried
-- **THEN** the registry deletes the stored contact for the withdrawn response and the retry cannot restore it
+- **THEN** the withdrawal has already deleted its contact payload and the retry cannot restore it
 
-#### Scenario: An RFQ ends with pending and completed introductions
+#### Scenario: An RFQ expires while cleanup is pending
 
-- **WHEN** an RFQ closes or expires with one response still pending and another already selected
-- **THEN** the registry deletes the pending response’s contact and applies the completed introduction’s own retention policy to its contact details
+- **WHEN** an RFQ expires with one response still pending and another already selected
+- **THEN** the pending contact cannot become eligible for disclosure, even before its payload is deleted
+- **AND** the registry deletes that payload within one hour during healthy operation, while the completed introduction follows its own retention policy
+
+#### Scenario: Expiry passes while the registry is stopped
+
+- **WHEN** the registry starts after pending response or introduction contact access expired during downtime
+- **THEN** it clears the overdue contact payloads before admitting RFQ traffic
 
 ### Requirement: One request supports independent introductions
 
@@ -218,21 +238,27 @@ The registry SHALL enforce the active contact-access state before admitting read
 - **WHEN** the registry restores such a backup and has no authoritative later termination history
 - **THEN** it withholds and redacts contacts of uncertain eligibility before reopening reads
 
-### Requirement: A CLI contact-sharing action requires human confirmation
+### Requirement: Terminal and browser clients use the same RFQ API
 
-An authenticated CLI user SHALL be able to browse open RFQs in the terminal. The account authority SHALL require explicit confirmation in a browser session belonging to the staging account before submitting a response, reconfirmation or selection that shares contact. Confirmation SHALL bind the action, target registry, counterparty, current terms revision and chosen contact. A personal API key alone SHALL NOT authorize that submission.
+The account entry point SHALL expose the same operations, inputs and outcomes to the terminal and browser, including contact-sharing actions. Each interactive client SHALL preview the exact contact and counterparty and ask for explicit approval before submission. The account authority SHALL verify permission to share contact for the acting account and the submitted affirmative consent before signing the action. The signed input SHALL bind the action, target registry, counterparty, current terms revision, relevant write version and chosen contact. The registry SHALL enforce the current ownership, counterparty, revision and eligibility checks. A credential with general account access alone SHALL NOT authorize contact sharing. Successful mutations SHALL return a contact-free outcome.
 
-#### Scenario: A respondent confirms from a browser
+#### Scenario: A respondent approves in the terminal
 
-- **WHEN** a respondent stages a response in the CLI and approves the displayed contact and request in their own browser session while the draft is valid
-- **THEN** the authority submits that response once and the buyer must still select it before either party can retrieve the other’s contact
+- **WHEN** a respondent with contact-sharing permission approves the displayed contact, counterparty and current request terms in the terminal
+- **THEN** the terminal submits through the common API and receives the same contact-free response result that a browser client would receive
+- **AND** the buyer must still select the response before either party can retrieve the other’s contact
 
-#### Scenario: Approval is absent or no longer valid
+#### Scenario: Permission or approval is missing
 
-- **WHEN** a staged action is abandoned, the link is only opened, another account attempts approval, or the action expires or becomes stale
-- **THEN** the attempt creates no pending response or introduction and grants no contact access
+- **WHEN** a requester attempts a contact-sharing action without affirmative consent or with a credential lacking current contact-sharing permission
+- **THEN** the service refuses the action and creates no pending response or introduction
 
-#### Scenario: The buyer retries an approved selection
+#### Scenario: The confirmed request is stale
 
-- **WHEN** the buyer confirms a staged selection and retries the completed approval after losing the acknowledgement
-- **THEN** the authority can return the contact-free outcome of the first submission and creates no second introduction
+- **WHEN** the terms, expected response version or counterparty changes before the confirmed mutation is admitted
+- **THEN** the service refuses the mutation and the client must obtain fresh approval for the current action
+
+#### Scenario: The buyer retries after losing the acknowledgement
+
+- **WHEN** the buyer repeats a completed selection with the same logical inputs and request ID using a currently authorized credential
+- **THEN** the service returns the contact-free outcome and creates no second introduction
