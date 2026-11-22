@@ -724,6 +724,7 @@ async def test_converge_teardowns_leaves_claim_intact_while_status_is_pending(
         )
 
 
+@pytest.mark.usefixtures("source")
 async def test_advance_cycle_reaches_a_row_this_worker_still_holds(
     session_factory, repo
 ):
