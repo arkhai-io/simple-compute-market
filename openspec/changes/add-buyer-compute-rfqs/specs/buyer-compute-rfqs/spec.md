@@ -11,16 +11,16 @@ The system SHALL allow a buyer to publish a compute request with a requested qua
 
 ### Requirement: The registry validates compute requests through a registered contract
 
-The registry SHALL admit the compute RFQ kind only when its compute-family contract is registered. The contract SHALL validate structured hardware, node counts, terms and search filters before serving the operation. The core registry SHALL own record lifecycle and account authorization. Descriptive metadata SHALL remain independent of structured matching and validation.
+The registry SHALL admit the compute RFQ kind only when configured with a valid declarative schema and filter mapping generated from the compute-family contract. The registry SHALL use the schema and mapping to validate structured hardware, node counts, terms and search filters before serving the operation. The core registry SHALL own record lifecycle and account authorization. Descriptive metadata SHALL remain independent of structured matching and validation.
 
-#### Scenario: A registry serves a registered compute RFQ kind
+#### Scenario: A registry serves a configured compute RFQ kind
 
 - **WHEN** a buyer publishes a valid typed compute request with an optional descriptive budget
 - **THEN** a respondent can search by the hardware and quantity fields and sees the original budget wording
 
 #### Scenario: The compute contract is unavailable
 
-- **WHEN** an authenticated account attempts to publish a compute RFQ at a registry without the registered compute contract
+- **WHEN** an authenticated account attempts to publish a compute RFQ at a registry without the configured compute RFQ schema
 - **THEN** the registry refuses the unsupported RFQ kind without creating a record
 
 ### Requirement: Buyers may state a budget in descriptive details
@@ -237,6 +237,21 @@ The registry SHALL enforce the active contact-access state before admitting read
 
 - **WHEN** the registry restores such a backup and has no authoritative later termination history
 - **THEN** it withholds and redacts contacts of uncertain eligibility before reopening reads
+
+### Requirement: Consent uses verified registry and party references
+
+The account entry point SHALL provide the verified registry identity and an opaque buyer reference on authorized RFQ detail reads. On authorized private response reads it SHALL provide the verified registry identity and the corresponding opaque respondent reference. Party references SHALL stay stable for an account within an RFQ across credential changes and SHALL be scoped to that RFQ. These projections SHALL omit raw account subjects and contact details. Clients SHALL preview the verified registry and recipient reference before asking for approval and echo those values when submitting the operation. The registry SHALL check the reference against the current eligible party.
+
+#### Scenario: A buyer browses two registries with the same RFQ identifier
+
+- **WHEN** the buyer opens a response in the second registry and selects it
+- **THEN** the preview and signed mutation identify the second registry and its verified respondent
+- **AND** a write that substitutes the first registry or an unrelated party reference is refused
+
+#### Scenario: An authenticated reader retrieves an RFQ before responding
+
+- **WHEN** an eligible reader opens RFQ details to prepare a response
+- **THEN** the reader receives the verified registry and the RFQ-specific buyer reference without receiving the buyer's contact or underlying account subject
 
 ### Requirement: Terminal and browser clients use the same RFQ API
 

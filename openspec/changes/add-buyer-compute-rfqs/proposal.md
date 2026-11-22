@@ -53,6 +53,6 @@ At closeout, record the RFQ contract in the new buyer-compute-rfqs capability an
 - D10: promote descriptive commercial metadata and its visibility and validation to the RFQ specification.
 - D11: promote uniqueness and individual dismissal to the RFQ specification.
 - D12: promote contact retrieval cutoffs and early termination to the RFQ specification and deployment guide.
-- D13: promote the shared account API and consent contract to the RFQ specification and the buyer guide.
+- D13: promote the shared account API, verified party projections and consent contract to the RFQ specification and the buyer guide.
 - D14: no permanent destination — this review cadence applies only to delivery of this change.
-- D15: promote the neutral registry and compute-family contract boundary to the RFQ architecture and repository architecture.
+- D15: promote the neutral registry and compute-family contract boundary to the RFQ architecture and repository architecture, and generated schema selection to deployment configuration.
