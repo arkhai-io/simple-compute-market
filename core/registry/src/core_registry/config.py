@@ -84,6 +84,10 @@ class Settings(BaseSettings):
         default_factory=dict,
         validation_alias="REGISTRY_RFQ_AUTHORITIES",
     )
+    registry_rfq_spec_path: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_RFQ_SPEC_PATH",
+    )
     registry_rfq_replay_keys_file: str | None = Field(
         default=None,
         validation_alias="REGISTRY_RFQ_REPLAY_KEYS_FILE",

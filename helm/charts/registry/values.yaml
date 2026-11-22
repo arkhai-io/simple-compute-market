@@ -53,6 +53,8 @@ service:
 config:
   # Select exactly one filter specification packaged in the registry image.
   filterSpecPath: "/app/filter-spec.yaml"
+  # Select a packaged RFQ schema when this registry serves requests for quotes.
+  rfqSpecPath: ""
   # SQLite path resolves against the persistence mount below by default.
   # Override with an external DSN (e.g. Postgres) when moving off SQLite.
   databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"

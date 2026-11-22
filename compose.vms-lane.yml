@@ -28,7 +28,7 @@ services:
   # lane's profile recommending its mediation double over their own.
   registry:
     environment:
-      - ACTIVE_PROFILES=registry-a,payments-lane
+      - ACTIVE_PROFILES=registry-a,rfq-lane,payments-lane
   registry-b:
     environment:
       - ACTIVE_PROFILES=registry-b,payments-lane

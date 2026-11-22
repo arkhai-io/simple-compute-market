@@ -338,17 +338,34 @@ async def test_client_accepts_only_the_registry_principal_in_its_signed_audience
         )
 
 
-@pytest.mark.parametrize("has_pins,has_key_file", [(False, True), (True, False), (True, True)])
-async def test_lifespan_enables_rfq_only_with_pins_and_digest_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_pins, has_key_file,
+@pytest.mark.parametrize(
+    "has_pins,has_key_file,schema",
+    [(False, True, "disabled"), (True, False, "disabled"), (True, True, "disabled"),
+     (True, True, "compute"), (True, True, "malformed")],
+)
+async def test_lifespan_loads_rfq_authority_and_schema_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_pins, has_key_file, schema,
 ):
-    url = f"sqlite:///{tmp_path / 'startup.db'}"
-    migrate_database(url)
+    database_file = tmp_path / "startup.db"
+    url = f"sqlite:///{database_file}"
+    if schema == "malformed":
+        # If startup probes persistence first, this file fails the database
+        # check and masks the configuration error.
+        database_file.write_bytes(b"invalid SQLite database")
+    else:
+        migrate_database(url)
     authority_file = tmp_path / "authority.key"
     # A deterministic fixture credential. Never use it on a public network.
     authority_file.write_bytes(urlsafe_b64encode(bytes([4]) * 32).rstrip(b"="))
     key_file = tmp_path / "rfq-digests.json"
     key_file.write_text(json.dumps({"current": "test", "keys": {"test": bytes([5] * 32).hex()}}))
+    schema_path = None
+    if schema == "compute":
+        root = Path(__file__).resolve().parents[4]
+        schema_path = root / "domains" / "compute" / "registry" / "rfq-schema.json"
+    elif schema == "malformed":
+        schema_path = tmp_path / "rfq-schema.json"
+        schema_path.write_text('{"kind": "compute"}')
     config = {
         "database_url": url,
         "bootstrap_api_key": None,
@@ -363,12 +380,24 @@ async def test_lifespan_enables_rfq_only_with_pins_and_digest_file(
         "registry_descriptor_access_acquisition_pointer": None,
         "registry_rfq_authorities": {"alpha": _pins(_OLD)} if has_pins else {},
         "registry_rfq_replay_keys_file": str(key_file) if has_key_file else None,
+        "registry_rfq_spec_path": str(schema_path) if schema_path else None,
     }
     for name, value in config.items():
         monkeypatch.setattr(settings, name, value)
     app = FastAPI()
+    if schema == "malformed":
+        with pytest.raises(RuntimeError, match="invalid REGISTRY_RFQ_SPEC_PATH configuration"):
+            async with lifespan(app):
+                pytest.fail("invalid RFQ configuration must fail before startup")
+        assert database_file.read_bytes() == b"invalid SQLite database"
+        assert not hasattr(app.state, "registry_authority_signer")
+        return
     async with lifespan(app):
         assert app.state.registry_descriptor.authority.name == "registry-test"
+        if schema == "compute":
+            assert app.state.rfq_spec.kind == "compute"
+        else:
+            assert app.state.rfq_spec is None
         if has_pins and has_key_file:
             assert app.state.rfq_trust.audience == _audience()
             assert app.state.rfq_replay_keys.current == "test"

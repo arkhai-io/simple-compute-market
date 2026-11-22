@@ -57,7 +57,8 @@ render "$OVERLAP_RENDERED" "$RELEASE-overlap" "$CHART_DIR" \
     --set-string 'storefront.agents.bob.internalRegistryTrust.principals[1].identifier=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y'
 render "$TWO_REGISTRIES_RENDERED" "$RELEASE-registries" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --values "$CHART_DIR/fixtures/two-registries-values.yaml"
+    --values "$CHART_DIR/fixtures/two-registries-values.yaml" \
+    --set-string registry.config.rfqSpecPath=/app/rfq-schema.json
 # The dedicated bare-metal storefront runs in a release of its own, beside its
 # own provisioning service (bare-metal-release-values.yaml).
 render "$BARE_METAL_RENDERED" "$RELEASE-bare-metal" "$CHART_DIR" \
@@ -156,6 +157,12 @@ DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/
 # A registry's settings are lines of its rendered profile, config-production.env;
 # its Deployment holds the signer Secret, the mounts and the resolver variables.
 DEFAULT_REGISTRY="$(extract_section "$DEFAULT_RENDERED" 'registry/templates/configmap\.yaml')"
+expect_absent "$DEFAULT_REGISTRY" 'REGISTRY_RFQ_SPEC_PATH=' "default registry leaves RFQs disabled"
+RFQ_REGISTRY="$(extract_section "$TWO_REGISTRIES_RENDERED" '/charts/registry/templates/configmap\.yaml')"
+OTHER_REGISTRY="$(extract_section "$TWO_REGISTRIES_RENDERED" '/charts/api-credits-registry/templates/configmap\.yaml')"
+expect_present "$RFQ_REGISTRY" "^    REGISTRY_RFQ_SPEC_PATH='/app/rfq-schema\.json'$" "configured compute registry selects its RFQ schema"
+expect_present "$OTHER_REGISTRY" 'REGISTRY_FILTER_SPEC_PATH=' "second registry renders its own config"
+expect_absent "$OTHER_REGISTRY" 'REGISTRY_RFQ_SPEC_PATH=' "second registry leaves RFQs disabled"
 DEFAULT_PROVISIONING_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'provisioning/templates/configmap\.yaml')"
 DEFAULT_HELM_PROFILE="$(extract_section "$DEFAULT_RENDERED" 'templates/tests/helm-profile\.yaml')"
 TWO_REGISTRIES_COMPUTE="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/configmap\.yaml')"

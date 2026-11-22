@@ -17,6 +17,7 @@ from core_registry.api.publisher_auth import (
     signed_response,
 )
 from core_registry.api.rfq_auth import RfqTrust
+from core_registry.api.rfq_spec import load_rfq_spec
 from core_registry.config import settings
 from core_registry.db.migrations import require_compatible_database
 from core_registry.api.filter_spec import get_loaded_spec
@@ -61,6 +62,8 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting listing registry service...")
     announce_time_source(injected_time.installed())
+
+    app.state.rfq_spec = load_rfq_spec(settings.registry_rfq_spec_path)
 
     # Before anything opens the database: the application issues no DDL, and
     # serves only a database `registry-migrate` brought to its script head.

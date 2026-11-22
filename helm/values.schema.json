@@ -218,6 +218,10 @@
               "type": "string",
               "pattern": "^/\\S+\\.ya?ml$"
             },
+            "rfqSpecPath": {
+              "type": "string",
+              "pattern": "^(/\\S+\\.json)?$"
+            },
             "rootPath": {
               "type": "string"
             }

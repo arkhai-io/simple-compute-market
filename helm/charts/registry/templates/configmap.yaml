@@ -14,6 +14,9 @@
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_AUTHORITY_IDENTIFIER" (required "registry identity principal identifier is required" $identity.principal.identifier))) -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_AUTHORITY_CREDENTIAL_FILE" (include "registry.credentialFile" .))) -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_FILTER_SPEC_PATH" (required "registry filter specification path is required" $config.filterSpecPath))) -}}
+{{- if $config.rfqSpecPath -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_RFQ_SPEC_PATH" $config.rfqSpecPath)) -}}
+{{- end -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_BASE_URL" (required "registry descriptor base URL is required" $descriptor.baseUrl))) -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_DISPLAY_NAME" (required "registry descriptor display name is required" $descriptor.displayName))) -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY" (required "registry descriptor operator identity is required" $descriptor.operatorIdentity))) -}}

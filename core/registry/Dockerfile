@@ -21,6 +21,7 @@ WORKDIR /app
 # which the wheel also carries as the registry's default, and API credits'.
 COPY core/registry/src/core_registry/filter-spec.yaml ./
 COPY domains/apicredits/registry/filter-spec.yaml ./filter-spec-apicredits.yaml
+COPY domains/compute/registry/rfq-schema.json ./rfq-schema.json
 # The lock is used as committed: the project's pyproject and lock sit at the
 # same depth below /repo as below the repository root, so the lock's relative
 # wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
@@ -56,6 +57,7 @@ LABEL org.arkhai.wheelhouse-digest="${WHEELHOUSE_DIGEST}"
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /app/filter-spec.yaml ./
 COPY --from=builder --chown=appuser:appuser /app/filter-spec-apicredits.yaml ./
+COPY --from=builder --chown=appuser:appuser /app/rfq-schema.json ./
 ENV PATH="/app/.venv/bin:$PATH"
 USER appuser
 

@@ -1155,7 +1155,13 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
         "registry": {
             "descriptor": {"displayName": awkward, "accessAcquisitionPointer": "https://registry.example/access"},
             "service": {"port": 8081},
-            "config": {"rootPath": "/registry", "logLevel": "debug", "requireReadApiKey": True, "requireWriteApiKey": True},
+            "config": {
+                "rfqSpecPath": "/app/rfq-schema.json",
+                "rootPath": "/registry",
+                "logLevel": "debug",
+                "requireReadApiKey": True,
+                "requireWriteApiKey": True,
+            },
         }
     }
     manifest = _release_one(overlay)
@@ -1179,6 +1185,7 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     settings = json.loads(loaded.stdout.strip().splitlines()[-1])
     profile = _registry_profile(manifest)
 
+    assert settings["registry_rfq_spec_path"] == "/app/rfq-schema.json"
     assert settings["registry_descriptor_display_name"] == awkward
     assert settings["registry_descriptor_recommended_dispute_authorities"] == [_recommended_mediation_double()]
     for setting, line in (
@@ -1187,6 +1194,7 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
         ("registry_authority_identifier", "REGISTRY_AUTHORITY_IDENTIFIER"),
         ("registry_authority_credential_file", "REGISTRY_AUTHORITY_CREDENTIAL_FILE"),
         ("registry_filter_spec_path", "REGISTRY_FILTER_SPEC_PATH"),
+        ("registry_rfq_spec_path", "REGISTRY_RFQ_SPEC_PATH"),
         ("registry_descriptor_base_url", "REGISTRY_DESCRIPTOR_BASE_URL"),
         ("registry_descriptor_operator_identity", "REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY"),
         ("database_url", "DATABASE_URL"),
