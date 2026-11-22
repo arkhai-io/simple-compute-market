@@ -33,6 +33,9 @@ def test_resource_binding_is_route_specific():
 
     assert selection.resource == "rfqs/request-a/responses/response-a"
     assert detail.resource == "rfqs/request-a"
+    assert selection.path == "/rfqs/request-a/responses/response-a/select"
+    assert detail.path == "/rfqs/request-a/read"
+    assert detail.method == "POST" and detail.caller_role == "service"
     with pytest.raises(ValueError):
         RfqTarget(RfqOperation.SELECT, "request-a")
     with pytest.raises(ValueError):

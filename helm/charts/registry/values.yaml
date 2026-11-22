@@ -67,6 +67,11 @@ config:
   requireReadApiKey: false
   requireWriteApiKey: false
 
+# Optional digest keyring. RFQ retry records retain keyed digests of their inputs.
+rfqReplayKeysSecret:
+  name: ""
+  key: rfq-replay-keys.json
+
 # Secret settings, such as the bootstrap API key (REGISTRY_BOOTSTRAP_API_KEY,
 # seeding one write-scoped operator key when the api_keys table is empty at
 # startup) and the shared administrator key (REGISTRY_ADMIN_API_KEY, enabling

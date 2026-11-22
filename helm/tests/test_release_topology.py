@@ -985,6 +985,12 @@ _REGISTRY_SETTINGS = {
     "REGISTRY_REQUIRE_WRITE_API_KEY",
 }
 
+_LOCAL_COMPUTE_REGISTRY_SETTINGS = _REGISTRY_SETTINGS | {
+    "REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES",
+    "REGISTRY_RFQ_SPEC_PATH",
+    "REGISTRY_RFQ_REPLAY_KEYS_FILE",
+}
+
 
 def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resolver_variables() -> None:
     """The deployment-state scenario "The registry chart renders a release",
@@ -1001,6 +1007,7 @@ def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resol
             "REGISTRY_AUTHORITY_ID": "registry-a",
             "REGISTRY_FILTER_SPEC_PATH": "/app/filter-spec.yaml",
             "REGISTRY_DESCRIPTOR_DISPLAY_NAME": "Local VM Compute Registry",
+            "REGISTRY_RFQ_SPEC_PATH": "/app/rfq-schema.json",
         },
         "api-credits-registry": {
             "REGISTRY_AUTHORITY_ID": "registry-api-credits",
@@ -1013,9 +1020,8 @@ def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resol
         deployment = _source(manifest, f"charts/{chart}/templates/deployment.yaml")
         name = f"{RELEASE_ONE}-{chart}"
 
-        # Release 1's registry alone recommends the mediation double.
-        recommends = {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"} if chart == "registry" else set()
-        assert set(profile) == _REGISTRY_SETTINGS | recommends, sorted(profile)
+        keys = _LOCAL_COMPUTE_REGISTRY_SETTINGS if chart == "registry" else _REGISTRY_SETTINGS
+        assert set(profile) == keys, sorted(profile)
         assert {key: profile[key] for key in own} == own
         assert profile["PORT"] == _service_url(manifest, name).rsplit(":", 1)[1]
         assert profile["REGISTRY_REQUIRE_READ_API_KEY"] == profile["REGISTRY_REQUIRE_WRITE_API_KEY"] == "false"
@@ -1045,7 +1051,7 @@ def test_a_values_file_stating_settings_nothing_reads_renders() -> None:
         }
     }
     manifest = _release_one(stated)
-    assert set(_registry_profile(manifest)) == _REGISTRY_SETTINGS | {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"}
+    assert set(_registry_profile(manifest)) == _LOCAL_COMPUTE_REGISTRY_SETTINGS
     assert not re.search(r"ENABLE_HEALTH_CHECKS|HEALTH_CHECK_INTERVAL|ENDPOINT_CHECK_TIMEOUT|HEARTBEAT_TTL_SECS", manifest)
 
 
@@ -1211,6 +1217,24 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     # The migration init container reads the same profiles through its own
     # loader, and finds the database the application serves.
     assert settings["migration"] == {"database_url": profile["DATABASE_URL"], "log_level": "warning"}
+
+
+def test_only_the_registry_application_mounts_rfq_replay_keys() -> None:
+    # The database migration has no access to the replay digest material.
+    source = "charts/registry/templates/deployment.yaml"
+    deployment = _source(_release_one(), source)
+    migration, registry = deployment.split("\n      containers:", 1)
+    assert "rfq-replay-keys" not in migration
+    assert "mountPath: /run/secrets/arkhai/registry-rfq-replay" in registry
+    assert 'secretName: "arkhai-registry-runtime"' in registry
+    assert 'key: "rfq-replay-keys.json"' in registry
+
+    profile = _registry_profile(_release_one())
+    assert profile["REGISTRY_RFQ_REPLAY_KEYS_FILE"] == "/run/secrets/arkhai/registry-rfq-replay/keys.json"
+
+    disabled = _release_one({"registry": {"rfqReplayKeysSecret": {"name": ""}}})
+    assert "rfq-replay-keys" not in _source(disabled, source)
+    assert "REGISTRY_RFQ_REPLAY_KEYS_FILE" not in _registry_profile(disabled)
 
 
 # --- the storefront's own loader -----------------------------------------

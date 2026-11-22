@@ -58,7 +58,7 @@ def sign_rfq_invocation(
         if invocation.inputs.get("consent_to_share") is not True:
             raise ValueError("explicit contact sharing consent required")
     request = authenticate_request(
-        signer=signer, role="service", method=target.method,
+        signer=signer, role=target.caller_role, method=target.method,
         operation=target.operation.value, resource=target.resource,
         body=invocation.model_dump(mode="json"), request_id=request_id,
         timestamp=timestamp,

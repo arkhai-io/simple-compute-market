@@ -14,6 +14,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # PostgreSQL enforces the default Alembic version column width. Widen it
+    # before Alembic records this revision, whose identifier exceeds 32 characters.
+    if op.get_context().dialect.name == "postgresql":
+        op.alter_column("alembic_version", "version_num", type_=sa.Text())
     op.add_column("listings", sa.Column("published_document", sa.JSON(), nullable=True))
     op.add_column("listings", sa.Column("publisher_publication", sa.JSON(), nullable=True))
     op.add_column("listings", sa.Column("publisher_updates", sa.JSON(), nullable=True))

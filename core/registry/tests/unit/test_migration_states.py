@@ -34,6 +34,7 @@ def test_the_packaged_script_holds_the_environment_and_the_baseline() -> None:
         "v0_3_0_baseline",
         "20261106_001_registry_retained_publications",
         "20261122_001_rfq_receipts",
+        "20261122_002_rfq_requests",
     )
 
 

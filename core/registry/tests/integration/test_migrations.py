@@ -50,7 +50,8 @@ from core_registry.db.migrations import (
 FLOOR = Path(__file__).resolve().parents[1] / "fixtures" / "v0_3_0_floor"
 BASELINE = "v0_3_0_baseline"
 RETAINED_PUBLICATIONS = "20261106_001_registry_retained_publications"
-HEAD = "20261122_001_rfq_receipts"
+RFQ_RECEIPTS = "20261122_001_rfq_receipts"
+HEAD = "20261122_002_rfq_requests"
 
 
 def _url(path: Path) -> str:
@@ -158,12 +159,12 @@ def test_a_v0_3_0_database_is_adopted_keeping_its_rows(tmp_path: Path) -> None:
 
     report = migrate_database(_url(database))
 
-    assert report.adopted and report.applied == (RETAINED_PUBLICATIONS, HEAD)
+    assert report.adopted and report.applied == (RETAINED_PUBLICATIONS, RFQ_RECEIPTS, HEAD)
     assert _revisions(database) == [HEAD]
     assert check_database(_url(database)).compatible
     fresh = tmp_path / "fresh.db"
     fresh_report = migrate_database(_url(fresh))
-    assert fresh_report.applied == (BASELINE, RETAINED_PUBLICATIONS, HEAD)
+    assert fresh_report.applied == (BASELINE, RETAINED_PUBLICATIONS, RFQ_RECEIPTS, HEAD)
     assert _snapshot(database) == _snapshot(fresh)
     connection = sqlite3.connect(database)
     try:

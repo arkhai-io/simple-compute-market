@@ -63,7 +63,7 @@ from jsonpath_ng.ext import parse as _jsonpath_parse
 from market_core.schemas import settlement_option_asset, settlement_option_lifecycle
 from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS, project_terms
 
-from core_registry.api.filter_spec import FilterDecl, FilterSpec
+from core_registry.filter_models import FilterDecl, FilterSpec
 
 
 # ---------------------------------------------------------------------------

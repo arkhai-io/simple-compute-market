@@ -234,6 +234,8 @@ def registry_schema() -> dict[str, Any]:
             "start_earliest": "start_earliest",
             "start_latest": "start_latest",
             "respond_by": "respond_by",
+            "set_fields": ["regions"],
+            "prose_fields": ["description"],
         },
         "filters": [
             {"name": "gpu_model", "path": f"$.shape.{GPU_MODEL_ATTRIBUTE}", "op": "in", "value_type": "string"},

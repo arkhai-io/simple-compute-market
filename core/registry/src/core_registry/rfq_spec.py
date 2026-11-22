@@ -15,8 +15,8 @@ from jsonschema.exceptions import SchemaError
 from market_core.rfq import RfqReference
 from pydantic import BaseModel, ConfigDict, Field
 
-from core_registry.api.filter_eval import Criterion, scalar_criterion
-from core_registry.api.filter_spec import FilterDecl
+from core_registry.filter_eval import Criterion, scalar_criterion
+from core_registry.filter_models import FilterDecl
 
 _Field = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 _SIMPLE_PATH = re.compile(r"\$(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\*\])?)+")
@@ -64,6 +64,8 @@ class _RfqFields(BaseModel):
     start_earliest: _Field
     start_latest: _Field
     respond_by: _Field
+    set_fields: list[_Field] = Field(default_factory=list)
+    prose_fields: list[_Field] = Field(default_factory=list)
 
 
 class _RfqSpecDocument(BaseModel):
@@ -138,6 +140,16 @@ def _check_fields(spec: _RfqSpecDocument) -> None:
         if quantity.get("type") != "integer" or quantity.get("minimum", 0) < 1:
             raise ValueError("RFQ quantities must declare positive integers")
 
+    normalized = fields.set_fields + fields.prose_fields + [fields.respond_by]
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("RFQ normalization field mappings must be distinct")
+    for name in fields.set_fields:
+        if _field_schema(spec.requirements, f"$.{name}[*]").get("type") != "string":
+            raise ValueError("RFQ set fields must contain strings")
+    for name in fields.prose_fields:
+        if _field_schema(spec.requirements, f"$.{name}").get("type") != "string":
+            raise ValueError("RFQ prose fields must be strings")
+
     names = {item.name for item in spec.filters}
     if (
         len(names) != len(spec.filters)
@@ -182,6 +194,24 @@ class RfqSpec:
         fields = self.document.fields
         if date.fromisoformat(body[fields.start_latest]) < date.fromisoformat(body[fields.start_earliest]):
             raise RfqInputError("inverted_rfq_start_window")
+
+    def response_deadline(self, body: dict[str, Any]) -> datetime:
+        instant = datetime.fromisoformat(body[self.document.fields.respond_by])
+        return instant.astimezone(timezone.utc).replace(tzinfo=None)
+
+    def canonical_terms(self, body: dict[str, Any]) -> str:
+        fields = self.document.fields
+        normalized = dict(body)
+        normalized[fields.respond_by] = self.response_deadline(body).isoformat()
+        for name in fields.set_fields:
+            if name in body:
+                normalized[name] = sorted(set(body[name]))
+        for name in fields.prose_fields:
+            if name in body:
+                normalized[name] = body[name].strip()
+        # JSON retains scalar type distinctions that equality on Python values
+        # loses, including booleans versus integers and integers versus floats.
+        return json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
     def search_criteria(self, body: Any) -> list[Criterion]:
         if not self._search.is_valid(body):

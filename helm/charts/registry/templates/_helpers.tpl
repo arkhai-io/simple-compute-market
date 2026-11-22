@@ -323,3 +323,7 @@ not expose root helper templates reliably inside dependency charts. */}}
     secretName: {{ include "registry.smokeTestSecretName" . }}
 {{- end -}}
 {{- end }}
+
+{{- define "registry.rfqReplayKeyFile" -}}
+/run/secrets/arkhai/registry-rfq-replay/keys.json
+{{- end -}}

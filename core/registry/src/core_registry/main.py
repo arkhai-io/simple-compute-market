@@ -17,7 +17,7 @@ from core_registry.api.publisher_auth import (
     signed_response,
 )
 from core_registry.api.rfq_auth import RfqTrust
-from core_registry.api.rfq_spec import load_rfq_spec
+from core_registry.rfq_spec import load_rfq_spec
 from core_registry.config import settings
 from core_registry.db.migrations import require_compatible_database
 from core_registry.api.filter_spec import get_loaded_spec

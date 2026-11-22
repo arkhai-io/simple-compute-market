@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from core_registry.api.filter_eval import evaluate_path
-from core_registry.api.rfq_spec import RfqInputError, load_rfq_spec
+from core_registry.filter_eval import evaluate_path
+from core_registry.rfq_spec import RfqInputError, load_rfq_spec
 
 _COMPUTE = Path(__file__).resolve().parents[4] / "domains" / "compute"
 _SCHEMA = _COMPUTE / "registry" / "rfq-schema.json"

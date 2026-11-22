@@ -5,12 +5,13 @@ from typing import Any
 
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from market_core.rfq import RfqMutationReceipt, RfqTarget
-from pydantic import ValidationError
+from market_core.rfq import RfqOperation, RfqTarget
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from core_registry.api.market_auth import (
     REQUEST_ID_HEADER,
+    SIGNATURE_HEADER,
     registry_authority_signer,
     signed_context_response,
     wire_body,
@@ -28,21 +29,25 @@ async def rfq_exchange(
     session: Session,
     target: RfqTarget,
     dispatch: Callable[[VerifiedRfqRequest], Any],
+    *,
+    available: bool = True,
 ) -> Response:
     """Authenticate before touching request history or domain records."""
-    request_id = request.headers.get(REQUEST_ID_HEADER, "")
-    signer = registry_authority_signer(request)
-    trust = request.app.state.rfq_trust
-    keys = request.app.state.rfq_replay_keys
+    trust = getattr(request.app.state, "rfq_trust", None)
+    keys = getattr(request.app.state, "rfq_replay_keys", None)
     try:
         if trust is None or keys is None:
             raise HTTPException(503, "rfq_not_available")
+        if not request.headers.get(SIGNATURE_HEADER):
+            raise HTTPException(401, "rfq_auth_required")
         verified = trust.verify(
             headers=request.headers, method=request.method, target=target,
             body=wire_body(await request.body()),
         )
+        if not available:
+            raise HTTPException(503, "rfq_not_available")
         result = execute_rfq_request(session, verified, keys, lambda: dispatch(verified))
-        if isinstance(result, RfqMutationReceipt):
+        if isinstance(result, BaseModel):
             result = result.model_dump(mode="json", exclude_none=True)
         status, body = 200, result
     except RfqReplayConflict:
@@ -52,13 +57,21 @@ async def rfq_exchange(
     except HTTPException as error:
         status, body = error.status_code, {"detail": error.detail}
 
+    return rfq_reply(request, target.operation, target.resource, status, body)
+
+
+def rfq_reply(
+    request: Request, operation: RfqOperation, resource: str, status: int, body: Any,
+) -> Response:
+    signer = registry_authority_signer(request)
     try:
         response = signed_context_response(
-            method=request.method, operation=target.operation.value, resource=target.resource,
-            request_id=request_id, signer=signer, status=status, body=body,
+            method=request.method, operation=operation.value, resource=resource,
+            request_id=request.headers.get(REQUEST_ID_HEADER, ""),
+            signer=signer, status=status, body=body,
         )
     except ValidationError:
-        # An absent or malformed request ID cannot bind a signed response.
+        # A request outside the signed envelope's bounds cannot bind a proof.
         response = JSONResponse(status_code=status, content=body)
     response.headers["Cache-Control"] = "no-store"
     return response

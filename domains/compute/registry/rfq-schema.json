@@ -1,8 +1,14 @@
 {
   "fields": {
     "offered_quantity": "offered_node_count",
+    "prose_fields": [
+      "description"
+    ],
     "quantity": "node_count",
     "respond_by": "respond_by",
+    "set_fields": [
+      "regions"
+    ],
     "start_earliest": "start_earliest",
     "start_latest": "start_latest"
   },

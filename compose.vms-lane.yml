@@ -28,7 +28,9 @@ services:
   # lane's profile recommending its mediation double over their own.
   registry:
     environment:
-      - ACTIVE_PROFILES=registry-a,rfq-lane,payments-lane
+      - ACTIVE_PROFILES=registry-a,rfq-lane,rfq-auth,payments-lane
+    volumes:
+      - ./dev-env/registry/rfq-replay-keys.json:/run/secrets/arkhai/registry-rfq-replay/keys.json:ro
   registry-b:
     environment:
       - ACTIVE_PROFILES=registry-b,payments-lane

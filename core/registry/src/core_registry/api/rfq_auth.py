@@ -54,7 +54,7 @@ class RfqTrust:
             raise HTTPException(400, "invalid_rfq_json") from exc
         result = verify_request(
             envelope, body=body, now=injected_time.now(), max_skew=300,
-            expected_role="service", expected_method=target.method,
+            expected_role=target.caller_role, expected_method=target.method,
             expected_operation=target.operation.value, expected_resource=target.resource,
             expected_principals=trusted,
         )

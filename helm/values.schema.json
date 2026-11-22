@@ -227,6 +227,14 @@
             }
           }
         },
+        "rfqReplayKeysSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string"},
+            "key": {"type": "string", "minLength": 1}
+          }
+        },
         "secretProfile": {
           "type": "object",
           "additionalProperties": false,

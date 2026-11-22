@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from core_registry.api.filter_eval import (
+from core_registry.filter_eval import (
     FilterParamError,
     build_criteria,
     evaluate_all,

@@ -142,6 +142,55 @@ class RfqReplayReservation(Base):
     receipt = Column(JSON(none_as_null=True), nullable=True)
 
 
+class RfqRequest(Base):
+    """The buyer's current request and optimistic write version."""
+
+    __tablename__ = "rfq_requests"
+
+    rfq_id = Column(String(128), primary_key=True)
+    kind = Column(String(128), nullable=False)
+    buyer_namespace = Column(String(128), nullable=False)
+    buyer_subject = Column(String(255), nullable=False)
+    requirements = Column(JSON, nullable=False)
+    version = Column(Integer, nullable=False)
+    terms_revision = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    respond_by = Column(DateTime, nullable=False)
+    closed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("idx_rfq_requests_discovery", "kind", "closed_at", "created_at", "rfq_id"),
+    )
+
+
+class RfqTermsRevision(Base):
+    """Original requirements for a consent-bearing terms revision."""
+
+    __tablename__ = "rfq_terms_revisions"
+
+    rfq_id = Column(
+        String(128), ForeignKey("rfq_requests.rfq_id", ondelete="CASCADE"), primary_key=True,
+    )
+    revision = Column(Integer, primary_key=True)
+    requirements = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class RfqPartyReference(Base):
+    """A stable, opaque reference visible only in the projections of one RFQ."""
+
+    __tablename__ = "rfq_party_references"
+
+    rfq_id = Column(
+        String(128), ForeignKey("rfq_requests.rfq_id", ondelete="CASCADE"), primary_key=True,
+    )
+    namespace = Column(String(128), primary_key=True)
+    subject = Column(String(255), primary_key=True)
+    reference = Column(String(128), nullable=False)
+
+    __table_args__ = (UniqueConstraint("rfq_id", "reference", name="uq_rfq_party_reference"),)
+
+
 class PublisherIdentityRotation(Base):
     """Idempotent two-proof transition between publisher principals."""
 
