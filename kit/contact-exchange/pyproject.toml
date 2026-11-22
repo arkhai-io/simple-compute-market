@@ -1,15 +1,15 @@
 [project]
 name = "arkhai-kit-contact-exchange"
-version = "0.5.1"
+version = "0.5.2"
 description = "Introduction-only settlement: contact exchange with no payment and no provisioning"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
-  "arkhai-core==0.6.0",
+  "arkhai-core>=0.6.0",
   "arkhai-injected-time>=0.1.0",
   "arkhai-kit-identity==0.5.0",
   "arkhai-kit-schema-migrations>=0.1.0",
-  "arkhai-kit-settlement-runtime==0.8.1",
+  "arkhai-kit-settlement-runtime>=0.8.1",
   "pydantic>=2.7",
   "typer>=0.12.0",
 ]

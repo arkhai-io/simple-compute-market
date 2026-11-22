@@ -6,18 +6,22 @@ import injected_time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from market_core.registry_descriptor import RegistryPrincipal
+from market_core.rfq import RfqAudience
 from market_identity import Identity, create_signer
 from core_registry.api.admin_routes import make_time_router
 from core_registry.api.routes import router
+from core_registry.api.market_auth import registry_authority_signer
 from core_registry.api.publisher_auth import (
     complete_authenticated_error,
-    registry_authority_signer,
     signed_response,
 )
+from core_registry.api.rfq_auth import RfqTrust
 from core_registry.config import settings
 from core_registry.db.migrations import require_compatible_database
 from core_registry.api.filter_spec import get_loaded_spec
 from core_registry.registry_descriptor import build_registry_descriptor
+from core_registry.rfq_replay import RfqReplayKeys
 
 # Configure logging
 logging.basicConfig(
@@ -85,6 +89,17 @@ async def lifespan(app: FastAPI):
             "registry authority credential does not match configured principal"
         )
     app.state.registry_authority_signer = registry_signer
+    app.state.rfq_trust = None
+    app.state.rfq_replay_keys = None
+    if settings.registry_rfq_authorities and settings.registry_rfq_replay_keys_file:
+        app.state.rfq_trust = RfqTrust(
+            RfqAudience(
+                name=settings.registry_authority_id,
+                principal=RegistryPrincipal.model_validate(expected_registry.model_dump(mode="json")),
+            ),
+            settings.registry_rfq_authorities,
+        )
+        app.state.rfq_replay_keys = RfqReplayKeys.load(settings.registry_rfq_replay_keys_file)
     app.state.registry_descriptor = build_registry_descriptor(
         base_url=settings.registry_descriptor_base_url,
         display_name=settings.registry_descriptor_display_name,

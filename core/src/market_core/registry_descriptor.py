@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, m
 _ED25519_IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]")
 _EIP191_IDENTIFIER = re.compile(r"0x[0-9a-f]{40}")
 _AUTHORITY_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]*")
+RegistryAuthorityName = Annotated[str, Field(min_length=1, max_length=64, pattern=_AUTHORITY_NAME.pattern)]
 _SCHEMA_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]*")
 
 
@@ -37,7 +38,7 @@ class RegistryPrincipal(_StrictCarrier):
 class RegistryAuthorityDescriptor(_StrictCarrier):
     """Stable authority name and its ordered active trust pins."""
 
-    name: str = Field(min_length=1, max_length=64, pattern=_AUTHORITY_NAME.pattern)
+    name: RegistryAuthorityName
     principals: tuple[RegistryPrincipal, ...] = Field(min_length=1, max_length=2)
 
     @model_validator(mode="after")

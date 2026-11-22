@@ -129,6 +129,19 @@ class PublisherReplayReservation(Base):
     )
 
 
+class RfqReplayReservation(Base):
+    """An account-scoped request binding with at most a mutation receipt."""
+
+    __tablename__ = "rfq_replay_reservations"
+
+    namespace = Column(String(128), primary_key=True)
+    subject = Column(String(255), primary_key=True)
+    request_id = Column(String(128), primary_key=True)
+    key_id = Column(String(128), nullable=False)
+    input_digest = Column(String(64), nullable=False)
+    receipt = Column(JSON(none_as_null=True), nullable=True)
+
+
 class PublisherIdentityRotation(Base):
     """Idempotent two-proof transition between publisher principals."""
 

@@ -5,14 +5,12 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import timedelta
-import json
 
 from typing import Any
 import uuid
 
 import injected_time
 from fastapi import HTTPException, Request, Response
-from fastapi.responses import JSONResponse
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedRequest,
@@ -20,28 +18,18 @@ from market_identity import (
     Identity,
     ReplayIdentity,
     ReplayReservation,
-    ResponseEnvelope,
     Signer,
     TrustedIdentitySet,
     VerificationCode,
-    canonical_body_hash,
     classify_replay,
-    sign_response,
     verify_request,
 )
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from core_registry.api.market_auth import request_signature_fields, signed_context_response
 from core_registry.db.models import PublisherReplayReservation, utcnow
-
-SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
-IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
-IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
-ROLE_HEADER = "X-Market-Role"
-REQUEST_ID_HEADER = "X-Market-Request-ID"
-TIMESTAMP_HEADER = "X-Market-Timestamp"
-SIGNATURE_HEADER = "X-Market-Signature"
 
 _MAX_TIMESTAMP_SKEW = 300
 _REPLAY_LEASE_SECONDS = 30
@@ -88,25 +76,6 @@ def normalize_if_match(value: str | None) -> str | None:
     return value.strip().removeprefix("W/").strip().strip('"')
 
 
-def wire_body(raw: bytes) -> Any:
-    """The body as the caller sent it, for signature verification.
-
-    A proof binds the bytes the caller hashed. Verifying against a value
-    re-serialized from a typed model instead compares a different document:
-    every field the model defaults or coerces is present in the server's view
-    and absent from the caller's, so a payload that omits an optional field
-    fails with a context mismatch that names nothing about the cause. Routes
-    that parse into a model keep the model for validation and pass this for
-    authentication.
-    """
-    if not raw:
-        return EMPTY_BODY
-    try:
-        return json.loads(raw)
-    except (TypeError, ValueError):
-        return raw.decode("utf-8", errors="replace")
-
-
 def canonical_query_body(request: Request) -> dict[str, Any]:
     body: dict[str, Any] = {
         "query": sorted([list(item) for item in request.query_params.multi_items()])
@@ -127,30 +96,13 @@ def authenticate_publisher_request(
     body: Any = EMPTY_BODY,
     allowed_roles: frozenset[str] = frozenset({"seller"}),
 ) -> AuthenticatedPublisherRequest:
-    headers = request.headers
     try:
-        timestamp: int | str = int(headers[TIMESTAMP_HEADER])
-    except (KeyError, TypeError, ValueError):
-        timestamp = headers.get(TIMESTAMP_HEADER, "")
-    try:
-        body_hash = canonical_body_hash(body)
+        envelope_data = request_signature_fields(
+            request.headers, method=method, operation=operation, resource=resource, body=body
+        )
     except CanonicalizationError as exc:
         raise HTTPException(status_code=400, detail="Body is not canonical JSON") from exc
-
-    scheme = headers.get(IDENTITY_SCHEME_HEADER, "")
-    envelope_data = {
-        "protocol": headers.get(SIGNATURE_VERSION_HEADER, ""),
-        "role": headers.get(ROLE_HEADER, ""),
-        "principal": {"scheme": scheme, "identifier": headers.get(IDENTITY_IDENTIFIER_HEADER, "")},
-        "method": method,
-        "operation": operation,
-        "resource": resource,
-        "request_id": headers.get(REQUEST_ID_HEADER, ""),
-        "timestamp": timestamp,
-        "body_hash": body_hash,
-        "proof": {"scheme": scheme, "value": headers.get(SIGNATURE_HEADER, "")},
-    }
-    role = headers.get(ROLE_HEADER, "")
+    role = envelope_data["role"]
     if role not in _MARKETPLACE_ROLES:
         raise HTTPException(status_code=401, detail="context_mismatch")
     try:
@@ -259,39 +211,13 @@ async def retained_request_evidence(
     }
 
 
-def registry_authority_signer(request: Request) -> Signer:
-    signer = getattr(request.app.state, "registry_authority_signer", None)
-    if signer is None:
-        raise HTTPException(status_code=503, detail="Registry authority unavailable")
-    return signer
-
-
 def signed_response(*, authenticated: AuthenticatedPublisherRequest, signer: Signer, status: int, body: dict[str, Any] | None) -> Response:
-    response_body: Any = EMPTY_BODY if status == 204 else body
-    envelope = ResponseEnvelope(
-        role="registry",
-        principal=signer.identity,
-        method=authenticated.request.method,
-        operation=authenticated.request.operation,
-        resource=authenticated.request.resource,
-        request_id=authenticated.request.request_id,
-        timestamp=injected_time.now(),
-        status=status,
-        body_hash=canonical_body_hash(response_body),
+    request = authenticated.request
+    return signed_context_response(
+        method=request.method, operation=request.operation,
+        resource=request.resource, request_id=request.request_id,
+        signer=signer, status=status, body=body,
     )
-    signed = sign_response(signer=signer, envelope=envelope)
-    headers = {
-        SIGNATURE_VERSION_HEADER: signed.protocol,
-        IDENTITY_SCHEME_HEADER: signed.principal.scheme.value,
-        IDENTITY_IDENTIFIER_HEADER: signed.principal.identifier,
-        ROLE_HEADER: signed.role,
-        REQUEST_ID_HEADER: signed.request_id,
-        TIMESTAMP_HEADER: str(signed.timestamp),
-        SIGNATURE_HEADER: signed.proof.value,
-    }
-    if status == 204:
-        return Response(status_code=status, headers=headers)
-    return JSONResponse(status_code=status, content=body, headers=headers)
 
 
 def cached_response(authenticated: AuthenticatedPublisherRequest, *, signer: Signer) -> Response | None:
