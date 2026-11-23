@@ -181,8 +181,13 @@ setup = false              # whether a setup charge beside the rate is serviced
 ```
 
 Absent or empty means no rate servicing, so no recurring option publishes; that is
-every shipped configuration. Only the compute end-to-end lanes' storefront
-configurations declare `charged` and `returned`, as a lane fixture. Publication omits
+every storefront's default. The VM storefront chart's production example,
+`helm/charts/storefront/examples/production-values.yaml`, declares `charged` and
+`returned` with `setup = false` beside an on-demand and a spot recurring clause: the
+supported seller configuration for on-demand and spot VM, which the
+[seller quickstart](../../../docs/seller-quickstart.md#offering-on-demand-and-spot)
+describes. The compute end-to-end lanes' storefront configurations declare the same
+two treatments, as a lane fixture. Publication omits
 an option naming an undeclared treatment or an undeclared setup charge, a cached
 selection of one is refused before acceptance, and materialization refuses it with
 `settlement_option_withdrawn_refetch`, so its mandate is never derived. Withdrawing a
@@ -194,7 +199,28 @@ payments section lacks its servicing fields while it holds open payment deals st
 and reports them repair required
 ([storefront publication, "The servicing declaration and its three doors"](../storefront-publication/architecture.md#the-servicing-declaration-and-its-three-doors)).
 Declaring any treatment also presupposes that the payment authority executes the
-dispute authority's `chosen` stop, which hosted qualification has not yet shown. A buyer's root refuses `rate_servicing`, and a
+dispute authority's `chosen` stop. The VM live verification against the hosted
+authorities, in mock provisioning, showed the hosted payments authority's outputs
+agreeing with the lane doubles' for the buyer's stop under `charged`, funds running
+out at the funded boundary, a spot seller's preemption and the term end under
+`returned`, and the hosted dispute authority's mechanical ruling of a seller's
+`delivery_end` filing, its authority stop through the `chosen` entry returning its
+period with the capped penalty; an operator's ruling of a buyer's contested case is
+unproven there, since no topology applied a ruling policy
+([live verification summary](../../../docs/attachments/switch-on-hosted-per-period-vm/live-verification.md)).
+
+A recurring option's delivery deadline is the payments clause's
+`delivery_deadline_seconds` while no composition supplies a pool's deadline, which
+none does, and publication refuses a clause whose `dispute_window_seconds` does not
+cover that deadline plus the dispute authority's advertised minimum window
+(`dispute_window_before_delivery_deadline`). A default buyer refuses an option
+promising no deadline. The storefront enforces the deadline, recording a deal
+undelivered by then as the seller's non-delivery; the site does not, so a lease
+whose storefront stops servicing it keeps its capacity until an operator ends it or
+the term ends
+([operator handbook, "Serving rate deals"](../../../docs/operator-handbook.md#serving-rate-deals)).
+
+A buyer's root refuses `rate_servicing`, and a
 table naming no installed mechanism, an unknown key or an unknown treatment fails
 validation. The storefront charts' values schemas carry the same table definition
 the loader parses.

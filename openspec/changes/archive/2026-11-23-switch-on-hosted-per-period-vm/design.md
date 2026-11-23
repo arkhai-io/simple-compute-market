@@ -299,6 +299,215 @@ a reduced declaration, or another course.
 Rejected: a `[charged]`-alone contingency with two buyer waivers on every deal and a
 charged term end billing past the agreed maximum, prescribed before any failure.
 
+## Implementation notes
+
+Reasoning and producer facts behind the implementation, moved here from the task notes
+at closeout so the notes keep only behaviour, evidence and destinations.
+
+### Section 1 — the mediation double
+
+One admission check, `rules.check_ruling`, serves both rule installation and operator
+decisions; before this change `decide` checked no effect, so a decision carrying a
+`stop` would have been recorded and then failed building a reverse from it.
+
+Each effect's payment events are built once, kept in `Case.events` and resent unchanged
+until applied, so a lost answer or a later event's failure resends the identical
+request. Payments refuses a past `at` (`invalid_event`) and never backdates a stop, so
+a stop whose time has passed is sent as a stop now. That makes a kept stop with a
+passed `at` refused on every resend, which would leave the case applying for good; the
+events are therefore rebuilt on resume, but only when payments refuses an effect's
+first event that no earlier send can have delivered (`Case.reached`). Rebuilding on any
+refusal was wrong after a lost answer, because a middleware refusal comes before
+payments' replay.
+
+A `penalty` reads the snapshot once every earlier effect is applied and reverses each
+part's `held` (earned and unreleased; a rate part's `reserved` is not held), in mandate
+order, so a reversal placed before it leaves the penalty only what remains. The split
+over parts is the pure function `penalty_reversals`, unit tested, with one integration
+case left. A penalty's reversals are kept once one is taken; if money is released from
+an unprotected part between a failure and the resume, a kept reversal can exceed what
+is held and be refused on every resend. No lane row meets this; it is an unowned row in
+Goal 8 of the roadmap.
+
+The lane mandate's authority entry is `chosen` with no notice (`kit/deal-lifecycle`'s
+`authorities.py`), so a ruled stop at the ruling's instant takes effect at once. The
+double first computed no reversal beside a passed stop and recorded that as a
+deviation; section 12 replaced it.
+
+`scripts/change-workflow run test-before` cannot show these packages' new tests
+failing at a base: it runs pytest with no project environment, so the double's tests
+fail at collection importing `lane_double_controls`, and `e2e-tests`' at importing
+`web3`. This held for every section that added tests.
+
+### Section 2 — the shared payment assertions
+
+The plan's separate read and assert stages are two functions, not two stage classes:
+separate classes would change every module's stage order, bare metal's included. The
+shared stages keep reading as before and call the assertion, and since a compute lane's
+shared stage has one body, the bare-metal rows assert through them too. A funding
+stop's treatment is ignored because it falls between periods. The unit tests run on
+snapshots from the payments kit's `PaymentsAuthority` engine driven through each row's
+input, not on a committed recording. `Recurring08` used to assert one period's price
+held and released outright; the shared assertion checks settled amount against the
+periods between start and stop, so the exact one period now rests on the stage setting
+the stop a minute into the first period and on `Recurring09`'s balance. A live run
+supplies each assertion the payer or payee account, the period price and seconds, the
+notice, for funds running out the funded boundary and the funded period count, and for
+the term end the Agreement's end rounded up to the whole second.
+
+### Section 3 — the rate-deal dispute rows
+
+The administrator's end goes through the storefront client's `admin_interrupt_deal`
+with `interruption_kind="failure"`, since the seller lifecycle client offers only
+`notice`, `read` and `list`; that route records the operator end, files `delivery_end`
+as the payee and begins the teardown, answering the filing's outcome inline. Because the
+double rules at filing and the end is at the filing's instant, the seller row holds its
+rule at the gate (`pause_before_effects`) while lane time moves a period on, so there
+are real earnings since the end; the hosted authority rules later than the filing
+anyway, so the live twin needs no gate. The storefront's recorded end is then the
+ruling's delivery end at the operator's instant, a `dispute-effect:` source sorting
+before the `operator:` one at the same instant. No route reads the classification
+`ruling` itself; its observable effect is that no filing follows the authority's stop.
+
+The dispute assertions' unit tests use payment events written as the double's
+`service.py` sends them and record entries validated by the mediation kit's
+`RecordEntry` model, not a committed recording, which the filed entry's whole Agreement
+makes too large. Round 1's triage (28 F1) bound both assertions to the claim the
+scenario sent (`claimed_end`), since a ruling consistent with itself on another end
+passed before; the contested case compares the ruled end and reverse amount only when
+given, because a live topology's policy chooses both. The lane double records
+`end_delivery` at its own clock, which equals the claim only because lane time is held
+at the claimed instant from filing to ruling. Declined at the check: a domain-stage
+order check, which the rate rows' domain stages lack too; and a `RateRow` of the rows'
+own, since the borrowed one carries what they need.
+
+### Section 4 — the production example
+
+The example is the values of the storefront chart installed alone, as the bare-metal
+example is of its chart, so it states `global.provisioning` and names its registry. The
+chart's own checks do not validate a principal's spelling; only the storefront's loader
+does (it caught a receipt identity no Ed25519 key can spell), so a placeholder change
+wants `STOREFRONT_PYTHON` set. The loader keeps a portless `base_url` raw and warns, so
+the example states the port. The publication probe states its wiring as the VM
+storefront's `publication_artifacts` does rather than taking it from the composition,
+so the two could drift without the check failing; readiness of a reachable service is
+not run, since the render check has no service.
+
+### Section 5 — wall-time reach and the live payment scenarios
+
+The live modules were first planned to rehearse against the local Helm release, which
+cannot serve them: its payments target is its double marked lane-owned
+(`helm/local-values.yaml`), which the live modules refuse by design; its agent declares
+no rate servicing, so publication refuses every recurring option; and serving them
+would need values changes outside the plan and a deployment the implementation step
+does not admit. Section 8's deployment run is therefore the only run of the live
+modules.
+
+The modules take their prerequisites as module fixtures set up before any hold
+(`payments_config`, `live_provenance`, `mock_provisioning`, the payer's balance), so a
+topology missing a requirement is a blocked skip naming it before anything is bought;
+`LIVE_GATES` in `test_scenario_cleanup_order.py` holds that order. That check maps a
+fixture by its function's name, so a fixture declared with `name=` reads as unknown and
+so as having a finaliser. The run settings refuse only what the harness can see wrong;
+the market refuses the other terms no deal can hold at publication or negotiation.
+
+Funds running out reads the boundary from the part's `reservedThrough`, because the
+payments engine's snapshot sets `fundedThrough` only over parts still running; a
+finding about a stale funded boundary was declined for that reason. Also declined:
+unifying `HOURLY_GROSS`'s third definition, the one-shot option's price, a separate
+offering. A run's wall-time length is set by the `LIVE` terms: at a one-minute period
+the term must exceed the five-minute approval window, the five-minute delivery deadline
+and a period, so about a quarter of an hour serves.
+
+The sections 5–7 triage (41 F1) found the buyer's stop could pass with nothing charged:
+the payments kit's contract fixture charges nothing for a `charged` stop with no time
+elapsed, as the archived serve-running-rate-deals design records, and the live stage
+sent the stop as soon as the earlier stages ended. The assertion now also requires the
+stop effective later than the part's `started`, and `LiveBuyerStop` sends the stop no
+earlier than `STOP_INTO_PERIOD_SECONDS` after the Agreement's start, an instant the
+scenario's own data fixes.
+
+### Section 6 — the live dispute scenarios
+
+The seller's filing reads the snapshot once after the record shows the case closed,
+rather than polling both, since the closed entry records each effect applied at
+payments; a lagging snapshot fails naming the field. `LiveDispute07`'s wait for the
+first period's earnings is a bounded poll of the producer's output, not a reached
+instant, so `LaneTime.reach`'s recorded case is not widened. `lane_time.poll_until`
+raises `PollBoundPassed`, an `AssertionError` carrying the last read, and that is all
+`await_case_closed` catches, so an assertion raised inside a read is not taken for an
+unmet ruling policy. An Agreement naming no dispute terms fails rather than reading as
+another authority. The contest is one servicing step, so a respondent listing that
+shows the case only later fails the contest.
+
+When no policy rules the contested case, the cleanup ends the deal by the buyer's own
+`end` with the case open; if the hosted payments service refuses that stop, the last
+stage's teardown fails and the ruling reads failed rather than unproven. Nothing here
+shows which the payments service does.
+
+A missing storefront dispute credential was first thought unreadable before a filing,
+so the contest failed rather than going unproven. The sections 5–7 triage (41 F2)
+corrected the premise: the seller lifecycle reports the missing credential on every
+lifecycle read of the deal (`kit/deal-servicing`'s `seller.py`, `_observed`), so the
+contest reads it first and skips naming `CREDENTIAL_REQUIREMENT`. That the hosted
+storefront's read carries the outcome rests on that code; no run here removes the
+credential.
+
+### Section 7 — the seller, buyer and operator documents
+
+The quickstart's TOML is held equal to the production example's `rate_servicing` and
+`pricing` by a render test, so it must stay the section's only TOML block, with the
+`<YOUR_PAYEE_ACCOUNT>` placeholder. The buyer's default refusals are only logged
+(`BuyerTermsPolicy.__call__` reports them to `AuthoritySelection.report` and they never
+reach its `refusals`), so a buy they alone empty prints "No listings matched" and exits
+0, an unowned row in Goal 8 of the roadmap. Running the installed `market` and
+`market-storefront` was not permitted in the implementing session, so commands, flags
+and routes were checked against the CLI source and route tables. The handbook links no
+published dispute policy, since this repository knows no published location, and points
+at an `arkhai.mediation.v1` authority description's `contact`. Declined at the check:
+the payments service's own facts in the quickstarts rest on this design's context, not
+on code here; and how a refused approval (`insufficient_funds`) surfaces to the buyer
+was not traced, the quickstart saying only that nothing is bought.
+
+### Section 12 — the mechanical ruling's shape
+
+A live rehearsal found the hosted authority rules a seller's filing with a delivery
+end, a `stop` and the `penalty`, reversing earnings since a passed stop time as the
+stop's own reversal, attributed to it. The double now derives that reversal once in
+`stop_reversal_amount`, from the signed receipt's period and price and the part's
+`started`, gross earned and held, kept under `<effect id>:since`; earnings an earlier
+reversal took are not told apart. The guard on a stop payments has not recorded has no
+test, since the double's `chosen` entry takes every stop at once and no lane input
+reaches it. The assertions now match each reversal to the ruling's effect whose id its
+payload names, rather than by order, so an effect's reversals may be several and a
+reversal naming no effect is never taken for a missing stop's.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — the switch-on is a documented, supported seller configuration; withdrawal removes the declaration | `docs/seller-quickstart.md#offering-on-demand-and-spot` and `helm/charts/storefront/examples/production-values.yaml` (implementation); `openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover` (the production example's declaration, and the hosted-qualification caveat replaced by the live summary's findings); `openspec/specs/deal-lifecycle/architecture.md#external-authorities` (the `chosen` stop and the live comparison) and `#current-limits` (rate deals against deployed authorities); `docs/development/ROADMAP.md`, Goal 8's current state |
+| D2 — no release step; a change cuts no release and declares nothing in production | `docs/guidance/workflow/changes.md#a-change-cuts-no-release` |
+| D3 — live verification names topology requirements, not a target; an unmet requirement leaves observations unproven | `docs/guidance/engineering/system-tests.md#locally-verifiable-and-external-topology-scenarios`; `docs/development/TESTING.md#live-verification`; `openspec/specs/test-compatibility/spec.md`, "Each live verification scenario states its topology requirements" (archive) |
+| D4 — the live scenarios extend the lane rows, with the provisioning their claim needs; `LaneTime.reach`'s wall-time case | `system-tests.md#locally-verifiable-and-external-topology-scenarios` (modes follow what a scenario proves) and `#time-a-test-does-not-control` (an instant the scenario's data fixes or a component recorded); `openspec/specs/test-compatibility/architecture.md#lane-time-and-the-doubles-controls`; `docs/guidance/repository/deal-scenarios.md#the-discipline-every-scenario-follows` (the wall-time bullet); `docs/development/TESTING.md#lane-time` |
+| D5 — SCM's dispute interface ends where the public client ends; a person's decision comes from a topology policy or the test | `docs/guidance/engineering/test-doubles.md#a-double-mirrors-its-producer`; `docs/development/ARCHITECTURE.md#authority-boundaries` (the dispute authority's row); `system-tests.md#locally-verifiable-and-external-topology-scenarios` (a policy watcher is a double for a person) |
+| D6 — ruling-downstream logic proven on amended doubles; live scenarios compare outputs through a shared assertion | `system-tests.md#locally-verifiable-and-external-topology-scenarios` (the live verification form) and `#a-scenario-is-a-sequence-of-state-changes` (bounded polling of a live producer); `test-doubles.md#a-double-mirrors-its-producer` (polled and inbound decisions); `test-compatibility/architecture.md#the-in-lane-mediation-double` (`stop`, its reversal, `penalty`) and `#payment-evidence-ownership` (live evidence as boundary comparisons); `TESTING.md#the-canonical-compute-deal` (the rate-deal dispute rows, the shared assertions), `#private-service-dependencies` (the double's effects) and `#lane-time` (the bounded poll); `deal-scenarios.md#the-discipline-every-scenario-follows`; `tools/mediation-lane-double/README.md` and `e2e-tests/README.md` (implementation); `openspec/specs/test-compatibility/spec.md` (archive) |
+| D7 — the delivery deadline from the seller's payments clause, enforced by the storefront | `settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover`; `docs/seller-quickstart.md#offering-on-demand-and-spot` and `docs/operator-handbook.md#serving-rate-deals` (implementation); the roadmap's open gap owned by `renewable-compute-lease-deadlines` |
+| D8 — the requirements land in `test-compatibility` and `deployment-state` | `openspec/specs/test-compatibility/spec.md` and `openspec/specs/deployment-state/spec.md` (archive); `docs/guidance/repository/chart-render-tests.md#where-they-live-and-how-they-run` (the production example's startup and publication checks); `deployment-state/configuration.md` has no production-examples passage, so nothing is written there |
+| D9 — live evidence is the caller's sanitized summary | `docs/attachments/switch-on-hosted-per-period-vm/live-verification.md` (section 8); cited by `ROADMAP.md` Goal 8, `settlement-configuration/configuration.md` and `deal-lifecycle/architecture.md`; the form in `system-tests.md` and `TESTING.md#live-verification` |
+| D10 — what sellers and buyers are told | `docs/seller-quickstart.md#offering-on-demand-and-spot`; `docs/buyer-quickstart.md#7-on-demand-and-spot` (implementation) |
+| D11 — the dispute authority's procedures stay with the authority; SCM's assumptions and runbooks | `docs/operator-handbook.md#serving-rate-deals` (implementation); `deal-lifecycle/architecture.md#current-limits` (receipt key stability, the drained cutover, the authority's policy its own); `ROADMAP.md` Goal 8's accepted limitations |
+| D12 — implementation cadence | No permanent destination: it governed this change's rounds only |
+| D13 — topology requirements start as prose; a mode earns its own scenario only where the external party runs different code | `system-tests.md#locally-verifiable-and-external-topology-scenarios`; `TESTING.md#live-verification` (the requirements in `e2e-tests/README.md`, "Live verification") |
+| D14 — no pre-written fallback | No permanent destination: it decided this change's handling of a failed live comparison, which did not arise |
+| Owner's principle (2026-11-20): every umbrella component can be switched off | `docs/guidance/engineering/helm.md#every-component-of-an-umbrella-chart-can-be-switched-off` |
+| Owner's principle (2026-11-20): a wrapper on the shared loader starts a third-party process that reads no configuration file | `docs/guidance/engineering/configuration.md#application-settings-stay-out-of-the-environment` |
+| Owner's principle (2026-11-20, revised 2026-11-23): where a stack's secret values come from | `configuration.md#secrets-travel-in-a-secret-profile-or-overlay-file` |
+| Owner's principle (2026-11-21): degraded service, exit and native sidecars | `docs/guidance/engineering/deployment.md#a-deployment-does-not-wait-on-a-services-dependencies`, with the next section aligned |
+| Owner's principle (2026-11-23): a stack's secret files are committed development values or a gitignored copy of a committed `.example`; a chart's defaults carry no secret value | `configuration.md#a-stacks-configuration-lives-in-committed-files`; `helm.md#a-charts-defaults-carry-no-secret-value`; `docs/guidance/engineering/kubernetes.md#configuration-travels-through-mounted-files` (the local cluster's Helm-layer target) |
+| Roadmap currency | `docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops`: this change's open-gap row removed; the VM switch-on, the double's `stop` and `penalty`, the VM rate-deal dispute rows and the live verification absorbed into the current state, citing the summary; the hosted-mediation sentences corrected from the summary; the accepted limitations' dispute-policy sentence aligned with D11; the unproven buyer's contested case added to "Work this goal found and leaves unowned" |
+| Campaign index currency | `openspec/changes/README.md`, Goal 8: this change's row, the campaign prose recording the live summary's outcome, and the graph annotation; two unowned rows under "Unowned work with no campaign" found at promotion |
+
 ## Open Questions
 
 - Whether the payments service will distinguish funds running out from a term end in

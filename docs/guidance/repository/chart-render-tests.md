@@ -47,7 +47,13 @@ gives obtaining one).
   interpreter `STOREFRONT_PYTHON` names, runs the storefront's startup refusal over
   it, and derives the local release's Alkahest release conditions over its render;
   over the chart defaults' render the refusal names the missing settlement
-  mechanism. `test-render.sh` sets it when the VM storefront environment exists
+  mechanism. Over the chart rendered alone with its production example,
+  `helm/charts/storefront/examples/production-values.yaml`, it runs the startup
+  refusal, which accepts the render, and derives the example's recurring clauses
+  against a representative dispute authority advertisement under the example's own
+  listing horizon, publishing an on-demand and a spot option with the clause's
+  delivery deadline and `charged` and `returned`, and none once an overlay removes
+  the rate servicing declaration. `test-render.sh` sets it when the VM storefront environment exists
   (`make init-storefront`). `helm/charts/bare-metal-storefront/tests/test_render.py`
   does the same through `BARE_METAL_STOREFRONT_PYTHON`, which `test-render.sh` sets
   when `domains/bare_metal/storefront/.venv` exists (`make
