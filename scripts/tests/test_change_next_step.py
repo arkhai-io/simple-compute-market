@@ -3130,7 +3130,8 @@ def test_a_clone_and_the_workspaces_view_are_read_from_git(
         monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.invalid")
     work = _repository(tmp_path / "work", "in implementation")
     shutil.rmtree(_reviews(work))
-    (work / ".gitignore").write_text("reviews/\n.claude/settings.local.json\n", "utf-8")
+    (work / ".gitignore").write_text(
+        "reviews/\n.claude/settings.local.json\n.agents/workflow.local.toml\n", "utf-8")
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(tmp_path / "origin.git"))
     _git(work, "init", "-q", "-b", "dev")
     _commit_all(work, "the change's proposal and plan")

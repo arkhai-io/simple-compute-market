@@ -106,6 +106,7 @@ def test_designs_scope_is_openspec_and_git_with_the_repositorys_documents(
                                 TMP: ENGINE, home / ".cache": ENGINE,
                                 checkout / "docs": REPOSITORY}
     assert _protected(found) == {checkout / ".agents/workflow.toml": ENGINE,
+                                 checkout / ".agents/workflow.local.toml": ENGINE,
                                  checkout / ".git/config": ENGINE,
                                  Path("/usr/bin/git"): ENGINE,
                                  Path("/usr/lib/git-core/git"): ENGINE}

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,10 @@ from change_workflow_fixtures import (CHANGE, CONFIGURED, MODELS, OPUS, SONNET, 
                                       make_wrapper)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+# The workflow's own guidance, which `config load` prints after the engineering
+# guidance and before the repository's documents, whole outside this checkout.
+WORKFLOW_GUIDANCE = [str(path) for path in
+                     sorted(documents.path(documents.GUIDANCE).rglob("*.md"))]
 
 
 def _checked(text: str) -> config.Configuration:
@@ -531,7 +536,7 @@ disable = [{ check = "skills", reason = "this repository keeps no agent skills" 
     assert fields["validation.evidence.helm.cleanup"]["value"] == ["make teardown"]
     assert fields["validation.evidence.helm.after"]["status"] == "absent"
     assert fields["validation.evidence.helm.required"]["value"] == "always"
-    assert fields["models.implement"]["status"] == "absent"
+    assert fields["models.implement"]["status"] == "missing"
     assert fields["review.format-retries"] == {"field": "review.format-retries",
                                                "status": "default", "value": 1}
 
@@ -627,9 +632,10 @@ design = ["docs/development/ROADMAP.md", "AGENTS.md"]
 
     assert main(["config", "load", "design"], root=tmp_path) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "AGENTS.md", "openspec/README.md", "docs/development/ROADMAP.md"]
+        *WORKFLOW_GUIDANCE, "AGENTS.md", "openspec/README.md", "docs/development/ROADMAP.md"]
     assert main(["config", "load", "plan"], root=tmp_path) == 0
-    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "openspec/README.md"]
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md",
+                                                    "openspec/README.md"]
 
 
 def test_config_load_takes_a_step(tmp_path: Path) -> None:
@@ -640,7 +646,8 @@ def test_config_load_takes_a_step(tmp_path: Path) -> None:
 def test_a_session_that_is_no_step_loads_the_common_documents(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The orchestrating session and a guidance review run no step of the graph, so
-    `config load common` prints `load.common` alone for them."""
+    `config load common` prints the workflow's guidance and `load.common` alone for
+    them."""
     configured(tmp_path, """
 [load]
 common = ["AGENTS.md", "openspec/README.md"]
@@ -648,7 +655,8 @@ design = ["docs/development/ROADMAP.md"]
 """)
 
     assert main(["config", "load", "common"], root=tmp_path) == 0
-    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "openspec/README.md"]
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md",
+                                                    "openspec/README.md"]
 
 
 def _guidance(root: Path, *paths: str) -> None:
@@ -674,6 +682,7 @@ design = ["docs/guidance/workflow/closeout.md", "docs/ROADMAP.md"]
     assert main(["config", "load", "design"], root=tmp_path) == 0
 
     assert capsys.readouterr().out.splitlines() == [
+        *WORKFLOW_GUIDANCE,
         "AGENTS.md", "docs/guidance/README.md", "docs/guidance/engineering/a/deep.md",
         "docs/guidance/engineering/comments.md", "docs/guidance/workflow/closeout.md",
         "openspec/README.md", "docs/ROADMAP.md"]
@@ -723,12 +732,13 @@ def test_a_literal_entry_naming_no_file_is_still_printed(
 
     assert main(["config", "load", "common"], root=tmp_path) == 0
 
-    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "docs/missing.md"]
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md",
+                                                    "docs/missing.md"]
 
 
-def test_an_absent_or_empty_list_loads_nothing(tmp_path: Path) -> None:
-    assert config.load(tmp_path).documents("design", tmp_path) == []
-    assert _checked("[load]\ncommon = []\n").documents("design", tmp_path) == []
+def test_an_absent_or_empty_list_loads_the_workflows_guidance_alone(tmp_path: Path) -> None:
+    assert config.load(tmp_path).documents("design", tmp_path) == WORKFLOW_GUIDANCE
+    assert _checked("[load]\ncommon = []\n").documents("design", tmp_path) == WORKFLOW_GUIDANCE
 
 
 # `[sandbox]`: what a repository adds to a step's scope.
@@ -948,7 +958,8 @@ def test_config_lists_each_steps_scope_with_each_paths_source(
                 "private": True} in found["writable"], step
     protected = {(entry["entry"], entry["source"])
                  for entry in shown["scopes"]["plan"]["protected"]}
-    assert protected == {(".agents/workflow.toml", "engine"), (".git/config", "engine"),
+    assert protected == {(".agents/workflow.toml", "engine"),
+                         (".agents/workflow.local.toml", "engine"), (".git/config", "engine"),
                          ("/usr/bin/git", "engine"), ("/usr/lib/git-core/git", "engine"),
                          (".claude/settings.json", "adapter"),
                          (".claude/settings.local.json", "adapter"),
@@ -1171,3 +1182,332 @@ def test_every_table_of_the_repositorys_file_says_who_uses_it() -> None:
             assert below, line
         else:
             assert any(user in comment for comment in above + below for user in users), line
+
+
+# `[workflow] version`: the range of workflow versions the repository accepts.
+
+@pytest.mark.parametrize("text,specifiers", [
+    (">=0.1, <0.2", [(">=", (0, 1)), ("<", (0, 2))]),
+    ("==0.1.0", [("==", (0, 1, 0))]),
+    ("~=0.4.1,!=0.4.3", [("~=", (0, 4, 1)), ("!=", (0, 4, 3))]),
+    (" <= 2 , > 1.9 ", [("<=", (2,)), (">", (1, 9))]),
+])
+def test_a_range_is_read_as_its_specifiers(text: str, specifiers: list) -> None:
+    assert config.version_range("workflow.version", text) == specifiers
+
+
+@pytest.mark.parametrize("text,named", [
+    ("0.1", "got '0.1'"),
+    (">=0.1, <0.2.*", "got '<0.2.*'"),
+    (">=0.1rc1", "got '>=0.1rc1'"),
+    ("=>0.1", "got '=>0.1'"),
+    (">=0.1,", "got ''"),
+    ("~=1", "~= compares with two release numbers or more"),
+    ("", "must be a non-empty string"),
+])
+def test_a_malformed_range_is_refused_naming_the_field(text: str, named: str) -> None:
+    with pytest.raises(ConfigError, match="workflow.version") as refused:
+        config.version_range("workflow.version", text)
+    assert named in str(refused.value)
+
+
+@pytest.mark.parametrize("version,admitted", [
+    ("0.1.0", True), ("0.1.7", True), ("0.1", True), ("0.2.0", False), ("0.0.9", False),
+    ("0.1.3", False), ("0.1.0.dev1", False), ("0.1.1rc1", True), ("unknown", False),
+])
+def test_a_range_admits_a_version_by_its_release_numbers_a_pre_release_first(
+        version: str, admitted: bool) -> None:
+    specifiers = config.version_range("workflow.version", ">=0.1, <0.2, !=0.1.3")
+
+    assert config.admits(specifiers, version) is admitted
+
+
+@pytest.mark.parametrize("version,admitted", [
+    ("0.4.1", True), ("0.4.9", True), ("0.5.0", False), ("0.4.0", False), ("0.4", False)])
+def test_a_compatible_release_stays_within_its_series(version: str, admitted: bool) -> None:
+    assert config.admits(config.version_range("v", "~=0.4.1"), version) is admitted
+
+
+def test_an_engine_outside_the_range_refuses_before_reading_a_later_versions_table() -> None:
+    text = '[workflow]\nversion = ">=0.5, <0.6"\n\n[release]\nchannel = "stable"\n'
+
+    with pytest.raises(ConfigError) as refused:
+        config.check(text, Path("workflow.toml"), installed=lambda: "0.4.2")
+
+    message = str(refused.value)
+    assert "the installed workflow is 0.4.2, outside the range >=0.5, <0.6" in message
+    assert "install a version the range admits" in message
+    assert "release" not in message
+    assert config.check('[workflow]\nversion = ">=0.4, <0.5"\n', Path("workflow.toml"),
+                        installed=lambda: "0.4.2").version_range == ">=0.4, <0.5"
+
+
+def test_the_installed_version_is_too_old(tmp_path: Path,
+                                          capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-f8yy's scenario: `config load design` refuses, naming the engine's version,
+    the range, and the fix, and does not report the table only the later version
+    defines as unknown."""
+    configured(tmp_path, '[workflow]\nversion = ">=0.5, <0.6"\n\n[release]\nchannel = "x"\n')
+
+    assert main(["config", "load", "design"], root=tmp_path) == 1
+
+    err = capsys.readouterr().err
+    assert (f"the installed workflow is {documents.version()}, outside the range >=0.5, <0.6 "
+            "that .agents/workflow.toml accepts") in err
+    assert "run `change-workflow install`" in err
+    assert "no table the workflow defines" not in err
+
+
+def test_an_engine_within_the_range_reads_the_rest(tmp_path: Path,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    configured(tmp_path, f'[workflow]\nversion = "=={documents.version()}"\n' + CONFIGURED)
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    fields = {entry["field"]: entry for entry in json.loads(capsys.readouterr().out)["fields"]}
+    assert fields["workflow.version"] == {"field": "workflow.version", "status": "declared",
+                                          "value": f"=={documents.version()}"}
+
+
+# The local configuration, `.agents/workflow.local.toml`.
+
+def _local(root: Path, text: str) -> None:
+    (root / config.LOCAL).parent.mkdir(parents=True, exist_ok=True)
+    (root / config.LOCAL).write_text(text, "utf-8")
+
+
+def _engineering(root: Path, directory: str = "guides/engineering") -> Path:
+    for name in ("tests.md", "imports/at-module-level.md"):
+        (root / directory / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / directory / name).write_text(f"# {name}\n", "utf-8")
+    return root / directory
+
+
+COMMITTED = """
+[repository]
+protected-branches = ["main"]
+
+[sandbox]
+writable.common = ["~/.cache/shared"]
+"""
+
+
+def test_config_as_json_reports_a_missing_local_configuration(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-4pm4's "CI reads the workflow's roles": with no local file, `config --json`
+    exits 0, reports the local file absent, each required local field as missing,
+    `guidance.engineering` as null, and the committed fields and the distribution's
+    in full."""
+    _checkout(tmp_path)
+    configured(tmp_path, COMMITTED)
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    fields = {entry["field"]: entry for entry in shown["fields"]}
+    assert shown["local"] == {"file": ".agents/workflow.local.toml", "exists": False}
+    assert shown["guidance"] == {"engineering": None}
+    assert fields["guidance.engineering"] == {"field": "guidance.engineering",
+                                              "status": "missing"}
+    assert {fields[f"models.{step}"]["status"] for step in (*config.STEPS, "orchestrator")} == {
+        "missing"}
+    committed = {field: entry for field, entry in fields.items()
+                 if not field.startswith(("models.", "guidance."))}
+    assert committed == {entry["field"]: entry
+                         for entry in config.resolution(config.load(tmp_path))
+                         if not entry["field"].startswith(("models.", "guidance."))}
+    assert fields["repository.protected-branches"]["value"] == ["main"]
+    assert fields["sandbox.writable.common"]["value"] == ["~/.cache/shared"]
+    assert shown["workflow"] == documents.RUNNING.described()
+    assert main(["config"], root=tmp_path) == 0
+    assert capsys.readouterr().out.splitlines()[1] == (
+        ".agents/workflow.local.toml: no such file; every local field is missing")
+
+
+def test_the_local_configuration_gives_the_models_the_pointer_and_more_writable_paths(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _checkout(tmp_path)
+    configured(tmp_path, COMMITTED)
+    _engineering(tmp_path)
+    _local(tmp_path, '[guidance]\nengineering = { path = "guides/engineering/" }\n'
+           + MODELS + '\n[sandbox]\nwritable.common = ["~/.cache/mine"]\n'
+           'writable.implement = ["build/"]\n')
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    fields = {entry["field"]: entry for entry in shown["fields"]}
+    assert shown["local"] == {"file": ".agents/workflow.local.toml", "exists": True}
+    assert fields["models.design"]["status"] == "declared"
+    assert fields["sandbox.writable.common"]["value"] == ["~/.cache/shared", "~/.cache/mine"]
+    assert fields["sandbox.writable.implement"]["value"] == ["build/"]
+    assert shown["guidance"] == {"engineering": {
+        "path": str(tmp_path / "guides/engineering")}}
+    assert fields["guidance.engineering"]["value"] == shown["guidance"]["engineering"]
+
+
+@pytest.mark.parametrize("text,named", [
+    ("[repository]\nprotected-branches = []\n",
+     ".agents/workflow.local.toml declares [repository], which belongs in "
+     ".agents/workflow.toml"),
+    ("[sandbox]\nprotected = ['x/']\n",
+     "declares sandbox.protected, which belongs in .agents/workflow.toml"),
+    ("[guidance]\nworkflow = { path = 'x/' }\n",
+     "guidance.workflow is no field the workflow defines"),
+    ("[colour]\n", "colour is no table the workflow defines"),
+    ("[models\n", ".agents/workflow.local.toml is not TOML"),
+    ("[sandbox]\nwritable.common = ['.agents/workflow.toml']\n",
+     "is or lies under the protected path .agents/workflow.toml"),
+    ('[models]\ndesign = [{ harness = "claude", model = "claude-opus-5-5" }]\n',
+     "models.design is declared in both .agents/workflow.toml and "
+     ".agents/workflow.local.toml"),
+])
+def test_a_malformed_local_configuration_is_refused_naming_the_field(
+        tmp_path: Path, text: str, named: str) -> None:
+    configured(tmp_path, COMMITTED + MODELS)
+    _local(tmp_path, text)
+
+    with pytest.raises(ConfigError) as refused:
+        config.load(tmp_path)
+    assert named in str(refused.value)
+
+
+def test_a_local_writable_path_under_a_committed_protected_path_is_refused(
+        tmp_path: Path) -> None:
+    configured(tmp_path, '[sandbox]\nprotected = ["secrets/"]\n')
+    _local(tmp_path, '[sandbox]\nwritable.common = ["secrets/cache/"]\n')
+
+    with pytest.raises(ConfigError, match="lies under the protected path secrets/"):
+        config.load(tmp_path)
+
+
+# The engineering-guidance pointer.
+
+def test_a_developer_points_at_the_repositorys_engineering_guidance(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-hu0z's first scenario: `config load plan` prints the pointer's Markdown
+    files first, then the workflow's guidance, then the repository's; `config
+    --json` gives the pointer's absolute directory."""
+    _checkout(tmp_path)
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md"]\nplan = ["PLAN.md"]\n')
+    _engineering(tmp_path, "docs/guidance/engineering")
+    _local(tmp_path, '[guidance]\nengineering = { path = "docs/guidance/engineering/" }\n')
+
+    assert main(["config", "load", "plan"], root=tmp_path) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "docs/guidance/engineering/imports/at-module-level.md",
+        "docs/guidance/engineering/tests.md", *WORKFLOW_GUIDANCE, "AGENTS.md", "PLAN.md"]
+    assert main(["config", "--json"], root=tmp_path) == 0
+    assert json.loads(capsys.readouterr().out)["guidance"]["engineering"] == {
+        "path": str(tmp_path / "docs/guidance/engineering")}
+
+
+def test_a_pointer_from_home_is_printed_whole(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _engineering(home, ".guidance")
+    checked = config.check("", tmp_path / "repo/.agents/workflow.toml", root=tmp_path / "repo",
+                           home=home,
+                           local='[guidance]\nengineering = { path = "~/.guidance/" }\n')
+
+    assert checked.engineering == config.Engineering(entry="~/.guidance/",
+                                                     path=home / ".guidance")
+    assert checked.documents("plan", tmp_path / "repo")[:2] == [
+        str(home / ".guidance/imports/at-module-level.md"), str(home / ".guidance/tests.md")]
+
+
+def test_a_repository_applies_no_engineering_guidance(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-hu0z's second scenario."""
+    _checkout(tmp_path)
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md"]\n')
+    _local(tmp_path, "[guidance]\nengineering = { none = \"the workflow's own repository "
+           "applies only its guidance\" }\n")
+
+    assert main(["config", "load", "plan"], root=tmp_path) == 0
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md"]
+    assert main(["config", "--json"], root=tmp_path) == 0
+    assert json.loads(capsys.readouterr().out)["guidance"]["engineering"] == {
+        "none": "the workflow's own repository applies only its guidance"}
+
+
+@pytest.mark.parametrize("pointer,named", [
+    ('{ path = "guides/missing/" }', "guidance.engineering names guides/missing/, which "
+                                     "does not exist"),
+    ('{ path = "guides/file.md" }', "guidance.engineering names guides/file.md, which is a "
+                                    "file"),
+    ('{ path = "guides/empty/" }', "guidance.engineering names guides/empty/, which holds no "
+                                   "Markdown file"),
+    ('{ none = " " }', "guidance.engineering declares none without a reason"),
+    ('{ path = "guides/engineering/", none = "x" }',
+     "guidance.engineering must be a table holding exactly one of path"),
+    ('{ distribution = "arkhai-engineering-guidance" }',
+     "guidance.engineering must be a table holding exactly one of path"),
+    ('"guides/engineering/"', "guidance.engineering must be a table holding exactly one"),
+    ('{ path = "/etc/guidance/" }', "guidance.engineering.path must be a directory from the "
+                                    "checkout's root or from `~`"),
+])
+def test_a_pointer_that_names_no_guidance_is_refused(tmp_path: Path, pointer: str,
+                                                     named: str) -> None:
+    _engineering(tmp_path)
+    (tmp_path / "guides/file.md").write_text("# x\n", "utf-8")
+    (tmp_path / "guides/empty").mkdir()
+    (tmp_path / "guides/empty/notes.txt").write_text("x\n", "utf-8")
+    _local(tmp_path, f"[guidance]\nengineering = {pointer}\n")
+
+    with pytest.raises(ConfigError) as refused:
+        config.load(tmp_path)
+    assert named in str(refused.value)
+
+
+@pytest.mark.parametrize("entry", ["docs/guidance/", "docs/guidance/engineering/",
+                                   "docs/guidance/engineering/tests.md",
+                                   "docs/guidance/engineering/imports/"])
+def test_a_load_entry_repeats_the_pointer(tmp_path: Path, entry: str) -> None:
+    """CW-hu0z's third scenario, and the entries that are the pointer's directory or
+    lie beneath it: the check refuses, naming the entry and the pointer."""
+    configured(tmp_path, f'[load]\ncommon = ["AGENTS.md", "{entry}"]\n')
+    _engineering(tmp_path, "docs/guidance/engineering")
+    _local(tmp_path, '[guidance]\nengineering = { path = "docs/guidance/engineering/" }\n')
+
+    with pytest.raises(ConfigError) as refused:
+        config.load(tmp_path)
+    assert (f"load.common names {entry}, which overlaps the directory "
+            "docs/guidance/engineering/ that guidance.engineering points at") in str(refused.value)
+
+
+def test_a_load_entry_beside_the_pointer_is_admitted(tmp_path: Path) -> None:
+    configured(tmp_path, '[load]\ncommon = ["docs/guidance/repository/", "docs/guidance.md"]\n')
+    _engineering(tmp_path, "docs/guidance/engineering")
+    _engineering(tmp_path, "docs/guidance/repository")
+    _local(tmp_path, '[guidance]\nengineering = { path = "docs/guidance/engineering/" }\n')
+
+    assert config.load(tmp_path).engineering is not None
+
+
+def test_this_repositorys_template_is_read_as_a_local_configuration(tmp_path: Path) -> None:
+    """MCW-iqh1: the template points at `docs/guidance/engineering/` and names a model
+    for every step and the orchestrating session; it is read whole beside this
+    repository's committed configuration, given no models of its own and common
+    documents holding no engineering guidance, as the local file requires."""
+    template = (REPOSITORY / ".agents/workflow.local.template.toml").read_text("utf-8")
+    committed = (REPOSITORY / config.CONFIGURATION).read_text("utf-8")
+    committed = re.sub(r"(?ms)^\[models\]$.*?(?=^\[)", "", committed)
+    committed = committed.replace('"docs/guidance/"', '"docs/guidance/repository/"')
+
+    checked = config.check(committed, REPOSITORY / config.CONFIGURATION, root=REPOSITORY,
+                           local=template)
+
+    assert checked.engineering == config.Engineering(
+        entry="docs/guidance/engineering/", path=REPOSITORY / "docs/guidance/engineering")
+    assert set(checked.models) == {*config.STEPS, "orchestrator"}
+    assert config.missing(checked, *(f"models.{step}" for step in config.STEPS),
+                          config.GUIDANCE_ENGINEERING) == []
+
+
+def test_the_local_configuration_is_ignored_by_git() -> None:
+    ignored = subprocess.run(["git", "check-ignore", ".agents/workflow.local.toml"],
+                             cwd=REPOSITORY, capture_output=True, text=True)
+
+    assert ignored.stdout == ".agents/workflow.local.toml\n"
+    assert subprocess.run(["git", "check-ignore", "-q", ".agents/workflow.local.template.toml"],
+                          cwd=REPOSITORY).returncode == 1

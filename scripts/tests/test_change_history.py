@@ -77,9 +77,11 @@ def workspace(tmp_path: Path) -> Path:
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(origin))
     work = tmp_path / "work"
     _git(tmp_path, "init", "-q", "-b", "dev", str(work))
-    # Ignored as the repository ignores them: records, evidence, and the settings link.
+    # Ignored as the repository ignores them: records, evidence, and the links to the
+    # workspace's settings and local configuration.
     (work / ".gitignore").write_text(
-        ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
+        ".claude/settings.local.json\n.agents/workflow.local.toml\n.snapshot/\n"
+        "openspec/changes/**/reviews/\n", "utf-8")
     (work / "README.md").write_text("1\n", "utf-8")
     (work / ".agents/evidence").mkdir(parents=True)
     (work / ".agents/workflow.toml").write_text(CONFIGURATION, "utf-8")

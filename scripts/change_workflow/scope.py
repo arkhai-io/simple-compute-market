@@ -7,8 +7,9 @@ starts, from four sources:
 - the engine: the step's baseline (`graph.STEP_DEFINITIONS`), design's holding each
   prerequisite's proposal worktree registered in its checkout (CW-k8dn), and the
   paths protected
-  in every scope (`PROTECTED`) — the workflow's configuration, so no step changes
-  what its own hooks run; Git's configuration, which says where Git finds its hooks;
+  in every scope (`PROTECTED`) — the workflow's configuration and the checkout's
+  local configuration, so no step changes what its own hooks run or which models
+  later steps run on; Git's configuration, which says where Git finds its hooks;
   and the system's two Git executables, so no step replaces the Git its pushes go
   through (CW-r6kd, CW-j4cs);
 - the adapter of the harness that runs the step: the state its harness writes and the
@@ -66,7 +67,8 @@ ENGINE, ADAPTER, REPOSITORY, GRANT = "engine", "adapter", "repository", "grant"
 # in Git's exec path, which Git puts first on `PATH` for its scripted commands.
 GIT_EXECUTABLES = ("/usr/bin/git", "/usr/lib/git-core/git")
 # The paths no step writes, whatever its scope.
-PROTECTED = (".agents/workflow.toml", ".git/config", *GIT_EXECUTABLES)
+PROTECTED = (".agents/workflow.toml", ".agents/workflow.local.toml", ".git/config",
+             *GIT_EXECUTABLES)
 # Where every step's private temporary directory sits inside its sandbox.
 PRIVATE_TEMPORARY = Path("/tmp")
 _GIT = ".git"

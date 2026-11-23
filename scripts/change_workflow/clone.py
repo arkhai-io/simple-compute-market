@@ -23,8 +23,11 @@ left and never reclones:
    same name on the push remote, so its first push goes there, and never the
    workspace's, so no push goes to the workspace; with no push remote it tracks
    nothing, and the guarded push refuses it;
-4. link `.claude/settings.local.json` to the workspace's, so the owner's local
-   permissions have one source;
+4. link `.claude/settings.local.json` and the workflow's local configuration,
+   `.agents/workflow.local.toml`, to the workspace's, so the owner's local
+   permissions and the owner's local workflow settings each have one source; an
+   empty local configuration in the link's place, the empty form the sandbox
+   creates for an absent protected file, holds no setting and is replaced;
 5. start the bootstrap, the workflow configuration's `post-clone` as the clone's
    checkout declares it, in the background, recording in the clone's Git directory
    the commands it resolved to, its process and log while it runs, then its exit
@@ -58,7 +61,7 @@ none and from one that cannot be used; `workspace_of`, which `find` defines, tel
 a clone from any other checkout. Importing the module does nothing.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-yib2, CW-8jyb, CW-8npg, and
-CW-xx5f; openspec/specs/market-change-workflow/spec.md, MCW-uqlq.
+CW-xx5f, and CW-4pm4; openspec/specs/market-change-workflow/spec.md, MCW-uqlq.
 """
 
 from __future__ import annotations
@@ -82,6 +85,9 @@ from .running import runs_in_progress
 
 POST_CLONE = "post-clone"
 SETTINGS = Path(".claude/settings.local.json")
+# The files a clone links to the workspace's own, each with the name `done` gives
+# the step that made its link.
+LINKED = ((SETTINGS, "settings"), (config.LOCAL, "local configuration"))
 # In the clone's Git directory: which change and branch the clone was made for and
 # the branch it lands on (`find`), the bootstrap's process and log, and its exit
 # status once it has one.
@@ -564,17 +570,20 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
         _git_path(target, MARKER).write_text(
             json.dumps({"change": change, "branch": branch, "base": landing}), "utf-8")
 
-    link = target / SETTINGS
-    wanted = workspace / SETTINGS
-    if link.is_symlink() and Path(os.readlink(link)) == wanted:
-        pass
-    elif link.exists() or link.is_symlink():
-        raise CloneError(f"{link} exists and is not the link to {wanted}; nothing was "
-                         "deleted")
-    else:
+    for linked, made in LINKED:
+        link = target / linked
+        wanted = workspace / linked
+        if link.is_symlink() and Path(os.readlink(link)) == wanted:
+            continue
+        if linked == config.LOCAL and not link.is_symlink() and link.is_file() \
+                and link.stat().st_size == 0:
+            link.unlink()
+        elif link.exists() or link.is_symlink():
+            raise CloneError(f"{link} exists and is not the link to {wanted}; nothing was "
+                             "deleted")
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(wanted)
-        done.append("settings")
+        done.append(made)
 
     state = bootstrap_state(target)
     if state.state in (ABSENT, FAILED):

@@ -747,7 +747,8 @@ def cloned(tmp_path: Path) -> tuple[Path, Path, str, str]:
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(origin))
     work = tmp_path / "work"
     _git(tmp_path, "init", "-q", "-b", "dev", str(work))
-    (work / ".gitignore").write_text("reviews/\n.claude/settings.local.json\n", "utf-8")
+    (work / ".gitignore").write_text(
+        "reviews/\n.claude/settings.local.json\n.agents/workflow.local.toml\n", "utf-8")
     base = _write(work, BASE_FILES)
     _git(work, "remote", "add", "origin", str(origin))
     _git(work, "push", "-q", "origin", "dev")

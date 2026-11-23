@@ -184,3 +184,19 @@ def test_a_test_of_a_repository_script_is_the_repositorys() -> None:
 def test_an_import_of_the_engine_is_found_wherever_it_sits(source: str,
                                                            lines: list[int]) -> None:
     assert engine_imports(source) == lines
+
+
+def test_config_load_prints_the_workflows_guidance_before_the_repositorys_documents() -> None:
+    """CW-l7hn: run as a process in this checkout, `config load common` prints the
+    workflow's guidance, after whatever engineering guidance the checkout's local
+    configuration points at, then `load.common`, which opens with `AGENTS.md`, each
+    document once."""
+    printed = subprocess.run([sys.executable, str(COMMAND), "config", "load", "common"],
+                             cwd=SCRIPTS.parent, capture_output=True, text=True, check=True)
+
+    lines = printed.stdout.splitlines()
+    workflow = sorted(path.relative_to(SCRIPTS.parent).as_posix()
+                      for path in (SCRIPTS.parent / "docs/guidance/workflow").glob("*.md"))
+    common = lines.index("AGENTS.md")
+    assert lines[common - len(workflow):common] == workflow
+    assert len(lines) == len(set(lines))

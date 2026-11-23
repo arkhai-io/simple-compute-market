@@ -334,6 +334,24 @@ def test_a_write_inside_the_scope_succeeds_and_one_outside_fails(checkout: Path)
 
 
 @needs_bwrap
+def test_an_implementation_run_edits_the_local_configuration(checkout: Path) -> None:
+    """CW-r6kd's "An implementation run edits the configuration", for the local file:
+    the write fails, as it does for the committed one, and a local file absent at
+    launch is created empty and read-only, so the run cannot write one either."""
+    (checkout / ".agents/workflow.local.toml").write_text("[models]\n", "utf-8")
+    found = _scope("implement", checkout)
+
+    written = _run(found, "echo y > .agents/workflow.local.toml", checkout)
+
+    assert "Read-only file system" in written.stderr
+    assert (checkout / ".agents/workflow.local.toml").read_text("utf-8") == "[models]\n"
+    (checkout / ".agents/workflow.local.toml").unlink()
+    created = _run(found, "echo y > .agents/workflow.local.toml", checkout)
+    assert created.returncode != 0
+    assert (checkout / ".agents/workflow.local.toml").read_text("utf-8") == ""
+
+
+@needs_bwrap
 def test_a_protected_file_cannot_be_written_or_replaced(checkout: Path) -> None:
     found = _scope("implement", checkout)
 

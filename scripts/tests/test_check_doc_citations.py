@@ -97,6 +97,20 @@ def test_a_cited_agents_path_must_resolve(tmp_path: Path) -> None:
         ".agents/gone.json"]
 
 
+def test_a_checkouts_local_configuration_need_not_exist(tmp_path: Path) -> None:
+    # A checkout's local configuration is on no branch, so a citation of it does
+    # not resolve to a file, while any other absent path still fails, ignored or not.
+    change = tmp_path / "openspec/changes/shape-bounds"
+    change.mkdir(parents=True)
+    (tmp_path / ".gitignore").write_text("*.local.toml\n", "utf-8")
+    (change / "why.md").write_text(
+        "`.agents/workflow.local.toml`, written from `.agents/workflow.local.template.toml`, "
+        "not `.agents/other.local.toml`\n", "utf-8")
+
+    assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
+        ".agents/other.local.toml", ".agents/workflow.local.template.toml"]
+
+
 def test_an_active_change_citing_a_spec_its_delta_creates_resolves(tmp_path: Path) -> None:
     change = tmp_path / "openspec/changes/shape-bounds"
     (change / "specs/new-flow").mkdir(parents=True)

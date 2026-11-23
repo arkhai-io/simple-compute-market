@@ -159,7 +159,7 @@ local file, MCW-iqh1). Touches `scripts/change_workflow/` (`config.py`, `hook.py
 `clone.py`, `scope.py`), `.gitignore`, `.agents/workflow.local.template.toml` (new),
 and their tests.
 
-- [ ] 2.1 `config.py` reads `[workflow] version` before the rest of the file: a
+- [x] 2.1 `config.py` reads `[workflow] version` before the rest of the file: a
   comma-separated subset of PEP 440 specifiers (`>=`, `<=`, `>`, `<`, `==`, `!=`, `~=`)
   over release numbers, parsed on the standard library; an installed version outside
   it refuses every subcommand that reads the configuration but `install` and
@@ -167,37 +167,149 @@ and their tests.
   reported as the mismatch, not as unknown (D11, CW-f8yy). Verify: unit tests of the
   parser and the check, and library integration cases in
   `test_change_workflow_config.py` ("The installed version is too old").
-- [ ] 2.2 The engine reads `.agents/workflow.local.toml` beside the committed file:
+  Done: `config.version_range` and `config.admits` parse and compare on the standard
+  library, padding release numbers with zeros, `~=` keeping the release's series; a
+  version with anything after its release numbers, a pre-release or development
+  release, sorts before its release, as PEP 440 orders them.
+  `config.check` reads the range (`_accepted`) right after parsing the TOML, before
+  any table is checked, against an injected `installed` (`documents.version` by
+  default). The field is checked when declared and not yet required (section 4).
+  Unit: specifiers read and malformed ranges refused, admission across `>=`, `<`,
+  `!=`, `~=` and of a development release and a release candidate, and the check refusing 0.4.2 against `>=0.5, <0.6` without naming the
+  later table: passed. Library integration (in-process `main` over a temporary
+  directory): "The installed version is too old" — `config load design` refuses
+  naming the engine's version, the range, and `change-workflow install`, and no
+  unknown table; a range admitting the engine reads on, `config --json` listing
+  `workflow.version` declared: passed. `install` does not exist yet; it will read no
+  configuration (section 3).
+- [x] 2.2 The engine reads `.agents/workflow.local.toml` beside the committed file:
   `[guidance]`, `[models]`, and `[sandbox] writable.*`, the local writable paths
   extending the committed ones; `config --json` reports `local` (`file`, `exists`),
   each required local field it lacks as `missing`, distinct from `absent`, and
   succeeds with no local file, giving the committed fields and the distribution's in
   full (D5, CW-4pm4's CI scenarios). Verify: library integration cases in
   `test_change_workflow_config.py`.
-- [ ] 2.3 The pointer (D4, CW-hu0z): `engineering = { path }` or `{ none = <reason> }`,
+  Done: `config.load` reads both files; `check(..., local=<text>)` takes the local
+  tables (`_local_tables`), its models joining the committed ones, a step's models
+  declared in both refused, and its writable paths extending the committed ones,
+  checked against the committed protected paths too. A local table or key the
+  committed file holds is refused naming `.agents/workflow.toml`; the converse, a
+  local field in the committed file, waits for section 4. `config --json` gives
+  `local` and `guidance`, and `resolution` lists `workflow.version` and
+  `guidance.engineering`, the latter and every `models.*` `missing` when absent;
+  `config`'s listing names the local file on its second line. Library integration
+  (in-process `main`, temporary Git checkouts): no local file — exit 0, `local`
+  absent, every required local field `missing`, `guidance.engineering` null, every
+  committed field as the resolution of the committed file alone gives it, `workflow`
+  in full, and `config`'s second line naming the local file absent; a local file's
+  models, pointer, and writable paths read; seven malformed local files refused,
+  each naming the field, table, or file at fault; a local writable path under a
+  committed protected one refused: passed.
+- [x] 2.3 The pointer (D4, CW-hu0z): `engineering = { path }` or `{ none = <reason> }`,
   one key; a missing or Markdown-less directory and an empty reason refused; a `load`
   entry that is or lies beneath the pointer refused; `config --json`'s
   `guidance.engineering` as `{"path"}`, `{"none"}`, or `null`. Verify: library
   integration cases in `test_change_workflow_config.py`, the scenarios of CW-hu0z.
-- [ ] 2.4 `config load <step>` and `config load common` print, in order, the
+  Done: `config.Engineering` and `_engineering`; an absolute `path` is refused, as
+  CW-hu0z admits only the root's or `~`'s; `_overlapping` refuses an entry that is
+  the pointer's directory, lies beneath it, or is a directory holding it. Library
+  integration: CW-hu0z's three scenarios, a `~` pointer printed whole, eight
+  malformed pointers, four overlapping entries, and an entry beside the pointer
+  admitted: passed.
+- [x] 2.4 `config load <step>` and `config load common` print, in order, the
   pointer's Markdown files, the installed workflow guidance, then `load.common` and
   `load.<step>`, each once; the post-compaction hook re-reads what `config load
   common` prints (D6, CW-l7hn). Verify: library integration cases in
   `test_change_workflow_config.py` and `test_change_workflow_command.py`.
-- [ ] 2.5 A change's clone links `.agents/workflow.local.toml` to the workspace's, as
+  Done: `Configuration.documents` prints the pointer's files, then the distribution's
+  guidance, then `load.common` and `load.<step>`, each relative to the root where it
+  lies in it and whole otherwise, each once; the hook reads the same list, and its
+  branch for a configuration naming no document went, since the workflow's guidance
+  always names some. Library integration: the existing load cases now open with the
+  workflow's guidance; `config load plan` with a pointer; the hook naming pointer,
+  workflow guidance, and `load.common` in order (`test_post_compaction_context.py`);
+  and `scripts/change-workflow config load common` run as a process in this checkout,
+  the workflow's guidance before `AGENTS.md`, each once: passed.
+- [x] 2.5 A change's clone links `.agents/workflow.local.toml` to the workspace's, as
   it links `.claude/settings.local.json` (CW-4pm4); the sandbox protects the local
   file beside `.agents/workflow.toml` (D13, CW-r6kd). Verify: `test_change_clone.py`
   and `test_change_workflow_scope.py`, `test_change_workflow_sandbox.py` (the write
   refused, under `needs_bwrap`).
-- [ ] 2.6 Add `.agents/workflow.local.toml` to `.gitignore`, and commit
+  Done: `clone.LINKED` links both files, `done` naming "local configuration"; a
+  local file that is not the link is refused, nothing deleted, but for an empty one,
+  the sandbox's empty form of an absent protected file, which holds no setting and
+  is replaced by the link. `scope.PROTECTED`
+  holds `.agents/workflow.local.toml`, so a local file absent at launch is created
+  empty and mounted read-only, as every absent protected path is. Library
+  integration, `test_change_clone.py` (the link made, resumed, a file in its place
+  refused, an empty one replaced): passed; unit, `test_change_workflow_scope.py`: passed; external
+  process, `test_change_workflow_sandbox.py` under `needs_bwrap` (the write to an
+  existing local file and to an absent one both fail, the absent one left empty),
+  run, not skipped: passed.
+- [x] 2.6 Add `.agents/workflow.local.toml` to `.gitignore`, and commit
   `.agents/workflow.local.template.toml`: the pointer at `docs/guidance/engineering/`
   and the models `.agents/workflow.toml` declares today, each with its comment (D5,
   MCW-iqh1). Verify: `git check-ignore .agents/workflow.local.toml` and the template
   read by 2.2's parser in a test.
+  Done: `git check-ignore .agents/workflow.local.toml` prints it, and the template is
+  not ignored, both held by a test; the template, beside this repository's committed
+  configuration with `[models]` removed and `load.common`'s `docs/guidance/` read as
+  `docs/guidance/repository/` (section 4.1's edit), is read whole, its pointer
+  resolved and every step's and the orchestrator's model declared: passed.
 - [ ] 2.7 Verify the section: its suites, and `scripts/change-workflow run
   pre-commit extract-change-workflow-repository` with this repository's configuration
   unchanged, which still passes.
   End-to-end: none exercises the workflow's tooling; none owed.
+  Done: the section's suites — `test_change_workflow_config.py`,
+  `test_change_workflow_command.py`, `test_post_compaction_context.py`,
+  `test_change_clone.py`, `test_change_workflow_scope.py`,
+  `test_change_workflow_sandbox.py`, `test_check_doc_citations.py`: passed.
+  `scripts/change-workflow run pre-commit`, this repository's configuration
+  unchanged: `make validate-local` passed (packaging and every suite, 3,661 scripts'
+  tests among them); the default checks and strict OpenSpec validation passed; `make
+  check-repository` failed only on the two checks that fail at the plan's commit:
+  `check-spec-index` (section 8's index entries) and `check-doc-citations`, now
+  naming only `scripts/tests/test_change_workflow_install.py` and
+  `scripts/tests/test_change_workflow_citations.py`, which sections 3 and 5 create.
+
+Section 2 notes (handoff):
+
+- Outside the plan: `scripts/check_doc_citations.py` admits one absent path,
+  `.agents/workflow.local.toml` (`LOCAL_ONLY`), which Git ignores and no branch
+  holds, under a new `overrides` row of `AGENTS.md`'s exceptions against
+  `documentation.md`'s "Citations resolve"; `market-change-workflow`'s companion's
+  row for the check says so. Without it every permanent document naming the local
+  file, the specifications sections 8 and 10 write among them, fails the check.
+- An absent protected path is created empty before a step launches, the local file
+  among them: a clone's link to a workspace with no local file creates the
+  workspace's empty, and a clone made before the link holds an empty file of its
+  own. `clone` replaces an empty local file with its link, and section 3's
+  `install` must treat an empty local file as absent, writing the template there,
+  or the orchestrator's install in 4.1 writes nothing; this change's own clone was
+  made before the link, so run `scripts/change-workflow clone
+  extract-change-workflow-repository` from the workspace once the workspace's local
+  file is written.
+- A clone now holds a second link, so every test fixture making a workspace that
+  ignores `.claude/settings.local.json` ignores `.agents/workflow.local.toml` too
+  (`test_change_history.py`, `test_change_next_step.py`, `test_round_view.py`,
+  `test_validate_parallel.py`), as this repository's `.gitignore` does.
+- Two tests read this repository's committed configuration and change with 4.1's
+  edit: `test_this_repositorys_template_is_read_as_a_local_configuration` removes
+  `[models]` and re-points `docs/guidance/` only where they are, so it holds after
+  4.1; `test_config_load_prints_the_workflows_guidance_before_the_repositorys_documents`
+  finds `AGENTS.md` and reads the workflow's guidance just before it, whatever the
+  checkout's pointer adds first. 4.1's `load.common` must stop naming
+  `docs/guidance/` before a local file with the pointer is written, or every command
+  reading the configuration refuses the overlap.
+- `config load`'s output now opens with the workflow's guidance, whole paths outside
+  the tree the engine runs from; in this checkout, still without a pointer, the
+  engineering guidance comes from `load.common`'s `docs/guidance/` as before.
+- The fresh-context check's findings fixed: the empty local file above; the
+  citation exemption narrowed from every ignored path to the one file and declared;
+  comments in `.gitignore` and the template naming the installer before it exists;
+  a test docstring describing 4.1's edit; the command test depending on the
+  checkout's local file; pre-releases ordered before their release; two overstated
+  notes; contract lines. Declined: none.
 
 ## 3. The installer, the version stamp, and what is installed protected
 

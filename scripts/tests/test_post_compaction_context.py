@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from change_workflow import config, hook
+from change_workflow import documents as distribution
 from change_workflow_fixtures import configured
 
 INDEX = """| Change | Status | Depends on | Notes |
@@ -52,11 +53,29 @@ def test_context_without_an_index_still_names_the_documents(tmp_path: Path) -> N
     assert "Changes in progress" not in text
 
 
-def test_context_with_no_common_documents_says_so(tmp_path: Path) -> None:
+def test_context_names_the_engineering_and_workflow_guidance_before_the_common_documents(
+        tmp_path: Path) -> None:
+    """CW-l7hn: the hook names what `config load common` prints: the Markdown files
+    beneath the engineering pointer, the workflow's guidance, then `load.common`."""
+    configured(tmp_path, LOAD)
+    (tmp_path / "guides/engineering").mkdir(parents=True)
+    (tmp_path / "guides/engineering/tests.md").write_text("# Tests\n", "utf-8")
+    (tmp_path / config.LOCAL).write_text(
+        '[guidance]\nengineering = { path = "guides/engineering/" }\n', "utf-8")
+
     text = hook.context(tmp_path)
 
-    assert "lists no documents every step reads" in text
-    assert "\n- " not in text.split("Checked-out branch")[0]
+    named = [line[2:] for line in text.split("Checked-out branch")[0].splitlines()
+             if line.startswith("- ")]
+    workflow = sorted(path for path in distribution.path(distribution.GUIDANCE).rglob("*.md"))
+    assert named == ["guides/engineering/tests.md", *map(str, workflow), "GUIDE.md",
+                     "docs/TESTS.md"]
+
+
+def test_context_with_no_configuration_names_the_workflows_guidance(tmp_path: Path) -> None:
+    text = hook.context(tmp_path)
+
+    assert f"- {distribution.path(distribution.GUIDANCE) / 'README.md'}\n" in text
 
 
 def test_a_malformed_configuration_is_named_and_the_session_still_told(tmp_path: Path) -> None:

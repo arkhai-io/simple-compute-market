@@ -27,7 +27,10 @@ itself is never reported. Before it is archived, a citation of a capability's
 `spec.md` that the change's own delta creates resolves, since closeout checks
 citations before the archive writes that file from the delta. A change's
 `reviews/` are excluded too: review records are untracked working notes, never
-part of the branch, so a citation in one is not a citation the branch makes.
+part of the branch, so a citation in one is not a citation the branch makes. A
+checkout's local workflow configuration (`LOCAL_ONLY`) is never on any branch, Git
+ignoring it, so a citation of it names a file each checkout holds for itself, and
+its absence is no unresolved citation.
 """
 
 from __future__ import annotations
@@ -48,6 +51,9 @@ CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
 #: Suffixes worth checking. A citation without one is usually a directory or
 #: prose, and directories are checked separately below.
 CITED_SUFFIXES = ("py", "md", "toml", "yml", "yaml", "json", "sh", "mk")
+
+#: The files each checkout keeps for itself, which Git ignores and no branch holds.
+LOCAL_ONLY = frozenset({".agents/workflow.local.toml"})
 
 #: A path-looking run inside a document. The lookarounds keep it from biting
 #: off the tail of a longer identifier, and the non-greedy body stops at the
@@ -133,7 +139,7 @@ def unresolvable(
             if own and cited.startswith(own[0]):
                 target = own[1] / cited[len(own[0]):]
             if not target.exists():
-                if cited not in created:
+                if cited not in created and cited not in LOCAL_ONLY:
                     problems.append(("absent", cited, document.as_posix()))
             elif target.is_file() and is_tombstone(target):
                 problems.append(("tombstone", cited, document.as_posix()))

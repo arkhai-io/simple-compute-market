@@ -1,5 +1,22 @@
-"""The repository's workflow configuration, `.agents/workflow.toml`: what the change
-workflow assumes about the repository it runs in, read and checked whole.
+"""The repository's workflow configuration, `.agents/workflow.toml`, and the
+checkout's local configuration beside it, `.agents/workflow.local.toml`: what the
+change workflow assumes about the repository it runs in, read and checked whole.
+
+A setting is local exactly when developers using the workflow on the same repository
+may give it different values: the engineering-guidance pointer, `[models]`, and the
+writable sandbox paths a developer adds, which extend the committed ones. The local
+file is ignored by Git, and may be absent, every local field then missing.
+
+The committed `[workflow] version` is the range of workflow versions the repository
+accepts, comma-separated specifiers (`>=`, `<=`, `>`, `<`, `==`, `!=`, `~=`) over
+release numbers. It is read before anything else in the file, so an engine outside
+the range refuses, naming its version, the range, and the fix, rather than
+reporting a newer workflow's table as unknown.
+
+`[guidance] engineering`, the pointer, names where the user's engineering guidance
+is: `{ path = "<directory>" }`, from the checkout's root or `~`, holding Markdown
+files, or `{ none = "<reason>" }`. No `load` entry overlaps the pointer's directory,
+so nothing is read twice.
 
 Each field configures one operation of a skill or the engine, and a value Git or
 the invocation supplies is never one. The workflow defines every table and key; an
@@ -57,11 +74,14 @@ writable path for the review.
 
 `config` lists every field and how it resolved, each kind's guide among them, and
 each step's resolved scope, every path with its source; `config load <step>` the
-documents a step's skill reads.
+documents a step's skill reads: the engineering guidance beneath the pointer, the
+workflow's own guidance, which the distribution ships (`documents`), then
+`load.common` and `load.<step>`, each document once.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
 CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-t3ev, CW-g1gn, CW-r5qk, CW-k7gd, CW-h3ks,
-CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, CW-r8fb, and CW-h2zt.
+CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, CW-r8fb, CW-h2zt, CW-f8yy, CW-4pm4, and
+CW-hu0z.
 """
 
 from __future__ import annotations
@@ -74,7 +94,7 @@ import shlex
 import subprocess
 import sys
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
@@ -85,11 +105,13 @@ from .adapters import ADAPTERS, HARNESSES
 from .adapters import PROTECTED as ADAPTER_PROTECTED
 from .harness import Model
 from .records import is_pattern
-from .scope import (PRIVATE_TEMPORARY, PROTECTED, Scope, hides_temporary,
-                    outside_checkout, protected_by, resolve)
+from .scope import (PRIVATE_TEMPORARY, PROTECTED, Scope, absolute, hides_temporary,
+                    outside_checkout, protected_by, resolve, within)
 
-# The configuration's place in the repository the command acts on.
+# The configuration's place in the repository the command acts on, and the
+# checkout's local configuration beside it.
 CONFIGURATION = Path(".agents/workflow.toml")
+LOCAL = Path(".agents/workflow.local.toml")
 
 # The hooks named by when they run. `pre-push` and `post-clone` belong to the
 # engine's own push and clone, so no step runs them through `run`.
@@ -123,6 +145,7 @@ REQUIRED = (ALWAYS, OWED)
 # The identities an evidence pattern may key its evidence by.
 TREE, COMMIT = "tree", "commit"
 _TABLES: dict[str, tuple[str, ...]] = {
+    "workflow": ("version",),
     "repository": ("protected-branches", "inert-paths"),
     "hooks": HOOKS + STEP_HOOKS,
     "defaults": ("disable",),
@@ -133,6 +156,17 @@ _TABLES: dict[str, tuple[str, ...]] = {
     "review": ("format-retries",),
     "sandbox": ("writable", "protected"),
 }
+# The local configuration's tables and keys: the engineering pointer, the models,
+# and the writable sandbox paths a developer adds.
+GUIDANCE_ENGINEERING = "guidance.engineering"
+_LOCAL_TABLES: dict[str, tuple[str, ...]] = {
+    "guidance": ("engineering",),
+    "models": (ORCHESTRATOR, *STEPS),
+    "sandbox": ("writable",),
+}
+# The comparison operators a version range may use, over release numbers.
+_SPECIFIER = re.compile(r"^\s*(~=|==|!=|<=|>=|<|>)\s*(\d+(?:\.\d+)*)\s*$")
+_RELEASE = re.compile(r"^(\d+(?:\.\d+)*)")
 # The placeholders every command may use, but `pre-push`'s: the guarded push pushes a
 # branch, not a change, so it has the remote alone to give.
 _EVERYWHERE = frozenset({"change", "base"})
@@ -245,6 +279,13 @@ class Configuration:
 
     path: Path
     exists: bool = False
+    # The local configuration's path, and whether there is a file.
+    local: Path | None = None
+    local_exists: bool = False
+    # `[workflow] version`, as declared.
+    version_range: str | None = None
+    # `[guidance] engineering`: the pointer, or None while the local file lacks it.
+    engineering: Engineering | None = None
     protected_branches: tuple[str, ...] | None = None
     inert_paths: tuple[str, ...] | None = None
     hooks: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
@@ -317,12 +358,17 @@ class Configuration:
         return self.openspec if self.openspec is not None else DEFAULT_OPENSPEC
 
     def documents(self, step: str, root: Path) -> list[str]:
-        """The documents a step's skill reads, relative to the repository at `root`:
-        `load.common`, then `load.<step>`, each document once. An entry ending in
+        """The documents a step's skill reads, relative to the repository at `root`
+        where they lie in it and whole otherwise, lower layer first: the Markdown
+        files beneath the engineering pointer, those of the workflow's guidance, then
+        `load.common` and `load.<step>`, each document once. A `load` entry ending in
         `/` names a directory and stands for the Markdown files beneath it
         (`directory_documents`); any other entry names one file and is given as it
         is, whether or not the file exists."""
         found: list[str] = []
+        if self.engineering is not None and self.engineering.path is not None:
+            found.extend(_markdown(self.engineering.path, root))
+        found.extend(_markdown(distribution.path(distribution.GUIDANCE), root))
         for entry in (*self.load.get(COMMON_DOCUMENTS, ()), *self.load.get(step, ())):
             found.extend(directory_documents(root, entry) if entry.endswith("/") else (entry,))
         return list(dict.fromkeys(found))
@@ -349,6 +395,29 @@ class Configuration:
     @property
     def shown(self) -> str:
         return CONFIGURATION.as_posix()
+
+
+@dataclass(frozen=True)
+class Engineering:
+    """The engineering-guidance pointer: the directory it names, as declared and
+    resolved, or the reason the repository applies none."""
+
+    entry: str | None = None
+    path: Path | None = None
+    none: str | None = None
+
+    def shown(self) -> dict[str, str]:
+        """As `config --json` gives it: `{"path": <the directory>}` or `{"none":
+        <the reason>}`."""
+        return {"path": str(self.path)} if self.path is not None else {"none": self.none or ""}
+
+
+def _markdown(directory: Path, root: Path) -> list[str]:
+    """The Markdown files beneath `directory`, in sorted path order, each relative to
+    `root` where it lies there and whole otherwise."""
+    files = sorted(path for path in directory.rglob("*.md") if path.is_file())
+    return [path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
+            for path in files]
 
 
 def directory_documents(root: Path, entry: str) -> list[str]:
@@ -636,8 +705,9 @@ def _kinds(value: Any, root: Path, unignored: Unignored) -> tuple[Kind, ...]:
     return tuple(kinds)
 
 
-def _sandbox(table: dict[str, Any], root: Path,
-             home: Path) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...] | None]:
+def _sandbox(table: dict[str, Any], root: Path, home: Path,
+             also_protected: Sequence[str] = ()
+             ) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...] | None]:
     """`[sandbox]`'s writable paths by key and its protected paths, refused naming the
     field: a key that is neither `common` nor a step; `writable.review`, since the
     review writes nothing it reviews; a pattern outside the checkout, since a pattern
@@ -648,7 +718,8 @@ def _sandbox(table: dict[str, Any], root: Path,
     sandbox could not honour; the protected paths are the engine's, every adapter's,
     whichever harness runs the step, and the repository's. A writable directory
     containing a protected path is admitted: the protected path stays read-only inside
-    it."""
+    it. `also_protected` adds the paths another file protects, as the committed
+    configuration's do for the local one's writable paths."""
     protected = (_strings("sandbox.protected", table["protected"])
                  if "protected" in table else None)
     for entry in protected or ():
@@ -679,7 +750,8 @@ def _sandbox(table: dict[str, Any], root: Path,
                                   "temporary directory; every step writes a private "
                                   f"{PRIVATE_TEMPORARY} of its own, which it would hide")
             if guarded := protected_by(entry, root, home,
-                                       (*PROTECTED, *ADAPTER_PROTECTED, *(protected or ()))):
+                                       (*PROTECTED, *ADAPTER_PROTECTED, *(protected or ()),
+                                        *also_protected)):
                 raise ConfigError(f"{where} names {entry}, which is or lies under the "
                                   f"protected path {guarded}")
         writable[key] = entries
@@ -714,14 +786,159 @@ def _hooks_table(value: Any) -> dict[str, Any]:
     return _table("hooks", value, _TABLES["hooks"])
 
 
+Specifier = tuple[str, tuple[int, ...]]
+
+
+def version_range(where: str, value: Any) -> list[Specifier]:
+    """A version range's specifiers, each an operator and the release numbers it
+    compares with; refused, naming the field, unless every comma-separated part is
+    one of the operators the range admits followed by release numbers."""
+    text = _string(where, value)
+    specifiers: list[Specifier] = []
+    for part in text.split(","):
+        match = _SPECIFIER.match(part)
+        if match is None:
+            raise ConfigError(f"{where} must be comma-separated version specifiers, each one "
+                              "of >=, <=, >, <, ==, !=, or ~= followed by release numbers "
+                              f"such as 0.1; got {part.strip()!r} in {text!r}")
+        operator, release = match.groups()
+        numbers = tuple(int(number) for number in release.split("."))
+        if operator == "~=" and len(numbers) < 2:
+            raise ConfigError(f"{where} names ~={release}, and ~= compares with two release "
+                              "numbers or more, such as ~=0.1")
+        specifiers.append((operator, numbers))
+    return specifiers
+
+
+def _padded(numbers: tuple[int, ...], width: int) -> tuple[int, ...]:
+    return numbers + (0,) * (width - len(numbers))
+
+
+def _holds(operator: str, version: tuple[int, ...], final: bool,
+           release: tuple[int, ...]) -> bool:
+    """Whether a version, its release numbers and whether it is a final release, meets
+    one specifier. A version with anything after its release numbers, a pre-release
+    or a development release, sorts before its release, as PEP 440 orders them."""
+    width = max(len(version), len(release))
+    have, want = (_padded(version, width), final), (_padded(release, width), True)
+    if operator == "~=":
+        # `~=0.4.1` is `>=0.4.1` within the `0.4` series: the release less its last
+        # number is a prefix the version keeps.
+        prefix = release[:-1]
+        return have >= want and _padded(version, len(prefix))[:len(prefix)] == prefix
+    return {"==": have == want, "!=": have != want, "<=": have <= want,
+            ">=": have >= want, "<": have < want, ">": have > want}[operator]
+
+
+def admits(specifiers: Sequence[Specifier], version: str) -> bool:
+    """Whether `version`, by the release numbers it begins with, meets every
+    specifier; one with nothing it begins with as release numbers meets none."""
+    match = _RELEASE.match(version)
+    if match is None:
+        return False
+    numbers = tuple(int(number) for number in match.group(1).split("."))
+    final = match.end() == len(version)
+    return all(_holds(operator, numbers, final, release) for operator, release in specifiers)
+
+
+def _accepted(raw: dict[str, Any], installed: Callable[[], str]) -> str | None:
+    """The range `[workflow] version` declares, checked against the installed
+    version before anything else in the file is read; None when it declares none.
+    Refused, naming the installed version, the range, and the fix, when the version
+    lies outside it: whatever else the file holds may be a later version's."""
+    declared = raw.get("workflow")
+    if not isinstance(declared, dict) or "version" not in declared:
+        return None
+    accepted = declared["version"]
+    specifiers = version_range("workflow.version", accepted)
+    running = installed()
+    if not admits(specifiers, running):
+        raise ConfigError(f"the installed workflow is {running}, outside the range "
+                          f"{accepted} that {CONFIGURATION.as_posix()} accepts "
+                          "(workflow.version): install a version the range admits and run "
+                          "`change-workflow install`, or change the range")
+    return accepted
+
+
+def _engineering(value: Any, root: Path, home: Path) -> Engineering:
+    """The engineering-guidance pointer: exactly one of `path`, a directory from the
+    checkout's root or `~` holding Markdown files, or `none`, a reason."""
+    where = GUIDANCE_ENGINEERING
+    if not isinstance(value, dict) or len(value) != 1 or not set(value) <= {"path", "none"}:
+        raise ConfigError(f"{where} must be a table holding exactly one of path, the "
+                          "directory of the engineering guidance, or none, the reason the "
+                          f"repository applies none; got {value!r}")
+    if "none" in value:
+        if not isinstance(value["none"], str) or not value["none"].strip():
+            raise ConfigError(f"{where} declares none without a reason; a repository applies "
+                              "no engineering guidance only with one")
+        return Engineering(none=value["none"])
+    entry = _string(f"{where}.path", value["path"])
+    if entry.startswith("/"):
+        raise ConfigError(f"{where}.path must be a directory from the checkout's root or "
+                          f"from `~`; got {entry!r}")
+    directory = absolute(entry, root, home)
+    if not directory.is_dir():
+        found = "is a file" if directory.exists() else "does not exist"
+        raise ConfigError(f"{where} names {entry}, which {found}")
+    if not any(path.is_file() for path in directory.rglob("*.md")):
+        raise ConfigError(f"{where} names {entry}, which holds no Markdown file")
+    return Engineering(entry=entry, path=directory)
+
+
+def _overlapping(load: Mapping[str, tuple[str, ...]], engineering: Engineering | None,
+                 root: Path) -> None:
+    """Refuse a `load` entry that is the pointer's directory, lies beneath it, or is a
+    directory holding it: each document beneath the pointer is read once, from it."""
+    if engineering is None or engineering.path is None:
+        return
+    for key, entries in load.items():
+        for entry in entries:
+            path = absolute(entry, root, root)
+            if within(path, engineering.path) or (entry.endswith("/")
+                                                  and within(engineering.path, path)):
+                raise ConfigError(f"load.{key} names {entry}, which overlaps the directory "
+                                  f"{engineering.entry} that {GUIDANCE_ENGINEERING} points at; "
+                                  "the documents beneath the pointer are read from it alone")
+
+
+def _local_tables(text: str) -> dict[str, dict[str, Any]]:
+    """The local configuration's tables, each key one the local file holds; a table
+    or key the committed configuration holds is refused, naming that file."""
+    try:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{LOCAL.as_posix()} is not TOML: {exc}") from exc
+    for name in raw:
+        if name in _LOCAL_TABLES:
+            continue
+        if name in _TABLES:
+            raise ConfigError(f"{LOCAL.as_posix()} declares [{name}], which belongs in "
+                              f"{CONFIGURATION.as_posix()}")
+        raise ConfigError(f"{name} is no table the workflow defines; "
+                          f"{LOCAL.as_posix()}'s tables: " + ", ".join(_LOCAL_TABLES))
+    if isinstance(raw.get("sandbox"), dict) and "protected" in raw["sandbox"]:
+        raise ConfigError(f"{LOCAL.as_posix()} declares sandbox.protected, which belongs in "
+                          f"{CONFIGURATION.as_posix()}: a developer adds writable paths alone")
+    return {name: _table(name, raw[name], keys) for name, keys in _LOCAL_TABLES.items()
+            if name in raw}
+
+
 def check(text: str, path: Path, *, root: Path | None = None,
-          unignored: Unignored = git_unignored, home: Path | None = None) -> Configuration:
+          unignored: Unignored = git_unignored, home: Path | None = None,
+          local: str | None = None,
+          installed: Callable[[], str] = distribution.version) -> Configuration:
     """The configuration `text` holds, checked whole; refused, naming the field, on
     an unknown table or key, a wrong type, a placeholder unknown or unavailable
     where it is used, an evidence pattern under a directory Git does not ignore, a
     guide missing or empty, or a `[sandbox]` path its check refuses (`_sandbox`).
     Paths are read from `root`, the repository's, which is the configuration's own by
-    default, and `~` from `home`, the user's by default."""
+    default, and `~` from `home`, the user's by default.
+
+    `local` is the local configuration's text, None when there is no local file; its
+    models join the committed ones, a step's declared in one file alone, and its
+    writable paths extend the committed ones. The range is checked against
+    `installed`, the engine's version, before anything else."""
     if root is None:
         depth = len(CONFIGURATION.parts)
         root = path.parents[depth - 1] if len(path.parents) >= depth else path.parent
@@ -729,6 +946,7 @@ def check(text: str, path: Path, *, root: Path | None = None,
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{CONFIGURATION.as_posix()} is not TOML: {exc}") from exc
+    accepted = _accepted(raw, installed)
     for name in raw:
         if name not in _TABLES:
             raise ConfigError(f"{name} is no table the workflow defines; its tables: "
@@ -741,10 +959,29 @@ def check(text: str, path: Path, *, root: Path | None = None,
     validation = tables.get("validation", {})
     load = {key: _strings(f"load.{key}", value)
             for key, value in tables.get("load", {}).items()}
-    sandbox_writable, sandbox_protected = _sandbox(tables.get("sandbox", {}), root,
-                                                   Path.home() if home is None else home)
+    home = Path.home() if home is None else home
+    sandbox_writable, sandbox_protected = _sandbox(tables.get("sandbox", {}), root, home)
+    models = dict(tables.get("models", {}))
+    engineering = None
+    if local is not None:
+        local_tables = _local_tables(local)
+        guidance = local_tables.get("guidance", {})
+        if "engineering" in guidance:
+            engineering = _engineering(guidance["engineering"], root, home)
+        local_models = local_tables.get("models", {})
+        if both := sorted(set(models) & set(local_models)):
+            raise ConfigError(f"models.{both[0]} is declared in both {CONFIGURATION.as_posix()} "
+                              f"and {LOCAL.as_posix()}; a step's models are declared once")
+        models.update(local_models)
+        local_writable, _ = _sandbox(local_tables.get("sandbox", {}), root, home,
+                                     also_protected=sandbox_protected or ())
+        sandbox_writable = {key: tuple(dict.fromkeys((*sandbox_writable.get(key, ()),
+                                                      *local_writable.get(key, ()))))
+                            for key in (*sandbox_writable, *local_writable)}
+    _overlapping(load, engineering, root)
     return Configuration(
-        path=path, exists=True,
+        path=path, exists=True, local=root / LOCAL, local_exists=local is not None,
+        version_range=accepted, engineering=engineering,
         protected_branches=(_strings(PROTECTED_BRANCHES, repository["protected-branches"])
                             if "protected-branches" in repository else None),
         inert_paths=(_strings("repository.inert-paths", repository["inert-paths"])
@@ -757,7 +994,7 @@ def check(text: str, path: Path, *, root: Path | None = None,
                             frozenset())[0]
                   if "command" in tables.get("openspec", {}) else None),
         load=load,
-        models=_models(tables.get("models", {})),
+        models=_models(models),
         preflight=(_commands("validation.preflight", validation["preflight"], _EVERYWHERE)
                    if "preflight" in validation else None),
         kinds=(_kinds(validation["evidence"], root, unignored) if "evidence" in validation
@@ -768,17 +1005,28 @@ def check(text: str, path: Path, *, root: Path | None = None,
     )
 
 
-def load(root: Path, unignored: Unignored = git_unignored) -> Configuration:
-    """The configuration of the repository at `root`, checked whole; every field
-    absent when the file does not exist."""
-    path = root / CONFIGURATION
+def _read(path: Path, shown: Path) -> str | None:
     try:
-        text = path.read_text("utf-8")
+        return path.read_text("utf-8")
     except FileNotFoundError:
-        return Configuration(path=path)
+        return None
     except OSError as exc:
-        raise ConfigError(f"cannot read {CONFIGURATION.as_posix()}: {exc}") from exc
-    return check(text, path, root=root, unignored=unignored)
+        raise ConfigError(f"cannot read {shown.as_posix()}: {exc}") from exc
+
+
+def load(root: Path, unignored: Unignored = git_unignored, home: Path | None = None,
+         installed: Callable[[], str] = distribution.version) -> Configuration:
+    """The configuration of the repository at `root` with its checkout's local one,
+    checked whole; every committed field absent when there is no committed file, and
+    every local field when there is no local one."""
+    path = root / CONFIGURATION
+    text = _read(path, CONFIGURATION)
+    local = _read(root / LOCAL, LOCAL)
+    if text is None and local is None:
+        return Configuration(path=path, local=root / LOCAL)
+    checked = check(text or "", path, root=root, unignored=unignored, home=home, local=local,
+                    installed=installed)
+    return checked if text is not None else replace(checked, exists=False)
 
 
 def missing(configuration: Configuration, *fields: str) -> list[str]:
@@ -794,6 +1042,8 @@ def missing(configuration: Configuration, *fields: str) -> list[str]:
             present = configuration.protected_branches is not None
         elif name.startswith("models."):
             present = name.removeprefix("models.") in configuration.models
+        elif name == GUIDANCE_ENGINEERING:
+            present = configuration.engineering is not None
         else:
             raise ConfigError(f"{name} is no required field")
         if not present:
@@ -842,6 +1092,8 @@ def require_for_step(configuration: Configuration, step: str, *,
 # Resolution: every field and how it resolved.
 
 DECLARED, DEFAULT, DISABLED, ABSENT = "declared", "default", "disabled", "absent"
+# A required local field the local configuration lacks; an optional field is absent.
+MISSING = "missing"
 # What each default check runs, as `config` shows it.
 _DEFAULT_SHOWN = {
     "index": "scripts/change-workflow check index",
@@ -862,6 +1114,11 @@ def resolution(configuration: Configuration) -> list[dict[str, Any]]:
         fields.append({"field": name, "status": status,
                        **({"value": value} if value is not None else {}), **more})
 
+    add("workflow.version", ABSENT if configuration.version_range is None else DECLARED,
+        configuration.version_range)
+    engineering = configuration.engineering
+    add(GUIDANCE_ENGINEERING, MISSING if engineering is None else DECLARED,
+        None if engineering is None else engineering.shown())
     branches = configuration.protected_branches
     add("repository.protected-branches", ABSENT if branches is None else DECLARED,
         None if branches is None else list(branches))
@@ -885,7 +1142,7 @@ def resolution(configuration: Configuration) -> list[dict[str, Any]]:
             None if documents is None else list(documents))
     for key in _TABLES["models"]:
         models = configuration.models.get(key)
-        add(f"models.{key}", ABSENT if models is None else DECLARED, models)
+        add(f"models.{key}", MISSING if models is None else DECLARED, models)
     add("validation.preflight", ABSENT if configuration.preflight is None else DECLARED,
         None if configuration.preflight is None else list(configuration.preflight))
     add("review.format-retries", DEFAULT if configuration.format_retries is None else DECLARED,
@@ -935,7 +1192,9 @@ def resolution_lines(configuration: Configuration, resolved: Mapping[str, Scope]
     """`config`'s listing: every field and how it resolved, then each step's scope in
     `resolved`, its paths shown from the checkout at `root`."""
     lines = [f"{configuration.shown}: " + ("read" if configuration.exists
-                                           else "no such file; every field is absent")]
+                                           else "no such file; every field is absent"),
+             f"{LOCAL.as_posix()}: " + ("read" if configuration.local_exists
+                                       else "no such file; every local field is missing")]
     for entry in resolution(configuration):
         detail = (f"— {entry['reason']}" if "reason" in entry
                   else _shown_value(entry["value"]) if "value" in entry else "")
@@ -982,8 +1241,13 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         for document in documents:
             print(document)
     elif args.json:
+        engineering = configuration.engineering
         print(json.dumps({"file": configuration.shown, "exists": configuration.exists,
+                          "local": {"file": LOCAL.as_posix(),
+                                    "exists": configuration.local_exists},
                           "fields": resolution(configuration),
+                          "guidance": {"engineering": None if engineering is None
+                                       else engineering.shown()},
                           "scopes": {step: scope.shown() for step, scope in resolved.items()},
                           "workflow": distribution.RUNNING.described()},
                          ensure_ascii=False))

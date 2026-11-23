@@ -58,7 +58,8 @@ def workspace(tmp_path: Path) -> Path:
     # Ignored as the repository ignores them: the settings link, and a change's
     # records and evidence.
     (work / ".gitignore").write_text(
-        ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
+        ".claude/settings.local.json\n.agents/workflow.local.toml\n.snapshot/\n"
+        "openspec/changes/**/reviews/\n", "utf-8")
     # The evidence directory history copies from, as an evidence kind's pattern fixes
     # it, and the guide the kind names.
     (work / ".agents/evidence").mkdir(parents=True)
@@ -112,7 +113,8 @@ def test_a_fresh_clone_has_both_remotes_the_branch_the_link_and_a_bootstrap(
 
     clone = created.clone
     assert clone == workspace.parent / "work.changes" / CHANGE
-    assert created.done == ("cloned", "remotes", "branch", "settings", "bootstrap")
+    assert created.done == ("cloned", "remotes", "branch", "settings", "local configuration",
+                            "bootstrap")
     assert _git(clone, "remote", "get-url", "origin") == _git(workspace, "remote", "get-url",
                                                                "origin")
     assert Path(_git(clone, "remote", "get-url", "workspace")).resolve() == workspace.resolve()
@@ -120,6 +122,8 @@ def test_a_fresh_clone_has_both_remotes_the_branch_the_link_and_a_bootstrap(
     assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
     assert os.readlink(clone / ".claude/settings.local.json") == str(
         workspace.resolve() / ".claude/settings.local.json")
+    assert os.readlink(clone / ".agents/workflow.local.toml") == str(
+        workspace.resolve() / ".agents/workflow.local.toml")
     assert spawn.calls == [(["make init"], clone)]
     assert created.bootstrap == clones.Bootstrap("succeeded",
                                                  _git_file(clone, clones.BOOTSTRAP_LOG))
@@ -289,7 +293,7 @@ def test_a_checkout_interrupted_before_its_upstream_was_settled_is_settled(
 
     created = _create(workspace)
 
-    assert created.done == ("settings", "bootstrap")
+    assert created.done == ("settings", "local configuration", "bootstrap")
     assert sentinel.read_text("utf-8") == "kept\n"
     assert _git(clone, "branch", "--format=%(refname:short)") == BRANCH
     assert _git(clone, "config", f"branch.{BRANCH}.remote") == "origin"
@@ -342,7 +346,7 @@ def test_a_clone_made_but_not_finished_resumes_after_its_clone(workspace: Path) 
 
     created = _create(workspace)
 
-    assert created.done == ("remotes", "branch", "settings", "bootstrap")
+    assert created.done == ("remotes", "branch", "settings", "local configuration", "bootstrap")
     assert sentinel.read_text("utf-8") == "kept\n"
     assert _git(clone, "branch", "--show-current") == BRANCH
 
@@ -355,18 +359,19 @@ def test_a_clone_with_its_remotes_resumes_at_its_branch(workspace: Path) -> None
     _git(clone, "remote", "add", "origin", _git(workspace, "remote", "get-url", "origin"))
     sentinel = _sentinel(clone)
 
-    assert _create(workspace).done == ("branch", "settings", "bootstrap")
+    assert _create(workspace).done == ("branch", "settings", "local configuration", "bootstrap")
     assert sentinel.read_text("utf-8") == "kept\n"
 
 
 def test_a_clone_without_its_link_or_bootstrap_resumes_at_the_link(workspace: Path) -> None:
     clone = _create(workspace).clone
     (clone / ".claude/settings.local.json").unlink()
+    (clone / ".agents/workflow.local.toml").unlink()
     for name in (clones.BOOTSTRAP, clones.BOOTSTRAP_STATUS, clones.BOOTSTRAP_LOG):
         _git_file(clone, name).unlink()
     sentinel = _sentinel(clone)
 
-    assert _create(workspace).done == ("settings", "bootstrap")
+    assert _create(workspace).done == ("settings", "local configuration", "bootstrap")
     assert sentinel.read_text("utf-8") == "kept\n"
 
 
@@ -656,6 +661,29 @@ def test_a_settings_file_that_is_not_the_link_is_refused(workspace: Path) -> Non
     with pytest.raises(clones.CloneError, match="is not the link"):
         _create(workspace)
     assert settings.read_text("utf-8") == "{}\n"
+
+
+def test_a_local_configuration_that_is_not_the_link_is_refused(workspace: Path) -> None:
+    clone = _create(workspace).clone
+    local = clone / ".agents/workflow.local.toml"
+    local.unlink()
+    local.write_text("[models]\n", "utf-8")
+
+    with pytest.raises(clones.CloneError, match="workflow.local.toml exists and is not the link"):
+        _create(workspace)
+    assert local.read_text("utf-8") == "[models]\n"
+
+
+def test_an_empty_local_configuration_in_the_links_place_is_replaced(workspace: Path) -> None:
+    # The sandbox creates an absent protected file empty before a step launches, so a
+    # clone made before it linked the local configuration can hold one.
+    clone = _create(workspace).clone
+    local = clone / ".agents/workflow.local.toml"
+    local.unlink()
+    local.write_text("", "utf-8")
+
+    assert _create(workspace).done == ("local configuration",)
+    assert os.readlink(local) == str(workspace.resolve() / ".agents/workflow.local.toml")
 
 
 def _upstream(workspace: Path) -> Path:
