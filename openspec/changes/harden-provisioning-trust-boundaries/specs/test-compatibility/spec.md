@@ -1,3 +1,33 @@
+## ADDED Requirements
+
+### Requirement: VM guest isolation is proven on a real host
+
+An external-topology module, `e2e_vm_guest_isolation`, MUST prove VM guest isolation on a configured real-provisioning target by extending the real VM scenario's two deals on one host, adding its stages while both guests run and the first holds a session with a liveness check, and sharing that scenario's teardown. It MUST belong to no default lane and MUST report a blocked skip without the target.
+
+A VM target MAY state, at version 2, a `guest_isolation` section naming a harness-local operator route to the host — its address, port, user, and the path of a key the harness references and never copies — and MAY name two private destinations, `refused` and `listed`, neither of which needs to answer. The module MUST perform every host-side step through that route alone, running fixed operator code under `sudo -n`: restarting libvirtd, reloading UFW, reading the guest policy's chains and rule counters, planting a guest unconverged, and running the host kit's installed convergence command. Guest-side probes MUST run as fixed code in a guest through the shared SSH helper. A refusal of a host port, of a link-local destination, or of a private destination MUST count only when the matching policy rule's counter rose across the probe, and a listed destination's forwarding only when its accept counter rose. The module MUST confirm from the policy's chain that the `listed` destination is admitted and the `refused` one is not.
+
+The module MUST report, as made, failed, or unproven, each observation: guest-to-guest ARP, ICMP and TCP refused, directly and through the gateway (O1); an ARP claim of the other guest's address dropped while its buyer still reaches it, with the filter's parameters in the guest's live definition (O2); DHCP and DNS passing and another host port refused (O3); the link-local metadata address refused (O4); the unlisted private destination refused and the listed one forwarded (O5); a buyer from a private address reaching their guest (O6); O3 to O5 holding after a libvirtd restart and after a UFW reload, with the policy's jumps first (O7); and a guest planted unconverged converged with its session's longest gap at most five seconds, its port isolated, its filter bound or recorded as waiting for its next start, and its saved definition carrying both (O8). A stage whose input the target does not name MUST skip naming it.
+
+#### Scenario: The target names no operator route
+
+- **WHEN** the module runs against a VM target with no `guest_isolation` section
+- **THEN** every host-side stage skips naming `guest_isolation`, and every observation but O1 and O6 is unproven naming it
+
+#### Scenario: A refusal the policy did not make
+
+- **WHEN** a guest's connection to a private destination gets no answer while the matching drop rule's counter is unchanged
+- **THEN** the stage fails rather than counting the refusal
+
+#### Scenario: Buyers reach the guests through a relay
+
+- **WHEN** the VM target's access is a relay
+- **THEN** the stage observing a private-source buyer skips naming the route it lacks, and O6 is unproven
+
+#### Scenario: A planted guest is converged
+
+- **WHEN** the module clears the first guest's port isolation, filter and saved definition through the operator route and runs the convergence command
+- **THEN** the first guest's session shows no gap over five seconds, its port is isolated, its saved definition carries the isolation and the filter, and its probes of the other guest are refused again
+
 ## MODIFIED Requirements
 
 ### Requirement: A real-provisioning target is a typed, versioned settings section

@@ -46,6 +46,10 @@ from submission to use, is deferred to an unowned gap (design D11).
   between guests. A guest reaches DHCP and DNS on its host and nothing else there, and
   no link-local or private destination the seller does not list. The host kit
   converges running guests live, until a stated release.
+- **Guest isolation is proven on a real host.** An external-topology scenario extends
+  the real-provisioning scenario's two guests, reaches the host through an operator
+  route its target names, and reports each observation made, failed or unproven;
+  closeout waits on the observations it requires.
 - **The administrator's reach is one rule.** The administrator is admitted on every
   route acting on its operator's resources and never authorized as a party to a deal.
   It is recorded in `ARCHITECTURE.md`, stated by each service's specification, held by
@@ -73,6 +77,9 @@ from submission to use, is deferred to an unowned gap (design D11).
   route.
 - `storefront-publication`: a storefront never authorizes its administrator as a
   party, and every storefront's negotiation reads are the administrator's.
+- `test-compatibility`: a real VM scenario pins its host only from an independent
+  source, and the real-host proof of guest isolation with the target's
+  `guest_isolation` section.
 
 ### New Capabilities
 
@@ -101,8 +108,11 @@ None.
   connectivity result, the host definitions document and its export.
 - The provisioning migration chain: version 2 to version 3, marking hosts for adoption.
 - `domains/vms/provisioning/iac/ansible/`: the `vm-management` role's interface
-  definition, and the VM host kit's isolation rules, nwfilter, convergence of running
-  guests, and `guest_allowed_private_destinations`; the VM IaC README.
+  definition, and the VM host kit's isolation rules, nwfilter, the installed
+  convergence command for running guests, removal of the older per-port rules, and
+  `guest_allowed_private_destinations`; the VM IaC README.
+- `e2e-tests/`: the real-provisioning target's `guest_isolation` section and
+  `e2e_vm_guest_isolation` with its guest-side and operator probes.
 - `domains/apicredits/storefront/`: authentication of its negotiation reads; the three
   storefronts' refusal tests.
 - The e2e real-provisioning helpers, which state or capture host keys.
@@ -122,7 +132,7 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md`: the administrator's reach
 - [x] Existing subsystem specification: `physical-provisioning`, `site-capacity`,
-  `api-credits`, `storefront-publication`
+  `api-credits`, `storefront-publication`, `test-compatibility`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -167,3 +177,18 @@ None.
   steps; the inventory of existing paths as an unowned gap in
   `openspec/changes/README.md`, written with this design.
 - D17: no permanent destination — the implementation cadence is this change's.
+- D18: `test-compatibility`'s specification (the real-host proof reaches the host
+  through an operator route its target names) and architecture companion; the
+  validation runbook's real-target instructions and the E2E README.
+- D19: `test-compatibility`'s specification (the scenario and its per-observation
+  outcome); the validation runbook and the E2E README.
+- D20: `physical-provisioning`'s specification (converging running guests and its
+  report) and architecture companion's "Guests are isolated from each other"; the VM
+  IaC README.
+- D21: `test-compatibility`'s specification (the target's `guest_isolation` section and
+  counter attribution); the committed example target, the validation runbook's
+  "Describe The Target", and the E2E README.
+- D22: no permanent destination — it settles this change's closeout gate; the run's
+  outcome is recorded in the change and its design-promotion record.
+- D23: `docs/release-handbook.md`'s "Compatibility to retire", its third row.
+- D24: no permanent destination — the implementation cadence is this change's.

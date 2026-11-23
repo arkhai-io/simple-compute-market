@@ -139,7 +139,7 @@ The provisioning migration that rewrites `ssh` connections to version 3 MUST mar
 
 ### Requirement: A VM guest reaches no other guest on its host
 
-Every VM guest MUST be created with its interface's bridge port isolated and with libvirt's `clean-traffic` filter binding it to its MAC address and the address it leased by DHCP. VM host preparation MUST drop forwarding from the guests' bridge back to it, in a chain of the host kit's own reached before any rule libvirt or UFW installs, and MUST keep that rule first across a restart of libvirt, a reload of UFW, and a reboot. A host whose libvirt lacks port isolation or the nwfilter driver MUST fail host preparation naming what is missing. A guest's address discovery, DHCP reservation, and teardown are unchanged.
+Every VM guest MUST be created with its interface's bridge port isolated and with libvirt's `clean-traffic` filter binding it to its MAC address and the address it leased by DHCP. VM host preparation MUST drop forwarding from the guests' bridge back to it, in a chain of the host kit's own reached before any rule libvirt or UFW installs, and MUST keep that rule first across a restart of libvirt, a reload of UFW, and a reboot. A host whose libvirt is older than 6.1 or lacks the nwfilter driver's `clean-traffic` filter, whose virt-install is older than 3.0, or which lacks `ebtables`, MUST fail host preparation naming each item missing. A guest's address discovery, DHCP reservation, and teardown are unchanged.
 
 #### Scenario: A guest probes another guest on its host
 
@@ -194,7 +194,7 @@ VM host preparation MUST accept, from the guests' bridge to the host, only DHCP,
 
 ### Requirement: VM host preparation converges running guests
 
-VM host preparation MUST isolate the bridge port of every running guest without interrupting its link, MUST apply the `clean-traffic` filter to it live where libvirt accepts that and otherwise at the guest's next start, and MUST write both into the guest's saved definition so that a restart or a host reboot keeps them. It MUST report every running guest it could not converge.
+VM host preparation MUST isolate the bridge port of every running guest without interrupting its link, MUST apply the `clean-traffic` filter to it live where libvirt accepts that and otherwise at the guest's next start, and MUST write both into the guest's saved definition so that a restart or a host reboot keeps them. It MUST report, for each running guest by name, whether its port is isolated, whether its filter applied live or waits for its next start, whether its saved definition carries both, and the reason for any step that failed, and MUST name every running guest it could not converge.
 
 #### Scenario: A host prepared before isolation is prepared again
 
@@ -206,6 +206,16 @@ VM host preparation MUST isolate the bridge port of every running guest without 
 
 - **WHEN** host preparation cannot isolate a running guest's port
 - **THEN** it reports the guest by name
+
+#### Scenario: libvirt refuses a live filter
+
+- **WHEN** host preparation converges a running guest whose filter libvirt will not apply live
+- **THEN** the guest's port is isolated, its saved definition carries the filter for its next start, and the report says the filter waits for that start
+
+#### Scenario: A host lacks a prerequisite of isolation
+
+- **WHEN** VM host preparation runs on a host whose virt-install is older than 3.0 and which lacks `ebtables`
+- **THEN** it fails before installing the guest policy, naming both
 
 ## MODIFIED Requirements
 

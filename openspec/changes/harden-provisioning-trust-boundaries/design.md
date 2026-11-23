@@ -72,6 +72,19 @@ migration chain receives only the database connection
 (`provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`),
 so no migration can learn a host's key or re-protect a value.
 
+**What the real-host proof can reach.** The e2e harness reaches the provisioning
+service through its typed clients and a delivered guest through the shared SSH
+helper, as the guest's buyer; the guest's tenant user has passwordless sudo
+(`vm-management/tasks/vm-create.yml`). Nothing offered to a test restarts a host
+service, reloads its firewall, or runs host preparation: the VM operator client runs
+fixed playbooks, and host preparation is run by an operator. The bare-metal
+qualification already reaches its host through a harness-local operator route its
+target names (`cleanup_qualification.operator`), running fixed observer code under
+`sudo -n` over the shared SSH seam (`working_data_qualification.py`), and
+`test-compatibility` admits such independent operator observations.
+`e2e_vm_real_provisioning` already holds two deal guests on one host at once, with a
+heartbeat held on the first (its stages `09f`–`09n`).
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -309,21 +322,28 @@ Every guest's interface is defined once for all nine `virt-install` sites:
 </interface>
 ```
 
+Every site takes these arguments from one template the role looks up
+(`vm-management/templates/guest-interface-args.j2`): `--network
+network=default,model=virtio` and `--xml` edits adding the port and the filter. It is
+a template rather than a variable because a pool's `extra_vars` override any variable,
+so a pool could otherwise put guests back on a shared segment.
+
 An isolated bridge port forwards only to ports that are not isolated, here `virbr0`
 itself, so guests reach DHCP, DNS and the NAT uplink but never each other at layer 2.
 `clean-traffic` holds each guest to its MAC address and the address it leased, which
-closes the ARP takeover. The host kit adds, first in its own forwarding chain (D8) and
-saved through the existing `iptables-restore` unit,
+closes the ARP takeover. The host kit adds, first in its own forwarding chain and
+installed by its own unit (D8),
 `-i virbr0 -o virbr0 -m comment --comment arkhai-guest-isolation -j DROP`,
 closing the hairpin through the gateway. `default`, the DHCP reservations, address
 discovery, and every teardown path are unchanged. A GPU guest needs nothing different.
-The host kit ensures libvirt's nwfilter driver is present and requires libvirt 6.1 or
-later. The VM IaC README's and the host kit's false isolation claims are corrected.
+Host preparation refuses, naming each missing item, a host with libvirt older than
+6.1, without the nwfilter driver's `clean-traffic` filter, with virt-install older than
+3.0 — whose `--xml` is the only way to set the filter's parameters — or without
+`ebtables`, which host preparation installs. The VM IaC README's and the host kit's
+false isolation claims are corrected.
 
-The proof is a probe between two guests on a real KVM host, controlled CPU targets
-sufficing: layer-2 ARP and ping, TCP and ping to the other guest's address, the
-hairpin through the gateway, and an attempt to claim the other guest's address. Static
-role tests hold the interface definition and the rule.
+The real-host proof is D22's observations O1 and O2. Static role tests hold the
+interface definition and the rule.
 
 Rejected:
 - nwfilter rules alone, a filter of our own kept correct by hand with ARP and
@@ -370,19 +390,29 @@ run, and under libvirt's nftables backend its accepts sit in a table of their ow
 where they stop no drop in the filter table. The host kit removes its own
 `ufw allow in on virbr0 from 192.168.122.0/24`, which accepts every packet from a guest
 to the host, and the scattered port-22 rules, which collapse into the default deny; its
-`allow out on virbr0` governs only the host's own connections to guests and stays. It
-re-asserts both jumps at the first position after libvirt restarts and after UFW
-reloads (17 F4). cloud-init reads a seed ISO, and the host's SSH into a guest, frpc's
-proxy, and DNATed buyer SSH are connections the host opened or forwards, so none needs
-more.
+`allow out on virbr0` governs only the host's own connections to guests and stays;
+removing the older rules from a host an earlier release prepared is a compatibility
+path (D23). The chains and both jumps are installed in one `iptables-restore -w
+--noflush` transaction that fills the chains and puts each jump first, run by
+`arkhai-guest-policy.service`, a oneshot started at boot and with every libvirtd start,
+and by `/etc/ufw/after.init` on UFW's start, so both jumps are first again after
+libvirt restarts and after UFW reloads (17 F4). The policy does not rely on the host
+kit's `iptables-restore` unit, which restores nothing at boot on a host with neither
+`/etc/iptables` nor `/etc/sysconfig`, an unowned gap in the change index. cloud-init
+reads a seed ISO, and the host's SSH into a guest, frpc's proxy, and DNATed buyer SSH
+are connections the host opened or forwards, so none needs more.
+
+A VM create inserts its guest's two forwarding accepts for DNATed buyer SSH at
+`FORWARD`'s first position, ahead of the policy's jump. They match no packet a guest
+originates: the inbound accept requires `! -i virbr0`, and the reply accept
+`--ctstate ESTABLISHED`, so neither admits another guest's connection through the
+gateway nor a connection a guest opens.
 
 A guest that reaches the seller's network, its management route, or its cloud
 credentials has crossed the boundary a seller places beside buyers as surely as one
 that reaches another guest.
 
-The real-host proof of D7 also shows DHCP and DNS passing while another host port and a
-private destination are refused, before and after restarting libvirt and reloading
-UFW, and a buyer connecting directly from a private address reaching their guest.
+The real-host proof is D22's observations O3 to O7.
 
 Rejected: host services alone, leaving the seller's network and cloud metadata open;
 host services and link-local alone; nothing beyond D7; installing the policy through
@@ -397,7 +427,8 @@ For each running guest, the host kit sets the bridge flag on its tap
 `clean-traffic` through `virsh update-device --live` where libvirt accepts it and
 otherwise at the guest's next start, and writes both into the guest's saved definition
 so a host reboot or autostart keeps them. No buyer connection is interrupted. The host
-kit reports any guest it could not converge. An isolated port can still be reached
+kit reports any guest it could not converge. The convergence is one installed command
+(D20), and its real-host proof is D22's observation O8. An isolated port can still be reached
 from one that is not, so without this a guest created before the change could reach new
 guests at layer 2 for as long as it runs, and VM leases may be open-ended.
 
@@ -501,7 +532,7 @@ removed when it falls due. The engineering guidance gains
 `retiring-compatibility.md`, a new file beside `versioning.md`, linked from it;
 this repository's form is a section of `package-versions.md`; and the release handbook
 gains "Compatibility to retire", a table read before a release candidate is loaded and
-when a release is cut, with this change's two rows (D6, D9). Their full text, as the
+when a release is cut, with this change's three rows (D6, D9, D23). Their full text, as the
 owner accepted it, is in "Promotion text" below. Listing the compatibility paths
 already in the code is an unowned gap in the change index.
 
@@ -512,30 +543,211 @@ too thin for the subject.
 
 ### D17 — Two rounds of two sessions, then closeout
 
+The cadence first settled; D24 settles the work remaining after guest isolation's
+proof returned the change to design. See "Implementation cadence".
+
+### D18 — The real-host proof reaches the host through an operator route its target names
+
+`e2e_vm_guest_isolation` performs its host-side steps — restarting libvirtd, reloading
+UFW, reading the policy's chains and counters, planting a guest to converge, and
+running the convergence (D20) — through a harness-local operator route named in the VM
+target's opt-in `guest_isolation` section (D21), as the bare-metal qualification's
+`cleanup_qualification.operator` is. The route's key is referenced, never copied. The
+operator code is a fixed Python probe beside its scenario, carried with JSON arguments
+over the shared SSH seam and run as `sudo -n -- python3 -c <probe> <arguments>`, as
+`working_data_probe.py` is. Without the section, every host-side stage skips naming it,
+and each observation it requires is unproven.
+
+The route gives the test no reach the deployment under test lacks: the provisioning
+service already holds a key that runs code as root on the host. It gives the test its
+own route, apart from the service's. The route is the deployment's to provide; until it
+is, the run waits (D22).
+
+Rejected:
+- an operator procedure between named runs, the target stating each run's phase: the
+  phase is the operator's word rather than an observation, a UFW reload is observable
+  nowhere, and no heartbeat spans runs, so convergence with an uninterrupted session
+  cannot be shown;
+- new administrator operations in the provisioning service and the VM operator client
+  to re-apply the policy and converge guests: new routes, jobs and client methods, a
+  second acceptance boundary, and restarting libvirtd or reloading UFW are no product
+  operation, so the restart and reload would still need a route;
+- proving the host-side claims only in a privileged container with real `iptables`: it
+  leaves libvirtd's start order, `ufw reload` running `after.init`, and live
+  convergence unproven on a real host;
+- deferring the host-side observations, against D2;
+- driving the host-side steps through the provisioning service's existing reach rather
+  than a route of the test's own: kept as the fallback should the deployment be unable
+  to provide the route (Open Questions), since it needs no new endpoint.
+
+### D19 — `e2e_vm_guest_isolation` extends the real-provisioning scenario's two-guest window
+
+The scenario is a module of its own subclassing `e2e_vm_real_provisioning`'s shared
+stages: it makes the same two deals on one host, adds its isolation stages within the
+window in which both guests run and the first holds a heartbeat, and shares the
+teardown. It runs in no lane, is blocked without the real-provisioning target, carries
+a marker of its own in `e2e-tests/pyproject.toml`, and logs each observation (D22) as
+made, failed or unproven after its last stage, through
+`tests/e2e/roles/helpers/qualification.py`, as the qualification modules do.
+
+Rejected: isolation stages inside `e2e_vm_real_provisioning`, gated on the section,
+which would restart libvirtd and alter a guest in the ordinary real-provisioning run
+whenever a target names the section, blurring that scenario's evidence; guests created
+through the VM operator client with no deal, which have no buyer path for O2 and O8.
+
+### D20 — Convergence is one installed command, proven on a guest planted unconverged
+
+Host preparation installs `vm-setup/files/guest_converge.sh` as
+`/usr/local/sbin/arkhai-guest-converge`, runs it, and reports from its output, as it
+installs and runs `arkhai-guest-policy`. The command converges every running guest as
+D9 says and writes one machine-readable line per guest: its name, whether its port is
+isolated, whether its filter applied live or waits for the guest's next start, whether
+its saved definition carries both, and the reason for any step that failed. It exits
+non-zero only when it could not run at all. Host preparation names each guest the
+output reports unconverged; the scenario's operator probe runs the same command and
+reads the same lines, so neither caller interprets `virsh` itself.
+
+The proof plants, through the operator route, the state an earlier release left on the
+first deal guest, the one holding the heartbeat: its live port's isolation cleared, its
+filter detached live, and its saved definition without either. It then runs the
+command and checks that the heartbeat's longest gap is at most five seconds, that the
+port is isolated and the filter bound, that the saved definition carries both, and that
+the guest-to-guest probes are refused again. Where libvirt refuses the fixture's own
+live filter removal, the fixture clears isolation alone, and the run records the
+next-start path as the one exercised, with the libvirt version.
+
+Rejected:
+- a guest an earlier release actually made, by preparing the host and creating the
+  guest with v0.3.0's host kit and images, which needs a second deployment in one run,
+  or by a hand-made `virt-install` guest outside any deal, which has no buyer session
+  and duplicates the create;
+- proving convergence only against faked `virsh` and `bridge`, leaving D9 without
+  real-host evidence;
+- convergence as Ansible tasks, which the scenario cannot run without
+  `ansible-playbook` and the IaC tree, so its proof would exercise other code;
+- a script run uninstalled by `ansible.builtin.script`, which the scenario could run
+  only by carrying a file of the IaC tree across a package boundary into the harness.
+
+### D21 — The VM target's `guest_isolation` section, and probes attributed by counters
+
+A VM target may state, at version 2, an optional section:
+
+```yaml
+REAL_PROVISIONING_TARGET:
+  version: 2
+  hosts:
+    - domain: vm
+      host_id: kvm-real-1
+      # … connection, access, capacity, listing_shape, management_unit …
+      guest_isolation:
+        operator:                       # referenced, never copied
+          host: 127.0.0.1
+          port: 16002
+          user: qual-observer
+          key_path: /run/secrets/example-observer-key
+        private_destinations:           # neither needs to answer
+          refused: 10.20.0.7            # not in guest_allowed_private_destinations
+          listed: 10.20.0.8             # in it; the scenario confirms it from the chain
+```
+
+Guest-side probes are a fixed Python probe run under `sudo` in a guest through the
+shared SSH seam: ARP, ICMP and TCP to the other guest, directly and through the
+gateway; an ARP claim of the other guest's address; DHCP and DNS; the host's port 22
+at `192.168.122.1`; `169.254.169.254`; and the two private destinations. A refusal in
+O3 to O5 counts only when the matching policy rule's packet counter, read through the
+operator route before and after the probe, rose; the listed destination counts only
+when its accept counter rose. Counters are per rule, so the run's guests are expected
+to be alone on the host, a precondition the controlled target guarantees and the run
+states beside its result. Under direct access a guest-side stage reads its buyer
+session's peer address and makes O6 when it is private; otherwise, and under relay
+access, that stage skips naming the private-source buyer route it lacks.
+
+An absent `private_destinations` skips O5's stages naming it. An older harness meets
+the section as an unknown field and refuses it naming the field, as the target model
+refuses any.
+
+Rejected: required fields or a target version 3, which fail every existing VM target
+for a section one module reads; refusals judged by the absence of a reply, which reads
+a destination that does not exist as refused; destinations that must answer, which a
+controlled target may not offer.
+
+### D22 — Closeout waits on observations O1 to O5, O7 and O8 being made
+
+The proof's observations:
+
+| # | Observation | Decision |
+|---|---|---|
+| O1 | ARP, ICMP and TCP from one guest to the other, directly and through the gateway, refused | D7 |
+| O2 | An ARP claim of the other guest's address dropped while its buyer still reaches it, and the filter's parameters present in the guest's live definition | D7 |
+| O3 | DHCP and DNS pass; another host port refused | D8 |
+| O4 | `169.254.169.254` refused | D8 |
+| O5 | An unlisted private destination refused, a listed one forwarded | D8 |
+| O6 | A buyer from a private address reaches their guest | D8 |
+| O7 | O3 to O5 still hold after a libvirtd restart and after a UFW reload, both jumps first | D8 |
+| O8 | A guest planted unconverged is converged, its session uninterrupted | D9 |
+
+D2's closeout gate requires O1 to O5, O7 and O8 made. O6 may be unproven only for want
+of a private-source buyer route: until a run makes it, it rests on the forwarded
+established/related accept's place ahead of the private-range drops, held by the
+rendered-chain and native installer tests, and on O7's evidence that the chain order
+survives on a real host. A failed observation, or an unproven one other than O6,
+returns the change to implementation. With no target or no operator route, the change
+waits at the run rather than proceeding. The run's evidence is supplied by whoever
+deploys the target, as a sanitized summary per observation with its run identifier and
+the host's libvirt version; raw logs stay in the operator's storage.
+
+Rejected: every observation required, which on a target whose buyers reach guests only
+through a relay holds closeout on a topology change outside this repository; recording
+whatever ran and closing out, against D2.
+
+### D23 — Removing the older per-port guest rules is a compatibility path, retired on schedule
+
+Host preparation deletes, from a host that holds them, the guest port-22 drops and logs,
+`ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with
+its script, which only a host prepared by an earlier release holds. That is an upgrade
+branch adopting state an older release wrote, so it carries a row in "Compatibility to
+retire", retiring with D6's and D9's. Afterwards a host still holding the old rules keeps
+them, behind the policy's first-position jumps, which decide every guest packet first.
+
+Rejected: treating the removal as permanent cleanup, against D16's definition; leaving
+the old rules in place, which leaves the printed host state untrue on upgraded hosts and
+a latent accept should a jump ever be lost.
+
+### D24 — The remaining work is two sessions, then a round for the real-host run
+
 See "Implementation cadence".
 
 ## Implementation cadence
 
-- **Round 1 — host-key verification**, two sessions in order:
+- **Round 1 — host-key verification**, two sessions in order, done:
   1. the `ssh` connection at version 3 with `host_keys`, the codec, the v2-to-v3
      migration and its pending-adoption flag, the host definitions document and its
      export, the INI import keeping pins, and the family client;
   2. the runner's per-job `known_hosts` and host variables, the check before a job's
      start with adoption, the capture route, the connectivity result's `host_key`,
      readiness, and the e2e helpers.
-- **Round 2**, two sessions:
+- **Round 2**, three sessions:
   1. guest isolation: the interface definition for every `virt-install` site, the host
-     kit's forwarding, input and private-range rules with
-     `guest_allowed_private_destinations`, converging running guests, and correcting
-     the README's and the host kit's claims;
-  2. the administrator stance: the API-credits storefront's negotiation reads and the
+     kit's guest policy chains with `guest_allowed_private_destinations`, and correcting
+     the README's and the host kit's claims (done);
+  2. convergence and the proof's code: the convergence command and its host-preparation
+     task (D20), the target's `guest_isolation` section (D21), and
+     `e2e_vm_guest_isolation` with its probes and per-observation outcomes (D19), with
+     their static and unit tests;
+  3. the administrator stance: the API-credits storefront's negotiation reads and the
      storefronts' refusal tests.
+- **Round 3 — the real-host run**, one session: recording the deployment's sanitized
+  per-observation evidence from `e2e_vm_guest_isolation` (D22) and fixing what the run
+  finds, reviewed on its own.
 - **Closeout** writes the promotion: the specifications and companions, `ARCHITECTURE.md`,
   the engineering and repository guidance and the release handbook's table (D16), the
   operator handbook, the quickstarts, `DEPLOYMENT_AND_CONFIG.md`, and the roadmap.
 
 Host-key verification is reviewed alone because it carries the most risk: a security
-property, and Ansible's ordering of its arguments.
+property, and Ansible's ordering of its arguments. The real-host run has a round of its
+own because it waits on the deployment's target and operator route, which round 2's
+review need not wait for, and because a failed observation returns the change to an
+implementation round (D22).
 
 ## Promotion text
 
@@ -661,7 +873,8 @@ released in` for every row it is the first to carry.
 | Compatibility path | First released in | Retires in | What retiring removes | A deployment still holding the old form |
 |---|---|---|---|---|
 | Adoption of hosts registered before host keys were pinned | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The `hosts` row's pending-adoption flag; the `accept-new` path of the check before a job's start and of the connectivity check; readiness's list of pending hosts | Such a host is unpinned: its jobs are refused until an operator captures or states its key. Readiness lists pending hosts before then |
-| Convergence of guests created before guest isolation | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's step setting running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
+| Convergence of guests created before guest isolation | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's `arkhai-guest-converge` command and the host-preparation step installing and running it, which set running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
+| Removal of the per-port guest rules hosts were prepared with before the guest policy | — | 0.3.3, or the second release after the one first carrying it, whichever is later | Host preparation's step deleting the old guest port-22 drops and logs, `ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with its script, and that step's tests | The old rules stay on the host, behind the guest policy's first-position jumps, which decide every guest packet first; an operator may delete them by hand |
 ```
 
 The handbook's introduction names the section; "Loading a release candidate" gains a
@@ -717,8 +930,19 @@ key when signing is not configured.
   every job.
 - **Private-address topologies.** A development topology whose guests need private
   destinations sets `guest_allowed_private_destinations`; no lane runs real VMs.
+- **The real-host proof's prerequisites.** Closeout waits on a controlled target and on
+  the deployment providing the operator route (D18, D22), both outside this repository.
+  A private-source buyer (O6) may stay unproven on a target whose buyers reach guests
+  only through a relay.
 
 ## Open Questions
+
+- **The host-side steps without an operator route.** If the deployment cannot provide
+  the target's operator route, how the proof's host-side stages run through the
+  provisioning service's existing reach, with no new endpoint (D18). Revisit when the
+  deployment reports that the route cannot be provided.
+- **A private-source buyer observed on a real host.** Revisit when a target offers a
+  buyer route from a private address to a guest's forwarded port, and make O6 (D22).
 
 - **A private network for one buyer's guests.** Revisit when a goal sells several
   guests to one buyer as a cluster (D10).
