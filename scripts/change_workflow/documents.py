@@ -118,6 +118,14 @@ class Distribution:
         project = self.package.parent / PROJECT
         return tomllib.loads(project.read_text("utf-8"))["project"]["version"]
 
+    def installed_paths(self) -> tuple[Path, ...]:
+        """What the installed distribution is on disk, which the sandbox keeps
+        read-only: its package and its metadata directory beside it; nothing for the
+        source tree, whose engine a step edits."""
+        if not self.installed:
+            return ()
+        metadata_directory = f"{DISTRIBUTION.replace('-', '_')}-*.dist-info"
+        return (self.package, *sorted(self.package.parent.glob(metadata_directory)))
 
     def described(self) -> dict[str, str]:
         """The distribution as `config --json` gives it under `workflow`: its version,

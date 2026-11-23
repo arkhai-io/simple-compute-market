@@ -7,8 +7,8 @@
 scm-clean-room-transfer/
 
 # The change workflow's local configuration: each checkout's own engineering
-# guidance pointer, models, and writable paths, which start from
-# .agents/workflow.local.template.toml.
+# guidance pointer, models, and writable paths, written by `change-workflow install`
+# from .agents/workflow.local.template.toml.
 .agents/workflow.local.toml
 
 # Legacy local rehearsal params (private keys, RPC URLs, etc.).

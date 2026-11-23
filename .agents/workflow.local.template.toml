@@ -1,7 +1,8 @@
 # What a checkout's own change workflow settings start from: those developers on
 # this repository may give different values, kept in .agents/workflow.local.toml,
-# which Git ignores; edit them there. Everything else the workflow assumes is
-# committed, in .agents/workflow.toml.
+# which Git ignores. `change-workflow install` writes that file from this one where
+# a checkout has none, and never overwrites one holding anything; edit it there.
+# Everything else the workflow assumes is committed, in .agents/workflow.toml.
 
 [guidance]
 # Engine, `config load <step>`: the engineering guidance every step's skill reads

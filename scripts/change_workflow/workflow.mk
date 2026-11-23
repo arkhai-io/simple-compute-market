@@ -112,7 +112,7 @@ check-change-index: ## Fail if the change index has a malformed row, an unresolv
 check-tasks: ## Fail if a task of a change's task list sits under another section's heading — a heading is missing or the task misplaced — or its closeout section, titled Closeout, is missing, repeated, or not its last (CHANGE=<change>)
 	@$(CHANGE_WORKFLOW) check tasks "$(CHANGE)"
 
-check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills
+check-agent-skills: ## Fail if a committed agent skill is not loaded from its one source under .agents/skills, or an installed engine's skills are not its version's
 	@$(CHANGE_WORKFLOW) check skills
 
 check-change-workflow-config: ## Fail, naming each field, unless the workflow configuration and the guides it names pass the configuration's check

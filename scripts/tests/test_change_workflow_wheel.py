@@ -1,7 +1,8 @@
 """The workflow's wheel, built from this tree and installed as a tool, carries every
-document it names: the installed `change-workflow` prints its version and, in a
-repository holding no copy of the workflow, names each document by role inside the
-installed distribution.
+document it names: the installed `change-workflow` prints its version, refuses
+until `change-workflow install` has written its skills, and then, in a repository
+holding no copy of the workflow, names each document by role inside the installed
+distribution.
 
 The test builds the wheel with `uv build` and installs it with `uv tool install`
 into temporary tool directories, so it needs `uv`, and is skipped, saying so, where
@@ -79,8 +80,11 @@ def test_the_wheel_ships_the_engine_and_every_document_of_the_tree(wheel: Path) 
 
 
 def test_the_installed_command_prints_its_version(installed: Path, tmp_path: Path) -> None:
+    # Under a home directory holding no installed skill, which every other
+    # subcommand refuses.
+    (tmp_path / "home").mkdir()
     printed = subprocess.run([str(installed), "--version"], cwd=tmp_path, capture_output=True,
-                             text=True)
+                             text=True, env={**os.environ, "HOME": str(tmp_path / "home")})
 
     assert (printed.returncode, printed.stdout) == (0, f"{documents.version()}\n")
 
@@ -89,10 +93,23 @@ def test_the_installed_command_names_each_document_inside_the_distribution(
         installed: Path, tmp_path: Path) -> None:
     repository = tmp_path / "repository"
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    environment = {**os.environ, "HOME": str(tmp_path / "home")}
+    (tmp_path / "home").mkdir()
 
-    printed = subprocess.run([str(installed), "config", "--json"], cwd=repository,
-                             capture_output=True, text=True)
+    def run(*arguments: str) -> subprocess.CompletedProcess:
+        return subprocess.run([str(installed), *arguments], cwd=repository,
+                              capture_output=True, text=True, env=environment)
 
+    before = run("config", "--json")
+    installing = run("install")
+    printed = run("config", "--json")
+
+    assert before.returncode == 1
+    assert "run `change-workflow install`" in before.stderr
+    assert installing.returncode == 0, installing.stderr
+    skills = sorted(path.name for path in (tmp_path / "home/.claude/skills").iterdir()
+                    if path.is_dir())
+    assert skills == sorted(documents.RUNNING.skills())
     assert printed.returncode == 0, printed.stderr
     workflow = json.loads(printed.stdout)["workflow"]
     assert workflow["version"] == documents.version()

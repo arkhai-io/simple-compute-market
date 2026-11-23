@@ -48,6 +48,13 @@ whose required fields are absent, naming them, before anything is launched or
 logged (`config.require_for_step`): an unattended run also needs its step's models,
 and the orchestrating session its own.
 
+`install` writes the distribution's skills into each supported harness's user skill
+directory and, in a checkout, its local configuration where it has none (`install`).
+Every other subcommand of an installed engine first refuses while the installed
+skills are not its own version's, naming what and `change-workflow install`; neither
+`install` nor `--version` reads the configuration, so neither is refused for the
+range either.
+
 The repository is found once, from the working directory, and every subcommand acts
 on it. Every exit status is one of three: 0 for success; 1 for a refusal or a failed
 check, its reason on standard error; 2 for a usage error, such as a malformed or
@@ -70,7 +77,8 @@ from typing import Callable, Mapping, Sequence
 from . import around
 from . import clone as clones
 from . import (config, cost_report, diagram, documents, evidence, find, gather, graph, history,
-               hook, hooks, index, next_step, propose, push, round_view, skills, tasks, wait)
+               hook, hooks, index, install, next_step, propose, push, round_view, skills,
+               tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
@@ -469,6 +477,10 @@ def _parser() -> argparse.ArgumentParser:
     waiting.add_argument("file", type=Path)
     waiting.add_argument("pattern")
     waiting.add_argument("--timeout", type=float, default=wait.DEFAULT_TIMEOUT_S)
+    commands.add_parser(
+        "install", help="write the workflow's skills into each supported harness's user "
+                        "skill directory, and, in a checkout, its local configuration where "
+                        "it has none")
     hook_ = commands.add_parser("hook", help="run a harness hook")
     harness_hooks = hook_.add_subparsers(dest="hook", required=True)
     harness_hooks.add_parser("post-compaction",
@@ -629,11 +641,15 @@ class _Usage(Exception):
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None,
          wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ,
-         launch: Launch = _launch, send: Callable[[int, int], None] = os.kill) -> int:
+         launch: Launch = _launch, send: Callable[[int, int], None] = os.kill,
+         distribution: documents.Distribution = documents.RUNNING,
+         home: Path | None = None) -> int:
     given = list(sys.argv[1:] if argv is None else argv)
+    home = Path.home() if home is None else home
     if given[:1] == ["openspec"]:
         # Every argument is OpenSpec's, flags included, so none is parsed here.
         try:
+            install.require_installed(distribution, home)
             root = repository_root() if root is None else root
             return hooks.run_openspec(config.load(root), given[1:], root)
         except StepError as exc:
@@ -644,7 +660,10 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 2
+    if args.command == "install":
+        return install.main(home=home, distribution=distribution, directory=root)
     try:
+        install.require_installed(distribution, home)
         root = repository_root() if root is None else root
         return _dispatch(args, root, wrapper or Wrapper(root=root), environ, launch, send)
     except _Usage as exc:

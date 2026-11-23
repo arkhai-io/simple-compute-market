@@ -83,7 +83,13 @@ siblings by relative import:
 - `push` — the guarded push of a change's own branch;
 - `wait` — blocking until a file holds a line matching a pattern, so an unattended
   step waits for a background command inside one call;
-- `skills` — the check that every agent skill is loaded from its one shared source;
+- `install` — the distribution's skills written into each harness's user skill
+  directory, stamped with its version beside a manifest of what it wrote, and a
+  checkout's local configuration where it has none; and the check that an
+  installed engine's skills are its own version's, which every other subcommand
+  makes;
+- `skills` — the check that every agent skill is loaded from its one source: the
+  workflow's installed, the repository's linked from its shared source;
 - `hook` — what a Claude Code session re-reads after its context is compacted;
 - `cli` — the engine's command, `scripts/change-workflow`, its subcommands
   dispatched to the modules above.

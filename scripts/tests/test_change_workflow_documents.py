@@ -84,6 +84,20 @@ def test_the_source_tree_finds_each_document_where_the_tree_keeps_it(tmp_path: P
     assert distribution.version() == "0.3.0"
 
 
+def test_an_installed_distribution_is_its_package_and_its_metadata_on_disk(
+        tmp_path: Path) -> None:
+    package = _installed(tmp_path)
+    metadata = package.parent / "arkhai_change_workflow-0.4.2.dist-info"
+    metadata.mkdir()
+    (package.parent / "other_tool-1.0.dist-info").mkdir()
+
+    assert Distribution(package).installed_paths() == (package, metadata)
+
+
+def test_the_source_tree_is_no_installed_distribution() -> None:
+    assert documents.RUNNING.installed_paths() == ()
+
+
 def test_a_role_the_distribution_does_not_name_is_refused(tmp_path: Path) -> None:
     with pytest.raises(KeyError, match="'manual' is no document of the workflow's"):
         Distribution(_installed(tmp_path)).path("manual")

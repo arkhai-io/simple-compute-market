@@ -963,7 +963,8 @@ def test_config_lists_each_steps_scope_with_each_paths_source(
                          ("/usr/bin/git", "engine"), ("/usr/lib/git-core/git", "engine"),
                          (".claude/settings.json", "adapter"),
                          (".claude/settings.local.json", "adapter"),
-                         ("~/.claude/settings.json", "adapter")}
+                         ("~/.claude/settings.json", "adapter"),
+                         ("~/.claude/skills/", "adapter")}
     # The review's first model is Codex's, so its scope holds Codex's state.
     review = {(entry["entry"], entry["source"])
               for entry in shown["scopes"]["review"]["writable"]}
@@ -1322,6 +1323,16 @@ def test_config_as_json_reports_a_missing_local_configuration(
     assert main(["config"], root=tmp_path) == 0
     assert capsys.readouterr().out.splitlines()[1] == (
         ".agents/workflow.local.toml: no such file; every local field is missing")
+
+
+def test_an_empty_local_configuration_reads_as_none(tmp_path: Path) -> None:
+    configured(tmp_path, COMMITTED)
+    _local(tmp_path, "")
+
+    loaded = config.load(tmp_path)
+
+    assert not loaded.local_exists
+    assert config.missing(loaded, config.GUIDANCE_ENGINEERING) == [config.GUIDANCE_ENGINEERING]
 
 
 def test_the_local_configuration_gives_the_models_the_pointer_and_more_writable_paths(

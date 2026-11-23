@@ -1,8 +1,15 @@
-"""Fail if an agent skill is not loaded from its one shared source.
+"""Fail if an agent skill is not loaded from its one source.
 
-Every committed skill lives once, under `.agents/skills/<name>/`, and each
-supported harness loads it through a relative symlink of the same name in its
-own skill directory. Two copies of a skill drift apart, so this check rejects:
+The rule holds two things. The workflow's own skills are the installed
+distribution's, loaded from each supported harness's user skill directory: an
+installed engine checks them before every subcommand, this check's among them
+(`install.require_installed`), and the engine run from its source tree checks
+nothing installed. The skills a repository
+commits itself each live once, under `.agents/skills/<name>/`, and each supported
+harness loads them through a relative symlink of the same name in its own project
+skill directory; the workflow's own sources, which the source tree keeps there for
+the distribution, need no such link. Two copies of a skill drift apart, so this
+check rejects:
 
 - a shared skill with no `SKILL.md`;
 - a shared skill missing from a harness skill directory;
@@ -11,7 +18,7 @@ own skill directory. Two copies of a skill drift apart, so this check rejects:
 - a harness link that does not resolve, or resolves anywhere but the shared
   skill of the same name.
 
-Contract: openspec/specs/change-workflow/spec.md.
+Contract: openspec/specs/change-workflow/spec.md, CW-d8de.
 """
 
 from __future__ import annotations
@@ -19,13 +26,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from . import documents
 from .common import StepError, repository_root
 
 SOURCE = Path(".agents/skills")
 HARNESSES = (Path(".claude/skills"), Path(".codex/skills"))
 
 
-def problems(root: Path) -> list[str]:
+def problems(root: Path, workflow: frozenset[str] = frozenset()) -> list[str]:
+    """Where the skills the repository commits are not each loaded from their one
+    source; `workflow` names the workflow's own, which no project link need load."""
     source = root / SOURCE
     shared = sorted(p.name for p in source.iterdir() if p.is_dir()) if source.is_dir() else []
     found = []
@@ -47,25 +57,28 @@ def problems(root: Path) -> list[str]:
                 found.append(f"{where}: links to {target}, not {SOURCE / entry.name}")
         present = {entry.name for entry in entries}
         for name in shared:
-            if name not in present:
+            if name not in present and name not in workflow:
                 found.append(f"{harness / name}: missing link to {SOURCE / name}")
     return found
 
 
-def main(root: Path | None = None) -> int:
+def main(root: Path | None = None,
+         distribution: documents.Distribution = documents.RUNNING) -> int:
     try:
         root = repository_root() if root is None else root
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    found = problems(root)
+    found = problems(root, frozenset(distribution.skills()))
     for problem in found:
         print(problem, file=sys.stderr)
     if found:
-        print(f"\n{len(found)} agent skill problem(s). Each skill has one source under {SOURCE}.",
-              file=sys.stderr)
+        print(f"\n{len(found)} agent skill problem(s). Each skill a repository commits has "
+              f"one source under {SOURCE}; the workflow's are installed by "
+              "`change-workflow install`.", file=sys.stderr)
         return 1
-    print("OK: every agent skill is loaded from its one shared source.")
+    print("OK: every agent skill the repository commits is loaded from its one shared "
+          "source.")
     return 0
 
 

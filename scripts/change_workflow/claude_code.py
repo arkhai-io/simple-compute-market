@@ -16,7 +16,9 @@ to `~/.claude.json`, a file in the home directory, mounted alone so that no step
 writes the home directory whole. It loads `.claude/settings.json`, and
 `~/.claude/settings.json` too, though a run loads only the project's: every file
 whose rules or hooks it could load is protected, `.claude/settings.local.json`
-among them, so no step changes what its harness lets it do (CW-r6kd).
+among them, so no step changes what its harness lets it do; and so is its user skill
+directory, `~/.claude/skills/`, where the workflow's installer writes the skills
+every later step follows (CW-r6kd).
 
 Contract: openspec/specs/change-workflow/spec.md, CW-t6mb, CW-x3pf, CW-r6kd, CW-k5mk,
 and CW-w3oa.
@@ -43,7 +45,8 @@ ADAPTER = Adapter(
     state=("~/.claude",),
     state_files=("~/.claude.json",),
     protected=(".claude/settings.json", ".claude/settings.local.json",
-               "~/.claude/settings.json"),
+               "~/.claude/settings.json", "~/.claude/skills/"),
+    skills="~/.claude/skills/",
     rules=("Bash(git push*)",),
 )
 # The built-in tools a step works with, each allowed whole: the sandbox, not a rule,

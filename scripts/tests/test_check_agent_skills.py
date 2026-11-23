@@ -1,4 +1,5 @@
-"""Every agent skill is loaded from its one shared source."""
+"""Every agent skill is loaded from its one source: the workflow's installed in each
+harness's user skill directory, the repository's linked from `.agents/skills/`."""
 
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from change_workflow import skills as checker
+from change_workflow.documents import Distribution
 
 
 def _repository(tmp_path: Path, *names: str) -> Path:
@@ -70,3 +72,29 @@ def test_shared_skill_without_skill_file_fails(tmp_path: Path) -> None:
     (root / ".agents/skills/review/SKILL.md").unlink()
 
     assert checker.problems(root) == [".agents/skills/review: shared skill has no SKILL.md"]
+
+
+def test_the_workflows_own_sources_need_no_project_link(tmp_path: Path) -> None:
+    """CW-d8de: the workflow's skills load from the user skill directories, so a
+    source the tree keeps for the distribution asks no project link, linked or not,
+    while a skill the repository commits still does."""
+    root = _repository(tmp_path, "change-plan", "openspec-propose", "change-design")
+    for harness in (".claude/skills", ".codex/skills"):
+        (root / harness / "change-plan").unlink()
+        (root / harness / "openspec-propose").unlink()
+
+    assert checker.problems(root, frozenset({"change-plan", "change-design"})) == [
+        ".claude/skills/openspec-propose: missing link to .agents/skills/openspec-propose",
+        ".codex/skills/openspec-propose: missing link to .agents/skills/openspec-propose"]
+
+
+def test_the_check_asks_no_link_of_the_running_distributions_skills(tmp_path: Path) -> None:
+    # The installed half of the rule is held before every subcommand, this check's
+    # among them (`test_change_workflow_install.py`); the check itself asks a link
+    # only of a skill the running distribution does not ship.
+    root = _repository(tmp_path, "openspec-propose", "change-plan")
+    for harness in (".claude/skills", ".codex/skills"):
+        (root / harness / "change-plan").unlink()
+    tree = Distribution(Path(__file__).resolve().parents[1] / "change_workflow")
+
+    assert checker.main(root, distribution=tree) == 0

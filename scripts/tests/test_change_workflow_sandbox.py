@@ -497,6 +497,36 @@ def test_codex_runs_in_the_reviews_scope(checkout: Path) -> None:
 
 
 @needs_bwrap
+def test_a_step_edits_an_installed_skill_or_the_installed_engine(checkout: Path) -> None:
+    """CW-r6kd's "A step edits an installed skill" and "A step edits the installed
+    engine": inside Claude Code's writable `~/.claude`, its user skill directory stays
+    read-only, and the engine's installed package, beneath a writable path the
+    repository grants, stays read-only too."""
+    home = checkout.parent / "home"
+    skill = home / ".claude/skills/change-design/SKILL.md"
+    package = home / ".local/share/uv/tools/arkhai-change-workflow/site/change_workflow"
+    for path in (skill, package / "cli.py"):
+        path.parent.mkdir(parents=True)
+        path.write_text("x\n", "utf-8")
+    adapter = adapters.ADAPTERS["claude"]
+    found = scope.resolve("implement", checkout, inert_paths=INERT, home=home,
+                          adapter_writable=adapter.state, adapter_protected=adapter.protected,
+                          writable=("~/.local/share/uv",), installed=(str(package),))
+
+    state = _run(found, f"echo x > {home}/.claude/history.jsonl", checkout)
+    edited = _run(found, f"echo y > {skill}", checkout)
+    added = _run(found, f"mkdir {home}/.claude/skills/change-extra", checkout)
+    engine = _run(found, f"echo y > {package}/cli.py", checkout)
+    cache = _run(found, f"echo x > {home}/.local/share/uv/entry", checkout)
+
+    assert (state.returncode, cache.returncode) == (0, 0), (state.stderr, cache.stderr)
+    for refused in (edited, added, engine):
+        assert refused.returncode != 0
+        assert "Read-only file system" in refused.stderr
+    assert skill.read_text("utf-8") == (package / "cli.py").read_text("utf-8") == "x\n"
+
+
+@needs_bwrap
 def test_design_writes_a_prerequisites_proposal_in_its_worktree(checkout: Path) -> None:
     """CW-k8dn's "A design needs a prerequisite": a worktree beside the checkout, made
     as `propose` makes one, is writable to the resumed design, and a sibling worktree

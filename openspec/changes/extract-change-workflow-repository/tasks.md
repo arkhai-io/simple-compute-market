@@ -319,13 +319,29 @@ CW-sv3u, CW-d8de, CW-r6kd). Touches `scripts/change_workflow/` (a new `install.p
 `skills.py`, `harness.py`, `claude_code.py`, `codex.py`, `scope.py`, `cli.py`) and
 their tests.
 
-- [ ] 3.1 Each adapter names its harness's user skill directory (Claude Code's under
+- [x] 3.1 Each adapter names its harness's user skill directory (Claude Code's under
   `~/.claude`, Codex's under `~/.codex`) and protects it and the installer's manifest
   there; the engine protects its own installed distribution, found from its own
   location (D13, CW-r6kd). Verify: `test_change_workflow_scope.py`, and
   `test_change_workflow_sandbox.py` under `needs_bwrap` (a write to an installed skill
   and to the installed engine beneath a writable path both refused).
-- [ ] 3.2 `install.py`: write the version's skills into each user skill directory,
+  Done: `Adapter.skills` names the user skill directory, `~/.claude/skills/` and
+  `~/.codex/skills/`, each also among its adapter's protected paths, so an absent one
+  is created as a directory before launch and the manifest inside it is covered.
+  `documents.Distribution.installed_paths()` gives an installed engine's package and
+  its `dist-info` beside it, none from the tree; `scope.INSTALLED` holds them and
+  `scope.resolve(installed=…)` protects them as the engine's, and the configuration's
+  writable-path check counts them, which no test exercises, the tree's engine having
+  none. Unit, `test_change_workflow_documents.py` (an installed layout's package and
+  its own `dist-info`, not another tool's; none for the tree),
+  `test_change_workflow_scope.py` (an absent user skill directory protected from the
+  adapter, given installed paths protected from the engine, the tree's engine
+  protecting none) and `test_change_workflow_harness.py`: passed. External process,
+  `test_change_workflow_sandbox.py` under `needs_bwrap`, run, not skipped: inside a
+  writable `~/.claude`, editing an installed skill and adding one fail read-only
+  while another write there succeeds, and a write to an installed package beneath
+  the granted `~/.local/share/uv` fails while one beside it succeeds: passed.
+- [x] 3.2 `install.py`: write the version's skills into each user skill directory,
   stamp each with the version, and keep a manifest of the names it wrote; remove a
   retired skill the manifest names; refuse, writing nothing, a skill of a shipped name
   the manifest does not record; and, in a checkout, write `.agents/workflow.local.toml`
@@ -334,20 +350,109 @@ their tests.
   (D8, CW-1rhd, CW-sv3u). Verify: library integration tests under a temporary `HOME`,
   `scripts/tests/test_change_workflow_install.py` (new), every scenario of CW-1rhd and
   CW-sv3u.
-- [ ] 3.3 Every subcommand but `install` and `--version` refuses when an installed
+  Done: `install.py`; the stamp is `.change-workflow-version` in each installed
+  skill's directory and the manifest `.change-workflow-manifest.json` in each user
+  skill directory, holding the version and the names written. An empty local file,
+  the sandbox's empty form of an absent protected file, is written as an absent one;
+  CW-sv3u's "MUST NOT overwrite a local configuration that exists" is read as one
+  holding anything. Outside a repository no local file is written. `install` reads
+  no configuration. Library integration, `test_change_workflow_install.py` (in-process
+  `main`, temporary `HOME` and repositories, a temporary installed distribution):
+  the skills, stamps, and manifest written into both directories; CW-1rhd's
+  "A skill of the workflow's name is not the installer's" (refused, nothing written
+  in either directory nor the local file) and "A later version retires a skill";
+  CW-sv3u's two scenarios; an empty local file written; the skeleton naming the
+  pointer and every model, which leaves every local field missing; nothing written
+  outside a checkout; `install` run beside a range that refuses the engine and over
+  stale skills: passed.
+- [x] 3.3 Every subcommand but `install` and `--version` refuses when an installed
   skill's stamp differs from the engine's version, or a supported harness's user skill
   directory lacks a shipped skill or the manifest, naming what and `change-workflow
   install` (CW-1rhd). Verify: library integration cases in
   `test_change_workflow_install.py`.
-- [ ] 3.4 `check skills` holds both halves: the installed skills as 3.3 checks them,
+  Done: `cli.main` refuses through `install.require_installed` before finding the
+  repository, for every subcommand but `install`, the `openspec` pass-through and
+  `check skills` included; `--version` exits while the arguments are parsed. The check applies to
+  an installed engine alone: the engine run from its source tree
+  (`scripts/change-workflow`) has the tree's own sources for skills, which no
+  installation stamps, so it checks nothing installed — without this every engine
+  command in this checkout, and every in-process test, would refuse until the
+  owner installs. Library integration, `test_change_workflow_install.py`: CW-1rhd's
+  "The engine is upgraded without its skills" (`next` refusing, naming 0.4.1, 0.4.2,
+  and `change-workflow install`) and "A skill is missing" (Codex's `change-plan`),
+  a directory without its manifest refusing `config --json`, `check skills` and
+  `openspec --version` refusing over stale skills, and the tree's engine checking
+  nothing: passed. External process, `test_change_workflow_wheel.py`: under a
+  temporary `HOME` the installed command prints `--version`, refuses `config --json`
+  until `change-workflow install` has run, then names every document: passed.
+- [x] 3.4 `check skills` holds both halves: the installed skills as 3.3 checks them,
   and, for skills the repository commits, one source under `.agents/skills/` linked
   from each harness's project skill directory, asking no project link of the
   workflow's own sources (D21, CW-d8de). Verify: `test_check_agent_skills.py`.
+  Done: `skills.problems(root, workflow)` asks no project link of the distribution's
+  own skill names, whether or not one is there; the installed half is the check
+  every subcommand of an installed engine makes first, `check skills` among them
+  (3.3), so the module holds the committed half alone. Unit,
+  `test_check_agent_skills.py` (the workflow's sources unlinked passing beside a
+  committed skill that must still be linked; the running distribution's skills
+  asked no link): passed. CW-d8de's "An installed skill is stale" through the
+  command is 3.3's `check skills` case: passed. `make check-agent-skills` against the
+  tracked links: passed.
 - [ ] 3.5 Verify the section: its suites, with the repository's existing
   `make check-agent-skills` still passing against the tracked links, which section 4
   removes; and `scripts/change-workflow run pre-commit
   extract-change-workflow-repository`.
   End-to-end: none exercises the workflow's tooling; none owed.
+  Done: the section's suites — `test_change_workflow_install.py`,
+  `test_check_agent_skills.py`, `test_change_workflow_scope.py`,
+  `test_change_workflow_sandbox.py`, `test_change_workflow_harness.py`,
+  `test_change_workflow_documents.py`, `test_change_workflow_config.py`,
+  `test_change_workflow_wheel.py`, `test_change_workflow_cli.py`,
+  `test_change_workflow_command.py`, `test_change_workflow_hooks.py`: passed; `make
+  check-agent-skills`: passed. `scripts/change-workflow run pre-commit`: `make
+  validate-local` passed (packaging and every suite); the default checks and strict
+  OpenSpec validation passed; `make check-repository` failed only on
+  `check-spec-index` (section 8's index entries) and `check-doc-citations`, now
+  naming `scripts/tests/test_change_workflow_citations.py` alone, which section 5
+  creates.
+
+Section 3 notes (handoff):
+
+- Judgments for the round's review and triage, each departing from a requirement's
+  letter:
+  - Only an installed engine checks the installed skills (`install.require_installed`):
+    CW-1rhd says every subcommand but `install` and `--version`, and CW-d8de that
+    `check skills` holds both halves, neither naming the engine's form. The engine
+    run from its source tree has the tree's sources for skills, which nothing
+    stamps; checking there would refuse every command in a checkout until the owner
+    installs, and every in-process test. Once 4.3 makes the fragment call
+    `change-workflow`, every step and make target runs the installed engine and is
+    checked; `scripts/change-workflow` stays unchecked until (iii) removes it. If the
+    triage wants the letter kept, the delta's CW-1rhd and CW-d8de should say "of an
+    installed engine" before section 8 promotes them.
+  - An empty local file is no local configuration, to `install` and to `config`
+    alike: the sandbox creates every absent protected path empty, the local file
+    among them, and CW-sv3u's "MUST NOT overwrite a local configuration that exists"
+    would otherwise leave a checkout stuck with an empty one. CW-sv3u could say so.
+- The installed engine's protection is its package and its `dist-info`. A step
+  whose writable paths hold the tool's environment (`~/.local/share/uv` here holds
+  `uv tool`'s) can still add a `.pth` file or replace the entry script or the
+  environment's interpreter beside them; section 8.3 should record this under the
+  companion's "Current limits", or a later change protect the environment's root.
+- Installing the workflow writes into the owner's real `~/.claude/skills/` and
+  `~/.codex/skills/`; no session of this change did, the orchestrator's 4.1 does.
+  Until then the tracked project links still load the skills from `.agents/skills/`.
+- 4.1's install must run after the workspace's empty local file, if a step created
+  one, is gone or empty: `install` writes over an empty one; `clone` replaces this
+  change's clone's empty file with the link (section 2's handoff).
+- The fresh-context check's findings fixed: "no longer ships" wording `make
+  check-history-wording` refuses; stale help text for `check skills`; the installed
+  half moved out of `skills.main`, where the gate before it made it unreachable;
+  evidence gaps (an installed layout's paths, `--version` and `openspec` under stale
+  skills, an existing local file with no template); an empty local file read as none
+  by `config` too; wrapping. Declined: protecting the tool environment's root, which
+  would also protect a shared environment the engine is installed into, recorded
+  above for 8.3; amending the delta, which is the triage's to decide.
 
 ## 4. The switch: this repository runs the installed workflow
 

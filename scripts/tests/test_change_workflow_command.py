@@ -33,7 +33,8 @@ def test_the_command_acts_on_its_working_directorys_repository(tmp_path: Path) -
     inside = subprocess.run(command, cwd=SCRIPTS.parent, env=environ, capture_output=True,
                             text=True, check=False)
     assert (inside.returncode, inside.stdout) == (
-        0, "OK: every agent skill is loaded from its one shared source.\n")
+        0, "OK: every agent skill the repository commits is loaded from its one shared "
+           "source.\n")
     refused = subprocess.run(command, cwd=outside, env=environ, capture_output=True,
                              text=True, check=False)
     assert (refused.returncode, refused.stdout) == (1, "")

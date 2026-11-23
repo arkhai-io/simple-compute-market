@@ -105,8 +105,8 @@ from .adapters import ADAPTERS, HARNESSES
 from .adapters import PROTECTED as ADAPTER_PROTECTED
 from .harness import Model
 from .records import is_pattern
-from .scope import (PRIVATE_TEMPORARY, PROTECTED, Scope, absolute, hides_temporary,
-                    outside_checkout, protected_by, resolve, within)
+from .scope import (INSTALLED, PRIVATE_TEMPORARY, PROTECTED, Scope, absolute,
+                    hides_temporary, outside_checkout, protected_by, resolve, within)
 
 # The configuration's place in the repository the command acts on, and the
 # checkout's local configuration beside it.
@@ -750,8 +750,8 @@ def _sandbox(table: dict[str, Any], root: Path, home: Path,
                                   "temporary directory; every step writes a private "
                                   f"{PRIVATE_TEMPORARY} of its own, which it would hide")
             if guarded := protected_by(entry, root, home,
-                                       (*PROTECTED, *ADAPTER_PROTECTED, *(protected or ()),
-                                        *also_protected)):
+                                       (*PROTECTED, *INSTALLED, *ADAPTER_PROTECTED,
+                                        *(protected or ()), *also_protected)):
                 raise ConfigError(f"{where} names {entry}, which is or lies under the "
                                   f"protected path {guarded}")
         writable[key] = entries
@@ -1021,7 +1021,9 @@ def load(root: Path, unignored: Unignored = git_unignored, home: Path | None = N
     every local field when there is no local one."""
     path = root / CONFIGURATION
     text = _read(path, CONFIGURATION)
-    local = _read(root / LOCAL, LOCAL)
+    # An empty local file is the sandbox's empty form of an absent protected file,
+    # holding no setting, and is read as no local file, as the installer writes it.
+    local = _read(root / LOCAL, LOCAL) or None
     if text is None and local is None:
         return Configuration(path=path, local=root / LOCAL)
     checked = check(text or "", path, root=root, unignored=unignored, home=home, local=local,
