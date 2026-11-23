@@ -4,10 +4,27 @@ tags: [engineering, helm]
 
 # Helm
 
-How a chart delivers a service's configuration: deriving what it mounts, toggling a
-profile, and the ways Helm's merge and encoding change a value on its way through.
+How a chart delivers a service's configuration: switching an umbrella's components,
+what its defaults may hold, deriving what it mounts, toggling a profile, and the ways
+Helm's merge and encoding change a value on its way through.
 The Kubernetes rules a chart renders are [Kubernetes](kubernetes.md); testing a
 chart's output is [Helm chart render tests](helm-render-tests.md).
+
+## Every component of an umbrella chart can be switched off
+
+Every component of an umbrella chart can be switched off on its own, so a deployment
+of fewer components is a values file that switches the others off, never a separate
+chart.
+
+## A chart's defaults carry no secret value
+
+A chart's `values.yaml` holds its development defaults, which a release gets for
+anything it doesn't state. They hold no secret value, not even a public development
+one: no password, private key, token or seed. Where a local release needs secret
+values, they are committed in a separate local values file, which a local install
+names explicitly. A release that names no source for a secret fails to start, naming
+the missing setting. Failing to start is preferable to accidentally deploying public
+test values.
 
 ## A chart derives a mounted file's path from the mount
 

@@ -286,7 +286,7 @@ enabled = false
 [Settlement.arkhai_payments]
 enabled = false
 # service_url = "https://<PAYMENTS_SERVICE>"
-# service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
+# service_identity = { scheme = "ed25519", identifier = "<SERVICE_RECEIPT_IDENTITY>" }
 # fee_bps = 250
 # api_key_env = "ARKHAI_PAYMENTS_API_KEY"   # names the variable; the key stays in the environment
 # attach_agreement = false                  # deposit the exact Agreement with the approval

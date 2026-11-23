@@ -14,10 +14,22 @@ how a local release rehearses a deployment's shape. The Kubernetes forms are
 No deployment holds a service back with a step before it starts — an init container,
 a wait script — that waits for or validates an external dependency, such as a chain,
 an upstream API, a site, or another service, and no service waits for one in process
-either. The service starts with its dependencies unreachable, reports each one it
-cannot reach in its system status as degraded, and its own loops retry it; a
-misaddressed dependency is indistinguishable at start from one that is down, so it is
-reported the same way rather than refused. The one step a deployment runs for a
+either.
+
+- A service serves degraded only where it has meaningful work to do without the
+  dependency. A service that has such work starts with the dependency unreachable,
+  reports it degraded, and retries. A service that can do no meaningful work without
+  it exits when it is unreachable, and the orchestrator's restarts are its retries.
+- Either way, configuration that can never work, an absent or malformed setting, is
+  refused at startup, naming it. A well-formed address that reaches nothing is
+  unreachable, never refused as wrong.
+- Native sidecars that are part of one service's own unit, such as its own state
+  store or its database connection, may hold the service back until their startup
+  probes pass. Each must refuse configuration it cannot use and exit on what it
+  cannot reach, so the wait hides no failure that cannot heal. A dependency outside
+  the unit is never waited on.
+
+The one step a deployment runs for a
 service before it starts is that service's own migration, which acts on the
 service's own state ([Migrations](migrations.md)). The Kubernetes form, a startup
 probe on a process check, is in [Kubernetes](kubernetes.md).
@@ -26,7 +38,8 @@ probe on a process check, is in [Kubernetes](kubernetes.md).
 
 A service refuses to start when its own configuration contradicts itself or its
 stored state cannot be served as it stands, since waiting repairs neither; a
-dependency it cannot reach is reported, not refused
+dependency it cannot reach is reported, or exited on where the service has no
+meaningful work without it, never refused as wrong configuration
 ([A deployment does not wait on a service's dependencies](#a-deployment-does-not-wait-on-a-services-dependencies)).
 
 ## A local release configures a service through the values a deployment uses

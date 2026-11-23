@@ -1,13 +1,13 @@
 [project]
 name = "mediation-lane-double"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "An HTTP double of an Arkhai mediation dispute authority for end-to-end lanes, answering from programmed rules"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-kit-arkhai-mediation>=0.3.0",
-    # The double's payments peer: it extends, reverses and lifts as the authority.
+    # The double's payments peer: it extends, stops, reverses and lifts as the authority.
     "arkhai-kit-arkhai-payments>=0.6.0",
     "arkhai-kit-identity>=0.4.0",
     "arkhai-injected-time>=0.1.0",

@@ -47,7 +47,13 @@ gives obtaining one).
   interpreter `STOREFRONT_PYTHON` names, runs the storefront's startup refusal over
   it, and derives the local release's Alkahest release conditions over its render;
   over the chart defaults' render the refusal names the missing settlement
-  mechanism. `test-render.sh` sets it when the VM storefront environment exists
+  mechanism. Over the chart rendered alone with its production example,
+  `helm/charts/storefront/examples/production-values.yaml`, it runs the startup
+  refusal, which accepts the render, and derives the example's recurring clauses
+  against a representative dispute authority advertisement under the example's own
+  listing horizon, publishing an on-demand and a spot option with the clause's
+  delivery deadline and `charged` and `returned`, and none once an overlay removes
+  the rate servicing declaration. `test-render.sh` sets it when the VM storefront environment exists
   (`make init-storefront`). `helm/charts/bare-metal-storefront/tests/test_render.py`
   does the same through `BARE_METAL_STOREFRONT_PYTHON`, which `test-render.sh` sets
   when `domains/bare_metal/storefront/.venv` exists (`make
@@ -78,7 +84,10 @@ gives obtaining one).
   umbrella with the `api-credits-registry` alias enabled both instances render the
   same, and with it disabled nothing of the alias renders.
   `helm/charts/provisioning/tests/test_render.py` asserts the same of
-  `compute-provisioning-migrate`.
+  `compute-provisioning-migrate`, and that the application container mounts the
+  SSH key from the Secret `sshKey.secretName` names only without `mockMode`,
+  where an empty or absent name is refused naming it, while under `mockMode` no
+  key mounts and no name is needed.
 - `helm/tests/test_release_topology.py` asserts, over both topology releases,
   that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
   `matchLabels` or any Service's selector — every test pod carries

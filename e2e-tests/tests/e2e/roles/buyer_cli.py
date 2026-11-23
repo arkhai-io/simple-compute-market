@@ -23,7 +23,12 @@ Resolution order for the binary path:
   2. ``shutil.which("market")`` (any PATH entry)
   3. ``<repo_root>/domains/vms/buyer/.venv/bin/market`` (developer default)
 
-If none of those exist the fixture skips, with instructions.
+Each must be installed from this checkout's own wheels, which a branch's
+unpublished package versions need: ``make init-buyer`` at the repository root
+builds them into ``.dist/`` and the buyer's environment from them, and the
+harness's own environment carries a ``market`` too once ``make dist-ci`` and
+``make -C e2e-tests init`` have run. If none of those exist the fixture skips,
+with instructions.
 """
 
 from __future__ import annotations
@@ -571,10 +576,12 @@ def buyer_cli_binary() -> Path:
     p = _resolve_market_binary()
     if p is None:
         pytest.skip(
-            "`market` binary not found. Install the buyer wheel "
-            "(`cd domains/vms/buyer && uv sync`) so "
-            "$REPO/domains/vms/buyer/.venv/bin/market exists, "
-            "or set MARKET_CLI_BIN=/path/to/market."
+            "`market` binary not found. Build the buyer's environment from this "
+            "checkout's wheels (`make init-buyer` at the repository root) so "
+            "$REPO/domains/vms/buyer/.venv/bin/market exists, or set "
+            "MARKET_CLI_BIN to a `market` installed from them, such as "
+            "e2e-tests/.venv/bin/market after `make dist-ci` and "
+            "`make -C e2e-tests init`."
         )
     try:
         result = subprocess.run(

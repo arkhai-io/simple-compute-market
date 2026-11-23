@@ -27,7 +27,7 @@ class FixtureError(ValueError):
 class AuthorityFixture:
     interface: str
     origin: str
-    #: The authority's payments account, which extends, reverses and lifts.
+    #: The authority's payments account, which extends, stops, reverses and lifts.
     account: str
     params: dict[str, Any]
     record_seed: bytes
