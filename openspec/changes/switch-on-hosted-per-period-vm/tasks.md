@@ -2102,7 +2102,12 @@ after campaign index currency.
       - D4: `system-tests.md`, "Locally verifiable and external-topology scenarios" (a
         live test's provisioning mode follows what it proves);
         `openspec/specs/test-compatibility/architecture.md`, "Lane time and the doubles'
-        controls" (`LaneTime.reach`'s wall-time case).
+        controls" (`LaneTime.reach`'s wall-time case);
+        `docs/guidance/repository/deal-scenarios.md`, "The discipline every scenario
+        follows" (its wall-time bullet), and `docs/development/TESTING.md`, "Lane
+        time": a wall-time run also waits for an instant the scenario's own data
+        fixes, such as the Agreement's start plus the scenario's offset, as
+        `LiveBuyerStop` does (sections 5 and 7's notes; review 67 F1).
       - D5: `docs/guidance/engineering/test-doubles.md`, "A double mirrors its producer"
         (no dependency on an endpoint the producer's public client lacks; past it, the
         producer's own live tests qualify); `docs/development/ARCHITECTURE.md`,
@@ -2123,15 +2128,24 @@ after campaign index currency.
         and the `penalty` it applies) and "Payment evidence ownership" (live
         evidence as boundary comparisons); `docs/development/TESTING.md`,
         "Private Service Dependencies" (the mediation double's effects), and "The
-        canonical compute deal" (the VM rate-deal dispute rows); the double's README,
-        written in section 1.
+        canonical compute deal" (the VM rate-deal dispute rows); `deal-scenarios.md`,
+        "The discipline every scenario follows" (its wall-time bullet), and
+        `TESTING.md`, "Lane time": a wall-time run also polls a live producer for an
+        effect of the scenario's own request, its bound outlasting the poll bound by
+        the producer's own schedule, as `LiveDispute07`'s wait for the first period's
+        earnings does (section 6's note; review 67 F1); the double's README, written
+        in section 1.
       - D7: `settlement-configuration/configuration.md`, "Settlement consumer
         configuration and cutover" (the clause deadline as the storefront-enforced
         stopgap `renewable-compute-lease-deadlines` retires); the seller quickstart,
         written in section 7.
       - D8: the `test-compatibility` and `deployment-state` specs, by the archive;
         `openspec/specs/deployment-state/configuration.md`, its production-examples
-        passage, if it lists them.
+        passage, if it lists them; `docs/guidance/repository/chart-render-tests.md`,
+        "Where they live and how they run": the VM storefront chart's render test runs
+        the storefront's startup refusal over the production example's render and
+        publishes both its recurring options, under `STOREFRONT_PYTHON`, beside the
+        bare-metal example's checks it names (section 4's note; review 67 F1).
       - D9: the summary, written in section 8; cited by Goal 8 (14.5).
       - D10: the quickstarts, written in section 7.
       - D11: the operator handbook, written in section 7;
