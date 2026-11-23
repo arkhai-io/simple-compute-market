@@ -150,6 +150,8 @@ release's surface (CW-c2tw):
 - `.claude/skills/` and `.codex/skills/`, whose `change-*` and `guidance-review`
   links go in the first half; `.claude/settings.json`'s post-compaction hook.
 - `docs/guidance/engineering/`, whose three repeated headings become unique.
+- `scripts/check_project_layout.py` and `AGENTS.md`'s exceptions table, which admit the
+  wheel's layout until the second half removes the wheel (D24).
 - The `Makefile`'s include of the fragment, and its install target.
 - About 95 permanent documents citing the workflow's specification or guidance,
   `AGENTS.md` and `openspec/README.md` among them; the citation check fails on any
@@ -236,6 +238,9 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
 - D21: the modified CW-d8de and `change-workflow`'s companion, "Leaf skills from one
   source".
 - D22: no permanent destination — the cadence is this change's plan.
+- D24: no permanent destination — the `overrides` row in `AGENTS.md`, "Exceptions
+  to shared guidance", and `make check-project-layout`'s admission of the wheel stand
+  only through the pause; (iii) removes both with the wheel.
 - D23: no permanent destination — how this change's own delta reaches the permanent
   specification and how it archives are recorded in its plan and closeout task.
 - `market-change-workflow`: MCW-9k0c and MCW-iqh1, and its companion's "This

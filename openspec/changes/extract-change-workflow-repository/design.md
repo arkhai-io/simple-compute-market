@@ -1,7 +1,8 @@
 # Design: extract the change workflow repository
 
-Status: design settled 2026-11-23 (D1–D23), amended by design review 15's triage
-(D4, D5, D6, D8, D14, D18, D21, D22, and D23 added). The change has two halves in one
+Status: design settled 2026-11-23 (D1–D24), amended by design review 15's triage
+(D4, D5, D6, D8, D14, D18, D21, D22, and D23 added) and by the owner's settlement of
+planning's question P1 (D24). The change has two halves in one
 change: first the workflow becomes a self-contained, versioned, installable
 distribution that this repository runs installed from its own tree; then, once a
 coordinator has bootstrapped the workflow's own repository from that tree and
@@ -526,6 +527,12 @@ applies the `market-change-workflow` delta by hand as it amends that capability.
 closeout archives with `--skip-specs`, which closeout's "Archival" admits for a
 `spec.md` already edited by hand; the delta files stay in the archived change as its
 record, and the closeout review compares each hand-applied requirement with its delta.
+What holds for the specification holds for the rest of the capability and the
+handbook, which also ship in the release and also leave in (iii): the promotions the
+proposal's knowledge to promote sends to `change-workflow`'s companion, its diagrams
+(D20), and the owner's handbook are written in (i)'s last sections with the
+specification, since no closeout in this repository can write a document (iii) has
+removed.
 
 This departs, for this change, from "Promotion"'s rule that the archive writes a
 `spec.md` the change's deltas cover. The archive cannot write it here: once (iii)
@@ -539,42 +546,30 @@ reverses D1 and costs the second design, review, and closeout D1 avoided; and de
 the `change-workflow` delta from the change in (iii), which archives normally but
 leaves the archived change without its largest specification change.
 
-## Raised by planning
+### D24 — A temporary exception to the packaging layout for the workflow's wheel
 
-Planning stopped on one question the design does not answer; the change returns to
-design for it.
+The wheel (D8) carries the engine from `scripts/change_workflow/` and the workflow's
+documents from where they sit (D6, D16), which no `src/<package>` layout can hold
+without moving the specification out of OpenSpec's tree. It is built in that shape
+under an `overrides` row of `AGENTS.md`'s "Exceptions to shared guidance", against
+`packaging-python.md`'s "One import package per distribution", "Nothing remaps the
+package", and "Data files live inside the package", and their Hatchling form; it
+spans the engine under `scripts/`, the skills under `.agents/`, and documents under
+`docs/` and `openspec/`, so it sits in the root table rather than beside one
+capability. `make check-project-layout` admits that one project, naming the row.
+The exception lasts until (iii) removes the engine, the wheel's project, and the
+row together: it is short-lived, and restructuring the engine to the rule's layout
+is not worth doing in a repository it is about to leave. The workflow's repository
+may restructure to the rule, or keep an exception of its own, as its own change.
 
-**P1 — How the wheel meets the packaging layout rules.** D8 builds the wheel with
-Hatchling and has it carry the skills, the workflow's documents, the schema, and the
-fragment as package data; D6 and D16 keep each of those where it sits during (i) —
-the specification under `openspec/specs/change-workflow/` for OpenSpec, the skills'
-sources under `.agents/skills/`, the guidance under `docs/guidance/workflow/` — and
-the engine at `scripts/change_workflow/`, the distribution packaging them from there.
-That build contradicts three engineering rules this repository applies without
-exception — `packaging-python.md`'s "One import package per distribution" (the
-package at `src/<package>`), "Nothing remaps the package" (no include, exclude, or
-remap in the build configuration), and "Data files live inside the package" — in
-their Hatchling form (`packaging-hatchling.md`, "The wheel target names the one
-package") and this repository's `docs/guidance/repository/project-layout.md`; and
-`make check-project-layout`, which scans every `pyproject.toml` outside `openspec/`,
-refuses a wheel target other than `packages = ["src/<package>"]` or any include or
-remap. No placement of the project file avoids it: the files the wheel must carry lie
-outside any one package directory. The options planning sees, none settled:
+Planning raised the question (P1) and the owner settled it, declining a return to
+design: "This is going to be a temporary exception until step (iii) removes the
+engine entirely. It's short lived and isn't worth doing heavy refactoring right now
+we move it out of the repo anyway."
 
-- **An exception.** An `overrides` row for the workflow's wheel against those three
-  rules, beside the capability it serves or in `AGENTS.md`'s table, with the layout
-  check admitting the declared row; the workflow's repository may later restructure
-  to the rule as its own change, or keep the row.
-- **The engine in the rule's layout, the documents linked in.** The engine moves to a
-  project's `src/change_workflow/` in (i) — a path D16 then lifts at its new place —
-  and each document reaches the package directory through a tracked symbolic link to
-  where it sits, so nothing in the build configuration includes or remaps; whether
-  Hatchling ships a linked file's content needs proving.
-- **A generated build tree.** A make target assembles a gitignored tree in the
-  rule's layout from the tracked files and builds the wheel from it; the tracked tree
-  holds no remap, but the copy is a build configuration by another name.
-
-Planning wrote no task list.
+Rejected: moving the engine to `src/change_workflow/` with each document linked into
+the package directory, a restructuring of code about to leave whose linked build was
+unproven; and a generated build tree, a build configuration by another name.
 
 ## Principles
 
