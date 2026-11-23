@@ -1,6 +1,7 @@
 # Design: extract the change workflow repository
 
-Status: design settled 2026-11-23 (D1–D22). The change has two halves in one
+Status: design settled 2026-11-23 (D1–D23), amended by design review 15's triage
+(D4, D5, D6, D8, D14, D18, D21, D22, and D23 added). The change has two halves in one
 change: first the workflow becomes a self-contained, versioned, installable
 distribution that this repository runs installed from its own tree; then, once a
 coordinator has bootstrapped the workflow's own repository from that tree and
@@ -130,18 +131,28 @@ A `path` is relative to the checkout's root or begins with `~`; the check refuse
 missing or empty directory. It is required; `engineering = { none = "<reason>" }`
 declares that a repository applies none, the reason required as `defaults.disable`
 requires one. `config load` prints the pointer's Markdown files with every step's
-documents, and `config --json` gives the resolved directory as `guidance.engineering`.
-The check refuses a `load` entry overlapping the pointer, so nothing is read twice.
+documents. `config --json` gives the pointer as `guidance.engineering`, mirroring the
+table's one key: `{"path": "<the resolved absolute directory>"}`, `{"none":
+"<reason>"}`, or `null` while the local file lacks it (D5). The check refuses a `load`
+entry overlapping the pointer, so nothing is read twice.
 
 The skills cite engineering guidance by Markdown section name — "the engineering
 guidance's section 'Imports go at module level'" — wherever the section sits beneath
 the pointer, never by file name. The cited section names are a provisional interface,
 its successor naming the guidance by role. `check config` reports a cited section
 missing beneath a user's pointer and does not refuse it, since refusing would hold
-every user's guidance to this repository's headings. The workflow's guidance names
-engineering guidance the same way, in prose, so CW-d2rw's link rule becomes a rule on
-what workflow guidance cites. No heading repeats across this repository's engineering
-guidance today.
+every user's guidance to this repository's headings. A cited name that heads more
+than one section beneath the pointer does not resolve: `check config` reports it as
+ambiguous, naming the files, and does not refuse it either, for the same reason. The
+workflow's guidance names engineering guidance the same way, in prose, so CW-d2rw's
+link rule becomes a rule on what workflow guidance cites.
+
+Three headings repeat across this repository's engineering guidance today, each a
+file's title and a section of another file: "Integration tests" and "System tests"
+(`integration-tests.md` and `system-tests.md`, and sections of `test-levels.md`), and
+"Contract fixtures" (`contract-fixtures.md`, and a section of `testing-python.md`).
+(i) makes all three unique in this repository's guidance, whether or not a skill
+cites them, so section names start unique here (15 F5, the owner's condition).
 
 Rejected: a bare path, which commits no version and invites a machine path; a Git
 source the engine fetches, which puts network Git in the engine; and file names as
@@ -187,6 +198,27 @@ refuses, naming the missing field and `change-workflow install`; `check config`
 reports missing local fields without refusing, so CI, which has no local file, checks
 everything it checks now.
 
+`config --json` succeeds without the local file too, exiting 0, so CI's callers of
+structured output — this repository's assumptions test reading `roles` (D14) — need
+none. It reports the file beside the committed one, and each required local field
+it lacks with the status `missing`, distinct from `absent`, which an optional field
+takes; what the distribution provides — `roles` and the `workflow` paths (D6) — never
+depends on it:
+
+```json
+{"file": ".agents/workflow.toml", "exists": true,
+ "local": {"file": ".agents/workflow.local.toml", "exists": false},
+ "fields": [{"field": "guidance.engineering", "status": "missing"},
+            {"field": "models.design", "status": "missing"}],
+ "guidance": {"engineering": null},
+ "workflow": {"version": "0.1.0", "specification": "…", "schema": "…"},
+ "roles": []}
+```
+
+A value of the wrong kind in either file is refused as it is today, and a pointer
+directory holding no Markdown file is refused (D4). Every caller of a local field is
+a step, which `start` guards, so the partial output reaches no step.
+
 Rejected: the whole configuration local, which loses the coupling of hooks to the
 branch that changes their targets, review of configuration changes, and CI's checks;
 and leaving everything committed, which commits per-developer values and makes the
@@ -200,8 +232,22 @@ package data, and the engine finds them beside itself with no setting: they belo
 the same version as the skills that cite them, so nothing about them varies between
 developers. `config load <step>` prints, lower layer first, the engineering pointer's
 files, the installed workflow guidance, then the repository's `load` entries.
-`config --json` names `workflow.documents` and `workflow.schema`; `outcome.SCHEMA` and
-`diagram.DIAGRAMS` resolve inside the distribution.
+`config --json` names each installed document by its role, never a directory to look
+inside, so the package's layout stays internal:
+
+```json
+"workflow": {"version": "0.1.0",
+             "specification": "…/spec.md", "index": "…/index.md",
+             "companion": "…/README.md", "diagrams": "…/diagrams/",
+             "guidance": "…/workflow/", "handbook": "…/change-workflow-handbook.md",
+             "schema": "…/change-outcome.schema.json", "fragment": "…/workflow.mk"}
+```
+
+The shipped skills read the workflow's own documents only through these fields — a
+`CW-` requirement id in `workflow.specification`, and a review of a change citing the
+workflow reads its installed specification and companion there. `fragment` stays a
+subcommand for a `Makefile`'s include (D15). `outcome.SCHEMA` and `diagram.DIAGRAMS`
+resolve inside the distribution.
 
 The skills cite the workflow's guidance by section name and its specification by
 requirement id, and the distribution's own test fails on a cited section or id that
@@ -219,7 +265,9 @@ in (iii).
 
 Rejected: a pointer for the workflow's own documents, which versions them apart from
 the skills citing them; copies installed into each repository; links pinned to a
-release; and links to the installed copy, a machine path.
+release; links to the installed copy, a machine path; and a `workflow.documents`
+directory with its layout made public, which commits every later release to the
+package's internal paths (15 F4).
 
 ### D7 — One installed version per machine, checked against each repository's range
 
@@ -251,14 +299,24 @@ shipped skills, the handbook, the fragment, and the post-compaction hook call it
 user skill directories, recording the names it wrote in a manifest beside them so it
 removes a skill a later version retired and never touches one it did not write, and
 stamping each with its version; every engine command compares the stamp with its own
-version and refuses on a mismatch, naming `change-workflow install`. Run in a
+version and refuses on a mismatch, naming `change-workflow install`, and refuses as
+well when a supported harness's user skill directory lacks a skill the version ships
+or lacks the manifest. `install` refuses a skill name present in a user skill
+directory that its manifest does not record, naming it and writing nothing, rather
+than overwriting a skill it did not write. Run in a
 checkout, it writes `.agents/workflow.local.toml` where none exists, from the
 repository's committed template, `.agents/workflow.local.template.toml`, when the
 repository has one, and otherwise as a skeleton naming each required local field; it
 never overwrites a local file.
 
 During (i) this repository and its CI install the workflow from the tree and run it
-as `change-workflow`, so the preliminary merge exercises the installed form.
+as `change-workflow`, and (i) removes the workflow's project skill links,
+`.claude/skills/` and `.codex/skills/`'s `change-*` and `guidance-review` entries, in
+the section that switches the skills to `change-workflow`: each harness then finds the
+workflow's skills only in its user skill directory, so the preliminary merge exercises
+the installed form whatever a harness's rule for a project and a user skill of one
+name (15 F2). The skills' sources stay under `.agents/skills/` until (iii), for the
+wheel to package and the coordinator to lift.
 
 Rejected: a zipapp, which fits uv's tool management less well and embeds its version;
 and installation from a tag alone, a channel rather than an artifact.
@@ -330,7 +388,8 @@ installing outside the harnesses' state, where the harnesses do not look.
 `config --json` gains `roles`: each role the workflow leaves to a repository, by name,
 with the configuration fields that provide it. The distribution's own test holds the
 companion's roles table to it; this repository's assumptions test reads the roles
-from it and the fragment from the path `fragment` prints. The MCW requirements and
+from it, in CI with no local file (D5), and the fragment from the path `fragment`
+prints. The MCW requirements and
 companion cite CW requirements in prose by id. `market-change-workflow` stays here as
 this repository's capability.
 
@@ -378,15 +437,20 @@ which rewrites every intra-workflow citation and rules out an OpenSpec tree.
 
 ### D18 — In-flight changes cross at their merge of `dev`
 
-A branch made before (iii) carries the in-tree engine and its tracked skill links,
-and its make targets run the in-tree command until it merges `dev`; (i) moves no
-`format` (D12), so its records stay readable by the installed engine. No migration is
-built, and the handbook says when a change crosses. Which wins when a project skill
-and a user skill share a name is the harness's rule; (iii)'s gate section checks and
-records it.
+A branch made before (i)'s preliminary merge carries the workflow's tracked project
+skill links, which (i) removes (D8), and a branch made before (iii) the in-tree
+engine; its make targets run the in-tree command, and its sessions the skills its
+harness picks, until it merges `dev`. (i) moves no `format` (D12), so its records stay
+readable by the installed engine. No migration is built, and the handbook says when a
+change crosses, and that until then which skill a branch still holding the links runs
+is its harness's rule for a project and a user skill of one name. This repository
+from (i) on holds no such pair, so nothing checks that rule (15 F2).
 
-Rejected: rebasing every open change at (iii), which a merge does anyway; and holding
-(iii) until no change is open.
+Rejected: rebasing every open change at (iii), which a merge does anyway; holding
+(iii) until no change is open; and keeping the project links through (i) while
+checking each harness's precedence, which probes a harness rule that may change
+between its versions, and which left (i) unable to show it ran the installed skills
+(15 F2).
 
 ### D19 — The lesser goal's section after extraction
 
@@ -411,10 +475,13 @@ the workflow's repository.
 
 ### D21 — What the skills check holds
 
-`check skills` holds two things: the installed skills' version stamp against the
-engine's (D8), and, for skills a repository keeps itself — here OpenSpec's `openspec-*`
-skills — one source under `.agents/skills/` linked from each harness's project skill
-directory, as now. CW-d8de covers both.
+`check skills` holds two things: the installed skills — each the version ships
+present in each supported harness's user skill directory with the manifest, and
+stamped with the engine's version (D8) — and, for skills a repository keeps itself —
+here OpenSpec's `openspec-*` skills — one source under `.agents/skills/` linked from
+each harness's project skill directory, as now. The workflow's own sources, under
+`.agents/skills/` through (i) for packaging only, are the distribution's, not the
+repository's, so the check asks no project link of them. CW-d8de covers both.
 
 Rejected: dropping the repository's half, which loses the guard against copies of
 OpenSpec's skills; and a repository script for an unchanged rule.
@@ -425,23 +492,52 @@ Two rounds. Round 1 is all of (i): the wheel and its package data; `install` wit
 manifest and stamp; the version, the range check, and the log's `workflow` field; the
 committed and local split and the engineering pointer; the documents served from the
 distribution, `config load`'s order, and `config --json`'s additions; `fragment`; the
-skills switched to `change-workflow` and to citations by section and id; the sandbox's
-protections and the skills check; the two new default checks and `check spec-index
---json`; `roles` and this repository's assumptions test; the workflow's documents
-made self-contained; the diagrams redrawn; the handbook's procedure and path list for
-the move; and this repository and CI installing from the tree. Its triage ends (i),
-the orchestrating session holds, and (i) is the candidate for the preliminary pull
-request. Round 2 is (iii), after the coordinator's evidence: the gate section; the
-range and the installed release; the in-tree copy and its tracked skill links
-removed; this repository's workflow citations rewritten; `market-change-workflow`,
-`AGENTS.md`, and the lesser goal's section. Round 1 is expected to take three sessions
+skills switched to `change-workflow` and to citations by section and id, and the
+workflow's project skill links removed; the engineering guidance's three repeated
+headings made unique; the sandbox's protections and the skills check; the two new
+default checks and `check spec-index --json`; `roles` and this repository's
+assumptions test; the workflow's documents made self-contained; the diagrams redrawn;
+the `change-workflow` delta applied to the permanent specification and its index
+(D23); the handbook's procedure and path list for the move; and this repository and
+CI installing from the tree. Its triage ends (i), the orchestrating session holds,
+and (i) is the candidate for the preliminary pull request. Round 2 is (iii), after the
+coordinator's evidence: the gate section; the range and the installed release; the
+in-tree copy removed; this repository's workflow citations rewritten;
+`market-change-workflow`, its delta applied by hand (D23), `AGENTS.md`, and the lesser
+goal's section. Round 1 is expected to take three sessions
 (the engine and installer; the skills and the configuration split; the checks,
 documents, and this repository's installed operation) and round 2 two (the gate and
-switch; the citation rewrite); planning maps them onto sections. Then closeout.
+switch; the citation rewrite); planning maps them onto sections. Then closeout, which
+archives with `--skip-specs` (D23).
 
-The install target and the skills' switch to `change-workflow` sit in one section,
-since this change's later sessions run whatever is installed from the tree, and a
-developer reinstalls after each engine edit.
+The install target, the skills' switch to `change-workflow`, and the removal of the
+workflow's project skill links sit in one section, since this change's later sessions
+run whatever is installed from the tree, and a developer reinstalls after each engine
+edit.
+
+### D23 — The `change-workflow` delta reaches the permanent specification in (i)
+
+(i)'s last section applies this change's `change-workflow` delta to
+`openspec/specs/change-workflow/spec.md`, and writes its `index.md` entries as
+promotion would, so the preliminary merge, the wheel built from the tree (D6), and the
+coordinator's lift (D16) carry the requirements the release implements, and the
+distribution's test of cited ids (CW-lm42) holds the skills' new citations. (iii)
+applies the `market-change-workflow` delta by hand as it amends that capability. The
+closeout archives with `--skip-specs`, which closeout's "Archival" admits for a
+`spec.md` already edited by hand; the delta files stay in the archived change as its
+record, and the closeout review compares each hand-applied requirement with its delta.
+
+This departs, for this change, from "Promotion"'s rule that the archive writes a
+`spec.md` the change's deltas cover. The archive cannot write it here: once (iii)
+removes the capability, `openspec archive` refuses a MODIFIED requirement whose
+specification does not exist, and the strict validation every pre-commit runs does
+not catch it (15 F1, checked on a scratch tree with OpenSpec 1.6.0); and the release,
+cut between the halves, must carry its own requirements before the closeout.
+
+Rejected: splitting the change in two so (i) archives normally before the lift, which
+reverses D1 and costs the second design, review, and closeout D1 avoided; and deleting
+the `change-workflow` delta from the change in (iii), which archives normally but
+leaves the archived change without its largest specification change.
 
 ## Principles
 

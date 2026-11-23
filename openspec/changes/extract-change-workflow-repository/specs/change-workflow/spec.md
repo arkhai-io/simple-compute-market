@@ -18,10 +18,13 @@ fragment. `change-workflow --version` MUST print the distribution's version.
 The engine MUST find the workflow's own documents — its guidance, its specification,
 its handbook, the outcome schema, the graph diagram, and the make fragment — in its
 installed distribution, with no field of any configuration naming them. `config
---json` MUST name the installed documents' directory as `workflow.documents` and the
-schema as `workflow.schema`. The skills MUST cite the workflow's guidance by section
-name and its specification by requirement id, and the distribution's own test MUST
-fail on a cited section or id it does not hold.
+--json` MUST name each installed document by its role under `workflow`:
+`specification`, `index`, `companion`, `diagrams`, `guidance`, `handbook`, `schema`,
+and `fragment`, and MUST NOT name a directory a caller looks inside for another
+document. The skills MUST read the workflow's own documents only through those
+fields, MUST cite the workflow's guidance by section name and its specification by
+requirement id, and the distribution's own test MUST fail on a cited section or id it
+does not hold.
 
 #### Scenario: A skill reads the outcome schema
 
@@ -29,6 +32,13 @@ fail on a cited section or id it does not hold.
   it
 - **THEN** it reads `workflow.schema` from `config --json`, which names the installed
   distribution's schema
+
+#### Scenario: A skill follows a requirement id
+
+- **WHEN** a skill relies on `CW-r6kd` in a repository holding no copy of the
+  workflow's specification
+- **THEN** it reads the requirement in the file `workflow.specification` names, and
+  infers no path inside the distribution
 
 #### Scenario: A skill cites a section the guidance lost
 
@@ -64,14 +74,31 @@ the range.
 directory of each harness the workflow supports, stamp each with the distribution's
 version, and record the names it wrote in a manifest beside them; it MUST remove a
 skill its manifest names that the installed version no longer ships, and MUST NOT
-touch a skill it did not write. Every subcommand but `install` and `--version` MUST
-refuse when an installed skill's stamp differs from the engine's version, naming both
-and `change-workflow install`.
+touch a skill it did not write: it MUST refuse, naming it and writing nothing, when a
+skill of a name it ships is present in a user skill directory and its manifest does
+not record it. Every subcommand but `install` and `--version` MUST refuse when an
+installed skill's stamp differs from the engine's version, naming both and
+`change-workflow install`, and when a supported harness's user skill directory lacks
+a skill the version ships or the manifest, naming what is missing and `change-workflow
+install`.
 
 #### Scenario: The engine is upgraded without its skills
 
 - **WHEN** the engine is upgraded to 0.4.2 and the installed skills are stamped 0.4.1
 - **THEN** `next` refuses, naming 0.4.1, 0.4.2, and `change-workflow install`
+
+#### Scenario: A skill is missing
+
+- **WHEN** Codex's user skill directory lacks `change-plan`, which the installed
+  version ships
+- **THEN** `next` refuses, naming the skill, the directory, and `change-workflow
+  install`
+
+#### Scenario: A skill of the workflow's name is not the installer's
+
+- **WHEN** `install` runs and Claude Code's user skill directory holds a
+  `change-design` its manifest does not record
+- **THEN** it refuses, naming the skill, and writes nothing
 
 #### Scenario: A later version retires a skill
 
@@ -108,7 +135,10 @@ writable sandbox paths a developer adds. Every other field MUST live in the comm
 belongs in; writable sandbox paths alone MAY appear in both, the local ones extending
 the committed ones. With no local configuration, `start` MUST refuse, naming the
 missing field and `change-workflow install`, and `check config` MUST report the
-missing local fields without refusing. A change's clone MUST link its local
+missing local fields without refusing. `config --json` MUST succeed with no local
+configuration, reporting it under `local` with `exists` false and each required
+local field it lacks with the status `missing`, and giving every committed field and
+what the distribution provides in full. A change's clone MUST link its local
 configuration to the workspace's.
 
 #### Scenario: Models are committed
@@ -122,6 +152,14 @@ configuration to the workspace's.
 - **WHEN** `check config` runs in a checkout with no local configuration
 - **THEN** it checks every committed field, reports the local fields as missing, and
   exits 0
+
+#### Scenario: CI reads the workflow's roles
+
+- **WHEN** a repository's test runs `config --json` in a checkout with no local
+  configuration
+- **THEN** it exits 0, gives `roles` and the `workflow` paths in full, reports
+  `guidance.engineering` and each step's models as `missing`, and gives
+  `guidance.engineering` as `null`
 
 #### Scenario: A step starts with no local configuration
 
@@ -137,16 +175,24 @@ holding exactly one of `path`, a directory relative to the checkout's root or
 beginning with `~`, or `none`, a reason the repository applies none; the field is
 required. The check MUST refuse a `path` that is missing or holds no Markdown file,
 and an empty reason. `config load` MUST print the Markdown files beneath the pointer
-with every step's documents, and `config --json` MUST give the resolved directory as
-`guidance.engineering`. The check MUST refuse a `load` entry that is or lies beneath
-the pointer's directory.
+with every step's documents, and `config --json` MUST give the pointer as
+`guidance.engineering`: `{"path": <the resolved absolute directory>}`, `{"none":
+<the reason>}`, or `null` while the local configuration lacks it. The check MUST
+refuse a `load` entry that is or lies beneath the pointer's directory.
 
 #### Scenario: A developer points at the repository's engineering guidance
 
 - **WHEN** the local configuration declares `engineering = { path =
   "docs/guidance/engineering/" }`
 - **THEN** `config load plan` prints that directory's Markdown files, and `config
-  --json` gives its absolute path as `guidance.engineering`
+  --json` gives `guidance.engineering` as `{"path": ...}` holding its absolute path
+
+#### Scenario: A repository applies no engineering guidance
+
+- **WHEN** the local configuration declares `engineering = { none = "the workflow's
+  own repository applies only its guidance" }`
+- **THEN** `config load plan` prints no engineering file, and `config --json` gives
+  `guidance.engineering` as `{"none": ...}` holding the reason
 
 #### Scenario: A load entry repeats the pointer
 
@@ -159,8 +205,10 @@ the pointer's directory.
 A skill MUST cite engineering guidance by the name of a Markdown section beneath the
 pointer's directory, never by a file's name or path. The section names the shipped
 skills cite are a provisional interface, succeeded by naming engineering guidance by
-role. `check config` MUST report each cited section no file beneath the pointer
-heads, and MUST NOT refuse for it.
+role. A cited name that heads more than one section beneath the pointer does not
+resolve. `check config` MUST report each cited section no file beneath the pointer
+heads, and each that more than one section heads, naming the files, and MUST NOT
+refuse for either.
 
 #### Scenario: A user's guidance lacks a cited section
 
@@ -168,6 +216,13 @@ heads, and MUST NOT refuse for it.
   level", which a skill cites
 - **THEN** `check config` reports the section as missing beneath the pointer and exits
   0
+
+#### Scenario: A cited section name repeats
+
+- **WHEN** a skill cites the section "Integration tests" and two files beneath the
+  pointer each head a section of that name
+- **THEN** `check config` reports the citation as ambiguous, naming both files, and
+  exits 0
 
 ### Requirement: CW-d867 Each log line records the workflow version
 
@@ -273,9 +328,10 @@ directory, when run outside one.
 ### Requirement: CW-d8de Each skill has one source for every harness
 
 The workflow's skills MUST be the installed distribution's, stamped with its version
-(CW-1rhd). Each agent skill a repository commits itself MUST have exactly one source,
-under `.agents/skills/`, and MUST be loadable by every supported agent harness from
-that source. A skill MUST NOT be maintained as separate copies for different
+(CW-1rhd), loaded from each supported harness's user skill directory, with no project
+skill entry of the same name. Each agent skill a repository commits itself MUST have
+exactly one source, under `.agents/skills/`, and MUST be loadable by every supported
+agent harness from that source. A skill MUST NOT be maintained as separate copies for different
 harnesses, and every harness entry for a skill MUST resolve. `check skills` MUST hold
 both.
 

@@ -39,7 +39,9 @@ The change has two halves, with a pause between them (design D1, D2).
 - **An installer.** `change-workflow install` writes the skills into Claude Code's
   and Codex's user skill directories, stamped with their version, and, run in a
   checkout, writes the checkout's local configuration where none exists. Every engine
-  command refuses skills whose stamp differs from its own version (D8).
+  command refuses skills whose stamp differs from its own version, or that are
+  missing (D8). The workflow's project skill links go in this half, so each harness
+  loads the installed skills (D8, D18).
 - **Repositories declare a compatible version range.** A committed `[workflow]
   version` holds PEP 440 specifiers; every engine command that reads the
   configuration refuses an installed version outside it, naming the fix. One version
@@ -58,14 +60,17 @@ The change has two halves, with a pause between them (design D1, D2).
   this repository (D6).
 - **Two more default checks.** The specification index and decision destinations
   checks become the engine's (D10).
-- **Smaller interfaces callers need.** `config --json` names the workflow's documents,
-  schema, engineering directory, and roles; `fragment` prints the installed fragment's
-  path; `check spec-index --json` reports the paths a change's deltas create (D6,
-  D10, D14, D15).
+- **Smaller interfaces callers need.** `config --json` names each of the workflow's
+  installed documents by role, the engineering pointer, and the roles, and succeeds
+  without the local file; `fragment` prints the installed fragment's path; `check
+  spec-index --json` reports the paths a change's deltas create (D5, D6, D10, D14,
+  D15).
 - **Protection of what is installed.** The sandbox protects the installed skills, the
   installed engine, and the local file (D13).
 - **This repository runs the workflow installed from its tree**, and the engine's
-  diagrams are redrawn (D20). This half may be merged to `dev` while the change waits.
+  diagrams are redrawn (D20). The `change-workflow` delta is applied to the permanent
+  specification, so the release carries its own requirements (D23). This half may be
+  merged to `dev` while the change waits.
 
 **The pause.** A coordinator bootstraps the workflow's public repository, `change-workflow`,
 from what the first half left, lifting the moved files with their history by path,
@@ -105,8 +110,9 @@ release's surface (CW-c2tw):
   `.agents/workflow.local.toml`, `[models]` moving to the local file and `[workflow]`
   and `[guidance]` added, both required: incompatible.
 - **New subcommands and outputs** — `install`, `fragment`, `--version`, `config
-  --json`'s `workflow`, `guidance`, and `roles`, `check spec-index --json`, the log
-  line's `workflow` field: compatible additions.
+  --json`'s `local`, `workflow` (each installed document by role), `guidance`, and
+  `roles`, and its `missing` status, `check spec-index --json`, the log line's
+  `workflow` field: compatible additions.
 - **New default checks**, `spec-index` and `decisions`: incompatible, since an
   adopter's commits may newly fail.
 - **The skills' citations of engineering guidance** become a provisional interface:
@@ -142,7 +148,8 @@ release's surface (CW-c2tw):
 - `.agents/workflow.toml`, a new `.agents/workflow.local.template.toml`, and
   `.gitignore`.
 - `.claude/skills/` and `.codex/skills/`, whose `change-*` and `guidance-review`
-  links go in the second half; `.claude/settings.json`'s post-compaction hook.
+  links go in the first half; `.claude/settings.json`'s post-compaction hook.
+- `docs/guidance/engineering/`, whose three repeated headings become unique.
 - The `Makefile`'s include of the fragment, and its install target.
 - About 95 permanent documents citing the workflow's specification or guidance,
   `AGENTS.md` and `openspec/README.md` among them; the citation check fails on any
@@ -229,6 +236,8 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
 - D21: the modified CW-d8de and `change-workflow`'s companion, "Leaf skills from one
   source".
 - D22: no permanent destination — the cadence is this change's plan.
+- D23: no permanent destination — how this change's own delta reaches the permanent
+  specification and how it archives are recorded in its plan and closeout task.
 - `market-change-workflow`: MCW-9k0c and MCW-iqh1, and its companion's "This
   repository is the workflow's first adopter"; `docs/development/ARCHITECTURE.md` for
   how this repository adopts the workflow.
