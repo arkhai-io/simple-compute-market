@@ -32,10 +32,13 @@ VM_CLEANUP = ("ensure_storefront_resumed", "reap_buyer_settle_subprocess", "rele
 #: The real-provisioning VM module, and its cleanup in place of the lane's.
 REAL_VM_MODULE = SCENARIOS / "vms" / "test_real_provisioning_deal.py"
 REAL_VM_CLEANUP = ("ensure_storefront_resumed", "recover_failed_run")
+#: The guest-isolation proof, which extends the real VM deal on its fixtures.
+GUEST_ISOLATION_MODULE = SCENARIOS / "vms" / "test_vm_guest_isolation.py"
 #: Every VM module against the real-provisioning target, and the cleanup each
 #: takes in place of the lane's.
 REAL_VM_MODULES = {
     REAL_VM_MODULE: REAL_VM_CLEANUP,
+    GUEST_ISOLATION_MODULE: REAL_VM_CLEANUP,
     SCENARIOS / "vms" / "test_vm_qualification.py": (
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "purchase_cleanup",
     ),
@@ -221,11 +224,13 @@ def test_a_qualification_module_checks_both_targets_before_any_hold(path, plans)
     assert gates == sorted(gates) and max(gates) < min(holds), order
 
 
-def test_the_real_vm_module_checks_its_target_and_execution_before_any_hold(plans):
+@pytest.mark.parametrize("module", [REAL_VM_MODULE, GUEST_ISOLATION_MODULE],
+                         ids=lambda path: path.name)
+def test_each_real_vm_deal_module_checks_its_target_and_execution_before_any_hold(plans, module):
     """A hold pauses a shared service when it is set up, so the module writes
     nothing to the stack only if its target is validated and its VM execution
     found real first."""
-    order = [name for name, _ in plans[str(REAL_VM_MODULE.relative_to(PROJECT))]["setup"]]
+    order = [name for name, _ in plans[str(module.relative_to(PROJECT))]["setup"]]
     holds = [order.index(name) for name in order if name in HOLD_FIXTURE_NAMES]
     assert holds, order
     assert order.index("real_vm_target") < order.index("real_vm_execution") < min(holds), order

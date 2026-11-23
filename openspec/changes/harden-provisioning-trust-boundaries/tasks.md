@@ -593,6 +593,10 @@ new task file or `tasks/guest-policy.yml`, `tasks/main.yml`) and
   IaC test layout with no gap row (added to `openspec/changes/README.md`). Declined: a
   fallback line when the report's own `python3` fails, since `python3` is checked
   present first and a failure there is no guest's state to report.
+  After the commit, `run test-before` of `test_guest_convergence.py` at `eccfbd790`
+  failed as intended: 17 failed, 1 passed, 2 native cases skipped, each failure the
+  absent script or the absent tasks (and one the double's new `isolation_refused`
+  argument), not a collection error.
 
 **Handoff.** Not shown until 7a's run: that libvirt accepts `update-device --live` with
 the running element as `dumpxml` prints it (target, alias and address included) and
@@ -621,7 +625,7 @@ the committed example target `config-real-provisioning-target.yml.example` under
 `bare_metal/working_data_qualification.py` sits beside `working_data_probe.py`),
 `e2e-tests/pyproject.toml`, and `e2e-tests/tests/unit/`.
 
-- [ ] 6a.1 Add to `VmHost` an optional `guest_isolation` section at target version 2:
+- [x] 6a.1 Add to `VmHost` an optional `guest_isolation` section at target version 2:
   `operator` (`host`, `port`, `user`, `key_path`, the key path harness-local and
   validated as `CleanupOperator.key_path` is) and an optional `private_destinations`
   (`refused`, `listed`, each an IPv4 address in a private range, distinct). Show it in
@@ -629,7 +633,23 @@ the committed example target `config-real-provisioning-target.yml.example` under
   is. (D21.) Verify: unit tests in `e2e-tests/tests/unit/test_real_provisioning_target.py`
   for the section accepted, an unknown field and a public or equal destination refused
   naming the field, and the example still loading.
-- [ ] 6a.2 Write the probes in `guest_isolation.py`, each fixed Python carried with JSON
+  Done: `GuestIsolation` (`operator`, optional `private_destinations`) on `VmHost`. The
+  route reuses `CleanupOperator`, whose docstring now names both its users, rather than
+  a copy of it. "A private range" is the guest policy's four
+  (`GUEST_POLICY_PRIVATE_RANGES`: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `100.64.0.0/10`), not Python's `is_private`, which admits the RFC 5737 documentation
+  ranges; both destinations are required once the section is given. The example shows
+  the section commented, with `127.0.0.1:16002`, an invented user and key path, and
+  `10.20.0.7`/`10.20.0.8`. `test_real_provisioning_target.py` passed (unit, 118, a
+  documentation-range address in place of a real public one after the fresh-context
+  check): the
+  section accepted and absent by default, the destinations optional, unknown, missing
+  and relative-path fields named, documentation-range, link-local, malformed, IPv6 and
+  CIDR destinations refused naming each, a destination on the guests' own network
+  (`192.168.122.0/24`, which the policy's other rules decide) refused, equal
+  destinations refused, the section refused on a bare-metal host, and the example's
+  commented block valid once uncommented.
+- [x] 6a.2 Write the probes in `guest_isolation.py`, each fixed Python carried with JSON
   arguments over the shared SSH seam (`ssh_access.SshSession.run`), as
   `working_data_qualification.probe_command` carries `working_data_probe.py`:
   - the **guest probe**, run under `sudo` in a guest as its buyer: ARP, ICMP and TCP to
@@ -661,7 +681,53 @@ the committed example target `config-real-provisioning-target.yml.example` under
   live removal refused leaving O9 unproven naming the libvirt version, a `next_start`
   convergence leaving O9 unproven — and for the operator command being `sudo -n --
   python3 -c` with the probe's own text and JSON arguments.
-- [ ] 6a.3 Write `test_vm_guest_isolation.py`, marked `e2e_vm_guest_isolation` and
+  Done, with one difference from the plan: the probe code is its own file,
+  `guest_isolation_probe.py`, read as text and carried as `working_data_probe.py` is,
+  one program for both sides selected by its `operation`; `guest_isolation.py` holds
+  `probe_command`, `IsolationProbes` (the operator route, each guest's buyer session,
+  and the guest probe run while the host watches for egress, in a thread of its own),
+  the judgements and the stages' state. Each judgement returns the faults it finds:
+  `refusal_faults` (a refusal counts only when its drop's counter rose, and an answer
+  or a reset is a reach), `host_service_faults` (O3), `metadata_faults` (O4),
+  `admission_faults` and `private_destination_faults` (O5, the accept's counter and
+  the egress both required), `jump_faults` (O7), `guest_to_guest_faults` (O1 and O8),
+  `claim_faults` and `filter_faults` (O2), `private_buyer_skip` (O6),
+  `planted_faults` and `converged_faults` (O8), and `live_restoration` (O9's made;
+  unproven, naming the libvirt version, only when libvirt reports the fixture's live
+  removal unsupported or convergence left the filter for the next start; otherwise
+  failed). Every probe operation exits 0 having printed what it saw, or prints an
+  `error` the harness fails on. How each probe observes: ARP, the claim and DHCP are
+  raw frames on the guest's own interface (a DHCPDISCOVER from its own MAC takes no
+  lease); the gateway path is a `/32` route the probe adds and removes, with the
+  guest's `accept_redirects` off meanwhile and restored after, since the host sends a
+  redirect for a packet it would forward back onto the bridge before its filter drops
+  it, and an accepted redirect would send the rest straight to the other guest; O2's
+  effect is the host's neighbour entry for the other guest, refreshed by a host ping
+  before the claim and read after it; the egress watch is an `AF_PACKET` socket on the
+  device `ip route get <listed>` names, counting outgoing TCP to the listed address and
+  port for 30 seconds while the guest makes five attempts, each started at least three
+  seconds after the last ended, since each side starts only once its own SSH connection
+  is made; the plant writes its interface files in a private temporary directory; the
+  libvirtd restart waits, bounded, for `arkhai-guest-policy.service`'s next exit, and
+  09k9 requires that run to have succeeded; the UFW reload is skipped when UFW is not
+  enabled. Every operation's bounds keep it within the shared SSH seam's 70-second
+  attempt, which re-sends a command that outlasts it. A host read that failed is a
+  named fault, never read as a port left open or a filter detached.
+  `test_vm_guest_isolation.py` passed (unit, but for its two tests that run pytest over
+  the module in a subprocess; see 6a.3): each judgement over sample `iptables -L -v -x
+  -n` (one chain read the same in both listing forms), `bridge -d link show`, `virsh`
+  and convergence output, including the two named cases, a rule missing from a read, a
+  counter that fell across a refill, a failed fixture step, a guest with no tap, a
+  failed host read, a convergence that failed or named nothing, and a live removal
+  that failed other than by libvirt's "Operation not supported" (an XML or an
+  unsupported-configuration error); the probe's pure framing and parsing — its ARP
+  request, claim and reply match, its echo request and reply match, its DHCPDISCOVER
+  and offer match, its egress match, and its reading of `virsh domiflist`, `virsh
+  version` and `systemctl show`; the command's form; every operation the stages ask
+  for being one the probe offers; and the checksum against RFC 1071's example. No test
+  runs the probe's sockets or commands against a real kernel or host; that is the
+  real-host run's.
+- [x] 6a.3 Write `test_vm_guest_isolation.py`, marked `e2e_vm_guest_isolation` and
   registered in `e2e-tests/pyproject.toml`, in no lane: it declares
   `OBSERVATIONS = ("O1", …, "O9")` for `tests/e2e/roles/helpers/qualification.py`, runs
   `test_real_provisioning_deal.py`'s shared stages for the two deals — subclassing them,
@@ -686,11 +752,116 @@ the committed example target `config-real-provisioning-target.yml.example` under
   `guest_isolation` leaves every observation but O1 and O6 unproven naming it (through
   `qualification.observation_outcomes` over the module's declared stages), and a relayed
   target leaves O6 unproven naming the route.
-- [ ] 6a.4 Verification point. Unit: `e2e-tests/tests/unit/test_real_provisioning_target.py`,
+  Done: the module subclasses every stage of `test_real_provisioning_deal.py` with an
+  empty body, in its order, imports its fixtures by name (deal state, keys, driver,
+  recovery, execution check), and replaces only its target fixture with
+  `qualification.target_host`, so a missing target is a blocked skip. Its fourteen own
+  stages, `09k1` to `09k14`, sit between `09k` and `09l`; the shared stages require
+  every observation, as in the qualification modules. O7 is four stages (after each of
+  the restart and the reload, O3 and O4 with the jumps, then O5), so a target without
+  `private_destinations` leaves O5 and O7 unproven while no other stage skips. Every
+  isolation stage names the earlier results it uses with `require_state`, the first
+  guest's access among them. O8 attempts
+  convergence whatever the fixture managed, in a `finally`; a convergence that fails
+  leaves the guest planted, and no test runs either path. The operator route has an SSH
+  session of its own, pinned to the target's `ssh_host_public_key` where it states one,
+  since the route reaches the host's own sshd; without it, the key the route first
+  presents is trusted for the run. The module is listed with the real VM modules in
+  `test_scenario_cleanup_order.py`, whose target-before-hold check now covers it. All
+  of 6a.3's checks are in `tests/unit/test_vm_guest_isolation.py` rather than split
+  with `test_real_vm_lane.py`, reusing `test_qualification_modules.py`'s marker and
+  lane readers (the module is not a row of its `MODULES`, whose README check waits on
+  closeout's promotion): the shared stages unchanged and the isolation stages inside
+  the window; every own stage declaring observations, O1 to O9 each required; the
+  marker registered and in no lane; the module collected under its marker, one item
+  per declared stage, and run without a target, every stage skipped at setup by the
+  module's target fixture, each item's skip reading `blocked: no real-provisioning
+  target` in the run's JUnit report (both static configuration tests in the sense of
+  `static-configuration-tests.md`: pytest, the tool that consumes the module, run over
+  it in a subprocess, as the hold checks read pytest's setup plan); and the outcomes through `observation_outcomes`, each own stage run
+  with its fixtures stood in for until it skips or reaches its first fixture, the shared
+  stages taken as passed — which shows which stages skip on the target's account, not
+  that any passes: without `guest_isolation`, only O1 and O6 have no skip and the rest
+  are unproven naming it; without `private_destinations`, O5 and O7 unproven naming it;
+  a relayed target, O6 unproven naming the route; under direct access, 09k8 passing for
+  a private buyer address and skipping for a public one and for the host's address on
+  the guests' network.
+
+  **Outside the plan, for the owner (O6).** D21's reading of O6 — a guest-side stage
+  reads its buyer session's peer address — cannot see a direct buyer's address: a VM
+  create masquerades the buyer's forwarded connection to the guest (`vm-create.yml`,
+  its `POSTROUTING ... --dport 22 -j MASQUERADE`), so the guest's peer is always
+  `192.168.122.1`, which is private. As first written, 09k8 would have made O6 on every
+  direct-access run. It now skips for any address on the guests' network, naming the
+  private-source buyer route, so under direct access O6 is unproven on every run and
+  never falsely made. D22 admits O6 unproven only for want of a private-source buyer
+  route; whether this counts, or O6 should instead be read host-side (the DNAT
+  session's original source in the host's conntrack, through the operator route), is a
+  design question for the round's review and triage. It was found by the fresh-context
+  check.
+- [x] 6a.4 Verification point. Unit: `e2e-tests/tests/unit/test_real_provisioning_target.py`,
   `test_vm_guest_isolation.py`, `test_real_vm_lane.py` (`make -C e2e-tests test-unit`).
   System: the module's run on a real host is section 7a's.
   End-to-end: `e2e_vm_guest_isolation`, in no lane; no lane scenario exercises it, and
   none is owed, since a lane has no real host.
+  Done: `make -C e2e-tests test-unit` passed (1137, 1 skipped, as before), the new
+  module's 75 tests and the cleanup-order and hold checks over it among them.
+  `scripts/change-workflow run pre-commit` before the first fresh-context fixes:
+  "after-functional-change …: passed, exit 0"; "pre-commit-functional …: passed, exit
+  0"; "pre-commit …: failed", on two comments saying "no longer", since reworded; after
+  them, all three passed.
+  The fresh-context check found: O6 falsely made under direct access (the note
+  above); the gateway path open to an accepted redirect; a counter that fell read as
+  risen; any failed live removal read as libvirt's refusal; the egress watch racing
+  the guest's attempts; fixed root-owned files in `/tmp`; a claim docstring naming a
+  send it does not make; a change reference and release-relative wording in comments;
+  duplicated marker and lane readers; a real public address in a target test; a test
+  name claiming more than it compared; and note claims overstating the stand-in runs,
+  the `finally`, and the blocked-skip check. Each is fixed above. A second fresh-context
+  check, after those fixes, found: a comment naming a design decision; two inaccurate
+  comments; stages using the first guest's access without naming it; probe framing and
+  parsing left untested; operations that could outlast the SSH seam's attempt and run
+  twice; failed host reads judged as facts; the policy unit's result unchecked after
+  the restart; a probe that raised on a request with no operation; O9's refusal match
+  also admitting libvirt's "unsupported configuration"; destinations admitted on the
+  guests' own network; a test name covering two modules in the singular; and note
+  claims overstating the destinations tested, the attempts' spacing, the stand-in
+  outcomes, where the blocked skip comes from, and an import of `checked_key_reference`
+  elsewhere. Each is fixed above. Declined, from both checks: moving
+  `checked_key_reference` out of the bare-metal qualification's module into the shared
+  helpers, a refactor of that module this section does not otherwise touch, so the VM
+  scenario imports it from there; reading the two readers of `test_qualification_modules.py`
+  as private, since the target tests already import that module's neighbour's
+  `EXAMPLE` the same way; counting O3's host-port refusal on anything narrower than the
+  chain's one drop, which the policy offers no rule for (a handoff item below); and the
+  `_host_read`-style names of the stages' own state flags, the form
+  `RealVmDealState` uses.
+  End-to-end confirmed: `e2e_vm_guest_isolation` runs in no lane; no lane scenario
+  exercises this section, and its only evidence beyond these tests is 7a's run.
+
+**Handoff for 7a.** The run needs, beyond the real VM scenario's target: the
+`guest_isolation` section with an operator route whose user may `sudo -n` Python as
+root, and that reaches the host's own sshd (it is pinned to `ssh_host_public_key` when
+the target states one); `private_destinations` whose `listed` address host preparation
+was given in `guest_allowed_private_destinations`; UFW enabled on the host, or O7's
+reload stage skips; and the guests alone on the host. What no test here shows, each a
+likely first finding: that the guest image's sudo and Python run the probe (it uses
+`ip -j`, raw sockets and the walrus operator, so Python 3.8 or later); that dnsmasq
+answers the probe's crafted DHCPDISCOVER through `clean-traffic`; that the host's
+neighbour entry for the second guest exists after the ping and is read through `ip -j
+neigh`; that `iptables -L -v -x -n` on the host prints a form `parse_rules` reads (two
+forms are covered); that libvirtd's restart reruns the policy's unit within the probe's
+60-second bound; and that the egress watch's 30 seconds cover some of the guest's five
+spaced attempts once both SSH connections are made. `ARKHAI-GUEST-IN`'s only drop is
+its closing catch-all, so O3's host-port refusal may also be counted by the guests' own
+broadcast or multicast in the window. The base module's `09n` asserts the heartbeat
+over the whole session, so a pause longer than five seconds from the restart, the
+reload or the convergence fails it as well as O8. If 09k13 fails before the plant is
+recorded, 09k14 skips naming the missing prerequisite, so O9 then reads unproven for a
+reason D22 does not admit; 7a's judgement reads O9's reason, not only its outcome.
+Closeout's promotion (8.9) should also name `e2e_vm_guest_isolation` in
+`docs/development/TESTING.md`'s account of the real-provisioning modules, beside the
+validation runbook and the E2E README it already lists.
 
 ## 7. A storefront never authorizes its administrator as a party
 
