@@ -833,7 +833,7 @@ def test_stopping_the_review_leaves_the_validation_running(tmp_path: Path) -> No
 # This repository's Makefile: the engine's fragment included, set to this
 # repository's branches, beside the repository's own targets.
 
-COMMAND = "scripts/change-workflow"
+COMMAND = "change-workflow"
 
 
 def _make_n(*arguments: str) -> list[str]:
@@ -959,3 +959,28 @@ def test_the_step_targets_help_names_write_and_not_allow() -> None:
 
     assert helps and all("[WRITE='<path>;<path>']" in line for line in helps)
     assert "ALLOW" not in fragment
+
+
+# The local configuration a step needs.
+
+def test_a_step_starts_with_no_local_configuration(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-4pm4's "A step starts with no local configuration": an unattended run is
+    refused, naming the missing pointer and models and `change-workflow install`, and
+    an interactive session the pointer; nothing is launched or logged."""
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    root = _checkout(tmp_path)
+    wrapper = make_wrapper(root, claude)
+    (root / ".agents/workflow.local.toml").unlink()
+    launched: list[list[str]] = []
+
+    assert main(["start", "design", CHANGE, "--unattended"], root=root, wrapper=wrapper) == 1
+    assert ("design needs guidance.engineering, models.design, which "
+            ".agents/workflow.local.toml does not declare (there is no such file): run "
+            "`change-workflow install`") in capsys.readouterr().err
+    assert main(["start", "design", CHANGE], root=root, wrapper=wrapper,
+                launch=lambda command, _: launched.append(list(command)) or 0) == 1
+    assert ("design needs guidance.engineering, which .agents/workflow.local.toml does not "
+            "declare") in capsys.readouterr().err
+    assert claude.commands == [] and launched == []
+    assert not log_path(root, CHANGE).exists()

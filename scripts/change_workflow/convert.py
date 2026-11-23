@@ -3,7 +3,7 @@ next-step computation reads.
 
 A change whose log holds a line without the format marker, or whose numbered
 records have no log, is routed on by nothing until its records are converted, once,
-in the checkout that holds them (`scripts/change-workflow convert <change>`). The
+in the checkout that holds them (`change-workflow convert <change>`). The
 conversion replaces the log whole, under its lock (`log.replace_log`):
 
 - each line without the marker is rewritten in place, keeping its seq, so every
@@ -196,7 +196,7 @@ def conversion(entries: Sequence[Entry], computation: Computation,
             f"the triage of {', '.join(in_progress)} is in progress: its triage file holds "
             "neither `## Next` nor `## Gate`, and no recorded triage outcome names it. Finish "
             "it on the code it started with, or resume it under the current skill, which "
-            "records its outcome with `scripts/change-workflow record`; then "
+            "records its outcome with `change-workflow record`; then "
             "convert the change again")
     lines = [rewritten(entry) for entry in entries]
     changed = [entry["seq"] for entry in entries if entry.get("format") != FORMAT]

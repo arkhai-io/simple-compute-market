@@ -2,7 +2,7 @@
 document it names: the installed `change-workflow` prints its version, refuses
 until `change-workflow install` has written its skills, and then, in a repository
 holding no copy of the workflow, names each document by role inside the installed
-distribution.
+distribution, and prints the installed fragment's path, which a Makefile includes.
 
 The test builds the wheel with `uv build` and installs it with `uv tool install`
 into temporary tool directories, so it needs `uv`, and is skipped, saying so, where
@@ -103,6 +103,7 @@ def test_the_installed_command_names_each_document_inside_the_distribution(
     before = run("config", "--json")
     installing = run("install")
     printed = run("config", "--json")
+    fragment = run("fragment")
 
     assert before.returncode == 1
     assert "run `change-workflow install`" in before.stderr
@@ -120,3 +121,13 @@ def test_the_installed_command_names_each_document_inside_the_distribution(
         assert path.exists(), role
         assert path.is_relative_to(tools), role
         assert not path.is_relative_to(ROOT), role
+    assert (fragment.returncode, fragment.stdout) == (0, f"{workflow['fragment']}\n")
+    # CW-dvz5's "A Makefile includes the fragment": make reads the installed fragment
+    # at the path the command prints, and its targets call `change-workflow`.
+    (repository / "Makefile").write_text(f"include $(shell {installed} fragment)\n", "utf-8")
+    made = subprocess.run(["make", "-n", "--no-print-directory", "design", "CHANGE=X"],
+                          cwd=repository, capture_output=True, text=True,
+                          env={key: value for key, value in environment.items()
+                               if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL",
+                                              "CHANGE_WORKFLOW", "UNATTENDED")})
+    assert (made.returncode, made.stdout) == (0, 'change-workflow start design "X"\n')

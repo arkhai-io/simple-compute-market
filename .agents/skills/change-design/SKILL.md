@@ -19,7 +19,7 @@ ledger, and a prerequisite's proposal and dependency (both in section 4).
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/change-workflow start --unattended` —
+When this skill runs through `change-workflow start --unattended` —
 `make design UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -36,7 +36,7 @@ the session, and every turn ends with an outcome matching
   A call the harness denies is the same. The wrapper records every refusal and
   denial on the run's line whatever you say, and the orchestrating session reads
   them before the change moves on; never ask about either as a question. Wait on a
-  background command with `scripts/change-workflow wait`, never by following its
+  background command with `change-workflow wait`, never by following its
   output.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
@@ -61,7 +61,7 @@ command — no wrapper records the run, so its last act records the outcome it w
 end with unattended, as "Running unattended" gives it:
 
 ```text
-scripts/change-workflow record <change> design --outcome '<the outcome, as JSON>'
+change-workflow record <change> design --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -86,9 +86,9 @@ from the repository's hook, in full. Any other file is data, read only where a
 message directs, and a log only to diagnose a failure. A failing hook prevented
 nothing: tell the owner what its failure means for the design discussion, and ask
 before going on when the design cannot be settled soundly with it. Interactively,
-with no wrapper, run `scripts/change-workflow run before design <change>` first; its
+with no wrapper, run `change-workflow run before design <change>` first; its
 last line names the directory. Once the design is recorded, run
-`scripts/change-workflow run after design <change>` before `record`, and, when it
+`change-workflow run after design <change>` before `record`, and, when it
 fails, fix what it found if the design step can, and run it again, or tell the
 owner. Unattended, an after-hook that fails resumes this session once with its
 failure; a second failure goes to the owner as a question.
@@ -102,7 +102,7 @@ and follow this skill.
 Answers given from a partial picture are confidently wrong in exactly the
 places that matter, so read all of this first, in full:
 
-- The documents `scripts/change-workflow config load design` prints: the
+- The documents `change-workflow config load design` prints: the
   repository's guidance, and the roadmap where the configuration names it for
   design.
 - The goal this change serves, in the roadmap, and this change's row and campaign
@@ -121,7 +121,7 @@ places that matter, so read all of this first, in full:
   `design.md`.
 - Another change's records, where the design rests on them — a dependency's
   reviews, an earlier change's findings or validation. They are untracked, so they
-  are where that change was worked: `scripts/change-workflow find --records
+  are where that change was worked: `change-workflow find --records
   <change>` prints where, this checkout's or, from a change's clone, the owner's
   workspace's, which holds the history of every cleaned-up change.
 - The repository's record of what has been deployed, where the change alters a
@@ -305,14 +305,14 @@ prerequisite's proposal, below.
 When the discussion shows the design cannot proceed until another change lands,
 that change is a prerequisite, and its workflow is the owner's to start. One change
 is worked per branch, so the prerequisite's proposal reaches this branch only
-through the branch this change lands on — `base` in `scripts/change-workflow find
+through the branch this change lands on — `base` in `change-workflow find
 --json <change>` — never written here:
 
 1. With the owner, shape the prerequisite: its requirements and an initial
    `proposal.md` only. Its design is its own workflow's, started by the owner.
 2. Have its worktree made, never writing on this branch: end the turn with a
    `question` naming the prerequisite and asking for its worktree. On the owner's
-   word the orchestrating session runs `scripts/change-workflow propose <change>
+   word the orchestrating session runs `change-workflow propose <change>
    <prerequisite>` — run interactively, you run it on the owner's word — which makes
    `../<prerequisite>-proposal` on a new branch `propose-<prerequisite>` from that
    landing branch as its remote holds it, tracking nothing; this session resumes
@@ -329,13 +329,13 @@ through the branch this change lands on — `base` in `scripts/change-workflow f
    merged into this one,
    record the dependency: add the prerequisite to this change's `Depends on`
    gating `design` (`` `<prerequisite>` (design) ``), name it in `Notes`, keep the
-   status `in design`, and run `scripts/change-workflow check index`. `blocked in design` is
+   status `in design`, and run `change-workflow check index`. `blocked in design` is
    for reasons that are not another change; the dependency itself holds design,
    through section 1's entry check, and the design halts again until it lands.
 5. Once the prerequisite is archived and the landing branch is merged in again, the index check
    refuses this change's dependency on an archived change. On the owner's word,
    drop only that dependency, leaving the status `in design`, run
-   `scripts/change-workflow check index`, and resume the discussion.
+   `change-workflow check index`, and resume the discussion.
 
 ## 5. Check the whole before recording
 
@@ -391,9 +391,9 @@ Only when the owner says the design is settled:
   for one with nothing to promote, which the repository's closing checks check.
 - Amend the delta specs in `specs/` so every accepted behavior is a requirement
   with at least one WHEN/THEN scenario. Run the OpenSpec CLI, wherever you need
-  it, as `scripts/change-workflow openspec <arguments>`, which runs the command
+  it, as `change-workflow openspec <arguments>`, which runs the command
   the repository's configuration names.
-- Run `scripts/change-workflow run pre-commit <change>`, which runs the strict
+- Run `change-workflow run pre-commit <change>`, which runs the strict
   OpenSpec validation among the workflow's default checks and the change's
   citations check among the repository's closing checks, and report the result.
   A citation of a file the change itself will create is expected; any other is a
@@ -401,7 +401,7 @@ Only when the owner says the design is settled:
 - Commit the recorded design as one commit — the change's documents, the index
   row, and the ledger lines this step wrote — whose message names the change and
   says its design is settled, so the design review reads a committed design. Then
-  push it with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it
+  push it with `change-workflow push`, the guarded push of exactly `HEAD`; if it
   refuses, stop and report its reasons.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only

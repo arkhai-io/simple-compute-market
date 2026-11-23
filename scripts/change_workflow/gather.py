@@ -1,4 +1,4 @@
-"""Gathering the evidence a change's commit lacks: `scripts/change-workflow gather
+"""Gathering the evidence a change's commit lacks: `change-workflow gather
 <change>`.
 
 The gathering runs the preflight, pushes `HEAD` through the guarded push, starts

@@ -76,16 +76,31 @@ def test_shared_skill_without_skill_file_fails(tmp_path: Path) -> None:
 
 def test_the_workflows_own_sources_need_no_project_link(tmp_path: Path) -> None:
     """CW-d8de: the workflow's skills load from the user skill directories, so a
-    source the tree keeps for the distribution asks no project link, linked or not,
-    while a skill the repository commits still does."""
+    source the tree keeps for the distribution asks no project link, while a skill the
+    repository commits still does."""
     root = _repository(tmp_path, "change-plan", "openspec-propose", "change-design")
     for harness in (".claude/skills", ".codex/skills"):
-        (root / harness / "change-plan").unlink()
-        (root / harness / "openspec-propose").unlink()
+        for name in ("change-plan", "change-design", "openspec-propose"):
+            (root / harness / name).unlink()
 
     assert checker.problems(root, frozenset({"change-plan", "change-design"})) == [
         ".claude/skills/openspec-propose: missing link to .agents/skills/openspec-propose",
         ".codex/skills/openspec-propose: missing link to .agents/skills/openspec-propose"]
+
+
+def test_a_project_entry_of_a_workflow_skills_name_fails(tmp_path: Path) -> None:
+    """CW-d8de: a workflow skill has no project skill entry of its name, which would
+    stand beside the installed skill as a second copy: refused, link or not."""
+    root = _repository(tmp_path, "change-plan", "openspec-propose")
+    (root / ".codex/skills/change-plan").unlink()
+    (root / ".codex/skills/change-plan").mkdir()
+
+    found = checker.problems(root, frozenset({"change-plan"}))
+
+    assert found == [
+        f"{harness}/change-plan: the workflow's skill change-plan is installed into the "
+        "harness's user skill directory; no project entry of its name may stand beside it"
+        for harness in (".claude/skills", ".codex/skills")]
 
 
 def test_the_check_asks_no_link_of_the_running_distributions_skills(tmp_path: Path) -> None:

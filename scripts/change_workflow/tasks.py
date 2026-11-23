@@ -12,7 +12,7 @@ The closeout section is known by its exact title, `Closeout`, alone, so a list
 with sections also fails where none is titled so, where more than one is, or where
 a section follows it.
 
-Run as `scripts/change-workflow check tasks <change>` (`make check-tasks`) by the
+Run as `change-workflow check tasks <change>` (`make check-tasks`) by the
 skills that act on a task list before they do; its check, `task_problems`, is also
 the next-step computation's own backstop where it routes on sections. Prints each
 problem with its line on standard error and exits 1, or prints OK.

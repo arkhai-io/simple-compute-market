@@ -127,7 +127,7 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # What a review on Claude is told beside its prompt: nobody can answer it, and its
 # final message is the review, which the wrapper checks and publishes.
 REVIEW_UNATTENDED = (
-    "This review runs unattended through scripts/change-workflow: nobody can answer a "
+    "This review runs unattended through change-workflow: nobody can answer a "
     "question in this session. Follow the change-review skill's instructions for running "
     "unattended. It runs in a sandbox scoped to it, which keeps every file it reviews "
     "read-only. Your final message is the review, in the skill's format, and nothing else; "
@@ -263,7 +263,7 @@ def correction_prompt(kind: str, change: str, problems: Sequence[str]) -> str:
             f"refused it, finding:{_problem_list(problems)}\n\nWrite the complete review again, "
             "in the change-review skill's format, correcting every problem listed; your final "
             "message is the review and nothing else. Before you answer, pipe it through "
-            f"`scripts/change-workflow check review {kind} {change}` until it passes.")
+            f"`change-workflow check review {kind} {change}` until it passes.")
 
 
 def refusal_prompt(kind: str, change: str, base: str | None, problems: Sequence[str]) -> str:
@@ -274,7 +274,7 @@ def refusal_prompt(kind: str, change: str, base: str | None, problems: Sequence[
               "read it. Then write the "
               f"complete {kind} review again in the skill's format, correcting every problem "
               "listed; before you answer, pipe it through "
-              f"`scripts/change-workflow check review {kind} {change}` until it passes.")
+              f"`change-workflow check review {kind} {change}` until it passes.")
     if kind != "design":
         prompt += f" Base: {base}."
     return prompt
@@ -579,6 +579,9 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     reviews = directory / "reviews"
     try:
         configuration = config.load(root)
+        # The reviewer reads the engineering guidance first, as every step does.
+        config.require(configuration, config.GUIDANCE_ENGINEERING, "models.review",
+                       needed_by="a review")
         models = configuration.step_models("review")
         retries = configuration.review_format_retries()
     except config.ConfigError as exc:

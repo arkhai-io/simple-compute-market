@@ -1,4 +1,4 @@
-"""Running the repository's hooks: `scripts/change-workflow run <hook> <change>`.
+"""Running the repository's hooks: `change-workflow run <hook> <change>`.
 
 A hook is one command or a list (`config`). Each command has its placeholders filled,
 each value shell-quoted, and runs with `sh -c` from the repository's root, without

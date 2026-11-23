@@ -1,4 +1,4 @@
-"""The engine's command, `scripts/change-workflow`: each subcommand reaches its module,
+"""The engine's command, `change-workflow`: each subcommand reaches its module,
 every exit status is one of three, `start` holds the make targets' entry logic, and
 the make fragment's targets call the command.
 
@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -27,9 +28,9 @@ from change_workflow import (clone, cli, config, cost_report, diagram, documents
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.review import check_review
-from change_workflow_fixtures import (CHANGE, CONFIGURED, LANDED, VALID, FakeClaude,
-                                      configured, event_lines, ignore_evidence, make_wrapper,
-                                      option_rules, prompted)
+from change_workflow_fixtures import (ACCEPTED, CHANGE, LANDED, LOCAL_CONFIGURED, MODELS,
+                                      VALID, FakeClaude, as_installed, configured, event_lines,
+                                      ignore_evidence, make_wrapper, option_rules, prompted)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -264,7 +265,7 @@ def test_the_version_is_printed_outside_any_repository_reading_no_configuration(
     refused = tmp_path / "refused"
     (refused / ".agents").mkdir(parents=True)
     _git(refused, "init", "-q")
-    (refused / ".agents/workflow.toml").write_text("[unknown]\n", "utf-8")
+    (refused / ".agents/workflow.toml").write_text(ACCEPTED + "[unknown]\n", "utf-8")
     command = [sys.executable, str(REPO / "scripts/change-workflow")]
 
     for where in (outside, refused):
@@ -522,6 +523,8 @@ def test_the_merge_brings_in_the_branch_the_clone_recorded(tmp_path: Path) -> No
     clone_root = find.clone_directory(root, CHANGE)
     _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
     ignore_evidence(clone_root)
+    # Git clones no ignored file: the clone's local configuration is its own.
+    (clone_root / ".agents/workflow.local.toml").write_text(LOCAL_CONFIGURED, "utf-8")
     (clone_root / ".git" / find.CLONE_MARKER).write_text(
         json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
         "utf-8")
@@ -708,7 +711,7 @@ def test_the_owner_starts_the_orchestrating_session(tmp_path: Path) -> None:
     """CW-w2ld: on the model and effort the configuration's `models.orchestrator`
     names."""
     root = _repository(tmp_path / "workspace", CHANGE)
-    configured(root, CONFIGURED.replace(
+    configured(root, local=LOCAL_CONFIGURED.replace(
         'orchestrator = { model = "claude-opus-5-5", effort = "medium" }',
         'orchestrator = { model = "claude-sonnet-5-5", effort = "low" }'))
     launched = Launched()
@@ -729,7 +732,7 @@ def test_start_orchestrate_takes_the_change_alone(tmp_path: Path, flags: list[st
 def test_start_orchestrate_refuses_a_configuration_without_its_model(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    configured(root, CONFIGURED.replace(
+    configured(root, local=LOCAL_CONFIGURED.replace(
         'orchestrator = { model = "claude-opus-5-5", effort = "medium" }\n', ""))
     launched = Launched()
 
@@ -737,6 +740,21 @@ def test_start_orchestrate_refuses_a_configuration_without_its_model(
                                                        root=root, launch=launched))
     assert status == 1
     assert "models.orchestrator" in err
+    assert launched.commands == []
+
+
+def test_start_orchestrate_refuses_a_checkout_without_the_pointer(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    configured(root, local=MODELS)
+    launched = Launched()
+
+    status, _, err = _printed(capsys, lambda: cli.main(["start", "orchestrate", CHANGE],
+                                                       root=root, launch=launched))
+    assert status == 1
+    assert ("the orchestrating session needs guidance.engineering, which "
+            ".agents/workflow.local.toml does not declare: run `change-workflow install`"
+            in err)
     assert launched.commands == []
 
 
@@ -751,13 +769,14 @@ def test_start_orchestrate_refuses_a_configuration_without_its_model(
 def test_the_orchestrators_model_is_a_model_and_effort_and_nothing_else(
         entry: str, problem: str) -> None:
     with pytest.raises(StepError, match=problem):
-        config.check(f"[models]\norchestrator = {entry}\n", Path("workflow.toml"))
+        config.check(ACCEPTED, Path("workflow.toml"),
+                     local=f"[models]\norchestrator = {entry}\n")
 
 
 def test_this_repositorys_orchestrator_is_opus_at_medium_effort() -> None:
     # The orchestrating session relays and routes rather than judging: it needs a
     # large context for a change's relayed turns, not a high effort.
-    model = config.load(REPO).orchestrator_model()
+    model = as_installed(REPO).orchestrator_model()
     assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
 
 
@@ -913,7 +932,8 @@ def _fragment(tmp_path: Path, target: str, *variables: str) -> list[str]:
     return output.splitlines()
 
 
-COMMAND = "scripts/change-workflow"
+# The command the fragment's targets call: the installed engine, on the path.
+COMMAND = "change-workflow"
 
 
 @pytest.mark.parametrize("target,variables,commands", [
@@ -985,6 +1005,36 @@ def test_a_value_set_before_the_include_stands(tmp_path: Path) -> None:
                                  if k not in ("MAKEFLAGS", "MFLAGS", "REVIEW_BASE",
                                               "CHANGE_WORKFLOW")}).stdout
     assert output.startswith('bin/cw review "X" --kind "design" --base "trunk"')
+
+
+def test_the_command_prints_the_fragments_path(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-dvz5: `fragment` prints the path of the distribution's make fragment, and reads
+    no configuration: a repository whose configuration is refused is given it too."""
+    (tmp_path / ".agents").mkdir()
+    (tmp_path / ".agents/workflow.toml").write_text("[unknown]\n", "utf-8")
+
+    assert _printed(capsys, lambda: cli.main(["fragment"], root=tmp_path)) == (
+        0, f"{documents.path(documents.FRAGMENT)}\n", "")
+
+
+def test_a_makefile_includes_the_fragment_the_command_names(tmp_path: Path) -> None:
+    """A Makefile including the fragment at the path the tree's command prints reads
+    it, and its targets call `change-workflow`; the installed command's is
+    `test_change_workflow_wheel.py`'s. External process: the command and make run as
+    processes."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    engine = REPO / "scripts/change-workflow"
+    command = f"{shlex.quote(sys.executable)} {shlex.quote(str(engine))}"
+    (tmp_path / "Makefile").write_text(f"include $(shell {command} fragment)\n", "utf-8")
+
+    printed = subprocess.run(["make", "-n", "--no-print-directory", "design", "CHANGE=X"],
+                             cwd=tmp_path, capture_output=True, text=True,
+                             env={key: value for key, value in os.environ.items()
+                                  if key not in ("MAKEFLAGS", "MFLAGS", "CHANGE_WORKFLOW",
+                                                 "UNATTENDED")})
+
+    assert (printed.returncode, printed.stdout) == (0, 'change-workflow start design "X"\n')
 
 
 def test_the_fragment_says_its_targets_carry_no_compatibility_promise() -> None:

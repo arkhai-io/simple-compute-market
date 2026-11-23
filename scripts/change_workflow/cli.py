@@ -1,5 +1,5 @@
-"""The engine's command, `scripts/change-workflow`: each subcommand dispatched to the
-module that does its work.
+"""The engine's command, `change-workflow`: each subcommand dispatched to the module
+that does its work.
 
 `start` starts a step: without `--unattended` it opens the interactive Claude Code
 session of the step's skill; with it, it runs the step through the wrapper inside
@@ -45,15 +45,18 @@ engine's own diagram, and no repository or runner relies on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
 whose required fields are absent, naming them, before anything is launched or
-logged (`config.require_for_step`): an unattended run also needs its step's models,
-and the orchestrating session its own.
+logged (`config.require_for_step`): every session needs the engineering-guidance
+pointer, an unattended run also its step's models, and the orchestrating session its
+own; a missing local field names `change-workflow install`, which writes the local
+configuration where the checkout has none.
 
 `install` writes the distribution's skills into each supported harness's user skill
 directory and, in a checkout, its local configuration where it has none (`install`).
 Every other subcommand of an installed engine first refuses while the installed
 skills are not its own version's, naming what and `change-workflow install`; neither
 `install` nor `--version` reads the configuration, so neither is refused for the
-range either.
+range either. `fragment` prints the path of the distribution's make fragment, for a
+repository's `Makefile` to include; it reads no configuration.
 
 The repository is found once, from the working directory, and every subcommand acts
 on it. Every exit status is one of three: 0 for success; 1 for a refusal or a failed
@@ -478,6 +481,9 @@ def _parser() -> argparse.ArgumentParser:
     waiting.add_argument("pattern")
     waiting.add_argument("--timeout", type=float, default=wait.DEFAULT_TIMEOUT_S)
     commands.add_parser(
+        "fragment", help="print the path of the installed make fragment, for a Makefile's "
+                         "include")
+    commands.add_parser(
         "install", help="write the workflow's skills into each supported harness's user "
                         "skill directory, and, in a checkout, its local configuration where "
                         "it has none")
@@ -665,6 +671,9 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
     try:
         install.require_installed(distribution, home)
         root = repository_root() if root is None else root
+        if args.command == "fragment":
+            print(distribution.path(documents.FRAGMENT))
+            return 0
         return _dispatch(args, root, wrapper or Wrapper(root=root), environ, launch, send)
     except _Usage as exc:
         parser.print_usage(sys.stderr)

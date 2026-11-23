@@ -8,10 +8,13 @@ nothing installed. The skills a repository
 commits itself each live once, under `.agents/skills/<name>/`, and each supported
 harness loads them through a relative symlink of the same name in its own project
 skill directory; the workflow's own sources, which the source tree keeps there for
-the distribution, need no such link. Two copies of a skill drift apart, so this
-check rejects:
+the distribution, need no such link, and a project entry of a workflow skill's name
+would stand beside the installed skill as a second copy. Two copies of a skill drift
+apart, so this check rejects:
 
 - a shared skill with no `SKILL.md`;
+- a harness entry of a workflow skill's name, which the installed skill alone
+  provides;
 - a shared skill missing from a harness skill directory;
 - a harness entry that is not a symlink — a real copy kept beside, or instead
   of, a shared source;
@@ -35,7 +38,8 @@ HARNESSES = (Path(".claude/skills"), Path(".codex/skills"))
 
 def problems(root: Path, workflow: frozenset[str] = frozenset()) -> list[str]:
     """Where the skills the repository commits are not each loaded from their one
-    source; `workflow` names the workflow's own, which no project link need load."""
+    source; `workflow` names the workflow's own, which each harness loads from its user
+    skill directory alone, so no project entry of their names may stand."""
     source = root / SOURCE
     shared = sorted(p.name for p in source.iterdir() if p.is_dir()) if source.is_dir() else []
     found = []
@@ -47,6 +51,11 @@ def problems(root: Path, workflow: frozenset[str] = frozenset()) -> list[str]:
         entries = sorted(directory.iterdir(), key=lambda p: p.name) if directory.is_dir() else []
         for entry in entries:
             where = harness / entry.name
+            if entry.name in workflow:
+                found.append(f"{where}: the workflow's skill {entry.name} is installed into "
+                             "the harness's user skill directory; no project entry of its "
+                             "name may stand beside it")
+                continue
             if not entry.is_symlink():
                 found.append(f"{where}: a copy, not a link to {SOURCE / entry.name}")
                 continue

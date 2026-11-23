@@ -24,8 +24,10 @@ the owner operates it is the
 ## What every session reads
 
 Every session reads these before changing code or specifications, whether or not it
-runs a step of the workflow; a step loads the same documents through `load.common`
-in `.agents/workflow.toml`.
+runs a step of the workflow; a step loads the same documents through `change-workflow
+config load`, which gives the engineering guidance the checkout's local configuration
+points at, the workflow's guidance the installed distribution ships, then
+`load.common` in `.agents/workflow.toml`.
 
 | Path | What it holds |
 |---|---|

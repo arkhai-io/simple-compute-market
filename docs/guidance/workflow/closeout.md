@@ -103,7 +103,7 @@ change that creates, renames, supersedes, or removes a change directory reconcil
 the index's links in the same step: a link to a directory that does not exist is a
 blocking defect, as an unresolvable citation always is
 ([Citations resolve](../engineering/documentation.md#citations-resolve)), not a stale
-link to fix later. The workflow's index check, `scripts/change-workflow check index`, holds each
+link to fix later. The workflow's index check, `change-workflow check index`, holds each
 row — its cells, its link, its status, and its dependencies, each listed and not
 archived — and that every active change has exactly one (`change-workflow`'s
 CW-jyff); an archived change needs no row, since archived rows may be pruned from
@@ -186,7 +186,7 @@ Run the repository's citation check, scoped to the change, after promotion, so t
 documents it wrote are there to resolve, and resolve every match: a citation whose
 target does not resolve is a blocking defect, not a stale link
 ([Citations resolve](../engineering/documentation.md#citations-resolve)). Then validate the
-change strictly, `scripts/change-workflow openspec validate <change> --strict`, the
+change strictly, `change-workflow openspec validate <change> --strict`, the
 last check before the archive. A change with no spec deltas records that instead,
 since the validator rejects a change with none, and archives with `--skip-specs`.
 
@@ -198,11 +198,11 @@ people route around. Run it unscoped to see the repository-wide picture.
 ## Archival
 
 Archive the change as the last step, once every other part is done:
-`scripts/change-workflow openspec archive <change> -y` merges its spec deltas into
+`change-workflow openspec archive <change> -y` merges its spec deltas into
 `openspec/specs/` and moves it to `openspec/changes/archive/<date>-<change>/`; the
 change's row in the change index then links to that directory. A change whose
 `spec.md` was already edited by hand archives with `--skip-specs`, so the merge is
 not applied twice. The closeout review
 and its triage then read the archived change and the permanent documents as
 archived, and find the change by name under the archive
-(`scripts/change-workflow find <change>`).
+(`change-workflow find <change>`).

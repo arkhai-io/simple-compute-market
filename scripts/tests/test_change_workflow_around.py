@@ -24,7 +24,7 @@ from change_workflow.common import SESSION_ID, UNATTENDED_RUN, StepError
 from change_workflow.log import log_path, read_log
 from change_workflow.next_step import TASKS_FILE
 from change_workflow.wrapper import Wrapper
-from change_workflow_fixtures import (AT, CHANGE, MODELS, SESSION, VALID, FakeClaude, clock,
+from change_workflow_fixtures import (AT, CHANGE, SESSION, VALID, FakeClaude, clock,
                                       configured, evidence_kind, event_lines, make_wrapper,
                                       option, prompted)
 
@@ -34,7 +34,7 @@ REQUIRED = '[repository]\nprotected-branches = ["main", "dev"]\n\n'
 
 def _hooks(*lines: str) -> str:
     return REQUIRED + "[hooks]\npre-commit-functional = []\n" + "".join(
-        f"{line}\n" for line in lines) + "\n" + evidence_kind("local", run="true") + MODELS
+        f"{line}\n" for line in lines) + "\n" + evidence_kind("local", run="true")
 
 
 def _reviews(root: Path) -> Path:
@@ -150,7 +150,7 @@ def test_the_local_suite_fails_during_gathering(tmp_path: Path) -> None:
     """CW-g6th: the gathering's `local` kind fails, and the session starts with that
     failure in its inputs."""
     root = _committed(tmp_path, REQUIRED + "[hooks]\npre-commit-functional = []\n\n"
-                      + evidence_kind("local", run="echo 3 failed; exit 1") + MODELS)
+                      + evidence_kind("local", run="echo 3 failed; exit 1"))
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
 
     line = make_wrapper(root, claude).run("validate", CHANGE)
@@ -173,7 +173,7 @@ def test_gathering_before_the_session_leaves_present_evidence_alone(tmp_path: Pa
     """CW-g6th: the gathering before validation says what it found present, and
     runs nothing for it."""
     root = _committed(tmp_path, REQUIRED + "[hooks]\npre-commit-functional = []\n\n"
-                      + evidence_kind("local", run="touch ran") + MODELS)
+                      + evidence_kind("local", run="touch ran"))
     tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=root, check=True,
                           capture_output=True, text=True).stdout.strip()
     present = root / f".snapshot/evidence/{tree}/local/20261117T100300Z/summary.json"
@@ -235,7 +235,7 @@ def test_archive_cleanup_starts_after_every_kinds_cleanup(tmp_path: Path) -> Non
     """CW-ikmm: the engine runs the kinds' cleanup before archive cleanup's session,
     which reads what it did from its inputs."""
     text = (REQUIRED + "[hooks]\npre-commit-functional = []\n\n"
-            + evidence_kind("helm", run="true", cleanup="echo removed; touch cleaned") + MODELS)
+            + evidence_kind("helm", run="true", cleanup="echo removed; touch cleaned"))
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
 
     line = _wrapper(tmp_path, text, claude).run("archive-cleanup", CHANGE)
@@ -254,7 +254,7 @@ def test_a_change_worked_in_place_has_no_history_to_copy_after_archive_cleanup(
     """CW-hak6: the copy after archive cleanup copies nothing where no clone holds the
     change, and passes, so the run goes on; the copy is kept for the run's line."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    configured(tmp_path, REQUIRED + MODELS)
+    configured(tmp_path, REQUIRED)
     after = around.Around(tmp_path, config.load(tmp_path), CHANGE, "archive-cleanup",
                           invocations=lambda _: tmp_path / "kept", clock=clock)
 

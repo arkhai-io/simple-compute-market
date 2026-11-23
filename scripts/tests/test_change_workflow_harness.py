@@ -185,7 +185,7 @@ def test_the_unattended_prompt_is_one_harness_neutral_paragraph() -> None:
         assert absent not in lowered, absent
     assert not re.search(r"-c\b", lowered)
     for present in ("sandbox scoped to it", "read-only file system", "resource busy",
-                    "`stopped`", "names the path", "scripts/change-workflow wait"):
+                    "`stopped`", "names the path", "change-workflow wait"):
         assert present in UNATTENDED, present
     assert "\n" not in UNATTENDED
 

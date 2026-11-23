@@ -454,10 +454,12 @@ def test_each_writing_step_writes_its_baseline_and_the_cache() -> None:
 
 def test_make_change_graph_reports_that_the_diagram_draws_the_table() -> None:
     # A make that runs these tests passes its flags down through MAKEFLAGS; none
-    # may reach the target run here.
+    # may reach the target run here. The target runs the tree's engine, on the tree's
+    # diagram, rather than whichever engine the machine has installed.
     environment = {key: value for key, value in os.environ.items()
                    if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
-    printed = subprocess.run(["make", "-s", "--no-print-directory", "change-graph"], cwd=ROOT,
+    printed = subprocess.run(["make", "-s", "--no-print-directory", "change-graph",
+                              "CHANGE_WORKFLOW=scripts/change-workflow"], cwd=ROOT,
                              env=environment, capture_output=True, text=True, check=True)
 
     assert printed.stdout == f"{SHOWN} draws the table.\n"

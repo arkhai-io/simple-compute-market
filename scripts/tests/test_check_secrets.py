@@ -31,6 +31,10 @@ import pytest
 import check_secrets as checker
 import install_gitleaks
 
+# The change workflow versions the test's workflow configuration accepts, which every
+# command reading the configuration checks first.
+ACCEPTED = '[workflow]\nversion = ">=0.1"\n'
+
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = os.environ.get("GITLEAKS_REQUIRED") == "1"
 HEADER = "-----BEGIN " + "RSA PRIVATE KEY-----"
@@ -503,7 +507,7 @@ def provide_gate(repo: Path, version_problem: str | None = None) -> None:
     `version_problem` stands in for a gitleaks that cannot run."""
     (repo / ".agents").mkdir(exist_ok=True)
     (repo / ".agents/workflow.toml").write_text(
-        '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
+        ACCEPTED + '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
         f'pre-push = "{shlex.quote(sys.executable)} scripts/{Path(checker.__file__).name} '
         '--pre-push {remote}"\n', "utf-8")
     with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:

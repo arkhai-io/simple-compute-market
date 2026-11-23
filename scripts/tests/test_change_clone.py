@@ -22,6 +22,7 @@ import pytest
 
 from change_workflow import cli, find, running
 from change_workflow import clone as clones
+from change_workflow_fixtures import ACCEPTED, accepting
 
 CHANGE = "seed-pool"
 BRANCH = f"feat/{CHANGE}"
@@ -65,7 +66,7 @@ def workspace(tmp_path: Path) -> Path:
     (work / ".agents/evidence").mkdir(parents=True)
     (work / ".agents/evidence/local.md").write_text("# The local kind\n", "utf-8")
     (work / ".agents/workflow.toml").write_text(
-        "[validation.evidence.local]\nrequired = 'always'\nrun = 'true'\n"
+        ACCEPTED + "[validation.evidence.local]\nrequired = 'always'\nrun = 'true'\n"
         "evidence = '.snapshot/validation/{tree}/local/*/summary.json'\n"
         "guide = '.agents/evidence/local.md'\n", "utf-8")
     _commit(work, "README.md", "1\n")
@@ -461,7 +462,7 @@ def test_the_real_spawn_records_the_commands_output_and_exit_status(workspace: P
 
 def _committed_configuration(workspace: Path, text: str) -> None:
     (workspace / ".agents").mkdir(exist_ok=True)
-    (workspace / ".agents/workflow.toml").write_text(text, "utf-8")
+    (workspace / ".agents/workflow.toml").write_text(accepting(text), "utf-8")
     _git(workspace, "add", "--all")
     _git(workspace, "commit", "-q", "-m", "configure")
 

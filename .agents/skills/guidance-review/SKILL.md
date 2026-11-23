@@ -51,9 +51,9 @@ falls into two periods.
 
 The changes to read are every change, active or archived, with a workflow-log line
 inside the period. List them from `openspec/changes/` and `openspec/changes/archive/`.
-Find each one's records with `scripts/change-workflow find --records <change>`, which
+Find each one's records with `change-workflow find --records <change>`, which
 looks in this checkout; for a change still worked in its own clone, whose records the
-workspace does not yet hold, `scripts/change-workflow clone where <change>` names the
+workspace does not yet hold, `change-workflow clone where <change>` names the
 clone, and you read its records, and its ledger, there. For each change, read:
 
 - its workflow log, `workflow.jsonl` under its records: each line's `at` places it in
@@ -137,7 +137,7 @@ Extract each correction's general principle — from the ledger's entries, and f
 accepted judgement findings — and cluster them. Where several changes carry copies of
 the same dispositions, such as changes planned together from one plan, count them
 once, and say so. Check each cluster against the guidance (the documents
-`scripts/change-workflow config load common` prints, `change-workflow`'s
+`change-workflow config load common` prints, `change-workflow`'s
 specification and companion, the skills) and the
 repository's `check-*` targets, and place it in one of three kinds:
 

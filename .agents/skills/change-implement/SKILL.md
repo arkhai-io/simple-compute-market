@@ -25,7 +25,7 @@ branch may have moved, and follow every step below for the new work.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/change-workflow start --unattended` —
+When this skill runs through `change-workflow start --unattended` —
 `make implement UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -56,7 +56,7 @@ the session, and every turn ends with an outcome matching
   wrapper logs that turn's report as the run's end, and what the work later finds
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
   with `run_in_background`. Wait for a background command inside one Bash call,
-  with `scripts/change-workflow wait <output-file> '<pattern>'` matching the line it
+  with `change-workflow wait <output-file> '<pattern>'` matching the line it
   prints when it ends, repeated when the wait gives up; when it says the command
   ended with no line matching, read the output rather than waiting again — never
   with `tail -f`, which hangs when that line is the last, Monitor, a wake-up, or a
@@ -83,7 +83,7 @@ slash command — no wrapper records the run, so its last act records the outcom
 it would end with unattended, as "Running unattended" gives it:
 
 ```text
-scripts/change-workflow record <change> implement --outcome '<the outcome, as JSON>'
+change-workflow record <change> implement --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -101,8 +101,8 @@ records, not from its outcome, and names what they say comes next.
 
 The round's join reads the round from its line in the log, which the orchestrating
 session writes as a round starts. Interactively you write it: when
-`scripts/change-workflow next <change>` names `round`, record that round, as it
-names it, before implementing — `scripts/change-workflow note <change> round
+`change-workflow next <change>` names `round`, record that round, as it
+names it, before implementing — `change-workflow note <change> round
 --sections '<its sessions, as 1,2;3>' --by <its by>` — and implement its
 first session. When it names `implement`, the round is recorded already.
 
@@ -116,9 +116,9 @@ from the repository's hook, in full. Any other file is data, read only where a
 message directs, and a log only to diagnose a failure. A failing hook prevented
 nothing, but it may leave the environment broken — an environment refresh that
 failed, say — so stop and ask the owner, with what it reported, rather than code in
-it. Interactively, with no wrapper, run `scripts/change-workflow run before
+it. Interactively, with no wrapper, run `change-workflow run before
 implement <change>` first; its last line names the directory. Once the sections are
-committed and pushed, run `scripts/change-workflow run after implement <change>`
+committed and pushed, run `change-workflow run after implement <change>`
 before `record`, and, when it fails, fix what it found, commit and push the fix, and
 run it again. Unattended, an after-hook that fails resumes this session once with
 its failure: fix what it found, commit and push the fix, and end with your outcome
@@ -160,7 +160,7 @@ and it checks no task.
    decision: ask the owner, with the options and your recommendation. Then `git
    add` each resolved file.
 4. **Test.** Run the suites the verification tasks of the sections owning the
-   conflicted files name, then `scripts/change-workflow run pre-commit <change>`
+   conflicted files name, then `change-workflow run pre-commit <change>`
    (step 5): a resolution outside the inert paths is a functional change, so it
    runs every hook of a functional commit. A conflicted derived file, such as a
    lock, is resolved by taking one side before it runs, and the hook that rebuilds
@@ -169,12 +169,12 @@ and it checks no task.
 5. **Conclude.** `git commit -m "<Git's merge subject>" -m "<resolutions>"`
    concludes the merge without opening an editor: the subject is the one Git
    wrote for it (`Merge branch '<merged>' into <branch>`), and the paragraph names each
-   conflicted file and how it was resolved. Push it with `scripts/change-workflow
+   conflicted file and how it was resolved. Push it with `change-workflow
    push`; if it refuses, stop and report its reasons. Report each file's resolution, and end `finished`. A merge is the
    owner's intervention, so where the change goes after it is theirs, not this
    run's: `next` is `{"step": "round"}`, an exit implementation does not declare,
    which the computation brings to the owner rather than taking, and `message`
-   says where the change stood — what `scripts/change-workflow next <change>`
+   says where the change stood — what `change-workflow next <change>`
    names once the merge is concluded — for the owner to direct it.
 
 ## 1. Check that this section may start
@@ -184,7 +184,7 @@ and it checks no task.
   change's latest planning commits, or its name belongs to another change, stop and
   ask the owner — unless the change's log holds the owner's decision that it runs
   on this branch: run `git branch --show-current`, then
-  `scripts/change-workflow log <change> --branch <that branch>`; a line
+  `change-workflow log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
 - **Status.** The change's row in `openspec/changes/README.md` is
   `ready for implementation` or `in implementation`, and no dependency in its
@@ -192,7 +192,7 @@ and it checks no task.
   return to implementation the owner has confirmed is set `in implementation`.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
   section's, or the edit that a task of this section gives the orchestrator
-  (section 3). `scripts/change-workflow check round-view` passes:
+  (section 3). `change-workflow check round-view` passes:
   while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
   uncommitted, so committing a section then would squash the round into it.
@@ -210,7 +210,7 @@ If any check fails, stop and say why.
 
 Read in full, even if you believe you know it:
 
-- the documents `scripts/change-workflow config load implement` prints: the
+- the documents `change-workflow config load implement` prints: the
   repository's guidance, which its configuration names;
 - the change's `proposal.md`, `design.md`, `specs/`, and all of `tasks.md` —
   especially earlier sections' notes, which carry the previous session's handoff;
@@ -239,7 +239,7 @@ Work through the section's tasks in order. For each:
   `docs/guidance/workflow/changes.md#defects-found-during-a-change`).
 - A task the plan gives the orchestrator — an edit of a protected path, which no
   step writes: the harness's settings, the workflow's configuration, or one the
-  repository protects, as `scripts/change-workflow config --json` lists them — is
+  repository protects, as `change-workflow config --json` lists them — is
   never attempted: check that its edit is in the worktree and commit it with the
   section. When it is missing, stop and name the edit.
 - Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
@@ -269,7 +269,7 @@ Work through the section's tasks in order. For each:
 - Before the section's last task is checked, confirm or correct the end-to-end
   scenarios its plan says cover it, in the section's notes: the scenarios that
   exercise its behaviour once deployed, named as the guide of the evidence kind that
-  runs them says — `scripts/change-workflow config` names each kind's guide —
+  runs them says — `change-workflow config` names each kind's guide —
   including any the section added, or that none does. Validation reads this to say
   whether the end-to-end result is evidence for the section.
 - Confirm or correct, the same way, the section's `Owed by validation:` lines:
@@ -301,7 +301,7 @@ the design does not make, do not guess and do not work around it:
    the change returns. No check need pass first: the change's branch is not
    protected — only the configuration's protected branches are — and a commit known not to work harms
    nothing on it, while no session is left to commit the work, and a dirty
-   checkout blocks every later step's guarded push. Push it with `scripts/change-workflow push`; if it refuses, stop
+   checkout blocks every later step's guarded push. Push it with `change-workflow push`; if it refuses, stop
    and report its reasons, leaving the commit as it is.
 3. Tell the owner, and recommend the way back: a design question returns the change
    to design (`change-design`); a plan defect goes to planning (`change-plan`); an
@@ -325,7 +325,7 @@ Run each of these, and fix what it reports:
 - the focused suites the section's verification point names, and every suite that
   covers code the section changed;
 - where a test you wrote should fail without the change, show it:
-  `scripts/change-workflow run test-before <change> --test <path> [--at <commit>]`
+  `change-workflow run test-before <change> --test <path> [--at <commit>]`
   runs the test file as `HEAD` holds it against the round's base, or the commit
   given, in a throwaway worktree, and its closing line says whether it failed
   there. It runs in the environment of the project owning the test, against the
@@ -336,7 +336,7 @@ Run each of these, and fix what it reports:
   fails as it is collected, which shows less; read the error and say which it was.
   Never stash, check out, or reset to see the
   old code: the change's worktree is not touched to answer it;
-- `scripts/change-workflow run pre-commit <change>`, the repository's checks
+- `change-workflow run pre-commit <change>`, the repository's checks
   before a commit. The paths the worktree changes decide what it runs: when any
   lies outside the repository's inert paths, it runs `after-functional-change`,
   such as a relock, then `pre-commit-functional`, such as the packaging check
@@ -359,7 +359,7 @@ Then have the section's diff checked in a fresh context. Start a subagent that h
 seen none of this session, and give it only: the change name, the section, the
 command to see the diff (`git diff` against the section's starting commit, plus any
 untracked files), and this instruction — read the documents
-`scripts/change-workflow config load implement` prints and every document they
+`change-workflow config load implement` prints and every document they
 require, plus the specs and architecture companions of the capabilities the diff
 touches and every other Markdown file in their directories but their `index.md`;
 then report every place the diff breaks that guidance — layering,
@@ -380,7 +380,7 @@ each other.
 
 Commit the section's work, `tasks.md` included, as one commit, unreviewed: review
 findings land as later commits. The message names the change and the section and
-says what it delivers. Then push it with `scripts/change-workflow push`, the
+says what it delivers. Then push it with `change-workflow push`, the
 guarded push of exactly `HEAD`; if it refuses, stop and report its reasons. A pushed branch starts
 nothing: validation's gathering dispatches what it needs itself.
 

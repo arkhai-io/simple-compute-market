@@ -70,7 +70,7 @@ The workflow's parts name the checks they run by role. Here they are:
 | Part | Check |
 |---|---|
 | Comment hygiene | `make check-comment-hygiene` |
-| Campaign index currency | `make check-change-index`, which runs the workflow's `scripts/change-workflow check index` |
+| Campaign index currency | `make check-change-index`, which runs the workflow's `change-workflow check index` |
 | Promotion | the index check, `make check-spec-index CHANGE=<change-name>` ([above](#the-index-check)) |
 | Guidance placement | the guidance check, `make check-guidance` |
 | Documentation citations | `make check-doc-citations CHANGE=<change-name>` |

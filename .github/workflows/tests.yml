@@ -98,6 +98,18 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Build the repository's wheels
         run: make dist-ci
+      # The change workflow built from this tree and installed as a tool, its skills
+      # written into each harness's user skill directory, so the install is proven
+      # from the tree and a make target calling `change-workflow` finds the tree's
+      # engine. `change-workflow install` runs outside the checkout, which so keeps
+      # no local configuration: CI checks the committed configuration alone.
+      - if: matrix.target == 'test-deployment-packaging'
+        name: Install the change workflow from the tree
+        run: |
+          uv tool install --force scripts/change-workflow-wheel
+          bin="$(uv tool dir --bin)"
+          echo "$bin" >> "$GITHUB_PATH"
+          cd "$RUNNER_TEMP" && "$bin/change-workflow" install
       # Where the script suites run, a real-gitleaks, real-Helm, real-Compose or
       # real-bubblewrap case that would skip fails instead.
       - name: make ${{ matrix.target }}

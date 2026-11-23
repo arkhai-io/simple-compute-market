@@ -1,6 +1,7 @@
-"""The engine is reached as one command, `scripts/change-workflow`: it runs as an
-executable, acts on the repository containing its working directory, and is the only
-way this repository's own scripts reach the engine.
+"""The engine is reached as one command, `change-workflow`, run here from the tree as
+`scripts/change-workflow`: it runs as an executable, acts on the repository
+containing its working directory, and is the only way this repository's own scripts
+reach the engine.
 
 The command's runs start it as a process from a working directory, since what is
 proven is which repository it acts on; the import rule reads the scripts' source.

@@ -36,7 +36,7 @@ refuses every entry while it is not met (`entry_refusal`); a waivable one takes 
 owner's direction as its override.
 
 Beside the graph, `HOOK_STEPS` holds which steps may run each of the repository's
-hooks through `scripts/change-workflow run`, `STEP_ACTIONS` the engine's own
+hooks through `change-workflow run`, `STEP_ACTIONS` the engine's own
 actions before and after each step's session, and `STEP_DEFINITIONS` each step's
 skill, the session it resumes, its profile, and the paths it writes before a
 repository adds its own; like the graph, no repository changes any of them (CW-u4pc,
@@ -540,7 +540,7 @@ STEPS: tuple[str, ...] = tuple(dict.fromkeys(d.runs for d in TABLE if d.runs))
 KINDS: tuple[str, ...] = tuple(dict.fromkeys(node.kind for node in NODES
                                              if node.step == "review" and node.kind))
 
-# Which steps may run each hook through `scripts/change-workflow run`, and the
+# Which steps may run each hook through `change-workflow run`, and the
 # gathering through `gather`: the workflow's structure, which no repository changes.
 # Only implementation, triage, and the merge make functional changes, so only they
 # relock or run the functional checks; validation changes nothing it validates

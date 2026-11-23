@@ -616,7 +616,7 @@ def open_log(path: Path, change: str, step: str, *, interactive: bool,
         return append_entry(path, {"step": OPENING, "outcome": "opened", "starts": step,
                                    "interactive": interactive}, clock)
     raise StepError(f"{why}, so its records are not in format {FORMAT}: the owner converts "
-                    f"them with `scripts/change-workflow convert {change}` before a step "
+                    f"them with `change-workflow convert {change}` before a step "
                     "starts")
 
 

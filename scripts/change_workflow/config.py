@@ -4,19 +4,24 @@ change workflow assumes about the repository it runs in, read and checked whole.
 
 A setting is local exactly when developers using the workflow on the same repository
 may give it different values: the engineering-guidance pointer, `[models]`, and the
-writable sandbox paths a developer adds, which extend the committed ones. The local
-file is ignored by Git, and may be absent, every local field then missing.
+writable sandbox paths a developer adds, which extend the committed ones. Every other
+field is committed. Each key has one home, and a key in the wrong file is refused,
+naming the file it belongs in; writable sandbox paths alone are declared in both.
+The local file is ignored by Git, and may be absent, every local field then missing:
+`check config` and `config --json` report them so and succeed, while a step needing
+one is refused, naming it and `change-workflow install`, which writes the file.
 
 The committed `[workflow] version` is the range of workflow versions the repository
 accepts, comma-separated specifiers (`>=`, `<=`, `>`, `<`, `==`, `!=`, `~=`) over
-release numbers. It is read before anything else in the file, so an engine outside
-the range refuses, naming its version, the range, and the fix, rather than
-reporting a newer workflow's table as unknown.
+release numbers. It is required, and read before anything else in the file, so an
+engine outside the range refuses, naming its version, the range, and the fix, rather
+than reporting a newer workflow's table as unknown, and a committed file declaring no
+range is refused whole.
 
-`[guidance] engineering`, the pointer, names where the user's engineering guidance
-is: `{ path = "<directory>" }`, from the checkout's root or `~`, holding Markdown
-files, or `{ none = "<reason>" }`. No `load` entry overlaps the pointer's directory,
-so nothing is read twice.
+`[guidance] engineering`, the pointer, is required of every step: it names where the
+user's engineering guidance is, `{ path = "<directory>" }`, from the checkout's root
+or `~`, holding Markdown files, or `{ none = "<reason>" }`. No `load` entry overlaps
+the pointer's directory, so nothing is read twice.
 
 Each field configures one operation of a skill or the engine, and a value Git or
 the invocation supplies is never one. The workflow defines every table and key; an
@@ -151,7 +156,6 @@ _TABLES: dict[str, tuple[str, ...]] = {
     "defaults": ("disable",),
     "openspec": ("command",),
     "load": (COMMON_DOCUMENTS, *STEPS),
-    "models": (ORCHESTRATOR, *STEPS),
     "validation": ("preflight", "evidence"),
     "review": ("format-retries",),
     "sandbox": ("writable", "protected"),
@@ -164,6 +168,9 @@ _LOCAL_TABLES: dict[str, tuple[str, ...]] = {
     "models": (ORCHESTRATOR, *STEPS),
     "sandbox": ("writable",),
 }
+# The local table of each step's models, whose fields `missing` reports as
+# `models.<step>`.
+MODELS = "models"
 # The comparison operators a version range may use, over release numbers.
 _SPECIFIER = re.compile(r"^\s*(~=|==|!=|<=|>=|<|>)\s*(\d+(?:\.\d+)*)\s*$")
 _RELEASE = re.compile(r"^(\d+(?:\.\d+)*)")
@@ -364,7 +371,10 @@ class Configuration:
         `load.common` and `load.<step>`, each document once. A `load` entry ending in
         `/` names a directory and stands for the Markdown files beneath it
         (`directory_documents`); any other entry names one file and is given as it
-        is, whether or not the file exists."""
+        is, whether or not the file exists. Refused, naming the pointer and
+        `change-workflow install`, while the local configuration lacks the pointer: a
+        session reading the list then would miss the guidance it points at."""
+        require(self, GUIDANCE_ENGINEERING, needed_by="the documents a session reads")
         found: list[str] = []
         if self.engineering is not None and self.engineering.path is not None:
             found.extend(_markdown(self.engineering.path, root))
@@ -926,7 +936,7 @@ def _local_tables(text: str) -> dict[str, dict[str, Any]]:
 
 def check(text: str, path: Path, *, root: Path | None = None,
           unignored: Unignored = git_unignored, home: Path | None = None,
-          local: str | None = None,
+          local: str | None = None, committed: bool = True,
           installed: Callable[[], str] = distribution.version) -> Configuration:
     """The configuration `text` holds, checked whole; refused, naming the field, on
     an unknown table or key, a wrong type, a placeholder unknown or unavailable
@@ -938,7 +948,8 @@ def check(text: str, path: Path, *, root: Path | None = None,
     `local` is the local configuration's text, None when there is no local file; its
     models join the committed ones, a step's declared in one file alone, and its
     writable paths extend the committed ones. The range is checked against
-    `installed`, the engine's version, before anything else."""
+    `installed`, the engine's version, before anything else, and is refused absent
+    unless `committed` is false: no committed file exists, and `text` is empty."""
     if root is None:
         depth = len(CONFIGURATION.parts)
         root = path.parents[depth - 1] if len(path.parents) >= depth else path.parent
@@ -947,10 +958,19 @@ def check(text: str, path: Path, *, root: Path | None = None,
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{CONFIGURATION.as_posix()} is not TOML: {exc}") from exc
     accepted = _accepted(raw, installed)
+    if accepted is None and committed:
+        raise ConfigError(f"{CONFIGURATION.as_posix()} declares no workflow.version, the range "
+                          "of workflow versions the repository accepts, such as "
+                          "version = \">=0.1, <0.2\" under [workflow]")
     for name in raw:
-        if name not in _TABLES:
-            raise ConfigError(f"{name} is no table the workflow defines; its tables: "
-                              + ", ".join(_TABLES))
+        if name in _TABLES:
+            continue
+        if name in _LOCAL_TABLES:
+            raise ConfigError(f"{CONFIGURATION.as_posix()} declares [{name}], which belongs in "
+                              f"{LOCAL.as_posix()}, the checkout's own settings that "
+                              "developers may give different values")
+        raise ConfigError(f"{name} is no table the workflow defines; its tables: "
+                          + ", ".join(_TABLES))
     tables = {name: (_hooks_table(raw[name]) if name == "hooks"
                      else _table(name, raw[name], keys))
               for name, keys in _TABLES.items() if name in raw}
@@ -961,18 +981,14 @@ def check(text: str, path: Path, *, root: Path | None = None,
             for key, value in tables.get("load", {}).items()}
     home = Path.home() if home is None else home
     sandbox_writable, sandbox_protected = _sandbox(tables.get("sandbox", {}), root, home)
-    models = dict(tables.get("models", {}))
+    models: dict[str, Any] = {}
     engineering = None
     if local is not None:
         local_tables = _local_tables(local)
         guidance = local_tables.get("guidance", {})
         if "engineering" in guidance:
             engineering = _engineering(guidance["engineering"], root, home)
-        local_models = local_tables.get("models", {})
-        if both := sorted(set(models) & set(local_models)):
-            raise ConfigError(f"models.{both[0]} is declared in both {CONFIGURATION.as_posix()} "
-                              f"and {LOCAL.as_posix()}; a step's models are declared once")
-        models.update(local_models)
+        models = dict(local_tables.get("models", {}))
         local_writable, _ = _sandbox(local_tables.get("sandbox", {}), root, home,
                                      also_protected=sandbox_protected or ())
         sandbox_writable = {key: tuple(dict.fromkeys((*sandbox_writable.get(key, ()),
@@ -1027,7 +1043,7 @@ def load(root: Path, unignored: Unignored = git_unignored, home: Path | None = N
     if text is None and local is None:
         return Configuration(path=path, local=root / LOCAL)
     checked = check(text or "", path, root=root, unignored=unignored, home=home, local=local,
-                    installed=installed)
+                    committed=text is not None, installed=installed)
     return checked if text is not None else replace(checked, exists=False)
 
 
@@ -1070,24 +1086,44 @@ STEP_NEEDS.update({
 })
 
 
+def is_local(name: str) -> bool:
+    """Whether the required field `name` is one the local configuration declares."""
+    return name == GUIDANCE_ENGINEERING or name.startswith(f"{MODELS}.")
+
+
 def require(configuration: Configuration, *fields: str, needed_by: str) -> None:
-    """Refuse, naming each field, when a required field `needed_by` needs is absent."""
-    if absent := missing(configuration, *fields):
-        raise ConfigError(f"{needed_by} needs {', '.join(absent)}, which "
-                          f"{configuration.shown} does not declare"
-                          + ("" if configuration.exists else " (there is no such file)")
-                          + "; an empty value declares it deliberately")
+    """Refuse, naming each field and the file it belongs in, when a required field
+    `needed_by` needs is absent; a local field's names `change-workflow install`,
+    which writes the local file where a checkout has none."""
+    absent = missing(configuration, *fields)
+    if not absent:
+        return
+    committed = [name for name in absent if not is_local(name)]
+    local = [name for name in absent if is_local(name)]
+    parts = []
+    if committed:
+        parts.append(f"{', '.join(committed)}, which {configuration.shown} does not declare"
+                     + ("" if configuration.exists else " (there is no such file)")
+                     + "; an empty value declares it deliberately")
+    if local:
+        parts.append(f"{', '.join(local)}, which {LOCAL.as_posix()} does not declare"
+                     + ("" if configuration.local_exists else " (there is no such file)")
+                     + ": run `change-workflow install` to write it where the checkout has "
+                       "none, or declare them there")
+    raise ConfigError(f"{needed_by} needs " + "; and ".join(parts))
 
 
 def require_for_step(configuration: Configuration, step: str, *,
                      unattended: bool = False) -> None:
     """Refuse a step whose required fields are absent, before anything is launched:
-    an unattended run also needs its step's models, and the orchestrating session
-    needs its own."""
+    every session needs the engineering pointer, whose guidance its skill reads
+    first; an unattended run also needs its step's models, and the orchestrating
+    session its own."""
     if step == ORCHESTRATOR_STEP:
-        require(configuration, f"models.{ORCHESTRATOR}", needed_by="the orchestrating session")
+        require(configuration, GUIDANCE_ENGINEERING, f"models.{ORCHESTRATOR}",
+                needed_by="the orchestrating session")
         return
-    require(configuration, *STEP_NEEDS.get(step, ()),
+    require(configuration, *STEP_NEEDS.get(step, ()), GUIDANCE_ENGINEERING,
             *((f"models.{step}",) if unattended else ()), needed_by=step)
 
 
@@ -1098,9 +1134,9 @@ DECLARED, DEFAULT, DISABLED, ABSENT = "declared", "default", "disabled", "absent
 MISSING = "missing"
 # What each default check runs, as `config` shows it.
 _DEFAULT_SHOWN = {
-    "index": "scripts/change-workflow check index",
-    "tasks": "scripts/change-workflow check tasks <change>",
-    "skills": "scripts/change-workflow check skills",
+    "index": "change-workflow check index",
+    "tasks": "change-workflow check tasks <change>",
+    "skills": "change-workflow check skills",
     "openspec": "{openspec} validate <change> --strict, or validate --specs --strict for an "
                 "archived change",
 }
@@ -1142,7 +1178,7 @@ def resolution(configuration: Configuration) -> list[dict[str, Any]]:
         documents = configuration.load.get(key)
         add(f"load.{key}", ABSENT if documents is None else DECLARED,
             None if documents is None else list(documents))
-    for key in _TABLES["models"]:
+    for key in _LOCAL_TABLES[MODELS]:
         models = configuration.models.get(key)
         add(f"models.{key}", MISSING if models is None else DECLARED, models)
     add("validation.preflight", ABSENT if configuration.preflight is None else DECLARED,
@@ -1239,6 +1275,15 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         print(f"OK: {configuration.shown} "
               + ("passes its check." if configuration.exists
                  else "does not exist; every field is absent."))
+        # A local field's absence is reported, not refused: a checkout with no local
+        # file, CI's among them, checks every committed field all the same.
+        if absent := [entry["field"] for entry in resolution(configuration)
+                      if entry["status"] == MISSING]:
+            print(f"MISSING: {LOCAL.as_posix()} "
+                  + ("does not declare " if configuration.local_exists
+                     else "does not exist, so lacks ")
+                  + ", ".join(absent) + "; a step needing one refuses until "
+                  "`change-workflow install` writes the file or they are declared there.")
     elif args.action == "load":
         for document in documents:
             print(document)

@@ -21,8 +21,8 @@ from change_workflow import clone as change_clone
 from change_workflow import find as find_change
 from change_workflow.log import record_outcome
 from change_workflow.wrapper import Wrapper
-from change_workflow_fixtures import (ACCEPTING, LANDED, MODELS, NO_SANDBOX, VALID, FakeClaude,
-                                      clock, event_lines)
+from change_workflow_fixtures import (ACCEPTED, ACCEPTING, LANDED, LOCAL_CONFIGURED, NO_SANDBOX,
+                                      VALID, FakeClaude, clock, event_lines)
 
 CHANGE = "seed-pool"
 ARCHIVED = Path("openspec/changes/archive/2026-10-22-seed-pool")
@@ -84,7 +84,7 @@ def workspace(tmp_path: Path) -> Path:
         "openspec/changes/**/reviews/\n", "utf-8")
     (work / "README.md").write_text("1\n", "utf-8")
     (work / ".agents/evidence").mkdir(parents=True)
-    (work / ".agents/workflow.toml").write_text(CONFIGURATION, "utf-8")
+    (work / ".agents/workflow.toml").write_text(ACCEPTED + CONFIGURATION, "utf-8")
     for name in ("pipeline", "local", "helm"):
         (work / ".agents/evidence" / f"{name}.md").write_text(f"# The {name} kind\n", "utf-8")
     _git(work, "add", "--all")
@@ -224,7 +224,8 @@ def test_the_engine_copies_archive_cleanups_history_once_its_session_finishes(
     # The log as the engine writes it, closeout's line its last before cleanup.
     (clone / log).unlink()
     record_outcome(clone / log, "closeout", VALID["finished"], session="c-1", commit=COMMIT)
-    (clone / ".agents/workflow.toml").write_text(CONFIGURATION + MODELS, "utf-8")
+    (clone / ".agents/workflow.toml").write_text(ACCEPTED + CONFIGURATION, "utf-8")
+    (clone / ".agents/workflow.local.toml").write_text(LOCAL_CONFIGURED, "utf-8")
     claude = FakeClaude((event_lines({**VALID["finished"], "next": {"step": "done"},
                                       "landing": LANDED}), 0))
     wrapper = Wrapper(root=clone, runner=claude, head=lambda _: COMMIT, clock=clock,
@@ -288,7 +289,7 @@ def test_evidence_under_a_directory_no_kind_declares_is_not_copied(
     _history(clone)
     _write(clone, f".snapshot/validation/{TREE}/local/1/summary.json", "{}\n")
     (clone / ".agents/workflow.toml").write_text(
-        _kind("local", ".snapshot/validation/{tree}/local/*/summary.json"), "utf-8")
+        ACCEPTED + _kind("local", ".snapshot/validation/{tree}/local/*/summary.json"), "utf-8")
 
     synced = history.sync(clone, workspace, CHANGE)
 
@@ -317,7 +318,7 @@ def test_the_kinds_pattern_says_which_evidence_the_records_name(
            VALIDATION_RECORD + f"\nCurrent: `{named}`.\n")
     _write(clone, named, '{"passed": true}\n')
     _write(clone, unnamed, '{"passed": false}\n')
-    (clone / ".agents/workflow.toml").write_text(_kind("local", pattern), "utf-8")
+    (clone / ".agents/workflow.toml").write_text(ACCEPTED + _kind("local", pattern), "utf-8")
 
     synced = history.sync(clone, workspace, CHANGE)
 
@@ -354,7 +355,7 @@ def test_a_pattern_matching_a_directory_copies_it_and_nothing_beside_it(
     for name in (attempt / "summary.json", attempt / "test.log", BY_TREE / "local/notes.txt"):
         _write(clone, name, "{}\n")
     (clone / ".agents/workflow.toml").write_text(
-        _kind("local", ".snapshot/evidence/{tree}/local/run-*"), "utf-8")
+        ACCEPTED + _kind("local", ".snapshot/evidence/{tree}/local/run-*"), "utf-8")
 
     synced = history.sync(clone, workspace, CHANGE)
 
@@ -376,7 +377,7 @@ def test_a_kinds_evidence_in_a_directory_another_kind_reaches_is_copied_alone(
         _write(clone, name, "{}\n")
     _write(clone, ".agents/evidence/report.md", "# The report kind\n")
     (clone / ".agents/workflow.toml").write_text(
-        _kind("report", ".snapshot/evidence/{tree}/report.json")
+        ACCEPTED + _kind("report", ".snapshot/evidence/{tree}/report.json")
         + _kind("local", ".snapshot/evidence/{tree}/local/*/summary.json"), "utf-8")
 
     synced = history.sync(clone, workspace, CHANGE)

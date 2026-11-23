@@ -64,7 +64,7 @@ def _documents(root: Path) -> list[str]:
                 f"{exc}",
                 "Re-read the repository's guidance your skill names before continuing."]
     # Never empty: the workflow's own guidance is among them, whatever the
-    # configuration declares.
+    # configuration's `load` declares.
     return ["Before continuing, re-read these in full with your file tools:",
             *(f"- {path}" for path in documents)]
 
@@ -78,7 +78,7 @@ def context(root: Path) -> str:
         *_documents(root),
         "If you are working an OpenSpec change, also re-read its design, the section of",
         "its task list you are on with that section's notes, and the skill you are",
-        "following (.agents/skills/<skill>/SKILL.md).",
+        "following.",
         "",
         f"Checked-out branch: {_branch(root)}",
     ]

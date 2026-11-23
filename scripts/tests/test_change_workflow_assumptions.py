@@ -68,9 +68,10 @@ ARCHIVE = "archive"
 # What the workflow keeps in the archive beside the changes: the guidance reviews'
 # period ledger.
 ARCHIVE_FILES = frozenset({"guidance-reviews.jsonl"})
-# The engine's command and package, and the outcome schema it checks every step's last
-# turn against.
-ENGINE = frozenset({"scripts/change-workflow", ".agents/change-outcome.schema.json"})
+# The outcome schema the engine checks every step's last turn against, and the
+# engine's package. The engine's command is `change-workflow` on the path, which
+# names no path of the repository's.
+ENGINE = frozenset({".agents/change-outcome.schema.json"})
 ENGINE_PACKAGE = "scripts/change_workflow/"
 _LAYER = re.compile(r"^tags:\s*\[([^\]]*)\]", re.M)
 
@@ -498,11 +499,11 @@ def test_a_skill_may_name_the_workflows_own_targets_and_paths(tmp_path: Path) ->
         "`docs/guidance/workflow/closeout.md#archival`, `docs/guidance/engineering/comments.md`, "
         "`openspec/changes/README.md`, `openspec/changes/archive/<date>-<change>/`, "
         "`openspec/changes/archive/guidance-reviews.jsonl`, and "
-        "`openspec/specs/<capability>/spec.md`; run `scripts/change-workflow next <change>`, "
+        "`openspec/specs/<capability>/spec.md`; run `change-workflow next <change>`, "
         "as `scripts/change_workflow/next_step.py` computes it; match "
         "`.agents/change-outcome.schema.json`.\n"))
 
-    assert {"make validate", "make -C <clone> validate", "scripts/change-workflow",
+    assert {"make validate", "make -C <clone> validate",
             "openspec/specs/<capability>/spec.md"} <= set(where)
     assert not_the_workflows(where, FRAGMENT_OF_TEST, {}) == []
 
@@ -525,6 +526,15 @@ def test_a_skill_naming_a_repositorys_paths_is_named(tmp_path: Path) -> None:
         "openspec/README.md", "openspec/changes/archive/2026-01-01-x/notes.md",
         "openspec/changes/some-change/notes.md", "openspec/specs/README.md",
         "openspec/specs/change-workflow/spec.md"]
+
+
+def test_a_skill_naming_the_in_tree_command_is_named(tmp_path: Path) -> None:
+    """A skill calls the installed command, `change-workflow`, never a copy of the
+    engine a repository's tree holds."""
+    where = _skill(tmp_path, "Run `scripts/change-workflow next <change>`.\n")
+
+    assert _shown_names(not_the_workflows(where, FRAGMENT_OF_TEST, {})) == [
+        "scripts/change-workflow"]
 
 
 def test_an_exempted_name_is_admitted(tmp_path: Path) -> None:

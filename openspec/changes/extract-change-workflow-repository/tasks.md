@@ -490,7 +490,7 @@ skills, `scripts/change_workflow/` (`config.py`, `cli.py`, `workflow.mk`), the
 `Makefile`, `.github/workflows/tests.yml`, `docs/change-workflow-handbook.md`, and
 their tests.
 
-- [ ] 4.1 The orchestrator's, on the owner's word, before the section's session: edit
+- [x] 4.1 The orchestrator's, on the owner's word, before the section's session: edit
   the protected `.agents/workflow.toml` — add `[workflow] version = ">=0.1, <0.2"`,
   remove `[models]`, and make `load.common` name `docs/guidance/repository/` in place
   of `docs/guidance/` — and `.claude/settings.json`'s post-compaction hook to run
@@ -498,21 +498,95 @@ their tests.
   `change-workflow install` in the workspace, writing the user skill directories and
   `.agents/workflow.local.toml` from the template (D5, D8, D11). The session commits
   both protected files with its section.
-- [ ] 4.2 Enforce the shape: `[workflow] version` and `[guidance] engineering`
+  Done by the orchestrator on the owner's word: both files' edits were in the worktree
+  as the task gives them, and are committed with the section. The tree's wheel
+  (0.1.0, built before this section's edits) was installed and `change-workflow
+  install` run in this change's clone only, not the workspace, by the owner's
+  direction, so the clone's local file is its own, written from the template, and
+  the clone's link to the workspace's local file was not made.
+- [x] 4.2 Enforce the shape: `[workflow] version` and `[guidance] engineering`
   required; a field in the wrong file refused, naming the file it belongs in; with no
   local file, `start` refuses, naming the missing field and `change-workflow install`,
   while `check config` and `config --json` report and exit 0 (D4, D5, D11; CW-f8yy,
   CW-4pm4, CW-hu0z). Verify: library integration cases in
   `test_change_workflow_config.py` and `test_change_workflow_cli_steps.py` ("Models are
   committed", "A step starts with no local configuration", "No range is declared").
-- [ ] 4.3 `change-workflow fragment` prints the installed `workflow.mk`'s path, and the
+  Done: `config.check` refuses a committed file declaring no `workflow.version`
+  (`committed=True`; `load` passes false when only a local file exists, so a checkout
+  with no committed file still reads as every field absent), right after the range is
+  read; `[models]` and `[guidance]` in the committed file are refused naming
+  `.agents/workflow.local.toml`, and `models` is no committed table, so a step's
+  models are declared once by construction. `require` names each missing field with
+  the file it belongs in, a local one with `change-workflow install`;
+  `require_for_step` asks the pointer of every step and the orchestrating session,
+  and the step's models of an unattended run as before; the review asks the pointer
+  and its models before it reads them; and `Configuration.documents`, which `config
+  load` and the post-compaction hook print, asks the pointer, since an interactive
+  session, which no `start` guards, would otherwise read no engineering guidance and
+  not know it. `check config` prints, after its OK line, a `MISSING:` line naming
+  each local field the checkout lacks, exiting 0; `config --json` is unchanged.
+  Library integration, `test_change_workflow_config.py` (in-process `main` over
+  temporary checkouts): "Models are committed" and "No range is declared", each
+  through `config --json`, `check config`, and `config load`; "CI checks the
+  configuration" (no local file: exit 0, the missing line, a committed fault still
+  refused); a complete local file reporting nothing missing; `config load plan` with
+  no pointer refused, naming it and `change-workflow install`; no committed file,
+  with and without a local file beside it, asking no range; `start design
+  --unattended` with neither file refused for the protected branches, the pointer,
+  and the models, each with its file: passed. Unit, the same file: `[models]` and
+  `[guidance]` in a committed text refused naming the local file; `require_for_step`
+  for an interactive step, an unattended one, and the orchestrating session: passed.
+  `test_change_workflow_cli_steps.py`: "A step starts with no local configuration" —
+  unattended, refused naming `guidance.engineering`, `models.design`, and
+  `change-workflow install`; interactive, the pointer; nothing launched or logged:
+  passed. `test_change_workflow_cli.py`: `start orchestrate` with models but no
+  pointer refused, launching nothing: passed. `test_change_workflow_review.py`: a
+  review with no pointer refused before any reviewer runs: passed.
+  `test_post_compaction_context.py`: with no local file, the hook names the pointer
+  and `change-workflow install` and still tells the session to re-read; with a
+  pointer applying none, it names the workflow's guidance: passed.
+  The test configuration now has two files: `change_workflow_fixtures.configured`
+  writes `ACCEPTED`, the range `>=0.1`, before a committed text declaring none, and
+  the local file `LOCAL_CONFIGURED` (the pointer as `none`, and every step's models)
+  unless given `local=None`, excluded from Git as the repository ignores it;
+  `configuration_checked` is `config.check` of a text so opened, for a unit test of
+  anything but the range. The tests of this repository's own configuration read it
+  as its template's install leaves it (`as_installed`), not the developer's own
+  local file.
+- [x] 4.3 `change-workflow fragment` prints the installed `workflow.mk`'s path, and the
   fragment's default becomes `CHANGE_WORKFLOW ?= change-workflow`; this repository's
   `Makefile` keeps including the in-tree fragment and gains `make install-workflow`,
   installing the tree's wheel with `uv tool install --force` and running
   `change-workflow install` (D8, D15, CW-dvz5). Verify: `test_change_workflow_cli.py`,
   `test_make_change_completion.py`, and `make install-workflow` in the section's
   handoff.
-- [ ] 4.4 The eleven workflow skills, the handbook, and the fragment invoke
+  Done: `fragment` prints `Distribution.path("fragment")` and reads no
+  configuration, though, like every subcommand but `install` and `--version`, it
+  needs a repository and installed skills of its version. The fragment's
+  `CHANGE_WORKFLOW ?= change-workflow`, its header naming the installed command and
+  CW-r3ka and CW-dvz5 rather than a tree path. The root `Makefile` keeps
+  `include scripts/change_workflow/workflow.mk`; `make install-workflow` runs `uv tool
+  install --force --reinstall scripts/change-workflow-wheel` — `--reinstall`, since an
+  edit of the engine or a skill keeps the version, and uv would otherwise keep the
+  build it has — then `change-workflow install`; `check-change` calls
+  `$(CHANGE_WORKFLOW)`, so it runs the installed engine like the fragment's targets.
+  Library integration, `test_change_workflow_cli.py`: `fragment` prints the
+  distribution's fragment in a checkout whose configuration `config` refuses; every
+  fragment target's dry run now calls `change-workflow`: passed. External process:
+  `test_change_workflow_cli.py`, a Makefile including the fragment at the path the
+  tree's command prints dry-runs `design` as `change-workflow start design "X"`; and
+  `test_change_workflow_wheel.py`, CW-dvz5's scenario on the installed command — its
+  `fragment` prints the `fragment` role `config --json` names, inside the tool
+  directory, and a Makefile holding `include $(shell <installed> fragment)` dry-runs
+  `design` as `change-workflow start design "X"`: passed.
+  `test_make_change_completion.py`: passed. `make install-workflow` run with
+  `UV_TOOL_DIR`, `UV_TOOL_BIN_DIR`, and `HOME` in a temporary directory and its bin
+  first on `PATH`, since the real `~/.claude/skills/` and `~/.codex/skills/` are
+  protected from this step: it built and installed `arkhai-change-workflow==0.1.0`
+  from the tree, then wrote 11 skills of 0.1.0 into each user skill directory, each
+  stamped 0.1.0, and left the checkout's existing local file alone; the installed
+  `fragment` printed the tool directory's `workflow.mk`.
+- [x] 4.4 The eleven workflow skills, the handbook, and the fragment invoke
   `change-workflow …` in place of `scripts/change-workflow …`, which stays in the tree
   through this half (D8, CW-r3ka); remove the `change-*` and `guidance-review` links
   from `.claude/skills/` and `.codex/skills/`, the skills' sources staying under
@@ -520,10 +594,46 @@ their tests.
   `test_change_workflow_assumptions.py` (the skills' targets and paths), `make
   check-agent-skills`, and `change-workflow check skills` after the orchestrator's
   reinstall.
-- [ ] 4.5 `tests.yml`'s test job installs the tree's wheel and runs `change-workflow
+  Done: every `scripts/change-workflow` in the eleven skills and the handbook reads
+  `change-workflow`, and the orchestrating skill's clone paragraph no longer names a
+  path to the command. The engine's own messages and docstrings name it too — the
+  unattended preamble, the review's, the next-step computation's `convert` and
+  `record` hints, the log's conversion refusal, the guarded push's refusal, and
+  `config`'s default-check commands — so what a session is told to run is the
+  command every step runs. The 22 links went with `git rm`; OpenSpec's six stay.
+  The handbook's "Customization" now gives the committed and local files and the
+  installed skills, and `market-change-workflow`'s companion rows on the command and
+  the skills' source say what is installed and what stays in the tree.
+  `check skills` now refuses a project skill entry of a workflow skill's name, link
+  or copy, which CW-d8de rules out, so a branch merging the old links back fails it;
+  the post-compaction hook no longer names `.agents/skills/<skill>/SKILL.md` as the
+  skill to re-read.
+  `test_change_workflow_assumptions.py` no longer admits `scripts/change-workflow` as
+  the engine's (`ENGINE`), so a skill naming the tree's command fails, naming it:
+  passed, with the new case. Unit, `test_check_agent_skills.py`: the workflow's
+  sources asking no link, and a link and a copy of `change-plan` refused in each
+  harness: passed. `scripts/change-workflow check skills` against the tracked
+  links: passed; `make check-agent-skills`, through the installed 0.1.0 engine built
+  before this section, which lacks the new refusal: passed. `change-workflow check
+  skills` after the reinstall is the orchestrator's, before the next session (4.6).
+- [x] 4.5 `tests.yml`'s test job installs the tree's wheel and runs `change-workflow
   install` before `make`, so the scripts' suites and every engine command CI runs meet
   installed skills (D8). Verify: the job's definition in the handoff.
-- [ ] 4.6 Verify the section: its suites; `scripts/change-workflow run pre-commit
+  Done: the `test` job's `test-deployment-packaging` entry, the one whose `make`
+  runs `test-release-tooling`, gains after `make dist-ci` a step "Install the change
+  workflow from the tree": `uv tool install --force scripts/change-workflow-wheel`,
+  the tool's bin directory (`uv tool dir --bin`) added to `GITHUB_PATH`, and
+  `change-workflow install` run from `$RUNNER_TEMP`, outside the checkout, so it
+  writes the skills and no local file, and CI checks the committed configuration
+  alone, as D5 has it. What it proves is that the workflow installs from the tree
+  and that a make target calling `change-workflow` finds it: the scripts' suites
+  run the tree's package or `scripts/change-workflow`, which checks nothing
+  installed, and the root Makefile's target the graph test runs is given the tree's
+  command. Unit, `test_tests_workflow.py` (the install step conditioned on that
+  entry, before the `make` step, its `change-workflow install` run outside the
+  checkout, and that entry running `test-release-tooling`): passed; the job's
+  definition is the step as quoted here.
+- [x] 4.6 Verify the section: its suites; `scripts/change-workflow run pre-commit
   extract-change-workflow-repository` and `change-workflow config load implement`
   against the edited configuration; and the handoff naming that the orchestrator
   reinstalls (`make install-workflow`) before the next session, since the skills
@@ -533,6 +643,80 @@ their tests.
   under `SANDBOX_REQUIRED=1`, its log showing the wheel installed from the tree,
   `change-workflow install` run, and the change workflow's suites passed with none of
   the sandbox tests skipped.
+  Done: the section's suites, each after its last edit — `test_change_workflow_config.py`,
+  `test_change_workflow_cli_steps.py`, `test_change_workflow_cli.py`,
+  `test_change_workflow_review.py`, `test_change_workflow_wheel.py`,
+  `test_make_change_completion.py`, `test_change_workflow_assumptions.py`,
+  `test_check_agent_skills.py`, `test_tests_workflow.py`,
+  `test_post_compaction_context.py`, `test_change_workflow_graph.py`, and the
+  suites whose fixtures changed: passed. `scripts/change-workflow run pre-commit`
+  against the edited configuration: `make lock` passed, changing no lock; `make
+  validate-local` passed — packaging, and every suite, the scripts' 3,700 passing,
+  none skipped; the default checks and the strict OpenSpec validation passed; `make
+  check-repository` failed on `check-spec-index` alone, the fourteen ids of the
+  change's deltas that 8.2 and 10.2 index. `change-workflow config load implement`,
+  the installed engine, and `scripts/change-workflow config load implement` each
+  print the 84 documents, the pointer's engineering guidance first, then the
+  workflow's, then `load.common`, each once; `scripts/change-workflow check config`:
+  passed. The orchestrator's reinstall is in the handoff below.
+
+Section 4 notes (handoff):
+
+- The orchestrator reinstalls before the next session runs a step, since the skills,
+  the engine, and the fragment changed: `make install-workflow` in the workspace and
+  in this clone. The installed stamp is the version, which this section keeps at
+  0.1.0, so the skills as installed before it pass every stamp check while their
+  text is the old one; `make check-agent-skills` passed through that older
+  installation, which lacks the new project-entry refusal. A developer reinstalls
+  after each engine or skill edit, and 6.1 is that reinstall for section 6.
+- Judgments for the round's review and triage, each reading a requirement's letter:
+  - CW-4pm4's "A step starts with no local configuration" says `start design`
+    names the missing models. An unattended run does; an interactive one, which runs
+    on the owner's own model, names the pointer alone, since requiring a model it
+    does not use would refuse what the step does not need. The delta could say "an
+    unattended `start design`" before section 8 promotes it.
+  - CW-hu0z's pointer is required by `config load` and the post-compaction hook as
+    well as by `start` and the review: D7 notes interactive sessions never pass
+    through `start`, and without it they would read no engineering guidance and not
+    know it. `check config` and `config --json` still report it missing and exit 0.
+  - CW-f8yy's "No range is declared" is read for a committed file: a checkout with
+    no committed configuration declares no field, the range among them, whether or
+    not a local file is beside it.
+  - `fragment` is refused, like every subcommand but `install` and `--version`,
+    while the installed skills are stale, as CW-1rhd's letter has it. For (iii)'s
+    `include $(shell change-workflow fragment)`, make then shows that refusal,
+    naming `change-workflow install`, before its own error on the empty include.
+- Outside the plan, each small beside the switch it follows from: the engine's own
+  messages name `change-workflow` (4.4); `check skills` refuses a project entry of a
+  workflow skill's name, CW-d8de's letter, which section 3 left unchecked; the
+  documents the switch made false are corrected — `AGENTS.md`'s "What every session
+  reads", `openspec/README.md`'s check table, `market-change-workflow`'s companion
+  (the default checks' and pre-commit's commands, the guidance every step reads, the
+  engine's command and the skills' source), the workflow guidance's closeout command
+  names, and the handbook's "Customization"; the graph target's test runs it with
+  `CHANGE_WORKFLOW=scripts/change-workflow`, so it checks the tree's diagram rather
+  than whatever the machine has installed; and the tests of this repository's own
+  configuration read it through its template (`as_installed`), since CI's checkout
+  has no local file and a developer's may differ.
+- Left for later sections, each recorded where it is owned: `.agents/workflow.toml`'s
+  `[openspec]` comment still names `scripts/change-workflow openspec`, a protected
+  file the orchestrator may correct; `market-change-workflow`'s `spec.md` names
+  `scripts/change-workflow` in three scenarios, normative text section 10 amends with
+  that capability's delta; `change-workflow`'s specification, companion, and index
+  name it throughout, section 8's; the orchestrating skill cites
+  `scripts/change_workflow/next_step.py` and `graph.py`, which section 5's citations
+  by requirement id replace; and the handbook's procedure for installing is 7.3's.
+- The repository's own suites `test_check_secrets.py`, `test_check_public_content.py`,
+  and `test_validate_parallel.py` write the range into their configurations as a
+  literal, not from the workflow's fixtures, which leave with the workflow (9.3).
+- The fresh-context check's findings fixed: CW-d8de's project entries unrefused;
+  overstated 4.2, 4.3, and 4.5 evidence (each claim now names the test that shows
+  it, and the orchestrating session's and local-file-only cases gained tests);
+  CI's install writing a local file into its checkout; the pointer unenforced in
+  `config load`; documents the switch made false; the repository's suites importing
+  the workflow's fixtures; comment and wording nits. Declined: `install-workflow`
+  calling `$(CHANGE_WORKFLOW) install`, since the recipe runs the command it has just
+  installed, whatever `CHANGE_WORKFLOW` names.
 
 ## 5. Citations by section and requirement id; unique engineering headings
 

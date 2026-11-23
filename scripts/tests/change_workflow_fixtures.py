@@ -8,14 +8,14 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import pytest
 
 from change_workflow.around import inputs_note
 from change_workflow.harness import Model
 from change_workflow.log import Checkout
-from change_workflow import sandbox
+from change_workflow import config, sandbox
 from change_workflow.sandbox import Confinement, Launch
 from change_workflow.wrapper import Wrapper
 
@@ -336,34 +336,80 @@ def evidence_kind(name: str, *, required: str = "always", identity: str = "tree"
     return "\n".join(lines) + "\n"
 
 
-# A repository's workflow configuration: the least every step needs, its protected
-# branches, its functional checks declared empty, one evidence kind, and every step's
-# models.
-CONFIGURED = """
+# The range of workflow versions a test configuration accepts: every version the
+# engine under test may carry.
+ACCEPTED = """
+[workflow]
+version = ">=0.1"
+"""
+
+# A repository's workflow configuration: the range it accepts and the least every step
+# needs, its protected branches, its functional checks declared empty, and one
+# evidence kind.
+CONFIGURED = ACCEPTED + """
 [repository]
 protected-branches = ["main", "dev"]
 
 [hooks]
 pre-commit-functional = []
 
-""" + evidence_kind("local", run="true") + MODELS
+""" + evidence_kind("local", run="true")
+
+# A checkout's engineering-guidance pointer, applying none.
+POINTER = """
+[guidance]
+engineering = { none = "the tests apply no engineering guidance" }
+"""
+
+# A checkout's local configuration: the pointer, and every step's models.
+LOCAL_CONFIGURED = POINTER + MODELS
 
 
 def ignore_evidence(root: Path) -> Path:
     """`root`, a Git checkout, ignoring `.snapshot/` as a repository with evidence
-    kinds must, through its own exclude file rather than a tracked `.gitignore`."""
+    kinds must, and its local configuration, as Git ignores it in a repository
+    adopting the workflow, each through its own exclude file rather than a tracked
+    `.gitignore`."""
     exclude = root / ".git/info/exclude"
     exclude.parent.mkdir(parents=True, exist_ok=True)
     with exclude.open("a", encoding="utf-8") as lines:
-        lines.write(".snapshot/\n")
+        lines.write(".snapshot/\n.agents/workflow.local.toml\n")
     return root
 
 
-def configured(root: Path, text: str = CONFIGURED) -> Path:
-    """`root` given `.agents/workflow.toml` holding `text`, and a guide for each kind
-    a test configuration names; in a Git checkout, `.snapshot/` ignored."""
+def as_installed(root: Path) -> config.Configuration:
+    """The configuration of the repository at `root` as its template's install leaves
+    it: the committed file beside `.agents/workflow.local.template.toml` as the local
+    one, whatever the checkout's own local file holds."""
+    template = root / ".agents/workflow.local.template.toml"
+    return config.check((root / config.CONFIGURATION).read_text("utf-8"),
+                        root / config.CONFIGURATION, root=root,
+                        local=template.read_text("utf-8"))
+
+
+def accepting(text: str) -> str:
+    """`text`, a committed configuration, opened by the range `ACCEPTED` where it
+    declares no `[workflow]` of its own."""
+    return text if "[workflow]" in text else ACCEPTED + text
+
+
+def configuration_checked(text: str, *args: Any, **options: Any) -> config.Configuration:
+    """`config.check` of `text` as `accepting` gives it, for a test of anything but
+    the range."""
+    return config.check(accepting(text), *args, **options)
+
+
+def configured(root: Path, text: str = CONFIGURED,
+               local: str | None = LOCAL_CONFIGURED) -> Path:
+    """`root` given `.agents/workflow.toml` holding `text`, opened by the range
+    `ACCEPTED` where `text` declares no `[workflow]` of its own, its local
+    configuration holding `local` unless it is None, and a guide for each kind a test
+    configuration names; in a Git checkout, `.snapshot/` and the local configuration
+    ignored."""
     (root / ".agents/evidence").mkdir(parents=True, exist_ok=True)
-    (root / ".agents/workflow.toml").write_text(text, "utf-8")
+    (root / ".agents/workflow.toml").write_text(accepting(text), "utf-8")
+    if local is not None:
+        (root / ".agents/workflow.local.toml").write_text(local, "utf-8")
     for name in GUIDES:
         (root / ".agents/evidence" / f"{name}.md").write_text(
             f"# The {name} evidence kind\n\nHow to read its evidence.\n", "utf-8")

@@ -139,7 +139,7 @@ TRIAGE_RUN = {UNATTENDED_RUN: "triage"}
 
 
 def test_a_step_opens_no_round_view(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """CW-p3vz's "A step opens a round view": `scripts/change-workflow round-view
+    """CW-p3vz's "A step opens a round view": `change-workflow round-view
     <change>` under an unattended triage's marker refuses, naming the triage step, and
     moves nothing; the guard every step reads still runs under it."""
     base, head = _round(repo)

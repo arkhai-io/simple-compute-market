@@ -25,7 +25,8 @@ from change_workflow.review import (ReviewError, check_review, claim_record, pri
 from change_workflow.running import (Terminated, invocations_directory, keep_invocations,
                                      kept_invocations, live_runs)
 from change_workflow.harness import Model
-from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
+from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD,
+                                      LOCAL_CONFIGURED, MODELS,
                                       NO_SANDBOX, RECORDS, VALIDATED, FakeClaude, claude_review,
                                       clock, codex_missing, codex_saying, configured,
                                       ignore_evidence, needs_bwrap, not_installed,
@@ -152,12 +153,25 @@ def test_the_owners_model_replaces_the_configured_models_for_one_run(tmp_path: P
 
 
 def test_a_review_with_no_models_configured_is_refused_naming_the_field(tmp_path: Path) -> None:
-    root = configured(repository(tmp_path), CONFIGURED.replace(MODELS, ""))
+    root = configured(repository(tmp_path), CONFIGURED,
+                      local=LOCAL_CONFIGURED.replace(MODELS, ""))
 
     with pytest.raises(ReviewError, match="models.review"):
         run_review(CHANGE, "design", root=root, runner=writing(review_text()),
                    head=lambda _: HEAD)
     # Refused before the reviewer ran: no record is published.
+    assert not [path for path in reviews_of(root).iterdir() if path.suffix == ".md"]
+
+
+def test_a_review_with_no_pointer_is_refused_naming_it_and_the_installer(tmp_path: Path) -> None:
+    """The reviewer reads the engineering guidance first, as every step does."""
+    root = configured(repository(tmp_path), CONFIGURED, local=MODELS)
+
+    with pytest.raises(ReviewError, match=r"a review needs guidance.engineering, which "
+                                          r"\.agents/workflow.local.toml does not declare: run "
+                                          r"`change-workflow install`"):
+        run_review(CHANGE, "design", root=root, runner=writing(review_text()),
+                   head=lambda _: HEAD)
     assert not [path for path in reviews_of(root).iterdir() if path.suffix == ".md"]
 
 

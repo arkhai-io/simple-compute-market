@@ -656,7 +656,8 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # only exits, with the status a test sets.
     (work / "Makefile").write_text("init:\n\t@exit $${INIT_STATUS:-0}\n", "utf-8")
     (work / ".agents").mkdir()
-    (work / ".agents/workflow.toml").write_text('[hooks]\npost-clone = "make init"\n', "utf-8")
+    (work / ".agents/workflow.toml").write_text(
+        '[workflow]\nversion = ">=0.1"\n[hooks]\npost-clone = "make init"\n', "utf-8")
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(tmp_path / "origin.git"))
     _git(work, "init", "-q", "-b", "dev")
     _git(work, "add", "--all")

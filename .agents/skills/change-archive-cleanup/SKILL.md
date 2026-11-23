@@ -26,7 +26,7 @@ now in any of them is not this skill's to fix — stop and tell the owner.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/change-workflow start --unattended` —
+When this skill runs through `change-workflow start --unattended` —
 `make archive-cleanup UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -43,7 +43,7 @@ the session, and every turn ends with an outcome matching
   A call the harness denies is the same. The wrapper records every refusal and
   denial on the run's line whatever you say, and the orchestrating session reads
   them before the change moves on; never ask about either as a question. Wait on a
-  background command with `scripts/change-workflow wait`, never by following its
+  background command with `change-workflow wait`, never by following its
   output. The owner's workspace is outside the scope: the engine copies the
   change's history there once your session finishes (step 10).
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
@@ -69,7 +69,7 @@ the slash command — no wrapper records the run, so its last act records the
 outcome it would end with unattended, as "Running unattended" gives it:
 
 ```text
-scripts/change-workflow record <change> archive-cleanup --outcome '<the outcome, as JSON>'
+change-workflow record <change> archive-cleanup --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -99,11 +99,11 @@ closing lines, exit status, and log, and every other top-level Markdown file the
 each a message from the repository's hook, in full. Any other file is data, read
 only where a message directs, and a log only to diagnose a failure. A failing
 cleanup or hook prevented nothing: step 7 reports it. Interactively, with no
-wrapper, run `scripts/change-workflow run before archive-cleanup <change>` once step
+wrapper, run `change-workflow run before archive-cleanup <change>` once step
 1's checks up to and including the Validated check hold, since it removes what the
 change's validation left; its last line names the directory, and step 1's Worktree
 check then reads what it wrote. Once the work is done, run
-`scripts/change-workflow run after archive-cleanup <change>` before `record`, and,
+`change-workflow run after archive-cleanup <change>` before `record`, and,
 when it fails, fix what it found if this step can, and run it again, or tell the
 owner. Unattended, an after-hook that fails resumes this session once with its
 failure; a second failure goes to the owner as a question.
@@ -118,9 +118,9 @@ and follow this skill.
   not carry this change's latest commits, or its name belongs to another change,
   stop and ask the owner — unless the change's log holds the owner's decision
   that it runs on this branch: run `git branch --show-current`, then
-  `scripts/change-workflow log <change> --branch <that branch>`; a line
+  `change-workflow log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
-- **Archived.** `scripts/change-workflow find --archived <change>` prints a
+- **Archived.** `change-workflow find --archived <change>` prints a
   directory under `openspec/changes/archive/`. Read every file of the change from
   there.
 - **Status.** The change's row in `openspec/changes/README.md` is `in closeout`. A
@@ -139,7 +139,7 @@ and follow this skill.
   and commit it alone before step 7. Append to `reviews/pull-request.md` the latest
   validation record's commit and result, or the waiver, so the drafts say how the
   merged `HEAD` was validated.
-- **Route.** `scripts/change-workflow next <change>` names
+- **Route.** `change-workflow next <change>` names
   `archive-cleanup`: the exit of the latest closeout review's triage, once any
   validation it owes cleared `HEAD`, or the owner's direction to archive cleanup;
   on a row already `archived`, the exit of the merge after the archive (its run
@@ -159,7 +159,7 @@ and follow this skill.
   the check or not, judging the paths named — as for another change's commit on a
   branch two changes share, which the merge carries all the same. When the
   computation named archive cleanup from the owner's direction — its reason says
-  `the owner directed archive-cleanup at seq <n>`, and `scripts/change-workflow
+  `the owner directed archive-cleanup at seq <n>`, and `change-workflow
   log <change>` shows that line — the direction is the
   waiver, its reason the owner's. Otherwise stop and ask the owner, naming the paths
   and the commits that changed them, whether the correction is validated first
@@ -172,7 +172,7 @@ and follow this skill.
   again, which then names archive cleanup:
 
   ```text
-  scripts/change-workflow note <change> orchestrator --by owner --next archive-cleanup --decision "waives archive cleanup's validation" --reason "<the owner's words, naming the paths>"
+  change-workflow note <change> orchestrator --by owner --next archive-cleanup --decision "waives archive cleanup's validation" --reason "<the owner's words, naming the paths>"
   ```
 
   Record a waiver as one line of the
@@ -184,7 +184,7 @@ and follow this skill.
   their reason. This run commits nothing as it stops, so once the owner has
   answered, name the declined recommendation and their reason in the message you
   end with, which the workflow log keeps; the run after the validation reads the
-  log (`scripts/change-workflow log <change>`) for it, or, run interactively, asks
+  log (`change-workflow log <change>`) for it, or, run interactively, asks
   the owner, and writes the line with its index edit. Likewise write, with the
   index edit, the line of each waiver a validation recommended in a record no
   triage read — each `NN-validation.md` with no triage file beside it whose `##
@@ -196,16 +196,16 @@ and follow this skill.
   before the session, which `git status --porcelain` shows; anything else fails the
   check. Commit each such file now, as step 8 says, before any other commit: the
   pre-commit checks and the guarded push of the steps below need a clean worktree.
-  `scripts/change-workflow check round-view` passes.
+  `change-workflow check round-view` passes.
 - **Landing branch.** Fetch the branch the change lands on, to record in your
   outcome's `landing` what you fetched; the engine reads it to tell whether that
   branch moved while the change was closed out. Run this on every run, a rerun on
   a row already `archived` included. The source:
   - the `landing.remote` and `landing.branch` of the latest finished merge line
     that records one, read from the whole log — `grep '"step": "merge"'
-    <records>/workflow.jsonl`, `scripts/change-workflow find --records <change>`
+    <records>/workflow.jsonl`, `change-workflow find --records <change>`
     naming the records — never a branch a merge's message names in prose;
-  - else the `base` `scripts/change-workflow find --json <change>` prints, the
+  - else the `base` `change-workflow find --json <change>` prints, the
     branch the change's clone recorded, fetched from the remote the merge would
     choose: the remote the branch tracks in the owner's workspace, or, in a clone,
     `workspace` for a branch only the owner's workspace holds;
@@ -240,7 +240,7 @@ and campaign, and every row and dependency graph that names the change. From the
 archived change read `proposal.md`, `design.md`'s design-promotion record,
 `tasks.md`'s closeout section with its end-to-end evidence, and the latest passing
 validation record in `reviews/`, with the guide of each evidence kind it names, which
-`scripts/change-workflow config` lists.
+`change-workflow config` lists.
 
 ## 3. Release the dependents
 
@@ -272,7 +272,7 @@ it costs the repository nothing, and it is the review history until an export fl
 exists. For a change worked in its own clone, the engine copies it into the owner's
 workspace once this session finishes (step 10).
 
-Run `scripts/change-workflow run pre-commit <change>`; it must report nothing
+Run `change-workflow run pre-commit <change>`; it must report nothing
 failing. Among the workflow's default checks, the change index check is the one
 that sees this edit; the repository's closing checks, such as a citations check,
 read the archived change's own documents.
@@ -281,7 +281,7 @@ read the archived change's own documents.
 
 Commit the index edit, with the waiver ledger lines step 1 recorded, as
 one commit whose message names the change and says its archive is cleaned up and
-which dependents it released. Then push it with `scripts/change-workflow push`,
+which dependents it released. Then push it with `change-workflow push`,
 the guarded push of exactly `HEAD`; if it refuses, stop and report its reasons.
 
 ## 6. Draft the merge
@@ -320,7 +320,7 @@ already gone — succeeds; with no kind declaring one, it was skipped, saying so
 each kind's cleanup removes and writes is its guide's. When a command failed — a
 service not answering, a resource in use, a record that could not be read — do not
 retry or work around it: say so in the report, from its log, with
-`scripts/change-workflow run cleanup <change>` to rerun once the cause is gone, and
+`change-workflow run cleanup <change>` to rerun once the cause is gone, and
 go on. Run again after an earlier run, the cleanup changes nothing more.
 
 ## 8. Commit what the cleanup wrote
@@ -344,7 +344,7 @@ conflict over the file resolves, as its kind's guide says.
 
 When a file a cleanup wrote was committed (step 8) and step 5 has not pushed it since
 — on a row already `archived`, where step 5 does not run — push it with
-`scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses,
+`change-workflow push`, the guarded push of exactly `HEAD`; if it refuses,
 stop and report its reasons.
 
 ## 10. The history copy, the engine's
@@ -355,7 +355,7 @@ outside this step's scope, so you never run `history`: once your session finishe
 before its outcome is logged, the engine copies the archived change's `reviews/` and
 the validation evidence its records name into the owner's workspace, at the same
 paths, where sessions working other changes find them, and the run's line names the
-copy among what it invoked (`history`). Run interactively, `scripts/change-workflow
+copy among what it invoked (`history`). Run interactively, `change-workflow
 run after archive-cleanup <change>` runs it before `record`. It is safe to repeat:
 files already there are left, files that grew are extended, and a file that differs
 otherwise is refused, named, and never overwritten; the owner reconciles it, and

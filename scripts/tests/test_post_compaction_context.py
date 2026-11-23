@@ -72,7 +72,19 @@ def test_context_names_the_engineering_and_workflow_guidance_before_the_common_d
                      "docs/TESTS.md"]
 
 
-def test_context_with_no_configuration_names_the_workflows_guidance(tmp_path: Path) -> None:
+def test_context_with_no_local_configuration_names_the_installer(tmp_path: Path) -> None:
+    """With no pointer the documents to re-read are unknown: the session is told what
+    is missing and how to write it, and still told to re-read its guidance."""
+    text = hook.context(tmp_path)
+
+    assert "guidance.engineering" in text and "`change-workflow install`" in text
+    assert "Re-read the repository's guidance" in text
+
+
+def test_context_with_a_pointer_applying_none_names_the_workflows_guidance(
+        tmp_path: Path) -> None:
+    configured(tmp_path, "")
+
     text = hook.context(tmp_path)
 
     assert f"- {distribution.path(distribution.GUIDANCE) / 'README.md'}\n" in text

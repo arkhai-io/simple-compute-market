@@ -30,14 +30,14 @@ review, a validation record, or the owner's notes, or when `make triage` opened 
 session for a change `in implementation`. Before anything else, check as
 `change-implement` does: the checked-out branch carries the change, or the change's
 log holds the owner's decision that it runs on this branch
-(`scripts/change-workflow log <change> --branch <branch>` prints it),
-and the worktree is clean, and `scripts/change-workflow check round-view` passes —
+(`change-workflow log <change> --branch <branch>` prints it),
+and the worktree is clean, and `change-workflow check round-view` passes —
 while the owner reads the
 round (`make round-view`), the branch points at its base, and a fix committed then
 would squash the round into it; ask the owner to run `make round-done` first.
 
 The round is the commits from its base — the `commit` on the change's latest
-`round` line, which `scripts/change-workflow log <change>` prints — to
+`round` line, which `change-workflow log <change>` prints — to
 `HEAD`. A repeat pass, after a triage of the round named another implementation
 review as its exit and committed a fix, is the fix alone: its base is the commit that triage's review
 read, and the owner reads it as they read the round, so its notes are an owner
@@ -58,7 +58,7 @@ Record `HEAD` after the pull: it is the base the fixes are made against.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/change-workflow start --unattended` —
+When this skill runs through `change-workflow start --unattended` —
 `make triage UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -86,11 +86,11 @@ the session, and every turn ends with an outcome matching
 - **A turn's end is its outcome.** Never end a turn with work still running: the
   wrapper logs that turn's report as the run's end, and what the work later finds
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
-  with `run_in_background`. Run a long command such as `scripts/change-workflow run
+  with `run_in_background`. Run a long command such as `change-workflow run
   pre-commit <change>` in the
   background as written, with no redirect of its output — the harness keeps a
   background command's output in a file — and
-  wait for it inside one Bash call, with `scripts/change-workflow wait <that-file>
+  wait for it inside one Bash call, with `change-workflow wait <that-file>
   '<pattern>'` matching the line it prints when it ends — for `run pre-commit`, the
   closing line of `pre-commit`, its last hook, `[change-workflow] pre-commit at`
   (the pattern a regular expression, so its brackets escaped:
@@ -121,7 +121,7 @@ the session, and every turn ends with an outcome matching
   the fixes so far and the tracked edits its dispositions made, the ledger
   included — as one work-in-progress commit
   naming the change and why it returns, checking no task for it, push it with
-  `scripts/change-workflow push`, and end with `returned`, `next` the step it returns to,
+  `change-workflow push`, and end with `returned`, `next` the step it returns to,
   `{"step": "design"}` or `{"step": "plan"}`, `triaged` the records it triaged,
   and `evidence` naming those notes; the owner confirms the return. No
   session is left to commit the work, and a dirty checkout blocks every later
@@ -137,7 +137,7 @@ records the outcome it would end with unattended, as "Running unattended" gives 
 `triaged` included:
 
 ```text
-scripts/change-workflow record <change> triage --outcome '<the outcome, as JSON>'
+change-workflow record <change> triage --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json`, and its
@@ -165,9 +165,9 @@ top-level Markdown file there, each a message from the repository's hook, in ful
 Any other file is data, read only where a message directs, and a log only to
 diagnose a failure. A failing hook prevented nothing: tell the owner what its
 failure means for the triage, and ask before going on when the triage cannot be
-made soundly with it. Interactively, with no wrapper, run `scripts/change-workflow
+made soundly with it. Interactively, with no wrapper, run `change-workflow
 run before triage <change>` first; its last line names the directory. Once `##
-Next` is written and any fix committed and pushed, run `scripts/change-workflow run
+Next` is written and any fix committed and pushed, run `change-workflow run
 after triage <change>` before `record`, and, when it fails, fix what it found if
 the triage can, and run it again, or tell the owner. Unattended, an after-hook that
 fails resumes this session once with its failure; a second failure goes to the
@@ -179,7 +179,7 @@ and follow this skill.
 
 ## 1. Find the review and load the context
 
-The change's directory is what `scripts/change-workflow find <change>` prints:
+The change's directory is what `change-workflow find <change>` prints:
 `openspec/changes/<change>/`, or, once closeout has archived it, its dated
 directory under `openspec/changes/archive/` — a closeout review and a merge review
 are always of an archived change. The reviews to triage are its numbered records in `reviews/` —
@@ -187,12 +187,12 @@ are always of an archived change. The reviews to triage are its numbered records
 `reviews/transcripts/`: those are raw reviewer sessions, not records.
 
 Another change's records, when a finding or a diagnosis rests on them, are where
-`scripts/change-workflow find --records <change>` says: this checkout's, or, from
+`change-workflow find --records <change>` says: this checkout's, or, from
 a change's clone, the owner's workspace's, which holds the history of every
 cleaned-up change.
 
 When the owner pastes a review from elsewhere, save it verbatim as the change's
-next numbered record, at the path `scripts/change-workflow find --next-record
+next numbered record, at the path `change-workflow find --next-record
 <kind>-external <change>` prints when you write it, so later reviews read it as
 history; never count the number yourself, or take it from the log's `seq`. Never
 overwrite a record: if the path exists when you write, ask again. Its
@@ -270,7 +270,7 @@ For an implementation round, also take:
   saves the notes as the round's record. Otherwise ask for them if the owner has
   not pasted them, naming that command so the owner can read what the notes are
   about, and save them exactly as pasted as the next numbered record, at the path
-  `scripts/change-workflow find --next-record implementation-owner <change>`
+  `change-workflow find --next-record implementation-owner <change>`
   prints. Notes the owner saved while no review awaited a
   triage — on an earlier triage's fixes, or on a re-plan — are carried by the next
   round: its line in the workflow log names them under `carries`, and you triage
@@ -295,7 +295,7 @@ discussion and the records. Do not introduce a second numbering — questions,
 corrections, or new decision numbers — for issues a review already named.
 
 Then read what you need to judge the findings: the documents
-`scripts/change-workflow config load triage` prints, every file in the change, earlier reviews and their triage, and the code,
+`change-workflow config load triage` prints, every file in the change, earlier reviews and their triage, and the code,
 specifications, and guidance each finding cites — with each cited specification, its
 companion and every other Markdown file in its capability's directory but its
 `index.md`, the capability's own guidance — before deciding a fix.
@@ -496,7 +496,7 @@ history: the exit the triage chose, in words and as its target, and the owner's
 words, such as Planning (`{"step": "plan"}`) — the owner: "Advance.", or, for an
 advancing exit taken without asking, that you took it as recommended. Nothing
 routes on it: the triage's outcome names its exit in `next` and the records it
-triaged in `triaged`, and `scripts/change-workflow next` reads a review whose triage
+triaged in `triaged`, and `change-workflow next` reads a review whose triage
 file no recorded outcome names as a triage still in progress, whatever the file
 says, so the change does not move on while its fixes are uncommitted. When two
 reviews are triaged together, write the same `## Next` in each review's triage
@@ -596,15 +596,15 @@ acceptances' outcomes are carried out with the rest.
   recorded as outside the plan; at the lowest test level that proves it; comments
   describing the current system. No step writes a protected path — the harness's
   settings, the workflow's configuration, or one the repository protects, as
-  `scripts/change-workflow config --json` lists them — so an accepted fix to one is
+  `change-workflow config --json` lists them — so an accepted fix to one is
   made by the orchestrating session or the owner, on the owner's word, and you
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
   committing (its step 5): the focused suites, a fix's new test run against the
-  commit before it with `scripts/change-workflow run test-before` where it should
+  commit before it with `change-workflow run test-before` where it should
   fail there (naming in `TEST_BEFORE_DIST` the wheels to rebuild when the fix is
-  in an internal dependency, as `change-implement` says), `scripts/change-workflow run
+  in an internal dependency, as `change-implement` says), `change-workflow run
   pre-commit <change>`, whose hooks follow from the paths the fixes change — a fix
   only under the repository's inert paths runs `pre-commit` alone — staging what
   the hooks rebuilt (before closeout its citations check may report only files the
@@ -622,12 +622,12 @@ acceptances' outcomes are carried out with the rest.
   naming the change and the round: the fixes, the change documents the dispositions
   edited (`design.md`, `proposal.md`, `tasks.md`), and `interventions.jsonl`.
   The triage records stay in `reviews/`, which is untracked. Then push the commit
-  with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop
+  with `change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop
   and report its reasons. The fix commit is validated next (`make validate
   CHANGE=<change>`), which gathers the evidence it lacks — unless, after a pre-closeout
   or a merge review, it changes only the repository's inert paths (step 6).
 
-Then run `scripts/change-workflow run pre-commit <change>` and report the result.
+Then run `change-workflow run pre-commit <change>` and report the result.
 Its default OpenSpec check validates an active change with `validate <change>
 --strict`, and an archived one — a closeout or merge triage — with `validate --specs
 --strict`, since its deltas are merged and the permanent specifications are what
@@ -675,7 +675,7 @@ finishes, its final report carrying the table. One that recommends another round
 asks that question alone, the table riding on it.
 
 What follows is the computation's, from that exit
-(`scripts/change-workflow next`), which checks the guards on it and names the step
+(`change-workflow next`), which checks the guards on it and names the step
 that satisfies one not yet met: after a design review, planning; after an
 implementation round, validation of the fix commit, then the next planned round or
 the pre-closeout review, once that validation passed; after a pre-closeout review,
@@ -704,7 +704,7 @@ When the triage of a phase-closing review takes its advancing exit, set the chan
 `Status` in `openspec/changes/README.md`, and rewrite the row's `Notes` in the same
 edit so nothing in it still describes the phase being left — a row whose notes
 contradict its status misleads every agent that reads the index — then run
-`scripts/change-workflow check index`:
+`change-workflow check index`:
 
 | Review | Status when its triage advances |
 |---|---|
@@ -720,7 +720,7 @@ dispositions edited, `interventions.jsonl` with any line the orchestrating sessi
 left uncommitted for you, such as a declined waiver of this design review, the
 index row, and any other tracked file an `edit` or a recorded defect changed — as
 one commit naming the change and the review, and
-pushes it with `scripts/change-workflow push`, so the next step reads a committed change from
+pushes it with `change-workflow push`, so the next step reads a committed change from
 a clean worktree. After a pre-closeout review such a commit needs no validation
 when it changes only the repository's inert paths: closeout's own checks
 read them again. Before then it is validated like any commit, unless it changes
@@ -742,7 +742,7 @@ session with the owner's words (`change-workflow`'s CW-r8vz): a message resuming
 a finished triage is that revisit.
 
 1. **Check again**: the branch carries the change and the worktree is clean, and,
-   for an implementation round, `scripts/change-workflow check round-view` passes.
+   for an implementation round, `change-workflow check round-view` passes.
    The stopped step is resolved, not resumed, so its uncommitted work is not yours
    to commit: if the worktree holds any, stop and ask the owner to clear it. Read
    what was committed since your last commit (`git log <that commit>..HEAD`), and
@@ -755,7 +755,7 @@ a finished triage is that revisit.
    the advancing recommendation as the `agent_position`, and recorded in `## Next`.
 3. **Amend in a new commit** what the revisit changes, carried out as step 5
    carries out its outcome — an `edit` as an edit, a `fix` with a fix's checks —
-   and pushed with `scripts/change-workflow push`; never rewrite the earlier
+   and pushed with `change-workflow push`; never rewrite the earlier
    commit, which is pushed and may be validated. When the amendment contradicts
    what was committed after the triage, the change returns to design or planning,
    as an accepted fix that shows the plan wrong does ("Running unattended"); at a
@@ -765,6 +765,6 @@ a finished triage is that revisit.
    so recommend afresh, taking the advancing exit or asking about another round.
    When your earlier advance set the row's `Status` and the exit is now another,
    put the row back as it stood before, its notes with it, and run
-   `scripts/change-workflow check index`. Rewrite `## Next` in each review's triage
+   `change-workflow check index`. Rewrite `## Next` in each review's triage
    file with the owner's words, and end as step 6 ends, `triaged` naming the same
    records: this outcome is the later one naming them, so it governs.

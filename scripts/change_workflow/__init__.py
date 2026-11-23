@@ -15,7 +15,7 @@ siblings by relative import:
   schema, and make fragment among them — found beside the engine, installed or in
   the source tree, and the skills it ships;
 - `diagram` — the architecture's hand-laid diagram of the graph, held to the table
-  (`scripts/change-workflow check graph`);
+  (`change-workflow check graph`);
 - `outcome` — the outcome a step ends with, checked against its schema, and the
   records a triage's outcome names;
 - `log` — the change's workflow log, the orchestrating session's notes, and the
@@ -91,7 +91,7 @@ siblings by relative import:
 - `skills` — the check that every agent skill is loaded from its one source: the
   workflow's installed, the repository's linked from its shared source;
 - `hook` — what a Claude Code session re-reads after its context is compacted;
-- `cli` — the engine's command, `scripts/change-workflow`, its subcommands
+- `cli` — the engine's command, `change-workflow`, its subcommands
   dispatched to the modules above.
 
 Beside them, `workflow.mk` is the make fragment whose targets call the command, for

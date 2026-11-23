@@ -33,7 +33,7 @@ Codex or, when Codex is unavailable, on Claude, either way inside a sandbox scop
 to the review: it reads the repository and its history, and every file it reviews
 stays read-only. Nothing in this skill changes for either: your final message is
 the review, and nothing else — on Claude too, where no outcome schema is given. It
-carries no structured outcome; `scripts/change-workflow review` checks it,
+carries no structured outcome; `change-workflow review` checks it,
 publishes it, and logs an outcome from the record it publishes, naming as its exit
 a review's one successor, the triage of its kind (`{"step": "triage", "kind":
 "<kind>"}`), or a stopped one when your message is not a review.
@@ -49,7 +49,7 @@ nothing, unlike every other step: it changes no file, so it publishes no record,
 and a review run's outcome names the record its run published. Your final message
 is still the review alone. The owner pastes it into a triage, which saves it as the
 change's next `NN-<kind>-external.md` and triages it like any other review. Being no
-run, it has no inputs directory and runs no hooks: `scripts/change-workflow run
+run, it has no inputs directory and runs no hooks: `change-workflow run
 before review` runs nothing and says so, so never run it.
 
 ## The run's inputs
@@ -73,13 +73,13 @@ summary and follow this skill.
 
 Read all of this before forming a view:
 
-- The documents `scripts/change-workflow config load review` prints: the
+- The documents `change-workflow config load review` prints: the
   repository's guidance, which its configuration names.
 - The goal the change serves, in the repository's roadmap, which its root guidance
   names, and the change's row, campaign, and dependencies in
   `openspec/changes/README.md`.
 - Every file in the change's directory, including `specs/` and
-  `interventions.jsonl`. The directory is what `scripts/change-workflow find
+  `interventions.jsonl`. The directory is what `change-workflow find
   <change>` prints: `openspec/changes/<change>/`, or for a closeout or merge review,
   which follow the archive, the change's dated directory under
   `openspec/changes/archive/`.
@@ -90,7 +90,7 @@ Read all of this before forming a view:
   would carry an earlier reviewer's reasoning into yours.
 - Another change's records, where a claim rests on them — a dependency's findings,
   an earlier change's validation. They are untracked, so they are where that change
-  was worked: `scripts/change-workflow find --records <change>` prints where, this
+  was worked: `change-workflow find --records <change>` prints where, this
   checkout's or, from a change's clone, the owner's workspace's, which holds the
   history of every cleaned-up change.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
@@ -104,7 +104,7 @@ Read all of this before forming a view:
   `git diff <base>...HEAD`, and `git log <base>..HEAD`; and the validation record
   of the commit you review, `reviews/NN-validation.md`, if one exists, with the
   guide of each evidence kind it names — the guide told validation how to read that
-  kind's evidence, so judge the record by it; `scripts/change-workflow config
+  kind's evidence, so judge the record by it; `change-workflow config
   --json` names each kind's guide. Never wait for one: validation runs beside an
   implementation review, and its results are triaged with yours. A pre-closeout
   review starts only once a passing validation of `HEAD` exists — or of an ancestor
@@ -112,7 +112,7 @@ Read all of this before forming a view:
   pre-closeout review's triage, only in the repository's inert paths — unless the
   owner overrides it; when none exists, say so in your readiness section rather
   than as a finding. The repository's checks before a commit change nothing, so you
-  may run them for evidence: `scripts/change-workflow run pre-commit <change>`,
+  may run them for evidence: `change-workflow run pre-commit <change>`,
   which on the clean checkout you read runs `pre-commit` alone — the workflow's
   default checks and the repository's closing checks.
 - The inputs of the runs whose work you review: each run's line in the change's
@@ -215,7 +215,7 @@ checks your understanding here before reading anything that rests on it. Then:
    the level it claims — is a finding, not only a remark in this answer: a gap
    stated only in prose is never triaged.
 3. **`documentation`** — Does the code and documentation comply with the
-   repository's guidance, the documents `scripts/change-workflow config load review`
+   repository's guidance, the documents `change-workflow config load review`
    prints: comments describing the current system
    (`docs/guidance/engineering/comments.md`) and naming no change
    (`docs/guidance/workflow/change-references.md`), permanent documents describing
@@ -282,7 +282,7 @@ specifications as they now stand, not the deltas.
 The change is archived and its archive cleaned up, and the merge after the archive
 brought the branch it lands on into its branch again, judging that its resolutions
 need this review. Find the merge in the workflow log — the latest `merge` run after
-an `archive-cleanup` run, `scripts/change-workflow log <change>` — read its report,
+an `archive-cleanup` run, `change-workflow log <change>` — read its report,
 and the note it appended to the archived change's `reviews/pull-request.md`. The
 merge commit is the latest merge on the first-parent history (`git log
 --first-parent --merges -1`); a merge without conflicts concluded itself, and its
@@ -327,7 +327,7 @@ and why it holds. The reader must be able to tell "no issue" from "not examined"
 **Basis** — what the finding rests on:
 
 - `specification` — a requirement in `openspec/specs/` or the change's own delta; cite it.
-- `guidance` — a written rule in the documents `scripts/change-workflow config load
+- `guidance` — a written rule in the documents `change-workflow config load
   review` prints, a capability's guidance, or an evidence kind's guide; cite the
   document and heading.
 - `evidence` — a claim in the change that the files contradict; cite the files.
@@ -367,7 +367,7 @@ Then, before your final message, run the format check the review is published
 under on the complete review, piped on standard input — you write no file:
 
 ```text
-scripts/change-workflow check review <kind> <change> <<'REVIEW'
+change-workflow check review <kind> <change> <<'REVIEW'
 <the complete review, exactly as you will send it>
 REVIEW
 ```

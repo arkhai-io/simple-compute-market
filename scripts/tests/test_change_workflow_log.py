@@ -948,7 +948,7 @@ def test_records_of_an_older_format_are_not_opened(tmp_path: Path, prepare,
     with pytest.raises(StepError, match=why) as refused:
         open_log(log, CHANGE, "design", interactive=True, clock=clock)
 
-    assert f"scripts/change-workflow convert {CHANGE}" in str(refused.value)
+    assert f"change-workflow convert {CHANGE}" in str(refused.value)
     assert sorted(path.name for path in log.parent.iterdir()) == before
 
 

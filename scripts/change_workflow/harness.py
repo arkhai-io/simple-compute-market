@@ -94,7 +94,7 @@ Reached = tuple[str, str] | None
 # can answer it, that it runs in a sandbox scoped to its step, how it treats a write
 # the sandbox refuses, how it waits, and how it ends a turn (CW-4yhk, CW-b5cf).
 UNATTENDED = (
-    "This step runs unattended through scripts/change-workflow: nobody can answer a "
+    "This step runs unattended through change-workflow: nobody can answer a "
     "question in this session. Follow your skill's instructions for running unattended. "
     "The step runs in a sandbox scoped to it, which lets it write only the paths its step "
     "may change: a write that fails as a read-only file system, or as a device or resource "
@@ -102,7 +102,7 @@ UNATTENDED = (
     "`stopped` outcome whose `reason` names the path; otherwise go on within the scope, and "
     "say in your message what you did instead. The write is recorded on the run's line "
     "whatever you say, as is any call the harness denies. Never ask about either as a "
-    "question. Wait on a background command with `scripts/change-workflow wait`, never by "
+    "question. Wait on a background command with `change-workflow wait`, never by "
     "following its output, and never end your turn, schedule a wake-up, or start a monitor "
     "to wait for a background command or subagent: run a subagent in the foreground. End "
     "every turn with an outcome matching the JSON schema you were given; where your skill "

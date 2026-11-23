@@ -45,3 +45,25 @@ def test_the_matrix_is_make_tests_targets() -> None:
     matrix would run in CI alone; either way the two stop agreeing."""
 
     assert _matrix_targets() == _make_test_targets()
+
+
+def test_the_scripts_job_installs_the_change_workflow_from_the_tree() -> None:
+    """The job running the scripts' suites, `test-deployment-packaging` through
+    `test-release-tooling`, installs the change workflow built from the tree — its
+    command and its skills — before it runs them, writing no local configuration into
+    the checkout, whose committed configuration CI checks alone."""
+
+    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    tool = next(i for i, line in enumerate(lines)
+                if line.strip() == "uv tool install --force scripts/change-workflow-wheel")
+    step = max(i for i in range(tool) if lines[i].startswith("      - "))
+    end = next(i for i in range(tool, len(lines)) if lines[i].startswith("      - "))
+    run = next(i for i, line in enumerate(lines)
+               if line.strip() == "run: make ${{ matrix.target }}")
+
+    assert lines[step].strip() == "- if: matrix.target == 'test-deployment-packaging'"
+    assert step < tool < end <= run
+    install = [line.strip() for line in lines[tool:end] if "change-workflow\" install" in line]
+    assert install == ['cd "$RUNNER_TEMP" && "$bin/change-workflow" install']
+    assert re.search(r"^test-deployment-packaging: test-release-tooling\b",
+                     MAKEFILE.read_text(encoding="utf-8"), re.MULTILINE)
