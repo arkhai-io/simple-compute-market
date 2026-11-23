@@ -539,6 +539,43 @@ reverses D1 and costs the second design, review, and closeout D1 avoided; and de
 the `change-workflow` delta from the change in (iii), which archives normally but
 leaves the archived change without its largest specification change.
 
+## Raised by planning
+
+Planning stopped on one question the design does not answer; the change returns to
+design for it.
+
+**P1 — How the wheel meets the packaging layout rules.** D8 builds the wheel with
+Hatchling and has it carry the skills, the workflow's documents, the schema, and the
+fragment as package data; D6 and D16 keep each of those where it sits during (i) —
+the specification under `openspec/specs/change-workflow/` for OpenSpec, the skills'
+sources under `.agents/skills/`, the guidance under `docs/guidance/workflow/` — and
+the engine at `scripts/change_workflow/`, the distribution packaging them from there.
+That build contradicts three engineering rules this repository applies without
+exception — `packaging-python.md`'s "One import package per distribution" (the
+package at `src/<package>`), "Nothing remaps the package" (no include, exclude, or
+remap in the build configuration), and "Data files live inside the package" — in
+their Hatchling form (`packaging-hatchling.md`, "The wheel target names the one
+package") and this repository's `docs/guidance/repository/project-layout.md`; and
+`make check-project-layout`, which scans every `pyproject.toml` outside `openspec/`,
+refuses a wheel target other than `packages = ["src/<package>"]` or any include or
+remap. No placement of the project file avoids it: the files the wheel must carry lie
+outside any one package directory. The options planning sees, none settled:
+
+- **An exception.** An `overrides` row for the workflow's wheel against those three
+  rules, beside the capability it serves or in `AGENTS.md`'s table, with the layout
+  check admitting the declared row; the workflow's repository may later restructure
+  to the rule as its own change, or keep the row.
+- **The engine in the rule's layout, the documents linked in.** The engine moves to a
+  project's `src/change_workflow/` in (i) — a path D16 then lifts at its new place —
+  and each document reaches the package directory through a tracked symbolic link to
+  where it sits, so nothing in the build configuration includes or remaps; whether
+  Hatchling ships a linked file's content needs proving.
+- **A generated build tree.** A make target assembles a gitignored tree in the
+  rule's layout from the tracked files and builds the wheel from it; the tracked tree
+  holds no remap, but the copy is a build configuration by another name.
+
+Planning wrote no task list.
+
 ## Principles
 
 Stated by the owner in this design, for promotion:
