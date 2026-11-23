@@ -428,7 +428,7 @@ For each running guest, the host kit sets the bridge flag on its tap
 otherwise at the guest's next start, and writes both into the guest's saved definition
 so a host reboot or autostart keeps them. No buyer connection is interrupted. The host
 kit reports any guest it could not converge. The convergence is one installed command
-(D20), and its real-host proof is D22's observation O8. An isolated port can still be reached
+(D20), and its real-host proof is D22's observations O8 and O9. An isolated port can still be reached
 from one that is not, so without this a guest created before the change could reach new
 guests at layer 2 for as long as it runs, and VM leases may be open-ended.
 
@@ -611,10 +611,16 @@ The proof plants, through the operator route, the state an earlier release left 
 first deal guest, the one holding the heartbeat: its live port's isolation cleared, its
 filter detached live, and its saved definition without either. It then runs the
 command and checks that the heartbeat's longest gap is at most five seconds, that the
-port is isolated and the filter bound, that the saved definition carries both, and that
-the guest-to-guest probes are refused again. Where libvirt refuses the fixture's own
-live filter removal, the fixture clears isolation alone, and the run records the
-next-start path as the one exercised, with the libvirt version.
+port is isolated, that the saved definition carries both, and that the guest-to-guest
+probes are refused again: O8, which every libvirt can plant, since clearing a live
+port's isolation and editing a saved definition are always allowed. Whether the filter
+is bound live again is O9, observed apart (41 F2). O9 is made only when the fixture
+detached the filter live and convergence bound it live again. Where libvirt refuses the
+fixture's own live filter removal, the filter was never absent, so the fixture plants
+the rest and O9 is unproven, naming the libvirt version; where convergence reports the
+filter waiting for the guest's next start, D9's accepted fallback, O9 is unproven
+likewise, since nothing was restored live. Neither case records a restoration it did
+not observe.
 
 Rejected:
 - a guest an earlier release actually made, by preparing the host and creating the
@@ -655,8 +661,15 @@ shared SSH seam: ARP, ICMP and TCP to the other guest, directly and through the
 gateway; an ARP claim of the other guest's address; DHCP and DNS; the host's port 22
 at `192.168.122.1`; `169.254.169.254`; and the two private destinations. A refusal in
 O3 to O5 counts only when the matching policy rule's packet counter, read through the
-operator route before and after the probe, rose; the listed destination counts only
-when its accept counter rose. Counters are per rule, so the run's guests are expected
+operator route before and after the probe, rose. The listed destination counts as
+forwarded only when its accept counter rose and the guest's packet to it was seen
+leaving the host: while the guest probes it, the operator probe, already root, holds a
+packet socket on the interface `ip route get <listed>` names and reports whether the
+guest's connection attempt to that destination left there, after masquerade. The
+counter proves the guest policy admitted the packet; it ends the filter table's
+`FORWARD` traversal, but a packet must still pass every other table's chain at that
+hook, libvirt's own under its nftables backend among them, and only the egress shows
+the host forwarded it (41 F1). Counters are per rule, so the run's guests are expected
 to be alone on the host, a precondition the controlled target guarantees and the run
 states beside its result. Under direct access a guest-side stage reads its buyer
 session's peer address and makes O6 when it is private; otherwise, and under relay
@@ -669,7 +682,9 @@ refuses any.
 Rejected: required fields or a target version 3, which fail every existing VM target
 for a section one module reads; refusals judged by the absence of a reply, which reads
 a destination that does not exist as refused; destinations that must answer, which a
-controlled target may not offer.
+controlled target may not offer; the accept counter alone as forwarding, which proves
+the guest policy's decision and not that the host forwarded the packet; relabelling O5
+as the policy's admission, which leaves forwarding unobserved on a real host (41 F1).
 
 ### D22 — Closeout waits on observations O1 to O5, O7 and O8 being made
 
@@ -681,24 +696,32 @@ The proof's observations:
 | O2 | An ARP claim of the other guest's address dropped while its buyer still reaches it, and the filter's parameters present in the guest's live definition | D7 |
 | O3 | DHCP and DNS pass; another host port refused | D8 |
 | O4 | `169.254.169.254` refused | D8 |
-| O5 | An unlisted private destination refused, a listed one forwarded | D8 |
+| O5 | An unlisted private destination refused; a listed one admitted by its accept rule and seen leaving the host on its routed interface | D8 |
 | O6 | A buyer from a private address reaches their guest | D8 |
 | O7 | O3 to O5 still hold after a libvirtd restart and after a UFW reload, both jumps first | D8 |
-| O8 | A guest planted unconverged is converged, its session uninterrupted | D9 |
+| O8 | A guest planted unconverged — its live port isolation cleared, its saved definition stripped — has its port isolated again and its saved definition carrying the isolation and the filter, its session's longest gap at most five seconds and its probes of the other guest refused again | D9 |
+| O9 | The filter the fixture detached live is bound live again by convergence | D9 |
 
 D2's closeout gate requires O1 to O5, O7 and O8 made. O6 may be unproven only for want
 of a private-source buyer route: until a run makes it, it rests on the forwarded
 established/related accept's place ahead of the private-range drops, held by the
 rendered-chain and native installer tests, and on O7's evidence that the chain order
-survives on a real host. A failed observation, or an unproven one other than O6,
-returns the change to implementation. With no target or no operator route, the change
+survives on a real host. O9 may be unproven only because libvirt refused the fixture's
+live filter removal, or because convergence reported the filter waiting for the
+guest's next start (D20): until a run makes it, live filter convergence rests on the
+static tests faking `virsh`, and on O2's evidence that the filter is bound on a guest
+this release created (41 F2). A failed observation, or an unproven one other than O6
+and O9 for those reasons, returns the change to implementation. With no target or no operator route, the change
 waits at the run rather than proceeding. The run's evidence is supplied by whoever
 deploys the target, as a sanitized summary per observation with its run identifier and
 the host's libvirt version; raw logs stay in the operator's storage.
 
 Rejected: every observation required, which on a target whose buyers reach guests only
 through a relay holds closeout on a topology change outside this repository; recording
-whatever ran and closing out, against D2.
+whatever ran and closing out, against D2; a fixture required to detach the live filter
+before O8 can be made, which holds closeout on a libvirt that permits live filter
+changes; O8 made with a filter recorded as waiting for its next start, or never
+removed, which reports a restoration nobody observed (41 F2).
 
 ### D23 — Removing the older per-port guest rules is a compatibility path, retired on schedule
 
@@ -933,7 +956,8 @@ key when signing is not configured.
 - **The real-host proof's prerequisites.** Closeout waits on a controlled target and on
   the deployment providing the operator route (D18, D22), both outside this repository.
   A private-source buyer (O6) may stay unproven on a target whose buyers reach guests
-  only through a relay.
+  only through a relay, and live filter restoration (O9) on a host whose libvirt
+  refuses live filter changes.
 
 ## Open Questions
 
@@ -943,6 +967,8 @@ key when signing is not configured.
   deployment reports that the route cannot be provided.
 - **A private-source buyer observed on a real host.** Revisit when a target offers a
   buyer route from a private address to a guest's forwarded port, and make O6 (D22).
+- **A live filter restored on a real host.** Revisit when a target's libvirt both
+  removes and applies a running guest's filter live, and make O9 (D20, D22).
 
 - **A private network for one buyer's guests.** Revisit when a goal sells several
   guests to one buyer as a cluster (D10).

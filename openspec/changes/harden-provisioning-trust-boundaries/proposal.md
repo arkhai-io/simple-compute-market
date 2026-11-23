@@ -186,7 +186,8 @@ None.
   report) and architecture companion's "Guests are isolated from each other"; the VM
   IaC README.
 - D21: `test-compatibility`'s specification (the target's `guest_isolation` section and
-  counter attribution); the committed example target, the validation runbook's
+  counter attribution, and the listed destination's egress observation); the committed
+  example target, the validation runbook's
   "Describe The Target", and the E2E README.
 - D22: no permanent destination — it settles this change's closeout gate; the run's
   outcome is recorded in the change and its design-promotion record.
