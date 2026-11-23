@@ -12,7 +12,10 @@ own templating decides what the play names.
 
 None of this runs against a real libvirt or kernel bridge: whether libvirt
 binds a running guest's filter live, and whether isolating a port keeps the
-guest's sessions, shows only on a real host.
+guest's sessions, shows only on a real host. The fake lists a binding for each
+filter a running definition names unless a test marks it absent, so the tests
+show how the command reads `virsh nwfilter-binding-list`, not what libvirt
+lists.
 """
 
 from __future__ import annotations
@@ -159,6 +162,45 @@ class TestTheCommand(unittest.TestCase):
         self.assertTrue(interface["bridge_isolated"])
         self.assertIsNone(interface["live"]["filterref"])
         self.assertEqual(interface["saved"], {"port": True, "filterref": CLEAN_TRAFFIC})
+
+    def test_a_filter_its_running_definition_names_but_libvirt_does_not_bind_waits_for_its_next_start(self) -> None:
+        interface = dict(_interface("vnet4", "52:54:00:00:00:41", converged=True),
+                         binding_absent=True)
+        self.host.set_virsh(domains={"vm-unbound": _guest(interface)}, hosts=[])
+
+        report = self._reports(self._converge())["vm-unbound"]
+
+        self.assertEqual(report, {
+            "port_isolated": True, "filter": "next_start", "saved_definition": True,
+            "changed": False, "error": "libvirt binds no clean-traffic filter to vnet4",
+        })
+        self.assertEqual(self._mutations(), [])
+
+    def test_a_live_filter_libvirt_accepts_but_does_not_bind_waits_for_its_next_start(self) -> None:
+        interface = dict(_interface("vnet3", "52:54:00:00:00:31", converged=False),
+                         binding_absent=True)
+        self.host.set_virsh(domains={"vm-old": _guest(interface)}, hosts=[])
+
+        report = self._reports(self._converge())["vm-old"]
+
+        self.assertEqual(report, {
+            "port_isolated": True, "filter": "next_start", "saved_definition": True,
+            "changed": True, "error": "libvirt binds no clean-traffic filter to vnet3",
+        })
+        self.assertEqual(self._interface("vm-old")["live"]["filterref"], CLEAN_TRAFFIC)
+
+    def test_an_unreadable_binding_list_leaves_the_filter_unconfirmed_live(self) -> None:
+        guest = _guest(_interface("vnet4", "52:54:00:00:00:41", converged=True))
+        self.host.set_virsh(domains={"vm-new": guest}, hosts=[])
+        self.host.refuse("virsh nwfilter-binding-list")
+
+        report = self._reports(self._converge())["vm-new"]
+
+        self.assertEqual(
+            {k: report[k] for k in ("port_isolated", "filter", "saved_definition")},
+            {"port_isolated": True, "filter": "next_start", "saved_definition": True},
+        )
+        self.assertIn("cannot read the filter bindings", report["error"])
 
     def test_a_guest_whose_port_cannot_be_isolated_is_reported_while_the_others_converge(self) -> None:
         self.host.set_virsh(

@@ -19,7 +19,10 @@ as the real commands answer:
   `interfaces` also has its running and saved definitions, each interface's
   `<port>` and `<filterref>` in each, which `dumpxml [--inactive]` prints,
   `domiflist` lists, and `update-device --live|--config` replaces, refusing
-  any live change of `<port>`;
+  any live change of `<port>`; `nwfilter-binding-list` lists a binding for each
+  running guest's tap whose running definition names a filter, unless the
+  interface is marked `binding_absent`, as when libvirt holds no binding of the
+  filter its definition names;
 - `bridge` reads and sets a running guest's tap port isolation flag;
 - `ufw` keeps numbered rules with their comments;
 - `curl` exits with each status a test queued, in order, then succeeds;
@@ -294,6 +297,15 @@ elif command == "dumpxml":
     print("<domain/>")
 elif command == "update-device":
     update_device(args[1], domain(args[1]), args[2], args[3:])
+elif command == "nwfilter-binding-list":
+    print(" Port Dev                               Filter")
+    print("------------------------------------------------------------------")
+    for found in domains.values():
+        for nic in found.get("interfaces", []):
+            ref = nic["live"]["filterref"]
+            if found["state"] == "running" and ref and not nic.get("binding_absent"):
+                print(f" {nic['tap']:<37} {ref['filter']}")
+    print()
 elif command == "destroy":
     domain(args[1])["state"] = "shut off"
     save()

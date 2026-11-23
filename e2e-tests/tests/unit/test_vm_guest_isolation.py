@@ -426,9 +426,11 @@ def test_an_unconverged_guest_or_an_interrupted_session_fails_o8(line, converged
     assert named in fault
 
 
-def _restoration(*, live_refused=False, still_bound=False, filter="live", bound_after=True):
+def _restoration(*, live_refused=False, still_bound=False, filter="live", bound_after=True,
+                 live_after=None):
     planted = state(isolated=False, bound=still_bound, saved_port=False, saved_filter=False)
-    converged = state(isolated=True, bound=bound_after, saved_port=True, saved_filter=True)
+    converged = state(isolated=True, bound=bound_after, saved_port=True, saved_filter=True,
+                      live_filter=live_after)
     return live_restoration(plant(live_refused=live_refused), planted,
                             convergence(filter=filter, error="libvirt did not bind the filter live"),
                             converged, "guest-1", "8.0.0")
@@ -477,8 +479,16 @@ def test_a_host_read_that_failed_is_named_rather_than_judged():
 
 
 def test_a_filter_left_for_the_next_start_leaves_o9_unproven_naming_the_version():
-    outcome, reason = _restoration(filter="next_start")
+    outcome, reason = _restoration(filter="next_start", bound_after=False)
     assert outcome == "unproven" and "for its next start on libvirt 8.0.0" in reason
+
+
+def test_a_live_filter_libvirt_took_but_does_not_bind_fails_o9():
+    """Convergence reports such a filter waiting for the next start, but
+    libvirt did not refuse it: the live definition names it, and no binding
+    holds it."""
+    outcome, reason = _restoration(filter="next_start", bound_after=False, live_after=True)
+    assert outcome == "failed" and "binds no clean-traffic filter to vnet0" in reason
 
 
 @pytest.mark.parametrize(("changes", "named"), [

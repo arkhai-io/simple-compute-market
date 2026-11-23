@@ -548,7 +548,8 @@ def live_restoration(plant: dict[str, Any], planted: dict[str, Any],
     """O9's outcome and its reason: ``made`` only when the fixture detached the
     filter live and convergence bound it live again; ``unproven`` when libvirt
     refused the live removal, or convergence left the filter for the guest's
-    next start, naming the libvirt version; otherwise ``failed``."""
+    next start with the live definition not naming it, naming the libvirt
+    version; otherwise ``failed``."""
     version = libvirt or "of unknown version"
     unread = _tap_faults(planted) + _tap_faults(converged)
     if unread:
@@ -567,10 +568,15 @@ def live_restoration(plant: dict[str, Any], planted: dict[str, Any],
         return ("failed", f"the fixture's live filter removal reported success, but libvirt "
                           f"{version} still binds clean-traffic to {planted['tap']}")
     line = convergence_line(convergence, guest) or {}
-    if line.get("filter") == "next_start":
+    # The command reports the filter waiting for the next start both when
+    # libvirt refused it live and when libvirt took it into the live
+    # definition but holds no binding of it; only the first is the fallback
+    # that leaves O9 unproven, and the second is judged by the binding below.
+    named_live = filter_parameters(converged["live"]["stdout"], converged["mac"]) is not None
+    if line.get("filter") == "next_start" and not named_live:
         return ("unproven", f"convergence left {guest}'s filter for its next start on libvirt "
                             f"{version} ({line.get('error')}), so nothing was restored live")
-    if line.get("filter") != "live":
+    if line.get("filter") not in ("live", "next_start"):
         return ("failed", f"convergence reported {guest}'s filter as {line.get('filter')!r}: {line}")
     faults = filter_faults(converged["live"]["stdout"], converged["mac"], f"{guest}'s live definition")
     if not binding_bound(converged["bindings"]["stdout"], converged["tap"]):

@@ -597,6 +597,44 @@ new task file or `tasks/guest-policy.yml`, `tasks/main.yml`) and
   failed as intended: 17 failed, 1 passed, 2 native cases skipped, each failure the
   absent script or the absent tasks (and one the double's new `isolation_refused`
   argument), not a collection error.
+  **Round 2's triage, 50 F2 (fix).** The command reported a filter `live` from the
+  running definition alone, so a guest whose definition names `clean-traffic` but whose
+  tap libvirt binds nothing was reported filtered. It now reads `virsh
+  nwfilter-binding-list` after the definition check or an accepted live update, and
+  reports the filter `live` only when the tap's `clean-traffic` binding is listed; a
+  missing binding, or a list it cannot read, is reported as not live (`next_start`
+  when the saved definition carries the filter), with "libvirt binds no clean-traffic
+  filter to <tap>" or the read's failure as its reason. Nothing is repaired: libvirt
+  ignores a live update repeating the same filter, and the next start binds what the
+  saved definition carries. The report's fields and values are unchanged. The double's
+  `virsh` lists a binding for each running tap whose live definition names a filter,
+  unless the interface is marked `binding_absent`. In 6a, `live_restoration` keeps O9
+  failing where the command now says `next_start` while the live definition names the
+  filter (libvirt took the live change and binds nothing), leaving O9 unproven only
+  for a filter libvirt did not take live; D20, D22 and the `test-compatibility` delta
+  say so. `test_guest_convergence.py` passed (unit, the real script against the
+  doubles; `make -C domains/vms/provisioning/iac test`, 229 passed, 15 native cases
+  skipped without local Ansible), three new cases among them: a definition naming the
+  filter with no binding, a live update accepted with no binding, and an unreadable
+  binding list. `make -C e2e-tests test-unit` passed (unit, 1138, 1 skipped), with
+  `test_a_live_filter_libvirt_took_but_does_not_bind_fails_o9` new and the next-start
+  case's converged state corrected to a filter absent from the live definition. `run
+  test-before` at `82ec390c8`: the three convergence cases failed (each reported
+  `live`, no error), the other 16 passed; the O9 case failed (`unproven`), the other 75
+  passed. The native gate was not run: the fix changes no task, and the tasks that read
+  the report read the same fields. `scripts/change-workflow run pre-commit`, first run:
+  "after-functional-change …: passed, exit 0"; "pre-commit-functional …: failed, exit
+  2", only its tree check, the worktree having been edited during the run
+  (`check-packaging` passed, and `make test` failed on nothing but the changed tree);
+  "pre-commit …: passed, exit 0". Final run, on the committed tree:
+  "after-functional-change …: passed, exit 0"; "pre-commit-functional …: passed, exit
+  0"; "pre-commit …: passed, exit 0". The fresh-context check found: O9 left unproven,
+  not failed, for a live update libvirt took but did not bind (fixed above); D21's
+  "makes O6 when it is private" still true only by implication, here and in 6a.3
+  (now "private and outside the guests' network"); D22's "until a run makes it" for an
+  O6 no run can make (reworded); and line wrapping. No finding was declined; its note
+  that the double's generic refusal message names the subcommand as the domain was
+  left, since the test asserts only the command's own prefix.
 
 **Handoff.** Not shown until 7a's run: that libvirt accepts `update-device --live` with
 the running element as `dumpxml` prints it (target, alias and address included) and
@@ -736,7 +774,8 @@ the committed example target `config-real-provisioning-target.yml.example` under
   heartbeat (after `09j`, before `09l`), each declaring the observations it requires:
   O1, O2 (the claim, the other buyer still reaching its guest, the filter's parameters
   in the live definition), O3, O4, O5, O6 (made only when the peer address is private
-  under direct access; otherwise skipped naming the private-source buyer route), O7
+  and outside the guests' network under direct access; otherwise skipped naming the
+  private-source buyer route), O7
   (O3–O5 again after the libvirtd restart and after the UFW reload, with both jumps
   first), and O8 and O9 on the first guest (the fixture, the convergence, the heartbeat's
   longest gap at most five seconds, the port, the saved definition, the guest-to-guest
@@ -798,7 +837,11 @@ the committed example target `config-real-provisioning-target.yml.example` under
   route; whether this counts, or O6 should instead be read host-side (the DNAT
   session's original source in the host's conntrack, through the operator route), is a
   design question for the round's review and triage. It was found by the fresh-context
-  check.
+  check. Settled in the round's triage (50 F1): the owner chose to keep the guest-side
+  read and amend D21, D22 and the `test-compatibility` delta (its scenario "A buyer's
+  forwarded connection is masqueraded") so that O6 is unproven under the create's
+  masquerade, naming it, rather than read host-side; 09k8's skip already names the
+  masquerade, so no code changed.
 - [x] 6a.4 Verification point. Unit: `e2e-tests/tests/unit/test_real_provisioning_target.py`,
   `test_vm_guest_isolation.py`, `test_real_vm_lane.py` (`make -C e2e-tests test-unit`).
   System: the module's run on a real host is section 7a's.
@@ -1074,8 +1117,10 @@ the run's findings name (sections 5, 6 and 6a's files).
   project or credential (`docs/guidance/engineering/system-tests.md`, "Locally
   verifiable and external-topology scenarios"; this repository is public). Judge it
   against D22: O1–O5, O7 and O8 made; O6 unproven only for want of a private-source
-  buyer route; O9 unproven only because libvirt refused the fixture's live filter
-  removal or convergence reported `next_start`. With no target, or no operator route,
+  buyer route or because the create's masquerade hides the buyer's address from the
+  guest (09k8's skip naming it); O9 unproven only because libvirt refused the fixture's
+  live filter removal or convergence reported `next_start` with the live definition not
+  naming the filter. With no target, or no operator route,
   this task waits; if the deployment reports that the route cannot be provided, stop
   and return the change to design (design.md, Open Questions, "The host-side steps
   without an operator route"). (D22.) Verify: the recorded summary, and its judgement

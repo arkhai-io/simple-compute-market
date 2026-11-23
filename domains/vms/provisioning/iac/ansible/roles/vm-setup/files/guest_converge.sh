@@ -28,15 +28,18 @@
 #    "filter": "live"|"next_start"|"none", "saved_definition": true|false,
 #    "changed": true|false, "error": null|"..."}
 #
-# `filter` is `live` when the filter is bound to the running interface,
-# `next_start` when it is not but the saved definition carries it, and `none`
-# when neither holds it. `error` joins the reason of every step that failed, a
-# live filter libvirt refused included. A guest already converged is reported
-# with nothing changed. Its callers read these lines rather than virsh, and name
-# each guest left unconverged; so the command exits non-zero only when it
-# cannot run at all (virsh, bridge or python3 missing, no working directory, or
-# the running guests unreadable), never because one guest could not be
-# converged.
+# `filter` is `live` when the running definition names the filter on the
+# interface and libvirt holds an active binding of it on the guest's tap
+# (`virsh nwfilter-binding-list`): the definition says what libvirt was asked
+# to apply, the binding that it applies it. It is `next_start` when either is
+# missing but the saved definition carries the filter, and `none` when neither
+# holds it. `error` joins the reason of every step that failed, a live filter
+# libvirt refused, a missing binding and an unreadable binding list included.
+# A guest already converged is reported with nothing changed. Its callers read
+# these lines rather than virsh, and name each guest left unconverged; so the
+# command exits non-zero only when it cannot run at all (virsh, bridge or
+# python3 missing, no working directory, or the running guests unreadable),
+# never because one guest could not be converged.
 set -u
 
 for required in virsh bridge python3; do
@@ -51,7 +54,7 @@ NETWORK=default
 # Reads and edits libvirt's XML, and writes the report's JSON, where a shell
 # would have to parse or quote them by hand. Each mode but report reads a
 # domain's XML on stdin:
-#   check MAC NETWORK  prints "<port isolated: yes|no> <filter bound: yes|no>"
+#   check MAC NETWORK  prints "<port isolated: yes|no> <filter named: yes|no>"
 #                      for the interface with MAC on NETWORK; exits 3 without one
 #   live MAC NETWORK   prints that interface with clean-traffic and its parameters
 #   saved MAC NETWORK  prints it with the isolated port and the filter as well
@@ -81,7 +84,7 @@ def port_isolated(element):
     return port is not None and port.get("isolated") == "yes"
 
 
-def filter_bound(element):
+def filter_named(element):
     ref = element.find("filterref")
     if ref is None or ref.get("filter") != FILTER:
         return False
@@ -113,7 +116,7 @@ def printed(element):
 mode = sys.argv[1]
 if mode == "check":
     element = interface(sys.argv[2])
-    print("yes" if port_isolated(element) else "no", "yes" if filter_bound(element) else "no")
+    print("yes" if port_isolated(element) else "no", "yes" if filter_named(element) else "no")
 elif mode == "live":
     printed(with_filter(interface(sys.argv[2])))
 elif mode == "saved":
@@ -180,7 +183,26 @@ converge_port() {
   fi
 }
 
-# Binds clean-traffic to the running interface with MAC unless it is bound.
+# Whether libvirt holds an active clean-traffic binding on TAP. A binding the
+# running definition names but libvirt does not hold is not repaired: asking
+# libvirt for the same filter again changes nothing, and the guest's next start
+# binds the filter its saved definition carries.
+check_binding() {
+  if ! virsh nwfilter-binding-list > "$WORK/bindings" 2> "$WORK/stderr"; then
+    live_bound=false
+    add_error "cannot read the filter bindings: $(reason)"
+    return
+  fi
+  # A row is "<tap> <filter>"; the header has three fields.
+  if ! awk -v tap="$1" 'NF == 2 && $1 == tap && $2 == "clean-traffic" { found = 1 }
+      END { exit !found }' "$WORK/bindings"; then
+    live_bound=false
+    add_error "libvirt binds no clean-traffic filter to $1"
+  fi
+}
+
+# Names clean-traffic in the running interface with MAC unless it is named,
+# then checks that libvirt binds it to TAP.
 converge_live_filter() {
   if ! python3 -c "$HELPER" check "$2" "$NETWORK" < "$WORK/live.xml" > "$WORK/state" 2> "$WORK/stderr"; then
     live_bound=false
@@ -188,11 +210,13 @@ converge_live_filter() {
     return
   fi
   if [ "$(cut -d' ' -f2 "$WORK/state")" = yes ]; then
+    check_binding "$3"
     return
   fi
   python3 -c "$HELPER" live "$2" "$NETWORK" < "$WORK/live.xml" > "$WORK/live-interface.xml"
   if virsh update-device "$1" "$WORK/live-interface.xml" --live > /dev/null 2> "$WORK/stderr"; then
     changed=true
+    check_binding "$3"
   else
     live_bound=false
     add_error "libvirt did not bind the filter live: $(reason)"
@@ -256,7 +280,7 @@ converge_guest() {
   while read -r tap mac <&4; do
     converge_port "$tap"
     if [ -s "$WORK/live.xml" ]; then
-      converge_live_filter "$name" "$mac"
+      converge_live_filter "$name" "$mac" "$tap"
     fi
     if [ -s "$WORK/saved.xml" ]; then
       converge_saved_definition "$name" "$mac"

@@ -620,7 +620,11 @@ fixture's own live filter removal, the filter was never absent, so the fixture p
 the rest and O9 is unproven, naming the libvirt version; where convergence reports the
 filter waiting for the guest's next start, D9's accepted fallback, O9 is unproven
 likewise, since nothing was restored live. Neither case records a restoration it did
-not observe.
+not observe. Convergence reports the filter live only when the running definition
+names it and libvirt lists an active binding of it on the guest's tap; a filter the
+live definition names with no binding is reported waiting for the next start, with
+the missing binding as its reason (50 F2), and fails O9 rather than leaving it
+unproven, since libvirt took the live change and did not refuse it.
 
 Rejected:
 - a guest an earlier release actually made, by preparing the host and creating the
@@ -672,8 +676,13 @@ hook, libvirt's own under its nftables backend among them, and only the egress s
 the host forwarded it (41 F1). Counters are per rule, so the run's guests are expected
 to be alone on the host, a precondition the controlled target guarantees and the run
 states beside its result. Under direct access a guest-side stage reads its buyer
-session's peer address and makes O6 when it is private; otherwise, and under relay
-access, that stage skips naming the private-source buyer route it lacks.
+session's peer address and makes O6 when it is private and outside the guests'
+network; otherwise, and under relay access, that stage skips naming the
+private-source buyer route it lacks. A VM create masquerades a forwarded buyer
+connection to its guest, so a guest reached at its forwarded port sees only the
+host's own address on the guests' network: under this create O6 is never made, and
+the stage skips naming the masquerade. The scenario reads no buyer's original source
+on the host (50 F1).
 
 An absent `private_destinations` skips O5's stages naming it. An older harness meets
 the section as an unknown field and refuses it naming the field, as the target model
@@ -684,7 +693,11 @@ for a section one module reads; refusals judged by the absence of a reply, which
 a destination that does not exist as refused; destinations that must answer, which a
 controlled target may not offer; the accept counter alone as forwarding, which proves
 the guest policy's decision and not that the host forwarded the packet; relabelling O5
-as the policy's admission, which leaves forwarding unobserved on a real host (41 F1).
+as the policy's admission, which leaves forwarding unobserved on a real host (41 F1);
+observing O6 on the host, by a packet watch on the forwarded port or the connection
+tracking entry's original source through the operator route, which would make O6
+under the masquerade at the cost of another probe operation (50 F1, the owner's
+choice).
 
 ### D22 — Closeout waits on observations O1 to O5, O7 and O8 being made
 
@@ -703,12 +716,14 @@ The proof's observations:
 | O9 | The filter the fixture detached live is bound live again by convergence | D9 |
 
 D2's closeout gate requires O1 to O5, O7 and O8 made. O6 may be unproven only for want
-of a private-source buyer route: until a run makes it, it rests on the forwarded
-established/related accept's place ahead of the private-range drops, held by the
-rendered-chain and native installer tests, and on O7's evidence that the chain order
-survives on a real host. O9 may be unproven only because libvirt refused the fixture's
-live filter removal, or because convergence reported the filter waiting for the
-guest's next start (D20): until a run makes it, live filter convergence rests on the
+of a private-source buyer route, or because the create's masquerade hides the buyer's
+address from the guest, which under this create is every direct-access run (D21,
+50 F1): while it is unproven, it rests on the forwarded established/related accept's
+place ahead of the private-range drops, held by the rendered-chain and native
+installer tests, and on O7's evidence that the chain order survives on a real host.
+O9 may be unproven only because libvirt refused the fixture's live filter removal, or
+because convergence reported the filter waiting for the guest's next start with the
+live definition not naming it (D20): until a run makes it, live filter convergence rests on the
 static tests faking `virsh`, and on O2's evidence that the filter is bound on a guest
 this release created (41 F2). A failed observation, or an unproven one other than O6
 and O9 for those reasons, returns the change to implementation. With no target or no operator route, the change
@@ -955,9 +970,10 @@ key when signing is not configured.
   destinations sets `guest_allowed_private_destinations`; no lane runs real VMs.
 - **The real-host proof's prerequisites.** Closeout waits on a controlled target and on
   the deployment providing the operator route (D18, D22), both outside this repository.
-  A private-source buyer (O6) may stay unproven on a target whose buyers reach guests
-  only through a relay, and live filter restoration (O9) on a host whose libvirt
-  refuses live filter changes.
+  A private-source buyer (O6) stays unproven under the create's masquerade, and on a
+  target whose buyers reach guests only through a relay; its replies' passage rests on
+  the static chain-order tests and O7. Live filter restoration (O9) may stay unproven
+  on a host whose libvirt refuses live filter changes.
 
 ## Open Questions
 
@@ -965,8 +981,9 @@ key when signing is not configured.
   the target's operator route, how the proof's host-side stages run through the
   provisioning service's existing reach, with no new endpoint (D18). Revisit when the
   deployment reports that the route cannot be provided.
-- **A private-source buyer observed on a real host.** Revisit when a target offers a
-  buyer route from a private address to a guest's forwarded port, and make O6 (D22).
+- **A private-source buyer observed on a real host.** Revisit when a guest's buyer
+  connection is no longer masqueraded, or a goal needs O6 made, by reading the buyer's
+  original source on the host (D21, D22, 50 F1).
 - **A live filter restored on a real host.** Revisit when a target's libvirt both
   removes and applies a running guest's filter live, and make O9 (D20, D22).
 
