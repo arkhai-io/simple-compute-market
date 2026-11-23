@@ -1855,11 +1855,11 @@ after campaign index currency.
           passes their values to it through its environment, never its arguments.
           Where the process reads configuration files of its own, those are preferred.
         - `configuration.md`, "Secrets travel in a secret profile or overlay file":
-          where a stack's secret values come from. A local cluster takes them from
-          gitignored values files, or from committed public development values for
-          unattended local validation. A cloud deployment takes them from the
-          operator's tooling, which populates the cloud's secret store, and the
-          cluster's secret store writes them into the pods' secret profiles.
+          where a stack's secret values come from, in the owner's words as revised on
+          2026-11-23: "A production deployment's secret values should be managed
+          externally from the chart, such as in a secret store, and injected into the
+          pods using secret profiles. A local stack's secrets come from [A stack's
+          configuration lives in committed files](#a-stacks-configuration-lives-in-committed-files)."
       - A fourth the owner agreed on 2026-11-21, likewise directed into this closeout:
         `docs/guidance/engineering/deployment.md`, amending "A deployment does not wait
         on a service's dependencies".
@@ -1876,6 +1876,64 @@ after campaign index currency.
           startup probes pass. Each must refuse configuration it cannot use and exit on
           what it cannot reach, so the wait hides no failure that cannot heal. A
           dependency outside the unit is never waited on.
+      - A fifth the owner agreed on 2026-11-23, likewise directed into this closeout,
+        with the "Secrets travel" sentence above. Read literally, `configuration.md`'s
+        "A stack's configuration lives in committed files" does not describe how
+        stacks work today: a committed `.example` beside a gitignored copy, and a
+        target writing generated keys into gitignored files. These are the agreed
+        texts.
+        - `configuration.md`, "A stack's configuration lives in committed files": its
+          first two sentences are replaced by the text below; from "A value the base
+          topology fixes" on, the section is unchanged.
+          > Every stack a repository runs, whether a development stack, an end-to-end
+          > lane or a local cluster, takes every non-secret value from committed
+          > profile, overlay and values files. Each of its secret files is one of two
+          > kinds:
+          > - **Committed public development values.** Used where the stack runs
+          >   unattended from a clean checkout, or where something else pins an
+          >   identity derived from them, such as a lane's fixed seed. They are never
+          >   for a public network.
+          > - **A gitignored copy of a committed `.example` beside it.** Used wherever
+          >   a person runs the stack by hand or brings a credential of their own. The
+          >   `.example` names every field and says how to fill it: either a generated
+          >   value and the command that makes one, or a held credential and where its
+          >   holder gets it. A copy is filled by hand, or by a make target that only
+          >   copies the `.example` and fills its generated fields. The target leaves
+          >   an existing copy untouched and prints no value. A generated file with no
+          >   fields, such as a private key, needs no `.example`: the target that
+          >   writes it and the committed file it pairs with name it.
+          >
+          > The compose layer reads the copies where it would read committed files,
+          > and a launcher refuses a missing copy, naming how to make one. A cluster
+          > gets a stack's secret files from a separate target at the Helm layer,
+          > which reads them and writes the cluster's secrets. Nothing generates a
+          > value straight into a cluster. A chart's committed development secret
+          > values are in a local values file, never in its defaults
+          > ([Helm](helm.md#a-charts-defaults-carry-no-secret-value)).
+          >
+          > A deployed stack's secret profile or overlay is never a committed file: it
+          > is the file an operator-supplied secret holds. The tooling that deploys the
+          > chart is responsible for selecting the configuration of that deployment.
+          > It should never carry a value itself. Configuration files should be
+          > populated by a separate step an operator runs before the deployment
+          > tooling runs.
+        - `helm.md`, a new section:
+          > ## A chart's defaults carry no secret value
+          >
+          > A chart's `values.yaml` holds its development defaults, which a release
+          > gets for anything it doesn't state. They hold no secret value, not even a
+          > public development one: no password, private key, token or seed. Where a
+          > local release needs secret values, they are committed in a separate local
+          > values file, which a local install names explicitly. A release that names
+          > no source for a secret fails to start, naming the missing setting. Failing
+          > to start is preferable to accidentally deploying public test values.
+        - `kubernetes.md`, its local-cluster guidance: one line pointing to the
+          Helm-layer target in `configuration.md`.
+        - Before promoting, check this repository's charts against the new `helm.md`
+          section: no `values.yaml` sets a secret value, and each committed
+          development secret value is in a local values file such as
+          `helm/local-values.yaml`. A chart that departs is a defect fixed in this
+          change ("Defects found during a change").
       Run `make check-spec-index CHANGE=switch-on-hosted-per-period-vm`; neither touched
       capability has an `index.md`, and `openspec/specs/README.md` needs no row.
 - [ ] 10.10 Guidance placement: read the paragraphs promoted in 10.9 against the layer
