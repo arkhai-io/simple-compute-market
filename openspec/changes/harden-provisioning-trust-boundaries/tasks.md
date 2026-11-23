@@ -484,7 +484,7 @@ new task file or `tasks/guest-policy.yml`, `tasks/main.yml`) and
 `domains/vms/provisioning/iac/tests/` (`host_fakes.py`, a new
 `test_guest_convergence.py`).
 
-- [ ] 6.1 Write `vm-setup/files/guest_converge.sh`. For each running guest
+- [x] 6.1 Write `vm-setup/files/guest_converge.sh`. For each running guest
   (`virsh list --state-running`), with its interface on `default` (`virsh domiflist`),
   it: sets the tap's bridge port isolated (`bridge link set dev <tap> isolated on`),
   which does not drop the link; applies the guest's interface with `clean-traffic`
@@ -505,7 +505,34 @@ new task file or `tasks/guest-policy.yml`, `tasks/main.yml`) and
   and its saved definition carrying the filter; a guest whose port cannot be isolated,
   reported with its error while the others converge; an already converged guest
   unchanged; a host with no running guest; and a missing `bridge`, failing the command.
-- [ ] 6.2 In host preparation, after the guest policy is installed, install the script as
+  Done: a POSIX `sh` script that orchestrates `virsh` and `bridge`, with an embedded
+  `python3` helper that reads and edits libvirt's XML and writes the JSON line, so
+  nothing is parsed or quoted by hand; `python3` joins `virsh` and `bridge` as what it
+  needs to run. Both definitions are edited by `virsh update-device`: `--live` with the
+  running interface element, its filter replaced and its `<port>` left as libvirt holds
+  it (the port is isolated through the bridge, and whether libvirt takes a live `<port>`
+  change varies by version, so asking for one could refuse the filter with it), and
+  `--config` with the saved element carrying both, rather than a `define` of the whole
+  domain, which would drop what `dumpxml` omits without `--security-info`. Two
+  differences from the plan's fields: `filter` has a third value, `none`, when neither
+  definition holds the filter (so a guest whose saved definition was not written, or
+  could not be read, is never reported as waiting for a next start that would not bind
+  it), and each line carries `changed`, which host preparation's `changed_when` reads
+  and which says an already converged guest was left alone. The command also fails
+  when `virsh list` fails or no working directory can be made. `TestTheCommand` in
+  `test_guest_convergence.py` passed: the real script run whole against the stateful
+  doubles of `virsh` and `bridge` added to `host_fakes.py`, at its subprocess boundary,
+  on a `PATH` of those doubles and the ordinary tools alone, so no real `virsh` or
+  `bridge` is reached (the plan calls this unit; it is the script's orchestration
+  against doubles of the commands it wraps). It covers each case the task lists, and a
+  transient guest, a live filter refused on a transient guest (`none`), a guest with no
+  interface on `default`, a guest whose interfaces cannot be read beside one that
+  converges, an unreadable running definition (`next_start`), and unreadable running
+  guests. No test reaches a failing `bridge -d link show`, either definition lacking
+  the interface `domiflist` named, or a failing `mktemp`. The double refuses a live
+  `<port>` change and, for a domain marked so, a live filter change; that libvirt does
+  either is not shown here.
+- [x] 6.2 In host preparation, after the guest policy is installed, install the script as
   `/usr/local/sbin/arkhai-guest-converge` (owner root, mode 0755), run it, and name in
   the play's output each guest it reports unconverged — its port not isolated, or its
   saved definition not written — with the reason, and each guest whose filter waits for
@@ -516,7 +543,24 @@ new task file or `tasks/guest-policy.yml`, `tasks/main.yml`) and
   gate running the task against a fake command printing an unconverged guest and a
   `next_start` guest, the play naming both; name the new native case in
   `docs/guidance/repository/ansible-gates.md`.
-- [ ] 6.3 Verification point. Unit (static configuration and the real script against
+  Done: four tasks at the end of `tasks/guest-policy.yml`, after the unit's restart,
+  tagged `guest_policy`: the install, the run (`changed_when` from the lines'
+  `changed`, no `failed_when`, so only a non-zero exit fails host preparation), and two
+  looping `debug` tasks naming each guest whose port is not isolated or whose saved
+  definition was not written, with whether its filter is bound, and each whose filter
+  waits for its next start, each with its reason. `main.yml`'s flow comment and
+  post-installation notes say running guests are converged.
+  `TestHostPreparationConvergesRunningGuests` passed (structure tests over the task
+  file, read with PyYAML: the install's source, destination, owner and mode, the order
+  after the policy's unit restart, the run's lack of `failed_when`, and the report
+  reading the run's registered lines). `TestTheReportNatively` passed (library
+  integration, native gate): the run and both report tasks under ansible-playbook, the
+  run's command replaced by a fake printing an unconverged guest, a `next_start` guest,
+  a guest with no filter in either definition and a converged guest, the play naming
+  the first three by name, state and reason and not the fourth, and a fake exiting 1
+  failing the play. No test runs the install task or the role as a whole. The new
+  module is in the native gate's `NATIVE`, and `ansible-gates.md` names the case.
+- [x] 6.3 Verification point. Unit (static configuration and the real script against
   fakes): `make -C domains/vms/provisioning/iac test`. Library integration (native
   gate): `make -C domains/vms/provisioning/iac validate-playbooks` and
   `native-ansible-gate`, or, with no local Ansible,
@@ -525,6 +569,41 @@ new task file or `tasks/guest-policy.yml`, `tasks/main.yml`) and
   End-to-end: the lanes run the mock executor and no real VM, so none exercises it;
   `e2e_vm_guest_isolation`'s O8 and O9 (section 6a, run in section 7a) are its only
   end-to-end evidence.
+  Done: `make -C domains/vms/provisioning/iac test` passed (226, 15 native cases
+  skipped without local Ansible). With no local Ansible, `native_ansible_gate.sh` ran
+  in the built `arkhai:compute-provisioning` image (ansible-core 2.19.13) over this
+  tree mounted read-only: every playbook's syntax check, `vm-setup-task-files.yaml`
+  parsing `guest-policy.yml` with the new tasks, then 85 tests passed, the two new
+  native cases among them. End-to-end confirmed: no lane scenario covers this
+  section; O8 and O9 of `e2e_vm_guest_isolation` are its only end-to-end evidence.
+  `scripts/change-workflow run pre-commit`, before and again after the fresh-context
+  fixes: "after-functional-change …: passed, exit 0"; "pre-commit-functional …:
+  passed, exit 0", `check-packaging` and `make test` passing for the trees
+  `440b01681af5` and `e5df3fd67cb9`; "pre-commit …: failed", its one failure each time
+  the citations check naming `e2e-tests/tests/unit/test_vm_guest_isolation.py`, which
+  this plan cites and 6a.2 creates.
+  The fresh-context check found: two comments stating as fact that libvirt refuses a
+  live `<port>` change (now stated as varying by version), comments naming the
+  real-host proof before it exists and a release-relative docstring (reworded),
+  `filter: next_start` reported for a guest whose saved definition was not written or
+  whose interfaces could not be read (the `none` state above), an unchecked `mktemp`,
+  untested error branches (four now tested, three named above as untested), the level
+  labels "unit" and "static configuration" (corrected above), a structure test
+  restating the report's expressions the native case proves (trimmed), and the flat
+  IaC test layout with no gap row (added to `openspec/changes/README.md`). Declined: a
+  fallback line when the report's own `python3` fails, since `python3` is checked
+  present first and a failure there is no guest's state to report.
+
+**Handoff.** Not shown until 7a's run: that libvirt accepts `update-device --live` with
+the running element as `dumpxml` prints it (target, alias and address included) and
+binds the filter (O9), whether it would take a live `<port>` change (the command never
+asks for one), and that `bridge link set ... isolated on` keeps the guest's sessions
+(O8). The running definition of a converged guest still says its port is not isolated,
+so a tap libvirt re-attaches before the guest restarts, as after a restart of the
+`default` network, would come up not isolated; O7 restarts libvirtd, not the network,
+so no observation shows either way, and the saved definition keeps the isolation from
+the guest's next start. The 6a operator probe runs `/usr/local/sbin/arkhai-guest-converge`
+and reads its lines, `changed` and the three `filter` values among them.
 
 ## 6a. The real-host proof of guest isolation, as a scenario
 

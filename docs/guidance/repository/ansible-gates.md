@@ -21,7 +21,9 @@ real `ansible-playbook` are library integration: the VM suite renders both creat
 facts, exercises its family-role call boundary, runs the host diagnostics
 task file against faked `systemctl` and `virsh`, runs host preparation's
 guest-isolation preconditions against faked `virsh`, `virt-install` and
-`ebtables` and its check of the guests' private destinations, and renders the
+`ebtables` and its check of the guests' private destinations, runs the tasks that
+converge running guests and name those left unconverged against a faked
+convergence command, and renders the
 guest interface's template through Ansible's lookup, and the family suite runs its
 installer and authenticated status wait against controlled local file and HTTP
 boundaries. Native tests skip in the default suite without supported Ansible;

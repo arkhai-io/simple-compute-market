@@ -30,7 +30,7 @@ import unittest
 # without a supported Ansible and its callback; here a skip is a failure.
 NATIVE = [
     "test_vm_relay_roles.py", "test_host_diagnostics.py", "test_guest_policy.py",
-    "test_vm_management_contracts.py",
+    "test_guest_convergence.py", "test_vm_management_contracts.py",
 ]
 
 suite = unittest.TestSuite(

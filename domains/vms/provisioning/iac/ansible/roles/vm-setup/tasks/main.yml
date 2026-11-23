@@ -11,8 +11,9 @@
 #    operator enables it)
 # 3. KVM Setup - Configure KVM virtualization
 # 4. KVM Network - Setup KVM networking
-# 4a. Guest Network Policy - Refuse a host that cannot isolate its guests, and
-#    install the chains holding each guest to DHCP and DNS on its host
+# 4a. Guest Network Policy - Refuse a host that cannot isolate its guests,
+#    install the chains holding each guest to DHCP and DNS on its host, and
+#    converge every running guest to an isolated, filtered port
 # 5. Security Hardening - Apply security configurations
 # 6. Golden Image Build - Build golden images (if vm_image_type == "golden")
 # 7. GPU Detection Service - Setup GPU detection service (with passthrough)
@@ -273,7 +274,7 @@
       - "9. FRP client installed and configured for remote access"
       - ""
       - "SECURITY FEATURES ACTIVE:"
-      - "  ✓ Each guest on an isolated bridge port under libvirt's clean-traffic filter (set when it is created)"
+      - "  ✓ Each guest created on an isolated bridge port under libvirt's clean-traffic filter; running guests converged to the same, any not converged and any whose filter waits for its next start named above"
       - "  ✓ Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD (iptables) and sshd DenyUsers for the guest subnet"
       - "  ✓ Libvirt security hardening: {{ 'applied' if not (skip_libvirt_security | default(true) | bool) else 'skipped (skip_libvirt_security=true)' }}"
       - "  ✓ SSH connection monitoring configured"

@@ -1,5 +1,5 @@
-"""Stateful fakes of the host commands a VM teardown and the guest policy's
-installer call.
+"""Stateful fakes of the host commands a VM teardown, the guest policy's
+installer, and guest convergence call.
 
 `shell_harness` runs a task's real shell with its external commands replaced on
 `PATH`. A teardown reads state back and acts on it — it lists rules and deletes
@@ -15,7 +15,12 @@ as the real commands answer:
   inserts and deletes to those rules in one transaction, changing nothing when
   a command fails;
 - `virsh` keeps domains with their state, address, MAC, and storage, and the
-  `default` network's DHCP reservations in `net-dumpxml` form;
+  `default` network's DHCP reservations in `net-dumpxml` form; a domain given
+  `interfaces` also has its running and saved definitions, each interface's
+  `<port>` and `<filterref>` in each, which `dumpxml [--inactive]` prints,
+  `domiflist` lists, and `update-device --live|--config` replaces, refusing
+  any live change of `<port>`;
+- `bridge` reads and sets a running guest's tap port isolation flag;
 - `ufw` keeps numbered rules with their comments;
 - `curl` exits with each status a test queued, in order, then succeeds;
 - a `virsh` subcommand, or `rm` of one path, fails as many times as a test asked
@@ -145,6 +150,7 @@ for table in ("filter", "nat"):
 '''
 
 _VIRSH = _PREAMBLE + r'''
+import xml.etree.ElementTree as ET
 state_path = STATE / "virsh.json"
 state = json.loads(state_path.read_text(encoding="utf-8"))
 domains, hosts = state["domains"], state["hosts"]
@@ -163,6 +169,80 @@ def domain(name):
         sys.exit(1)
     return domains[name]
 
+def fail(message):
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+def domain_xml(name, found, live):
+    # A domain's running or saved definition, as `dumpxml` and `dumpxml
+    # --inactive` print it: only the running one names the tap, the bridge, and
+    # the device's alias.
+    lines = ["<domain type='kvm'>", f"  <name>{name}</name>", "  <devices>"]
+    for nic in found["interfaces"]:
+        held = nic["live" if live else "saved"]
+        lines += ["    <interface type='network'>", f"      <mac address='{nic['mac']}'/>"]
+        if live:
+            lines += [
+                f"      <source network='{nic['source']}' bridge='virbr0'/>",
+                f"      <target dev='{nic['tap']}'/>",
+            ]
+        else:
+            lines.append(f"      <source network='{nic['source']}'/>")
+        lines.append("      <model type='virtio'/>")
+        if held["port"]:
+            lines.append("      <port isolated='yes'/>")
+        if held["filterref"]:
+            lines.append(f"      <filterref filter='{held['filterref']['filter']}'>")
+            for key, value in held["filterref"]["parameters"].items():
+                lines.append(f"        <parameter name='{key}' value='{value}'/>")
+            lines.append("      </filterref>")
+        if live:
+            lines.append("      <alias name='net0'/>")
+        lines += [
+            "      <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>",
+            "    </interface>",
+        ]
+    return "\n".join(lines + ["  </devices>", "</domain>"])
+
+def update_device(name, found, path, flags):
+    # Replaces the interface the file names by its MAC, in the running
+    # definition (--live) or the saved one (--config). A live change of its
+    # filter, where the domain says libvirt refuses one, fails as libvirt's
+    # refusal does, changing nothing. So does any live change of its <port>,
+    # which libvirt accepts in some versions and not in others, so that a
+    # command asking for one is caught here.
+    element = ET.parse(path).getroot()
+    mac = element.find("mac").get("address")
+    nic = next((n for n in found["interfaces"] if n["mac"].lower() == mac.lower()), None)
+    if nic is None:
+        fail(f"operation failed: no device matching MAC address {mac} found")
+    source, model = element.find("source"), element.find("model")
+    if source is None or source.get("network") != nic["source"] or model is None:
+        fail("Operation not supported: cannot change network interface type or model")
+    port = element.find("port")
+    port = port is not None and port.get("isolated") == "yes"
+    ref = element.find("filterref")
+    if ref is not None:
+        ref = {"filter": ref.get("filter"),
+               "parameters": {p.get("name"): p.get("value") for p in ref.findall("parameter")}}
+    if flags == ["--live"]:
+        if found["state"] != "running":
+            fail("Requested operation is not valid: domain is not running")
+        if port != nic["live"]["port"]:
+            fail("Operation not supported: cannot modify network device port isolation")
+        if ref != nic["live"]["filterref"] and found.get("live_filter_refused"):
+            fail("Operation not supported: cannot modify network device filter")
+        nic["live"]["filterref"] = ref
+    elif flags == ["--config"]:
+        if found.get("transient"):
+            fail("Requested operation is not valid: cannot modify device on transient domain")
+        nic["saved"] = {"port": port, "filterref": ref}
+    else:
+        print(f"fake virsh: unsupported update-device {flags}", file=sys.stderr)
+        sys.exit(2)
+    save()
+    print("Device updated successfully")
+
 if command == "net-dumpxml":
     if state.get("network_unreadable"):
         print("error: network 'default' not found", file=sys.stderr)
@@ -180,6 +260,11 @@ elif command == "net-update":
         sys.exit(1)
     state["hosts"] = kept
     save()
+elif command == "list" and "--state-running" in args:
+    for name, found in domains.items():
+        if found["state"] == "running":
+            print(name)
+    print()
 elif command == "list":
     for name in domains:
         print(name)
@@ -193,12 +278,22 @@ elif command == "domifaddr":
     if found["state"] == "running" and found.get("address"):
         print(" Name       MAC address          Protocol     Address")
         print(f" vnet0      {found['mac']}    ipv4         {found['address']}/24")
+elif command == "domiflist" and "interfaces" in domain(args[1]):
+    print(" Interface   Type      Source    Model    MAC")
+    print("-------------------------------------------------------")
+    for nic in domain(args[1])["interfaces"]:
+        print(f" {nic['tap']:<11} network   {nic['source']:<9} virtio   {nic['mac']}")
 elif command == "domiflist":
     found = domain(args[1])
     print(f" vnet0      network   default   virtio   {found['mac']}")
+elif command == "dumpxml" and "interfaces" in domain(next(a for a in args[1:] if not a.startswith("-"))):
+    name = next(a for a in args[1:] if not a.startswith("-"))
+    print(domain_xml(name, domain(name), live="--inactive" not in args))
 elif command == "dumpxml":
     domain(args[1])
     print("<domain/>")
+elif command == "update-device":
+    update_device(args[1], domain(args[1]), args[2], args[3:])
 elif command == "destroy":
     domain(args[1])["state"] = "shut off"
     save()
@@ -234,6 +329,44 @@ elif args[:2] == ["--force", "delete"]:
     state_path.write_text(json.dumps(state), encoding="utf-8")
 else:
     print(f"fake ufw: unsupported {args}", file=sys.stderr)
+    sys.exit(2)
+'''
+
+# `bridge` reads and sets a running guest's tap port flag, kept on the guest's
+# interface in the `virsh` state as `bridge_isolated`, apart from the `<port>`
+# element of either definition, as the kernel keeps it apart from libvirt. A
+# tap the state lists under `isolation_refused` refuses the flag as a kernel
+# without bridge port isolation does.
+_BRIDGE = _PREAMBLE + r'''
+state_path = STATE / "virsh.json"
+state = json.loads(state_path.read_text(encoding="utf-8"))
+args = sys.argv[1:]
+
+def port(tap):
+    for found in state["domains"].values():
+        for nic in found.get("interfaces", []):
+            if nic["tap"] == tap and found["state"] == "running":
+                return nic
+    print(f'Cannot find device "{tap}"', file=sys.stderr)
+    sys.exit(1)
+
+if args[:4] == ["-d", "link", "show", "dev"] and len(args) == 5:
+    nic = port(args[4])
+    flag = "on" if nic["bridge_isolated"] else "off"
+    print(f"7: {args[4]}: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master virbr0 "
+          "state forwarding priority 32 cost 100 ")
+    print("    hairpin off guard off root_block off fastleave off learning on flood on "
+          "mcast_flood on bcast_flood on mcast_router 1 mcast_to_unicast off "
+          f"neigh_suppress off vlan_tunnel off isolated {flag} locked off")
+elif args[:3] == ["link", "set", "dev"] and args[4:] == ["isolated", "on"]:
+    nic = port(args[3])
+    if args[3] in state.get("isolation_refused", []):
+        print("RTNETLINK answers: Operation not supported", file=sys.stderr)
+        sys.exit(2)
+    nic["bridge_isolated"] = True
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+else:
+    print(f"fake bridge: unsupported {args}", file=sys.stderr)
     sys.exit(2)
 '''
 
@@ -282,6 +415,7 @@ class FakeHost:
             "iptables-restore": _IPTABLES_RESTORE,
             "iptables-save": _IPTABLES_SAVE,
             "virsh": _VIRSH,
+            "bridge": _BRIDGE,
             "ufw": _UFW,
             "curl": _CURL,
             "systemctl": _ABSENT,
@@ -300,11 +434,17 @@ class FakeHost:
         return (self.state / f"iptables.{table}").read_text(encoding="utf-8").splitlines()
 
     def set_virsh(
-        self, *, domains: dict, hosts: list[dict], network_unreadable: bool = False
+        self,
+        *,
+        domains: dict,
+        hosts: list[dict],
+        network_unreadable: bool = False,
+        isolation_refused: tuple[str, ...] = (),
     ) -> None:
         (self.state / "virsh.json").write_text(
             json.dumps(
-                {"domains": domains, "hosts": hosts, "network_unreadable": network_unreadable}
+                {"domains": domains, "hosts": hosts, "network_unreadable": network_unreadable,
+                 "isolation_refused": list(isolation_refused)}
             ),
             encoding="utf-8",
         )

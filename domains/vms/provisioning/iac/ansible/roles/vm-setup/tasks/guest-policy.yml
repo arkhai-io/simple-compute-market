@@ -21,6 +21,9 @@
 # starts and UFW when it reloads, so the installer runs again after each.
 # security-hardening.yml, which runs after this file, saves the installed rules
 # with the rest of the host's.
+#
+# Last, every guest already running is converged to the interface a new guest
+# is created with, and each it could not converge is named.
 
 # ============================================
 # Preconditions: what isolating a guest needs
@@ -161,4 +164,59 @@
     enabled: yes
     state: restarted
     daemon_reload: yes
+  tags: guest_policy
+
+# ============================================
+# Running guests: converged to an isolated, filtered port
+# ============================================
+
+# A guest created before guests were isolated still runs on a port that is not
+# isolated, from which it can reach every new guest at layer 2. The command
+# (files/guest_converge.sh) isolates each running guest's port without dropping
+# its link, binds its filter live where libvirt accepts that, and writes both
+# into its saved definition, printing one JSON line per guest. Host preparation
+# fails only when the command cannot run; a guest it could not converge is
+# named below, since failing would leave every other host step undone for one
+# guest the operator can act on.
+- name: Install the command that converges running guests
+  copy:
+    src: guest_converge.sh
+    dest: /usr/local/sbin/arkhai-guest-converge
+    owner: root
+    group: root
+    mode: '0755'
+  tags: guest_policy
+
+- name: Converge every running guest to an isolated, filtered port
+  command: /usr/local/sbin/arkhai-guest-converge
+  register: guest_convergence
+  changed_when: >-
+    guest_convergence.stdout_lines | map('from_json') | selectattr('changed') | list | length > 0
+  tags: guest_policy
+
+- name: Name each running guest left unconverged
+  debug:
+    msg: >-
+      Guest {{ item.name }} is NOT converged: its bridge port
+      {{ 'is' if item.port_isolated else 'is not' }} isolated, its saved
+      definition {{ 'carries' if item.saved_definition else 'does not carry' }}
+      the isolation and the filter, and its filter
+      {{ 'is bound live' if item.filter == 'live' else 'is not bound' }}.
+      Reason: {{ item.error or 'none reported' }}.
+  loop: "{{ guest_convergence.stdout_lines | map('from_json') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not (item.port_isolated and item.saved_definition)
+  tags: guest_policy
+
+- name: Name each running guest whose filter waits for its next start
+  debug:
+    msg: >-
+      Guest {{ item.name }}'s clean-traffic filter waits for its next start:
+      it is not bound live, and its saved definition carries it. Reason:
+      {{ item.error or 'none reported' }}.
+  loop: "{{ guest_convergence.stdout_lines | map('from_json') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.filter == 'next_start'
   tags: guest_policy
