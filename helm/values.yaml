@@ -328,9 +328,13 @@ provisioning:
     type: ClusterIP
     host: "0.0.0.0"
 
+  # The Secret holding the SSH key, `id_ed25519`, mounted only when
+  # provisioning is real (mockMode: false). Mock provisioning mounts no key, so
+  # no Secret is named here; a release with real provisioning names its own,
+  # and one that names none fails to render.
   sshKey:
     createSecret: false
-    secretName: arkhai-provisioning-ssh
+    secretName: ""
 
   sshDecryptionKey:
     createSecret: false

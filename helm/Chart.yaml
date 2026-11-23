@@ -27,7 +27,7 @@ dependencies:
     repository: "file://charts/bare-metal-storefront"
     condition: bare-metal-storefront.enabled
   - name: provisioning
-    version: "0.1.2"
+    version: "0.1.3"
     repository: "file://charts/provisioning"
     condition: provisioning.enabled
   - name: validate-contracts

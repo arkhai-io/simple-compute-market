@@ -78,7 +78,10 @@ gives obtaining one).
   umbrella with the `api-credits-registry` alias enabled both instances render the
   same, and with it disabled nothing of the alias renders.
   `helm/charts/provisioning/tests/test_render.py` asserts the same of
-  `compute-provisioning-migrate`.
+  `compute-provisioning-migrate`, and that the application container mounts the
+  SSH key from the Secret `sshKey.secretName` names only without `mockMode`,
+  where an empty or absent name is refused naming it, while under `mockMode` no
+  key mounts and no name is needed.
 - `helm/tests/test_release_topology.py` asserts, over both topology releases,
   that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
   `matchLabels` or any Service's selector — every test pod carries

@@ -31,11 +31,13 @@
 # Its storefront shares release 1's CA bundle ConfigMap, which the same target
 # creates from the lane doubles' committed lane CA:
 #   ConfigMap payments-ca-bundle            `ca-bundle.pem`: the committed lane CA
-# Release 2's provisioning reuses release 1's SSH and runtime Secrets, which mock
-# provisioning does not read for delivery. `topology-check` also needs release
-# 1's e2e-tests Secrets: arkhai-buyer-profile-credential (`credential`, Anvil
-# account 1's key) and arkhai-e2e-credentials, whose `config-e2e-secret.yml` the
-# deal test and the registry smoke test layer as their `e2e-secret` profile:
+# Release 2's provisioning reuses release 1's runtime Secret, which mock
+# provisioning does not read for delivery. Like release 1's, it mounts no SSH
+# key, since mock provisioning opens no connection. `topology-check` also needs
+# release 1's e2e-tests Secrets: arkhai-buyer-profile-credential (`credential`,
+# Anvil account 1's key) and arkhai-e2e-credentials, whose
+# `config-e2e-secret.yml` the deal test and the registry smoke test layer as
+# their `e2e-secret` profile:
 #   buyer:        marketplace_credential, private_key: "<account 1's key>"
 #   seller:       private_key, admin_credential: "<account 2's key>" (Bob)
 #   provisioning: admin_credential: "<account 5's key>",

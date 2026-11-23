@@ -3,6 +3,7 @@
   "type": "object",
   "required": ["server", "sshKey", "sshDecryptionKey", "identity", "storefrontIdentity", "adminIdentity"],
   "properties": {
+    "mockMode": {"type": "boolean"},
     "server": {
       "type": "object",
       "properties": {
@@ -12,7 +13,7 @@
     "identity": {"$ref": "#/definitions/identity"},
     "storefrontIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
     "adminIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
-    "sshKey": {"$ref": "#/definitions/secretReference"},
+    "sshKey": {"$ref": "#/definitions/optionalSecretReference"},
     "config": {
       "type": "object",
       "properties": {
@@ -65,6 +66,8 @@
       }
     }
   },
+  "if": {"required": ["mockMode"], "properties": {"mockMode": {"const": true}}},
+  "else": {"properties": {"sshKey": {"$ref": "#/definitions/secretReference"}}},
   "definitions": {
     "image": {
       "type": "object",
@@ -135,6 +138,18 @@
       "properties": {
         "createSecret": {"const": false},
         "secretName": {"type": "string", "minLength": 1},
+        "sshPrivateKey": false,
+        "privateKey": false,
+        "key": false
+      }
+    },
+    "optionalSecretReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createSecret"],
+      "properties": {
+        "createSecret": {"const": false},
+        "secretName": {"type": "string"},
         "sshPrivateKey": false,
         "privateKey": false,
         "key": false

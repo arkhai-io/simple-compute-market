@@ -14,6 +14,7 @@ global:
 # When true, "mock" is appended to ACTIVE_PROFILES in the Deployment so the
 # container.py factory selects MockAnsibleService at startup. The mock dynaconf
 # profile (config-mock.yml, bundled in the image) is loaded automatically.
+# The Deployment then mounts no SSH key (see `sshKey` below).
 #
 # Set to true for dev/CI clusters. Never true in production.
 # ---------------------------------------------------------------------------
@@ -139,10 +140,14 @@ server:
 
 # ---------------------------------------------------------------------------
 # Provisioning credentials are always operator-managed Kubernetes Secrets.
-# sshKey.secretName must expose `id_ed25519`; sshDecryptionKey.secretName must
-# expose `config-provisioning-secrets.yml`. The chart never accepts credential
-# or callback-token contents as values; hosts are declared in
-# `definitions.hosts`, which names each key by its file path.
+# sshDecryptionKey.secretName must expose `config-provisioning-secrets.yml`.
+# sshKey.secretName must expose `id_ed25519`, which the Deployment mounts at
+# /home/appuser/.ssh/id_ed25519 only when provisioning is real (`mockMode:
+# false`), and then requires; the mock runner opens no connection, so with
+# `mockMode: true` no key is mounted, the name may be empty, and the Secret it
+# names need not exist. The chart never accepts credential or callback-token
+# contents as values; hosts are declared in `definitions.hosts`, which names
+# each key by its file path.
 # ---------------------------------------------------------------------------
 sshKey:
   createSecret: false
