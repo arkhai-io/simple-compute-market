@@ -1962,8 +1962,27 @@ after campaign index currency.
 - [ ] 14.1 Comment hygiene: run `make check-comment-hygiene`; a finding, or a comment this
       change added that names a change, a task or a review, returns the change to
       implementation.
-- [ ] 14.2 Import placement: confirm every import this change added is at module level,
+      Closeout 2026-11-23, at `f32db7037`: `make check-comment-hygiene` fails, exit 2,
+      on one comment, `scripts/tests/test_change_next_step.py:1265–1266`: "# Section 3
+      joins the open round: its reading and review start from the / # open round's
+      base, so section 2 is still read and reviewed with it." This change did not write
+      it: the merge of `origin/dev` (`6d1340c02`) brought it in from that branch's
+      `58a1e11c9`, and the file is the same on `origin/dev` and `HEAD`. The
+      pre-closeout review's run of the check, at `1641f95d4`, came before that merge.
+      The comment describes the test's fixture sections, not history. Still, the check
+      matches it, and it fails `scripts/change-workflow run pre-commit`'s
+      `check-repository` (1 of 9 checks failed), which closeout must pass before it
+      archives. Rewording it is a code edit, so closeout returns the change to
+      implementation for a fix round. The recommended fix is to word the fixture's
+      sections without a numeral, for example "The third section joins the open
+      round: its reading and review start from the open round's base, so the second
+      is still read and reviewed with it." Every comment the change itself added had
+      passed the check at pre-closeout (review 54).
+- [x] 14.2 Import placement: confirm every import this change added is at module level,
       or return the change to implementation.
+      Closeout 2026-11-23: the change's Python diff against `origin/dev` adds no
+      indented `import` or `from … import` line, so every import it added is at module
+      level.
 - [ ] 14.3 Documentation compliance: re-check D1–D14 against
       `docs/guidance/workflow/openspec-documentation.md` and `openspec/README.md`,
       "Documentation placement", and that every permanent document written describes the
@@ -1989,6 +2008,11 @@ after campaign index currency.
       CHANGE=switch-on-hosted-per-period-vm`; resolve every failure or owned exception;
       run `make check-agent-skills` only if the change touched `.agents/`, `.claude/` or
       `.codex/`.
+      Run early, at `f32db7037`, so the return under 14.1 names every code finding at
+      once: `make check-packaging` passed, and `make check-architecture-change
+      CHANGE=switch-on-hosted-per-period-vm` passed ("owns no architecture row"). The
+      change touched no file under `.agents/`, `.claude/` or `.codex/`. Left unchecked:
+      the resumed closeout runs it again on the fix round's tree.
 - [ ] 14.8 End-to-end pipeline: record, from the latest passing validation, the pipeline
       run and its result, and the scenarios exercising this change —
       `e2e_vm_rate_dispute`, `e2e_vm_recurring_purchase`, `e2e_vm_rate_servicing`,
