@@ -7,7 +7,7 @@ description: Close out an OpenSpec change whose pre-closeout review's triage adv
 
 Closeout turns a change into the permanent record of what the system now is. It
 works through the change's closeout task — the workflow's parts in
-`docs/guidance/workflow/closeout.md`, with the repository's own parts, in the
+the workflow guidance's section "Closeout", with the repository's own parts, in the
 section the root guidance names, at the position it gives them, which the plan made
 specific to this change as its last `tasks.md` section — and ends by
 archiving the change:
@@ -177,7 +177,7 @@ Read in full, even if you believe you know it:
 
 ## 3. Work through the closeout task
 
-Take the parts in the order `docs/guidance/workflow/closeout.md` gives them, with
+Take the parts in the order the workflow guidance's section "Closeout" gives them, with
 the repository's own parts where it places them, which is the order the closeout
 section lists them in; this step covers comment hygiene through the repository's own
 parts, and step 4 promotion, guidance placement, documentation citations, and
@@ -190,22 +190,22 @@ list its parts in another order; work in this order, and note it on the section.
   section the root guidance names gives among the checks the workflow's parts run,
   and read the
   comments the change added for any that describe history rather than the current
-  system (`docs/guidance/engineering/comments.md`) or name the change, the review,
-  or the migration that introduced them
-  (`docs/guidance/workflow/change-references.md`). Do not edit them: if anything
+  system (the engineering guidance's section "Comments describe the current
+  system") or name the change, the review, or the migration that introduced them
+  (the workflow guidance's section "Change references"). Do not edit them: if anything
   needs rewriting, stop, tell the owner what and where, and recommend a fix round
   in implementation.
 - **Import placement — confirm.** Check the imports the change added for any still
   local without a recorded reason
-  (`docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level`).
+  (the engineering guidance's section "Imports go at module level").
   Do not move one: if one should move, stop as for comment hygiene.
 - **Documentation compliance.** Check every accepted decision in `design.md`
   against the placement rules —
-  `docs/guidance/workflow/openspec-documentation.md#documentation-placement` and
+  the workflow guidance's section "Documentation placement" and
   the repository's placement table, which its root guidance names — and the permanent documents
   against the code they describe, each describing the current state with no wording
   relative to the change
-  (`docs/guidance/engineering/documentation.md#permanent-documents-describe-the-current-state`).
+  (the engineering guidance's section "Permanent documents describe the current state").
 - **Narrative compression.** Shorten completed-task notes to final behaviour,
   material evidence, deferrals, and destinations. Move what is worth keeping —
   alternatives, debugging narratives, review rationale — into `design.md` first;
@@ -216,7 +216,7 @@ list its parts in another order; work in this order, and note it on the section.
   dependency graph. Leave every other row's `Depends on` and status as they are:
   the change lands, and its dependents are released, only at archive cleanup after
   the closeout review's triage advances it
-  (`docs/guidance/workflow/closeout.md#campaign-index-currency`). The
+  (the workflow guidance's section "Campaign index currency"). The
   status stays `in closeout`: archive cleanup writes `archived`. Run
   `change-workflow check index` after the edit.
 - **The repository's own parts.** Each part the section the root guidance names
@@ -256,7 +256,7 @@ location, as a heading anchor where one exists. A `spec.md` the change's deltas
 cover is written by the archive, not by hand; the record names it all the same.
 
 In a capability organized by an `index.md`
-(`docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index`),
+(the workflow guidance's section "A capability organized by an index"),
 promotion also writes the
 index before the archive merges the deltas: an entry for each id the change's deltas
 add — its link to the requirement's heading in `spec.md` and its summary line, under
@@ -267,7 +267,7 @@ is accepted before the archive puts it in `spec.md`.
 
 **Guidance placement.** Read each guidance section the change added, moved, or
 rewrote — promoted text included — against the layer test, adjacency, and exception
-placement (`docs/guidance/workflow/closeout.md#guidance-placement`); move what is
+placement (the workflow guidance's section "Guidance placement"); move what is
 misplaced and re-point its citations within the inert paths — a citation outside them
 returns the change to implementation — then run the repository's guidance check where
 its closeout parts name one. Report a placement that needs a decision for the
@@ -279,7 +279,7 @@ exists:
 
 - `change-workflow run pre-commit <change>` must report nothing failing:
   its citations check finds every document the change cites
-  (`docs/guidance/engineering/documentation.md#citations-resolve`), so fix the
+  (the engineering guidance's section "Citations resolve"), so fix the
   documents until it does, and its default OpenSpec check runs `validate <change>
   --strict` through the configured command. A change with no spec deltas cannot
   pass that validation — the validator rejects a change with none — so record on

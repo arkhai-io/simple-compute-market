@@ -729,33 +729,135 @@ section name, the workflow's guidance by section, and its specification by id, w
 and every citation of the renamed headings, `scripts/change_workflow/config.py`,
 `scripts/check_guidance.py`, and their tests.
 
-- [ ] 5.1 Make the three repeated headings unique — "Integration tests", "System
+- [x] 5.1 Make the three repeated headings unique — "Integration tests", "System
   tests", "Contract fixtures", each a file's title and a section of another — and
   re-point every citation of a renamed anchor (D4, 15 F5). Verify: `make
   check-guidance` (the anchor check) and no heading repeated beneath
   `docs/guidance/engineering/`, held by a unit test of 5.3's resolver over this
   repository's guidance.
-- [ ] 5.2 The skills cite engineering guidance by section name, never a path or file
+  Done: the two files' titles give way, since the level sections of
+  `test-levels.md` keep the parallel "Unit tests", "Integration tests", "Smoke
+  tests", "System tests", which other documents cite in prose: `integration-tests.md`
+  is "Application integration tests", the rules it holds; `system-tests.md` "System
+  test scenarios"; and `testing-python.md`'s section, the Python names and places of
+  the fixtures `contract-fixtures.md` defines, "Contract fixture modules", its one
+  citation, in `docs/guidance/repository/test-placement.md`, re-pointed, and the
+  link texts naming the two files by their old titles follow them. Content check,
+  `test_check_guidance.py`: no heading beneath `docs/guidance/engineering/` heads two
+  sections, read with the guidance check's own heading syntax over the real tree.
+  Library integration, the same file, the plan's resolver test: the workflow's
+  `check config`, run as a process in a temporary checkout whose pointer is a link
+  to this repository's engineering guidance, which its `config --json` shows it
+  reads, reports no cited section unresolved or ambiguous: passed. `make
+  check-guidance`: passed. Both live among this repository's tests, reaching the
+  engine through its command (CW-r3ka), since the engineering guidance is this
+  repository's and leaves with no workflow.
+- [x] 5.2 The skills cite engineering guidance by section name, never a path or file
   name, the workflow's guidance by section, and the workflow's specification by
   requirement id; the workflow's guidance names engineering guidance in prose by
   section, with no link (D4, D6; CW-7x0z, CW-n8tr, CW-d2rw). Verify:
   `test_change_workflow_assumptions.py`, extended to fail on any path into
   `docs/guidance/` in a skill ("A skill names an engineering guidance file").
-- [ ] 5.3 `check config` reports each engineering section a shipped skill cites that
+  Done: every path into `docs/guidance/` in the eleven skills is now a citation by
+  section name, in one form the engine parses — `the engineering guidance's section
+  "Imports go at module level"`, `the workflow guidance's sections "Comment hygiene"
+  and "Import placement"` — eleven engineering sections and fourteen of the
+  workflow's, each heading one section; a file cited whole cites its title, or, for
+  `comments.md`, `documentation.md`, `testing.md`, and `dependencies-python.md`, the
+  section the sentence relies on. The orchestrating skill's paths into
+  `scripts/change_workflow/` went: the graph is cited as CW-ak1z and CW-66kx, and
+  the computation's results are the skill's own sections that route on them, since
+  no requirement words the result's shape. The seven links from the workflow's
+  guidance to engineering guidance became the sections' names in prose, with no
+  link, and its README states the rule as CW-d2rw has it. `test_change_workflow_assumptions.py` no longer admits a
+  path into the workflow's or the engineering guidance, nor the engine's package, as
+  the workflow's own: "A skill names an engineering guidance file" fails naming
+  each path, and the skills pass; and no code span of a workflow skill is the bare
+  name of a guidance file, as `test-levels.md` was, CW-7x0z's "never by a file's
+  name": passed.
+- [x] 5.3 `check config` reports each engineering section a shipped skill cites that
   no file beneath the pointer heads, and each that several sections head, naming the
   files, exiting 0 for both (CW-7x0z). Verify: library integration cases in
   `test_change_workflow_config.py` ("A user's guidance lacks a cited section", "A cited
   section name repeats").
-- [ ] 5.4 The guidance check refuses a link from workflow guidance to engineering
+  Done: `sections.py`, new: the section names a text cites of either guidance, a
+  directory's headings outside fenced blocks, and the names that head no section or
+  several. `config.cited_sections` reads the names the shipped skills and the
+  workflow's guidance cite of the engineering guidance, and `check config` prints
+  an `UNRESOLVED:` line for each no file beneath the pointer heads and an
+  `AMBIGUOUS:` line for each several sections head, naming the files and the
+  skills citing it, still exiting 0; nothing while the pointer applies none. Unit,
+  `test_change_workflow_sections.py` (one name or several, wrapped names, a quotation
+  outside a citation, fenced headings, resolution): passed. Library integration,
+  `test_change_workflow_config.py` (in-process `main` over temporary checkouts): "A
+  user's guidance lacks a cited section" and "A cited section name repeats", each
+  exiting 0 and naming the section and a skill citing it, the second both files; a
+  pointer applying none reporting nothing unresolved or ambiguous: passed.
+- [x] 5.4 The guidance check refuses a link from workflow guidance to engineering
   guidance (CW-d2rw, MCW-c4ek's link rule). Verify: `test_check_guidance.py` and `make
   check-guidance`.
-- [ ] 5.5 The distribution's test fails on a skill citing a section of the workflow's
+  Done: `check_guidance.py` refuses a link from a file tagged `workflow` to one
+  tagged `engineering`, naming both and saying the workflow's guidance names the
+  section instead; its fixture's workflow guidance names its engineering section in
+  prose; its OK and failure lines and `market-change-workflow`'s companion, which
+  lists what the check refuses, say so. Unit, `test_check_guidance.py` (the link
+  refused, the section named in prose admitted): passed. `make check-guidance` over
+  this repository: passed.
+- [x] 5.5 The distribution's test fails on a skill citing a section of the workflow's
   guidance that the installed guidance does not head (CW-lm42). Verify:
   `test_change_workflow_citations.py` (new, under `scripts/tests/`); its requirement-id half is
   section 8's.
-- [ ] 5.6 Verify the section: its suites, `make check-guidance`, and `scripts/change-workflow
+  Done: `test_change_workflow_citations.py`, new: every section of the workflow's
+  guidance a shipped skill cites heads exactly one section of the guidance the
+  distribution ships (`documents.RUNNING`), and CW-lm42's "A skill cites a section the
+  guidance lost" fails naming the skill and the section. Unit: passed.
+- [x] 5.6 Verify the section: its suites, `make check-guidance`, and `scripts/change-workflow
   run pre-commit extract-change-workflow-repository`.
   End-to-end: none exercises the workflow's tooling; none owed.
+  Done: the section's suites, each after its last edit —
+  `test_change_workflow_sections.py`, `test_change_workflow_citations.py`,
+  `test_change_workflow_config.py`, `test_change_workflow_assumptions.py`,
+  `test_check_guidance.py`, `test_check_agent_skills.py`,
+  `test_post_compaction_context.py`, `test_change_workflow_documents.py`,
+  `test_check_doc_citations.py`, `test_change_workflow_wheel.py` (`sections.py`
+  shipped through the package's `force-include`): passed. `make check-guidance`,
+  `make check-doc-citations CHANGE=extract-change-workflow-repository`, and `make
+  check-comment-hygiene`: passed. `scripts/change-workflow check config` in this
+  checkout reports no cited section unresolved. `scripts/change-workflow run
+  pre-commit`: `make lock` passed, changing no lock; `make validate-local` passed —
+  packaging, and every suite, the scripts' 3,717 passing; the default checks and the
+  strict OpenSpec validation passed; `make check-repository` failed on
+  `check-spec-index` alone, the fourteen ids 8.2 and 10.2 index.
+
+Section 5 notes (handoff):
+
+- The citation form is the interface the engine parses (`sections.py`): `the
+  engineering guidance's section "<name>"`, or `sections "<a>" and "<b>"`, and the
+  same with `workflow guidance's`. A citation written otherwise — "its section", a
+  file name — is neither reported by `check config` nor held by the distribution's
+  test; `test_change_workflow_assumptions.py` holds paths and bare file names out of
+  the skills, not the phrasing. Section 8.5's requirement-id half can sit beside
+  `unresolved_citations` in `test_change_workflow_citations.py`.
+- `check config` also reads the engineering sections the workflow's own guidance
+  cites, beyond CW-7x0z's "a shipped skill cites", since that guidance cites them the
+  same way and ships with the skills; the triage may keep it or narrow it to the
+  letter.
+- Outside the plan: the orchestrating skill no longer cites
+  `scripts/change_workflow/next_step.py` for the computation's result, which no
+  requirement words; it cites its own sections that route on each result. If the
+  result's shape is to be a public interface, the specification would need it, which
+  is section 8's or a later change's to decide. The workflow guidance's README
+  restates the layer rule as CW-d2rw has it, `market-change-workflow`'s companion
+  lists the guidance check's new refusal, and the check's own lines say so.
+- `change-workflow`'s companion, "Leaf skills from one source", still describes the
+  skills citing guidance by path; section 8.3 promotes D4 and D6 there.
+- The fresh-context check's findings fixed: the orchestrating skill citing CW-4rqr
+  for a result contract the specification does not hold; a note calling the
+  replaced links "by link in prose"; the assumptions test's stale docstring; 5.1's
+  evidence named a unit test where it is a content check, and its integration test
+  now shows the pointer read; bare guidance file names unchecked; the guidance
+  check's description and lines; two overstated 5.3 claims; citation wording;
+  stale link texts. Declined: none.
 
 ## 6. Two default checks moved into the engine, and the roles as structured output
 

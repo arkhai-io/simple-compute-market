@@ -183,13 +183,14 @@ checks your understanding here before reading anything that rests on it. Then:
    change implements, with a WHEN/THEN scenario, and does the delta modify every
    existing requirement its behavior contradicts rather than only adding new ones?
    Does any open question have its
-   answer prescribed elsewhere (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`)?
+   answer prescribed elsewhere (the workflow guidance's section "Open questions and
+   prescribed tasks")?
    Does every cited path resolve?
 5. **`scope`** — Has the scope grown beyond the original proposal? Growth that is a
    small, understood defect fix, or unification the architecture favours, stays;
    work that is large, or not understood well enough to fix without a design of its
    own, should be its own change
-   (`docs/guidance/workflow/changes.md#defects-found-during-a-change`). Does anything give the
+   (the workflow guidance's section "Defects found during a change"). Does anything give the
    change a prerequisite it could close out without?
 6. **`readiness`** — Are there related changes that must land first? Is the design
    ready for planning? A change returned to design keeps the `tasks.md` it was
@@ -207,8 +208,9 @@ checks your understanding here before reading anything that rests on it. Then:
    test coverage, state the level it actually operates at — unit against a mocked
    boundary, integration against a real in-process application, or something that
    needs a live multi-service environment — using the level definitions and
-   coverage jurisdiction of `docs/guidance/engineering/test-levels.md`, and the
-   typed-client rule of `integration-tests.md` beside it. Does each integration
+   coverage jurisdiction of the engineering guidance's section "Test levels", and its
+   typed-client rule, the engineering guidance's section "No raw calls: the typed
+   client is the contract". Does each integration
    test exercise the real typed client, or build requests by hand in a way that
    could silently diverge from what the client sends? What does the validation report show? A coverage gap you
    notice while answering — a behaviour the change claims that no test proves at
@@ -217,17 +219,18 @@ checks your understanding here before reading anything that rests on it. Then:
 3. **`documentation`** — Does the code and documentation comply with the
    repository's guidance, the documents `change-workflow config load review`
    prints: comments describing the current system
-   (`docs/guidance/engineering/comments.md`) and naming no change
-   (`docs/guidance/workflow/change-references.md`), permanent documents describing
-   current state (`docs/guidance/engineering/documentation.md`), promotion where the
-   change says it happened?
+   (the engineering guidance's section "Comments describe the current system") and
+   naming no change (the workflow guidance's section "Change references"), permanent
+   documents describing current state (the engineering guidance's section
+   "Permanent documents describe the current state"), promotion where the change says
+   it happened?
 4. **`architecture`** — Is the code organized by the layers the repository's
    architecture document draws? Is each behaviour in the layer it belongs to, and
    does a higher layer compose what a lower one offers rather than encode it again?
 5. **`consistency`** — Does the implementation do what the design and delta specs
    say, and only that, beyond a small, understood defect fixed outside the plan and
    recorded in the task notes or a triage record
-   (`docs/guidance/workflow/changes.md#defects-found-during-a-change`)? An unrecorded one is a
+   (the workflow guidance's section "Defects found during a change")? An unrecorded one is a
    finding.
 
 ### Pre-closeout review
@@ -238,18 +241,18 @@ checks your understanding here before reading anything that rests on it. Then:
 2. **`scope`** — What scope crept in during implementation? Review anything new under
    the implementation review's questions. A small, understood defect fixed in place
    belongs in the change; large or vague work belongs in its own change or an
-   unowned gap (`docs/guidance/workflow/changes.md#defects-found-during-a-change`). Changes are
+   unowned gap (the workflow guidance's section "Defects found during a change"). Changes are
    rarely split at this stage, so say what the new scope needs rather than only that
    it exists.
 3. **`documentation`** — Are the change's comments and imports as closeout will
    confirm them? Closeout edits no code, so this is the last review that can ask
    for a code change. Read the comments the change added for any naming the review,
    migration, or task that introduced them, or describing history rather than the
-   current system (`docs/guidance/engineering/comments.md`;
-   `docs/guidance/workflow/change-references.md`); and check each import the change
-   added or touched that is local rather than at module level for a recorded reason
-   to stay local (`docs/guidance/engineering/dependencies-python.md`, "Imports go at
-   module level"; `docs/guidance/workflow/closeout.md`, "Comment hygiene" and
+   current system (the engineering guidance's section "Comments describe the
+   current system"; the workflow guidance's section "Change references"); and check
+   each import the change added or touched that is local rather than at module level
+   for a recorded reason to stay local (the engineering guidance's section "Imports
+   go at module level"; the workflow guidance's sections "Comment hygiene" and
    "Import placement").
 4. **`readiness`** — Is the change ready for promotion and closeout?
 5. **`consistency`**, after the merge before closeout — when the workflow log's last
@@ -269,7 +272,7 @@ Closeout has already archived the change: its spec deltas are merged into
 specifications as they now stand, not the deltas.
 
 1. **`documentation`** — Does the change comply with the documentation guidance?
-   Check each part of `docs/guidance/workflow/closeout.md`, and the repository's own
+   Check each part of the workflow guidance's section "Closeout", and the repository's own
    parts, in the section the root guidance names, against the
    files and the closeout task's recorded evidence, and the design-promotion record
    against the permanent documents it names. Did the archive's merge leave each

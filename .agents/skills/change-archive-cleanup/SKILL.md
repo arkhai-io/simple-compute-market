@@ -234,7 +234,7 @@ If any check fails, stop and say why.
 
 ## 2. Load the context
 
-Read in full: `docs/guidance/workflow/closeout.md#campaign-index-currency`, which
+Read in full: the workflow guidance's section "Campaign index currency", which
 states the dependent rules, and `openspec/changes/README.md` — its legend, the change's row
 and campaign, and every row and dependency graph that names the change. From the
 archived change read `proposal.md`, `design.md`'s design-promotion record,
@@ -301,7 +301,7 @@ Draft, for the owner to use when the branch is merged:
 
 Both are as public as the code, so whatever the repository refuses to hold in its
 code it refuses in every word of them
-(`docs/guidance/engineering/repository-content.md`, in the case the repository's
+(the engineering guidance's section "Repository content", in the case the repository's
 root guidance selects). When the branch carries another change that is not archived,
 say so: the pull request would merge that change too, so the owner decides when to
 open it, and the drafts cover this change only.

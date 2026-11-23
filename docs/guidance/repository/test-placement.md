@@ -53,7 +53,7 @@ that fails on a skip, as the native Ansible checks are
 ## Contract fixtures
 
 Contract fixtures follow [`contract-fixtures.md`](../engineering/contract-fixtures.md),
-placed as [`testing-python.md`, "Contract fixtures"](../engineering/testing-python.md#contract-fixtures)
+placed as [`testing-python.md`, "Contract fixture modules"](../engineering/testing-python.md#contract-fixture-modules)
 says. A same-package fixture here is
 `domains/vms/storefront/tests/fixtures/publication_cycle.py`; a cross-package one
 is `core/storefront-client/src/storefront_client/fixtures/escrow.py`, imported as

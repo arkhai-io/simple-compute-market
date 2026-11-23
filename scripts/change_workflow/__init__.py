@@ -88,6 +88,8 @@ siblings by relative import:
   checkout's local configuration where it has none; and the check that an
   installed engine's skills are its own version's, which every other subcommand
   makes;
+- `sections` — the guidance a skill cites by section name, and whether each name
+  heads exactly one section beneath a guidance directory;
 - `skills` — the check that every agent skill is loaded from its one source: the
   workflow's installed, the repository's linked from its shared source;
 - `hook` — what a Claude Code session re-reads after its context is compacted;

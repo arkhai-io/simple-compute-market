@@ -78,15 +78,18 @@ directory holding it, which would hide the private `/tmp` every step writes; and
 writable path for the review.
 
 `config` lists every field and how it resolved, each kind's guide among them, and
-each step's resolved scope, every path with its source; `config load <step>` the
+each step's resolved scope, every path with its source; `check config` reports, and
+does not refuse, each local field the checkout lacks, and each engineering section a
+shipped skill or the workflow's guidance cites that the guidance beneath the pointer
+does not resolve (`sections`); `config load <step>` the
 documents a step's skill reads: the engineering guidance beneath the pointer, the
 workflow's own guidance, which the distribution ships (`documents`), then
 `load.common` and `load.<step>`, each document once.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
 CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-t3ev, CW-g1gn, CW-r5qk, CW-k7gd, CW-h3ks,
-CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, CW-r8fb, CW-h2zt, CW-f8yy, CW-4pm4, and
-CW-hu0z.
+CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, CW-r8fb, CW-h2zt, CW-f8yy, CW-4pm4,
+CW-hu0z, and CW-7x0z.
 """
 
 from __future__ import annotations
@@ -104,6 +107,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
 from . import documents as distribution
+from . import sections
 from .common import ORCHESTRATOR, StepError, repository_root
 from .graph import STEPS
 from .adapters import ADAPTERS, HARNESSES
@@ -1247,6 +1251,37 @@ def resolution_lines(configuration: Configuration, resolved: Mapping[str, Scope]
     return lines
 
 
+def cited_sections(configuration: Configuration,
+                   shipped: distribution.Distribution) -> list[str]:
+    """`check config`'s report of the engineering sections the `shipped` skills and
+    workflow guidance cite that the guidance beneath the pointer does not resolve:
+    each no file heads, and each several sections head, naming the files. A report,
+    never a refusal: a user's guidance is held to no repository's headings. Nothing
+    while the pointer names no directory."""
+    engineering = configuration.engineering
+    if engineering is None or engineering.path is None:
+        return []
+    texts = {name: (source / "SKILL.md").read_text("utf-8")
+             for name, source in shipped.skills().items()}
+    guidance = shipped.path(distribution.GUIDANCE)
+    texts.update({f"the workflow guidance's {path.relative_to(guidance).as_posix()}":
+                  path.read_text("utf-8") for path in sorted(guidance.rglob("*.md"))})
+    citing = sections.citing(texts, sections.ENGINEERING)
+    lines = []
+    for name, files in sections.unresolved(citing, sections.heads(engineering.path)).items():
+        by = ", ".join(sorted(citing[name]))
+        if files:
+            lines.append(f'AMBIGUOUS: the engineering guidance\'s section "{name}", which '
+                         f"{by} cites, heads a section in each of "
+                         + ", ".join(f"{engineering.entry.rstrip('/')}/{path.as_posix()}"
+                                     for path in files)
+                         + ", so the citation names none of them")
+        else:
+            lines.append(f'UNRESOLVED: the engineering guidance\'s section "{name}", which '
+                         f"{by} cites, heads no file beneath {engineering.entry}")
+    return lines
+
+
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     """`config [--json]`, `config load <step>` or `config load common`, and `check
     config`, as `cli` hands them on."""
@@ -1284,6 +1319,8 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
                      else "does not exist, so lacks ")
                   + ", ".join(absent) + "; a step needing one refuses until "
                   "`change-workflow install` writes the file or they are declared there.")
+        for line in cited_sections(configuration, distribution.RUNNING):
+            print(line)
     elif args.action == "load":
         for document in documents:
             print(document)

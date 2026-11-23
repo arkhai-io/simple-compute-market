@@ -330,8 +330,8 @@ For each finding, open what it cites and decide:
   `fix` when its fix is understood and small beside the change, recorded in the
   task notes or the triage record; one that is large, or not understood well enough
   to fix without a design of its own, is `none`, recorded where deferred work goes
-  (`docs/guidance/workflow/working-model.md#deferred-work`) — its own change, or an
-  unowned gap (`docs/guidance/workflow/changes.md#defects-found-during-a-change`).
+  (the workflow guidance's section "Deferred work") — its own change, or an
+  unowned gap (the workflow guidance's section "Defects found during a change").
 - **Section:** the `tasks.md` section the finding concerns, when it concerns one.
 - **Default acceptance:** whether the finding is accepted by default or discussed.
   It is accepted by default when every condition of the default rule holds
@@ -570,7 +570,7 @@ acceptances' outcomes are carried out with the rest.
   replacing, with the finding cited in its note.
 - **none:** nothing to carry out, except for a large or vague out-of-scope defect
   (step 2): record it where deferred work goes
-  (`docs/guidance/workflow/working-model.md#deferred-work`), and name where in
+  (the workflow guidance's section "Deferred work"), and name where in
   the finding's `Result`.
 - **fix, at a closeout triage:** the change is archived, and its code was reviewed
   and validated before closeout, so a closeout triage makes documentation fixes
@@ -614,7 +614,7 @@ acceptances' outcomes are carried out with the rest.
   fresh-context compliance check of the diff against the `HEAD` recorded at the
   start. In the fix's task
   note, record each check as `change-implement` records a section's evidence: each
-  suite with its level as `docs/guidance/engineering/test-levels.md` defines them
+  suite with its level as the engineering guidance's section "Test levels" defines them
   and its result, each hook's
   closing line, and what the fresh-context check found and what was fixed or declined —
   so the next review and validation can see what the fix was proven by.

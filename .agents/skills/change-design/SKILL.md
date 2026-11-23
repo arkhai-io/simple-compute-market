@@ -129,7 +129,7 @@ places that matter, so read all of this first, in full:
   Fetch the remote first, then read the record where the repository's guidance
   names it: the compatibility the design owes is measured against what it says
   was deployed, not against the branch the change lands on
-  (`docs/guidance/engineering/versioning.md#compatibility-is-owed-to-what-has-been-deployed`).
+  (the engineering guidance's section "Compatibility is owed to what has been deployed").
   Where the guidance names no record, or the record is unclear, ask the owner for
   the release policy before designing or leaving out any migration or
   compatibility path.
@@ -222,8 +222,8 @@ of the owner's attention:
 - **Judgement** — the options trade real values against each other and no
   written principle or precedent picks one. Present these one at a time, in full.
 - **Consequence** — the answer follows from a decision already settled, or from
-  a principle in the repository's architecture document or
-  `docs/guidance/engineering/`. Name what it follows from.
+  a principle in the repository's architecture document or the engineering
+  guidance. Name what it follows from.
 - **Convention** — the answer follows from how the nearest existing precedent
   does the same thing (a sibling hint, library, or configuration key). Cite the
   precedent.
@@ -235,7 +235,7 @@ so the owner can confirm the batch or pull one out for discussion.
 Never ask the owner where documentation should live, at which test level a
 behaviour is proven, or which evidence a section records: state each as a
 provisional answer — the documentation destination in `proposal.md`, the test
-level from `docs/guidance/engineering/test-levels.md` — for planning and review to
+level from the engineering guidance's section "Test levels" — for planning and review to
 confirm or move.
 
 ### Do not argue from absence of a caller alone
@@ -286,8 +286,8 @@ rationale.
 When the owner states a principle that settles a decision, apply it to the
 remaining open decisions before presenting them, and say where it applied.
 Principles the owner states that no document records are candidates for the
-repository's architecture document, or for `docs/guidance/engineering/` where one holds in any
-repository; list them for the owner when the design is settled.
+repository's architecture document, or for the engineering guidance where one holds
+in any repository; list them for the owner when the design is settled.
 
 When the owner's input changes or reverses your recommendation, append one line
 to the change's `interventions.jsonl` with the decision as the finding:
@@ -351,15 +351,14 @@ When every decision is settled, and before writing anything:
   decisions added it, and whether any of it gives the change a new prerequisite
   or a second domain, subsystem, or acceptance boundary. Ask the owner
   explicitly whether any of it should be split into its own change, as
-  `docs/guidance/workflow/changes.md#defects-found-during-a-change` frames it: a small,
+  the workflow guidance's section "Defects found during a change" frames it: a small,
   understood defect fix, or unification the architecture favours, belongs in the
   change; work that is large, or not understood well enough to fix without a
   design of its own, is split. A change that can close out on its own is
   preferred to one waiting on another.
 - **List the principles the owner stated** that no permanent document records,
-  for promotion to the repository's architecture document, or to
-  `docs/guidance/engineering/` where one
-  holds in any repository.
+  for promotion to the repository's architecture document, or to the engineering
+  guidance where one holds in any repository.
 - **Settle the implementation cadence** with the owner, as a decision like any
   other: how many rounds implement the work, what each round covers before its
   review, and how many sessions implement each — in terms of the work, since the
@@ -383,7 +382,7 @@ Only when the owner says the design is settled:
   change's implementation cadence.
 - Keep under `## Open Questions` only what is genuinely deferred, each with what
   would trigger revisiting it. A question may not stay open while a task
-  prescribes its answer (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`).
+  prescribes its answer (the workflow guidance's section "Open questions and prescribed tasks").
 - Amend `proposal.md` when scope, non-goals, capabilities, or impact moved, and
   keep its `## Permanent documentation impact` and `### Knowledge to promote`
   naming the permanent destination of every material decision: a bullet starting

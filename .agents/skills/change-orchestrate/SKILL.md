@@ -36,8 +36,9 @@ the owner, who may interrupt it or revisit a finished triage through you
 ## Recover from the files
 
 On every start and after compaction, read the documents `change-workflow
-config load common` prints — the repository's guidance every session reads — this
-skill, and the result contract in `scripts/change_workflow/next_step.py`. Run:
+config load common` prints — the repository's guidance every session reads — and
+this skill, whose "Where the change is worked" and "Run the computed step" give each
+result the computation prints and what you do with it (CW-4rqr). Run:
 
 ```text
 change-workflow next <change>
@@ -71,8 +72,8 @@ only when it decides no finding, answers no design question, changes no status,
 and directs no step; record the decision and evidence through `note`. Otherwise
 bring the evidence and the options to the owner in prose and wait. Never silently
 replace the computation with your own transition table: the workflow's graph is
-the table in `scripts/change_workflow/graph.py`, which the `change-workflow`
-architecture's diagram draws.
+one table in the engine's code (CW-ak1z), which the diagram of the workflow's
+companion draws (CW-66kx).
 
 ### A change not yet converted
 

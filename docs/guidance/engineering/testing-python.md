@@ -37,7 +37,7 @@ Drive the real application with `httpx.AsyncClient` over `ASGITransport`, inject
 through the service's canonical typed-client constructor
 (`FooClient(transport=...)`). Override the dependency container's provider for the
 one collaborator being doubled before the test, and restore it after
-([Integration tests](integration-tests.md)).
+([Application integration tests](integration-tests.md)).
 
 ## Waiting on a background job
 
@@ -57,7 +57,7 @@ only at its next poll, is the one standing exception to waiting on events: run
 `socketserver`'s `serve_forever` with `poll_interval=0.01`, and stop a loopback
 server on an event rather than at its library's poll.
 
-## Contract fixtures
+## Contract fixture modules
 
 A contract fixture's builder and validator are `build_*()` and `validate_*()`
 ([Contract fixtures](contract-fixtures.md)). For a boundary inside one package they

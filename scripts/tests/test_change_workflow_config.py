@@ -1622,3 +1622,62 @@ def test_a_complete_local_configuration_is_reported_whole(
     assert main(["check", "config"], root=tmp_path) == 0
     assert capsys.readouterr().out == "OK: .agents/workflow.toml passes its check.\n"
 
+
+# The engineering sections the shipped skills cite, reported against the pointer.
+
+def _guided(root: Path, files: dict[str, str]) -> Path:
+    """`root`, a Git checkout configured, its local pointer naming `guides/`, which
+    holds `files`, each path's text."""
+    _checkout(root)
+    configured(root, CONFIGURED, local='[guidance]\nengineering = { path = "guides/" }\n'
+                                       + MODELS)
+    for name, text in files.items():
+        (root / "guides" / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / "guides" / name).write_text(text, "utf-8")
+    return root
+
+
+def test_a_users_guidance_lacks_a_cited_section(tmp_path: Path,
+                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-7x0z's scenario: a section a skill cites that no file beneath the pointer
+    heads is reported, naming the skills citing it, and `check config` exits 0."""
+    _guided(tmp_path, {"rules.md": "# Our rules\n\n## Citations resolve\n"})
+
+    assert main(["check", "config"], root=tmp_path) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "OK: .agents/workflow.toml passes its check."
+    (imports,) = [line for line in lines if '"Imports go at module level"' in line]
+    assert imports.startswith('UNRESOLVED: the engineering guidance\'s section "Imports go at '
+                              'module level", which ')
+    assert "change-implement" in imports
+    assert imports.endswith(" cites, heads no file beneath guides/")
+    assert not any('"Citations resolve"' in line for line in lines)
+
+
+def test_a_cited_section_name_repeats(tmp_path: Path,
+                                      capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-7x0z's scenario: a cited name two files beneath the pointer each head does
+    not resolve, and is reported naming both files; `check config` exits 0."""
+    _guided(tmp_path, {"testing.md": "# Testing\n\n## Test levels\n",
+                       "levels/test-levels.md": "# Test levels\n"})
+
+    assert main(["check", "config"], root=tmp_path) == 0
+
+    (levels,) = [line for line in capsys.readouterr().out.splitlines()
+                 if '"Test levels"' in line]
+    assert levels.startswith('AMBIGUOUS: the engineering guidance\'s section "Test levels", '
+                             "which ")
+    assert "change-implement" in levels
+    assert levels.endswith(" cites, heads a section in each of guides/levels/test-levels.md, "
+                           "guides/testing.md, so the citation names none of them")
+
+
+def test_a_pointer_applying_none_reports_no_cited_section(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _checkout(tmp_path)
+    configured(tmp_path, CONFIGURED)
+
+    assert main(["check", "config"], root=tmp_path) == 0
+    shown = capsys.readouterr().out
+    assert "UNRESOLVED" not in shown and "AMBIGUOUS" not in shown

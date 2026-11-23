@@ -354,7 +354,9 @@ check-spec-index`), and holds six of the rules beside them (MCW-c4ek):
   carries one layer tag and other tags its layer's vocabulary or a lower one's
   defines, every vocabulary row is carried, every vocabulary and exception table is
   well formed and every exception row cites a guidance file and names `selects` or
-  `overrides`, no guidance file links to one of a higher layer, and every citation of
+  `overrides`, no guidance file links to one of a higher layer, the workflow's
+  guidance links to no engineering guidance, naming the section it relies on
+  instead, and every citation of
   a guidance file in any tracked Markdown file outside the archived changes and
   `docs/prompts/` names an anchor the file has.
 

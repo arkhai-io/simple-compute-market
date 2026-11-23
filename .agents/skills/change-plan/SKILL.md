@@ -148,7 +148,7 @@ you have seen it before —
 the files are what the implementer will see:
 
 - the change's `proposal.md`, `design.md`, `specs/`, and current `tasks.md`;
-- `docs/guidance/workflow/closeout.md`, and the repository's own closeout parts, in
+- the workflow guidance's section "Closeout", and the repository's own closeout parts, in
   the section the root guidance names;
 - `change-workflow openspec instructions tasks --change <change>` for the
   tasks template and the repository's rules for tasks, which OpenSpec prints with
@@ -233,7 +233,7 @@ complete and the next-step computation does not name it again.
   planning reports its mapping onto the sections in its outcome (section 7),
   never in the plan, which is agnostic of whether a coding harness implements it;
 - ends at a verification point — the focused suites that prove it, each named with
-  its level as `docs/guidance/engineering/test-levels.md` defines them (unit,
+  its level as the engineering guidance's section "Test levels" defines them (unit,
   library integration, application integration through the typed client, system),
   at the lowest level that can prove the behavior; and the repository's functional
   checks, which `change-workflow run pre-commit` runs before a commit
@@ -273,9 +273,9 @@ and say so in the report; the owner is asked for each round as it starts.
 
 **Every task is traceable.** Each names what it answers to — a design decision, a
 delta requirement, or a repository obligation such as the verification, packaging,
-promotion, and closeout work the workflow's guidance (`docs/guidance/workflow/changes.md`,
-`docs/guidance/workflow/closeout.md`), the repository's guidance, and its rules for
-tasks require, cited — and the evidence that proves it. A feature task with nothing to trace to is
+promotion, and closeout work the workflow's guidance (the workflow guidance's
+sections "A change's documents" and "Closeout"), the repository's guidance, and its
+rules for tasks require, cited — and the evidence that proves it. A feature task with nothing to trace to is
 either missing from the design or not part of this change.
 
 **Give what no step writes to the orchestrator.** No step's sandbox writes a
@@ -292,7 +292,7 @@ or companion, and its architecture document where the design says so.
 Provisional destinations the design delegated to planning are settled here; tell
 the owner which you moved and why.
 
-**End with the closeout task**, its parts from `docs/guidance/workflow/closeout.md`
+**End with the closeout task**, its parts from the workflow guidance's section "Closeout"
 in that order, the repository's own parts, in the section the root guidance names,
 at the position it gives them, each named by its heading and made specific to this
 change:
@@ -323,7 +323,7 @@ Before presenting it:
   task, and every task maps back to a decision, a requirement, or a cited
   repository obligation;
 - no open question has its answer prescribed by a task
-  (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`);
+  (the workflow guidance's section "Open questions and prescribed tasks");
 - every section has a verification point, its covering end-to-end scenarios or a
   statement that none covers it, and a size its verification point can prove;
 - `change-workflow run pre-commit <change>` reports no failure but its

@@ -235,31 +235,32 @@ Work through the section's tasks in order. For each:
   change's stated scope, and recorded in the section's notes as outside the plan,
   so the round's review and the owner's reading see it; one that is large, or not
   understood well enough to fix without a design of its own, is recorded where
-  deferred work goes (`docs/guidance/workflow/working-model.md#deferred-work`,
-  `docs/guidance/workflow/changes.md#defects-found-during-a-change`).
+  deferred work goes (the workflow guidance's sections "Deferred work" and "Defects
+  found during a change").
 - A task the plan gives the orchestrator — an edit of a protected path, which no
   step writes: the harness's settings, the workflow's configuration, or one the
   repository protects, as `change-workflow config --json` lists them — is
   never attempted: check that its edit is in the worktree and commit it with the
   section. When it is missing, stop and name the edit.
-- Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
-  `test-levels.md`), through the seams and injected dependencies the code already
-  offers rather than brute-force patching (`test-seams.md`).
+- Prove it at the lowest test level that can (the engineering guidance's sections
+  "Where a test goes" and "Test levels"), through the seams and injected
+  dependencies the code already offers rather than brute-force patching (the
+  engineering guidance's section "Test seams").
 - Respect the dependency layers the repository's guidance draws, and take internal
   dependencies as it says; `TYPE_CHECKING` imports count
-  (`docs/guidance/engineering/dependencies-python.md`).
+  (the engineering guidance's section "Every import form counts").
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
-  what the code used to be (`docs/guidance/engineering/comments.md`;
-  `docs/guidance/workflow/change-references.md`).
+  what the code used to be (the engineering guidance's section "Comments describe
+  the current system"; the workflow guidance's section "Change references").
 - Imports the section adds go at module level, unless one has a reason to stay
   local that you verified by attempting the move — a circular import that fails, or
   a deliberate lazy load — and recorded beside it
-  (`docs/guidance/engineering/dependencies-python.md`, "Imports go at module level";
-  `docs/guidance/workflow/closeout.md#import-placement`). Closeout only confirms
+  (the engineering guidance's section "Imports go at module level"; the workflow
+  guidance's section "Import placement"). Closeout only confirms
   comments and imports; it never edits code, so this is where they are done.
 - Mark the task `[x]` when its evidence passes, with a short note: each suite, its
-  level as `docs/guidance/engineering/test-levels.md` defines them — unit, library
+  level as the engineering guidance's section "Test levels" defines them — unit, library
   integration (a real component against real storage, no application),
   application integration (the running
   application through its typed client), or system — and its result, and anything

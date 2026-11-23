@@ -49,7 +49,7 @@ triage round fixes them. At closeout, run the repository's comment check. It
 catches change ids, section numbers, and task numbers mechanically, though not fuzzier
 violations of the two rules this part confirms — the engineering rule that comments
 describe the current system
-([Comments](../engineering/comments.md#comments-describe-the-current-system)), and the
+(the engineering guidance's section "Comments describe the current system"), and the
 workflow's rule that code names no change, task, or change document
 ([Change references](change-references.md)) — such as a comment naming the review or
 migration that introduced the code. If a check reports anything, or a comment the
@@ -62,7 +62,7 @@ reads only documentation, covers everything closeout changed.
 Confirm it; do not do it here, for the same reason as comment hygiene. During
 implementation, before the pre-closeout review, each section places the imports it
 added or touched as the import rule says
-([Imports go at module level](../engineering/dependencies-python.md#imports-go-at-module-level)),
+(the engineering guidance's section "Imports go at module level"),
 checking its own diff
 rather than every pre-existing local import in a file it touched. At closeout, check
 the imports the change added; one that should move returns the change to
@@ -75,7 +75,7 @@ Re-check the change's own accepted decisions against the workflow's placement ru
 table directly — do not defer this to an external reviewer noticing it first. Confirm
 too that each permanent document the change wrote describes the current state,
 declaratively and with no wording relative to the change
-([Permanent documents describe the current state](../engineering/documentation.md#permanent-documents-describe-the-current-state)).
+(the engineering guidance's section "Permanent documents describe the current state").
 
 ## Narrative compression
 
@@ -102,7 +102,7 @@ unchanged records that disposition explicitly rather than omitting the step. A
 change that creates, renames, supersedes, or removes a change directory reconciles
 the index's links in the same step: a link to a directory that does not exist is a
 blocking defect, as an unresolvable citation always is
-([Citations resolve](../engineering/documentation.md#citations-resolve)), not a stale
+(the engineering guidance's section "Citations resolve"), not a stale
 link to fix later. The workflow's index check, `change-workflow check index`, holds each
 row — its cells, its link, its status, and its dependencies, each listed and not
 archived — and that every active change has exactly one (`change-workflow`'s
@@ -185,7 +185,7 @@ touched no guidance records that.
 Run the repository's citation check, scoped to the change, after promotion, so the
 documents it wrote are there to resolve, and resolve every match: a citation whose
 target does not resolve is a blocking defect, not a stale link
-([Citations resolve](../engineering/documentation.md#citations-resolve)). Then validate the
+(the engineering guidance's section "Citations resolve"). Then validate the
 change strictly, `change-workflow openspec validate <change> --strict`, the
 last check before the archive. A change with no spec deltas records that instead,
 since the validator rejects a change with none, and archives with `--skip-specs`.

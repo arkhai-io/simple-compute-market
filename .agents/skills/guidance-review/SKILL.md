@@ -33,7 +33,7 @@ of their own. Apart from that, the one file it writes is the period ledger's lin
 
 Everything you write that the repository keeps — a proposal, its design, a summary
 the owner commits — is as public as the repository: its root guidance says which case
-of `docs/guidance/engineering/repository-content.md` it selects, and in a public
+of the engineering guidance's section "Repository content" it selects, and in a public
 repository nothing private reaches it. Only
 aggregates — counts, rates — and the principles drawn from them reach it: no
 correction's wording, and no private name, path, identifier, or log. The period ledger
@@ -123,7 +123,7 @@ the ledger for comparison:
   correction. Note waivers the owner gave that no step recommended, by reason.
 - **Terms the owner asked about.** Each word or mechanism the owner asked an agent to
   explain, with how often, and whether its home defines it — the homes
-  `docs/guidance/workflow/terms.md` names, the repository's cross-subsystem terms in
+  the workflow guidance's section "Where terms live" names, the repository's cross-subsystem terms in
   the home its root guidance names. An undefined term the owner asked about is a
   candidate entry,
   unless the change that met it added the entry then.
@@ -172,12 +172,12 @@ did not hold on the later ones when Rule E was chosen — about 2% rose to 10–
 widening that holds only on the data it was drawn from is no evidence.
 
 Ask in prose, each option and your recommendation written out
-(`docs/guidance/workflow/working-model.md#asking-the-owner`). The owner may pick, narrow, reword, or pick nothing.
+(the workflow guidance's section "Asking the owner"). The owner may pick, narrow, reword, or pick nothing.
 
 ## 5. Write the proposal, on the owner's word
 
 When the owner picks edits and asks for a change, write its `proposal.md` as
-`docs/guidance/workflow/changes.md` asks of a proposal: why — the period it covered and the figures
+the workflow guidance's section "A change's documents" asks of a proposal: why — the period it covered and the figures
 behind each edit, in aggregate — what changes, and its permanent documentation impact.
 Write it, with its `ready for design` row in the change index, in a worktree on a new
 branch from the branch the workspace has checked out, as its remote holds it, as
