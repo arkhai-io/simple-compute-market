@@ -119,8 +119,10 @@ their tests.
   section 8 writes them) and `check-doc-citations` (the change's documents cite
   `.agents/workflow.local.template.toml` and `.agents/workflow.local.toml`, which
   section 2 creates and ignores, and `scripts/tests/test_change_workflow_install.py`
-  and `scripts/tests/test_change_workflow_citations.py`, which sections 3 and 5
-  create).
+  and `test_change_workflow_citations.py`, which sections 3 and 5
+  create). Correction: the index check names fourteen ids, the `market-change-workflow`
+  delta's two among them, which 10.2 indexes; the citation of a test file a later
+  section creates is now by its bare name, which the citations check does not resolve.
 
 Section 1 notes (handoff):
 
@@ -256,10 +258,15 @@ and their tests.
   configuration with `[models]` removed and `load.common`'s `docs/guidance/` read as
   `docs/guidance/repository/` (section 4.1's edit), is read whole, its pointer
   resolved and every step's and the orchestrator's model declared: passed.
-- [ ] 2.7 Verify the section: its suites, and `scripts/change-workflow run
+- [x] 2.7 Verify the section: its suites, and `scripts/change-workflow run
   pre-commit extract-change-workflow-repository` with this repository's configuration
   unchanged, which still passes.
   End-to-end: none exercises the workflow's tooling; none owed.
+  Checked by a later session on the evidence below and in 3.5's note. Of the two
+  `check-repository` failures, the citations of files later sections create are now
+  cited by their bare names; the index check still fails on the fourteen ids the
+  change's deltas add, which 8.2 and 10.2 index, the gap
+  `pass-checks-at-every-commit` owns, as 1.6 was checked through it.
   Done: the section's suites — `test_change_workflow_config.py`,
   `test_change_workflow_command.py`, `test_post_compaction_context.py`,
   `test_change_clone.py`, `test_change_workflow_scope.py`,
@@ -270,7 +277,7 @@ and their tests.
   check-repository` failed only on the two checks that fail at the plan's commit:
   `check-spec-index` (section 8's index entries) and `check-doc-citations`, now
   naming only `scripts/tests/test_change_workflow_install.py` and
-  `scripts/tests/test_change_workflow_citations.py`, which sections 3 and 5 create.
+  `test_change_workflow_citations.py`, which sections 3 and 5 create.
 
 Section 2 notes (handoff):
 
@@ -398,7 +405,7 @@ their tests.
   asked no link): passed. CW-d8de's "An installed skill is stale" through the
   command is 3.3's `check skills` case: passed. `make check-agent-skills` against the
   tracked links: passed.
-- [ ] 3.5 Verify the section: its suites, with the repository's existing
+- [x] 3.5 Verify the section: its suites, with the repository's existing
   `make check-agent-skills` still passing against the tracked links, which section 4
   removes; and `scripts/change-workflow run pre-commit
   extract-change-workflow-repository`.
@@ -413,8 +420,26 @@ their tests.
   validate-local` passed (packaging and every suite); the default checks and strict
   OpenSpec validation passed; `make check-repository` failed only on
   `check-spec-index` (section 8's index entries) and `check-doc-citations`, now
-  naming `scripts/tests/test_change_workflow_citations.py` alone, which section 5
+  naming `test_change_workflow_citations.py` alone, which section 5
   creates.
+  Re-verified by a fresh session on `c1d30dd59` with 4.1's edits uncommitted beside
+  it (below), the tree of that pre-commit run
+  (`2afff8a8`, `make validate-local` exit 0 in the change's log) differing from the
+  commit's only in `tasks.md`: sections 1–3's suites together — the twenty files
+  named in 1.2–1.6, 2.7, and this task — 1,469 passed, none skipped, the sandbox
+  tests run; `make check-agent-skills`: passed; `make check-repository` failing on
+  the same two checks alone, until the citation of section 5's test file became its
+  bare name, as 7.1 and 8.5 cite it, leaving the index check alone failing.
+  `scripts/change-workflow run pre-commit` then: `make lock` passed; `make
+  validate-local` ran packaging and every suite to the end, each passing (3,684
+  scripts' tests among them, no failure in its log), and was marked failed only by
+  its tree guard, since `tasks.md` was edited during the run; the default checks and
+  strict OpenSpec validation passed; `make check-repository` failed on the index
+  check alone. These runs had 4.1's uncommitted edits of
+  `.agents/workflow.toml` and `.claude/settings.json` in the worktree, with the
+  local file `change-workflow install` wrote, so the configuration-unchanged run
+  remains the earlier one; the suites passing under both shapes is what section 2's
+  handoff expects.
 
 Section 3 notes (handoff):
 
@@ -542,7 +567,7 @@ and every citation of the renamed headings, `scripts/change_workflow/config.py`,
   check-guidance`.
 - [ ] 5.5 The distribution's test fails on a skill citing a section of the workflow's
   guidance that the installed guidance does not head (CW-lm42). Verify:
-  `scripts/tests/test_change_workflow_citations.py` (new); its requirement-id half is
+  `test_change_workflow_citations.py` (new, under `scripts/tests/`); its requirement-id half is
   section 8's.
 - [ ] 5.6 Verify the section: its suites, `make check-guidance`, and `scripts/change-workflow
   run pre-commit extract-change-workflow-repository`.
