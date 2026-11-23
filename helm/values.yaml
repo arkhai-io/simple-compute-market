@@ -409,10 +409,11 @@ integrationTests:
 
 # ---------------------------------------------------------------------------
 # e2e-tests subchart
-# Full buyer-seller deal lifecycle test suite. Dev / CI only — disabled by
-# default. Enable with --set e2e-tests.enabled=true or in a CI values overlay.
-# Credentials default to the deterministic Anvil test keys; override for other
-# environments.
+# Full buyer-seller deal lifecycle test suite, for development and CI. These
+# defaults enable it; a release that runs no tests sets e2e-tests.enabled=false,
+# as bare-metal-release-values.yaml does. Its credentials come only from
+# pre-existing Secrets, the one secretName names and the buyer's
+# buyer.credentialSecret: the chart carries no key value.
 # ---------------------------------------------------------------------------
 e2e-tests:
   enabled: true

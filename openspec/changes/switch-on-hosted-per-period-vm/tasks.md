@@ -1964,7 +1964,7 @@ closeout's comment hygiene (`docs/guidance/workflow/closeout.md`, "Comment hygie
 which fails the closing checks until it passes. Touches
 `scripts/tests/test_change_next_step.py` and `helm/values.yaml`, comments only.
 
-- [ ] 13a.1 Reword the comment at `scripts/tests/test_change_next_step.py:1265–1266`
+- [x] 13a.1 Reword the comment at `scripts/tests/test_change_next_step.py:1265–1266`
       so it names the test's fixture sections without a numeral, keeping what it says —
       the newly planned section joins the open round, and its reading and review start
       from that round's base, so the section planned before it is still read and
@@ -1973,16 +1973,44 @@ which fails the closing checks until it passes. Touches
       and reviewed with it." Verify: `make check-comment-hygiene` passes, and the test
       module still passes (unit, `uv run --no-project --with pytest --with pyyaml pytest
       -q scripts/tests/test_change_next_step.py`).
-- [ ] 13a.2 Reword the comment at `helm/values.yaml:414–415` so it describes the
+      Done: the comment now reads "The third section joins the open round: its
+      reading and review start from the open round's base, so the second is still
+      read and reviewed with it." `make check-comment-hygiene` passes; the module
+      (unit) passes, 270 tests.
+- [x] 13a.2 Reword the comment at `helm/values.yaml:414–415` so it describes the
       values beneath it: the e2e-tests subchart's credentials come only from the
       pre-existing Secret `secretName` names (`createSecret: false`, lines 427–430), and
       the chart carries no key value. Verify: the chart render tests pass (unit,
       `make -C helm test-render`), no value changing.
-- [ ] 13a.3 Verification point: 13a.1 and 13a.2 hold, and `scripts/change-workflow run
+      At the owner's direction (workflow seq 110) the same header's lines 412–413,
+      which said the subchart is disabled by default though `enabled: true` sits
+      beneath them, are reworded too.
+      Done: the header now says the suite is for development and CI, the chart's
+      defaults enable it, a release that runs no tests sets
+      `e2e-tests.enabled=false` as `bare-metal-release-values.yaml` does, and its
+      credentials come only from pre-existing Secrets, the one `secretName` names
+      and the buyer's `buyer.credentialSecret`, the chart carrying no key value.
+      This differs from the task's wording, which named only `secretName`'s Secret:
+      the deal and scenarios test pods also mount the buyer's credential from
+      `buyer.credentialSecret` (`helm/charts/e2e-tests/templates/tests/`), as the
+      fresh-context check found. Outside the plan, the subchart's own header
+      (`helm/charts/e2e-tests/values.yaml:2–3`) said it is disabled by default,
+      which the umbrella's `enabled: true` contradicts; it now says the umbrella's
+      defaults enable it. `git diff` shows comment lines only. The chart render
+      tests (`make -C helm test-render`, static configuration tests, not unit as
+      the Verify line labels them) pass, exit 0; a comment cannot change a render,
+      so "no value changing" rests on the diff.
+- [x] 13a.3 Verification point: 13a.1 and 13a.2 hold, and `scripts/change-workflow run
       pre-commit switch-on-hosted-per-period-vm` passes every check, the citations
       check included now that section 8's summary exists.
       End-to-end: none; comments only, no scenario's behaviour changes.
       Nothing is owed to validation.
+      Done: `scripts/change-workflow run pre-commit switch-on-hosted-per-period-vm`
+      ran `after-functional-change`, `pre-commit-functional` (every suite) and
+      `pre-commit`, each passing, exit 0; `check-repository` passed all nine checks,
+      the comment hygiene and citations checks among them. End-to-end confirmed:
+      none. Nothing owed. Handoff: closeout resumes at 14.1, whose check now
+      passes; 14.7 runs again on this tree.
 
 ## 14. Closeout
 

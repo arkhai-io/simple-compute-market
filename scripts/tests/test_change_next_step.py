@@ -1262,8 +1262,8 @@ def test_a_plan_amended_while_a_round_is_open_names_the_round_it_continues(
     _round(root, named["sections"])
     recorded = read_log(log_path(root, CHANGE))[-1]
 
-    # Section 3 joins the open round: its reading and review start from the
-    # open round's base, so section 2 is still read and reviewed with it.
+    # The third section joins the open round: its reading and review start from
+    # the open round's base, so the second is still read and reviewed with it.
     assert (named["step"], named["sections"]) == ("round", [[3]])
     assert (named["continues"], named["base"]) == (opened["seq"], "b" * 40)
     assert f"seq {opened['seq']} is open" in named["reason"]
