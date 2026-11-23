@@ -107,6 +107,12 @@ No change owns these yet. They were found by `harden-provisioning-trust-boundari
 | The compatibility paths already in the code have no rows in the release handbook's "Compatibility to retire", so nothing states when they retire | `harden-provisioning-trust-boundaries` design, D16 |
 | The registry's administrator authenticates by the bearer key `REGISTRY_ADMIN_API_KEY` rather than a signed principal bound to the `admin` role | `harden-provisioning-trust-boundaries` design, D15 |
 
+No change owns this yet either. It was found by `harden-provisioning-trust-boundaries`' implementation.
+
+| Item | Origin |
+|---|---|
+| On a VM host with neither `/etc/iptables` nor `/etc/sysconfig`, the host kit's security hardening and a VM create write an `iptables-restore.service` whose `ExecStart=/sbin/iptables-restore < /etc/iptables.rules` systemd does not redirect, passing `<` as an argument, so no saved rule is restored at boot there: a guest's forwarding and NAT rules are lost on reboot. The guest policy does not rely on it, since its own unit installs it at boot. A fix also settles the unit's order against UFW and libvirt, since a restore without `--noflush` replaces their live rules | `harden-provisioning-trust-boundaries` section 5 |
+
 ## Roadmap goal — Negotiate full compute capability, not GPU count alone
 
 ```text

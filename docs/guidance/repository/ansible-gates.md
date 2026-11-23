@@ -18,8 +18,11 @@ role has a parse-only playbook, as
 ships from one list, which a structure test holds equal to the playbooks
 present; `make validate-playbooks` runs it. Tests that run shipped tasks through
 real `ansible-playbook` are library integration: the VM suite renders both create
-facts, exercises its family-role call boundary, and runs the host diagnostics
-task file against faked `systemctl` and `virsh`, and the family suite runs its
+facts, exercises its family-role call boundary, runs the host diagnostics
+task file against faked `systemctl` and `virsh`, runs host preparation's
+guest-isolation preconditions against faked `virsh`, `virt-install` and
+`ebtables` and its check of the guests' private destinations, and renders the
+guest interface's template through Ansible's lookup, and the family suite runs its
 installer and authenticated status wait against controlled local file and HTTP
 boundaries. Native tests skip in the default suite without supported Ansible;
 the family HTTP tests also require the `ansible.posix.json` callback.

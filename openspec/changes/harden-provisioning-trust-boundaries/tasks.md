@@ -330,14 +330,30 @@ private destination". Touches `domains/vms/provisioning/iac/ansible/roles/vm-man
 (`security-hardening.yml`, `system-packages.yml`, `kvm-network.yml`, `kvm-setup.yml`,
 `main.yml`, defaults).
 
-- [ ] 5.1 Define the guest interface once — `default` network, virtio, `port
+- [x] 5.1 Define the guest interface once — `default` network, virtio, `port
   isolated='yes'`, `clean-traffic` with `CTRL_IP_LEARNING=dhcp` and
   `DHCPSERVER=192.168.122.1` — and use it at all nine `virt-install` sites, GPU guests
   included. (D7; "A GPU guest is created".) Verify: a static test in
   `domains/vms/provisioning/iac/tests/test_vm_management_contracts.py` that every
   `virt-install` in the role uses the one definition and no site states
   `network=default` alone.
-- [ ] 5.2 In host preparation, fail naming what is missing on a host whose libvirt is
+  Done: `vm-management/templates/guest-interface-args.j2` holds `--network
+  network=default,model=virtio` and four `--xml` XPath edits for the port and the
+  filter. Each site passes `{{ lookup('template', 'guest-interface-args.j2') | trim }}`.
+  It is a template rather than a variable because a pool's `extra_vars` reach
+  `ansible-playbook --extra-vars` and override any variable. virt-install has no
+  sub-option for a filter's parameters, and `--xml` first shipped in virt-install
+  3.0, so 5.2's preflight also refuses an older virt-install. `VmGuestInterfaceTests`
+  (static configuration) passed. It finds the nine commands, GPU ones included, each
+  passing the lookup once and no other `--network`. It renders the template with
+  Jinja2 and reads the arguments, and shows the template reads no variable.
+  `VmGuestInterfaceNativeTests` (library integration, native gate) passed: Ansible's
+  own template lookup, from a play's templates directory, renders the same arguments.
+  No test runs the lookup through a role's site. `run test-before` at `d7e3f66c6`
+  failed to collect the current module, for want of the `jinja2` it adds. An earlier
+  draft of the site check, without the import, ran there: all nine sites failed it,
+  each naming `network=default` alone.
+- [x] 5.2 In host preparation, fail naming what is missing on a host whose libvirt is
   older than 6.1 or lacks the nwfilter driver; install the chains `ARKHAI-GUEST-IN`
   and `ARKHAI-GUEST-FWD` exactly as D8 lists them, the hairpin drop first in
   `ARKHAI-GUEST-FWD`, the forwarded established/related accept after it, one accept per
@@ -348,17 +364,102 @@ private destination". Touches `domains/vms/provisioning/iac/ansible/roles/vm-man
   "The host's firewall rules are reloaded".) Verify: static tests in
   `test_ansible_structure.py` or a new `test_guest_policy.py` over the rendered rules,
   their order, the allowlist's placement, and the re-assertion hooks.
-- [ ] 5.3 Remove the host kit's `ufw allow in on virbr0 from 192.168.122.0/24` and the
+  Done: `vm-setup/tasks/guest-policy.yml`, included after the KVM network and before
+  security hardening, whose existing save writes the rules out. Its preflight refuses,
+  naming each, libvirt before 6.1, no `clean-traffic` filter, virt-install before
+  3.0, and no `ebtables`, which host preparation now installs. The rules are
+  `templates/guest-policy.rules.j2`; `files/guest_policy.sh`, installed as
+  `/usr/local/sbin/arkhai-guest-policy`, fills both chains, deletes any existing
+  jump by its rule, and inserts each jump first, in one `iptables-restore --noflush`
+  transaction, waiting for the xtables lock. It runs from
+  `arkhai-guest-policy.service`, a oneshot ordered after UFW, the saved rules and
+  libvirtd. The unit is `WantedBy` libvirtd and keeps no active state, so every
+  libvirtd start, socket activation included, runs it again. It also runs from
+  `/etc/ufw/after.init` on `start`. UFW is expected to run that hook on start and on
+  reload; only the hook's text is tested here. Each allowlist entry must be an IPv4
+  address or CIDR block, checked with the role's preconditions.
+  `test_guest_policy.py` passed:
+  - the rendered chains and the role's structure (static configuration);
+  - the real installer script against stateful fake `iptables` and
+    `iptables-restore` at the subprocess boundary: over existing UFW and libvirt
+    jumps, after both re-insert theirs, on a rerun, and with no rules file. The fake
+    stores rules as written, not normalised, so real `iptables-restore` parsing is
+    not exercised;
+  - natively, under ansible-core 2.19.13 in the provisioning image (library
+    integration), the preflight tasks against fake `virsh`, `virt-install` and
+    `ebtables`. The refusal message names all four missing items, or the one
+    missing alone. The allowlist check is also run natively, admitting addresses
+    and blocks and refusing a rule fragment, a bad octet, a trailing newline, IPv6,
+    a string and a mapping.
+
+  It failed to collect at `d7e3f66c6` under `run test-before`, since the `jinja2`
+  dev dependency it adds was absent.
+- [x] 5.3 Remove the host kit's `ufw allow in on virbr0 from 192.168.122.0/24` and the
   scattered guest port-22 rules (the iptables `INPUT` drops and logs, the UFW denies,
   the `vm-network-isolation.sh` script and service), keeping `allow out on virbr0`;
   correct the host kit's printed claims to what it installs. (D8.) Verify: a static
   test that none of the removed rules remains and the printed summary names the guest
   policy chains.
-- [ ] 5.4 Verification point. Unit (static role tests): `make -C
+  Done: none is installed, and security hardening's first firewall task removes
+  each from a host holding it, matching their exact drop and log forms, as D8's "the
+  host kit removes" reads. `TestNoPerPortGuestRuleRemains` passed (static
+  configuration, and the task's real shell against fake `iptables` and `ufw`). The
+  host holds every such rule and five operator rules: three port-22 accepts from a
+  bridged uplink, a LAN and `virbr0`, an unrelated drop, and a general accept. Only
+  the operator rules stay. The task's removal of `vm-network-isolation.service`
+  and its script works on absolute paths, so no test runs that branch. Both printed
+  summaries name the chains. They no longer claim an isolation service, its log
+  prefixes, or VM attack detection by the fail2ban filter that read those prefixes.
+- [x] 5.4 Verification point. Unit (static role tests): `make -C
   domains/vms/provisioning/iac test`; the playbooks' syntax gates, `make -C
   domains/vms/provisioning/iac validate-playbooks`; the native Ansible gate, `make -C
   domains/vms/provisioning/iac native-ansible-gate`. The real-host proof is section 6.
   End-to-end: the lanes run the mock executor and no real VM, so none exercises it.
+  Done: `make -C domains/vms/provisioning/iac test` passed (210, 11 native cases
+  skipped without Ansible). No local Ansible, so the syntax checks and native gate ran
+  as `domains/vms/provisioning/iac/scripts/native_ansible_gate.sh` in the built
+  `arkhai:compute-provisioning` image over this tree, mounted read-only: every
+  playbook's syntax check, `vm-setup-task-files.yaml` importing `guest-policy.yml`
+  included, then its 67 tests passed. The syntax check once failed `vm-create.yml`
+  on an apostrophe added to a shell comment; the comment now has none. `docs/guidance/repository/ansible-gates.md`
+  names the new native cases. End-to-end confirmed: no lane scenario covers this
+  section; `e2e_vm_guest_isolation` (section 6) is its only end-to-end evidence.
+  `scripts/change-workflow run pre-commit`: "after-functional-change at d7e3f66c6…:
+  passed, exit 0"; "pre-commit-functional at d7e3f66c6…: passed, exit 0", its local
+  evidence for the tree `04bdb7c0c9f9` passing `check-packaging` and `make test`;
+  "pre-commit at d7e3f66c6…: passed, exit 0". Two fresh-context checks ran, and their
+  findings were fixed: a pool's `extra_vars` could override an interface variable,
+  the removal patterns matched port-22 accepts, the unit's `RemainAfterExit` kept it
+  from re-running on a later libvirtd start, the installer did not wait for the
+  xtables lock, the allowlist pattern admitted a trailing newline, and some evidence
+  wording overstated the tests. Declined: the preflight's task-level variables can
+  be overridden by extra variables, which only the operator sets.
+
+**Outside the plan.** A create inserts its guest's two forwarding accepts at
+`FORWARD`'s first position, ahead of the policy's jump, and as written they admitted a
+guest's own packets: another guest's connection to this guest's port 22 through the
+gateway, and any connection a guest opened from its port 22. The inbound accept now
+requires `! -i virbr0` and the reply accept `--ctstate ESTABLISHED`, so neither matches
+a packet a guest originates. `VmCreateForwardingTests` holds this; teardown deletes
+these rules by their marker, whatever else they match. The host kit's
+`iptables-restore.service` fallback never restores at boot; it is recorded unowned in
+`openspec/changes/README.md`, not fixed.
+
+**Handoff.** Not proven until 6.3 runs on a real host: that virt-install's `--xml`
+creates the filter's two `<parameter>` elements from the `[@name='…']` predicates (no
+virt-install was available here to show it); that real `iptables-restore --noflush`
+flushes and refills a declared chain and deletes jumps by rule as the fake does; that
+libvirtd's start completes its network rules before systemd starts
+`arkhai-guest-policy.service` after it; and that `ufw reload` runs `after.init start`. The fail2ban jail `vm-ssh-attacks` matches log
+lines only the per-port rules wrote, so it now matches nothing; it is left as it is.
+Removing per-port rules from a host prepared by an older release adopts state that
+release wrote, so review may judge it a compatibility path owing a retirement row
+beside D9's (D16). Closeout's promotion (8.9) should carry the host requirements this
+section adds to the seller quickstart and the VM IaC README: libvirt 6.1, virt-install
+3.0 and `ebtables`. It should carry `arkhai-guest-policy.service`, the
+`/etc/ufw/after.init` hook and `/etc/arkhai/guest-policy.rules` to the architecture
+companion's new section. The flat `tests/` layout of the IaC suite, not a Python
+package, is kept as it is.
 
 ## 6. Running guests converge, and the isolation is proven on a real host
 

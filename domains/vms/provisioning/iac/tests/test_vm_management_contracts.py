@@ -1,7 +1,14 @@
 from pathlib import Path
+import os
 import re
+import shlex
+import shutil
+import subprocess
+import tempfile
 import unittest
 
+import jinja2
+import jinja2.meta
 import yaml
 
 
@@ -238,6 +245,151 @@ class VmCreationRequestsKvmTests(unittest.TestCase):
         self.assertEqual(
             refusal["when"], ['vm_action == "create"', "not kvm_device.stat.exists"]
         )
+
+
+#: The guest interface every create passes: the role's template, looked up.
+GUEST_INTERFACE = "{{ lookup('template', 'guest-interface-args.j2') | trim }}"
+GUEST_INTERFACE_TEMPLATE = ROOT / "ansible/roles/vm-management/templates/guest-interface-args.j2"
+
+
+def _continues(line: str) -> bool:
+    """Whether a command's line continues onto the next: it ends with a
+    backslash, or with one closed inside a conditional (`\\{% endif %}`), or
+    it is a blank line a conditional left."""
+    return line == "" or line.endswith("\\") or line.endswith("\\{% endif %}")
+
+
+def _virt_install_commands() -> list[tuple[str, int, list[str]]]:
+    """Every virt-install command in the role's tasks: its file, its line, and
+    its lines up to the first that does not continue onto the next."""
+    commands = []
+    for path in sorted(TASKS.glob("*.yml")):
+        lines = _read(path).splitlines()
+        for number, line in enumerate(lines):
+            text = line.strip()
+            if text.startswith("#") or text.startswith("- name:") or not _VIRT_INSTALL.search(text):
+                continue
+            block = [text]
+            index = number
+            while _continues(block[-1]) and index + 1 < len(lines):
+                index += 1
+                block.append(lines[index].strip())
+            commands.append((path.name, number + 1, block))
+    return commands
+
+
+class VmGuestInterfaceTests(unittest.TestCase):
+    """Every guest's interface is isolated and filtered, a GPU guest's too."""
+
+    def test_every_virt_install_passes_the_one_interface_definition(self) -> None:
+        commands = _virt_install_commands()
+        self.assertEqual(len(commands), 9)
+        findings = []
+        for name, number, block in commands:
+            interfaces = [line for line in block if line == f"{GUEST_INTERFACE} \\"]
+            networks = [line for line in block if "--network" in line or "network=" in line]
+            if len(interfaces) != 1 or networks:
+                findings.append(f"{name}:{number}: {interfaces} {networks}")
+        self.assertEqual(findings, [])
+        self.assertTrue(any(
+            any(line.startswith("--hostdev") for line in block) for _, _, block in commands
+        ), "no GPU create found among the virt-install commands")
+
+    def test_no_task_states_the_default_network_alone(self) -> None:
+        offenders = [
+            path.name for path in sorted(TASKS.glob("*.yml"))
+            if "network=default" in _directives(_read(path))
+        ]
+        self.assertEqual(offenders, [])
+
+    def _template(self) -> jinja2.Template:
+        environment = jinja2.Environment(trim_blocks=True, undefined=jinja2.StrictUndefined)
+        return environment.from_string(_read(GUEST_INTERFACE_TEMPLATE))
+
+    def test_the_definition_isolates_the_port_and_filters_it_by_its_leased_address(self) -> None:
+        """Rendered as the lookup renders it, and read as the shell reads the
+        lines it continues."""
+        rendered = self._template().render().strip()
+        self.assertEqual(shlex.split(rendered.replace("\\\n", " ")), [
+            "--network", "network=default,model=virtio",
+            "--xml", "./devices/interface/port/@isolated=yes",
+            "--xml", "./devices/interface/filterref/@filter=clean-traffic",
+            "--xml", "./devices/interface/filterref/parameter[@name='CTRL_IP_LEARNING']/@value=dhcp",
+            "--xml", "./devices/interface/filterref/parameter[@name='DHCPSERVER']/@value=192.168.122.1",
+        ])
+        self.assertFalse(rendered.endswith("\\"), "the site's own continuation follows it")
+
+    def test_no_variable_can_name_another_interface(self) -> None:
+        """An extra variable, such as a pool's extra_vars, overrides every
+        variable; the template reads none, so nothing a pool sets changes it."""
+        environment = jinja2.Environment()
+        parsed = environment.parse(_read(GUEST_INTERFACE_TEMPLATE))
+        self.assertEqual(jinja2.meta.find_undeclared_variables(parsed), set())
+
+
+def _ansible() -> tuple[str | None, str]:
+    binary = shutil.which("ansible-playbook")
+    if binary is None:
+        return None, "native tests require ansible-core 2.17 to 2.19"
+    version = subprocess.run([binary, "--version"], capture_output=True, text=True, check=False)
+    if not re.search(r"core 2\.(1[7-9])\.", version.stdout):
+        return None, "native tests require ansible-core 2.17 to 2.19"
+    return binary, ""
+
+
+ANSIBLE_PLAYBOOK, UNAVAILABLE = _ansible()
+
+
+@unittest.skipIf(ANSIBLE_PLAYBOOK is None, UNAVAILABLE)
+class VmGuestInterfaceNativeTests(unittest.TestCase):
+    """The sites' lookup, rendered by ansible-playbook from a play's templates
+    directory, gives the arguments the static case reads: Ansible's template
+    lookup strips the comment and keeps the continued lines."""
+
+    def test_the_lookup_renders_the_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            (work / "templates").mkdir()
+            shutil.copy(GUEST_INTERFACE_TEMPLATE, work / "templates" / GUEST_INTERFACE_TEMPLATE.name)
+            output = work / "arguments.txt"
+            play = [{
+                "hosts": "localhost", "connection": "local", "gather_facts": False,
+                "tasks": [{"name": "Render the guest interface", "copy": {
+                    "content": GUEST_INTERFACE, "dest": str(output), "mode": "0600"}}],
+            }]
+            path = work / "play.yml"
+            path.write_text(yaml.safe_dump(play, sort_keys=False), encoding="utf-8")
+            environment = {k: v for k, v in os.environ.items() if not k.startswith("ANSIBLE_")}
+            environment.update(ANSIBLE_NOCOLOR="true", ANSIBLE_LOG_PATH="/dev/null")
+            run = subprocess.run(
+                [ANSIBLE_PLAYBOOK, "-i", "localhost,", str(path)],
+                cwd=work, env=environment, capture_output=True, text=True, timeout=90,
+                check=False,
+            )
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            rendered = output.read_text(encoding="utf-8")
+        environment = jinja2.Environment(trim_blocks=True, undefined=jinja2.StrictUndefined)
+        expected = environment.from_string(_read(GUEST_INTERFACE_TEMPLATE)).render().strip()
+        self.assertEqual(rendered, expected)
+        self.assertTrue(rendered.startswith("--network network=default,model=virtio \\\n--xml "))
+
+
+class VmCreateForwardingTests(unittest.TestCase):
+    """A create inserts its forwarding accepts at FORWARD's first position, ahead
+    of the host's guest policy jump, so neither may admit a packet a guest
+    originates."""
+
+    def test_the_inbound_accept_excludes_the_bridge_and_the_reply_accept_is_established_only(self) -> None:
+        tasks = yaml.safe_load(_read(VM_CREATE))
+        (task,) = [t for t in tasks if t.get("name") == "Set up iptables port forwarding for SSH"]
+        inserts = [line.strip() for line in task["shell"].splitlines()
+                   if line.strip().startswith("iptables -I FORWARD")]
+        self.assertEqual(len(inserts), 2)
+        inbound, reply = sorted(inserts, key=lambda line: "--sport" in line)
+        self.assertIn("! -i virbr0", inbound)
+        self.assertIn("--dport 22", inbound)
+        self.assertIn("--sport 22", reply)
+        self.assertIn("-m conntrack --ctstate ESTABLISHED ", reply)
 
 
 if __name__ == "__main__":

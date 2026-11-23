@@ -1,4 +1,5 @@
-"""Stateful fakes of the host commands a VM teardown calls.
+"""Stateful fakes of the host commands a VM teardown and the guest policy's
+installer call.
 
 `shell_harness` runs a task's real shell with its external commands replaced on
 `PATH`. A teardown reads state back and acts on it — it lists rules and deletes
@@ -8,7 +9,11 @@ as the real commands answer:
 
 - `iptables -S` prints rules in `iptables -S` form, a comment quoted as
   iptables 1.8 quotes it, and `-D` deletes the first rule equal to its
-  arguments, or fails as iptables does when none is;
+  arguments, or fails as iptables does when none is; `-w`, waiting for the
+  xtables lock, is accepted and changes nothing;
+- `iptables-restore --noflush` applies a table's chain declarations, appends,
+  inserts and deletes to those rules in one transaction, changing nothing when
+  a command fails;
 - `virsh` keeps domains with their state, address, MAC, and storage, and the
   `default` network's DHCP reservations in `net-dumpxml` form;
 - `ufw` keeps numbered rules with their comments;
@@ -53,7 +58,7 @@ def refused(key):
 """
 
 _IPTABLES = _PREAMBLE + r'''
-args = sys.argv[1:]
+args = [a for a in sys.argv[1:] if a != "-w"]
 table = "filter"
 if args[:1] == ["-t"]:
     table, args = args[1], args[2:]
@@ -78,6 +83,56 @@ if op == "-D":
     sys.exit(1)
 print(f"fake iptables: unsupported {args}", file=sys.stderr)
 sys.exit(2)
+'''
+
+# `iptables-restore --noflush`: a table's commands apply to a copy of its rules,
+# written back only at COMMIT, so a failing command changes nothing, as the real
+# command's one transaction per table does. A chain declaration (`:CHAIN`)
+# flushes that chain, `-A` appends to it, `-I CHAIN N` inserts at position N,
+# and `-D CHAIN rule` deletes the first rule equal to it, or fails. Unlike the
+# real command, it stores each rule as written, not as iptables normalises it
+# (no implicit `-m udp`, no `/32`), and flushes a built-in chain declared too.
+_IPTABLES_RESTORE = _PREAMBLE + r'''
+if sorted(a for a in sys.argv[1:] if a != "-w") != ["--noflush"]:
+    print(f"fake iptables-restore: unsupported {sys.argv[1:]}", file=sys.stderr)
+    sys.exit(2)
+rules, path = None, None
+for number, line in enumerate(sys.stdin.read().splitlines(), start=1):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    if line.startswith("*"):
+        path = STATE / f"iptables.{line[1:]}"
+        rules = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        continue
+    if line == "COMMIT":
+        path.write_text("".join(r + "\n" for r in rules), encoding="utf-8")
+        rules = None
+        continue
+    if line.startswith(":"):
+        chain = line[1:].split()[0]
+        rules = [r for r in rules if shlex.split(r)[1] != chain]
+        continue
+    tokens = shlex.split(line)
+    op, chain = tokens[0], tokens[1]
+    positions = [i for i, r in enumerate(rules) if shlex.split(r)[1] == chain]
+    if op == "-A":
+        rules.insert(positions[-1] + 1 if positions else len(rules), line)
+    elif op == "-I":
+        index = int(tokens[2]) - 1
+        spec = shlex.join(["-A", chain] + tokens[3:])
+        rules.insert(positions[index] if index < len(positions) else len(rules), spec)
+    elif op == "-D":
+        for i in positions:
+            if shlex.split(rules[i])[2:] == tokens[2:]:
+                del rules[i]
+                break
+        else:
+            print(f"iptables-restore: line {number} failed", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(f"fake iptables-restore: unsupported {line}", file=sys.stderr)
+        sys.exit(2)
 '''
 
 _IPTABLES_SAVE = _PREAMBLE + r'''
@@ -224,6 +279,7 @@ class FakeHost:
     def binaries(self) -> dict[str, str]:
         return {
             "iptables": _IPTABLES,
+            "iptables-restore": _IPTABLES_RESTORE,
             "iptables-save": _IPTABLES_SAVE,
             "virsh": _VIRSH,
             "ufw": _UFW,

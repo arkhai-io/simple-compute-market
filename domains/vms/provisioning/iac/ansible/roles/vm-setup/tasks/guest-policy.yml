@@ -1,0 +1,164 @@
+---
+# The VM guest network policy.
+#
+# Each guest's interface is an isolated bridge port under libvirt's
+# clean-traffic filter (vm-management's templates/guest-interface-args.j2). This file
+# refuses a host that cannot give a guest either, then installs the host side:
+# two chains of the host kit's own, each jumped to from the first position of
+# its built-in chain for packets from the guests' bridge.
+#
+#   ARKHAI-GUEST-IN   a guest reaches only DHCP and DNS on its host;
+#   ARKHAI-GUEST-FWD  a guest's forwarded packet never goes back out on the
+#                     bridge to another guest, and reaches no link-local or
+#                     private destination unless guest_allowed_private_destinations
+#                     lists it.
+#
+# The rules are in templates/guest-policy.rules.j2 and the installer in
+# files/guest_policy.sh. They lead INPUT and FORWARD because an appended rule
+# would follow UFW's accepts on INPUT and libvirt's LIBVIRT_FWO accept on
+# FORWARD and never run; under libvirt's nftables backend its accepts sit in a
+# table of their own and stop no drop here. libvirt re-adds its rules when it
+# starts and UFW when it reloads, so the installer runs again after each.
+# security-hardening.yml, which runs after this file, saves the installed rules
+# with the rest of the host's.
+
+# ============================================
+# Preconditions: what isolating a guest needs
+# ============================================
+
+- name: Read the libvirt daemon's version
+  shell: |
+    virsh version --daemon | sed -n 's/^Running against daemon: *//p'
+  register: guest_policy_libvirt_version
+  changed_when: false
+  failed_when: false
+  tags: guest_policy
+
+- name: Read libvirt's clean-traffic network filter
+  command: virsh nwfilter-dumpxml clean-traffic
+  register: guest_policy_nwfilter
+  changed_when: false
+  failed_when: false
+  tags: guest_policy
+
+- name: Read virt-install's version
+  command: virt-install --version
+  register: guest_policy_virt_install_version
+  changed_when: false
+  failed_when: false
+  tags: guest_policy
+
+- name: Read whether ebtables, which the network filter driver runs, is present
+  shell: command -v ebtables
+  register: guest_policy_ebtables
+  changed_when: false
+  failed_when: false
+  tags: guest_policy
+
+# Port isolation is libvirt 6.1's; virt-install edits the interface's XML
+# through --xml, which version 3.0 added; clean-traffic needs the nwfilter
+# driver and ebtables. A host lacking any of them would run its guests on a
+# shared segment, so it is refused instead.
+- name: Name what this host lacks to isolate its guests
+  set_fact:
+    guest_policy_missing: >-
+      {{
+        ([] if (libvirt_version | length > 0 and libvirt_version is version('6.1.0', '>='))
+            else ['libvirt 6.1 or later, which isolates a bridge port (the daemon reports '
+                  ~ (libvirt_version or 'no version') ~ ')'])
+        + ([] if guest_policy_nwfilter.rc == 0
+              else ["libvirt's nwfilter driver with its clean-traffic filter"])
+        + ([] if (virt_install_version | length > 0 and virt_install_version is version('3.0.0', '>='))
+              else ['virt-install 3.0 or later, which edits a guest interface through --xml (found '
+                    ~ (virt_install_version or 'none') ~ ')'])
+        + ([] if guest_policy_ebtables.rc == 0 else ['ebtables, which the nwfilter driver runs'])
+      }}
+  vars:
+    libvirt_version: "{{ guest_policy_libvirt_version.stdout | default('') | trim }}"
+    virt_install_version: "{{ guest_policy_virt_install_version.stdout | default('') | trim }}"
+  tags: guest_policy
+
+- name: Refuse a host that cannot isolate its guests
+  fail:
+    msg: >-
+      This host cannot isolate its VM guests from each other. It lacks:
+      {{ guest_policy_missing | join('; ') }}.
+  when: guest_policy_missing | length > 0
+  tags: guest_policy
+
+# ============================================
+# The policy and what keeps it first
+# ============================================
+
+- name: Create the guest policy's directory
+  file:
+    path: /etc/arkhai
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags: guest_policy
+
+- name: Render the guest policy's rules
+  template:
+    src: guest-policy.rules.j2
+    dest: /etc/arkhai/guest-policy.rules
+    owner: root
+    group: root
+    mode: '0644'
+  tags: guest_policy
+
+- name: Install the guest policy's installer
+  copy:
+    src: guest_policy.sh
+    dest: /usr/local/sbin/arkhai-guest-policy
+    owner: root
+    group: root
+    mode: '0755'
+  tags: guest_policy
+
+- name: Install the unit that keeps the guest policy first at boot and after libvirt starts
+  copy:
+    src: arkhai-guest-policy.service
+    dest: /etc/systemd/system/arkhai-guest-policy.service
+    owner: root
+    group: root
+    mode: '0644'
+  tags: guest_policy
+
+# UFW runs /etc/ufw/after.init, when it is executable, each time it starts or
+# reloads, after re-adding its own chains' jumps. The block leaves the rest of
+# an operator's hook as it is.
+- name: Ensure UFW's after.init hook exists
+  copy:
+    dest: /etc/ufw/after.init
+    content: "#!/bin/sh\n"
+    force: no
+    owner: root
+    group: root
+    mode: '0755'
+  tags: guest_policy
+
+- name: Re-install the guest policy each time UFW starts or reloads
+  blockinfile:
+    path: /etc/ufw/after.init
+    marker: "# {mark} ARKHAI GUEST POLICY"
+    insertafter: '^#!'
+    block: |
+      if [ "$1" = start ]; then
+          /usr/local/sbin/arkhai-guest-policy
+      fi
+    owner: root
+    group: root
+    mode: '0755'
+  tags: guest_policy
+
+# Restarted, which runs the installer whatever state the unit is in, so a rerun
+# of host preparation installs the rules it has just rendered.
+- name: Install the guest policy now and at every boot and libvirt start
+  systemd:
+    name: arkhai-guest-policy.service
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
+  tags: guest_policy

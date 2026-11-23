@@ -1,0 +1,30 @@
+# The VM guest policy's chains, as iptables-restore reads them inside the filter
+# table. /usr/local/sbin/arkhai-guest-policy installs them in one transaction,
+# each chain flushed and refilled, and jumps to each from the first position of
+# its built-in chain for packets arriving from the guests' bridge.
+#
+# ARKHAI-GUEST-IN: from a guest to the host, only DHCP, DNS to the bridge's
+# address, and traffic of connections already established; nothing else.
+:ARKHAI-GUEST-IN - [0:0]
+-A ARKHAI-GUEST-IN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A ARKHAI-GUEST-IN -p udp --dport 67 -j ACCEPT
+-A ARKHAI-GUEST-IN -d 192.168.122.1 -p udp --dport 53 -j ACCEPT
+-A ARKHAI-GUEST-IN -d 192.168.122.1 -p tcp --dport 53 -j ACCEPT
+-A ARKHAI-GUEST-IN -m comment --comment arkhai-guest-isolation -j DROP
+#
+# ARKHAI-GUEST-FWD: forwarded from a guest. Nothing goes back out on the bridge,
+# which closes the hairpin through the gateway to another guest; replies of
+# established connections pass, a private-address buyer's included; a listed
+# private destination is accepted; link-local and private destinations are
+# dropped; anything else returns to FORWARD, where libvirt's NAT accepts it.
+:ARKHAI-GUEST-FWD - [0:0]
+-A ARKHAI-GUEST-FWD -o virbr0 -m comment --comment arkhai-guest-isolation -j DROP
+-A ARKHAI-GUEST-FWD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+{% for destination in guest_allowed_private_destinations %}
+-A ARKHAI-GUEST-FWD -d {{ destination }} -j ACCEPT
+{% endfor %}
+-A ARKHAI-GUEST-FWD -d 169.254.0.0/16 -j DROP
+-A ARKHAI-GUEST-FWD -d 10.0.0.0/8 -j DROP
+-A ARKHAI-GUEST-FWD -d 172.16.0.0/12 -j DROP
+-A ARKHAI-GUEST-FWD -d 192.168.0.0/16 -j DROP
+-A ARKHAI-GUEST-FWD -d 100.64.0.0/10 -j DROP
