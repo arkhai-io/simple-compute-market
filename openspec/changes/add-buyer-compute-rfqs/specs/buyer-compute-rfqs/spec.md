@@ -34,7 +34,7 @@ An RFQ MAY include an optional plain-text description and optional bounded flat 
 
 ### Requirement: Open RFQ discovery follows supply visibility
 
-The registry SHALL permit anonymous search and direct lookup by registry-scoped ID for open RFQs wherever its supply discovery permits anonymous access. Any ordinary authenticated account SHALL be eligible to read open requests. Anonymous discovery SHALL expose only published RFQ information and routing identity. It SHALL omit party references, private responses and contact details. Anonymous requests SHALL NOT retrieve closed or expired RFQs, and an invalid supplied account proof SHALL NOT fall back to anonymous access.
+The registry SHALL permit anonymous search and direct lookup by registry-scoped ID for open RFQs when `REGISTRY_REQUIRE_READ_API_KEY` is false, the registry's advertised public supply posture. Any ordinary authenticated account SHALL be eligible to read open requests. Anonymous discovery SHALL expose only published RFQ information and routing identity. It SHALL omit party references, private responses and contact details. Anonymous requests SHALL NOT retrieve closed or expired RFQs, and an invalid supplied account proof SHALL NOT fall back to anonymous access.
 
 #### Scenario: Anonymous discovery in a registry with public supply
 
@@ -43,7 +43,7 @@ The registry SHALL permit anonymous search and direct lookup by registry-scoped 
 
 #### Scenario: Anonymous discovery in a registry with private supply
 
-- **WHEN** an anonymous caller requests an RFQ on a registry that requires authentication for supply discovery
+- **WHEN** an anonymous caller requests an RFQ on a registry that requires a supply read key
 - **THEN** the registry refuses the request without disclosing RFQ information
 
 #### Scenario: Anonymous lookup after closure
@@ -58,7 +58,7 @@ The registry SHALL permit anonymous search and direct lookup by registry-scoped 
 
 ### Requirement: An authenticated account may express interest
 
-The system SHALL allow any authenticated account other than the request owner to respond to an open RFQ without a seller role, publisher registration or a supply listing. The system SHALL bind the response to the authenticated respondent and the request it answers.
+The system SHALL allow a signed-in account holder other than the request owner to respond to an open RFQ without a seller role, publisher registration or a supply listing. The account authority SHALL admit an ordinary holder's verified interactive session to express consent for its submitted RFQ contact and SHALL require current RFQ contact-sharing permission from a delegate. The system SHALL bind the response to the authenticated respondent and the request it answers.
 
 #### Scenario: A participant with no listed inventory responds
 
@@ -265,7 +265,7 @@ The account entry point SHALL provide the verified registry identity and an opaq
 
 ### Requirement: Interactive clients and authorized delegates use the same RFQ API
 
-The account entry point SHALL expose the same operations, inputs and outcomes to the browser, the terminal and programmatic callers, including contact-sharing actions. The terminal SHALL accept complete operation inputs and return machine-readable outcomes and errors without prompts when invoked noninteractively. A delegate with current sharing permission SHALL be able to initiate an RFQ contact share for the acting account. Each interactive client SHALL preview the exact contact and counterparty and ask for explicit approval before submission. The account authority SHALL verify permission to share contact for the acting account and the submitted affirmative consent before signing the action. The signed input SHALL bind the action, target registry, counterparty, current terms revision, relevant write version and chosen contact. The registry SHALL enforce the current ownership, counterparty, revision and eligibility checks. A credential with general account access alone SHALL NOT authorize contact sharing. Successful mutations SHALL return a contact-free outcome.
+The account entry point SHALL expose the same operations, inputs and outcomes to the browser, the terminal and programmatic callers, including contact-sharing actions. The terminal SHALL accept complete operation inputs and return machine-readable outcomes and errors without prompts when invoked noninteractively. A delegate with current sharing permission SHALL be able to initiate an RFQ contact share for the acting account. Each interactive client SHALL preview the exact contact and counterparty and ask for explicit approval before submission. The account authority SHALL verify permission to share contact for the acting account and the submitted affirmative consent before signing the action. The signed input SHALL bind the action, target registry, counterparty, current terms revision, relevant write version and chosen contact. The registry SHALL enforce the current ownership, counterparty, revision and eligibility checks. General read or posting authority on a programmatic credential SHALL NOT authorize contact sharing. Successful mutations SHALL return a contact-free outcome.
 
 #### Scenario: A respondent approves in the terminal
 
