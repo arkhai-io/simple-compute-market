@@ -28,7 +28,8 @@ from sqlalchemy.orm import Session
 
 from core_registry.filter_eval import Criterion, evaluate_path
 from core_registry.rfq_spec import RfqSpec
-from core_registry.db.models import RfqPartyReference, RfqRequest, RfqTermsRevision, utcnow
+from core_registry.db.models import RfqPartyReference, RfqRequest, RfqResponse, RfqTermsRevision, utcnow
+from core_registry.rfq_contact_store import end_pending_responses
 
 
 class RfqActionError(Exception):
@@ -65,49 +66,31 @@ def _state(rfq: RfqRequest, now: datetime) -> Literal["open", "closed", "expired
     return "open" if now < rfq.respond_by else "expired"
 
 
-def _is_buyer(rfq: RfqRequest, account: RfqAccountClaim) -> bool:
+def account_is_buyer(rfq: RfqRequest, account: RfqAccountClaim) -> bool:
     return (rfq.buyer_namespace, rfq.buyer_subject) == (account.namespace, account.subject)
 
 
-class RfqRequests:
-    """Operate in the signed exchange's transaction without committing it."""
+def can_view_rfq(db: Session, record: RfqRequest, account: RfqAccountClaim, now: datetime) -> bool:
+    if _state(record, now) == "open" or account_is_buyer(record, account):
+        return True
+    return db.scalar(select(RfqResponse.response_id).where(
+        RfqResponse.rfq_id == record.rfq_id,
+        RfqResponse.respondent_namespace == account.namespace,
+        RfqResponse.respondent_subject == account.subject,
+    ).limit(1)) is not None
 
-    def __init__(self, db: Session, spec: RfqSpec, account: RfqAccountClaim, registry: RfqAudience):
+
+class RfqDiscovery:
+    """Query public open RFQs on the registry's current state."""
+
+    def __init__(self, db: Session, spec: RfqSpec, registry: RfqAudience):
         self.db = db
         self.spec = spec
-        self.account = account
         self.registry = registry
 
     def _require_kind(self, kind: str) -> None:
         if kind != self.spec.kind:
             raise RfqActionError(503, "rfq_kind_not_supported")
-
-    def _require_future_deadline(self, body: dict[str, JsonValue], now: datetime) -> datetime:
-        deadline = self.spec.response_deadline(body)
-        if deadline <= now:
-            raise RfqActionError(422, "rfq_deadline_not_in_future")
-        return deadline
-
-    def create(self, inputs: CreateRfq) -> RfqMutationReceipt:
-        self._require_kind(inputs.kind)
-        self.spec.validate_requirements(inputs.requirements)
-        now = utcnow()
-        deadline = self._require_future_deadline(inputs.requirements, now)
-        rfq_id = uuid4().hex
-        self.db.add(RfqRequest(
-            rfq_id=rfq_id, kind=inputs.kind, buyer_namespace=self.account.namespace,
-            buyer_subject=self.account.subject, requirements=inputs.requirements,
-            version=1, terms_revision=1, created_at=now, respond_by=deadline,
-        ))
-        self.db.flush()
-        self.db.add_all([
-            RfqPartyReference(
-                rfq_id=rfq_id, namespace=self.account.namespace, subject=self.account.subject,
-                reference=uuid4().hex,
-            ),
-            RfqTermsRevision(rfq_id=rfq_id, revision=1, requirements=inputs.requirements, created_at=now),
-        ])
-        return RfqMutationReceipt(resource_id=rfq_id, state="open", version=1, terms_revision=1)
 
     def _summary(self, rfq: RfqRequest, now: datetime) -> RfqSummary:
         return RfqSummary(
@@ -116,23 +99,15 @@ class RfqRequests:
             terms_revision=rfq.terms_revision, state=_state(rfq, now),
         )
 
-    def read(self, rfq_id: str) -> RfqDetail:
-        result = self.db.execute(
-            select(RfqRequest, RfqPartyReference.reference)
-            .join(RfqPartyReference, and_(
-                RfqPartyReference.rfq_id == RfqRequest.rfq_id,
-                RfqPartyReference.namespace == RfqRequest.buyer_namespace,
-                RfqPartyReference.subject == RfqRequest.buyer_subject,
-            ))
-            .where(RfqRequest.rfq_id == rfq_id, RfqRequest.kind == self.spec.kind)
-        ).one_or_none()
-        if result is None:
+    def read_open(self, rfq_id: str) -> RfqSummary:
+        now = utcnow()
+        record = self.db.scalar(select(RfqRequest).where(
+            RfqRequest.rfq_id == rfq_id, RfqRequest.kind == self.spec.kind,
+            RfqRequest.closed_at.is_(None), RfqRequest.respond_by > now,
+        ))
+        if record is None:
             raise RfqActionError(404, "rfq_not_found")
-        record, reference = result
-        summary = self._summary(record, utcnow())
-        if summary.state != "open" and not _is_buyer(record, self.account):
-            raise RfqActionError(404, "rfq_not_found")
-        return RfqDetail(**summary.model_dump(), buyer_reference=reference)
+        return self._summary(record, now)
 
     def search(self, inputs: SearchRfqs) -> RfqSearchPage:
         self._require_kind(inputs.kind)
@@ -173,6 +148,59 @@ class RfqRequests:
                 last = _Cursor(created_at=record.created_at, rfq_id=record.rfq_id, query=query)
         return RfqSearchPage(results=results)
 
+
+class RfqRequests(RfqDiscovery):
+    """Operate in the signed exchange's transaction without committing it."""
+
+    def __init__(self, db: Session, spec: RfqSpec, account: RfqAccountClaim, registry: RfqAudience):
+        super().__init__(db, spec, registry)
+        self.account = account
+
+    def _require_future_deadline(self, body: dict[str, JsonValue], now: datetime) -> datetime:
+        deadline = self.spec.response_deadline(body)
+        if deadline <= now:
+            raise RfqActionError(422, "rfq_deadline_not_in_future")
+        return deadline
+
+    def create(self, inputs: CreateRfq) -> RfqMutationReceipt:
+        self._require_kind(inputs.kind)
+        self.spec.validate_requirements(inputs.requirements)
+        now = utcnow()
+        deadline = self._require_future_deadline(inputs.requirements, now)
+        rfq_id = uuid4().hex
+        self.db.add(RfqRequest(
+            rfq_id=rfq_id, kind=inputs.kind, buyer_namespace=self.account.namespace,
+            buyer_subject=self.account.subject, requirements=inputs.requirements,
+            version=1, terms_revision=1, created_at=now, respond_by=deadline,
+        ))
+        self.db.flush()
+        self.db.add_all([
+            RfqPartyReference(
+                rfq_id=rfq_id, namespace=self.account.namespace, subject=self.account.subject,
+                reference=uuid4().hex,
+            ),
+            RfqTermsRevision(rfq_id=rfq_id, revision=1, requirements=inputs.requirements, created_at=now),
+        ])
+        return RfqMutationReceipt(resource_id=rfq_id, state="open", version=1, terms_revision=1)
+
+    def read(self, rfq_id: str) -> RfqDetail:
+        result = self.db.execute(
+            select(RfqRequest, RfqPartyReference.reference)
+            .join(RfqPartyReference, and_(
+                RfqPartyReference.rfq_id == RfqRequest.rfq_id,
+                RfqPartyReference.namespace == RfqRequest.buyer_namespace,
+                RfqPartyReference.subject == RfqRequest.buyer_subject,
+            ))
+            .where(RfqRequest.rfq_id == rfq_id, RfqRequest.kind == self.spec.kind)
+        ).one_or_none()
+        if result is None:
+            raise RfqActionError(404, "rfq_not_found")
+        record, reference = result
+        now = utcnow()
+        if not can_view_rfq(self.db, record, self.account, now):
+            raise RfqActionError(404, "rfq_not_found")
+        return RfqDetail(**self._summary(record, now).model_dump(), buyer_reference=reference)
+
     def _lock_buyer_request(self, rfq_id: str, version: int) -> RfqRequest:
         record = self.db.scalar(select(RfqRequest).where(
             RfqRequest.rfq_id == rfq_id, RfqRequest.kind == self.spec.kind,
@@ -205,6 +233,7 @@ class RfqRequests:
             respond_by=deadline, terms_revision=revision,
         )
         if changed:
+            end_pending_responses(self.db, rfq_id, "superseded")
             self.db.add(RfqTermsRevision(
                 rfq_id=rfq_id, revision=revision, requirements=inputs.requirements, created_at=now,
             ))
@@ -216,6 +245,7 @@ class RfqRequests:
         record = self._lock_buyer_request(rfq_id, inputs.version)
         now = utcnow()
         self._replace_open(rfq_id, inputs.version, now, closed_at=now)
+        end_pending_responses(self.db, rfq_id, "expired")
         return RfqMutationReceipt(
             resource_id=rfq_id, state="closed", version=inputs.version + 1,
             terms_revision=record.terms_revision,

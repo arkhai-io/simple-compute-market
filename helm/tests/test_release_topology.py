@@ -989,6 +989,7 @@ _LOCAL_COMPUTE_REGISTRY_SETTINGS = _REGISTRY_SETTINGS | {
     "REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES",
     "REGISTRY_RFQ_SPEC_PATH",
     "REGISTRY_RFQ_REPLAY_KEYS_FILE",
+    "REGISTRY_RFQ_CONTACT_KEYS_FILE",
 }
 
 
@@ -1201,6 +1202,8 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
         ("registry_authority_credential_file", "REGISTRY_AUTHORITY_CREDENTIAL_FILE"),
         ("registry_filter_spec_path", "REGISTRY_FILTER_SPEC_PATH"),
         ("registry_rfq_spec_path", "REGISTRY_RFQ_SPEC_PATH"),
+        ("registry_rfq_replay_keys_file", "REGISTRY_RFQ_REPLAY_KEYS_FILE"),
+        ("registry_rfq_contact_keys_file", "REGISTRY_RFQ_CONTACT_KEYS_FILE"),
         ("registry_descriptor_base_url", "REGISTRY_DESCRIPTOR_BASE_URL"),
         ("registry_descriptor_operator_identity", "REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY"),
         ("database_url", "DATABASE_URL"),

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, field_validator
 
 from market_core.registry_descriptor import (
     RegistryAuthorityName,
@@ -192,7 +192,7 @@ class RfqMutationReceipt(BaseModel):
 
 
 class RfqSummary(BaseModel):
-    """The account-visible routing reference and current request requirements."""
+    """The public routing reference and published request requirements."""
 
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
 
@@ -216,3 +216,92 @@ class RfqSearchPage(BaseModel):
 
     results: list[RfqSummary]
     next_cursor: str | None = None
+
+
+def _nonblank_contact_text(value: str) -> str:
+    if not value.strip():
+        raise ValueError("contact fields must be nonblank")
+    return value
+
+
+_ContactKey = Annotated[str, Field(min_length=1, max_length=64), AfterValidator(_nonblank_contact_text)]
+_ContactValue = Annotated[str, Field(min_length=1, max_length=512), AfterValidator(_nonblank_contact_text)]
+RfqContact = Annotated[dict[_ContactKey, _ContactValue], Field(min_length=1, max_length=16)]
+RfqResponseState = Literal["pending", "superseded", "withdrawn", "dismissed", "selected", "expired"]
+
+
+class RfqResponseDetail(BaseModel):
+    """A private response projection that carries no contact payload."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    registry: RfqAudience
+    rfq_id: RfqReference
+    response_id: RfqReference
+    respondent_reference: RfqReference
+    offered_quantity: int | None = Field(default=None, ge=1)
+    state: RfqResponseState
+    version: int = Field(ge=1)
+    terms_revision: int = Field(ge=1)
+    introduction_id: RfqReference | None = None
+
+
+class RfqResponseInbox(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    responses: list[RfqResponseDetail]
+
+
+class RfqIntroductionDetail(BaseModel):
+    """An authorized participant's own view of the other party's chosen contact."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    registry: RfqAudience
+    rfq_id: RfqReference
+    introduction_id: RfqReference
+    version: int = Field(ge=1)
+    contact_until: str
+    contact: RfqContact = Field(repr=False)
+
+
+class ResponseVersion(RfqInput):
+    version: int = Field(ge=1)
+
+
+class ShareContact(ResponseVersion):
+    terms_revision: int = Field(ge=1)
+    counterparty: RfqReference
+    consent_to_share: Literal[True]
+    contact: RfqContact = Field(repr=False)
+
+    @field_validator("consent_to_share", mode="before")
+    @classmethod
+    def require_affirmative_consent(cls, value: object) -> object:
+        if value is not True:
+            raise ValueError("consent must be the boolean true")
+        return value
+
+
+class OfferResponse(ShareContact):
+    offer: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+
+def validate_rfq_provenance(target: RfqTarget, audience: RfqAudience, result: BaseModel) -> None:
+    if isinstance(result, RfqSearchPage):
+        if any(entry.registry != audience for entry in result.results):
+            raise ValueError("invalid RFQ registry provenance")
+    elif isinstance(result, RfqSummary):
+        if result.registry != audience or result.rfq_id != target.rfq_id:
+            raise ValueError("invalid RFQ registry provenance")
+    elif isinstance(result, RfqResponseDetail):
+        if (result.registry != audience or result.rfq_id != target.rfq_id
+                or result.response_id != target.response_id):
+            raise ValueError("invalid RFQ response provenance")
+    elif isinstance(result, RfqResponseInbox):
+        if any(entry.registry != audience or entry.rfq_id != target.rfq_id for entry in result.responses):
+            raise ValueError("invalid RFQ response provenance")
+    elif isinstance(result, RfqIntroductionDetail):
+        if result.registry != audience or result.introduction_id != target.introduction_id:
+            raise ValueError("invalid RFQ introduction provenance")

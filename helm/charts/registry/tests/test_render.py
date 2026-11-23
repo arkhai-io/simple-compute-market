@@ -164,8 +164,23 @@ def test_each_instance_renders_its_migration_and_a_disabled_one_renders_nothing(
     _assert_migration_first(_deployment(disabled, "registry"), "/var/lib/arkhai-registry")
 
 
+def test_rfq_contact_key_is_mounted_only_for_registry_runtime() -> None:
+    enable = {"rfqContactKeysSecret": {"name": "contact-keys", "key": "contact-key.json"}}
+    manifest = _helm_template("registry-test", CHART, enable)
+    deployment = _deployment(manifest, "registry")
+    (migration,) = _containers(deployment, "initContainers")
+    (application,) = _containers(deployment, "containers")
+    assert "rfq-contact-keys" not in migration
+    assert "mountPath: /run/secrets/arkhai/registry-rfq-contacts" in application
+    assert 'secretName: "contact-keys"' in deployment and 'key: "contact-key.json"' in deployment
+    assert "REGISTRY_RFQ_CONTACT_KEYS_FILE='/run/secrets/arkhai/registry-rfq-contacts/keys.json'" in manifest
+    disabled = _helm_template("registry-test", CHART, {})
+    assert "REGISTRY_RFQ_CONTACT_KEYS_FILE" not in disabled and "rfq-contact-keys" not in disabled
+
+
 if __name__ == "__main__":
     test_the_migration_runs_first_from_the_application_image_over_its_database()
     test_the_migration_reads_the_secret_profile_the_application_reads()
     test_each_instance_renders_its_migration_and_a_disabled_one_renders_nothing()
+    test_rfq_contact_key_is_mounted_only_for_registry_runtime()
     print("registry chart render checks passed")

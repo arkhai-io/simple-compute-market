@@ -327,3 +327,7 @@ not expose root helper templates reliably inside dependency charts. */}}
 {{- define "registry.rfqReplayKeyFile" -}}
 /run/secrets/arkhai/registry-rfq-replay/keys.json
 {{- end -}}
+
+{{- define "registry.rfqContactKeyFile" -}}
+/run/secrets/arkhai/registry-rfq-contacts/keys.json
+{{- end -}}

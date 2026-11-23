@@ -98,7 +98,8 @@ def alembic_config(database_url: str) -> Config:
 
     config = Config()
     config.set_main_option("script_location", SCRIPT_LOCATION)
-    config.set_main_option("sqlalchemy.url", database_url)
+    # Alembic's ConfigParser interpolates percent signs, including URL escapes.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     return config
 
 

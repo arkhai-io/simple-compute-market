@@ -8,6 +8,7 @@ from core_registry.api.descriptor_routes import router as descriptor_router
 from core_registry.api.filter_spec import router as filter_spec_router
 from core_registry.api.listing_routes import router as listing_router
 from core_registry.api.publisher_routes import router as publisher_router
+from core_registry.api.rfq_response_routes import router as rfq_response_router
 from core_registry.api.rfq_routes import router as rfq_router
 from core_registry.api.system_routes import make_health_router, make_system_router
 from core_registry.api.validate_routes import router as validate_router
@@ -34,3 +35,4 @@ router.include_router(publisher_router)
 # own read- or write-scoped dependency.
 router.include_router(listing_router)
 router.include_router(rfq_router)
+router.include_router(rfq_response_router)

@@ -92,6 +92,14 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="REGISTRY_RFQ_REPLAY_KEYS_FILE",
     )
+    registry_rfq_contact_keys_file: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_RFQ_CONTACT_KEYS_FILE",
+    )
+    registry_rfq_redact_restored_contacts: bool = Field(
+        default=False,
+        validation_alias="REGISTRY_RFQ_REDACT_RESTORED_CONTACTS",
+    )
 
     # The filter specification this registry serves; unset, the packaged
     # filter-spec.yaml.

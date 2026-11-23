@@ -68,6 +68,7 @@ def authentication_headers(request: AuthenticatedRequest) -> dict[str, str]:
         SIGNATURE_HEADER: request.proof.value,
     }
 
+
 def verify_authenticated_response(
     *,
     headers: Any,
@@ -78,11 +79,36 @@ def verify_authenticated_response(
     now: int | None = None,
 ) -> None:
     """Verify a registry response against its public authority pin and request."""
+    verify_registry_response_context(
+        headers=headers,
+        expected_registries=expected_registries,
+        method=request.method,
+        operation=request.operation,
+        resource=request.resource,
+        request_id=request.request_id,
+        status=status,
+        body=body,
+        now=now,
+    )
+
+
+def verify_registry_response_context(
+    *,
+    headers: Any,
+    expected_registries: TrustedIdentitySet,
+    method: str,
+    operation: str,
+    resource: str,
+    request_id: str,
+    status: int,
+    body: Any = EMPTY_BODY,
+    now: int | None = None,
+) -> None:
+    """Verify the proof at a client that knows the original operation and registry pin."""
     try:
         timestamp: int | str = int(headers[TIMESTAMP_HEADER])
     except (KeyError, TypeError, ValueError):
         timestamp = headers.get(TIMESTAMP_HEADER, "")
-
 
     scheme = headers.get(IDENTITY_SCHEME_HEADER, "")
     envelope = {
@@ -92,9 +118,9 @@ def verify_authenticated_response(
             "scheme": scheme,
             "identifier": headers.get(IDENTITY_IDENTIFIER_HEADER, ""),
         },
-        "method": request.method,
-        "operation": request.operation,
-        "resource": request.resource,
+        "method": method,
+        "operation": operation,
+        "resource": resource,
         "request_id": headers.get(REQUEST_ID_HEADER, ""),
         "timestamp": timestamp,
         "status": status,
@@ -110,11 +136,11 @@ def verify_authenticated_response(
         now=injected_time.now() if now is None else now,
         max_skew=300,
         expected_role="registry",
-        expected_method=request.method,
-        expected_operation=request.operation,
+        expected_method=method,
+        expected_operation=operation,
         expected_principals=expected_registries,
-        expected_resource=request.resource,
-        expected_request_id=request.request_id,
+        expected_resource=resource,
+        expected_request_id=request_id,
     )
     if result.code != VerificationCode.VERIFIED:
         raise ValueError(f"invalid registry response: {result.code.value}")

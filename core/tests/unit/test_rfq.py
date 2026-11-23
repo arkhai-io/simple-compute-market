@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -9,6 +11,7 @@ from market_core.rfq import (
     RfqMutationReceipt,
     RfqOperation,
     RfqTarget,
+    ShareContact,
 )
 
 
@@ -48,3 +51,16 @@ def test_a_receipt_refuses_fields_outside_the_contact_free_schema():
             "resource_id": "request-a", "state": "open", "version": 1,
             "contact": {"email": "example@example.test"},
         })
+
+
+
+@pytest.mark.parametrize("consent", [False, 1, 1.0, "true", None])
+def test_contact_consent_requires_the_boolean_true(consent):
+    fields = {
+        "version": 1, "terms_revision": 1, "counterparty": "owner",
+        "consent_to_share": consent, "contact": {"email": "buyer@example.test"},
+    }
+    with pytest.raises(ValidationError, match="boolean true"):
+        ShareContact.model_validate(fields)
+    with pytest.raises(ValidationError, match="boolean true"):
+        ShareContact.model_validate_json(json.dumps(fields))

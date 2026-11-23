@@ -1,9 +1,9 @@
-"""Filter evaluator for GET /listings.
+"""Evaluate declared filters for registry listings and RFQ discovery.
 
-Drives off the registry's filter-spec — every accepted query-param name
-is a declared filter, every filter is `(path, op, value_type, on_missing,
-alias_kind?)`.  The evaluator is generic over the spec: drop a new filter
-in YAML, ?new_filter=... works without code changes.
+Listing query parameters are declared by its filter specification. Each
+declaration gives the path, operator, value type, missing-value policy and
+optional URL alias. RFQ search builds criteria from its configured schema and
+uses the same document-path comparison.
 
 Set-theoretic op model (closed set):
 
@@ -17,7 +17,7 @@ Array projections in the path (``$.foo[*].bar``) get array-projection
 semantics for free: "at least one element matches."  Scalar paths
 collapse to a singleton resolution set.
 
-Two URL surfaces, both honoured per request:
+The listing API accepts both URL surfaces in the same request:
 
 * **URL sugar** (single-value query params) maps to the set form via
   the filter's ``alias_kind``:
@@ -94,7 +94,7 @@ class _Range:
 
 @dataclass(frozen=True)
 class Criterion:
-    """One parsed filter constraint, ready to evaluate against a listing."""
+    """One parsed filter constraint over a registry document."""
 
     name: str
     path_expr: Any  # parsed jsonpath-ng expression

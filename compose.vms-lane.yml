@@ -31,6 +31,7 @@ services:
       - ACTIVE_PROFILES=registry-a,rfq-lane,rfq-auth,payments-lane
     volumes:
       - ./dev-env/registry/rfq-replay-keys.json:/run/secrets/arkhai/registry-rfq-replay/keys.json:ro
+      - ./dev-env/registry/rfq-contact-keys.json:/run/secrets/arkhai/registry-rfq-contacts/keys.json:ro
   registry-b:
     environment:
       - ACTIVE_PROFILES=registry-b,payments-lane

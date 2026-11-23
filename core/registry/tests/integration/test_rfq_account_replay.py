@@ -23,7 +23,7 @@ from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
 from registry_client.auth import authenticate_request, authentication_headers
 from registry_client.rfq_auth import sign_rfq_invocation
 from sqlalchemy import Update, create_engine, event, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from core_registry.api.rfq_auth import RfqTrust
 from core_registry.api.rfq_exchange import rfq_exchange
@@ -106,7 +106,7 @@ def boundary(tmp_path: Path):
                     return read(verified)
                 return mutate(verified, session)
 
-            response = await rfq_exchange(request, session, target, dispatch)
+            response = await rfq_exchange(request, session, target, lambda request: lambda: dispatch(request))
         return httpx.Response(response.status_code, headers=response.headers, content=response.body)
 
     prior = injected_time.installed()
@@ -392,15 +392,20 @@ async def test_lifespan_loads_rfq_authority_and_schema_settings(
         assert database_file.read_bytes() == b"invalid SQLite database"
         assert not hasattr(app.state, "registry_authority_signer")
         return
-    async with lifespan(app):
-        assert app.state.registry_descriptor.authority.name == "registry-test"
-        if schema == "compute":
-            assert app.state.rfq_spec.kind == "compute"
-        else:
-            assert app.state.rfq_spec is None
-        if has_pins and has_key_file:
-            assert app.state.rfq_trust.audience == _audience()
-            assert app.state.rfq_replay_keys.current == "test"
-        else:
-            assert app.state.rfq_trust is None
-            assert app.state.rfq_replay_keys is None
+    engine = create_engine(url)
+    app.state.database_sessions = sessionmaker(engine, autoflush=False)
+    try:
+        async with lifespan(app):
+            assert app.state.registry_descriptor.authority.name == "registry-test"
+            if schema == "compute":
+                assert app.state.rfq_spec.kind == "compute"
+            else:
+                assert app.state.rfq_spec is None
+            if has_pins and has_key_file:
+                assert app.state.rfq_trust.audience == _audience()
+                assert app.state.rfq_replay_keys.current == "test"
+            else:
+                assert app.state.rfq_trust is None
+                assert app.state.rfq_replay_keys is None
+    finally:
+        engine.dispose()

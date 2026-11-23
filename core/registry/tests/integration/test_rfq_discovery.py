@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import injected_time
 from market_core.rfq import (
-    CloseRfq, CreateRfq, EditRfq, RfqAccountClaim, RfqAudience, RfqDetail,
+    CloseRfq, CreateRfq, EditRfq, OfferResponse, RfqAccountClaim, RfqAudience, RfqDetail,
     RfqMutationReceipt, RfqOperation, RfqSearchPage, RfqTarget, SearchRfqs,
 )
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -17,15 +17,15 @@ import pytest
 from registry_client import RegistryClient, RegistryClientError, authenticate_request, authentication_headers
 from registry_client.auth import verify_authenticated_response
 from registry_client.models import ListingRequest
+from registry_client.rfq_public import RfqPublicRegistryClient
 from registry_client.rfq_registry import RfqRegistryClient
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from core_registry.db.database import get_db
 from core_registry.db.migrations import migrate_database
-from core_registry.db.models import RfqPartyReference, RfqRequest, RfqTermsRevision
+from core_registry.db.models import RfqPartyReference, RfqReplayReservation, RfqRequest, RfqTermsRevision
 from core_registry.config import settings
-from core_registry.main import app
+from core_registry.main import create_app
 
 # Deterministic test signers and digest material. Never use them on a public network.
 _AUTHORITY = Ed25519Signer(bytes([21]) * 32)
@@ -47,10 +47,11 @@ def requirements(**changes):
 
 
 class Registry:
-    def __init__(self, path, *, name, seed, configured):
-        url = f"sqlite:///{path}"
+    def __init__(self, path, *, name, seed, configured, url=None):
+        url = url or f"sqlite:///{path}"
         migrate_database(url)
         self.engine = create_engine(url)
+        self.sessions = sessionmaker(self.engine, autoflush=False)
         self.signer = Ed25519Signer(seed)
         self.audience = RfqAudience(
             name=name, principal=self.signer.identity.model_dump(mode="json"),
@@ -60,6 +61,11 @@ class Registry:
         digest_file = path.with_suffix(".json")
         digest_file.write_text(json.dumps({
             "current": "fixture", "keys": {"fixture": bytes([25] * 32).hex()},
+        }))
+        contact_file = path.with_suffix(".contact-keys.json")
+        # Deterministic encryption key for synthetic tests. Never use it on a public network.
+        contact_file.write_text(json.dumps({
+            "current": "fixture", "keys": {"fixture": bytes([26] * 32).hex()},
         }))
         self.configuration = {
             "database_url": url,
@@ -79,22 +85,15 @@ class Registry:
             },
             "registry_rfq_spec_path": str(_SCHEMA) if configured else None,
             "registry_rfq_replay_keys_file": str(digest_file),
+            "registry_rfq_contact_keys_file": str(contact_file),
         }
 
     @asynccontextmanager
     async def running(self):
-        def sessions():
-            with Session(self.engine) as db:
-                yield db
-
         with pytest.MonkeyPatch.context() as configuration:
             for name, value in self.configuration.items():
                 configuration.setattr(settings, name, value)
-            for name in (
-                "registry_authority_signer", "registry_descriptor", "rfq_spec", "rfq_trust", "rfq_replay_keys",
-            ):
-                configuration.setattr(app.state, name, getattr(app.state, name, None), raising=False)
-            configuration.setitem(app.dependency_overrides, get_db, sessions)
+            app = create_app(self.sessions)
             async with app.router.lifespan_context(app):
                 yield app
 
@@ -149,8 +148,8 @@ def registries(tmp_path):
     injected_time.install(time)
     opened = []
 
-    def make(*, name="registry-a", seed=bytes([23]) * 32, configured=True):
-        result = Registry(tmp_path / f"{name}.db", name=name, seed=seed, configured=configured)
+    def make(*, name="registry-a", seed=bytes([23]) * 32, configured=True, url=None):
+        result = Registry(tmp_path / f"{name}.db", name=name, seed=seed, configured=configured, url=url)
         opened.append(result)
         return result
 
@@ -162,7 +161,7 @@ def registries(tmp_path):
         injected_time.install(prior)
 
 
-async def test_discovery_is_account_only_and_excludes_supply(registries):
+async def test_discovery_excludes_supply(registries):
     make, _ = registries
     registry = make()
     listing = ListingRequest(
@@ -181,12 +180,6 @@ async def test_discovery_is_account_only_and_excludes_supply(registries):
     body = requirements()
     created = await registry.create(body, request_id="one-create")
     assert await registry.create(body, request_id="one-create") == created
-    # Rejection-path checks for unsigned requests the RFQ client cannot construct.
-    async with registry.running() as application, httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=application), base_url="http://test"
-    ) as anonymous:
-        assert (await anonymous.post("/rfqs/search", json={"kind": "compute"})).status_code == 401
-        assert (await anonymous.post(f"/rfqs/{created.resource_id}/read")).status_code == 401
     async with registry.supply_client(signer=_AUTHORITY) as supply:
         matching = await supply.list_listings()
         assert [row.id for row in matching.listings] == [published["listing_id"]]
@@ -330,7 +323,7 @@ async def test_deadline_and_allocated_reference_survive_a_signer_change(registri
 
 
 
-async def test_registry_identity_qualifies_even_an_identical_rfq_id(registries):
+async def test_registry_identity_qualifies_even_an_identical_rfq_id(registries, tmp_path):
     make, _ = registries
     one = make()
     two = make(name="registry-b", seed=bytes([24]) * 32)
@@ -359,3 +352,118 @@ async def test_registry_identity_qualifies_even_an_identical_rfq_id(registries):
     assert a.buyer_reference != b.buyer_reference
     with pytest.raises(ValueError, match="wrong_principal"):
         await two.request("read", rfq_id=first.resource_id, audience=one.audience, status=401)
+
+    # A valid preview for the first registry does not authorize contact sharing in the second.
+    # Deterministic encryption key for synthetic tests. Never use it on a public network.
+    key_file = tmp_path / "synthetic-contact.json"
+    key_file.write_text(json.dumps({"current": "fixture", "keys": {"fixture": "42" * 32}}))
+    two.configuration["registry_rfq_contact_keys_file"] = str(key_file)
+    claim = RfqAccountClaim(namespace="test-accounts", subject="respondent", can_share_contact=True)
+    offer = OfferResponse(
+        version=b.version, terms_revision=b.terms_revision, counterparty=a.buyer_reference,
+        consent_to_share=True, contact={"email": "respondent@example.test"},
+    )
+    async with two.running() as application, RfqRegistryClient(
+        "http://test", signer=_AUTHORITY, audience=two.audience,
+        transport=httpx.ASGITransport(app=application),
+    ) as scoped:
+        with pytest.raises(RegistryClientError, match="rfq_counterparty_changed"):
+            await scoped.respond(claim, b.rfq_id, offer)
+        valid = offer.model_copy(update={"counterparty": b.buyer_reference})
+        assert (await scoped.respond(claim, b.rfq_id, valid)).state == "pending"
+
+
+async def test_admission_requires_the_contact_key_configuration(registries):
+    make, _ = registries
+    registry = make()
+    registry.configuration["registry_rfq_contact_keys_file"] = None
+    async with registry.running() as application, RfqRegistryClient(
+        "http://test", signer=_AUTHORITY, audience=registry.audience,
+        transport=httpx.ASGITransport(app=application),
+    ) as client:
+        buyer = RfqAccountClaim(namespace="test-accounts", subject="buyer")
+        with pytest.raises(RegistryClientError, match="rfq_not_available"):
+            await client.search(buyer, SearchRfqs(kind="compute"))
+
+
+
+@pytest.mark.parametrize("public_supply", [False, True])
+async def test_open_rfq_discovery_uses_supply_visibility(registries, public_supply):
+    make, clock = registries
+    registry = make()
+    registry.configuration["require_read_api_key"] = not public_supply
+    if not public_supply:
+        registry.configuration["registry_descriptor_access_acquisition_pointer"] = "https://keys.example.test"
+    terms = requirements(metadata={"deposit": "30% upfront, balance monthly"})
+    created = await registry.create(terms, request_id="buyer-created")
+    # The public projection must exclude private records that actually exist.
+    claim = RfqAccountClaim(namespace="test-accounts", subject="respondent", can_share_contact=True)
+    async with registry.running() as application, RfqRegistryClient(
+        "http://test", signer=_AUTHORITY, audience=registry.audience, transport=httpx.ASGITransport(app=application),
+    ) as seller:
+        visible = await seller.read(claim, created.resource_id)
+        await seller.respond(claim, created.resource_id, OfferResponse(
+            version=visible.version, terms_revision=visible.terms_revision,
+            counterparty=visible.buyer_reference, consent_to_share=True,
+            contact={"email": "private-contact@example.test"},
+        ))
+    closed = await registry.create(request_id="buyer-created-second")
+    _ = await registry.request("close", rfq_id=closed.resource_id, inputs={"version": closed.version})
+    target = RfqTarget(RfqOperation.READ, created.resource_id)
+    request_headers = {"X-Market-Request-ID": "guest-lookup"}
+
+    async with registry.running() as application:
+        transport = httpx.ASGITransport(app=application)
+        async with RfqPublicRegistryClient(
+            "http://test", audience=registry.audience, transport=transport,
+        ) as guest:
+            if public_supply:
+                read = await guest.read(created.resource_id, request_id="guest-lookup")
+                found = await guest.search(SearchRfqs(kind="compute"), request_id="guest-lookup")
+                assert read.registry == registry.audience
+                assert read.rfq_id == created.resource_id
+                assert read.requirements == terms
+                assert found.results == [read]
+                assert "private-contact@example.test" not in read.model_dump_json()
+                for reference in (closed.resource_id, "unknown"):
+                    with pytest.raises(RegistryClientError) as refused:
+                        await guest.read(reference, request_id="guest-lookup")
+                    assert refused.value.status_code == 404
+                    assert refused.value.body == "rfq_not_found"
+            else:
+                with pytest.raises(RegistryClientError) as unreadable:
+                    await guest.read(created.resource_id, request_id="guest-lookup")
+                with pytest.raises(RegistryClientError) as unsearchable:
+                    await guest.search(SearchRfqs(kind="compute"), request_id="guest-lookup")
+                for error in (unreadable.value, unsearchable.value):
+                    assert error.status_code == 401
+                    assert error.body == "rfq_auth_required"
+
+        async with RfqRegistryClient(
+            "http://test", signer=_OTHER_REGISTRY, audience=registry.audience, transport=transport,
+        ) as untrusted:
+            with pytest.raises(RegistryClientError) as refused:
+                await untrusted.read(claim, created.resource_id)
+            assert refused.value.status_code == 401
+
+        # Rejection paths the public client cannot construct.
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as raw:
+            failed_proof = await raw.post(target.path, headers=request_headers | {"X-Market-Signature": ""})
+            assert failed_proof.status_code == 401
+            denied_inbox = await raw.post(f"/rfqs/{created.resource_id}/responses/list", headers=request_headers)
+            assert denied_inbox.status_code == 401
+
+    with Session(registry.engine) as db:
+        assert db.scalar(select(RfqReplayReservation).where(RfqReplayReservation.request_id == "guest-lookup")) is None
+    account_read = await registry.request("read", rfq_id=created.resource_id, subject="eligible-account")
+    assert account_read["buyer_reference"]
+
+    if public_supply:
+        clock.set(int(datetime.fromisoformat(terms["respond_by"]).timestamp()))
+        async with registry.running() as application, RfqPublicRegistryClient(
+            "http://test", audience=registry.audience, transport=httpx.ASGITransport(app=application),
+        ) as guest:
+            with pytest.raises(RegistryClientError) as expired:
+                await guest.read(created.resource_id)
+            assert expired.value.status_code == 404
+            assert expired.value.body == "rfq_not_found"

@@ -10,7 +10,9 @@ from sqlalchemy import (
     JSON,
     Enum as SQLEnum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
+    LargeBinary,
     UniqueConstraint,
     text,
 )
@@ -189,6 +191,76 @@ class RfqPartyReference(Base):
     reference = Column(String(128), nullable=False)
 
     __table_args__ = (UniqueConstraint("rfq_id", "reference", name="uq_rfq_party_reference"),)
+
+
+class RfqResponse(Base):
+    """One respondent's versioned consent for an RFQ terms revision."""
+
+    __tablename__ = "rfq_responses"
+
+    response_id = Column(String(128), primary_key=True)
+    rfq_id = Column(String(128), nullable=False)
+    respondent_namespace = Column(String(128), nullable=False)
+    respondent_subject = Column(String(255), nullable=False)
+    terms_revision = Column(Integer, nullable=False)
+    offered_quantity = Column(JSON(none_as_null=True), nullable=True)
+    state = Column(String(16), nullable=False)
+    version = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("rfq_id", "terms_revision"),
+            ("rfq_terms_revisions.rfq_id", "rfq_terms_revisions.revision"),
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("rfq_id", "respondent_namespace", "respondent_subject"),
+            ("rfq_party_references.rfq_id", "rfq_party_references.namespace", "rfq_party_references.subject"),
+            ondelete="CASCADE",
+        ),
+        Index("idx_rfq_responses_inbox", "rfq_id", "created_at", "response_id"),
+        Index(
+            "uq_rfq_response_pending", "rfq_id", "respondent_namespace", "respondent_subject",
+            "terms_revision", unique=True, sqlite_where=text("state = 'pending'"),
+            postgresql_where=text("state = 'pending'"),
+        ),
+    )
+
+
+class RfqIntroduction(Base):
+    """A single consenting pair with its own contact retrieval cutoff."""
+
+    __tablename__ = "rfq_introductions"
+
+    introduction_id = Column(String(128), primary_key=True)
+    response_id = Column(
+        String(128), ForeignKey("rfq_responses.response_id", ondelete="CASCADE"), nullable=False,
+    )
+    completed_at = Column(DateTime, nullable=False)
+    contact_until = Column(DateTime, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    version = Column(Integer, nullable=False)
+
+    __table_args__ = (UniqueConstraint("response_id", name="uq_rfq_introduction_response"),)
+
+
+class RfqContactPayload(Base):
+    """Only authenticated ciphertext and its envelope reach database custody."""
+
+    __tablename__ = "rfq_contact_payloads"
+
+    response_id = Column(
+        String(128), ForeignKey("rfq_responses.response_id", ondelete="CASCADE"), primary_key=True,
+    )
+    purpose = Column(String(32), primary_key=True)
+    format_version = Column(Integer, nullable=False)
+    key_id = Column(String(128), nullable=False)
+    nonce = Column(LargeBinary, nullable=False)
+    ciphertext = Column(LargeBinary, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (Index("idx_rfq_contacts_expiry", "expires_at", "response_id", "purpose"),)
 
 
 class PublisherIdentityRotation(Base):

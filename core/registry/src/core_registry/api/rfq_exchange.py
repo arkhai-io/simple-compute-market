@@ -28,7 +28,7 @@ async def rfq_exchange(
     request: Request,
     session: Session,
     target: RfqTarget,
-    dispatch: Callable[[VerifiedRfqRequest], Any],
+    prepare: Callable[[VerifiedRfqRequest], Callable[[], Any]],
     *,
     available: bool = True,
 ) -> Response:
@@ -46,7 +46,8 @@ async def rfq_exchange(
         )
         if not available:
             raise HTTPException(503, "rfq_not_available")
-        result = execute_rfq_request(session, verified, keys, lambda: dispatch(verified))
+        dispatch = prepare(verified)
+        result = execute_rfq_request(session, verified, keys, dispatch)
         if isinstance(result, BaseModel):
             result = result.model_dump(mode="json", exclude_none=True)
         status, body = 200, result

@@ -8,16 +8,23 @@ from market_core.rfq import (
     CloseRfq,
     CreateRfq,
     EditRfq,
+    OfferResponse,
+    ResponseVersion,
     RfqAccountClaim,
     RfqAudience,
     RfqDetail,
     RfqInput,
+    RfqIntroductionDetail,
     RfqInvocation,
     RfqMutationReceipt,
     RfqOperation,
+    RfqResponseDetail,
+    RfqResponseInbox,
     RfqSearchPage,
     RfqTarget,
     SearchRfqs,
+    ShareContact,
+    validate_rfq_provenance,
 )
 from market_identity import Signer
 from pydantic import BaseModel
@@ -55,10 +62,7 @@ class _RfqRegistryProtocol:
                 code = "rfq_registry_refused"
             raise RegistryClientError(target.method, target.path, response.status_code, code)
         result = outcome.model_validate(body)
-        if isinstance(result, RfqSearchPage) and any(entry.registry != self._audience for entry in result.results):
-            raise ValueError("invalid RFQ registry provenance")
-        if isinstance(result, RfqDetail) and (result.registry != self._audience or result.rfq_id != target.rfq_id):
-            raise ValueError("invalid RFQ registry provenance")
+        validate_rfq_provenance(target, self._audience, result)
         return result
 
 
@@ -125,6 +129,78 @@ class RfqRegistryClient(_RfqRegistryProtocol):
             RfqTarget(RfqOperation.CLOSE, rfq_id), account, inputs, RfqMutationReceipt, request_id,
         )
 
+    async def respond(
+        self, account: RfqAccountClaim, rfq_id: str, inputs: OfferResponse,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return await self._exchange(
+            RfqTarget(RfqOperation.RESPOND, rfq_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    async def response_inbox(
+        self, account: RfqAccountClaim, rfq_id: str,
+        *, request_id: str | None = None,
+    ) -> RfqResponseInbox:
+        return await self._exchange(
+            RfqTarget(RfqOperation.LIST_RESPONSES, rfq_id), account, RfqInput(), RfqResponseInbox, request_id,
+        )
+
+    async def read_response(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str,
+        *, request_id: str | None = None,
+    ) -> RfqResponseDetail:
+        return await self._exchange(
+            RfqTarget(RfqOperation.READ_RESPONSE, rfq_id, response_id), account, RfqInput(), RfqResponseDetail, request_id,
+        )
+
+    async def reconfirm(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: OfferResponse,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return await self._exchange(
+            RfqTarget(RfqOperation.RECONFIRM, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    async def withdraw(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: ResponseVersion,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return await self._exchange(
+            RfqTarget(RfqOperation.WITHDRAW, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    async def dismiss(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: ResponseVersion,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return await self._exchange(
+            RfqTarget(RfqOperation.DISMISS, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    async def select(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: ShareContact,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return await self._exchange(
+            RfqTarget(RfqOperation.SELECT, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    async def read_introduction(
+        self, account: RfqAccountClaim, introduction_id: str,
+        *, request_id: str | None = None,
+    ) -> RfqIntroductionDetail:
+        return await self._exchange(
+            RfqTarget(RfqOperation.READ_INTRODUCTION, introduction_id=introduction_id), account, RfqInput(), RfqIntroductionDetail, request_id,
+        )
+
+    async def end_introduction(
+        self, account: RfqAccountClaim, introduction_id: str, inputs: ResponseVersion,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return await self._exchange(
+            RfqTarget(RfqOperation.END_INTRODUCTION, introduction_id=introduction_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
 
 class SyncRfqRegistryClient(_RfqRegistryProtocol):
     """Synchronous transport for the same signed RFQ operations."""
@@ -187,4 +263,76 @@ class SyncRfqRegistryClient(_RfqRegistryProtocol):
     ) -> RfqMutationReceipt:
         return self._exchange(
             RfqTarget(RfqOperation.CLOSE, rfq_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    def respond(
+        self, account: RfqAccountClaim, rfq_id: str, inputs: OfferResponse,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return self._exchange(
+            RfqTarget(RfqOperation.RESPOND, rfq_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    def response_inbox(
+        self, account: RfqAccountClaim, rfq_id: str,
+        *, request_id: str | None = None,
+    ) -> RfqResponseInbox:
+        return self._exchange(
+            RfqTarget(RfqOperation.LIST_RESPONSES, rfq_id), account, RfqInput(), RfqResponseInbox, request_id,
+        )
+
+    def read_response(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str,
+        *, request_id: str | None = None,
+    ) -> RfqResponseDetail:
+        return self._exchange(
+            RfqTarget(RfqOperation.READ_RESPONSE, rfq_id, response_id), account, RfqInput(), RfqResponseDetail, request_id,
+        )
+
+    def reconfirm(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: OfferResponse,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return self._exchange(
+            RfqTarget(RfqOperation.RECONFIRM, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    def withdraw(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: ResponseVersion,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return self._exchange(
+            RfqTarget(RfqOperation.WITHDRAW, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    def dismiss(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: ResponseVersion,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return self._exchange(
+            RfqTarget(RfqOperation.DISMISS, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    def select(
+        self, account: RfqAccountClaim, rfq_id: str, response_id: str, inputs: ShareContact,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return self._exchange(
+            RfqTarget(RfqOperation.SELECT, rfq_id, response_id), account, inputs, RfqMutationReceipt, request_id,
+        )
+
+    def read_introduction(
+        self, account: RfqAccountClaim, introduction_id: str,
+        *, request_id: str | None = None,
+    ) -> RfqIntroductionDetail:
+        return self._exchange(
+            RfqTarget(RfqOperation.READ_INTRODUCTION, introduction_id=introduction_id), account, RfqInput(), RfqIntroductionDetail, request_id,
+        )
+
+    def end_introduction(
+        self, account: RfqAccountClaim, introduction_id: str, inputs: ResponseVersion,
+        *, request_id: str | None = None,
+    ) -> RfqMutationReceipt:
+        return self._exchange(
+            RfqTarget(RfqOperation.END_INTRODUCTION, introduction_id=introduction_id), account, inputs, RfqMutationReceipt, request_id,
         )
