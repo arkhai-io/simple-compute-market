@@ -498,6 +498,46 @@ of the two guest-isolation requirements on a real host. Touches
   `e2e_vm_guest_isolation` run on the real host (6.3).
   End-to-end: `e2e_vm_guest_isolation`, in no lane; no lane scenario exercises it.
 
+**Returned to design before any task (work in progress, nothing implemented).**
+Task 6.2's scenario must restart libvirt and reload UFW on the target host and probe
+again afterwards. It must also run host preparation again over a guest created
+before it and show that guest converged. The design does not say how a system test
+performs these host-side steps, and the code offers no way:
+- The e2e harness reaches a real host only through the provisioning service's typed
+  clients. The VM operator client
+  (`domains/vms/provisioning/client/src/vm_provisioning_operator/client.py`) offers
+  VM create, list, start, shutdown, reboot, destroy, undefine, monitor, password
+  reset, capacity check and host diagnostics, and nothing that restarts a host
+  service, reloads its firewall or runs host preparation.
+- Host preparation (`playbooks/host-kit/vm-setup.yaml`) is run by an operator, by
+  hand or through `scripts/run_acceptance_validation.sh`; no service job runs it.
+- A system test reaches services only through their interfaces
+  (`docs/guidance/engineering/system-tests.md`), and setup needing knowledge the
+  repository lacks is the deployment's, never a scenario's
+  (`docs/guidance/repository/deal-scenarios.md`).
+- A converging guest needs a port that is not isolated. Every create on a prepared
+  host now isolates its port, so producing one is itself a host-side step.
+
+The real-provisioning target (`e2e_harness/real_provisioning_target.py`) also names
+no private destination reachable from the host for the "private destination
+refused" probe, and no route for a buyer connecting from a private address.
+
+Options for the design session:
+1. The scenario makes only the guest-side probes. An operator procedure in
+   `VALIDATION_RUNBOOK.md` restarts libvirt, reloads UFW, and prepares the host again
+   over a guest it left unconverged, between named runs of the scenario. A
+   target section names the private destination and states which phase a run is,
+   so each phase's observations are made or unproven, never inferred.
+2. New administrator operations in the provisioning service and VM operator client
+   (reload the guest policy, prepare the host's guest isolation again) for the
+   scenario to step. This is new routes and jobs, beyond this change's scope.
+3. Operator SSH to the host from the harness, named in the target. Ruled out by
+   `system-tests.md`.
+
+Recommended: option 1, with D2's closeout gate reading the per-phase outcomes.
+Task 6.1, converging running guests, is independent of this choice and unstarted.
+Nothing in this section is checked.
+
 ## 7. A storefront never authorizes its administrator as a party
 
 Delivers authentication of the API-credits storefront's negotiation reads and the
