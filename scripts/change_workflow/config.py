@@ -78,6 +78,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
+from . import documents as distribution
 from .common import ORCHESTRATOR, StepError, repository_root
 from .graph import STEPS
 from .adapters import ADAPTERS, HARNESSES
@@ -983,7 +984,8 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     elif args.json:
         print(json.dumps({"file": configuration.shown, "exists": configuration.exists,
                           "fields": resolution(configuration),
-                          "scopes": {step: scope.shown() for step, scope in resolved.items()}},
+                          "scopes": {step: scope.shown() for step, scope in resolved.items()},
+                          "workflow": distribution.RUNNING.described()},
                          ensure_ascii=False))
     else:
         print("\n".join(resolution_lines(configuration, resolved, root)))

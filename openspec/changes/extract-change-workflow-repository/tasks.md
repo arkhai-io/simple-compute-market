@@ -21,7 +21,7 @@ CW-lm42, CW-d867). Touches `scripts/change-workflow-wheel/` (new),
 `log.py`, a new `documents.py`), `scripts/check_project_layout.py`, `AGENTS.md`, and
 their tests.
 
-- [ ] 1.1 Write the wheel's project, `scripts/change-workflow-wheel/pyproject.toml`:
+- [x] 1.1 Write the wheel's project, `scripts/change-workflow-wheel/pyproject.toml`:
   distribution `arkhai-change-workflow`, version `0.1.0`, MIT, Hatchling, the
   `change-workflow` console entry point on `change_workflow.cli:main`, the package
   `scripts/change_workflow/`, and, as package data under it, the eleven workflow skills
@@ -32,23 +32,55 @@ their tests.
   outside the project's directory (`uv build --wheel scripts/change-workflow-wheel`)
   and that the wheel lists every file; if it cannot, stop the section and report it,
   since the layout is D24's. Verify: the wheel's file list in the section's handoff.
-- [ ] 1.2 Add `scripts/change_workflow/documents.py`: each document by its role
+  Done: Hatchling builds it with `bypass-selection = true` and a `force-include` table
+  of paths relative to the project directory (`"../change_workflow" = "change_workflow"`,
+  each document under `change_workflow/data/`); `only-include` and `sources` refuse a
+  path outside the project (`must be relative`), so `force-include` is the form.
+  `__pycache__` is left out without an exclude. The wheel's file list is in the
+  section's notes. `openspec/specs/change-workflow/diagrams.md`, the capability's own
+  guidance, is not among the four documents the task names, and does not ship.
+- [x] 1.2 Add `scripts/change_workflow/documents.py`: each document by its role
   (`specification`, `index`, `companion`, `diagrams`, `guidance`, `handbook`, `schema`,
   `fragment`, and the skills), found through `importlib.resources` when installed and
   at its tree path when the package runs from `scripts/` (D6, CW-lm42). Route
   `outcome.SCHEMA` and `diagram.DIAGRAMS` through it. Verify: unit tests for both
   modes, `scripts/tests/test_change_workflow_documents.py` (new).
-- [ ] 1.3 `config --json` gains `workflow`: `version` and each document by role, no
+  Done: `documents.Distribution(package)` is installed when the package holds `data/`,
+  which the tree's never does; `path(role)`, `documents()`, `skills()` (the tree's
+  `change-*` and `guidance-review` beside OpenSpec's skills, or the package's every
+  one), `version()` (the metadata through an injected `metadata_version`, or the
+  tree's project file), and `described()` for `config --json`. `outcome.SCHEMA` and
+  `diagram.DIAGRAMS` are now absolute paths in the distribution, so `check graph`
+  checks the distribution's diagram in any repository, naming it relative to the
+  repository only where it lies there. Unit, `test_change_workflow_documents.py`
+  (both modes, and this checkout's tree): passed; `test_change_workflow_graph.py`,
+  `test_change_workflow_cli.py`, `test_change_workflow_outcome.py`: passed.
+- [x] 1.3 `config --json` gains `workflow`: `version` and each document by role, no
   directory to look inside (D6, CW-lm42); `change-workflow --version` prints the
   version and reads no configuration (CW-5kl9). The version comes from the installed
   distribution's metadata, or the project file's when run from the tree. Verify:
   library integration cases in `test_change_workflow_config.py` and
   `test_change_workflow_cli.py`.
-- [ ] 1.4 Every line `log.py` appends carries `workflow`, the engine's version; no
+  Done: `--version` is argparse's version action, so it prints before any
+  repository is looked for. Library integration: `config --json` in a temporary
+  checkout names the tree's eight documents, existing, as `documents.described()`
+  gives them (in-process `main`); `scripts/change-workflow --version` run as a
+  subprocess outside any repository, and in a repository whose configuration
+  `config` refuses there, prints the version: passed.
+- [x] 1.4 Every line `log.py` appends carries `workflow`, the engine's version; no
   reader routes on it and `format` stays 2 (D12, CW-d867). Verify: unit cases in
   `test_change_workflow_log.py` (a line written under each of two versions), and the
   next-step suite unchanged (`test_change_next_step.py`).
-- [ ] 1.5 Declare the exception (D24): an `overrides` row in `AGENTS.md`, "Exceptions
+  Done: `log.numbered` adds `workflow` beside `format`, from an injected `version`
+  (`documents.version` by default), and refuses a writer setting it, as it refuses
+  `seq`, `at`, and `format`; the line a conversion appends carries it too, through
+  `numbered`, while the older lines it rewrites keep only what `convert.rewritten`
+  gives them, since they are not appended. Unit, `test_change_workflow_log.py` (two lines under 0.4.1 and 0.4.2,
+  both format 2, neither older nor newer; a writer setting it refused): passed, with
+  five exact-line assertions given the field as `documents.version()` gives it, and
+  one in `test_change_workflow_review.py`;
+  `test_change_next_step.py` unchanged: passed.
+- [x] 1.5 Declare the exception (D24): an `overrides` row in `AGENTS.md`, "Exceptions
   to shared guidance", against `packaging-python.md`'s "One import package per
   distribution", "Nothing remaps the package", and "Data files live inside the
   package", and `packaging-hatchling.md`'s "The wheel target names the one package",
@@ -56,13 +88,66 @@ their tests.
   `scripts/check_project_layout.py` admitting that one project, naming the row. Verify:
   `test_check_project_layout.py` (the wheel admitted, any other remap still refused)
   and `make check-guidance`.
-- [ ] 1.6 Verify the section: build the wheel, install it into a temporary tool
+  Done: `check_project_layout.ADMITTED` maps the project to the row; the admitted
+  project skips only the wheel target's rule, still held to the backend and `[tool.uv]`
+  rules. Unit, `test_check_project_layout.py` (the same remap admitted at
+  `scripts/change-workflow-wheel` and refused elsewhere; the admitted project's
+  setuptools backend and `find-links` refused): passed. `make check-guidance` and
+  `make check-project-layout`: passed. The other packaging checks
+  (`check-uv-setup`, `check-locks`, `check-python-version`, `check-build-requirements`,
+  `check-architecture`, `check-release-components`) pass with the project present.
+- [x] 1.6 Verify the section: build the wheel, install it into a temporary tool
   directory with `uv tool install`, and run the installed `change-workflow --version`
   and `config --json` in a temporary repository, each named document existing — a
   library integration test, `scripts/tests/test_change_workflow_wheel.py` (new),
   skipped with its reason where `uv` is absent; plus the section's suites and `scripts/change-workflow run pre-commit
   extract-change-workflow-repository`.
   End-to-end: none exercises the workflow's tooling; none owed.
+  Done: `test_change_workflow_wheel.py` builds the wheel with `uv build` and installs
+  it with `uv tool install` into temporary `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`; it
+  runs real external processes, so it is integration of the external-process form,
+  skipped where `uv` is absent as the plan asks, though `make test-release-tooling`
+  always runs under `uv`. It holds the wheel's packaged files equal, byte for byte,
+  to the engine's modules and fragment and every document of the tree; the installed
+  `--version` prints the tree's version; and the installed `config --json`, in a
+  temporary repository holding no copy of the workflow, names every role inside the
+  tool directory and none in this checkout: passed. `scripts/change-workflow run
+  pre-commit`: `make validate-local` passed (packaging and every suite, 3,599 scripts'
+  tests among them); the strict OpenSpec validation and the default checks passed;
+  `make check-repository` failed only on two checks that fail at the plan's commit as
+  well: `check-spec-index` (the delta's twelve added ids are not in `index.md` until
+  section 8 writes them) and `check-doc-citations` (the change's documents cite
+  `.agents/workflow.local.template.toml` and `.agents/workflow.local.toml`, which
+  section 2 creates and ignores, and `scripts/tests/test_change_workflow_install.py`
+  and `scripts/tests/test_change_workflow_citations.py`, which sections 3 and 5
+  create).
+
+Section 1 notes (handoff):
+
+- The wheel's file list, as `uv build --wheel scripts/change-workflow-wheel` builds
+  it: `change_workflow/` with its 43 modules and `workflow.mk`; under
+  `change_workflow/data/`: `change-outcome.schema.json`,
+  `change-workflow-handbook.md`, `guidance/` (the seven files of
+  `docs/guidance/workflow/`), `specification/` (`spec.md`, `index.md`, `README.md`,
+  and `diagrams/` with its four `.drawio` sources and four SVGs), and `skills/` (the
+  eleven skills' `SKILL.md`); and the `dist-info`'s `METADATA`, `WHEEL`,
+  `entry_points.txt`, and `RECORD`. A build with no `--out-dir` writes
+  `scripts/change-workflow-wheel/dist/`, which `.gitignore`'s `dist/` covers.
+- A document added to the workflow's set needs a `force-include` line and a role in
+  `documents`; `test_change_workflow_wheel.py` fails until both agree with the tree.
+  A skill added under `.agents/skills/` named `change-*` is the workflow's by
+  `documents.skills()`'s rule, and the wheel test fails until its line is added.
+- The modules cite CW-5kl9, CW-lm42, and CW-d867, which only the change's delta holds
+  until section 8 applies it to `spec.md`; the preliminary merge waits for section 8.
+- Outside the plan: `scripts/tests/test_change_next_step.py` held a comment
+  `make check-comment-hygiene` refuses at the plan's commit ("Section 3 joins…"),
+  reworded to name the sections by ordinal.
+- The fresh-context check's findings fixed: a comment naming a range check that did
+  not exist yet, and one naming an installer; `documents` missing from the package's
+  module list; the CW-5kl9 test now runs `--version` in a repository whose
+  configuration `config` refuses, as well as outside any; exact-line assertions take
+  the version from `documents.version()` rather than a literal. Declined: dropping
+  the wheel test's skip, which the plan asks for.
 
 ## 2. The configuration's new shape, read
 

@@ -22,8 +22,8 @@ from typing import Callable, Sequence
 
 import pytest
 
-from change_workflow import (clone, cli, config, cost_report, diagram, find, history, hook, index,
-                             next_step, push, round_view, skills, tasks)
+from change_workflow import (clone, cli, config, cost_report, diagram, documents, find, history,
+                             hook, index, next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.review import check_review
@@ -253,19 +253,48 @@ def test_a_subcommand_hands_its_module_every_argument(
     assert cli.delegated(cli._parser().parse_args(subcommand)) == (module, arguments)
 
 
-def test_check_graph_compares_the_repositorys_own_diagram(
+def test_the_version_is_printed_outside_any_repository_reading_no_configuration(
+        tmp_path: Path) -> None:
+    """CW-5kl9's scenario: `--version` prints the distribution's version, here the
+    tree's project file's, and reads no repository's configuration: it answers in a
+    directory no repository contains, and in a repository whose configuration every
+    subcommand reading it refuses."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    refused = tmp_path / "refused"
+    (refused / ".agents").mkdir(parents=True)
+    _git(refused, "init", "-q")
+    (refused / ".agents/workflow.toml").write_text("[unknown]\n", "utf-8")
+    command = [sys.executable, str(REPO / "scripts/change-workflow")]
+
+    for where in (outside, refused):
+        printed = subprocess.run([*command, "--version"], cwd=where, capture_output=True,
+                                 text=True)
+        assert (printed.returncode, printed.stdout, printed.stderr) == (
+            0, f"{documents.version()}\n", ""), where
+    reading = subprocess.run([*command, "config"], cwd=refused, capture_output=True, text=True)
+    assert reading.returncode == 1
+    assert "unknown is no table the workflow defines" in reading.stderr
+
+
+def test_check_graph_compares_the_distributions_own_diagram(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     subcommand = cli._parser().parse_args(["check", "graph"])
     assert cli.delegated(subcommand) == (cli._graph, None)
-    # This checkout's diagram draws the table, so the command says so as the module
-    # does; a repository with no diagram is refused, naming the file.
+    # The distribution's diagram draws the table, so the command says so as the
+    # module does, in this checkout and in a repository holding no diagram of its
+    # own, where it names the diagram by its whole path.
     expected = _printed(capsys, lambda: diagram.main(root=REPO))
     assert expected[0] == 0
     assert _printed(capsys, lambda: cli.main(["check", "graph"], root=REPO)) == expected
-    status, out, err = _printed(capsys, lambda: cli.main(
-        ["check", "graph"], root=_repository(tmp_path / "bare")))
+    assert _printed(capsys, lambda: cli.main(
+        ["check", "graph"], root=_repository(tmp_path / "bare"))) == (
+        0, f"{diagram.SOURCE} draws the table.\n", "")
+    # A diagram that cannot be read is refused, naming it.
+    status, out, err = _printed(capsys, lambda: diagram.main(tmp_path / "gone.drawio",
+                                                             root=REPO))
     assert (status, out) == (1, "")
-    assert f"cannot read the graph's diagram {diagram.SOURCE}" in err
+    assert f"cannot read the graph's diagram {tmp_path / 'gone.drawio'}" in err
 
 
 def test_the_subcommands_this_module_runs_reach_no_other() -> None:

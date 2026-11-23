@@ -1,8 +1,8 @@
 """The outcome a step ends with, checked against its schema.
 
-A step's outcome conforms to `.agents/change-outcome.schema.json`: `finished`,
-`question`, `returned`, `blocked`, or `stopped`, each with the step's `message` to
-the owner. The scripts run on the standard library alone, without a JSON Schema
+A step's outcome conforms to the outcome schema the distribution ships beside
+the engine (`documents`): `finished`, `question`, `returned`, `blocked`, or
+`stopped`, each with the step's `message` to the owner. The scripts run on the standard library alone, without a JSON Schema
 package, so the check understands exactly the keywords the schema uses.
 """
 
@@ -13,11 +13,12 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from .common import FORMAT, StepError, repository_root
+from . import documents
+from .common import FORMAT, StepError
 from .graph import TargetError, node_of, review_phase
 
-# The schema's place in the repository the command acts on.
-SCHEMA = Path(".agents/change-outcome.schema.json")
+# The schema, which the distribution ships beside the engine.
+SCHEMA = documents.path(documents.SCHEMA)
 # The schema's `$id` names the record-set format its outcomes belong to.
 _SCHEMA_ID = re.compile(r":format:(\d+)$")
 # A commit's full object name, SHA-1 or SHA-256, as `git rev-parse` prints it: an
@@ -33,10 +34,10 @@ def schema_format(schema: dict[str, Any]) -> int | None:
 
 
 def load_schema(path: Path | None = None) -> dict[str, Any]:
-    """The outcome schema at `path`, or the repository's own; refused when its `$id`
+    """The outcome schema at `path`, or the distribution's own; refused when its `$id`
     states another format than the one this engine records, since its outcomes would
     be logged as lines of a format they do not belong to."""
-    where = repository_root() / SCHEMA if path is None else path
+    where = SCHEMA if path is None else path
     schema = json.loads(where.read_text("utf-8"))
     if (stated := schema_format(schema)) != FORMAT:
         raise StepError(f"{where} states format {stated} in its $id, and this engine records "

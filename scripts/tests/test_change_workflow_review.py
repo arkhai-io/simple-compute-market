@@ -15,7 +15,7 @@ from typing import Sequence
 
 import pytest
 
-from change_workflow import codex, config, find, review, sandbox
+from change_workflow import codex, config, documents, find, review, sandbox
 from change_workflow.claude_code import TOOLS
 from change_workflow.common import SESSION_ID
 from change_workflow.sandbox import BWRAP
@@ -738,8 +738,8 @@ def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
                           runner=writing(review_text(), session="codex-1"),
                           head=lambda _: HEAD)
 
-    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2, "step": "review",
-                    "session": "codex:codex-1", "commit": HEAD, "kind": "design",
+    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2,
+                    "workflow": documents.version(), "step": "review", "session": "codex:codex-1", "commit": HEAD, "kind": "design",
                     "inputs": "runs/20261021T091540Z-review",
                     "record": f"01-{kind}.md", "harness": "codex", "model": "gpt-6-sol",
                     "effort": "high", "outcome": "finished",

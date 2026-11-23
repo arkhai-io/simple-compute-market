@@ -10,6 +10,10 @@ siblings by relative import:
   the next-step computation interprets, and the steps and review kinds it declares,
   the engine's only list of either; and beside it each step's definition: its skill,
   the session it resumes, its profile, and the paths it writes;
+- `documents` — the workflow's distribution: its version, and each of its own
+  documents by role — its specification, companion, guidance, handbook, outcome
+  schema, and make fragment among them — found beside the engine, installed or in
+  the source tree, and the skills it ships;
 - `diagram` — the architecture's hand-laid diagram of the graph, held to the table
   (`scripts/change-workflow check graph`);
 - `outcome` — the outcome a step ends with, checked against its schema, and the

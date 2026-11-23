@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import config
+from change_workflow import config, documents
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.config import ConfigError
@@ -534,6 +534,23 @@ disable = [{ check = "skills", reason = "this repository keeps no agent skills" 
     assert fields["models.implement"]["status"] == "absent"
     assert fields["review.format-retries"] == {"field": "review.format-retries",
                                                "status": "default", "value": 1}
+
+
+def test_config_as_json_names_the_workflows_version_and_each_document_by_role(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-lm42: `config --json` names each of the distribution's documents by role,
+    whatever repository it runs in, with its version; run from this tree, each is the
+    tree's own file."""
+    _checkout(tmp_path)
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    workflow = json.loads(capsys.readouterr().out)["workflow"]
+    assert workflow == documents.RUNNING.described()
+    assert list(workflow) == ["version", *documents.ROLES]
+    assert workflow["diagrams"].endswith("/diagrams/")
+    assert all(Path(path).is_relative_to(REPOSITORY) and Path(path).exists()
+               for role, path in workflow.items() if role != "version")
 
 
 def test_config_as_json_names_every_kinds_guide_and_each_step_hook(

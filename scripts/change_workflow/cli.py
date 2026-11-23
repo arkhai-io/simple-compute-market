@@ -69,8 +69,8 @@ from typing import Callable, Mapping, Sequence
 
 from . import around
 from . import clone as clones
-from . import (config, cost_report, diagram, evidence, find, gather, graph, history, hook,
-               hooks, index, next_step, propose, push, round_view, skills, tasks, wait)
+from . import (config, cost_report, diagram, documents, evidence, find, gather, graph, history,
+               hook, hooks, index, next_step, propose, push, round_view, skills, tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
@@ -194,6 +194,10 @@ def section_words(text: str) -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="change-workflow", description=DESCRIPTION)
+    # Printed as the arguments are parsed, before any repository is looked for or
+    # configuration read, so it answers outside a repository.
+    parser.add_argument("--version", action="version", version=documents.version(),
+                        help="print the workflow's version")
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser(
         "start", help="start a step: an interactive session, or with --unattended a run "
@@ -754,7 +758,8 @@ def _around(args: argparse.Namespace, root: Path, environ: Mapping[str, str],
 
 
 def _graph(root: Path) -> int:
-    """The diagram's comparison with the graph table, on the repository's own diagram."""
+    """The diagram's comparison with the graph table, on the distribution's own
+    diagram."""
     return diagram.main(root=root)
 
 

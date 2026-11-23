@@ -42,8 +42,10 @@ win. It lives in the change's untracked `reviews/` directory and moves with the
 change when it is archived.
 
 Every line this module appends carries the record set's format (`common.FORMAT`),
-which the log is the only authority for. A line with no format, or a lower one, is
-older (`older`): its records are converted before anything routes on them. A line
+which the log is the only authority for, and `workflow`, the version of the
+engine that wrote it (`documents.version`). The version is informational: no
+reader routes on it, and a field an older reader ignores moves no format. A line
+with no format, or a lower one, is older (`older`): its records are converted before anything routes on them. A line
 with a higher one is newer (`newer`), written by an engine this one predates, and
 nothing here routes on, converts, or appends to such a log (`NewerFormat`). `start`
 opens the log with a line of its own before any step it starts runs (`open_log`),
@@ -70,6 +72,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import IO, Any, Callable, Collection, Mapping, Sequence
 
+from . import documents
 from .common import CHANGES, FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
 from .find import (ARCHIVE, ChangeNotFound, change_directory, change_name, find_records,
                    landing_branch)
@@ -256,19 +259,26 @@ def undeclared(entry: Entry) -> str | None:
     return None
 
 
+# What the log assigns every line it appends, which no writer sets itself.
+_ASSIGNED = frozenset({"seq", "at", "format", "workflow"})
+# The engine's version, which every line records.
+Version = Callable[[], str]
+
+
 def _refuse_reserved(entry: Entry) -> None:
-    if reserved := {"seq", "at", "format"} & entry.keys():
+    if reserved := _ASSIGNED & entry.keys():
         raise StepError(f"a log line may not set {', '.join(sorted(reserved))}, which "
                         "the log assigns")
 
 
-def numbered(entries: Sequence[Entry], entry: Entry, clock: Clock = utc_now) -> Entry:
-    """`entry` as the line that follows `entries`: the next `seq`, the time, and the
-    log's format, which no writer sets itself."""
+def numbered(entries: Sequence[Entry], entry: Entry, clock: Clock = utc_now,
+             version: Version = documents.version) -> Entry:
+    """`entry` as the line that follows `entries`: the next `seq`, the time, the
+    log's format, and the engine's version, which no writer sets itself."""
     _refuse_reserved(entry)
     return {"seq": max((e["seq"] for e in entries), default=0) + 1,
             "at": clock().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "format": FORMAT, **entry}
+            "format": FORMAT, "workflow": version(), **entry}
 
 
 def _locked_for_writing(path: Path) -> IO[str]:
@@ -282,9 +292,10 @@ def _locked_for_writing(path: Path) -> IO[str]:
     return stream
 
 
-def append_entry(path: Path, entry: Entry, clock: Clock = utc_now) -> Entry:
-    """Append `entry` to the log with the next `seq`, the time, and the log's format,
-    and return the line.
+def append_entry(path: Path, entry: Entry, clock: Clock = utc_now,
+                 version: Version = documents.version) -> Entry:
+    """Append `entry` to the log with the next `seq`, the time, the log's format, and
+    the engine's version, and return the line.
 
     Several processes may append to one change's log at once, so the log is
     locked from reading the last `seq` to writing the new line; without the lock
@@ -297,7 +308,7 @@ def append_entry(path: Path, entry: Entry, clock: Clock = utc_now) -> Entry:
         text = stream.read()
         entries = _parse(path, text)
         refuse_newer(path, entries)
-        line = numbered(entries, entry, clock)
+        line = numbered(entries, entry, clock, version)
         stream.seek(0, 2)
         # A last line saved without its newline would otherwise be joined to this one.
         separator = "\n" if text and not text.endswith("\n") else ""
