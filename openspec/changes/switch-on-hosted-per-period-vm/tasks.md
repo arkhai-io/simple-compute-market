@@ -1613,7 +1613,7 @@ sections 5 and 6, prepares a topology meeting them, runs `e2e_vm_live_rate_servi
 and `e2e_vm_live_dispute` at the branch's code, and records its summary. Touches
 `docs/attachments/switch-on-hosted-per-period-vm/`.
 
-- [ ] 8.1 Receive the deployment's summary at
+- [x] 8.1 Receive the deployment's summary at
       `docs/attachments/switch-on-hosted-per-period-vm/live-verification.md`: per
       observation, made, failed or unproven, with public-safe provenance — source
       revision, target alias, authority revision identifiers, provisioning mode — no raw
@@ -1623,14 +1623,24 @@ and `e2e_vm_live_dispute` at the branch's code, and records its summary. Touches
       `docs/guidance/engineering/repository-content.md`). Verify: the public-content
       checks pass in `scripts/change-workflow run pre-commit`, and the source revision
       is the branch's code at the run.
-- [ ] 8.2 Confirm the threshold (D3): the buyer's stop, funds running out, the spot
+      Done: received for the run of 2026-11-23 at source revision `3b12f82ea`, the
+      branch's code at the run. Its authority revision is an opaque build label, since
+      a public repository holds no private commit identifier; the deployment holds
+      what it identifies. Before it, a rehearsal against the hosted dispute authority
+      found the seller filing's ruling shaped differently from the lane twin's, which
+      section 12 corrected.
+- [x] 8.2 Confirm the threshold (D3): the buyer's stop, funds running out, the spot
       preemption, the term end and the seller's filing each made; the buyer's contested
       case made, or unproven naming the requirement it lacked. A failed comparison
       returns the change to design with the evidence (D14); an unproven required
       observation holds the change here for the deployment to meet the requirement it
       names, or, on the owner's word, returns it to design (D3). Verify: the summary
       states each of the five made.
-- [ ] 8.3 Verification point: 8.1 and 8.2 hold.
+      Done: the buyer's stop, funds running out, the spot preemption, the term end and
+      the seller's filing are made. The buyer's contested case has its filing and the
+      storefront's contest made and the policy's ruling unproven, naming the ruling
+      policy the topology lacks, for closeout to record as the Goal 8 gap D3 names.
+- [x] 8.3 Verification point: 8.1 and 8.2 hold.
       End-to-end: `e2e_vm_live_rate_servicing`, `e2e_vm_live_dispute`, run by the
       deployment, not by the pipeline.
       Nothing is owed to validation.
