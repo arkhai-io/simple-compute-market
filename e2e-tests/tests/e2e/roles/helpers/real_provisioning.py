@@ -31,19 +31,21 @@ def configured_relay(provisioning_client: Any, target: VmHost | BareMetalHost) -
 
 
 def pin_registered_vm(provisioning_client: Any, host: Any) -> Any:
-    """Capture a first-time VM lane key before declaring that host's supply."""
-    if host.connection.public.get("host_keys"):
-        return host
-    result = provisioning_client.check_connectivity(host.host_id)
-    assert result.reachable and result.host_key is not None, (
-        f"management host {host.host_id!r} presented no usable SSH key: {result.detail}"
-    )
-    fingerprint = result.host_key.presented.rsplit(" ", 1)[-1]
-    if not result.host_key.pinned:
-        provisioning_client.capture_host_key(host.host_id, fingerprint)
+    """The registered VM host, once it holds a pin from an independent source.
+
+    The pin is the target's stated `ssh_host_public_key`, or one already stored:
+    an earlier run's, or one an operator captured after comparing the presented
+    fingerprint. A key the host merely presents is never captured here, since
+    comparing an observation with itself trusts whatever answered, and the
+    scenario's jobs then send it the relay token and a buyer's keys. With no pin,
+    the scenario stops before declaring the host's supply.
+    """
     registered = provisioning_client.get_host(host.host_id)
     assert registered.connection.public.get("host_keys"), (
-        f"management host {host.host_id!r} has no key pin after capture"
+        f"management host {host.host_id!r} has no SSH host key pin: state the host's "
+        "public key as ssh_host_public_key in the real-provisioning target, or check "
+        "its connectivity, compare the presented fingerprint with the host's own, and "
+        "capture it through the provisioning service's host-key capture route"
     )
     return registered
 

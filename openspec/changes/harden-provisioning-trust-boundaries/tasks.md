@@ -293,6 +293,32 @@ database. VM test supply is declared once a pin is available. Reapplying the
 VM declaration restates the registered pin if a key is absent from the target
 configuration.
 
+**Round 1 triage fixes (26 F1, 26 F2).** 26 F1, settled as the decision recorded
+under D5 ("The real-target harness"): task 4.4's observe-and-capture fallback is
+replaced. `pin_registered_vm` no longer checks connectivity or captures what a host
+presents; it returns the registered host when it holds a pin, the target's stated
+key or one stored before the run, and otherwise refuses before capacity is declared,
+naming `ssh_host_public_key` and the operator's capture route. The test-compatibility
+delta's sentence and its new scenario "A VM target with no pin is refused" say so,
+and the committed example target's comment names the requirement. 26 F2: the raw
+malformed-fingerprint request in `test_hosts_api.py` asserts only its 422 and is
+commented as a rejection-path test. Evidence: the e2e unit suites
+`test_real_vm_lane.py`, `test_real_provisioning_target.py` and
+`test_real_bare_metal_lane.py` (unit) passed, 214 tests; the new
+`test_an_unpinned_vm_is_refused_before_supply_without_capturing_what_it_presents`
+failed at `5c911f1af` under `run test-before`, the file's other 94 tests passing
+there; the provisioning service's integration suite (application integration)
+passed, 579 tests. The fresh-context compliance check found the delta's
+prohibition conditional on a fingerprint, which the decision rejects, and the
+example target's comment omitting a pin an earlier run stated; both were fixed. It
+noted that no unit test drives `provision_e2e_executor` with an unpinned host to show
+capacity undeclared; declined, since that order is `provision_e2e_executor`'s, which
+runs `before_declare` before declaring and is unchanged, and the gap predates the fix.
+`scripts/change-workflow run pre-commit`: "after-functional-change at 5c911f1af…:
+passed, exit 0"; "pre-commit-functional at 5c911f1af…: passed, exit 0", its local
+evidence for the tree `7ec540110033` passing `check-packaging` and `make test`;
+"pre-commit at 5c911f1af…: passed, exit 0".
+
 ## 5. A VM guest reaches no other guest and only DHCP and DNS on its host
 
 Delivers every guest's isolated, filtered interface and the VM host kit's guest
@@ -486,8 +512,9 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
     release" — all as drafted in `design.md` (D16).
   - D1, D2, D12, D13 and D17 have no permanent destination; D11's roadmap row and
     unowned gap were written with the design.
-  Promote the target's management SSH pin field, capture-before-capacity rule, and
-  reapply evidence to the test-compatibility specification and the real-target
+  Promote the target's management SSH pin field, the rule that a VM host is pinned
+  from an independent source before capacity is declared (26 F1), and reapply
+  evidence to the test-compatibility specification and the real-target
   instructions in the validation runbook and E2E README.
 
 - [ ] 8.10 **Guidance placement.** Read the new engineering file, the package-versions

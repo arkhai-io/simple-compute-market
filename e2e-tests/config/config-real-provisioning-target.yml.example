@@ -23,6 +23,10 @@ REAL_PROVISIONING_TARGET:
       # host's own units.
       # management_unit: example-agent.service
       # Optional: the VM host's independently confirmed OpenSSH public key.
+      # Without it the host must already hold a pin in the provisioning service,
+      # stated by an earlier run or captured by an operator who compared its
+      # fingerprint; the scenario refuses an unpinned host rather than trusting
+      # the key it presents.
       # Deterministic test fixture only, never a public-network identity.
       # ssh_host_public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJS'
     - host_id: example-bm-1

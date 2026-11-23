@@ -239,6 +239,19 @@ playbook, which counts the job as started and holds a teardown for an operator t
 nothing touched the host; a separate rotation operation with its own result type,
 which duplicates what stating keys or capturing with `replace` already does (17 F5).
 
+**The real-target harness (26 F1).** The real VM scenarios pin a host only from an
+independent source: the target's stated `ssh_host_public_key`, or a pin already
+stored, an earlier run's or one an operator captured after comparing the presented
+fingerprint. With neither, a scenario refuses before declaring capacity, naming the
+field; it never captures the key a host presents, since comparing an observation with
+itself is trust on first use, and its jobs then send the relay token and a buyer's
+keys to whatever answered. The target's key stays optional, so a profile for a host
+already pinned keeps working. Rejected for the harness: requiring the key in every VM
+target, which fails a profile for an already pinned host until the key is added; an
+expected fingerprint in the target passed to the capture, a further target field for
+a capture section 4's local SSH fixture already exercises; observing and capturing,
+as first implemented.
+
 ### D6 — Hosts deployed before pins are adopted by the probe before their first job
 
 The migration of D4 marks each host it rewrites as pending adoption, a flag on the

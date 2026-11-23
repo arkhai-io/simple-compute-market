@@ -70,11 +70,20 @@ physical machine.
 - **THEN** the target is refused, naming the field
 
 A VM target MAY state its management SSH public key. A VM scenario registering a
-host MUST state that pin when supplied. Otherwise it MUST obtain a registered pin
-before declaring capacity, preserving a stored pin or observing and explicitly
-capturing the presented key. A reapply MUST restate the pin held at registration
-and verify that the management pins are retained. A bare-metal scenario MUST
-state the target's management SSH public key at registration.
+host MUST state that pin when supplied. Otherwise it MUST preserve a pin already
+stored for the host, and MUST refuse before declaring capacity, naming the field,
+when the host holds none. A scenario MUST NOT capture a key the host presents.
+A reapply MUST
+restate the pin held at registration and verify that the management pins are
+retained. A bare-metal scenario MUST state the target's management SSH public key
+at registration.
+
+#### Scenario: A VM target with no pin is refused
+
+- **WHEN** a real VM scenario registers a host whose target states no management SSH
+  public key and which holds no stored pin
+- **THEN** the scenario refuses before declaring capacity, naming
+  `ssh_host_public_key`, and captures nothing
 
 #### Scenario: Provisioning registration is reapplied with an existing pin
 

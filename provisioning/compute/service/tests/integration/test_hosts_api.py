@@ -1080,11 +1080,13 @@ class TestHostKeyCapture:
         assert mismatch.value.status_code == 409 and mismatch.value.code == "host_key_mismatch"
         with pytest.raises(ValidationError, match="fingerprint"):
             await client.capture_host_key("kvm1", "invalid")
+        # Rejection-path test: the typed client refuses this fingerprint before
+        # sending it, so a raw request proves the server's own validation.
         with pytest.raises(ComputeProvisioningError) as invalid:
             await client.authenticated_request(
                 "POST", "/api/v1/hosts/kvm1/host-keys/capture", {"fingerprint": "invalid"},
             )
-        assert invalid.value.status_code == 422 and "fingerprint" in str(invalid.value)
+        assert invalid.value.status_code == 422
         with pytest.raises(ComputeProvisioningError) as missing:
             await client.capture_host_key("unregistered", first.split()[1])
         assert missing.value.status_code == 404

@@ -157,20 +157,25 @@ def test_a_configured_vm_key_is_stated_and_a_captured_pin_is_restated():
     assert target_connection(TARGET, registered_pins=[key]).public["host_keys"] == [key]
 
 
-def test_an_unpinned_vm_is_observed_and_captured_before_supply_is_declared():
+def test_an_unpinned_vm_is_refused_before_supply_without_capturing_what_it_presents():
     host = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
-    fingerprint = "SHA256:" + b64encode(b"x" * 32).decode().rstrip("=")
     client = MagicMock()
-    client.check_connectivity.return_value = SimpleNamespace(
-        reachable=True, host_key=SimpleNamespace(
-            pinned=False, presented="ssh-ed25519 " + fingerprint
-        ), detail="fixture reachable",
-    )
+    client.get_host.return_value = host
+
+    with pytest.raises(AssertionError, match="ssh_host_public_key"):
+        pin_registered_vm(client, host)
+    client.check_connectivity.assert_not_called()
+    client.capture_host_key.assert_not_called()
+
+
+def test_a_vm_pinned_before_the_run_keeps_its_stored_pin():
+    host = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
     pinned = _host(HOST, REAL_POOL_ID, target_connection(TARGET, registered_pins=["fixture"]))
+    client = MagicMock()
     client.get_host.return_value = pinned
 
     assert pin_registered_vm(client, host) is pinned
-    client.capture_host_key.assert_called_once_with(HOST, fingerprint)
+    client.capture_host_key.assert_not_called()
 
 
 def test_an_unchanged_host_is_left_as_it_is():
