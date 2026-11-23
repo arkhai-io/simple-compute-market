@@ -23,23 +23,33 @@ The registry SHALL admit the compute RFQ kind only when configured with a valid 
 - **WHEN** an authenticated account attempts to publish a compute RFQ at a registry without the configured compute RFQ schema
 - **THEN** the registry refuses the unsupported RFQ kind without creating a record
 
-### Requirement: Buyers may state a budget in descriptive details
+### Requirement: Buyers may state commercial terms in descriptive details
 
-An RFQ MAY include an optional plain-text description and optional bounded flat metadata with scalar values. A buyer MAY state a target budget in either. The registry SHALL preserve these details on authenticated RFQ reads. Omission of a budget SHALL leave the request valid.
+An RFQ MAY include an optional plain-text description and optional bounded flat metadata with scalar values. A buyer MAY state proposed price, deposit and other payment terms in either. The registry SHALL preserve these terms on every eligible open RFQ read, including anonymous reads where discovery is public. The request SHALL remain valid without commercial terms.
 
 #### Scenario: A buyer states a target for private negotiation
 
-- **WHEN** the buyer includes “Target USD 20 per node-hour, negotiable” in the description or as a metadata string
-- **THEN** an authenticated reader receives that text in the field the buyer supplied, and the request creates no binding price
+- **WHEN** the buyer states “USD 20 per node-hour, 30% upfront, balance monthly” in the description or a metadata string
+- **THEN** an eligible reader receives the wording as supplied, and publication creates no binding price or payment obligation
 
-### Requirement: Open RFQ discovery requires an authenticated account
+### Requirement: Open RFQ discovery follows supply visibility
 
-The registry SHALL require an authenticated account to list, search or retrieve open RFQs by ID. Any ordinary authenticated account SHALL be eligible to read open request requirements. Discovery SHALL omit private responses and contact details.
+The registry SHALL permit anonymous search and direct lookup by registry-scoped ID for open RFQs wherever its supply discovery permits anonymous access. Any ordinary authenticated account SHALL be eligible to read open requests. Anonymous discovery SHALL expose only published RFQ information and routing identity. It SHALL omit party references, private responses and contact details. Anonymous requests SHALL NOT retrieve closed or expired RFQs, and an invalid supplied account proof SHALL NOT fall back to anonymous access.
 
 #### Scenario: Anonymous discovery in a registry with public supply
 
-- **WHEN** an anonymous caller lists RFQs, searches for one, or requests a known open RFQ by ID, even while supply listings are public
-- **THEN** the registry refuses each RFQ request without returning request requirements
+- **WHEN** an anonymous caller searches open RFQs or looks up a known open RFQ ID on a public registry
+- **THEN** the registry returns the published request with its registry identity and ID and omits private fields
+
+#### Scenario: Anonymous discovery in a registry with private supply
+
+- **WHEN** an anonymous caller requests an RFQ on a registry that requires authentication for supply discovery
+- **THEN** the registry refuses the request without disclosing RFQ information
+
+#### Scenario: Anonymous lookup after closure
+
+- **WHEN** an anonymous caller requests the ID of a closed or expired RFQ on a public registry
+- **THEN** the registry refuses disclosure in the same way as for an unknown ID
 
 #### Scenario: An ordinary account discovers demand
 
@@ -240,7 +250,7 @@ The registry SHALL enforce the active contact-access state before admitting read
 
 ### Requirement: Consent uses verified registry and party references
 
-The account entry point SHALL provide the verified registry identity and an opaque buyer reference on authorized RFQ detail reads. On authorized private response reads it SHALL provide the verified registry identity and the corresponding opaque respondent reference. Party references SHALL stay stable for an account within an RFQ across credential changes and SHALL be scoped to that RFQ. These projections SHALL omit raw account subjects and contact details. Clients SHALL preview the verified registry and recipient reference before asking for approval and echo those values when submitting the operation. The registry SHALL check the reference against the current eligible party.
+The account entry point SHALL provide the verified registry identity and an opaque buyer reference on authorized RFQ detail reads. On authorized private response reads it SHALL provide the verified registry identity and the corresponding opaque respondent reference. Party references SHALL stay stable for an account within an RFQ across credential changes and SHALL be scoped to that RFQ. These projections SHALL omit raw account subjects and contact details. Interactive clients SHALL preview the verified registry and recipient reference before asking for approval. Interactive clients and programmatic callers SHALL echo the values they verified when submitting the operation. The registry SHALL check the reference against the current eligible party.
 
 #### Scenario: A buyer browses two registries with the same RFQ identifier
 
@@ -253,15 +263,20 @@ The account entry point SHALL provide the verified registry identity and an opaq
 - **WHEN** an eligible reader opens RFQ details to prepare a response
 - **THEN** the reader receives the verified registry and the RFQ-specific buyer reference without receiving the buyer's contact or underlying account subject
 
-### Requirement: Terminal and browser clients use the same RFQ API
+### Requirement: Interactive clients and authorized delegates use the same RFQ API
 
-The account entry point SHALL expose the same operations, inputs and outcomes to the terminal and browser, including contact-sharing actions. Each interactive client SHALL preview the exact contact and counterparty and ask for explicit approval before submission. The account authority SHALL verify permission to share contact for the acting account and the submitted affirmative consent before signing the action. The signed input SHALL bind the action, target registry, counterparty, current terms revision, relevant write version and chosen contact. The registry SHALL enforce the current ownership, counterparty, revision and eligibility checks. A credential with general account access alone SHALL NOT authorize contact sharing. Successful mutations SHALL return a contact-free outcome.
+The account entry point SHALL expose the same operations, inputs and outcomes to the browser, the terminal and programmatic callers, including contact-sharing actions. The terminal SHALL accept complete operation inputs and return machine-readable outcomes and errors without prompts when invoked noninteractively. A delegate with current sharing permission SHALL be able to initiate an RFQ contact share for the acting account. Each interactive client SHALL preview the exact contact and counterparty and ask for explicit approval before submission. The account authority SHALL verify permission to share contact for the acting account and the submitted affirmative consent before signing the action. The signed input SHALL bind the action, target registry, counterparty, current terms revision, relevant write version and chosen contact. The registry SHALL enforce the current ownership, counterparty, revision and eligibility checks. A credential with general account access alone SHALL NOT authorize contact sharing. Successful mutations SHALL return a contact-free outcome.
 
 #### Scenario: A respondent approves in the terminal
 
 - **WHEN** a respondent with contact-sharing permission approves the displayed contact, counterparty and current request terms in the terminal
 - **THEN** the terminal submits through the common API and receives the same contact-free response result that a browser client would receive
 - **AND** the buyer must still select the response before either party can retrieve the other’s contact
+
+#### Scenario: An authorized delegate acts without interactive prompts
+
+- **WHEN** an authorized delegate submits explicit consent, the chosen contact, verified registry and recipient, and expected terms and record versions
+- **THEN** the service admits the same operation and returns the same contact-free result as for an interactive caller
 
 #### Scenario: Permission or approval is missing
 
