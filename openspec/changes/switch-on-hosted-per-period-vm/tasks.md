@@ -1953,6 +1953,37 @@ the owner's direction on 2026-11-23 (workflow seq 88). Touches
 - [x] 13.3 Verification point: 13.1 and 13.2 hold. Section 8's run records how its
       `market` was built. Nothing is owed to validation.
 
+## 13a. Two comments that the comment check or the values beneath contradict
+
+Delivers the fix round closeout returned for (14.1, workflow seq 105, the owner's
+direction at seq 107): rewording a comment the merge of `origin/dev` brought in, which
+`make check-comment-hygiene` matches, and an older chart comment the values beneath it
+contradict. Implements no design decision; it answers the comment rule
+(`docs/guidance/engineering/comments.md`, "Comments describe the current system") and
+closeout's comment hygiene (`docs/guidance/workflow/closeout.md`, "Comment hygiene"),
+which fails the closing checks until it passes. Touches
+`scripts/tests/test_change_next_step.py` and `helm/values.yaml`, comments only.
+
+- [ ] 13a.1 Reword the comment at `scripts/tests/test_change_next_step.py:1265–1266`
+      so it names the test's fixture sections without a numeral, keeping what it says —
+      the newly planned section joins the open round, and its reading and review start
+      from that round's base, so the section planned before it is still read and
+      reviewed with it — for example "The third section joins the open round: its
+      reading and review start from the open round's base, so the second is still read
+      and reviewed with it." Verify: `make check-comment-hygiene` passes, and the test
+      module still passes (unit, `uv run --no-project --with pytest --with pyyaml pytest
+      -q scripts/tests/test_change_next_step.py`).
+- [ ] 13a.2 Reword the comment at `helm/values.yaml:414–415` so it describes the
+      values beneath it: the e2e-tests subchart's credentials come only from the
+      pre-existing Secret `secretName` names (`createSecret: false`, lines 427–430), and
+      the chart carries no key value. Verify: the chart render tests pass (unit,
+      `make -C helm test-render`), no value changing.
+- [ ] 13a.3 Verification point: 13a.1 and 13a.2 hold, and `scripts/change-workflow run
+      pre-commit switch-on-hosted-per-period-vm` passes every check, the citations
+      check included now that section 8's summary exists.
+      End-to-end: none; comments only, no scenario's behaviour changes.
+      Nothing is owed to validation.
+
 ## 14. Closeout
 
 Closes the change through `docs/guidance/workflow/closeout.md`'s parts in order, with
