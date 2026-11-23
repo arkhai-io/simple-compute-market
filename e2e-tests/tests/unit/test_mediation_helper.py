@@ -8,7 +8,9 @@ them, naming it. A live verification scenario refuses a lane-owned target
 with a blocked skip naming it, and fails a run stating no buyer token; an
 Agreement pinning another authority than the run's target is named with both.
 The buyer's credential names its token's variable, and the harness hands the
-token over under it. Every value below is a development
+token over under it. A target reached through MEDIATION.PROXY_URL is probed and
+read through that proxy alone, and the buyer processes receive it as their
+HTTPS_PROXY with loopback excluded. Every value below is a development
 fixture, never used on any network.
 """
 
@@ -17,7 +19,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import ssl
 import tomllib
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -30,6 +34,8 @@ from tests.e2e.roles.helpers import mediation
 
 Failed = pytest.fail.Exception
 Skipped = pytest.skip.Exception
+# The lanes' public development CA, a real bundle the transport can load.
+_LANE_CA = Path(__file__).resolve().parents[3] / "tools/lane-double-controls/tls/lane-ca.pem"
 
 # The lanes' mediation double's identity and tokens, public development values.
 _EXTERNAL = {
@@ -335,3 +341,92 @@ def test_an_unreachable_authority_leaves_the_buyer_s_filing_unknown(tmp_path) ->
 
     assert outcome.status == "unknown", outcome
     assert peer.cases == {}
+
+
+_PROXIED = {**_EXTERNAL, "SERVICE_URL": "https://dispute-authority.topology.svc.cluster.local",
+            "PROXY_URL": " http://127.0.0.1:18443 ", "CA_BUNDLE_PATH": str(_LANE_CA)}
+
+
+def test_a_target_named_with_a_proxy_is_probed_through_it(configure, monkeypatch) -> None:
+    asked: list[tuple[str, dict[str, Any]]] = []
+
+    def probe(url: str, **kwargs: Any) -> bool:
+        asked.append((url, kwargs))
+        return True
+
+    monkeypatch.setattr(mediation, "target_ready", probe)
+    configure(**_PROXIED)
+    target = mediation.configured_mediation()
+    assert target.proxy_url == "http://127.0.0.1:18443"
+    assert target.service_url == _PROXIED["SERVICE_URL"]
+    assert asked == [(_PROXIED["SERVICE_URL"],
+                      {"ca_bundle": str(_LANE_CA), "proxy": "http://127.0.0.1:18443"})]
+
+
+def test_the_buyer_processes_reach_a_proxied_target_through_it_and_loopback_directly(
+        configure) -> None:
+    configure(**_PROXIED)
+    target = mediation.configured_mediation(ready=_ready)
+    assert mediation.buyer_mediation_environment(target) == {
+        "MEDIATION_BUYER_API_KEY": _EXTERNAL["BUYER_API_KEY"],
+        "HTTPS_PROXY": "http://127.0.0.1:18443", "https_proxy": "http://127.0.0.1:18443",
+        "NO_PROXY": "127.0.0.1,localhost,::1", "no_proxy": "127.0.0.1,localhost,::1",
+    }
+    configure(**_EXTERNAL)
+    direct = mediation.configured_mediation(ready=_ready)
+    assert mediation.buyer_mediation_environment(direct) == {
+        "MEDIATION_BUYER_API_KEY": _EXTERNAL["BUYER_API_KEY"]}
+
+
+def test_the_harness_client_goes_through_the_proxy_trusting_the_bundle_alone(configure) -> None:
+    configure(**_PROXIED)
+    target = mediation.configured_mediation(ready=_ready)
+    transport = mediation.target_transport(target)
+    assert isinstance(transport, httpx.AsyncHTTPTransport)
+    pool = transport._pool  # httpx exposes no public view of a transport's proxy.
+    assert type(pool).__name__ == "AsyncHTTPProxy"
+    assert pool._proxy_url.host == b"127.0.0.1" and pool._proxy_url.port == 18443
+    lane_ca = ssl.create_default_context(cafile=str(_LANE_CA)).get_ca_certs()
+    assert pool._ssl_context.get_ca_certs() == lane_ca and lane_ca
+
+
+def test_a_test_transport_or_no_proxy_leaves_the_client_its_own(configure) -> None:
+    configure(**_PROXIED)
+    proxied = mediation.configured_mediation(ready=_ready)
+    given = httpx.MockTransport(lambda request: httpx.Response(200))
+    assert mediation.target_transport(proxied, given) is given
+    configure(**_EXTERNAL)
+    assert mediation.target_transport(mediation.configured_mediation(ready=_ready)) is None
+
+
+def test_an_unready_proxied_target_is_named_with_its_proxy(configure) -> None:
+    configure(**_PROXIED)
+    outcome = _outcome(ready=_unready)
+    assert isinstance(outcome, Skipped)
+    assert (f"blocked: mediation service at {_PROXIED['SERVICE_URL']} through "
+            "http://127.0.0.1:18443 is not ready") in str(outcome)
+
+
+def test_the_buyer_s_filing_and_record_reads_go_through_the_proxy(tmp_path, monkeypatch) -> None:
+    """Both of the harness's mediation clients take the proxied transport; the
+    fake authority then answers in its place."""
+    peer = MediationContractFake()
+    given: list[object] = []
+    real = mediation.MediationClient
+
+    def recording(*args: Any, transport: object = None, **kwargs: Any) -> Any:
+        given.append(transport)
+        return real(*args, transport=peer.transport(), **kwargs)
+
+    monkeypatch.setattr(mediation, "MediationClient", recording)
+    target = dataclasses.replace(_peer_target(peer), proxy_url="http://127.0.0.1:18443")
+    request = peer.data["filing"]["request"]
+    outcome = mediation.file_as_buyer(
+        target, negotiation_id="negotiation-fixture", transaction=request["transaction"],
+        agreement=request["agreement"], store=tmp_path, ended_at=_ENDED_AT,
+    )
+    peer.decide(outcome.filing.case_ref, [])
+    mediation.read_record(target, negotiation_id="negotiation-fixture",
+                          transaction=request["transaction"], agreement=request["agreement"])
+    assert len(given) == 2
+    assert all(isinstance(transport, httpx.AsyncHTTPTransport) for transport in given)

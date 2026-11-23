@@ -125,7 +125,7 @@ change's index row and Goal 8 gap (inert paths).
       left for its own reverification. The Goal 8 gap row drops the clause. This
       change's own row is `in implementation`. `check index` — pass. The Goal 8
       current-state sentence naming the double's `reverse` effects is left for
-      roadmap currency (10.5), as planned.
+      roadmap currency (11.5), as planned.
 - [x] 1.5 Verification point: the double's unit and integration suites pass, and the VM
       lane's dispute scenarios still pass against the amended double (system, the VM
       lane's Compose stack: `make -C e2e-tests test-e2e-vm "E2E_MODULE=e2e_vm_payment_deal
@@ -662,7 +662,7 @@ Handoff (section 4):
 - For closeout's promotion: `docs/guidance/repository/chart-render-tests.md`,
   "Where they live and how they run", describes what the VM chart's render test
   runs under `STOREFRONT_PYTHON` and does not yet name the production example's
-  startup and publication checks, beside the bare-metal example's it names; 10.9's
+  startup and publication checks, beside the bare-metal example's it names; 11.9's
   D8 lists only the specs and `deployment-state/configuration.md`, which has no
   production-examples passage, so the guidance file is the destination to add.
 - The fresh-context check found: the test file's docstring describing only
@@ -919,7 +919,7 @@ Handoff (section 5):
   five-minute delivery deadline and a period, so about a quarter of an hour
   serves; the rate payer's exact balance follows the period (README, "Live
   verification").
-- For closeout's promotion of D4 (10.9): beside `test-compatibility/architecture.md`
+- For closeout's promotion of D4 (11.9): beside `test-compatibility/architecture.md`
   and `system-tests.md`, two permanent documents still say a wall-time run waits
   only for an instant the Agreement fixes, which `LaneTime.reach`'s recorded case
   now widens: `docs/guidance/repository/deal-scenarios.md`, "The discipline every
@@ -988,7 +988,7 @@ within the run's reach bound (at once when the earlier stages took longer; a par
 started later than that instant still meets the assertion's check, which fails it
 rather than passing), and fails naming LIVE.MAXIMUM_TERM_SECONDS when that instant is
 not before the Agreement's end. The README's input column, `test_buyer_stop.py`'s and
-`live/stages.py`'s docstrings say so. For closeout's promotion of D4 and D6 (10.9):
+`live/stages.py`'s docstrings say so. For closeout's promotion of D4 and D6 (11.9):
 `deal-scenarios.md` and `TESTING.md`, "Lane time", admit on wall time "an instant the
 deal's Agreement fixes, such as its start", which does not literally cover the
 Agreement's start plus the scenario's own minute, though the delta's "its own data
@@ -1269,7 +1269,7 @@ Handoff (section 6):
   (`lifecycle_buyer_read`, `delivery_read`) returns. The contest now reads it first
   and is a blocked skip naming the requirement, so the requirement is met as the
   spec words it (below).
-- For closeout's promotion of D6 (10.9), "bounded polling of a live producer for an
+- For closeout's promotion of D6 (11.9), "bounded polling of a live producer for an
   effect of the scenario's own request": `LiveDispute07`'s wait for the first
   period's earnings is such a poll, bounded by up to a whole period plus the poll
   bound, with no instant reached; `system-tests.md`, `deal-scenarios.md` and
@@ -1544,14 +1544,14 @@ Handoff (section 7):
   retires in part (its abandoned-lease and unactivated-reservation subsection, once
   the site enforces the deadline); the seller quickstart's deadline bullet links it
   by its anchor, `operator-handbook.md#serving-rate-deals`.
-- For closeout's promotion (10.9): D7's quickstart and D10/D11's documents are
+- For closeout's promotion (11.9): D7's quickstart and D10/D11's documents are
   written here. D11's `deal-lifecycle/architecture.md` "Current limits" sentence and
   D1's caveat corrections stay closeout's, and the caveats wait for section 8's
   evidence (D3). The handbook says only what SCM relies on of the dispute
   authority, and points at the authority's own published policy and its
   description's `contact` rather than linking a document, since no published
   location is known to this repository.
-- For 10.5: the buyer quickstart states that `market` files no case on a running
+- For 11.5: the buyer quickstart states that `market` files no case on a running
   deal but the surrender `end --end-now-regardless` makes, Goal 8's existing
   unowned row; and that a buy its default refusals alone empty says nothing and
   exits 0, the new unowned row.
@@ -1568,7 +1568,7 @@ Handoff (section 7):
   over" for "beneath", and two note phrasings (the test's level, an unasserted
   horizon value); all fixed. It also noted that `settlement-configuration`'s
   companion still says no shipped configuration declares rate servicing, which
-  10.9's D1 corrects at closeout once section 8's evidence is in.
+  11.9's D1 corrects at closeout once section 8's evidence is in.
 
 The sections 5–7 round's triage (`reviews/41-implementation.triage.md`; validation 42
 passed at `68b5566e4`, the owner's notes 43 had none) fixed 41 F1 and 41 F2, each
@@ -1733,27 +1733,68 @@ Handoff (section 9):
   the run command gave a port and an unquoted placeholder; the example's optional
   fee and dispute authority inputs were unlisted; the section's introduction
   explained the fix by a change elsewhere; and a README line overran its wrap.
-- For closeout: section 9 changes no capability's behaviour, so 10.9 promotes nothing
+- For closeout: section 9 changes no capability's behaviour, so 11.9 promotes nothing
   from it. The kit README and the quickstart are already the permanent documents.
 
-## 10. Closeout
+## 10. The live harness reaches a topology's authority through a configured proxy
+
+Delivers a run setting through which the live dispute scenarios reach a mediation
+authority whose origin resolves only inside its topology. Until now the harness
+dialled MEDIATION.SERVICE_URL itself, which must equal the origin the Agreement pins,
+so a run outside the topology could reach the authority only by changing how the
+runner's machine resolves names. The owner directed on 2026-11-23 that the tests be
+configurable instead, through a proxy the run reaches by a port forward. Implements
+no design decision; it serves section 8's run (`docs/guidance/workflow/changes.md`,
+"Defects found during a change"). Touches
+`e2e-tests/tests/e2e/roles/helpers/mediation.py` and `payments.py`, their unit
+tests, and `e2e-tests/README.md`, its `MEDIATION` settings and "Live verification".
+
+- [x] 10.1 MEDIATION.PROXY_URL names an HTTP proxy for the mediation target. With it:
+      - the readiness probe asks the target's `/health` through that proxy alone,
+        still ignoring environment proxies (`target_ready`'s `proxy`);
+      - the harness's own mediation client, for the buyer's filing and the record
+        reads, goes through it, verifying the target's certificate under
+        MEDIATION.CA_BUNDLE_PATH when one is set (`target_transport`);
+      - the buyer processes the harness starts receive it as their `HTTPS_PROXY`,
+        both cases, with `NO_PROXY` covering loopback, so every HTTPS request they
+        make outside loopback goes through it (`buyer_mediation_environment`);
+      - an unready target is named with the proxy it was asked through.
+      MEDIATION.SERVICE_URL stays the pinned origin, compared with the Agreement's
+      authority as before. Without the setting nothing changes. Verify: unit tests,
+      each failing once its behaviour is removed.
+      Done: six tests in `test_mediation_helper.py` and two in
+      `test_payments_helper.py`. Removed one at a time, the proxy in the probe
+      failed the probe tests, in `target_transport` the transport test, in the
+      buyer environment the environment test, and at the filing and record-read
+      call sites the wiring test; restored, the two files pass (81). A fresh-context
+      check ran a local TLS origin behind a CONNECT proxy: the transport tunnels to
+      the origin host and verifies its certificate under the bundle.
+- [x] 10.2 `e2e-tests/README.md`: the `MEDIATION` settings list names PROXY_URL, and
+      "Live verification"'s run settings say where it applies (an origin resolving
+      only inside the topology), what the harness and the buyer processes do with it,
+      and that SERVICE_URL and its certificate stay the pinned origin's. Verify: the
+      paragraphs name no deployment.
+- [x] 10.3 Verification point: 10.1 and 10.2 hold. Section 8's run uses the setting.
+      Nothing is owed to validation beyond the unit tests.
+
+## 11. Closeout
 
 Closes the change through `docs/guidance/workflow/closeout.md`'s parts in order, with
 this repository's own parts (`openspec/README.md`, "This repository's closeout parts")
 after campaign index currency.
 
-- [ ] 10.1 Comment hygiene: run `make check-comment-hygiene`; a finding, or a comment this
+- [ ] 11.1 Comment hygiene: run `make check-comment-hygiene`; a finding, or a comment this
       change added that names a change, a task or a review, returns the change to
       implementation.
-- [ ] 10.2 Import placement: confirm every import this change added is at module level,
+- [ ] 11.2 Import placement: confirm every import this change added is at module level,
       or return the change to implementation.
-- [ ] 10.3 Documentation compliance: re-check D1–D14 against
+- [ ] 11.3 Documentation compliance: re-check D1–D14 against
       `docs/guidance/workflow/openspec-documentation.md` and `openspec/README.md`,
       "Documentation placement", and that every permanent document written describes the
       current state, declaratively and with no wording relative to the change.
-- [ ] 10.4 Narrative compression: shorten completed tasks to final behaviour, evidence,
+- [ ] 11.4 Narrative compression: shorten completed tasks to final behaviour, evidence,
       deferred work and destinations, moving any rationale into `design.md` first.
-- [ ] 10.5 Roadmap currency: in `docs/development/ROADMAP.md`'s Goal 8, remove this
+- [ ] 11.5 Roadmap currency: in `docs/development/ROADMAP.md`'s Goal 8, remove this
       change's open-gap row; absorb into the current state that on-demand and spot VM
       are a supported seller configuration, in production once a release carries them,
       qualified live as the summary of section 8 records (citing it), and that the
@@ -1764,20 +1805,20 @@ after campaign index currency.
       D11; and, if the buyer's contested case is unproven, add a row to "Work this goal
       found and leaves unowned" naming the missing ruling policy. Name the edit in the
       design-promotion record.
-- [ ] 10.6 Campaign index currency: update this change's row in
+- [ ] 11.6 Campaign index currency: update this change's row in
       `openspec/changes/README.md` and the Goal 8 campaign prose and graph annotation
       for this change; leave other rows' `Depends on` as they are; run
       `make check-change-index`.
-- [ ] 10.7 Packaging: run `make check-packaging`, then `make check-architecture-change
+- [ ] 11.7 Packaging: run `make check-packaging`, then `make check-architecture-change
       CHANGE=switch-on-hosted-per-period-vm`; resolve every failure or owned exception;
       run `make check-agent-skills` only if the change touched `.agents/`, `.claude/` or
       `.codex/`.
-- [ ] 10.8 End-to-end pipeline: record, from the latest passing validation, the pipeline
+- [ ] 11.8 End-to-end pipeline: record, from the latest passing validation, the pipeline
       run and its result, and the scenarios exercising this change —
       `e2e_vm_rate_dispute`, `e2e_vm_recurring_purchase`, `e2e_vm_rate_servicing`,
       `e2e_vm_payment_deal` and the `e2e_vm_dispute_*` scenarios; the live scenarios'
       evidence is section 8's summary, not the pipeline's. Closeout dispatches no run.
-- [ ] 10.9 Promotion: write the permanent documents below and complete the
+- [ ] 11.9 Promotion: write the permanent documents below and complete the
       design-promotion record (`docs/guidance/workflow/changes.md`, "The design-promotion
       record"); the `test-compatibility` and `deployment-state` `spec.md` files are
       written by the archive.
@@ -1831,7 +1872,7 @@ after campaign index currency.
       - D8: the `test-compatibility` and `deployment-state` specs, by the archive;
         `openspec/specs/deployment-state/configuration.md`, its production-examples
         passage, if it lists them.
-      - D9: the summary, written in section 8; cited by Goal 8 (10.5).
+      - D9: the summary, written in section 8; cited by Goal 8 (11.5).
       - D10: the quickstarts, written in section 7.
       - D11: the operator handbook, written in section 7;
         `deal-lifecycle/architecture.md`, "Current limits" (each environment's receipt
@@ -1936,12 +1977,12 @@ after campaign index currency.
           change ("Defects found during a change").
       Run `make check-spec-index CHANGE=switch-on-hosted-per-period-vm`; neither touched
       capability has an `index.md`, and `openspec/specs/README.md` needs no row.
-- [ ] 10.10 Guidance placement: read the paragraphs promoted in 10.9 against the layer
+- [ ] 11.10 Guidance placement: read the paragraphs promoted in 11.9 against the layer
       test — `system-tests.md`'s and `test-doubles.md`'s in the engineering layer with
       neutral examples, `changes.md`'s in the workflow's — then run `make check-guidance`.
-- [ ] 10.11 Documentation citations: run `make check-doc-citations
+- [ ] 11.11 Documentation citations: run `make check-doc-citations
       CHANGE=switch-on-hosted-per-period-vm` and resolve every match, then
       `scripts/change-workflow openspec validate switch-on-hosted-per-period-vm --strict`.
-- [ ] 10.12 Archival: `scripts/change-workflow openspec archive
+- [ ] 11.12 Archival: `scripts/change-workflow openspec archive
       switch-on-hosted-per-period-vm -y`, merging the deltas into `test-compatibility`
       and `deployment-state`; the index row then links the archive directory.

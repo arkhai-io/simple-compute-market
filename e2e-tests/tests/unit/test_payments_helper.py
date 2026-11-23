@@ -205,6 +205,22 @@ def test_the_probe_trusts_the_configured_bundle_alone_and_no_proxy() -> None:
     assert context.get_ca_certs() == lane_ca and lane_ca
 
 
+def test_a_named_proxy_is_the_only_one_the_probe_uses() -> None:
+    probe = _Probe(_healthy())
+    assert payments.target_ready("https://dispute-authority.topology.svc.cluster.local",
+                                 proxy="http://127.0.0.1:18443", get=probe)
+    ((url, kwargs),) = probe.calls
+    assert url == "https://dispute-authority.topology.svc.cluster.local/health"
+    assert kwargs["proxy"] == "http://127.0.0.1:18443" and kwargs["trust_env"] is False
+
+
+def test_without_a_named_proxy_the_probe_asks_the_target_directly() -> None:
+    probe = _Probe(_healthy())
+    assert payments.target_ready("https://payments.example", get=probe)
+    ((_, kwargs),) = probe.calls
+    assert "proxy" not in kwargs and kwargs["trust_env"] is False
+
+
 def test_without_a_bundle_the_probe_keeps_default_verification(monkeypatch) -> None:
     # The process's SSL_CERT_FILE is not the probe's configuration.
     monkeypatch.setenv("SSL_CERT_FILE", str(_LANE_CA))

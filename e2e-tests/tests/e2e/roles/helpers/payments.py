@@ -109,12 +109,14 @@ def target_ready(
     url: str,
     *,
     ca_bundle: str | None = None,
+    proxy: str | None = None,
     get: Callable[..., Any] = httpx.get,
 ) -> bool:
     """Whether the service at `url`, a payments or mediation target, reports
     itself ready.
 
-    Environment proxies are never used: the probe asks the target itself. A CA
+    Environment proxies are never used: the probe asks the target itself, or
+    through `proxy` alone when the run names one for the target. A CA
     bundle, such as a lane's CA for its doubles, is the only trust the probe
     has, just as the service's client trusts it alone. A bundle that cannot be
     loaded leaves the target not ready, as the client could not reach it
@@ -125,7 +127,8 @@ def target_ready(
         verify: ssl.SSLContext | bool = (
             ssl.create_default_context(cafile=ca_bundle) if ca_bundle else True
         )
-        health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify)
+        through = {"proxy": proxy} if proxy else {}
+        health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify, **through)
         return health.status_code == 200 and health.json().get("status") == "ok"
     except (httpx.HTTPError, ValueError, OSError):
         return False

@@ -82,8 +82,10 @@ The `MEDIATION` section (environment prefix `ARKHAI_MEDIATION__`), read through
 `tests/e2e/roles/helpers/mediation.py`, names the run's dispute authority for the
 buyer: SERVICE_URL its origin, ACCOUNT and RECORD_KEY its identity, API_KEY_ENV
 the variable the buyer's `[[DisputeCredential]]` names its token by, BUYER_API_KEY
-that token, CA_BUNDLE_PATH the bundle it is trusted under, and, for a lane's own
-target, LANE_OWNED and CONTROL_TOKEN. With SERVICE_URL set, the purchase drivers
+that token, CA_BUNDLE_PATH the bundle it is trusted under, PROXY_URL, where its
+origin resolves only inside its topology, the HTTP proxy the run reaches it
+through (see "Live verification"), and, for a lane's own target, LANE_OWNED and
+CONTROL_TOKEN. With SERVICE_URL set, the purchase drivers
 write the buyer's credential and hand the token to each `market` process under
 API_KEY_ENV; a missing required setting fails the scenario by name, an unready
 lane-owned target fails setup by name, and an unready external one reports
@@ -702,10 +704,16 @@ above, naming no deployment:
   POLL_BOUND_SECONDS covering the authority's or the policy's time to rule; the
   `MEDIATION` section (`tests/e2e/roles/helpers/mediation.py`) naming the hosted
   authority, with LANE_OWNED unset — a lane-owned target is a blocked skip
-  naming it — and no CONTROL_TOKEN; and LIVE.MEDIATION_REVISION, the mediation
-  authority's revision identifier, beside the other provenance, without which
-  each module is a blocked skip naming the setting. A missing BUYER_API_KEY
-  fails each module naming it.
+  naming it — and no CONTROL_TOKEN. Where the authority's origin resolves only
+  inside the topology, PROXY_URL names an HTTP proxy the run reaches, such as a
+  forward to one in the topology: the harness reaches the origin through it, and
+  the buyer processes it starts receive it as their HTTPS_PROXY with loopback
+  excluded, so every HTTPS request they make outside loopback goes through it.
+  SERVICE_URL stays the origin the Agreement pins, and its certificate is
+  verified against it, under CA_BUNDLE_PATH when one is set. LIVE.MEDIATION_REVISION states
+  the mediation authority's revision identifier, beside the other provenance,
+  without which each module is a blocked skip naming the setting. A missing
+  BUYER_API_KEY fails each module naming it.
 - **What the caller owes between runs.** Topping up the buyer, and closing a
   case a module left open: the contested case's, awaiting an operator, when no
   policy rules it, and the seller's filing's when the authority did not rule it.
