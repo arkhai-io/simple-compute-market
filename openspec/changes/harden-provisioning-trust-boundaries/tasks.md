@@ -461,82 +461,157 @@ section adds to the seller quickstart and the VM IaC README: libvirt 6.1, virt-i
 companion's new section. The flat `tests/` layout of the IaC suite, not a Python
 package, is kept as it is.
 
-## 6. Running guests converge, and the isolation is proven on a real host
+**Correction (planning after design review 41).** The real-host proof this section's
+notes defer to "6.3" is now section 6a's scenario, run in section 7a. Removing the
+per-port rules from a host an earlier release prepared (5.3) is a compatibility path
+(D23): its retirement row is written at closeout (8.9), and 5.3's code stays as it is.
+The `physical-provisioning` scenario "A host lacks a prerequisite of isolation" is held
+by 5.2's native preflight case, which names every missing item.
 
-Delivers host preparation's live convergence of running guests and the real-host
-proof of D7 and D8 as an external-topology scenario. Implements D9 and the proofs of D7
-and D8; requirement "VM host preparation converges running guests", and the scenarios
-of the two guest-isolation requirements on a real host. Touches
-`domains/vms/provisioning/iac/ansible/roles/vm-setup/` and `e2e-tests/`.
+## 6. Running guests converge through one installed command
 
-- [ ] 6.1 In host preparation, for each running guest, set its tap's bridge port
-  isolated without interrupting its link, apply `clean-traffic` live through `virsh
-  update-device --live` where libvirt accepts it and otherwise leave it for the
-  guest's next start, write both into its saved definition, and report each guest it
-  could not converge by name. (D9; "A host prepared before isolation is prepared
-  again", "A guest cannot be converged".) Verify: static tests with
-  `domains/vms/provisioning/iac/tests/host_fakes.py` faking `virsh` and `bridge` for a
-  converged guest, a guest refusing the live filter, and one whose port cannot be
-  isolated, reported.
-- [ ] 6.2 Add the external-topology scenario `e2e_vm_guest_isolation`, in no lane and
-  blocked without the real-provisioning target: two CPU guests on the target's KVM
-  host; ARP, ICMP and TCP from one to the other, directly and through the gateway,
-  refused; an ARP claim of the other's address dropped while the other's buyer
-  connection still reaches it; DHCP and DNS passing, another host port and a private
-  destination refused, before and after restarting libvirt and reloading UFW; a buyer
-  connecting from a private address reaching their guest; and a guest created before
-  host preparation ran again converged with its buyer session uninterrupted. Register
-  its marker in `e2e-tests/pyproject.toml`. (D7, D8, D9.) Verify: its collection and
-  its blocked path without the target in the e2e unit suites.
-- [ ] 6.3 Run `e2e_vm_guest_isolation` against the owner's controlled CPU target, on the
-  owner's word that the target is available, and record the result, its run and the
-  target's libvirt version in this task's note; with no target available, record it as
-  not run and why, for validation and triage. (D7, D8, D9; D2 makes closeout wait on
-  this proof.) Verify: the recorded result.
-- [ ] 6.4 Verification point. Unit (static role tests): `make -C
-  domains/vms/provisioning/iac test` and `native-ansible-gate`. System: the
-  `e2e_vm_guest_isolation` run on the real host (6.3).
-  End-to-end: `e2e_vm_guest_isolation`, in no lane; no lane scenario exercises it.
+Replanned against the reviewed design (D18–D24, design review 41) after section 6 was
+returned to design before any of its tasks ran (commit 3ea0e74ce); its scenario moved to
+section 6a and its real-host run to section 7a.
 
-**Returned to design before any task (work in progress, nothing implemented).**
-Task 6.2's scenario must restart libvirt and reload UFW on the target host and probe
-again afterwards. It must also run host preparation again over a guest created
-before it and show that guest converged. The design does not say how a system test
-performs these host-side steps, and the code offers no way:
-- The e2e harness reaches a real host only through the provisioning service's typed
-  clients. The VM operator client
-  (`domains/vms/provisioning/client/src/vm_provisioning_operator/client.py`) offers
-  VM create, list, start, shutdown, reboot, destroy, undefine, monitor, password
-  reset, capacity check and host diagnostics, and nothing that restarts a host
-  service, reloads its firewall or runs host preparation.
-- Host preparation (`playbooks/host-kit/vm-setup.yaml`) is run by an operator, by
-  hand or through `scripts/run_acceptance_validation.sh`; no service job runs it.
-- A system test reaches services only through their interfaces
-  (`docs/guidance/engineering/system-tests.md`), and setup needing knowledge the
-  repository lacks is the deployment's, never a scenario's
-  (`docs/guidance/repository/deal-scenarios.md`).
-- A converging guest needs a port that is not isolated. Every create on a prepared
-  host now isolates its port, so producing one is itself a host-side step.
+Delivers `arkhai-guest-converge`, installed and run by host preparation, which
+converges every running guest and reports each by name. Implements D9 and D20 (the
+command and its report); requirement "VM host preparation converges running guests",
+its scenarios "A host prepared before isolation is prepared again", "A guest cannot be
+converged" and "libvirt refuses a live filter". Touches
+`domains/vms/provisioning/iac/ansible/roles/vm-setup/` (`files/guest_converge.sh`, a
+new task file or `tasks/guest-policy.yml`, `tasks/main.yml`) and
+`domains/vms/provisioning/iac/tests/` (`host_fakes.py`, a new
+`test_guest_convergence.py`).
 
-The real-provisioning target (`e2e_harness/real_provisioning_target.py`) also names
-no private destination reachable from the host for the "private destination
-refused" probe, and no route for a buyer connecting from a private address.
+- [ ] 6.1 Write `vm-setup/files/guest_converge.sh`. For each running guest
+  (`virsh list --state-running`), with its interface on `default` (`virsh domiflist`),
+  it: sets the tap's bridge port isolated (`bridge link set dev <tap> isolated on`),
+  which does not drop the link; applies the guest's interface with `clean-traffic`
+  (`CTRL_IP_LEARNING=dhcp`, `DHCPSERVER=192.168.122.1`) through `virsh update-device
+  --live` where libvirt accepts it, and otherwise leaves the filter for the next start;
+  and writes the isolated port and the filter into the saved definition (`--config`, or
+  `virsh dumpxml --inactive` edited and `virsh define`d). It prints one JSON line per
+  guest — `name`, `port_isolated`, `filter` (`live` or `next_start`),
+  `saved_definition`, `error` — and exits non-zero only when it cannot run at all (no
+  `virsh`, no `bridge`), never because one guest failed. A guest already converged is
+  reported converged with nothing changed. (D9, D20; "A host prepared before isolation
+  is prepared again", "libvirt refuses a live filter".) Verify: unit tests (static
+  configuration, the real script against fakes at the subprocess boundary) in a new
+  `domains/vms/provisioning/iac/tests/test_guest_convergence.py`, extending
+  `host_fakes.py` with a stateful fake `bridge` and the `virsh` subcommands the script
+  uses, for: an unconverged guest converged live, its saved definition carrying both; a
+  guest whose live filter libvirt refuses, reported `next_start` with its port isolated
+  and its saved definition carrying the filter; a guest whose port cannot be isolated,
+  reported with its error while the others converge; an already converged guest
+  unchanged; a host with no running guest; and a missing `bridge`, failing the command.
+- [ ] 6.2 In host preparation, after the guest policy is installed, install the script as
+  `/usr/local/sbin/arkhai-guest-converge` (owner root, mode 0755), run it, and name in
+  the play's output each guest it reports unconverged — its port not isolated, or its
+  saved definition not written — with the reason, and each guest whose filter waits for
+  its next start; host preparation fails only when the command cannot run. (D9, D20; "A
+  guest cannot be converged".) Verify: static tests in `test_guest_convergence.py` over
+  the task file — the install, the order after the guest policy, and the report's
+  wording read from the command's lines — and a native case under the native Ansible
+  gate running the task against a fake command printing an unconverged guest and a
+  `next_start` guest, the play naming both; name the new native case in
+  `docs/guidance/repository/ansible-gates.md`.
+- [ ] 6.3 Verification point. Unit (static configuration and the real script against
+  fakes): `make -C domains/vms/provisioning/iac test`. Library integration (native
+  gate): `make -C domains/vms/provisioning/iac validate-playbooks` and
+  `native-ansible-gate`, or, with no local Ansible,
+  `domains/vms/provisioning/iac/scripts/native_ansible_gate.sh` in
+  the provisioning image over this tree, as section 5 ran it.
+  End-to-end: the lanes run the mock executor and no real VM, so none exercises it;
+  `e2e_vm_guest_isolation`'s O8 and O9 (section 6a, run in section 7a) are its only
+  end-to-end evidence.
 
-Options for the design session:
-1. The scenario makes only the guest-side probes. An operator procedure in
-   `VALIDATION_RUNBOOK.md` restarts libvirt, reloads UFW, and prepares the host again
-   over a guest it left unconverged, between named runs of the scenario. A
-   target section names the private destination and states which phase a run is,
-   so each phase's observations are made or unproven, never inferred.
-2. New administrator operations in the provisioning service and VM operator client
-   (reload the guest policy, prepare the host's guest isolation again) for the
-   scenario to step. This is new routes and jobs, beyond this change's scope.
-3. Operator SSH to the host from the harness, named in the target. Ruled out by
-   `system-tests.md`.
+## 6a. The real-host proof of guest isolation, as a scenario
 
-Recommended: option 1, with D2's closeout gate reading the per-phase outcomes.
-Task 6.1, converging running guests, is independent of this choice and unstarted.
-Nothing in this section is checked.
+Delivers the VM target's `guest_isolation` section and `e2e_vm_guest_isolation`, with
+its guest-side and operator probes and its per-observation outcome. Implements D18
+(the operator route and its fixed Python probe), D19 (extending the real VM scenario's
+two-guest window), D20 (the planted fixture, O8 and O9), D21 (the section, counter and
+egress attribution) and D22's observation list; requirement "VM guest isolation is
+proven on a real host" and its scenarios, in the `test-compatibility` delta. Touches
+`e2e-tests/src/e2e_harness/real_provisioning_target.py`,
+the committed example target `config-real-provisioning-target.yml.example` under
+`e2e-tests/config/`,
+`e2e-tests/tests/e2e/roles/scenarios/vms/` (a new `test_vm_guest_isolation.py`, a new
+`guest_isolation.py` beside it with its guest and operator probes, as
+`bare_metal/working_data_qualification.py` sits beside `working_data_probe.py`),
+`e2e-tests/pyproject.toml`, and `e2e-tests/tests/unit/`.
+
+- [ ] 6a.1 Add to `VmHost` an optional `guest_isolation` section at target version 2:
+  `operator` (`host`, `port`, `user`, `key_path`, the key path harness-local and
+  validated as `CleanupOperator.key_path` is) and an optional `private_destinations`
+  (`refused`, `listed`, each an IPv4 address in a private range, distinct). Show it in
+  the committed example, commented and visibly fictitious, as `cleanup_qualification`
+  is. (D21.) Verify: unit tests in `e2e-tests/tests/unit/test_real_provisioning_target.py`
+  for the section accepted, an unknown field and a public or equal destination refused
+  naming the field, and the example still loading.
+- [ ] 6a.2 Write the probes in `guest_isolation.py`, each fixed Python carried with JSON
+  arguments over the shared SSH seam (`ssh_access.SshSession.run`), as
+  `working_data_qualification.probe_command` carries `working_data_probe.py`:
+  - the **guest probe**, run under `sudo` in a guest as its buyer: ARP, ICMP and TCP to
+    the other guest's address and through the gateway; an ARP claim of the other
+    guest's address; a DHCP request and a DNS query to `192.168.122.1`; TCP to the
+    host's port 22 at `192.168.122.1`; TCP to `169.254.169.254`; TCP to each private
+    destination; and its buyer session's peer address;
+  - the **operator probe**, run as `sudo -n -- python3 -c <probe> <arguments>` through
+    the target's operator route: restart libvirtd; reload UFW; read `ARKHAI-GUEST-IN`'s
+    and `ARKHAI-GUEST-FWD`'s rules with their packet counters and the jumps' positions
+    in `INPUT` and `FORWARD`; hold a packet socket on the interface `ip route get
+    <listed>` names and report whether the guest's packet to the listed destination left
+    there while the guest probes; plant the fixture on a named guest — clear its tap's
+    isolation, detach its filter live (reporting whether libvirt refused), strip the
+    isolation and the filter from its saved definition — and read its port, its live
+    filter binding (`virsh nwfilter-binding-list`) and its live and saved definitions;
+    run `/usr/local/sbin/arkhai-guest-converge` and return its lines; and report the
+    host's libvirt version.
+
+  Keep the judgements as pure functions beside them: a refusal counts only when the
+  matching rule's counter rose; the listed destination counts as forwarded only when its
+  accept counter rose and its egress was seen; the chain confirms `listed` is admitted
+  and `refused` is not; O9 is made only when the fixture detached the filter live and it
+  is bound live after convergence. (D18, D20, D21.) Verify: unit tests in a new
+  `e2e-tests/tests/unit/test_vm_guest_isolation.py` for each judgement, over sample
+  `iptables -L -v -x -n`, `bridge -d link show`, `virsh` and convergence output — a
+  counter unchanged with no answer failing, an accept counter risen with no egress
+  failing O5 ("A listed destination's packet does not leave the host"), the fixture's
+  live removal refused leaving O9 unproven naming the libvirt version, a `next_start`
+  convergence leaving O9 unproven — and for the operator command being `sudo -n --
+  python3 -c` with the probe's own text and JSON arguments.
+- [ ] 6a.3 Write `test_vm_guest_isolation.py`, marked `e2e_vm_guest_isolation` and
+  registered in `e2e-tests/pyproject.toml`, in no lane: it declares
+  `OBSERVATIONS = ("O1", …, "O9")` for `tests/e2e/roles/helpers/qualification.py`, runs
+  `test_real_provisioning_deal.py`'s shared stages for the two deals — subclassing them,
+  and reusing its fixtures, driver and recovery so the teardown is the same — and adds
+  its own stages inside the window in which both guests run and the first holds its
+  heartbeat (after `09j`, before `09l`), each declaring the observations it requires:
+  O1, O2 (the claim, the other buyer still reaching its guest, the filter's parameters
+  in the live definition), O3, O4, O5, O6 (made only when the peer address is private
+  under direct access; otherwise skipped naming the private-source buyer route), O7
+  (O3–O5 again after the libvirtd restart and after the UFW reload, with both jumps
+  first), and O8 and O9 on the first guest (the fixture, the convergence, the heartbeat's
+  longest gap at most five seconds, the port, the saved definition, the guest-to-guest
+  probes again, and the live filter). Every host-side stage skips naming
+  `guest_isolation` when the target has none, and O5's stages skip naming
+  `private_destinations` when it names none; the run logs the host's libvirt version
+  and states that its guests are expected alone on the host. (D19, D21, D22; the
+  delta's scenarios "The target names no operator route", "Buyers reach the guests
+  through a relay", "A planted guest is converged", "libvirt refuses the fixture's live
+  filter removal".) Verify: unit tests in `e2e-tests/tests/unit/test_vm_guest_isolation.py`
+  and `test_real_vm_lane.py`: the module collects under its marker, every stage declares
+  its observations, a run without the target skips every stage blocked, a target with no
+  `guest_isolation` leaves every observation but O1 and O6 unproven naming it (through
+  `qualification.observation_outcomes` over the module's declared stages), and a relayed
+  target leaves O6 unproven naming the route.
+- [ ] 6a.4 Verification point. Unit: `e2e-tests/tests/unit/test_real_provisioning_target.py`,
+  `test_vm_guest_isolation.py`, `test_real_vm_lane.py` (`make -C e2e-tests test-unit`).
+  System: the module's run on a real host is section 7a's.
+  End-to-end: `e2e_vm_guest_isolation`, in no lane; no lane scenario exercises it, and
+  none is owed, since a lane has no real host.
 
 ## 7. A storefront never authorizes its administrator as a party
 
@@ -578,6 +653,49 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
   force-accept as the administrator through the canonical client; no lane reads the
   API-credits storefront's negotiations.
 
+## 7a. Guest isolation is proven on a real host
+
+Delivers the recorded real-host run of `e2e_vm_guest_isolation` and the fixes it
+calls for. Implements D22 (the closeout gate) and the real-host proofs of D7, D8 and D9
+(D2 makes closeout wait on them); requirement "VM guest isolation is proven on a real
+host", and the real-host scenarios of the two guest-isolation requirements and of "VM
+host preparation converges running guests". Touches this task list, and whatever code
+the run's findings name (sections 5, 6 and 6a's files).
+
+- [ ] 7a.1 Record the run. The deployment providing the controlled target and its
+  operator route runs `e2e_vm_guest_isolation` against a stack deployed from this
+  branch (`make -C e2e-tests test-module MODULE=e2e_vm_guest_isolation
+  ACTIVE_PROFILES=local,real-provisioning-target`, as `VALIDATION_RUNBOOK.md` sections
+  21–25 describe the real-provisioning runs), its host prepared by this branch's host
+  kit, and supplies a sanitized summary: each observation O1–O9 made, failed or unproven
+  with what an unproven one named, the run identifier, the commit, and the host's
+  libvirt version. Record that summary in this task's note, naming no host, address,
+  project or credential (`docs/guidance/engineering/system-tests.md`, "Locally
+  verifiable and external-topology scenarios"; this repository is public). Judge it
+  against D22: O1–O5, O7 and O8 made; O6 unproven only for want of a private-source
+  buyer route; O9 unproven only because libvirt refused the fixture's live filter
+  removal or convergence reported `next_start`. With no target, or no operator route,
+  this task waits; if the deployment reports that the route cannot be provided, stop
+  and return the change to design (design.md, Open Questions, "The host-side steps
+  without an operator route"). (D22.) Verify: the recorded summary, and its judgement
+  against D22.
+- [ ] 7a.2 Fix what the run finds. For each failed observation, or each unproven one
+  D22 does not admit, diagnose it from the summary, fix the code it names in the section
+  that owns it — the guest interface, the policy chains or their re-assertion (5), the
+  convergence command (6), the scenario or its probes (6a) — with a focused test at the
+  lowest level that holds the fix, and have the deployment run the module again; record
+  each run's summary as 7a.1 does. A finding the design does not cover — a decision D7,
+  D8, D9 or D22 does not make — returns the change to design instead. Section 5's
+  handoff items (the `--xml` parameters, real `iptables-restore --noflush`, the unit's
+  order after libvirtd, `ufw reload` running `after.init`) are discharged by O2 and O7
+  being made, or each becomes a finding here. (D7, D8, D9, D22.) Verify: the focused
+  tests of each fix, and a recorded run meeting D22.
+- [ ] 7a.3 Verification point. System: the recorded `e2e_vm_guest_isolation` run
+  meeting D22 (7a.1). Unit, library integration: the suites of whatever 7a.2 changed,
+  as their sections name them.
+  End-to-end: `e2e_vm_guest_isolation` on the deployment's real host, in no lane; no
+  lane scenario exercises it.
+
 ## 8. Closeout
 
 - [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene`; confirm no comment the
@@ -588,12 +706,12 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
   `e2e-tests/` against
   `docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level`; one
   that should move returns the change to implementation.
-- [ ] 8.3 **Documentation compliance.** Re-check D3–D10 and D14–D16 against the
+- [ ] 8.3 **Documentation compliance.** Re-check D3–D10, D14–D16 and D18–D23 against the
   placement tables (`docs/guidance/workflow/openspec-documentation.md`,
   `openspec/README.md#documentation-placement`) and confirm every permanent document
   written describes the current state.
 - [ ] 8.4 **Narrative compression.** Shorten completed-task notes to final behaviour,
-  the real-host proof's result (6.3), deferred work and destinations, moving any
+  the real-host proof's per-observation result (7a.1), deferred work and destinations, moving any
   rationale into `design.md` first.
 - [ ] 8.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, Goal 1: remove the
   gap rows this change closes — host-key checking disabled, VM guests sharing a
@@ -613,18 +731,42 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
 - [ ] 8.8 **End-to-end pipeline.** Record the pipeline run the latest passing
   validation gathered, its result, and the scenarios exercising the change — `e2e_deal`,
   `e2e_bare_metal_mock_deal`, `e2e_bare_metal_publication` — with the real-target
-  scenarios named as run in no lane, and `e2e_vm_guest_isolation`'s real-host result
-  (6.3).
+  scenarios named as run in no lane, and `e2e_vm_guest_isolation`'s real-host
+  per-observation result (7a.1), with O6 and O9 named where they are unproven and why
+  (D22).
 - [ ] 8.9 **Promotion.** Write, and complete the design-promotion record in
   `design.md` naming each:
   - `openspec/specs/physical-provisioning/architecture.md`: "The host registry owns the
     connection" (the pin, why capture is an operator's probe, the version-3
     connection, the executor's rule and the mock's exemption — D3, D4); "Proof-driven
     release" (a host-key refusal before the start — D5); a new section "Guests are
-    isolated from each other" (port isolation, the filter, the guest policy chains and
-    why they lead `INPUT` and `FORWARD`, the allowlist, convergence and its residual
-    exposure, why no guest shares a segment — D7, D8, D9, D10). The four `spec.md`
-    deltas are merged by the archive.
+    isolated from each other", after "Host preparation cannot cost the machine" (port
+    isolation, the filter and its interface template, the guest policy chains and why
+    they lead `INPUT` and `FORWARD`, `arkhai-guest-policy.service`, the
+    `/etc/ufw/after.init` hook and `/etc/arkhai/guest-policy.rules`, the create's
+    narrowed per-guest accepts, the allowlist, convergence through
+    `arkhai-guest-converge` and its report, its residual exposure, why no guest shares a
+    segment — D7, D8, D9, D10, D20). The five `spec.md` deltas are merged by the
+    archive.
+  - `openspec/specs/test-compatibility/architecture.md`: a new section "The real-host
+    proof of guest isolation", after "Ordinary Arkhai purchase evidence" (the
+    scenario's extension of the real VM scenario's two guests, the target-named
+    operator route and its fixed probe, the planted fixture, counter and egress
+    attribution, and the per-observation outcome — D18, D19, D20, D21). The principle
+    that such a route adds no reach the deployment lacks is recorded in D18 only, and
+    goes into no guidance (the owner declined its promotion).
+  - `docs/development/VALIDATION_RUNBOOK.md`: "24. Describe The Target" (the optional
+    `guest_isolation` section, its operator route and private destinations, and that
+    host preparation must be given the listed destination in
+    `guest_allowed_private_destinations` — D21); "25. Run The Real-Provisioning
+    Scenario" (running `e2e_vm_guest_isolation`, its observations and what each
+    unproven one names — D18, D19, D22).
+  - `e2e-tests/README.md`: "Real provisioning target and VM lane" (the
+    `guest_isolation` section and the module, D19, D21).
+  - `domains/vms/provisioning/iac/README.md` and `docs/seller-quickstart.md`, "4.
+    Prepare your KVM hosts": the host requirements libvirt 6.1, virt-install 3.0 and
+    `ebtables` (D7), and that host preparation converges running guests and reports any
+    it could not (D9, D20).
   - `docs/development/ARCHITECTURE.md`: "The administrator's reach" under "Shared
     vocabulary and identities", after "Authenticated service boundaries", as drafted
     in `design.md` (D14, D15).
@@ -648,11 +790,11 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
     links, and the engineering README's `versioning` tag description; the new section
     "Compatibility paths retire on a schedule" in
     `docs/guidance/repository/package-versions.md`; and in `docs/release-handbook.md`
-    the new "Compatibility to retire" with its two rows, the introduction's list, the
-    first step of "Loading a release candidate", and the second step of "Cutting a
-    release" — all as drafted in `design.md` (D16).
-  - D1, D2, D12, D13 and D17 have no permanent destination; D11's roadmap row and
-    unowned gap were written with the design.
+    the new "Compatibility to retire" with its three rows (D6, D9, D23), the
+    introduction's list, the first step of "Loading a release candidate", and the second
+    step of "Cutting a release" — all as drafted in `design.md` (D16, D23).
+  - D1, D2, D12, D13, D17, D22 and D24 have no permanent destination; D11's roadmap row
+    and unowned gap were written with the design.
   Promote the target's management SSH pin field, the rule that a VM host is pinned
   from an independent source before capacity is declared (26 F1), and reapply
   evidence to the test-compatibility specification and the real-target
@@ -666,5 +808,5 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
   every match; then `scripts/change-workflow openspec validate harden-provisioning-trust-boundaries --strict`.
 - [ ] 8.12 **Archival.** Run
   `scripts/change-workflow openspec archive harden-provisioning-trust-boundaries -y`,
-  merging the `physical-provisioning`, `site-capacity`, `api-credits` and
-  `storefront-publication` deltas.
+  merging the `physical-provisioning`, `site-capacity`, `api-credits`,
+  `storefront-publication` and `test-compatibility` deltas.
