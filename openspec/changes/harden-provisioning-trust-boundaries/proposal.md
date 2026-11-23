@@ -113,8 +113,10 @@ None.
   `guest_allowed_private_destinations`; the VM IaC README.
 - `e2e-tests/`: the real-provisioning target's `guest_isolation` section and
   `e2e_vm_guest_isolation` with its guest-side and operator probes.
-- `domains/apicredits/storefront/`: authentication of its negotiation reads; the three
-  storefronts' refusal tests.
+- `domains/apicredits/storefront/`: authentication of its negotiation reads and its
+  advance under the operations the canonical client signs; the three storefronts'
+  refusal tests, the deal-servicing kit's for the lifecycle routes they mount, and the
+  credits service's administrator case.
 - The e2e real-provisioning helpers, which state or capture host keys.
 - `docs/operator-handbook.md`, both seller quickstarts, the release handbook, the
   engineering and repository guidance, and `ARCHITECTURE.md`.
@@ -127,6 +129,13 @@ None.
 - `redesign-authenticated-requests` is reworking service request authentication. It
   touches no route roles, and its operation-bound envelope is compatible with the
   administrator rule; it owns retiring the API-credits service's `X-Admin-Key`.
+- `kit-owned-storefront-auth-and-persistence` planned to move API credits' advance,
+  pause and resume routes onto the operations the canonical client signs. This change
+  took the advance (and the negotiation reads it newly authenticates), since the
+  administrator's advance must be recorded as its own on every storefront; pause and
+  resume remain that change's, and the API-credit storefront's negotiation-list
+  resource builder and buyer-filter parsing are third copies of the VM's and bare
+  metal's for it to fold in.
 
 ## Permanent documentation impact
 

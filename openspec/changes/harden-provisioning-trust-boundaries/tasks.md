@@ -873,7 +873,7 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
 `domains/vms/storefront/tests/`, `domains/bare_metal/storefront/tests/`,
 `kit/site/tests/`, `domains/apicredits/service/tests/`.
 
-- [ ] 7.1 Require the administrator on the API-credits storefront's
+- [x] 7.1 Require the administrator on the API-credits storefront's
   `GET /api/v1/listings/{listing_id}/negotiations` and `…/negotiations/{neg_id}` through
   `require_admin_principal`, as its other administrator routes are. (D15, fixed;
   "The API-credits storefront's negotiations are read unsigned", "The administrator
@@ -881,27 +881,178 @@ the existing checks hold them. Touches `domains/apicredits/storefront/`,
   `domains/apicredits/storefront/tests/integration/` refusing unsigned and
   buyer-signed reads, and reading them through the canonical storefront client signed
   as the administrator.
-- [ ] 7.2 Add, for each storefront — VM (`domains/vms/storefront/tests/integration/`),
+  Done, with one difference from the plan: `require_admin_principal` verified the
+  FastAPI route's name as the operation and the request path as the resource, which no
+  client signs, so a read behind it would still have refused the canonical client. Both
+  reads now verify `authenticate_admin` under the client's own contract,
+  `admin_list_negotiations` over the listing and its sorted, percent-encoded query
+  (`limit` and `offset` defaulted, any other or repeated name refused with 400, as the
+  VM and bare-metal storefronts rebuild it; the builder, `negotiation_list_resource`,
+  sits beside `authenticate_admin` in `middleware/admin_auth.py`) and
+  `admin_get_negotiation` over `{listing}/negotiations/{neg_id}`, and their responses
+  are signed. The list also takes the buyer filter (`buyer_scheme`,
+  `buyer_identifier`) the client signs, which the route ignored, refusing one without
+  the other or an invalid principal with 422.
+  **Outside the plan, taken from another change.** The advance had the same mismatch,
+  so the canonical client could not advance an API-credit negotiation, and it called
+  the negotiation service without the `actor_principal` it requires, so it answered 500
+  to any caller. It now verifies `admin_advance_negotiation` over `{listing}/{neg_id}`
+  and passes the authenticated administrator, as "The administrator advances a
+  negotiation" needs on every storefront. `kit-owned-storefront-auth-and-persistence`
+  owns moving API credits' advance, pause and resume onto the client's contracts; this
+  section took the advance only, named in this change's proposal and that change's
+  index row, with the third copy of the list-resource builder for it to fold in.
+  Pause and resume keep `require_admin_principal`. The package moves to 0.23.0, its
+  negotiation routes' signed contract having changed.
+  `test_administrator_reach.py` (application integration: the routers the storefront
+  mounts over the real API-credit runtime and a migrated SQLite database, the canonical
+  client signing) passed: the administrator lists, filters and reads negotiations,
+  verifying signed responses; an unsigned list and detail answer 401 and the same
+  reads signed by the buyer's key under `buyer` are refused; an unknown or repeated
+  query name answers 400 and a half or invalid buyer filter 422 (each a rejection-path
+  test, status only). `run test-before` of the module at `d7e3f66c6`, as it then
+  stood: the four administrator tests failed (the reads' responses unsigned, so
+  `invalid_proof`; the advance refused), its eight route-sweep and classification
+  tests passing there, since they hold behaviour that predates the change. (The
+  unsigned-read and query-name cases were added after that run; before the change both
+  reads answered unsigned and ignored unknown names.)
+- [x] 7.2 Add, for each storefront — VM (`domains/vms/storefront/tests/integration/`),
   bare metal (`domains/bare_metal/storefront/tests/integration/`), API credits — a test
   that a request signed under `admin` by an active administrator principal is refused
   on every buyer, counterparty-seller and service route and admitted on its
   administrator routes, and that an administrator's advance records the round as the
   administrator's. (D15, held; "The administrator opens a negotiation as a buyer",
   "The administrator advances a negotiation".) Verify: the three tests.
-- [ ] 7.3 Confirm the existing checks hold the authorities' form: provisioning's
+  Done: `tests/integration/test_administrator_reach.py` in each storefront, at the level
+  of what each runs: bare metal drives its composed app
+  (`build_bare_metal_storefront_app` over a runtime with held loops, application
+  integration); VM mounts its seven party-route routers behind its three
+  authentication middlewares in production's order, and API credits the routers its
+  app mounts behind its response signing, each over a real migrated database with
+  container state set, not the composed application. Each classifies every route its
+  production app mounts — party,
+  administrator, public, and for bare metal its lease-ready evidence read, a record of
+  its own deals its administrator may read — and fails on an unclassified route or a
+  party route (or kit route) the table names but the app does not mount. Each party
+  route is then called through the canonical client's generic `authenticated_request`
+  (a rejection-path test, status only), signed under `admin` by the storefront's active
+  administrator over the operation and resource that party's client signs, with a body
+  the route reads up to its authentication (not the full body a client sends: VM
+  create and arbitrate send `{}`), naming the administrator as the buyer, payer or
+  claimant where the body names one; each is refused 401 or 403, no negotiation is
+  opened, and the deal's thread is unchanged. The tests show the refusal, not its
+  cause: each operation and resource was read against the route's own authentication
+  call, but no positive control signs the same request under the party's role (it
+  would run the party's action on each route), and on VM and bare metal the swept
+  deal's buyer is the fixture's buyer, not the administrator, so a deal-bound route
+  that checks the stored owner first (VM's settle does) refuses for ownership before
+  it reaches the role. Only the API-credit sweep opens its deal with the administrator
+  as buyer. The state each route reads before it authenticates
+  is set up so authentication is reached: an opened API-credit thread; for bare metal,
+  `test_http_settlement`'s accepted deal, a fulfillment row holding a reservation
+  (service-internal setup) and a trusted site peer; for VM, `test_vm_delivery_path`'s
+  settled payments deal, a trusted site peer and a site-signed lease-ended report.
+  Routes swept: API credits 7 (publish-from-quota, close, negotiate new and continue,
+  settle, settle status, refund); bare metal 11 (close, negotiate new and continue,
+  settle, settle status, refund, the three fulfillment reads, capacity-released,
+  lease-ended); VM 14 (create, close, refund, claim, arbitrate, reclaim, negotiate new
+  and continue, settle, settle status, settlement refund, heartbeat, capacity-released,
+  lease-ended). The introduction routes, on both: an accepted contact-exchange deal
+  served over loopback (bare metal `test_http_introductions`' harness, VM
+  `tests/publication_app.py` and `tests/introduction_deals.py`), the administrator's
+  start refused 403 before the buyer starts and its read refused 403 after. The
+  lifecycle routes both storefronts mount from `kit/deal-servicing` are held once there
+  (`tests/integration/test_routes.py`, library integration, a new case: the buyer's
+  peer submission and read, signed under `admin` by the active administrator, refused
+  403 and nothing reaching the peer). The administrator routes are admitted through
+  the canonical client on a representative set, not swept: the negotiation list and
+  detail on bare metal and API credits, the detail on VM (its list is
+  `test_negotiations_api.py`'s existing `TestListNegotiations`), and the advance on VM
+  and API credits. Bare metal serves no advance; its force-accept route passes the
+  authenticated administrator as the actor (`api.py`), and `kit/negotiation-runtime`'s
+  administrative acceptance test (unit) shows the runtime records such an acceptance
+  under `admin`, but no bare-metal test force-accepts through the route. Most other
+  administrator routes are already exercised through the client by each storefront's
+  suites. The advance cases (VM, over `test_negotiations_api`'s harness;
+  API credits) show the exit round recorded with `sender_role` `admin` and the
+  administrator's principal. Passed: API credits 12, bare metal 14, VM 17 (VM run
+  through its Makefile's `--find-links ../../../.dist`, its lock needing the
+  wheelhouse), `kit/deal-servicing`'s `test_routes.py` 4.
+- [x] 7.3 Confirm the existing checks hold the authorities' form: provisioning's
   assembly refusal (`provisioning/compute/contracts/tests/unit/test_contracts.py`,
   `provisioning/compute/service/tests/unit/test_route_table_composition.py`),
   `kit/site/tests/unit/test_auth_route_parity.py`, and the credits service's
   `tests/integration/test_credits_route_parity.py`; add to the last a case that a
   credits route naming another role admits an `admin`-signed request. (D15; the
   site-capacity and api-credits requirements.) Verify: the four suites.
-- [ ] 7.4 Verification point. Unit: `test_contracts.py`,
+  Done. Confirmed, unchanged: provisioning's `test_family_routes_name_their_roles` and
+  `test_every_relay_route_is_the_administrators_alone` (`test_contracts.py`, unit, 71
+  passed) and `test_every_contributed_route_admits_admin` and
+  `test_site_routes_admit_their_named_role_and_admin`
+  (`test_route_table_composition.py`, unit, 120 passed); `kit/site`'s
+  `test_admin_is_accepted_on_every_route_without_being_enumerated`
+  (`test_auth_route_parity.py`, unit, 26 passed). One difference from the plan: the
+  case is not in `test_credits_route_parity.py`, a static check of the contract table,
+  where `permits("admin")` is true whatever the table says, so a case there could not
+  fail and would restate `kit/site`'s own test. It is in the same suite's
+  `test_signed_authority.py` (application integration),
+  `test_the_operator_role_reaches_a_credits_route_naming_the_seller`: the canonical
+  `CreditsServiceClient`, signing under `admin` as the operator, lists keys through
+  `GET /api/v1/keys`, whose contract names only `seller`, and verifies the authority's
+  signed response, beside the existing capacity-route case. Both modules passed (29).
+- [x] 7.4 Verification point. Unit: `test_contracts.py`,
   `test_route_table_composition.py`, `test_auth_route_parity.py`. Application
   integration: the three storefronts' new tests and the API-credits storefront's
   negotiation-read tests, `test_credits_route_parity.py`.
   End-to-end: `e2e_deal` and `e2e_bare_metal_mock_deal` read negotiations and
   force-accept as the administrator through the canonical client; no lane reads the
   API-credits storefront's negotiations.
+  End-to-end confirmed: `e2e_deal` lists, force-accepts and reads negotiations through
+  the canonical administrator client (`roles/helpers/compute_deal_stages.py`), and
+  `e2e_bare_metal_mock_deal` force-accepts and reads one; neither touches the
+  API-credit storefront, whose changed routes no lane scenario calls. No owed
+  evidence.
+  The fresh-context check found: the first draft also moved API credits' pause and
+  resume onto the client's contracts and removed `require_admin_principal`, work
+  `kit-owned-storefront-auth-and-persistence` owns, unrecorded (now the advance alone,
+  recorded as above); a hand-built happy-path request to the credits service (now the
+  typed `CreditsServiceClient`, which also verifies the signed response the old
+  assertion only saw a header of); a route-table case `permits` could never fail
+  (dropped); the VM introduction check calling the callback directly from the
+  integration suite (now through the routes); a third copy of the list-resource
+  builder in a controller (moved beside `authenticate_admin`, and recorded for the
+  owning change); sweeps not commented as rejection-path tests; the new 400 and 422
+  refusals untested (now tested); notes and docstrings claiming the exact bodies a
+  client signs and that an admitting route would answer (reworded; the positive
+  control declined, above); "no negotiation opened" checked only on API credits (now
+  on all three); the kit routes not checked as mounted (now checked); missing levels
+  and the reads signed by the seller's key (fixed). Its finding on
+  `tests/unit/test_admin_auth.py` lapsed with the pause and resume edits withdrawn.
+  A second check, after those fixes, found: the refusals' cause claimed where VM's and
+  bare metal's deal-bound routes may refuse for ownership; the VM and API-credit tests
+  labelled application integration; bare metal's force-accept claimed recorded; its
+  loops not held in the sweep's fixture; the index row's summary still naming the
+  advance; the buyer-filter parsing, a third copy too, unrecorded; the proposal's
+  Impact; the handoff's test name; the VM list read; and the test-before explanation.
+  Each is fixed above. Declined: setting up the bare-metal fulfillment row through the
+  API rather than inserting it (only a delivered deal reaches it, and
+  `test_site_trust.py` sets up the same row the same way); patching the
+  administrator-configuration readers the admin modules import, as the storefronts'
+  existing suites do; and making the administrator the buyer of the VM and bare-metal
+  swept deals, which would mean seeding a deal of their own (the note states the
+  limit instead).
+
+**Handoff.** The administrator-refusal sweeps are tables of each storefront's party
+routes; a new route fails each module's classification test
+(`test_every_mounted_route_is_classified_once`, API credits'
+`test_every_mounted_route_is_a_party_administrator_or_public_route`) until it is
+classified, and is swept only if it is classified as a party route. Their contracts were read from each route's
+authentication call, and no positive control proves one: when a route's operation or
+resource changes, its row changes with it. API credits' pause and resume still verify
+the route's name and path, so the canonical client's `pause_listing` and
+`resume_listing` cannot reach them; that is `kit-owned-storefront-auth-and-persistence`'s.
+The VM storefront's tests run only with the wheelhouse: `uv run --find-links
+../../../.dist` from its directory, as its Makefile does.
 
 ## 7a. Guest isolation is proven on a real host
 

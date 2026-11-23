@@ -36,6 +36,7 @@ import pytest_asyncio
 from injected_time import InjectedTime
 from arkhai_apicredits.settlement.credits_client import (
     CreditsServiceAuthenticationError,
+    CreditsServiceClient,
     CreditsServiceError,
     derive_credit_fulfillment_id,
 )
@@ -434,6 +435,26 @@ async def test_the_operator_role_reaches_a_seller_route(client):
     )
     assert response.status_code == 200, response.text
     _assert_signed_by_authority(response)
+
+
+@pytest.mark.asyncio
+async def test_the_operator_role_reaches_a_credits_route_naming_the_seller(signed_app):
+    """The key list, a credits ledger route whose contract names only
+    `seller`, answers the canonical credits client signing under `admin` as the
+    operator, and the client verifies the authority's signed response."""
+    operator = CreditsServiceClient(
+        "http://credits-service",
+        transport=httpx.ASGITransport(app=signed_app),
+        signer=OPERATOR_SIGNER,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(
+            identities=(Ed25519Signer(AUTHORITY_SEED).identity,),
+        ),
+    )
+
+    listed = await operator.list_keys(owner_id=BUYER)
+
+    assert listed["keys"] == []
 
 
 @pytest.mark.asyncio
