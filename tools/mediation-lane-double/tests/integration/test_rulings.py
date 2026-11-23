@@ -434,3 +434,91 @@ def test_a_payments_failure_after_a_stop_and_before_a_reverse_resumes_without_st
         RATE_PRICE]
     assert lane.part(transaction)["held"] == "0"
     assert controls.cases(transaction).cases[0].state == "closed"
+
+
+# A stop whose time has passed: payments stops the part now, and what it earned
+# since that time is reversed to the payer, attributed to the stop.
+@pytest.mark.parametrize(("at", "reversed_amount"), [
+    (T0 + HOUR // 2, RATE_PRICE), (T0 + HOUR + 60, None), (RUNNING + HOUR, None),
+], ids=["passed, with earnings since", "passed, with none since", "not yet reached"])
+def test_a_ruled_stop_reverses_what_the_part_earned_since_its_passed_time(
+    at: int, reversed_amount: str | None,
+) -> None:
+    lane, sent, transaction = _rate_lane()
+    lane.controls().install_rule(Rule.model_validate(RULE | {"ruling": _ruling(_stop(at))}))
+
+    case_ref = _file(lane, transaction)["case"]["case_ref"]
+
+    reverses = lane.events(transaction, "reverse")
+    if reversed_amount is None:
+        assert reverses == []
+        assert lane.part(transaction)["held"] == RATE_PRICE
+    else:
+        [reverse] = reverses
+        assert reverse["account"] == lane.authority.account
+        assert reverse["requestId"] == f"mediation:{case_ref}:1:effect:1:reverse"
+        assert reverse["event"] == {"kind": "reverse", "part": 0, "amount": reversed_amount,
+                                    "payload": {"case_ref": case_ref,
+                                                "effect_id": f"{case_ref}:1:1"}}
+        assert lane.part(transaction)["held"] == "0"
+    assert [key for key, _ in sent.sent("stop")] == [f"mediation:{case_ref}:1:effect:1"]
+    assert lane.controls().cases(transaction).cases[0].state == "closed"
+
+
+def test_a_failed_reversal_after_a_passed_stop_resumes_without_stopping_or_deriving_twice(
+) -> None:
+    lane, sent, transaction = _rate_lane(
+        lambda call, key: (PaymentsAPIError(503, "ledger_unavailable")
+                           if key.endswith(":1:effect:1:reverse") else None))
+    controls = lane.controls()
+    controls.install_rule(Rule.model_validate(RULE | {"ruling": _ruling(
+        _stop(T0 + HOUR // 2), {"kind": "penalty", "amount": "1000"})}))
+
+    case_ref = _file(lane, transaction)["case"]["case_ref"]
+    assert controls.cases(transaction).cases[0].state == "applying"
+    assert lane.events(transaction, "reverse") == []
+    controls.resume_rule("payee-end")
+
+    # Only the resent reversal, derived once, reached payments; the stop's reversal
+    # took everything held, so the penalty after it reverses nothing.
+    assert len(lane.events(transaction, "stop")) == 1
+    assert [(key, event["amount"]) for key, event in sent.sent("reverse")] == [
+        (f"mediation:{case_ref}:1:effect:1:reverse", RATE_PRICE)]
+    assert [event["event"]["amount"] for event in lane.events(transaction, "reverse")] == [
+        RATE_PRICE]
+    assert controls.cases(transaction).cases[0].state == "closed"
+
+
+def test_a_passed_stops_reversal_is_derived_once_and_resent_as_it_was() -> None:
+    # Prorated, a stop now earns half the second hour, and one ten minutes into it a
+    # sixth: the reversal is the difference. Payments takes it and the answer is lost.
+    recording: list[Recording] = []
+
+    def wrap(peer: Any) -> Any:
+        recording.append(Recording(peer))
+        return Failing(recording[0], lambda call, key: (
+            PaymentsTransportError("payments service request failed")
+            if key.endswith(":1:effect:1:reverse") else None), after_commit=True)
+
+    lane = Lane(wrap)
+    transaction = lane.approve_rate()
+    controls = lane.controls()
+    controls.set_time(RUNNING)
+    controls.install_rule(Rule.model_validate(RULE | {"ruling": _ruling(
+        {"kind": "stop", "part": 0, "at": T0 + HOUR + 600, "partialPeriod": "prorated"})}))
+    case_ref = _file(lane, transaction)["case"]["case_ref"]
+    assert controls.cases(transaction).cases[0].state == "applying"
+    failing = lane.app.state.double.payments
+    reads = failing.reads
+
+    controls.resume_rule("payee-end")
+
+    # Resumed, the kept reversal is resent as it was, and no holdings are read again.
+    earned_now = int(RATE_PRICE) + int(RATE_PRICE) // 2
+    earned_then = int(RATE_PRICE) + int(RATE_PRICE) * 600 // HOUR
+    reversal = (f"mediation:{case_ref}:1:effect:1:reverse", str(earned_now - earned_then))
+    assert [(key, event["amount"]) for key, event in recording[0].sent("reverse")] == [
+        reversal, reversal]
+    assert failing.reads == reads
+    assert lane.part(transaction)["held"] == str(earned_then)
+    assert controls.cases(transaction).cases[0].state == "closed"

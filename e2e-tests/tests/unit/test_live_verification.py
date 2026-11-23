@@ -329,7 +329,8 @@ def test_a_storefront_without_a_credential_leaves_the_contest_and_ruling_unprove
     # The ruling stage then skips at its prerequisite, the contest not made.
     with pytest.raises(Skipped) as unmet:
         LiveContestedCase10_PolicyRuling().test_lc10_the_policys_ruling_matches_the_lane_twins(
-            payments_config=None, mediation_target=None, live_settings=None, deal_state=state)
+            payments_config=None, mediation_target=None, live_settings=None, deal_driver=driver,
+            deal_state=state)
     prerequisite = str(unmet.value)
     assert "_case_contested" in prerequisite, prerequisite
 

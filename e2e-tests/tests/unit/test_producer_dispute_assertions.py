@@ -2,19 +2,22 @@
 
 Each output is two producers'. The payments snapshot is the payments kit's
 ``PaymentsAuthority`` engine's (``payments_engine``), the engine the lanes'
-payments double serves, driven through the payment events this test writes as
-the mediation double sends them for the row's ruling, its payloads included — its
-extend on filing, the stop, the reverse, a penalty's reversal of what the part
-still holds, the lift. The dispute authority's record of the case is entries this
-test writes in the shape the mediation double writes them, each validated by the
-mediation kit's contract model; the doubles' own outputs are asserted by the
-lane's rows. The seller's filing is ruled with a penalty above and below what the
-part holds; the buyer's contested case with an operator's stop and reverse. Each
-assertion passes on its row's output, fails naming the field and both values when
-an exact or a related field is altered — the filed claim and the ruled end
+payments double serves, driven through the payment events this test writes as the
+mediation double sends them for the row's ruling, its payloads included — its
+extend on filing, the stop, the reversal of earnings since a passed stop time, an
+operator's reverse, a penalty's reversal of what the part still holds, the lift.
+The dispute authority's record of the case is entries this test writes in the
+shape the mediation double writes them, each validated by the mediation kit's
+contract model; the doubles' own outputs are asserted by the lane's rows. The
+seller's filing is ruled with a penalty above and below what the part holds,
+applied a period after the end as the lane applies it and at once as a hosted
+authority does; the buyer's contested case with an operator's stop and reverse.
+Each assertion passes on its row's output, fails naming the field and both values
+when an exact or a related field is altered — the filed claim and the ruled end
 included, even where the ruling's own times move together — and ignores record
-references, payment payloads, signatures and ``observedAt``. Every account and key is a development
-fixture, never used on any network.
+references, payment payloads but for their effect ids, signatures and
+``observedAt``. Every account and key is a development fixture, never used on any
+network.
 """
 
 from __future__ import annotations
@@ -88,10 +91,13 @@ def _outcome(effects: list[dict[str, Any]], states: list[str]) -> list[dict[str,
             for effect_id, effect, state in zip(ids, effects, states)]
 
 
-def _send(engine: Engine, transaction: str, number: int | str, event: dict[str, Any]) -> dict:
-    """One payment event from the authority's account for an effect, keyed and
-    carrying the payload the double sends."""
-    return engine.submit(transaction, AUTHORITY, f"mediation:{CASE}:1:effect:{number}",
+def _send(engine: Engine, transaction: str, key: int | str, event: dict[str, Any],
+          effect: int | None = None) -> dict:
+    """One payment event from the authority's account for an effect, keyed beneath
+    it and carrying the payload the double sends: the id of ``effect``, by default
+    the effect the key numbers."""
+    number = key if effect is None else effect
+    return engine.submit(transaction, AUTHORITY, f"mediation:{CASE}:1:effect:{key}",
                          {**event, "payload": {"case_ref": CASE, "effect_id": _effect_id(number)}})
 
 
@@ -106,33 +112,43 @@ def _lift(engine: Engine, transaction: str, extension: int) -> None:
                   {"kind": "lift", "part": 0, "ref": extension, "payload": {"case_ref": CASE}})
 
 
-def seller_filing_output(penalty: int) -> Output:
-    """The seller's filing at the delivery end, its gated mechanical ruling
-    applied a period later: the stop, whose time has passed, a stop now; the
-    reverse of the period earned after the end; the penalty's reversal of what
-    the part still holds; the lift."""
+def seller_filing_output(penalty: int, ruled_at: int = RULED_AT, *, split: bool = False
+                         ) -> Output:
+    """The seller's filing at the delivery end, its mechanical ruling applied at
+    ``ruled_at``: the stop, whose time has passed, a stop now, then the reversal
+    of any period earned since the end, attributed to the stop, in two reversals
+    with ``split``; the penalty's reversal of what the part still holds; the
+    lift. The lane's gated ruling applies a period later, after the part earned
+    a period; a hosted authority rules at once, within the period the end fell
+    in, and the stop then reverses nothing."""
     engine = Engine(funds=40 * PRICE)
     transaction = engine.approve_and_start(payee_notice_seconds=None)
     engine.authority.reserve(transaction, TERM_END)
     engine.now = DELIVERY_END
     extension = _extend(engine, transaction)
-    engine.now = RULED_AT
+    engine.now = ruled_at
     _send(engine, transaction, 1, {"kind": "stop", "part": 0, "partialPeriod": "returned"})
-    _send(engine, transaction, 2, {"kind": "reverse", "part": 0, "amount": str(PRICE)})
+    earned_since = int(engine.snapshot(transaction)["parts"][0]["rate"]["grossEarned"]) - PRICE
+    if earned_since and split:
+        for index, share in enumerate((earned_since // 2, earned_since - earned_since // 2)):
+            _send(engine, transaction, f"1:reverse:{index}",
+                  {"kind": "reverse", "part": 0, "amount": str(share)}, effect=1)
+    elif earned_since:
+        _send(engine, transaction, "1:reverse",
+              {"kind": "reverse", "part": 0, "amount": str(earned_since)}, effect=1)
     held = int(engine.snapshot(transaction)["parts"][0]["held"])
-    _send(engine, transaction, "3:part:0",
-          {"kind": "reverse", "part": 0, "amount": str(min(penalty, held))})
+    _send(engine, transaction, "2:part:0",
+          {"kind": "reverse", "part": 0, "amount": str(min(penalty, held))}, effect=2)
     _lift(engine, transaction, extension)
     effects = [{"kind": "end_delivery", "at": DELIVERY_END},
                {"kind": "stop", "part": 0, "at": DELIVERY_END, "partialPeriod": "returned"},
-               {"kind": "reverse", "part": 0, "amount": str(PRICE)},
                {"kind": "penalty", "amount": str(penalty)}]
     record = [
         _filed(transaction, PAYEE, "payee", extension),
         _entry(transaction, "ruled", 2, AUTHORITY, DELIVERY_END, extension, basis="payee_filed",
-               outcome=_outcome(effects, ["prepared"] * 4)),
-        _entry(transaction, "closed", 3, AUTHORITY, RULED_AT, extension, reason="ruled",
-               basis="payee_filed", outcome=_outcome(effects, ["applied"] * 4)),
+               outcome=_outcome(effects, ["prepared"] * 3)),
+        _entry(transaction, "closed", 3, AUTHORITY, ruled_at, extension, reason="ruled",
+               basis="payee_filed", outcome=_outcome(effects, ["applied"] * 3)),
     ]
     return record, engine.snapshot(transaction)
 
@@ -174,6 +190,7 @@ def _contested(output: Output, reverse_amount: int | None = PRICE,
     record, snapshot = output
     assert_contested_case_ruled(record, snapshot, case_ref=CASE, payer=PAYER, payee=PAYEE,
                                 claimed_end=DELIVERY_END, authority=AUTHORITY,
+                                period_price=PRICE, period_seconds=PERIOD_SECONDS,
                                 ruled_end=ruled_end, reverse_amount=reverse_amount)
 
 
@@ -201,6 +218,28 @@ def test_the_seller_filing_assertion_holds_on_its_output(penalty):
                  if item["event"]["kind"] == "reverse"]
     # The penalty above the holdings takes all the part held; the one below, itself.
     assert reversals == [PRICE, min(penalty, PRICE)], reversals
+
+
+@pytest.mark.parametrize("penalty", PENALTIES)
+def test_the_seller_filing_assertion_holds_on_a_ruling_applied_at_once(penalty):
+    """Ruled seconds after the end, within its period, as a hosted authority
+    rules: the stop reverses nothing, and the penalty takes what the part held."""
+    output = seller_filing_output(penalty, ruled_at=DELIVERY_END + 2)
+    _seller(output, penalty)
+    reversals = [(item["event"]["payload"]["effect_id"], int(item["event"]["amount"]))
+                 for item in output[1]["events"] if item["event"]["kind"] == "reverse"]
+    assert reversals == [(_effect_id(2), min(penalty, PRICE))], reversals
+
+
+def test_the_seller_filing_assertion_sums_an_effects_reversals():
+    """The stop's reversal of the earnings since the end, made in two reversals
+    under its id, holds as one."""
+    output = seller_filing_output(PENALTIES[0], split=True)
+    _seller(output)
+    stop_reversals = [int(item["event"]["amount"]) for item in output[1]["events"]
+                      if item["event"]["kind"] == "reverse"
+                      and item["event"]["payload"]["effect_id"] == _effect_id(1)]
+    assert stop_reversals == [PRICE // 2, PRICE - PRICE // 2], stop_reversals
 
 
 def test_the_contested_case_assertion_holds_on_its_output():
@@ -289,12 +328,62 @@ def test_an_effect_left_prepared_fails_naming_the_states():
             f"got ['applied', 'applied', 'prepared']") in message, message
 
 
-def test_a_reverse_of_other_than_the_earnings_since_the_end_fails_naming_the_relation():
+def _reversal_altered(snapshot: dict[str, Any], effect: str, **event: Any) -> dict[str, Any]:
+    """The snapshot with the reversal attributed to ``effect`` altered: its amount, or
+    the effect id its payload names."""
+    altered = copy.deepcopy(snapshot)
+    [reversal] = [item for item in altered["events"] if item["event"]["kind"] == "reverse"
+                  and item["event"]["payload"]["effect_id"] == effect]
+    if "amount" in event:
+        reversal["event"]["amount"] = event["amount"]
+    if "effect_id" in event:
+        reversal["event"]["payload"] = {**reversal["event"]["payload"],
+                                        "effect_id": event["effect_id"]}
+    return altered
+
+
+def test_a_stop_reversal_of_other_than_the_earnings_since_the_end_fails_naming_the_relation():
     record, snapshot = seller_filing_output(PENALTIES[0])
-    message = _message(_seller, (_altered(record, "2.outcome.2.effect.amount", str(2 * PRICE)),
-                                 snapshot))
-    assert (f"case {CASE}: the reverse effect's amount: expected {PRICE!r} (1 periods earned "
-            f"after the delivery end, at {PRICE}), got {2 * PRICE!r}") in message, message
+    message = _message(_seller, (record, _reversal_altered(snapshot, _effect_id(1),
+                                                           amount=str(2 * PRICE))))
+    assert (f"the authority's reversals of part 0 for case {CASE}'s stop: expected {PRICE!r} "
+            f"(1 periods earned after the delivery end, at {PRICE}), got {2 * PRICE!r}"
+            ) in message, message
+
+
+def test_a_reversal_attributed_to_another_effect_fails_naming_the_effect_short_of_it():
+    """The stop's reversal carried under the penalty's id: the stop has none. The
+    penalty above the holdings takes whatever the part held, so its own sum is not
+    what shows it."""
+    record, snapshot = seller_filing_output(PENALTIES[0])
+    message = _message(_seller, (record, _reversal_altered(snapshot, _effect_id(1),
+                                                           effect_id=_effect_id(2))))
+    assert (f"the authority's reversals of part 0 for case {CASE}'s stop: expected {PRICE!r} "
+            f"(1 periods earned after the delivery end, at {PRICE}), got 0") in message, message
+
+
+def test_a_reversal_naming_no_effect_is_not_taken_for_a_missing_stops():
+    """A ruling with no stop effect: a reversal whose payload names no effect is
+    not taken for the stop's, and is reported as attributed to nothing."""
+    record, snapshot = copy.deepcopy(seller_filing_output(PENALTIES[0]))
+    for entry in record:
+        if "outcome" in entry:
+            entry["outcome"] = [item for item in entry["outcome"]
+                                if item["effect"]["kind"] != "stop"]
+    for item in snapshot["events"]:
+        if item["event"].get("payload", {}).get("effect_id") == _effect_id(1):
+            item["event"]["payload"] = {"case_ref": CASE}
+    message = _message(_seller, (record, snapshot))
+    assert (f"the authority's reversals of part 0 for no effect of case {CASE}'s ruling: "
+            f"expected {{}}, got {{<absent>: [{PRICE!r}]}}") in message, message
+
+
+def test_a_reversal_attributed_to_no_effect_of_the_ruling_fails_naming_it():
+    record, snapshot = contested_case_output()
+    message = _message(_contested, (record, _reversal_altered(snapshot, _effect_id(2),
+                                                              effect_id="elsewhere")))
+    assert (f"the authority's reversals of part 0 for no effect of case {CASE}'s ruling: "
+            f"expected {{}}, got {{'elsewhere': [{PRICE!r}]}}") in message, message
 
 
 def test_a_penalty_beyond_its_cap_fails_naming_the_relation():
@@ -303,8 +392,8 @@ def test_a_penalty_beyond_its_cap_fails_naming_the_relation():
     record, snapshot = seller_filing_output(penalty)
     message = _message(lambda output: _seller(output, penalty // 2), (record, snapshot))
     assert (f"the authority's penalty reversals of part 0: expected {penalty // 2!r} (the "
-            f"Agreement's penalty of {penalty // 2}, capped at what the part still held), "
-            f"got {penalty!r}") in message, message
+            f"Agreement's penalty of {penalty // 2}, capped at what the part held after the "
+            f"stop's reversal), got {penalty!r}") in message, message
 
 
 def test_a_stop_taking_effect_before_its_receipt_fails_naming_the_relation():
@@ -332,15 +421,17 @@ def test_a_case_with_no_contest_fails_naming_the_answers():
 
 
 def _renamed(output: Output) -> Output:
-    """The output with its record references renamed, its payloads replaced, a
-    signature altered and its ``observedAt`` a day later."""
+    """The output with its record references renamed, its payloads replaced but
+    for their effect ids, a signature altered and its ``observedAt`` a day later."""
     record, snapshot = output
     record = [{**entry, "record_ref": f"renamed-{entry['record_ref']}"} for entry in record]
     snapshot = copy.deepcopy(snapshot)
     snapshot["observedAt"] = int(snapshot["observedAt"]) + 86_400
     snapshot["receipt"]["proof"]["value"] = "A" * 86
     for entry in snapshot["events"]:
-        entry["event"]["payload"] = {"anything": "the authority's own"}
+        effect = entry["event"].get("payload", {}).get("effect_id")
+        entry["event"]["payload"] = {"anything": "the authority's own",
+                                     **({"effect_id": effect} if effect else {})}
     return record, snapshot
 
 

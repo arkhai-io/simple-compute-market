@@ -531,11 +531,11 @@ class LiveSellerFiling10_MechanicalRulingRead:
         and snapshot are held to the lane twin's assertion
         (``producer_assertions.assert_payee_filing_ruled``): the filing and its
         protection of the part, the ruling's basis, delivery end and effects
-        each applied, the authority's stop returning its period, the reversal
-        of the earnings since the end, the Agreement's penalty capped at what
-        the part held, the extension lifted, and the case closed. The claimed
-        end is the one the storefront recorded, the period the run's. No stage
-        runs after it."""
+        each applied, the authority's stop returning its period with its
+        reversal of any earnings since the end, the Agreement's penalty capped
+        at what the part then held, the extension lifted, and the case closed.
+        The claimed end is the one the storefront recorded, the period the
+        run's. No stage runs after it."""
         require_state(deal_state, "case_ref", "delivery_end_at", "agreement", "negotiation_id",
                       "settlement_id", "payer_account")
         record, snapshot = _ruled_output(payments_config, mediation_target, live_settings,
@@ -608,7 +608,7 @@ class LiveContestedCase10_PolicyRuling:
 
     def test_lc10_the_policys_ruling_matches_the_lane_twins(
         self, payments_config, mediation_target, live_settings: LiveSettings,
-        deal_state: LiveRateState,
+        deal_driver: RecurringPurchaseDriver, deal_state: LiveRateState,
     ):
         """A contested case is a person's decision, which reaches the scenario
         only through the ruling policy the topology applies; the scenario
@@ -619,10 +619,11 @@ class LiveContestedCase10_PolicyRuling:
         the lane twin's assertion
         (``producer_assertions.assert_contested_case_ruled``): the filing and
         its protection, the contest before the ruling, the ruling's effects
-        each applied, the authority's stop returning its period, payments
-        reversing the reverse effect's amount, the extension lifted, and the
-        case closed; the ruling's delivery end and reverse amount are the
-        policy's, so not compared. No stage runs after it."""
+        each applied, the authority's stop returning its period with its
+        reversal of any earnings since the ruled end, payments reversing the
+        reverse effect's amount, the extension lifted, and the case closed;
+        the ruling's delivery end and reverse amount are the policy's, so not
+        compared. No stage runs after it."""
         require_state(deal_state, "_case_contested", "case_ref", "delivery_end_at", "agreement",
                       "negotiation_id", "settlement_id", "payer_account")
         record, snapshot = _ruled_output(payments_config, mediation_target, live_settings,
@@ -630,10 +631,12 @@ class LiveContestedCase10_PolicyRuling:
         # A stopped part is the authority's to end; any other is left to the
         # module's cleanup, which ends it by the buyer's own stop.
         deal_state._deal_ending = _stopped(snapshot)
+        terms = deal_driver.rate_terms
         assert_contested_case_ruled(
             record, snapshot, case_ref=str(deal_state.case_ref),
             payer=str(deal_state.payer_account), payee=str(payment_setting("SELLER_ACCOUNT")),
             claimed_end=deal_state.delivery_end_at, authority=mediation_target.account,
+            period_price=terms.period_gross, period_seconds=terms.period_seconds,
         )
         deal_state._ruling_applied = True
         log.info("[lc10] The policy ruled case %s: stopped, reversed %s, case closed",

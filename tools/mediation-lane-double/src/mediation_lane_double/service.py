@@ -48,6 +48,7 @@ from lane_double_controls.models import (
 from market_arkhai_mediation.contract import validate
 from market_arkhai_mediation.records import record_message
 from market_arkhai_payments.errors import PaymentsAPIError, PaymentsError
+from market_arkhai_payments.fixtures.arithmetic import add_duration, periods_through
 from market_identity import SignatureProof, canonical_json
 
 from mediation_lane_double.authority import AuthorityFixture
@@ -109,6 +110,8 @@ class Case:
     outcome: list[dict[str, Any]] = field(default_factory=list)
     #: Each prepared effect's payment events, each with its request id, by its
     #: effect id: one for a reverse or a stop, one per part reversed for a penalty.
+    #: Under ``<effect id>:since``, a stop's reversal of the earnings since its passed
+    #: time, derived once the stop was accepted: empty when there is none to send.
     events: dict[str, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
     #: The effect requests payments may have taken: answered, or lost in transit. A
     #: refusal of such a request may come before payments' replay of it, so it never
@@ -529,23 +532,15 @@ class MediationDouble:
             try:
                 if item["id"] not in case.events:
                     case.events[item["id"]] = self._payment_events(case, item)
-                for position, (request_id, event) in enumerate(case.events[item["id"]]):
-                    try:
-                        self.payments.submit_event(case.transaction, event,
-                                                   request_id=request_id)
-                    except PaymentsAPIError:
-                        if position == 0 and request_id not in case.reached:
-                            # Payments refused the effect's first event, which no
-                            # earlier send can have delivered, so it took none of the
-                            # effect, which is built afresh when resumed: a stop time
-                            # passed meanwhile is then a stop now, and a penalty reads
-                            # the holdings as they then are.
-                            del case.events[item["id"]]
-                        raise
-                    except PaymentsError:
-                        case.reached.add(request_id)
-                        raise
-                    case.reached.add(request_id)
+                self._send(case, item["id"], rebuildable=True)
+                if item["effect"]["kind"] == "stop":
+                    # The stop is accepted, which fixes what the part earned; only
+                    # now is its reversal of the earnings since a passed time
+                    # derived, and, kept under a key of its own, never again.
+                    since = f"{item['id']}:since"
+                    if since not in case.events:
+                        case.events[since] = self._stop_reversal(case, item)
+                    self._send(case, since, rebuildable=False)
             except PaymentsError:
                 self.rules.set_waiting(case.rule_id, case.case_ref, True)
                 return False
@@ -567,6 +562,28 @@ class MediationDouble:
         self.rules.set_waiting(case.rule_id, case.case_ref, False)
         return True
 
+    def _send(self, case: Case, key: str, *, rebuildable: bool) -> None:
+        """Send the payment events kept under ``key``, each under its request id.
+
+        Where payments refuses the first of a ``rebuildable`` effect's events, which
+        no earlier send can have delivered, it took none of the effect, which is
+        built afresh when resumed: a stop time passed meanwhile is then a stop now,
+        and a penalty reads the holdings as they then are. A stop's reversal, once
+        derived, is kept and resent as it is.
+        """
+
+        for position, (request_id, event) in enumerate(case.events[key]):
+            try:
+                self.payments.submit_event(case.transaction, event, request_id=request_id)
+            except PaymentsAPIError:
+                if rebuildable and position == 0 and request_id not in case.reached:
+                    del case.events[key]
+                raise
+            except PaymentsError:
+                case.reached.add(request_id)
+                raise
+            case.reached.add(request_id)
+
     def _payment_events(self, case: Case, item: dict[str, Any]
                         ) -> list[tuple[str, dict[str, Any]]]:
         """The payment events applying ``item``, each under a key beneath its effect's.
@@ -575,11 +592,12 @@ class MediationDouble:
         account, which payments takes through the part's ``chosen`` stop entry
         with the ruling's partial-period rule: a stop time not yet reached is
         requested as it is, and one already passed is a stop now, since payments
-        never backdates a stop. Any reversal of earnings a ruling wants beside it
-        is an effect of its own. A penalty is read against the transaction as
-        every earlier effect left it: it reverses what each part still holds, part
-        by part in mandate order, up to its amount and never beyond what is held,
-        so a penalty larger than the holdings reverses exactly the holdings.
+        never backdates a stop; the reversal of what the part earned since that
+        time follows once the stop is accepted (``_stop_reversal``). A penalty is
+        read against the transaction as every earlier effect left it: it reverses
+        what each part still holds, part by part in mandate order, up to its amount
+        and never beyond what is held, so a penalty larger than the holdings
+        reverses exactly the holdings.
         """
 
         effect = item["effect"]
@@ -601,6 +619,33 @@ class MediationDouble:
         return [(f"{key}:part:{index}", {"kind": "reverse", "part": index,
                                          "amount": str(amount), "payload": payload})
                 for index, amount in penalty_reversals(int(effect["amount"]), held)]
+
+    def _stop_reversal(self, case: Case, item: dict[str, Any]
+                       ) -> list[tuple[str, dict[str, Any]]]:
+        """The reversal following an accepted stop whose time had passed, if any.
+
+        Payments stopped the part now, so it may have earned more than a stop at
+        the ruling's time would have. Those earnings, as far as the part still
+        holds them, are reversed to the payer, attributed to the stop, under a key
+        beneath the stop's. A stop requested at its time has none, nor one that
+        left nothing to reverse, nor one payments has not recorded: the double's
+        ``chosen`` entry takes a stop at once, so an accepted stop now is recorded.
+        """
+
+        effect = item["effect"]
+        request_id, stop = case.events[item["id"]][0]
+        if "at" in stop:
+            return []
+        snapshot = self._snapshot(case.transaction)
+        if "stop" not in snapshot["parts"][effect["part"]]:
+            return []
+        amount = stop_reversal_amount(snapshot, effect["part"], effect["at"],
+                                      effect["partialPeriod"])
+        if not amount:
+            return []
+        return [(f"{request_id}:reverse", {
+            "kind": "reverse", "part": effect["part"], "amount": str(amount),
+            "payload": {"case_ref": case.case_ref, "effect_id": item["id"]}})]
 
     def _lift(self, case: Case) -> bool:
         """Lift this case's extensions, and no other case's; ``False`` if payments stopped it."""
@@ -736,6 +781,41 @@ def penalty_reversals(amount: int, held: list[int]) -> list[tuple[int, int]]:
             reversals.append((part, taken))
             left -= taken
     return reversals
+
+
+def stop_reversal_amount(snapshot: Mapping[str, Any], part: int, at: int, rule: str) -> int:
+    """What a rate part stopped later than ``at`` still holds beyond what a stop at
+    ``at`` would have earned under the partial-period ``rule``.
+
+    A stop at ``at`` earns the periods completed by then at the period price the
+    signed receipt fixes, plus the started period's share as payments cuts it: none
+    when ``returned``, the period when ``charged``, its elapsed share when
+    ``prorated``. The reversal is the part's gross earned beyond that, as far as
+    the part still holds it. Earnings an earlier reversal of the part took are not
+    told apart from those it left: the dispute authority reconstructs each
+    reversal's offsets, and the double, which applies rulings its scenarios
+    program, reads only what the part still holds.
+    """
+
+    current = snapshot["parts"][part]
+    receipt = snapshot["receipt"]["receipt"]["parts"][part]
+    earned = int(current.get("rate", {}).get("grossEarned", "0"))
+    started = current.get("started")
+    if not earned:
+        return 0
+    if started is None or at <= started:
+        wanted = 0
+    else:
+        period = receipt["rate"]["period"]
+        unit = int(receipt["gross"]) // int(receipt["rate"]["periodsReserved"])
+        completed = periods_through(started, period, at, partial=False)
+        low = add_duration(started, period, completed)
+        high = add_duration(started, period, completed + 1)
+        elapsed = at - low
+        cut = 0 if rule == "returned" or not elapsed else (
+            unit if rule == "charged" else unit * elapsed // (high - low))
+        wanted = completed * unit + cut
+    return max(0, min(int(current["held"]), earned - wanted))
 
 
 def _claim_properties(operation: str, filer: str, transaction: str,

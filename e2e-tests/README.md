@@ -497,7 +497,7 @@ and files a case the authority rules with a stop
 
 | Module | What it proves |
 |---|---|
-| `test_seller_filing.py` | the storefront's administrator ends delivery as a failure through the storefront client's interruption, and the storefront records the end and files `delivery_end` as the payee; a mediation-double rule, held at its gate, rules the filing as the dispute authority documents a mechanical ruling — basis `payee_filed`, a delivery end, a `stop` returning its period, a `reverse` of the earnings since the end and the Agreement's premature-stop `penalty` — and closes the case. Lane time passes the second period's end before the rule resumes, so the part earns after the end; the double then stops the part as the authority, a stop now since its time passed, reverses that period and takes the penalty from what the part still holds. The storefront records the ruling's end with no filing beyond its own |
+| `test_seller_filing.py` | the storefront's administrator ends delivery as a failure through the storefront client's interruption, and the storefront records the end and files `delivery_end` as the payee; a mediation-double rule, held at its gate, rules the filing as the dispute authority documents a mechanical ruling — basis `payee_filed`, a delivery end, a `stop` at that end returning its period and the Agreement's premature-stop `penalty`, with no `reverse` of its own — and closes the case. Lane time passes the second period's end before the rule resumes, so the part earns after the end; the double then stops the part as the authority, a stop now since its time passed, reverses the period earned since the end as that stop's own reversal, and takes the penalty from what the part still holds. The storefront records the ruling's end with no filing beyond its own |
 | `test_buyer_contested_case.py` | the buyer files `delivery_end` through the mediation kit's dispute adapter in the harness (`file_as_buyer`), the storefront's respondent discovery contests the case with an append, and an operator decision through the typed control client rules a `stop` returning its period and a `reverse` of the held first period, closing the case. The storefront records the ruled end with no filing |
 
 The seller's filing needs the part funded past its first reservation, so it
@@ -608,7 +608,12 @@ What a topology provides for them, naming no deployment:
   listing's hour (3600); POLL_BOUND_SECONDS, how long an output is polled for
   once due (120); and the provenance the evidence is labelled with,
   SOURCE_REVISION, TARGET_ALIAS and PAYMENTS_REVISION, without which each module
-  is a blocked skip naming the setting. The period, notice and term set how long
+  is a blocked skip naming the setting. The buyer's `market` is SOURCE_REVISION's
+  own, installed from the run checkout's wheels, since a branch's package
+  versions may be unpublished: the buyer's environment `make init-buyer` builds
+  at the repository root, or the harness's own once `make dist-ci` and
+  `make -C e2e-tests init` have run, which MARKET_CLI_BIN names
+  (`tests/e2e/roles/buyer_cli.py`). The period, notice and term set how long
   a run takes on wall time, the term end waiting out the whole term, so a
   deployment states short ones, within what a deal can hold: the harness refuses
   a period longer than the term and a notice no shorter than it, and the market
@@ -646,8 +651,8 @@ left in the first period and POLL_BOUND_SECONDS after it.
 
 | Module | What it proves | Input to the dispute authority | Output compared |
 |---|---|---|---|
-| `test_seller_filing.py` | the seller's filing, twin of the rate-dispute row | the storefront's own `delivery_end` filing as the payee, made when its administrator ends the delivery as a failure through the storefront client's interruption | the authority's mechanical ruling: the part protected by an extension, basis `payee_filed`, the delivery end the one the storefront claimed, an authority stop returning its period, a reversal of the earnings since the end, the Agreement's premature-stop penalty capped at what the part held, the extension lifted and the case closed (`assert_payee_filing_ruled`) |
-| `test_buyer_contested_case.py` | the buyer's contested case, twin of the rate-dispute row | the buyer's `delivery_end` filing through the mediation kit's dispute adapter in the harness (`file_as_buyer`), then the storefront's contest, an append its respondent discovery makes in one servicing step | the ruling the topology's policy makes: the part protected, the payee's answer before the ruling, basis `operator`, an authority stop returning its period and a reversal payments applied as ruled, the extension lifted and the case closed; the ruled delivery end and the reverse amount are the policy's and not compared (`assert_contested_case_ruled`) |
+| `test_seller_filing.py` | the seller's filing, twin of the rate-dispute row | the storefront's own `delivery_end` filing as the payee, made when its administrator ends the delivery as a failure through the storefront client's interruption | the authority's mechanical ruling: the part protected by an extension, basis `payee_filed`, the delivery end the one the storefront claimed, an authority stop returning its period with its reversal of any earnings since the end, the Agreement's premature-stop penalty capped at what the part then held, each reversal matched to the effect whose id its payload names, the extension lifted and the case closed (`assert_payee_filing_ruled`) |
+| `test_buyer_contested_case.py` | the buyer's contested case, twin of the rate-dispute row | the buyer's `delivery_end` filing through the mediation kit's dispute adapter in the harness (`file_as_buyer`), then the storefront's contest, an append its respondent discovery makes in one servicing step | the ruling the topology's policy makes: the part protected, the payee's answer before the ruling, basis `operator`, an authority stop returning its period with its reversal of any earnings since the ruled end, and a reversal payments applied as ruled, the extension lifted and the case closed; the ruled delivery end and the reverse amount are the policy's and not compared (`assert_contested_case_ruled`) |
 
 The contested case makes three observations: the buyer's filing, the
 storefront's contest and the policy's ruling. With no ruling of the case once
@@ -681,8 +686,9 @@ above, naming no deployment:
   party — applying a ruling's effects at that payments target before it records
   the case closed. The seller's filing compares the mechanical ruling the
   authority documents for a payee's `delivery_end` — a delivery end at the
-  claimed instant, a `stop` returning its period, a `reverse` of the earnings
-  since the end and the premature-stop penalty — and an authority that does not
+  claimed instant, a `stop` returning its period, whose application reverses
+  any earnings since the end under the stop's id, and the premature-stop
+  penalty, with no `reverse` of its own — and an authority that does not
   make it within POLL_BOUND_SECONDS of the filing fails the observation, as a
   different ruling does: that output is the authority's own, not the
   topology's.
@@ -692,7 +698,8 @@ above, naming no deployment:
   payee has answered, once, it rules the case as an operator, basis
   `operator`, with exactly these effects in this order — a delivery end, a
   `stop` of the part returning its period, and a `reverse` of the part of an
-  amount it chooses — applies them and closes the case as ruled, within
+  amount it chooses — applies them, a stop whose time has passed with its
+  reversal of the earnings since, and closes the case as ruled, within
   POLL_BOUND_SECONDS of the contest. Without it the ruling is unproven; a
   ruling with other effects, another order or another basis fails it.
 - **Accounts and starting balances.** The buyer account holds at least one

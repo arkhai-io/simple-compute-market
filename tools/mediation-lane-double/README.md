@@ -76,7 +76,15 @@ effect's id, `<case_ref>:<ruling>:<n>`, under keys stable within the Agreement:
 - a `stop` is one stop event from the double's own account, which payments takes
   through the part's `chosen` stop entry, carrying the ruling's partial-period
   treatment; a stop time not yet reached is requested as it is, and one already
-  passed is sent as a stop now, since payments never backdates a stop;
+  passed is sent as a stop now, since payments never backdates a stop. Once
+  payments has accepted and recorded that stop, the earnings beyond what a stop
+  at the ruling's time would have earned under that treatment — the periods
+  completed by then at the receipt's period price, and the started period's
+  share — are reversed to the payer, as far as the part still holds them, as one
+  reverse event carrying the stop's id, under a key beneath the stop's; none is
+  sent when nothing is beyond it. It is derived once and kept, and earnings an
+  earlier reversal took are not told apart from those it left, where the
+  authority reconstructs each reversal's offsets;
 - a `penalty` is reversals of the earned amounts the transaction's parts still
   hold, read once every earlier effect is applied: part by part in mandate order,
   up to the penalty and no further than what is held, each under a key beneath
@@ -126,13 +134,11 @@ concurrence signature or mechanical guard, which are the marketplace's
 verification and the authority's decision logic; the mediation kit proves the
 marketplace's own verification against the producer's vectors. Which effects a
 ruling carries is the scenario's: the double executes the `reverse`, `stop` and
-`penalty` effects a rule or an operator decision programs, and computes no ruling. A
-`stop` whose time has passed is a stop now with nothing more, where the authority
-would also reverse the still-held earnings beyond what a stop at that time would
-earn; a ruling wanting that reversal programs it as a `reverse` of its own. An
-`award` is not executable on `arkhai.payments.v1`, as the contract states, so a
-rule or a decision carrying one is refused, `422 invalid_request`, and nothing is
-installed or ruled.
+`penalty` effects a rule or an operator decision programs, and computes no ruling.
+Like the authority's, a `stop` whose time has passed brings its own reversal of the
+earnings since. An `award` is not executable on `arkhai.payments.v1`, as the
+contract states, so a rule or a decision carrying one is refused,
+`422 invalid_request`, and nothing is installed or ruled.
 To know which party files before the app runs, so that a rule naming the filer can
 drop a filing's response, the fault classifier reads an unseen transaction's
 parties from payments. The transport-fault middleware runs the classifier on a

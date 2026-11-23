@@ -44,7 +44,7 @@ deployment and MUST NOT be performed by the scenario.
 
 ### Requirement: Lanes run a mediation double that answers from programmed rules
 
-Every lane MUST run a mediation double, recommended by the lane's registries, that reproduces the dispute authority's API mechanics — authentication, idempotency, the filing's admission checks, signed per-agreement records and cursors, the respondent listing, the closed-case refusal, extensions at the payments double, execution of a ruling's per-part `reverse`, `stop` and `penalty` effects and the record of its delivery end — and takes every ruling from a scenario-programmed rule or operator decision. A `stop` MUST be applied as one stop event from the double's own account through the part's `chosen` stop entry, carrying the partial-period treatment the ruling names. A `penalty` MUST be applied as reversals of earned amounts still held, across the transaction's parts in mandate order, up to the penalty and no further than what is held. It MUST NOT compute a ruling, and with no matching rule it MUST rule nothing. It MUST refuse at install, and install nothing for, a rule or decision whose ruling carries an `award`, which the contract makes unexecutable on `arkhai.payments.v1`.
+Every lane MUST run a mediation double, recommended by the lane's registries, that reproduces the dispute authority's API mechanics — authentication, idempotency, the filing's admission checks, signed per-agreement records and cursors, the respondent listing, the closed-case refusal, extensions at the payments double, execution of a ruling's per-part `reverse`, `stop` and `penalty` effects and the record of its delivery end — and takes every ruling from a scenario-programmed rule or operator decision. A `stop` MUST be applied as one stop event from the double's own account through the part's `chosen` stop entry, carrying the partial-period treatment the ruling names; when its time has passed, payments stops the part now, and once the stop is accepted the double MUST reverse to the payer the earnings beyond what a stop at that time would have earned under that treatment, as far as the part still holds them, attributed to the stop, as the dispute authority documents a stop effect, and MUST send no such reversal when there is none. A `penalty` MUST be applied as reversals of earned amounts still held, across the transaction's parts in mandate order, up to the penalty and no further than what is held. It MUST NOT compute a ruling, and with no matching rule it MUST rule nothing. It MUST refuse at install, and install nothing for, a rule or decision whose ruling carries an `award`, which the contract makes unexecutable on `arkhai.payments.v1`.
 
 #### Scenario: A case is filed with no rule installed
 
@@ -71,6 +71,12 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 
 - **WHEN** a rule or operator decision rules `stop` with `returned` on a running rate part
 - **THEN** the double sends one stop event as its own account through the part's `chosen` entry with `returned`, the payments double records the part stopped with cause `authority`, and a repeated application sends the same event
+
+#### Scenario: A programmed stop's time has passed
+
+- **WHEN** a rule or operator decision rules `stop` with `returned` at a time before the double's clock, on a rate part that has earned a period since that time
+- **THEN** the double sends the stop event with no time, and once payments accepts it sends one `reverse` of the earnings beyond what a stop at that time would have earned, as far as the part holds them, carrying the stop's effect id under a key beneath the stop's
+- **AND** a stop at a passed time with nothing earned since, or at a time not yet reached, is followed by no reversal
 
 #### Scenario: A programmed penalty exceeds what is held
 
@@ -179,11 +185,12 @@ payments in test mode and, where they file, a hosted mediation authority:
 - the term end: the part ends at the Agreement's end with `returned`;
 - a seller's filing: the storefront's own `delivery_end` filing as the payee is accepted
   with each part protected, and the authority's ruling is read — an authority stop with
-  `returned`, a reversal since the end, the capped penalty, its extensions lifted and the
-  case closed;
+  `returned` and its reversal of any earnings since the end, the capped penalty, each
+  reversal attributed to its effect by the id its payload names, its extensions lifted
+  and the case closed;
 - a buyer's contested case: the buyer's filing is contested by the storefront, and the
-  ruling the topology's declared policy makes — an authority stop with `returned` and a
-  reversal — is read.
+  ruling the topology's declared policy makes — an authority stop with `returned`, with
+  its reversal of any earnings since the ruled end, and a reversal — is read.
 
 Each MUST be labelled live evidence with public-safe provenance.
 
@@ -199,16 +206,17 @@ Each MUST be labelled live evidence with public-safe provenance.
 
 - **WHEN** the seller-filing scenario's storefront files as the payee on a running rate deal
 - **THEN** it reads the authority's ruled entry and the payment snapshot through the public
-  clients and compares the stop, the reversal, the penalty and the closed case with its
-  lane twin's assertion
+  clients and compares the stop and its reversal, the penalty and the closed case with
+  its lane twin's assertion
 
 ### Requirement: A dispute on a running rate deal is qualified in the VM lane
 
 The VM lane MUST run, each on its own rate deal under the lane's `[charged, returned]`
 declaration and labelled lane-double evidence, a seller's `delivery_end` filing ruled as
-the dispute authority documents a mechanical ruling — a `stop` with `returned`, a reverse
-of earnings since the end and a penalty — and a buyer's filing the storefront contests,
-ruled by an operator decision with a `stop` with `returned` and a reverse. Each MUST show
+the dispute authority documents a mechanical ruling — a `stop` with `returned`, whose
+reversal of the earnings since the end follows it, and a penalty, with no reverse of its
+own — and a buyer's filing the storefront contests, ruled by an operator decision with a
+`stop` with `returned` and a reverse. Each MUST show
 the storefront recording the authority's stop as an end classified `ruling` with no
 filing, the payer's returns, the teardown, and, once the case closes, the seller's list
 reading the deal `ended` with no open extension.
@@ -216,7 +224,7 @@ reading the deal `ended` with no open extension.
 #### Scenario: A seller's filing on a rate deal is ruled
 
 - **WHEN** the storefront's administrator ends a running on-demand deal and the double's
-  rule rules the payee's filing with a stop, a reverse and a penalty
+  rule rules the payee's filing with a stop and a penalty
 - **THEN** the storefront records the authority's stop classified `ruling` with no
   further filing, the payer is returned the unstarted remainder and the reversed and
   penalised earnings, and after the case closes the seller's list reads the deal `ended`

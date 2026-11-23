@@ -46,8 +46,9 @@ is read there to match an extension to the filing that reports it, and an
 entry's to order the case's entries. They ignore the record's signatures, record
 references, case references beyond finding the case, the entries' own ``at``
 (the relations read the effects' instants), and the payload a payment event
-carries, which is the authority's own: a reversal is matched to its effect by
-the order the ruling lists its effects in.
+carries but for the effect id: a reversal is matched to the ruling's effect
+whose id its payload names, since a stop whose time has passed brings the
+authority's own reversal of what the part earned since.
 """
 
 from __future__ import annotations
@@ -458,9 +459,48 @@ def _ruled_end_check(effects: Mapping[str, Mapping[str, Any]], *, case_ref: str,
                  field(effects.get("end_delivery", {}), "effect.at"), ruled_end)
 
 
-def _reversal_amounts(snapshot: Mapping[str, Any], *, authority: str, part: int) -> list[int]:
-    return [int(field(item, "event.amount"))
-            for item in _authority_events(snapshot, "reverse", authority, part)]
+def _reversals_by_effect(snapshot: Mapping[str, Any], *, authority: str,
+                         part: int) -> dict[Any, list[int]]:
+    """The authority's reversals of ``part``, in sequence, by the effect id their
+    payload names (``ABSENT`` where it names none)."""
+    reversals: dict[Any, list[int]] = {}
+    for item in _authority_events(snapshot, "reverse", authority, part):
+        reversals.setdefault(field(item, "event.payload.effect_id"), []).append(
+            int(field(item, "event.amount")))
+    return reversals
+
+
+def _reversal_checks(snapshot: Mapping[str, Any], effects: Mapping[str, Mapping[str, Any]],
+                     reversals: Mapping[Any, list[int]], *, case_ref: str, part: int,
+                     period_price: int, period_seconds: int,
+                     own: dict[str, tuple[Any, str]]) -> list[Check]:
+    """The authority's ``reversals`` of ``part``, by the ruling's effect their
+    payload names, each effect's summed: the stop's, whose time may have passed when
+    the authority sent it, the periods earned after the ruling's delivery end up to
+    the stop, at ``period_price``; each effect's in ``own``, by kind, its expected
+    sum; and none attributed to anything else."""
+    prefix = f"parts.{part}"
+    by_effect = dict(reversals)
+    started = field(snapshot, f"{prefix}.started")
+    end_at = field(effects.get("end_delivery", {}), "effect.at")
+    effective = field(snapshot, f"{prefix}.stop.effectiveAt")
+    after_end = (ABSENT if ABSENT in (started, end_at, effective) else
+                 _periods(started, effective, period_seconds, started_period=False)
+                 - _periods(started, end_at, period_seconds, started_period=False))
+    since = _times(after_end, period_price)
+    def taken(kind: str) -> int:
+        effect_id = effects.get(kind, {}).get("id", ABSENT)
+        return 0 if effect_id is ABSENT else sum(by_effect.pop(effect_id, []))
+
+    checks = [Check(f"the authority's reversals of part {part} for case {case_ref}'s stop",
+                    taken("stop"), since,
+                    f"{after_end!r} periods earned after the delivery end, at {period_price}")]
+    for kind, (expected, relation) in own.items():
+        checks.append(Check(f"the authority's {kind} reversals of part {part}", taken(kind),
+                            expected, relation))
+    checks.append(Check(f"the authority's reversals of part {part} for no effect of case "
+                        f"{case_ref}'s ruling", by_effect, {}))
+    return checks
 
 
 def assert_payee_filing_ruled(
@@ -475,33 +515,27 @@ def assert_payee_filing_ruled(
     ``claimed_end``, the end the storefront filed, ``part`` held; the ruling's
     basis ``payee_filed``, its delivery end the claimed one, as a mechanical
     ruling of the claim states it, its effects a delivery end, a ``stop``
-    returning its period, a ``reverse`` and a ``penalty``, in that order, every
-    one applied; the case closed as ruled; the part stopped by the authority's
-    account with ``returned``, nothing reserved; the case's extension lifted. By relation:
+    returning its period and a ``penalty``, in that order, every one applied;
+    the case closed as ruled; the part stopped by the authority's account with
+    ``returned``, nothing reserved; the case's extension lifted. By relation:
     the extension the filing reports is the one the authority opened and lifted
     at payments; the ruled entry's effects are the closed entry's; the stop
     stated at the delivery end and effective then, or at its receipt once that
-    passed; the reverse effect's amount the periods earned after the delivery end
-    up to the stop at ``period_price``, and payments reversing exactly it first;
-    the penalty's reversals after it the Agreement's ``penalty`` capped at what
-    the part still held; the refund the rest of what was paid. The penalty
-    effect's recorded amount is ignored, since a producer may record the term or
-    its cap: what it moved is compared. Everything else is ignored (module
-    docstring).
+    passed; the stop's reversals summing to the periods earned after the
+    delivery end up to the stop at ``period_price``, none when there were none;
+    the penalty's summing to the Agreement's ``penalty`` capped at what the part
+    held after the stop's; no other reversal; the refund the rest of what was
+    paid. Each reversal is the effect's whose id its payload names, however many
+    an effect has. The penalty effect's
+    recorded amount is ignored, since a producer may record the term or its cap:
+    what it moved is compared. Everything else is ignored (module docstring).
     """
-    prefix = f"parts.{part}"
     ruling, effects = _ruling_checks(record, case_ref=case_ref, basis="payee_filed",
-                                     kinds=["end_delivery", "stop", "reverse", "penalty"])
-    end_at = field(effects.get("end_delivery", {}), "effect.at")
-    started = field(snapshot, f"{prefix}.started")
-    effective = field(snapshot, f"{prefix}.stop.effectiveAt")
-    after_end = (ABSENT if ABSENT in (started, end_at, effective) else
-                 _periods(started, effective, period_seconds, started_period=False)
-                 - _periods(started, end_at, period_seconds, started_period=False))
-    reverse_amount = amount(field(effects.get("reverse", {}), "effect.amount"))
-    reversals = _reversal_amounts(snapshot, authority=authority, part=part)
-    taken = sum(reversals[1:])
-    held = amount(field(snapshot, f"{prefix}.held"))
+                                     kinds=["end_delivery", "stop", "penalty"])
+    reversals = _reversals_by_effect(snapshot, authority=authority, part=part)
+    penalty_id = effects.get("penalty", {}).get("id", ABSENT)
+    taken = 0 if penalty_id is ABSENT else sum(reversals.get(penalty_id, []))
+    held = amount(field(snapshot, f"parts.{part}.held"))
     capped = ABSENT if held is ABSENT else min(penalty, taken + held)
     case = f"case {case_ref}"
     require(f"the ruling of {case} on the payee's filing", [
@@ -511,20 +545,18 @@ def assert_payee_filing_ruled(
         _ruled_end_check(effects, case_ref=case_ref, ruled_end=claimed_end),
         *_authority_stop_checks(snapshot, effects, case_ref=case_ref, authority=authority,
                                 part=part),
-        Check(f"{case}: the reverse effect's amount", reverse_amount,
-              _times(after_end, period_price),
-              f"{after_end!r} periods earned after the delivery end, at {period_price}"),
-        Check(f"the authority's first reversal of part {part}", reversals[:1],
-              [] if reverse_amount is ABSENT else [reverse_amount], "the reverse effect's amount"),
-        Check(f"the authority's penalty reversals of part {part}", taken, capped,
-              f"the Agreement's penalty of {penalty}, capped at what the part still held"),
+        *_reversal_checks(snapshot, effects, reversals, case_ref=case_ref, part=part,
+                          period_price=period_price, period_seconds=period_seconds,
+                          own={"penalty": (capped, f"the Agreement's penalty of {penalty}, "
+                                                    f"capped at what the part held after the "
+                                                    f"stop's reversal")}),
     ])
 
 
 def assert_contested_case_ruled(
     record: list[Mapping[str, Any]], snapshot: Mapping[str, Any], *, case_ref: str, payer: str,
-    payee: str, claimed_end: int, authority: str, ruled_end: int | None = None,
-    reverse_amount: int | None = None, part: int = 0,
+    payee: str, claimed_end: int, authority: str, period_price: int, period_seconds: int,
+    ruled_end: int | None = None, reverse_amount: int | None = None, part: int = 0,
 ) -> None:
     """A buyer's ``delivery_end`` filing the storefront contested, ruled by an
     operator with a stop and a reverse.
@@ -541,8 +573,12 @@ def assert_contested_case_ruled(
     extension the filing reports is the one the authority opened and lifted at
     payments; the ruled entry's effects are the closed entry's; the stop stated
     at the delivery end and effective then, or at its receipt once that passed;
-    payments reversing exactly the reverse effect's amount; the refund the rest
-    of what was paid. Everything else is ignored (module docstring).
+    the stop's reversals summing to the periods earned after the ruling's
+    delivery end up to the stop at ``period_price``, none when there were none;
+    the reverse effect's summing to exactly its amount; no other reversal; the
+    refund the rest of what was paid. Each reversal is the effect's whose id its
+    payload names, however many an effect has. Everything else is ignored (module
+    docstring).
     """
     ruling, effects = _ruling_checks(record, case_ref=case_ref, basis="operator",
                                      kinds=["end_delivery", "stop", "reverse"])
@@ -559,9 +595,12 @@ def assert_contested_case_ruled(
         *ruling,
         *_authority_stop_checks(snapshot, effects, case_ref=case_ref, authority=authority,
                                 part=part),
-        Check(f"the authority's reversals of part {part}",
-              _reversal_amounts(snapshot, authority=authority, part=part),
-              [] if effect_amount is ABSENT else [effect_amount], "the reverse effect's amount"),
+        *_reversal_checks(snapshot, effects,
+                          _reversals_by_effect(snapshot, authority=authority, part=part),
+                          case_ref=case_ref, part=part, period_price=period_price,
+                          period_seconds=period_seconds,
+                          own={"reverse": (0 if effect_amount is ABSENT else effect_amount,
+                                           "the reverse effect's amount")}),
     ]
     if ruled_end is not None:
         checks.append(_ruled_end_check(effects, case_ref=case_ref, ruled_end=ruled_end))

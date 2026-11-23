@@ -12,9 +12,10 @@ authority stop:
   through the Agreement's end (``Reservation06``), since the ruling falls past
   the part's first reservation. A rule is installed for the storefront's filing,
   held at its gate, ruling as the dispute authority documents a mechanical
-  ruling: basis ``payee_filed``, a delivery end, a ``stop`` returning its
-  period, a ``reverse`` of the earnings since the end and a ``penalty`` of the
-  Agreement's premature-stop penalty, closing the case (``SellerFiling08``).
+  ruling: basis ``payee_filed``, a delivery end, a ``stop`` at that end
+  returning its period, whose application reverses the earnings since the end,
+  and a ``penalty`` of the Agreement's premature-stop penalty, closing the case
+  (``SellerFiling08``).
   The storefront's administrator ends delivery as a failure, which records the
   end and files ``delivery_end`` as the payee (``SellerFiling09``). With the
   ruling still at its gate, lane time moves past the second period's end, so the
@@ -321,12 +322,11 @@ class SellerFiling08_MechanicalRulingInstalled:
         """A rule on the deal's filing, held at its gate before any effect,
         ruling as the dispute authority documents a mechanical ruling of a
         payee's ``delivery_end``: basis ``payee_filed``, a delivery end, a stop
-        at that end returning its period, a reverse of the earnings since the
-        end, and the Agreement's premature-stop penalty, closing the case.
-
-        The double computes no ruling, so the rule states each amount: the
-        reverse is one period's price, the period ``SellerFiling10`` lets the
-        part earn after the end before the ruling applies.
+        at that end returning its period, and the Agreement's premature-stop
+        penalty, closing the case. The ruling carries no reverse of its own: the
+        stop, applied once its time has passed, reverses what the part earned
+        since the end, the period ``SellerFiling10`` lets it earn before the
+        ruling applies.
         """
         require_state(deal_state, "delivery_end_at", "agreement", "settlement_id",
                       "reserved_through")
@@ -338,7 +338,6 @@ class SellerFiling08_MechanicalRulingInstalled:
             ruling=Ruling(basis="payee_filed", delivery_end=True, close=True, effects=[
                 {"kind": "stop", "part": 0, "at": deal_state.delivery_end_at,
                  "partialPeriod": "returned"},
-                {"kind": "reverse", "part": 0, "amount": str(PERIOD_GROSS)},
                 {"kind": "penalty", "amount": str(penalty)},
             ]),
             pause_before_effects=True,
@@ -385,10 +384,11 @@ class SellerFiling10_RulingApplied:
         """Lane time moves a period on, past the second period's end, which the
         part earns after the delivery end; then the ruling resumes. The double
         applies every effect at that instant — the stop, whose time has passed,
-        is a stop now — lifts the case's extension and closes the case. The
-        authority's record and the payments snapshot are read and asserted
-        through ``assert_payee_filing_ruled``. No servicing step runs while the
-        ruling waits."""
+        is a stop now followed by the reversal of that period, and the penalty
+        reverses what the part then holds — lifts the case's extension and
+        closes the case. The authority's record and the payments snapshot are
+        read and asserted through ``assert_payee_filing_ruled``. No servicing
+        step runs while the ruling waits."""
         require_state(deal_state, "case_ref", "delivery_end_at", "reserved_through", "penalty",
                       "agreement", "negotiation_id")
         ruled_at = deal_state.delivery_end_at + PERIOD_SECONDS
@@ -476,10 +476,12 @@ class ContestedCase10_OperatorRules:
     ):
         """An operator decision through the typed control client rules the
         case: a delivery end, a stop at the claimed end returning its period,
-        and a reverse of the held first period, closing the case. The double
-        applies both at once and lifts the case's extension. The authority's
-        record and the payments snapshot are read and asserted through
-        ``assert_contested_case_ruled``."""
+        and a reverse of the held first period, closing the case. The claimed
+        end is the lane instant no stage has moved since, so the stop's time has
+        not passed and it reverses nothing of its own; the reverse is the
+        operator's. The double applies both at once and lifts the case's
+        extension. The authority's record and the payments snapshot are read and
+        asserted through ``assert_contested_case_ruled``."""
         require_state(deal_state, "case_ref", "delivery_end_at", "agreement", "negotiation_id")
         deal_state._deal_ending = True
         case = lane_double_rules.controls["mediation"].decide(deal_state.case_ref, Ruling(
@@ -494,7 +496,8 @@ class ContestedCase10_OperatorRules:
         assert_contested_case_ruled(
             record, snapshot, case_ref=deal_state.case_ref, payer=str(deal_state.payer_account),
             payee=str(payment_setting("SELLER_ACCOUNT")), claimed_end=deal_state.delivery_end_at,
-            authority=mediation_target.account, ruled_end=deal_state.delivery_end_at,
+            authority=mediation_target.account, period_price=PERIOD_GROSS,
+            period_seconds=PERIOD_SECONDS, ruled_end=deal_state.delivery_end_at,
             reverse_amount=PERIOD_GROSS,
         )
         deal_state._ruling_applied = True

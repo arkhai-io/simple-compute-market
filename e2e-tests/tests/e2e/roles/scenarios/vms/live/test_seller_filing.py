@@ -11,10 +11,11 @@ administrator ends the delivery as a failure and the storefront files
 double. The hosted authority rules the filing mechanically on its own schedule,
 as it documents; its signed record, polled until the case is closed, and the
 payments snapshot are held to the lane twin's assertion: the part protected,
-the authority's stop returning its period, the earnings since the end reversed,
-the Agreement's penalty capped at what the part held, the extension lifted and
-the case closed (``producer_assertions.assert_payee_filing_ruled``). No operator
-endpoint is called, and no stage runs after the assertion. Every stage requires
+the authority's stop returning its period with any earnings since the end
+reversed, the Agreement's penalty capped at what the part then held, the
+extension lifted and the case closed
+(``producer_assertions.assert_payee_filing_ruled``). No operator endpoint is
+called, and no stage runs after the assertion. Every stage requires
 the module's one observation, whose outcome the module logs at its end
 (``helpers/qualification.py``). In no lane: a lane-owned payments or mediation
 target is a blocked skip. Its topology requirements are ``e2e-tests/README.md``'s

@@ -155,16 +155,21 @@ SCM defines and the topology implements, superseded by the topology's declared p
 SCM logic downstream of a side effect SCM cannot create live is proven against the
 doubles, whose limits are amended where the logic needs them. The mediation double
 executes a ruling's `stop`, as one stop event from its own account through the part's
-`chosen` entry with the ruling's treatment, and its `penalty`, as reversals of earned
-amounts still held across parts in mandate order, capped at what is held — executing
-effects the contract defines, while which effects a ruling carries stays the scenario's
-programmed rule. `award` stays refused. The VM lane gains two rows on rate deals: a
-seller's filing ruled as the producer documents a mechanical ruling, and a buyer's
-filing the storefront contests, ruled by an operator decision; each shows the authority's
-stop recorded and classified `ruling`, the payer's returns, the teardown and, once the
-case closes, the deal listed `ended`. This takes the double's `stop` from
-`converge-ongoing-compute-leases`, whose index row and Goal 8 gap keep `penalty`'s use in
-its own rows.
+`chosen` entry with the ruling's treatment, followed, when its time has passed, by the
+reversal of the earnings beyond what a stop at that time would have earned, as far as
+the part still holds them, attributed to the stop, as the dispute authority documents a
+stop effect; and its `penalty`, as reversals of earned amounts still held across parts
+in mandate order, capped at what is held — executing effects the contract defines, while
+which effects a ruling carries stays the scenario's programmed rule. A mechanical ruling
+of a payee's `delivery_end` on a rate deal carries a delivery end, the `stop` and the
+`penalty`, and no `reverse` of its own: the stop's reversal covers the earnings since
+the end. `award` stays refused. The VM lane gains two rows on rate deals: a seller's
+filing ruled as the producer documents a mechanical ruling, and a buyer's filing the
+storefront contests, ruled by an operator decision; each shows the authority's stop
+recorded and classified `ruling`, the payer's returns, the teardown and, once the case
+closes, the deal listed `ended`. This takes the double's `stop` from
+`converge-ongoing-compute-leases`, whose index row and Goal 8 gap keep `penalty`'s use
+in its own rows.
 
 A live verification scenario's minimum is to verify the interactions between SCM and
 external systems the lane scenarios could not exercise: it gives the live producer the
@@ -181,8 +186,8 @@ complete-scenario external form rather than replacing it. The live scenarios are
 | Funds running out | a balance of N periods | a `terms` stop at the funded boundary, N periods settled |
 | Spot preemption | a payee stop with notice | pending, then final at receipt plus notice, `returned`, the remainder refunded |
 | Term end | the part's end | ended at the Agreement's end, `returned` |
-| Seller's filing | the storefront's payee filing | each part protected; an authority stop `returned`, a reversal since the end, the capped penalty, extensions lifted, the case closed |
-| Buyer's contested case | the buyer's filing, contested | the topology policy's ruling: an authority stop `returned` and a reversal |
+| Seller's filing | the storefront's payee filing | each part protected; an authority stop `returned` with its reversal of any earnings since the end, the capped penalty, each reversal attributed to its effect by id, extensions lifted, the case closed |
+| Buyer's contested case | the buyer's filing, contested | the topology policy's ruling: an authority stop `returned` with its reversal of any earnings since the ruled end, and a reversal |
 
 A ruled `delivery_end` with no `stop` on a rate deal leaves the deal listed `ending` with
 its payment running; that is the authority's to correct, since SCM sends no money

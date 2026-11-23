@@ -125,7 +125,7 @@ change's index row and Goal 8 gap (inert paths).
       left for its own reverification. The Goal 8 gap row drops the clause. This
       change's own row is `in implementation`. `check index` — pass. The Goal 8
       current-state sentence naming the double's `reverse` effects is left for
-      roadmap currency (12.5), as planned.
+      roadmap currency (14.5), as planned.
 - [x] 1.5 Verification point: the double's unit and integration suites pass, and the VM
       lane's dispute scenarios still pass against the amended double (system, the VM
       lane's Compose stack: `make -C e2e-tests test-e2e-vm "E2E_MODULE=e2e_vm_payment_deal
@@ -165,10 +165,9 @@ Handoff (section 1):
   sentence is left as it is: the README is its wheel's metadata, and the sentence
   is incomplete rather than false.
 - For closeout's promotion of D6 to `test-compatibility`'s "The in-lane mediation
-  double": state the `stop` deviation the README now states — a passed stop time is
-  a stop now with no reversal of the earnings beyond it, which a ruling programs
-  as its own `reverse`. The delta requirement's "one stop event" already implies
-  it; the fresh-context check suggested naming it, and triage may prefer the delta.
+  double": superseded by section 12 (12.1, 12.4). A passed stop time is a stop now
+  followed by the stop's own reversal of the earnings since, which the delta
+  requirement now states; no deviation is promoted.
 - For section 3's rows: the lane mandate's authority entry is `chosen` with no
   notice (`kit/deal-lifecycle`'s `authorities.py`), so a ruled stop at the ruling's
   instant takes effect at once. A `penalty` reverses each part's snapshot `held`
@@ -662,7 +661,7 @@ Handoff (section 4):
 - For closeout's promotion: `docs/guidance/repository/chart-render-tests.md`,
   "Where they live and how they run", describes what the VM chart's render test
   runs under `STOREFRONT_PYTHON` and does not yet name the production example's
-  startup and publication checks, beside the bare-metal example's it names; 12.9's
+  startup and publication checks, beside the bare-metal example's it names; 14.9's
   D8 lists only the specs and `deployment-state/configuration.md`, which has no
   production-examples passage, so the guidance file is the destination to add.
 - The fresh-context check found: the test file's docstring describing only
@@ -919,7 +918,7 @@ Handoff (section 5):
   five-minute delivery deadline and a period, so about a quarter of an hour
   serves; the rate payer's exact balance follows the period (README, "Live
   verification").
-- For closeout's promotion of D4 (12.9): beside `test-compatibility/architecture.md`
+- For closeout's promotion of D4 (14.9): beside `test-compatibility/architecture.md`
   and `system-tests.md`, two permanent documents still say a wall-time run waits
   only for an instant the Agreement fixes, which `LaneTime.reach`'s recorded case
   now widens: `docs/guidance/repository/deal-scenarios.md`, "The discipline every
@@ -988,7 +987,7 @@ within the run's reach bound (at once when the earlier stages took longer; a par
 started later than that instant still meets the assertion's check, which fails it
 rather than passing), and fails naming LIVE.MAXIMUM_TERM_SECONDS when that instant is
 not before the Agreement's end. The README's input column, `test_buyer_stop.py`'s and
-`live/stages.py`'s docstrings say so. For closeout's promotion of D4 and D6 (12.9):
+`live/stages.py`'s docstrings say so. For closeout's promotion of D4 and D6 (14.9):
 `deal-scenarios.md` and `TESTING.md`, "Lane time", admit on wall time "an instant the
 deal's Agreement fixes, such as its start", which does not literally cover the
 Agreement's start plus the scenario's own minute, though the delta's "its own data
@@ -1269,7 +1268,7 @@ Handoff (section 6):
   (`lifecycle_buyer_read`, `delivery_read`) returns. The contest now reads it first
   and is a blocked skip naming the requirement, so the requirement is met as the
   spec words it (below).
-- For closeout's promotion of D6 (12.9), "bounded polling of a live producer for an
+- For closeout's promotion of D6 (14.9), "bounded polling of a live producer for an
   effect of the scenario's own request": `LiveDispute07`'s wait for the first
   period's earnings is such a poll, bounded by up to a whole period plus the poll
   bound, with no instant reached; `system-tests.md`, `deal-scenarios.md` and
@@ -1544,14 +1543,14 @@ Handoff (section 7):
   retires in part (its abandoned-lease and unactivated-reservation subsection, once
   the site enforces the deadline); the seller quickstart's deadline bullet links it
   by its anchor, `operator-handbook.md#serving-rate-deals`.
-- For closeout's promotion (12.9): D7's quickstart and D10/D11's documents are
+- For closeout's promotion (14.9): D7's quickstart and D10/D11's documents are
   written here. D11's `deal-lifecycle/architecture.md` "Current limits" sentence and
   D1's caveat corrections stay closeout's, and the caveats wait for section 8's
   evidence (D3). The handbook says only what SCM relies on of the dispute
   authority, and points at the authority's own published policy and its
   description's `contact` rather than linking a document, since no published
   location is known to this repository.
-- For 12.5: the buyer quickstart states that `market` files no case on a running
+- For 14.5: the buyer quickstart states that `market` files no case on a running
   deal but the surrender `end --end-now-regardless` makes, Goal 8's existing
   unowned row; and that a buy its default refusals alone empty says nothing and
   exits 0, the new unowned row.
@@ -1568,7 +1567,7 @@ Handoff (section 7):
   over" for "beneath", and two note phrasings (the test's level, an unasserted
   horizon value); all fixed. It also noted that `settlement-configuration`'s
   companion still says no shipped configuration declares rate servicing, which
-  12.9's D1 corrects at closeout once section 8's evidence is in.
+  14.9's D1 corrects at closeout once section 8's evidence is in.
 
 The sections 5–7 round's triage (`reviews/41-implementation.triage.md`; validation 42
 passed at `68b5566e4`, the owner's notes 43 had none) fixed 41 F1 and 41 F2, each
@@ -1733,7 +1732,7 @@ Handoff (section 9):
   the run command gave a port and an unquoted placeholder; the example's optional
   fee and dispute authority inputs were unlisted; the section's introduction
   explained the fix by a change elsewhere; and a README line overran its wrap.
-- For closeout: section 9 changes no capability's behaviour, so 12.9 promotes nothing
+- For closeout: section 9 changes no capability's behaviour, so 14.9 promotes nothing
   from it. The kit README and the quickstart are already the permanent documents.
 
 ## 10. The live harness reaches a topology's authority through a configured proxy
@@ -1831,24 +1830,137 @@ and `docs/guidance/repository/chart-render-tests.md`.
       refused. Nothing is owed to validation beyond the render and release-tooling
       tests.
 
-## 12. Closeout
+## 12. The mechanical ruling's shape matches the dispute authority's
+
+Delivers a lane twin, a mediation double and a shared assertion that hold a seller's
+filing to the ruling the dispute authority actually makes. A live rehearsal against
+the hosted dispute authority found the seller's filing ruled with a delivery end, a
+`stop` returning its period and the premature-stop `penalty`, and no `reverse`
+effect: the authority reverses what the part earned since a passed stop time as that
+stop's own reversal, attributed to the stop, as its documentation of a stop effect
+states. The lane twin's rule, the double and `assert_payee_filing_ruled` instead
+modelled a `reverse` effect of its own, and the assertion took the first reversal for
+it, so the live observation failed though the authority behaved as documented. Amends
+D6 at the owner's direction on 2026-11-23 (workflow seq 88): the double applies a
+passed stop's reversal, and the mechanical ruling carries no `reverse`. Touches
+`tools/mediation-lane-double/` (`service.py`, its README and tests), the
+test-compatibility delta, design D6,
+`e2e-tests/tests/e2e/roles/helpers/producer_assertions.py`, `rate_dispute/stages.py`,
+`live/stages.py` and `live/test_seller_filing.py`, their
+unit tests (`test_producer_dispute_assertions.py`, `test_live_verification.py`), and
+`e2e-tests/README.md`.
+
+- [x] 12.1 The mediation double applies a `stop` whose time has passed as a stop now
+      and, once payments accepts it, one `reverse` of the earnings beyond what a stop
+      at the ruling's time would have earned under its partial-period rule, as far as
+      the part still holds them, carrying the stop's effect id under a key beneath the
+      stop's; none when nothing is beyond it, and none for a stop requested at its
+      time or not recorded. The reversal is derived once and kept, and resent as it
+      was after a payments failure. Explicit `reverse` effects stay, for operator
+      decisions. Verify: integration and unit tests, each failing once its behaviour
+      is removed.
+      Done: `stop_reversal_amount` reads the signed receipt's period and price
+      (gross over periods reserved) and the part's `started`, gross earned and held,
+      and returns nothing when nothing is earned. `_apply` sends the stop's events,
+      then derives the reversal once, kept under `<effect id>:since` in
+      `Case.events`, an empty list when there is none to send; `_send` sends a kept
+      list. Earnings an earlier reversal took are not told apart, as the README says.
+      Tests: a passed stop with a period earned since, with none, and a stop not yet
+      reached; a refused reversal resumed without a second stop; a prorated stop
+      whose reversal's answer is lost after payments took it, resent as it was with
+      no holdings read again; and the amount's cases by rule, at a boundary, capped
+      at what is held, before the start and with nothing earned. With the derivation
+      removed, the earnings-since and recovery tests failed; with the reversal
+      derived on every pass, the resent-as-it-was test failed; with the charged cut
+      or the held cap altered, their unit cases failed. The guard on a stop payments
+      has not recorded has no test: the double's `chosen` entry takes every stop at
+      once, so no lane input reaches it. The double's suite passes.
+- [x] 12.2 The lane twin's seller filing (`SellerFiling08`) rules a delivery end, the
+      `stop` at that end with `returned` and the `penalty`, with no `reverse`;
+      `SellerFiling10` still lets the part earn a period after the end, so the stop's
+      reversal is that period and the penalty takes what is held after it, the same
+      money as before. The buyer's contested case (`ContestedCase10`) is unchanged:
+      its operator's stop is at the claimed end, the lane instant no stage has moved
+      since, so the stop's time has not passed and it brings no reversal; the
+      operator's own `reverse` of the held first period is the only one, as the
+      dispute authority would apply that decision. Verify: the stages' docstrings say
+      so; the VM lane's `e2e_vm_rate_dispute` passes.
+      Owed: validation (`e2e_vm_rate_dispute`).
+- [x] 12.3 `assert_payee_filing_ruled` expects the effects `end_delivery`, `stop` and
+      `penalty`, and matches each authority reversal to the ruling's effect whose id
+      its payload names, summing each effect's: the stop's, the periods earned after
+      the delivery end up to the stop at the period price, or nothing; the penalty's,
+      the Agreement's penalty capped at what the part held after the stop's reversal;
+      and none attributed to anything else. `assert_contested_case_ruled` matches its
+      reversals the same way, the reverse effect's amount to the reverse, and takes
+      the period's price and length for the stop's. Verify: unit tests on outputs
+      shaped as the doubles emit them, including the hosted shape: a ruling applied
+      within the end's period, with no stop reversal and one penalty reversal.
+      Done: `_reversals_by_effect` groups the reversals once and `_reversal_checks`
+      compares each effect's sum, so an effect's reversals may be several; a
+      reversal naming no effect is never taken for a missing stop's. The live
+      contested stage passes the run's rate terms. Tests: both seller penalties
+      applied a period on and at once; the stop's reversal split in two; a stop
+      reversal of another amount, a reversal under another effect's id, one under no
+      effect of the ruling, and one naming no effect where the ruling has no stop
+      each fail naming the check; a penalty beyond its cap fails as before. With the
+      unattributed check removed, with the stop's reversals left unread, with only
+      an effect's first reversal read, with a reversal naming no effect taken for a
+      missing stop's, and with a `reverse` restored to the expected kinds, the
+      corresponding tests failed. The e2e unit suite passes.
+- [x] 12.4 D6, the test-compatibility delta's mediation double requirement (with a
+      scenario for a passed stop) and its live and lane rows, the double's README
+      (dropping the deviation that a passed stop brings nothing more),
+      `e2e-tests/README.md`'s rate-dispute and live tables and the live ruling
+      requirements, and closeout's promotion list (14.9) describe the stop's
+      reversal and the ruling's three effects. Verify: `scripts/openspec validate
+      switch-on-hosted-per-period-vm --strict`; no permanent document still describes
+      a `reverse` effect in a mechanical ruling.
+- [x] 12.5 Verification point: 12.1–12.4 hold. Section 8's run asserts the seller's
+      filing through the amended assertion. Owed to validation:
+      `e2e_vm_rate_dispute`.
+
+## 13. A live run's buyer CLI
+
+Delivers instructions for the buyer's `market` that work on a branch whose package
+versions are unpublished. Until now the harness's skip message and docstring advised
+`cd domains/vms/buyer && uv sync`, which resolves against published packages and
+fails when the branch's kits are newer; the same live rehearsal ran the harness's own
+`market` instead. Implements no design decision; it serves section 8's run
+(`docs/guidance/workflow/changes.md`, "Defects found during a change"), recorded at
+the owner's direction on 2026-11-23 (workflow seq 88). Touches
+`e2e-tests/tests/e2e/roles/buyer_cli.py` and `e2e-tests/README.md`.
+
+- [x] 13.1 `buyer_cli.py`'s docstring and skip message name the repository's path:
+      `make init-buyer` at the repository root, which builds `.dist/` and the
+      buyer's environment from it, or MARKET_CLI_BIN naming a `market` installed from
+      the same wheels, such as `e2e-tests/.venv/bin/market` after `make dist-ci` and
+      `make -C e2e-tests init`. Verify: the targets exist (`Makefile`'s `init-buyer`
+      and `dist-ci`, `e2e-tests/Makefile`'s `init`).
+- [x] 13.2 `e2e-tests/README.md`, "Live verification": the buyer's `market` is
+      SOURCE_REVISION's own, installed from the run checkout's wheels, and where it
+      comes from. Verify: the paragraph names no deployment.
+- [x] 13.3 Verification point: 13.1 and 13.2 hold. Section 8's run records how its
+      `market` was built. Nothing is owed to validation.
+
+## 14. Closeout
 
 Closes the change through `docs/guidance/workflow/closeout.md`'s parts in order, with
 this repository's own parts (`openspec/README.md`, "This repository's closeout parts")
 after campaign index currency.
 
-- [ ] 12.1 Comment hygiene: run `make check-comment-hygiene`; a finding, or a comment this
+- [ ] 14.1 Comment hygiene: run `make check-comment-hygiene`; a finding, or a comment this
       change added that names a change, a task or a review, returns the change to
       implementation.
-- [ ] 12.2 Import placement: confirm every import this change added is at module level,
+- [ ] 14.2 Import placement: confirm every import this change added is at module level,
       or return the change to implementation.
-- [ ] 12.3 Documentation compliance: re-check D1–D14 against
+- [ ] 14.3 Documentation compliance: re-check D1–D14 against
       `docs/guidance/workflow/openspec-documentation.md` and `openspec/README.md`,
       "Documentation placement", and that every permanent document written describes the
       current state, declaratively and with no wording relative to the change.
-- [ ] 12.4 Narrative compression: shorten completed tasks to final behaviour, evidence,
+- [ ] 14.4 Narrative compression: shorten completed tasks to final behaviour, evidence,
       deferred work and destinations, moving any rationale into `design.md` first.
-- [ ] 12.5 Roadmap currency: in `docs/development/ROADMAP.md`'s Goal 8, remove this
+- [ ] 14.5 Roadmap currency: in `docs/development/ROADMAP.md`'s Goal 8, remove this
       change's open-gap row; absorb into the current state that on-demand and spot VM
       are a supported seller configuration, in production once a release carries them,
       qualified live as the summary of section 8 records (citing it), and that the
@@ -1859,20 +1971,20 @@ after campaign index currency.
       D11; and, if the buyer's contested case is unproven, add a row to "Work this goal
       found and leaves unowned" naming the missing ruling policy. Name the edit in the
       design-promotion record.
-- [ ] 12.6 Campaign index currency: update this change's row in
+- [ ] 14.6 Campaign index currency: update this change's row in
       `openspec/changes/README.md` and the Goal 8 campaign prose and graph annotation
       for this change; leave other rows' `Depends on` as they are; run
       `make check-change-index`.
-- [ ] 12.7 Packaging: run `make check-packaging`, then `make check-architecture-change
+- [ ] 14.7 Packaging: run `make check-packaging`, then `make check-architecture-change
       CHANGE=switch-on-hosted-per-period-vm`; resolve every failure or owned exception;
       run `make check-agent-skills` only if the change touched `.agents/`, `.claude/` or
       `.codex/`.
-- [ ] 12.8 End-to-end pipeline: record, from the latest passing validation, the pipeline
+- [ ] 14.8 End-to-end pipeline: record, from the latest passing validation, the pipeline
       run and its result, and the scenarios exercising this change —
       `e2e_vm_rate_dispute`, `e2e_vm_recurring_purchase`, `e2e_vm_rate_servicing`,
       `e2e_vm_payment_deal` and the `e2e_vm_dispute_*` scenarios; the live scenarios'
       evidence is section 8's summary, not the pipeline's. Closeout dispatches no run.
-- [ ] 12.9 Promotion: write the permanent documents below and complete the
+- [ ] 14.9 Promotion: write the permanent documents below and complete the
       design-promotion record (`docs/guidance/workflow/changes.md`, "The design-promotion
       record"); the `test-compatibility` and `deployment-state` `spec.md` files are
       written by the archive.
@@ -1914,8 +2026,9 @@ after campaign index currency.
         observed by polling is programmed and the poller stepped; an inbound call is
         spoofed through the real interface, or made by a double control);
         `openspec/specs/test-compatibility/architecture.md`, "The in-lane mediation
-        double" (the `stop` and `penalty` it applies) and "Payment evidence ownership"
-        (live evidence as boundary comparisons); `docs/development/TESTING.md`,
+        double" (the `stop`, with its reversal of the earnings since a passed time,
+        and the `penalty` it applies) and "Payment evidence ownership" (live
+        evidence as boundary comparisons); `docs/development/TESTING.md`,
         "Private Service Dependencies" (the mediation double's effects), and "The
         canonical compute deal" (the VM rate-deal dispute rows); the double's README,
         written in section 1.
@@ -1926,7 +2039,7 @@ after campaign index currency.
       - D8: the `test-compatibility` and `deployment-state` specs, by the archive;
         `openspec/specs/deployment-state/configuration.md`, its production-examples
         passage, if it lists them.
-      - D9: the summary, written in section 8; cited by Goal 8 (12.5).
+      - D9: the summary, written in section 8; cited by Goal 8 (14.5).
       - D10: the quickstarts, written in section 7.
       - D11: the operator handbook, written in section 7;
         `deal-lifecycle/architecture.md`, "Current limits" (each environment's receipt
@@ -2031,12 +2144,12 @@ after campaign index currency.
           change ("Defects found during a change").
       Run `make check-spec-index CHANGE=switch-on-hosted-per-period-vm`; neither touched
       capability has an `index.md`, and `openspec/specs/README.md` needs no row.
-- [ ] 12.10 Guidance placement: read the paragraphs promoted in 12.9 against the layer
+- [ ] 14.10 Guidance placement: read the paragraphs promoted in 14.9 against the layer
       test — `system-tests.md`'s and `test-doubles.md`'s in the engineering layer with
       neutral examples, `changes.md`'s in the workflow's — then run `make check-guidance`.
-- [ ] 12.11 Documentation citations: run `make check-doc-citations
+- [ ] 14.11 Documentation citations: run `make check-doc-citations
       CHANGE=switch-on-hosted-per-period-vm` and resolve every match, then
       `scripts/change-workflow openspec validate switch-on-hosted-per-period-vm --strict`.
-- [ ] 12.12 Archival: `scripts/change-workflow openspec archive
+- [ ] 14.12 Archival: `scripts/change-workflow openspec archive
       switch-on-hosted-per-period-vm -y`, merging the deltas into `test-compatibility`
       and `deployment-state`; the index row then links the archive directory.
