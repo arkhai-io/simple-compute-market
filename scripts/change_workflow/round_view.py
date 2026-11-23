@@ -51,8 +51,11 @@ While a view is open the branch it moved does not point at the round's commit,
 so every step that describes a commit refuses in that checkout (`check`). The
 state lives in the Git directory of the checkout whose branch the view moved.
 
+The round view is the owner's: `start` and `done` refuse while an unattended run's
+marker is set, naming the run's step, and move nothing.
+
 Contract: openspec/specs/change-workflow/spec.md, CW-aoby, CW-4svs, CW-9mrq,
-CW-78ul, CW-n44s, CW-uq5q, CW-gd24, and CW-rgws.
+CW-78ul, CW-n44s, CW-uq5q, CW-gd24, CW-rgws, and CW-p3vz.
 """
 
 from __future__ import annotations
@@ -66,10 +69,10 @@ import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 from .clone import clone_of, workspace_of
-from .common import StepError, repository_root
+from .common import UNATTENDED_RUN, StepError, repository_root
 from .find import ChangeNotFound, change_directory
 from .log import LOG, read_log
 from .running import Run, runs_in_progress
@@ -634,7 +637,17 @@ def check(root: Path) -> None:
                          "`make round-done` first")
 
 
-def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
+def unattended_refusal(environ: Mapping[str, str]) -> str | None:
+    """Why the round view refuses to open or end in `environ`: the round view is the
+    owner's, so an unattended run, which its marker names, moves nothing (CW-p3vz)."""
+    if step := environ.get(UNATTENDED_RUN):
+        return (f"the round view is the owner's, and this is the unattended {step} run, so "
+                "it opens and ends none; nothing was moved")
+    return None
+
+
+def main(argv: Sequence[str] | None = None, root: Path | None = None,
+         environ: Mapping[str, str] = os.environ) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     actions = parser.add_subparsers(dest="action", required=True)
     opening = actions.add_parser("start")
@@ -643,6 +656,9 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     actions.add_parser("done")
     actions.add_parser("check")
     args = parser.parse_args(argv)
+    if args.action in ("start", "done") and (refused := unattended_refusal(environ)):
+        print(f"ERROR: {refused}", file=sys.stderr)
+        return 1
     try:
         root = repository_root() if root is None else root
     except StepError as error:

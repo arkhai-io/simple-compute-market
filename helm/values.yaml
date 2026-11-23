@@ -369,7 +369,7 @@ provisioning:
     ansible_timeout_seconds: 1800
     lease_watchdog_enabled: true
     lease_watchdog_poll_interval_seconds: 60
-    lease_watchdog_grace_period_seconds: 300
+    lease_watchdog_grace_period_seconds: 3600
     storefront_site_id: "default"
     enable_rate_limiting: false
     rate_limit_requests_per_minute: 30

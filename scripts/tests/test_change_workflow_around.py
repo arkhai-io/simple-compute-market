@@ -249,6 +249,24 @@ def test_archive_cleanup_starts_after_every_kinds_cleanup(tmp_path: Path) -> Non
     assert (cleanup["kind"], cleanup["phase"], cleanup["exit_status"]) == ("helm", "cleanup", 0)
 
 
+def test_a_change_worked_in_place_has_no_history_to_copy_after_archive_cleanup(
+        tmp_path: Path) -> None:
+    """CW-hak6: the copy after archive cleanup copies nothing where no clone holds the
+    change, and passes, so the run goes on; the copy is kept for the run's line."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    configured(tmp_path, REQUIRED + MODELS)
+    after = around.Around(tmp_path, config.load(tmp_path), CHANGE, "archive-cleanup",
+                          invocations=lambda _: tmp_path / "kept", clock=clock)
+
+    (ran, hook) = after.after(tmp_path / "after")
+
+    assert (ran.name, ran.exit_status, hook.skipped) == ("history", 0, "not declared")
+    assert "history is already the workspace's" in ran.log.read_text("utf-8")
+    [copy] = ran.invoked
+    assert (copy["hook"], copy["exit_status"], copy["started"]) == (
+        "history", 0, "2026-10-21T09:15:40Z")
+
+
 def test_a_triages_hooks_are_given_the_kind_it_triages(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
     wrapper = replace(_wrapper(tmp_path, _hooks("before-triage = 'echo {kind} > {inputs}/kind'"),

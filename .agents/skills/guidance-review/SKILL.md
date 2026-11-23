@@ -16,8 +16,8 @@ CW-d5ac). Where it was chosen
 it was measured as **Rule E**, one of several candidate rules, and its baseline below
 carries that name.
 
-This is not a step of a change. It has no node in the workflow graph, no row in the
-step table, no outcome, and nothing records it in a change's workflow log. The owner
+This is not a step of a change. It has no node in the workflow graph, no definition
+in the engine, no outcome, and nothing records it in a change's workflow log. The owner
 runs it interactively, in their workspace, which alone holds every cleaned-up change's
 records (`change-workflow`'s CW-hak6). Nothing runs it
 unattended; if you are in an unattended run, stop and say so. A change's clone is not

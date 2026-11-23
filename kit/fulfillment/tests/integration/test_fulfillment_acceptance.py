@@ -12,19 +12,41 @@ from market_core import VersionedEnvelope
 from market_fulfillment import (
     FulfillmentOrchestrator, FulfillmentResult, ProviderRegistry, SettlementRecordState,
 )
-from market_fulfillment.db import Base as FulfillmentBase
 from market_fulfillment.fulfillment_persistence import (
     SqlAlchemyFulfillmentTransaction, SqlAlchemyFulfillmentUnitOfWork,
 )
+from market_fulfillment.migrations import BASELINE as FULFILLMENT_BASELINE
 from market_fulfillment.settlement_repository import SettlementRepository
 from market_fulfillment.settlement_types import SettlementRequirement, SettlementResource
 from market_resource_pools import ResourcePoolService
-from market_resource_pools.db import Base as PoolsBase
+from market_resource_pools.migrations import BASELINE as POOLS_BASELINE
 from market_resource_pools_contracts import PoolCreate
 
 
 class _ProviderMock(MagicMock):
     needs_host = True
+
+
+class _Handler:
+    provider = "ansible"
+
+    def validate_config(self, config):
+        return dict(config)
+
+    def validate_config_problems(self, config):
+        return dict(config), ()
+
+    def read_config(self, db, pool_id):
+        return {}
+
+    def read_config_for_execution(self, db, pool_id):
+        # Dispatch reads through this one; a handler that omits it fails
+        # loudly here rather than returning configuration with its secrets
+        # silently missing.
+        return self.read_config(db, pool_id)
+
+    def replace_config(self, db, pool_id, config):
+        pass
 
 
 def test_independent_sessions_serialize_fulfillment_acceptance_deterministically(tmp_path):
@@ -34,37 +56,14 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
     ``test_independent_sessions_serialize_cursor_updates_deterministically``
     for ``SchedulingUnitOfWork``.
     """
-
-
-
-    class _Handler:
-        provider = "ansible"
-
-        def validate_config(self, config):
-            return dict(config)
-
-        def validate_config_problems(self, config):
-            return dict(config), ()
-
-        def read_config(self, db, pool_id):
-            return {}
-
-        def read_config_for_execution(self, db, pool_id):
-            # Dispatch reads through this one; a handler that omits it fails
-            # loudly here rather than returning configuration with its secrets
-            # silently missing.
-            return self.read_config(db, pool_id)
-
-        def replace_config(self, db, pool_id, config):
-            pass
-
     database = tmp_path / "fulfillment.db"
     engine = create_engine(
         f"sqlite:///{database}",
         connect_args={"check_same_thread": False, "timeout": 5},
     )
-    PoolsBase.metadata.create_all(bind=engine)
-    FulfillmentBase.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        POOLS_BASELINE.apply(connection)
+        FULFILLMENT_BASELINE.apply(connection)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
     pools.create_pool(
@@ -178,3 +177,109 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
         "cr-2",
     }
     assert first.state == second.state == SettlementRecordState.dispatching.value
+
+
+def _sessions_starting_with(first, factory):
+    """A session factory that hands out ``first`` once, then fresh sessions."""
+    pending = [first]
+
+    def open_session():
+        return pending.pop() if pending else factory()
+
+    return open_session
+
+
+def test_an_acceptance_that_read_the_row_before_another_committed_returns_the_first(
+    tmp_path,
+):
+    """An equivalent acceptance judges the row its lock returns, not an earlier read.
+
+    Session 2 reads the reservation's row while it is only scheduled, so its
+    identity map holds the row with no ``fulfillment_id``. Session 1 then
+    accepts the reservation, dispatches and commits. When session 2 accepts an
+    equivalent request, the locked select returns that same identity-mapped
+    object: without ``populate_existing`` it comes back unrefreshed, still
+    reading ``fulfillment_id is None`` and ``assigned``, and session 2 would
+    accept anew under a second fulfillment ID, prepare the create again and
+    dispatch it again. The steps run one after another, each on its own
+    session, so no thread or timing decides their order.
+    """
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'fulfillment.db'}", connect_args={"timeout": 1}
+    )
+    with engine.begin() as connection:
+        POOLS_BASELINE.apply(connection)
+        FULFILLMENT_BASELINE.apply(connection)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    pools.create_pool(
+        PoolCreate(
+            id="pool-a",
+            label="pool-a",
+            provider="ansible",
+            policy_tags={
+                "advertisable_modes": ["vm"],
+                "capacity_backing": "backed",
+                "deliverable_modes": ["vm"],
+            },
+            provider_config={},
+        )
+    )
+    repo = SettlementRepository()
+    with factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=SettlementRequirement(
+                offering_mode="vm", resource_kind="vm", dimensions={"gpu_count": 1}
+            ),
+            resource=SettlementResource(
+                settlement_resource_id="r1",
+                offering_mode="vm",
+                pool_id="pool-a",
+                resource_kind="vm",
+                provider="ansible",
+            ),
+        )
+        db.commit()
+
+    prepared = VersionedEnvelope(
+        kind="vm.ansible.create.v1", schema_version=1, payload={"prepared": True},
+    )
+    provider = _ProviderMock()
+    provider.resolve_executor_job_id.return_value = None
+    provider.prepare_create.return_value = prepared
+    provider.dispatch_create = AsyncMock(return_value=FulfillmentResult({"job_id": "job-1"}))
+    providers = ProviderRegistry({"ansible": provider})
+    request = VersionedEnvelope(
+        kind="vm.fulfillment.request", schema_version=1, payload={"vm_target": "vm-1"},
+    )
+
+    second_session = factory()
+    assert repo.get(second_session, "cr-1").fulfillment_id is None
+
+    first = asyncio.run(
+        FulfillmentOrchestrator(
+            provider_registry=providers,
+            unit_of_work=SqlAlchemyFulfillmentUnitOfWork(factory, pools, repository=repo),
+        ).begin_fulfillment("cr-1", "vms", request)
+    )
+    retried = asyncio.run(
+        FulfillmentOrchestrator(
+            provider_registry=providers,
+            unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
+                _sessions_starting_with(second_session, factory), pools, repository=repo
+            ),
+        ).begin_fulfillment("cr-1", "vms", request)
+    )
+
+    assert retried.fulfillment_id == first.fulfillment_id
+    assert retried.state == SettlementRecordState.dispatching.value
+    assert provider.prepare_create.call_count == 1
+    assert provider.dispatch_create.await_count == 1
+    with factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.fulfillment_id == first.fulfillment_id
+        assert record.prepared_create_operation == prepared.model_dump(mode="json")
+        assert record.state == SettlementRecordState.dispatching.value

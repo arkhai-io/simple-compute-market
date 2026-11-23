@@ -628,6 +628,13 @@ async def run_publication_cycle_once(
     """
 
     enter_stage("compose")
+    composition = container.resolved_settlement_composition
+    if not dry_run and composition is not None:
+        # A registry whose recommendations could not be read is read again
+        # before options are composed, so the authorities it recommends reach
+        # this cycle's listings without a restart. A preview changes nothing,
+        # so it reads nothing.
+        await composition.disputes.reread()
     cycle = VmPublicationCycle(
         sqlite_client=container.resolved_sqlite_client,
         listing_service=container.resolved_listing_service,

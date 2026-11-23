@@ -679,6 +679,11 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   (`20261108_001_ssh_connections_version_2`), failing, naming every refused host
   and rewriting nothing, where the version-2 codec refuses one. A host submission
   must state its connection's version.
+- Compute provisioning then adds a job's `execution_started_at` and `finished_at`
+  (`20261118_001_ansible_jobs_execution_instants`), nullable and not backfilled:
+  every job the earlier engine recorded reads null in both, and is never
+  classified as never started, since that engine recorded no start before it
+  acted on the host.
 - Each compute storefront creates the tables v0.3.0 created only when a store
   opened — deal servicing's, and the bare-metal lifecycle cursor — with
   `IF NOT EXISTS`, leaving any present as they are

@@ -64,7 +64,7 @@ from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
 from compute_provisioning.jobs.queue import AsyncJobQueue
-from compute_provisioning import ReleaseEffects, compose_adapter_bundles
+from compute_provisioning import ReleaseEffects, TeardownRerunPolicy, compose_adapter_bundles
 from compute_provisioning_service.services.deal_event_sink import (
     SqlAlchemyCapacityReleaseOutbox,
     StorefrontLifecycleEventSink,
@@ -285,6 +285,20 @@ def _make_job_engine(session_factory, job_executors, host_authority, cfg):
     )
 
 
+def _make_teardown_rerun_policy(cfg) -> TeardownRerunPolicy:
+    """The one rerun policy both domains' providers dispatch by and the release
+    status reads, so whether a rerun is pending is judged alike by both.
+
+    Spaced by the job retry policy. A negative ``teardown_rerun_limit`` is
+    refused, naming the setting; startup composes the providers and the
+    release status, so the refusal stops the service.
+    """
+    return TeardownRerunPolicy(
+        teardown_rerun_limit=int(cfg.teardown_rerun_limit),
+        retry_policy=retry_policy_from(cfg),
+    )
+
+
 def _make_release_effects():
     """The one registry of what domains return with a reservation's capacity.
 
@@ -490,6 +504,8 @@ class Container(containers.DeclarativeContainer):
         cfg=config,
     )
 
+    teardown_rerun_policy = providers.Singleton(_make_teardown_rerun_policy, cfg=config)
+
     # Every job, a fulfillment's or an operator's, is submitted through this.
     job_submission = providers.Singleton(
         JobSubmissionService,
@@ -525,6 +541,7 @@ class Container(containers.DeclarativeContainer):
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
         connection_codecs=connection_codecs,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
 
     ansible_service = providers.Callable(
@@ -561,6 +578,7 @@ class Container(containers.DeclarativeContainer):
         job_engine=job_engine,
         job_submission=job_submission,
         config=config,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
     bare_metal_mock_executor = providers.Callable(
         _runtime_value,
@@ -662,6 +680,8 @@ class Container(containers.DeclarativeContainer):
         FulfillmentReleaseStatusPort,
         settlement_repository=settlement_repository,
         session_factory=session_factory,
+        rerun_policy=teardown_rerun_policy,
+        jobs=job_engine,
     )
 
     fulfillment_unit_of_work = providers.Singleton(

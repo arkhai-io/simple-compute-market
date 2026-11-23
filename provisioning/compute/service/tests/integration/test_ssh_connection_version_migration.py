@@ -157,10 +157,14 @@ def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_store
     assert _recorded(engine)
 
     # The unfinished jobs hold no connection of their own: their rows are
-    # unchanged, and the host each stored job names now reads at the served
-    # version through the host lookup the job engine is given for dispatch and
-    # the runner's inventory target, which refused it above.
-    assert _rows(engine, "ansible_jobs", "id") == jobs_before
+    # unchanged but for the chain's later job columns, which read null, and
+    # the host each stored job names now reads at the served version through
+    # the host lookup the job engine is given for dispatch and the runner's
+    # inventory target, which refused it above.
+    assert _rows(engine, "ansible_jobs", "id") == {
+        job_id: {**row, "execution_started_at": None, "finished_at": None}
+        for job_id, row in jobs_before.items()
+    }
     authority = _authority(engine)
     assert set(jobs_before) == set(_JOBS)
     for job_id, job in jobs_before.items():

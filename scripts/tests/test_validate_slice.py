@@ -1053,6 +1053,25 @@ def test_helm_refuses_a_kubeconfig_without_the_context_named(tmp_path: Path) -> 
     assert "'docker-desktop'" in summary.steps[-1].detail
 
 
+def test_on_a_kind_context_the_built_images_are_loaded_into_its_node(tmp_path: Path) -> None:
+    fake = Fake(context="kind-scm", contexts=("kind-scm",))
+    summary = _helm(tmp_path, fake, context="kind-scm")
+
+    assert summary.passed, validator.render(summary)
+    ran = fake.ran()
+    load = f"python3 scripts/kind_load.py scm --change {CHANGE}"
+    assert load in ran
+    assert ran.index(load) == ran.index(next(c for c in ran if c.startswith("make build-dev"))) + 1
+
+
+def test_on_docker_desktop_nothing_is_loaded(tmp_path: Path) -> None:
+    fake = Fake()
+    summary = _helm(tmp_path, fake)
+
+    assert summary.passed, validator.render(summary)
+    assert not any("kind_load" in command for command in fake.ran())
+
+
 def test_helm_pins_the_context_named_whatever_context_is_selected(tmp_path: Path) -> None:
     fake = Fake(context="production-cluster", contexts=("production-cluster", "docker-desktop"))
     earlier = os.environ.get("KUBECONFIG")
@@ -1950,7 +1969,7 @@ def _make_n(target: str, *variables: str, environment: dict[str, str] | None = N
     """What `make -n <target>` of the root Makefile runs, with no step variable
     inherited from the caller, a make that ran these tests among them."""
     env = {key: value for key, value in os.environ.items()
-           if key not in ("HELM_ALL_SCENARIOS", "UNATTENDED", "ARGUMENTS", "ALLOW",
+           if key not in ("HELM_ALL_SCENARIOS", "UNATTENDED", "ARGUMENTS", "WRITE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     return subprocess.run(
         ["make", "-n", "--no-print-directory", "-C", str(REPO_ROOT), target, "CHANGE=x",

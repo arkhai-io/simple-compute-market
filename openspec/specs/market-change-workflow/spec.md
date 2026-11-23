@@ -8,8 +8,8 @@ its validation has — local, Helm, the end-to-end pipeline, and CI — and what
 builds and compares; the isolation of each change's Helm validation in a namespace
 of its own, under its change's image tag, and the memory those namespaces share;
 and its workflow values — its protected branches, the pre-push check its guarded
-push runs, the branch a change lands on, the models it forbids, and a clone's
-bootstrap.
+push runs, the branch a change lands on, the models it prefers for each step, and a
+clone's bootstrap.
 
 Requirements are organized by `index.md`; their order here carries no meaning.
 
@@ -20,8 +20,8 @@ Requirements are organized by `index.md`; their order here carries no meaning.
 This repository's configuration, `.agents/workflow.toml`, MUST declare the fields the
 workflow defines, and this repository MUST state how it provides each role the
 configuration does not hold: the make target, path, or document that fills it. Every
-make target and repository path the workflow's step table and make fragment name MUST
-appear in that statement or in the configuration; the workflow's skills name none.
+make target and repository path the workflow's make fragment names MUST appear in
+that statement or in the configuration; the workflow's skills name none.
 
 #### Scenario: The local validation role
 
@@ -537,15 +537,53 @@ public-content checks under Git's hook contract, and which both the configuratio
 - **THEN** the hook runs `make pre-push` with the remote, which runs both
   public-content checks the guarded push runs
 
+### Requirement: MCW-s4bx This repository's sandbox extensions
+
+This repository's configuration MUST give design and planning `docs/` beside their
+baseline scope, and every step the tool state its suites, builds, and deployments
+write outside the checkout, the review included, since none of it is a file the
+review reads: uv's Pythons and tools, the Kubernetes
+client's cache, the Google Cloud SDK's configuration, which refreshes its tokens,
+Docker's client configuration, and npm's cache, which the configured OpenSpec command
+writes. It MUST protect nothing beyond the engine's and the adapters' protected
+paths.
+
+#### Scenario: Design edits the roadmap
+
+- **WHEN** an unattended design run edits `docs/development/ROADMAP.md`
+- **THEN** the write succeeds, since the configuration gives design `docs/`
+
+#### Scenario: Implementation syncs an environment
+
+- **WHEN** an unattended implementation run's `uv sync` installs a Python under
+  `~/.local/share/uv`
+- **THEN** the write succeeds, since the configuration gives every writing step that
+  path
+
+#### Scenario: Design validates the change
+
+- **WHEN** an unattended design run runs `scripts/change-workflow openspec validate
+  <change> --strict`, whose `npx` writes npm's cache under `~/.npm`
+- **THEN** the write succeeds, since the configuration gives every writing step that
+  path
+
+#### Scenario: A review runs the repository's checks
+
+- **WHEN** an unattended review run runs `scripts/change-workflow run pre-commit
+  <change>` for evidence, whose OpenSpec check's `npx` writes npm's cache under
+  `~/.npm`
+- **THEN** the write succeeds, since the path lies outside the checkout and the
+  configuration gives it to every step
+
 ## Evidence
 
 - This repository's hooks, evidence kinds, protected branches, inert paths, models,
-  and documents to load: `.agents/workflow.toml`; each kind's guide:
+  documents to load, and sandbox extensions: `.agents/workflow.toml`; each kind's guide:
   `.agents/evidence/`.
 - How this repository provides each role the configuration does not hold, and meets
   each of the engine's own assumptions: `README.md`, held complete, with the
-  configuration's commands, for the targets and paths the step table and make
-  fragment name by `scripts/tests/test_change_workflow_assumptions.py`, which holds
+  configuration's commands, for the targets and paths the make fragment names, by
+  `scripts/tests/test_change_workflow_assumptions.py`, which holds
   the skills to naming none but the README's table of exemptions, each owned by an
   open change (CW-n8tr);
   rationale and current limits: `README.md`; the requirements' organization:

@@ -67,35 +67,18 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed, so
-  if a chained command is denied, run its commands one call at a time. If a single
-  command or any other tool call is denied, finish every part of the work that does
-  not depend on it. If the step cannot complete without that call, end with
-  `stopped`, `reason` naming that exact call and why the step needed it, and
-  `denials` listing the calls as you saw them; the wrapper replaces them with the
-  run's own record. Otherwise go on and end as the step ends: the wrapper records
-  the denial on the outcome whatever it is, and the orchestrating session reads it
-  before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it, except where the rule exists only to keep file writes on the Edit and
-  Write tools — the step table's comments name those rules: sed's in-place forms,
-  find's deleting, running, and writing actions, and the diff family's
-  output-to-file forms — whose refused shell write may be made with the Edit or
-  Write tool this step's rules allow. A call denied because no rule allows it —
-  the harness reports it as don't ask mode — may be done instead by a tool this
-  step's rules allow for the same work, such as the Edit tool for a shell write or
-  Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question. Remove a
+  tracked file with `git rm`, which Git can restore.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
-  the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`: `-C` names only a subdirectory a skill names, such as a package's
-  own. Remove a tracked file with
-  `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
 - **Every reply is a turn.** This step is a discussion: each reply to the owner
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
@@ -105,8 +88,8 @@ the session, and every turn ends with an outcome matching
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
   with `run_in_background`. Run a long command such as `scripts/change-workflow run
   pre-commit <change>` in the
-  background as written, with no redirect of its output — a redirect is a write no
-  rule admits, and the harness keeps a background command's output in a file — and
+  background as written, with no redirect of its output — the harness keeps a
+  background command's output in a file — and
   wait for it inside one Bash call, with `scripts/change-workflow wait <that-file>
   '<pattern>'` matching the line it prints when it ends — for `run pre-commit`, the
   closing line of `pre-commit`, its last hook, `[change-workflow] pre-commit at`
@@ -611,15 +594,17 @@ acceptances' outcomes are carried out with the rest.
   the accepted fixes, as `change-implement` makes a section's changes: the change
   and the decision it rests on, and no more, an out-of-scope defect's fix (step 2)
   recorded as outside the plan; at the lowest test level that proves it; comments
-  describing the current system. Every step is denied edits under `.claude/`, so
-  an accepted fix there — the step table, the project's Claude Code settings — is
+  describing the current system. No step writes a protected path — the harness's
+  settings, the workflow's configuration, or one the repository protects, as
+  `scripts/change-workflow config --json` lists them — so an accepted fix to one is
   made by the orchestrating session or the owner, on the owner's word, and you
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
   committing (its step 5): the focused suites, a fix's new test run against the
   commit before it with `scripts/change-workflow run test-before` where it should
-  fail there, `scripts/change-workflow run
+  fail there (naming in `TEST_BEFORE_DIST` the wheels to rebuild when the fix is
+  in an internal dependency, as `change-implement` says), `scripts/change-workflow run
   pre-commit <change>`, whose hooks follow from the paths the fixes change — a fix
   only under the repository's inert paths runs `pre-commit` alone — staging what
   the hooks rebuilt (before closeout its citations check may report only files the

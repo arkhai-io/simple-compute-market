@@ -36,8 +36,10 @@ pre-push = "make pre-push REMOTE={remote}"
 post-clone = "make init"
 # Engine, `run test-before`, for change-implement and change-triage: one test file,
 # as HEAD holds it, run in a detached worktree of an earlier commit, to show a test
-# fails without the change. The scripts' suites run there with no built environment.
-test-before = "uv run --no-project --with pytest --with pyyaml pytest -q {test}"
+# fails without the change. The checkout's scripts/test_before.py runs it in the
+# environment of the project that owns it, rebuilding only the wheels
+# TEST_BEFORE_DIST names; the scripts' suites run with no built environment.
+test-before = "python3 \"$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/test_before.py\" {test}"
 
 [defaults]
 # Engine, `run pre-commit` and `check change`: the workflow's default checks this
@@ -61,12 +63,29 @@ common = ["AGENTS.md", "docs/guidance/", "docs/development/ARCHITECTURE.md",
 # Engine, `config load design`: change-design's own addition.
 design = ["docs/development/ROADMAP.md"]
 
+[sandbox]
+# Engine, the wrapper and the review: paths each unattended step's sandbox may write
+# besides the engine's baseline and its adapter's state; `common` for every step but
+# review, a step's own key for that step alone. Relative paths are from the
+# checkout's root; `~` is the home directory.
+# uv's managed Pythons and tools, the cluster client's cache, the cloud CLI's token
+# refresh, Docker's client configuration, and npm's cache for the OpenSpec command
+# `npx` runs: the suites, builds, checks and deployments the writing steps and
+# validation's new attempts run.
+writable.common = ["~/.local/share/uv", "~/.kube/cache", "~/.config/gcloud", "~/.docker",
+                   "~/.npm"]
+# Design and planning keep this repository's documentation under `docs/` current.
+writable.design = ["docs/"]
+writable.plan = ["docs/"]
+# Paths no step writes, beyond the engine's and the adapters' own: none.
+protected = []
+
 [models]
 # Engine, `start orchestrate`: the orchestrating session's model and effort.
 orchestrator = { model = "claude-opus-5-5", effort = "medium" }
 # Engine, the wrapper and the review: each step's models in order of preference.
-# The review runs on Codex in its read-only sandbox, falling back to Claude when
-# Codex is unavailable.
+# The review runs on Codex, which a confined review runs without its own sandbox,
+# falling back to Claude when Codex is unavailable.
 review          = [{ harness = "codex",  model = "gpt-6-sol",         effort = "high" },
                    { harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
 design          = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]

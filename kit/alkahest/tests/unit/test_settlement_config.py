@@ -266,6 +266,34 @@ async def test_a_reachable_chain_raises_no_blocker_and_status_reports_its_probe(
 
 
 @pytest.mark.asyncio
+async def test_an_unread_registry_is_a_public_detail_and_no_blocker() -> None:
+    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
+    config = registry.resolve(
+        {"priority": [ALKAHEST_MECHANISM_ID], "alkahest": {"enabled": True}}, role="seller"
+    )
+    unread = [
+        {"registry": "https://registry.example", "last_failed_at": _PROBED_AT.isoformat()}
+    ]
+
+    # Through the registry, which refuses a public detail its registration
+    # does not allowlist.
+    (status,) = await registry.ordered_readiness(
+        config, role="seller", resources=_seller_resources(dispute_authorities_unread=unread)
+    )
+    (without,) = await registry.ordered_readiness(
+        config, role="seller", resources=_seller_resources()
+    )
+
+    assert (status.ready, status.blockers) == (True, ())
+    assert status.public_details["dispute_authorities_unread"] == unread
+    assert without.public_details == {
+        key: value
+        for key, value in status.public_details.items()
+        if key != "dispute_authorities_unread"
+    }
+
+
+@pytest.mark.asyncio
 async def test_only_the_chains_the_clauses_select_are_read() -> None:
     probe = _StubProbe(
         {

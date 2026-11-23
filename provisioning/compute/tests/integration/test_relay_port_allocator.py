@@ -236,7 +236,10 @@ class TestAllocation:
     def test_a_stale_port_read_retries_without_rolling_back_the_caller(
         self, allocator, session_factory
     ):
-        _relay(session_factory)
+        """A claim on a port another owner holds is no reason to stop: the
+        owner holds no lease, so the next free port is claimed, and only a
+        window whose every port is held then refuses."""
+        _relay(session_factory, start=6100, count=2)
         held = allocator.allocate(
             relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
         )
@@ -266,6 +269,10 @@ class TestAllocation:
         assert original == held
         with session_factory() as reader:
             assert reader.get(Relay, "site-a").label == "accepted"
+        with pytest.raises(RelayWindowExhaustedError):
+            allocator.allocate(
+                relay_id="site-a", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-3"
+            )
 
     def test_a_port_comes_from_the_relays_window(self, allocator, session_factory):
         _relay(session_factory, start=6100, count=10)
@@ -597,6 +604,85 @@ class TestADisableRacingAnAcceptance:
         assert "claim" in trace
         assert "relay locked" in trace[: trace.index("claim")], trace
         assert "relay" not in trace, trace
+
+
+class TestAConcurrentAllocationForOneOwner:
+    """An allocation for an owner whose lease another allocation committed
+    meanwhile receives that lease, never a second port or a false
+    ``RelayWindowExhaustedError``.
+
+    The acceptance callers reach the allocator holding the settlement row's
+    lock, so a concurrent retry of one reservation finds the first lease
+    already committed; these hold the allocator's own rule for a caller that
+    does not.
+    On PostgreSQL the relay's row lock is what an allocation waits on, so the
+    order of the reads is asserted as PostgreSQL renders them; a lease
+    committed on another relay is not serialized by that lock, so a first
+    owner read that misses it is simulated by a test-only subclass."""
+
+    def test_the_owner_is_read_after_the_relay_is_locked(
+        self, allocator, session_factory
+    ):
+        _relay(session_factory)
+        trace: list[str] = []
+
+        with session_factory() as db:
+
+            @event.listens_for(db, "do_orm_execute")
+            def reads(state):
+                if not state.is_select:
+                    return
+                rendered = str(state.statement.compile(dialect=postgresql.dialect()))
+                if "FROM relays" in rendered:
+                    trace.append("relay locked" if "FOR UPDATE" in rendered else "relay")
+                elif "relay_port_leases.owner_id =" in rendered:
+                    trace.append("owner")
+
+            begin_sqlite_write_transaction(db)
+            allocator.allocate_in_session(
+                db, relay_id="site-a", lease_ends_at=_ENDED,
+                owner_kind="fulfillment", owner_id="cr-1",
+            )
+            db.commit()
+
+        assert "owner" in trace, trace
+        assert trace.index("relay locked") < trace.index("owner"), trace
+
+    def test_a_first_owner_read_that_missed_a_committed_lease_returns_that_lease(
+        self, allocator, session_factory
+    ):
+        """The owner's lease was committed on another relay after the first
+        read missed it, so the claim on this relay fails the one-active-lease
+        index, not a port's; the allocator returns the owner's lease rather
+        than running through the window to exhaustion."""
+        _relay(session_factory, relay_id="site-a", start=6100, count=2)
+        _relay(session_factory, relay_id="site-b", addr="10.0.0.10")
+        committed = allocator.allocate(
+            relay_id="site-b", lease_ends_at=_ENDED, owner_kind="fulfillment", owner_id="cr-1"
+        )
+
+        class FirstOwnerReadMisses(RelayPortAllocator):
+            """Stands for an owner read taken before the other claim committed."""
+
+            missed = False
+
+            def _owner_lease(self, db, *, owner_kind, owner_id):
+                if not self.missed:
+                    self.missed = True
+                    return None
+                return super()._owner_lease(db, owner_kind=owner_kind, owner_id=owner_id)
+
+        with session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            lease = FirstOwnerReadMisses(session_factory).allocate_in_session(
+                db, relay_id="site-a", lease_ends_at=_ENDED,
+                owner_kind="fulfillment", owner_id="cr-1",
+            )
+            db.commit()
+
+        assert lease == committed
+        assert allocator.held_ports("site-a") == []
+        assert allocator.held_ports("site-b") == [committed.remote_port]
 
 
 class TestTheReleasePrimitive:

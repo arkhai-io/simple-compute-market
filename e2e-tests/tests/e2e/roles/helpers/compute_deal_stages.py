@@ -118,14 +118,14 @@ BUYER_MAX_PRICE = 12 * 10**18
 #:
 #: Bounded on both sides, which is why it is not simply "a long time ago". The
 #: lease must be past its end for the watchdog to begin releasing, but it must
-#: NOT be past `lease_watchdog_grace_period_seconds` (300s), because the release
-#: path marks `release_failed` the moment grace elapses with teardown
-#: unfinished — and a mock lane deliberately holds teardown at its gate from
-#: 11a until 11a2 releases it.
+#: NOT be past `lease_watchdog_grace_period_seconds` (the configured grace, 3600s
+#: in the charts' values), because the release path marks `release_failed` the
+#: moment grace elapses with teardown unfinished — and a mock lane deliberately
+#: holds teardown at its gate from 11a until 11a2 releases it.
 #: A back-date past grace would have the first cycle both dispatch the removal
 #: and time it out.
 #:
-#: One minute expires the lease and leaves roughly four minutes for the stages
+#: One minute expires the lease and leaves the rest of the grace for the stages
 #: from 10b to 11b, ample for a mock lane, whose stages make no network waits.
 E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
 

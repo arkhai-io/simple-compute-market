@@ -13,7 +13,9 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
+from compute_provisioning import TeardownRerunPolicy
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
+from compute_provisioning.jobs import JobRetryPolicy
 from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning_contracts import (
@@ -234,6 +236,7 @@ def test_the_runtime_gives_its_plan_the_services_configured_playbook(monkeypatch
             resolved_bare_metal_playbook_path=Path("/opt/service/node-access.yaml"),
             bare_metal_reclaim_policy=None,
         ),
+        teardown_rerun_policy=_RERUN_POLICY,
     )
 
     operation = runtime.fulfillment_provider.prepare_create(
@@ -269,6 +272,13 @@ class _MockJobs:
     def get_credentials(self, job_id):
         return JobCredentialsResponse(job_id=job_id, credentials=[])
 
+    def bound_jobs(self, capacity_reservation_id, action_kind):
+        """No teardown job is bound before the reclaim this test dispatches."""
+        return ()
+
+
+_RERUN_POLICY = TeardownRerunPolicy(teardown_rerun_limit=3, retry_policy=JobRetryPolicy())
+
 
 @pytest.mark.asyncio
 async def test_a_mock_grant_is_delivered_and_reclaimed_through_the_family_provider() -> None:
@@ -283,6 +293,7 @@ async def test_a_mock_grant_is_delivered_and_reclaimed_through_the_family_provid
             job_queue_provider=lambda: None,
         ),
         jobs=jobs,
+        rerun_policy=_RERUN_POLICY,
     )
     created = await provider.dispatch_create(
         provider.prepare_create(
