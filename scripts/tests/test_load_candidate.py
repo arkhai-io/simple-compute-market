@@ -179,6 +179,37 @@ def test_the_store_receives_exactly_the_declared_wheels_one_chart_and_one_binary
     ]
 
 
+def test_a_named_candidate_store_receives_the_wheels_and_chart(root: Path) -> None:
+    """A candidate store named apart from the prefix holds the wheels and the chart; the
+    binary stays in the prefix's CLI repository."""
+    processes = Processes(root)
+
+    assert main([*ARGUMENTS, "--candidates-repository", "elsewhere"], run=processes,
+                root=root) == 0
+
+    deletes = processes.matching(["gcloud", "artifacts", "versions", "delete"])
+    assert [(_flag(c, "repository"), _flag(c, "package")) for c in deletes] == [
+        ("elsewhere", "wheelhouse"), ("elsewhere", "chart"), ("prefix-cli", "market")]
+    uploads = {(_flag(c, "repository"), _flag(c, "package"))
+               for c in processes.matching(["gcloud", "artifacts", "generic", "upload"])}
+    assert uploads == {("elsewhere", "wheelhouse"), ("elsewhere", "chart"),
+                       ("prefix-cli", "market")}
+
+
+def test_make_names_the_candidate_store_it_is_given() -> None:
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
+    printed = subprocess.run(
+        ["make", "-n", "--no-print-directory", "load-candidate", "AR_PROJECT=project",
+         "AR_LOCATION=region", "AR_CANDIDATES=elsewhere"], cwd=REPO_ROOT,
+        capture_output=True, text=True, check=True, env=environment).stdout
+    line = next(line for line in printed.replace("\\\n", " ").splitlines()
+                if "scripts/load_candidate.py" in line)
+    words = shlex.split(line)
+
+    assert dict(zip(words[2::2], words[3::2]))["--candidates-repository"] == "elsewhere"
+
+
 def test_every_declared_image_and_development_image_is_pushed_under_the_revision(
         root: Path) -> None:
     processes = Processes(root)
@@ -347,5 +378,5 @@ def test_make_passes_the_load_its_destination_and_nine_character_revision() -> N
 
     assert values == {"--project": "project", "--location": "region", "--prefix": "project",
                       "--docker-registry": "region-docker.pkg.dev/project/project-docker",
-                      "--revision": revision}
+                      "--revision": revision, "--candidates-repository": "project-candidates"}
     assert len(revision) == 9

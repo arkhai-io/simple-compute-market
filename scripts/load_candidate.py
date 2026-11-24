@@ -22,9 +22,11 @@ stored wheels to the images validated, in this order:
 4. delete the revision's `wheelhouse`, `chart` and binary versions, all of
    them, before uploading any;
 5. upload the declared wheels as the generic package `wheelhouse` and the chart's
-   package as `chart`, version `<revision>`, in `<prefix>-candidates`, each
-   declared binary as the package of its name in `<prefix>-cli`, and push every
-   declared image and development image as `make push-images` does.
+   package as `chart`, version `<revision>`, in the candidate store
+   (`<prefix>-candidates` unless `--candidates-repository` names another generic
+   repository), each declared binary as the package of its name in
+   `<prefix>-cli`, and push every declared image and development image as
+   `make push-images` does.
 
 A generic upload cannot replace a file its version holds, so without the deletes
 a reload would fail part-way after replacing some files. With them, the store
@@ -136,7 +138,8 @@ def delete_version(destination: Destination, repository: str, package: str, vers
 
 
 def load_candidate(destination: Destination, docker_registry: str, revision: str,
-                   root: Path = REPO_ROOT, run: Run = subprocess.run) -> None:
+                   root: Path = REPO_ROOT, run: Run = subprocess.run,
+                   candidates_repository: str | None = None) -> None:
     """Steps 1 to 5, raising before any delete or upload when a check refuses."""
     dist_dir = root / ".dist"
     _make(root, "dist", run)
@@ -151,7 +154,7 @@ def load_candidate(destination: Destination, docker_registry: str, revision: str
     if problems:
         raise LoadRefused("uploaded nothing:\n" + "\n".join(f"  {line}" for line in problems))
 
-    candidates = destination.repository(CANDIDATES)
+    candidates = candidates_repository or destination.repository(CANDIDATES)
     delete_version(destination, candidates, WHEELHOUSE_PACKAGE, revision, run)
     delete_version(destination, candidates, CHART_PACKAGE, revision, run)
     for binary in components.binaries:
@@ -171,10 +174,13 @@ def main(argv: list[str] | None = None, run: Run = subprocess.run,
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     for name in ("project", "location", "prefix", "docker-registry", "revision"):
         parser.add_argument(f"--{name}", required=True)
+    parser.add_argument("--candidates-repository", default=None,
+                        help="the candidate store; default <prefix>-candidates")
     args = parser.parse_args(argv)
     try:
         load_candidate(Destination(args.project, args.location, args.prefix),
-                       args.docker_registry, args.revision, root, run)
+                       args.docker_registry, args.revision, root, run,
+                       args.candidates_repository)
     except subprocess.CalledProcessError as error:
         command = " ".join(map(str, error.cmd))
         print(f"load-candidate: {command} failed with exit status {error.returncode}",
