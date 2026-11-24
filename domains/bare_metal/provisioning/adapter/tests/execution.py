@@ -19,7 +19,7 @@ HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={
             "ssh_host": "10.0.0.5",
             "public_host": "203.0.113.5",
@@ -87,6 +87,7 @@ def job_run(params: BareMetalJobParams, host: ExecutionHost = HOST) -> JobRun:
         action=params.action,
         host=host,
         parameters=params.model_dump(mode="json"),
+        report_starting=lambda: None,
         report_handle=lambda handle: None,
         report_logs=lambda logs: None,
     )

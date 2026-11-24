@@ -10,6 +10,7 @@ unattended run's harness are injected.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -25,8 +26,10 @@ from change_workflow import (clone, cli, config, cost_report, diagram, find, his
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
-from change_workflow_fixtures import (CHANGE, CONFIGURED, VALID, FakeClaude, configured,
-                                      event_lines, make_wrapper, option_rules)
+from change_workflow.review import check_review
+from change_workflow_fixtures import (CHANGE, CONFIGURED, LANDED, VALID, FakeClaude,
+                                      configured, event_lines, ignore_evidence, make_wrapper,
+                                      option_rules, prompted)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -63,6 +66,83 @@ def _repository(path: Path, *changes: str) -> Path:
     return path
 
 
+def _landing_on(root: Path, remote: Path, branch: str, name: str = "origin") -> str:
+    """`root` given a bare remote called `name` holding `branch` at a commit of its own,
+    `branch` tracking that remote, and marked as the change's clone recording `branch`
+    as the one it lands on; that commit."""
+    _git(root.parent, "init", "-q", "--bare", str(remote))
+    _git(root, "remote", "add", name, str(remote))
+    _git(root, "push", "-q", name, f"HEAD:refs/heads/{branch}")
+    _git(root, "config", f"branch.{branch}.remote", name)
+    (root / ".git" / find.CLONE_MARKER).write_text(
+        json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": branch}), "utf-8")
+    return _git(root, "rev-parse", "HEAD")
+
+
+def test_propose_makes_a_prerequisites_worktree_on_its_own_branch(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-k8dn: the worktree beside the checkout, on `propose-<prerequisite>` from the
+    branch the change lands on as its remote holds it, tracking nothing; a second run
+    is refused and changes nothing. Library integration: real Git."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    landed = _landing_on(root, tmp_path / "origin.git", "dev")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "local only")
+    proposal = tmp_path / "shape-floor-proposal"
+
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 0
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 1
+
+    assert f"{proposal} exists" in capsys.readouterr().err
+    assert _git(proposal, "branch", "--show-current") == "propose-shape-floor"
+    assert _git(proposal, "rev-parse", "HEAD") == landed
+    assert subprocess.run(["git", "config", "branch.propose-shape-floor.remote"], cwd=root,
+                          capture_output=True).returncode != 0
+    assert _git(root, "branch", "--show-current") == "main"
+
+
+def test_propose_refuses_a_branch_that_exists_and_a_missing_landing_branch(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 1
+    assert "give it with --base <branch>" in capsys.readouterr().err
+    _landing_on(root, tmp_path / "origin.git", "dev")
+    _git(root, "branch", "propose-shape-floor")
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 1
+
+    assert "the branch propose-shape-floor exists" in capsys.readouterr().err
+    assert not (tmp_path / "shape-floor-proposal").exists()
+
+
+def test_propose_fetches_from_the_remote_the_landing_branch_tracks(tmp_path: Path) -> None:
+    """The engine names no remote of its own: a landing branch tracking `upstream`, as a
+    fork's does, is fetched from there."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    landed = _landing_on(root, tmp_path / "upstream.git", "dev", name="upstream")
+
+    assert cli.main(["propose", CHANGE, "shape-floor"], root=root) == 0
+
+    assert _git(tmp_path / "shape-floor-proposal", "rev-parse", "HEAD") == landed
+
+
+@pytest.mark.parametrize("arguments,refused", [
+    (["no-such-change", "shape-floor"], "no change 'no-such-change'"),
+    ([CHANGE, "archive"], "'archive' is not a change name"),
+    ([CHANGE, "../escape"], "'../escape' is not a change name"),
+])
+def test_propose_refuses_a_change_or_prerequisite_it_cannot_name(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], arguments: list[str],
+        refused: str) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    _landing_on(root, tmp_path / "origin.git", "dev")
+
+    assert cli.main(["propose", *arguments], root=root) == 1
+
+    assert refused in capsys.readouterr().err
+    assert [path.name for path in tmp_path.iterdir()] != [] and not any(
+        path.name.endswith("-proposal") for path in tmp_path.iterdir())
+
+
 def _archive(root: Path) -> Path:
     archived = root / ARCHIVED
     archived.mkdir(parents=True)
@@ -97,6 +177,8 @@ def _printed(capsys: pytest.CaptureFixture[str], run: Callable[[], int]) -> tupl
     (["find", "--active", CHANGE], lambda root: find.main(["--active", CHANGE], root=root)),
     (["find", "--archived", CHANGE], lambda root: find.main(["--archived", CHANGE], root=root)),
     (["find", "--records", CHANGE], lambda root: find.main(["--records", CHANGE], root=root)),
+    (["find", "--next-record", "validation", CHANGE],
+     lambda root: find.main(["--next-record", "validation", CHANGE], root=root)),
     (["clone", CHANGE], lambda root: clone.main(["create", CHANGE], root=root)),
     (["clone", CHANGE, "--branch", "b", "--from", "main"],
      lambda root: clone.main(["create", CHANGE, "--branch", "b", "--from", "main"], root=root)),
@@ -126,6 +208,26 @@ def test_a_subcommand_does_what_its_modules_command_line_does(
     expected = _printed(capsys, lambda: module(root))
     assert _printed(capsys, lambda: cli.main(subcommand, root=root)) == expected
     assert expected[0] in (0, 1)
+
+
+@pytest.mark.parametrize("text,status", [
+    ("# Design review — c\n\n## Summary\n\nWhat.\n\n## Assessment\n\nSound.\n\n"
+     "## Questions\n\nNone.\n\n## Findings\n\nNone.\n\n## Readiness\n\nReady.\n", 0),
+    ("Not a review.\n", 1),
+])
+def test_check_review_reads_the_review_on_standard_input(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+        text: str, status: int) -> None:
+    expected = _printed(capsys, lambda: check_review(text, "design", "c"))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+
+    assert _printed(capsys, lambda: cli.main(["check", "review", "design", "c"],
+                                             root=tmp_path)) == expected
+    assert expected[0] == status
+
+
+def test_check_review_refuses_an_unknown_kind(tmp_path: Path) -> None:
+    assert cli.main(["check", "review", "kindly", "c"], root=tmp_path) == 2
 
 
 @pytest.mark.parametrize("subcommand,module,arguments", [
@@ -177,6 +279,8 @@ def test_the_subcommands_this_module_runs_reach_no_other() -> None:
 @pytest.mark.parametrize("arguments", [
     [], ["deploy"], ["start"], ["start", "review", CHANGE], ["start", "design"],
     ["find"], ["find", "--records", "--json", CHANGE], ["find", "--active", "--archived", CHANGE],
+    ["find", "--next-record", "validation", "--json", CHANGE],
+    ["find", "--next-record", "validation", "--records", CHANGE],
     ["clone", "where"], ["clone", "a", "b"], ["clone", "where", CHANGE, "--from", "dev"],
     ["check"], ["check", "lint"], ["hook", "pre-compaction"], ["next"], ["review", CHANGE],
 ])
@@ -241,7 +345,7 @@ def test_a_failed_push_exits_1_whatever_git_returned(
 
 # `start`: the make targets' entry logic.
 
-@pytest.mark.parametrize("step", ["design", "plan", "implement", "merge"])
+@pytest.mark.parametrize("step", ["design", "plan", "implement"])
 def test_start_refuses_an_archived_change_for_a_step_taking_an_active_one(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], step: str) -> None:
     root = _repository(tmp_path / "workspace")
@@ -260,14 +364,25 @@ def test_start_takes_an_archived_change_for_a_step_that_may_follow_the_archive(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str) -> None:
     root = _repository(tmp_path / "workspace")
     _archive(root)
-    (root / ".claude").mkdir()
-    (root / ".claude/change-steps.toml").write_text(
-        (REPO / ".claude/change-steps.toml").read_text("utf-8"), "utf-8")
     monkeypatch.chdir(root)
     launched = Launched()
 
     assert cli.main(["start", step, CHANGE], root=root, launch=launched) == 0
     assert launched.commands[0][-1] == f"/change-{step} {CHANGE}"
+
+
+def test_start_takes_an_archived_change_for_the_merge_after_the_archive(
+        tmp_path: Path) -> None:
+    """One node of the merge step, the merge after the archive, enters an archived
+    change, so `start` takes it; the merge's route check refuses a run the
+    computation does not name."""
+    root = _repository(tmp_path / "workspace")
+    _archive(root)
+    launched = Launched()
+
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev"], root=root,
+                    launch=launched) == 0
+    assert launched.commands[0][-1] == f"/change-merge {CHANGE} from dev"
 
 
 def test_start_takes_only_an_archived_change_for_archive_cleanup(
@@ -377,6 +492,7 @@ def test_the_merge_brings_in_the_branch_the_clone_recorded(tmp_path: Path) -> No
     root = _repository(tmp_path / "workspace", CHANGE)
     clone_root = find.clone_directory(root, CHANGE)
     _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
+    ignore_evidence(clone_root)
     (clone_root / ".git" / find.CLONE_MARKER).write_text(
         json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
         "utf-8")
@@ -417,7 +533,7 @@ def test_an_unattended_run_that_stops_exits_1_with_its_reason_on_standard_error(
     assert f"ERROR: {line['reason']}" in err
 
 
-@pytest.mark.parametrize("flag", [["--allow", "Bash(make lock)"], ["--session", "s-1"],
+@pytest.mark.parametrize("flag", [["--write", "kit/site/.venv"], ["--session", "s-1"],
                                   ["--fresh"]])
 def test_an_interactive_start_refuses_what_qualifies_an_unattended_run(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: list[str]) -> None:
@@ -456,15 +572,15 @@ def test_a_session_that_cannot_be_started_is_a_refusal(
 
 def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    claude = FakeClaude((event_lines({**VALID["finished"], "landing": LANDED}), 0))
     launched = Launched()
 
     assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev", "--unattended",
-                     "--allow", "Bash(make lock)"], root=root, launch=launched,
+                     "--write", "kit/site/.venv"], root=root, launch=launched,
                     wrapper=make_wrapper(root, claude)) == 0
     assert launched.commands == []
-    assert claude.commands[0][2] == f"/change-merge {CHANGE} from dev"
-    assert option_rules(claude.commands[0], "--allowedTools")[-1] == "Bash(make lock)"
+    assert claude.commands[0][2] == prompted(f"/change-merge {CHANGE} from dev", "merge")
+    assert read_log(log_path(root, CHANGE))[-1]["writes_granted"] == ["kit/site/.venv"]
 
 
 class Recorded(Launched):
@@ -758,7 +874,7 @@ def _fragment(tmp_path: Path, target: str, *variables: str) -> list[str]:
     makefile = tmp_path / "Makefile"
     makefile.write_text(f"include {FRAGMENT}\n", "utf-8")
     env = {key: value for key, value in os.environ.items()
-           if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "ALLOW", "ARGUMENTS",
+           if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "WRITE", "ARGUMENTS",
                           "SESSION_ID", "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT",
                           "UNVALIDATED", "FROM", "BASE", "BRANCH", "KIND", "CHANGE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
@@ -773,9 +889,11 @@ COMMAND = "scripts/change-workflow"
 
 @pytest.mark.parametrize("target,variables,commands", [
     ("design", [], [f'{COMMAND} start design "X"']),
-    ("design", ["UNATTENDED=1", "ALLOW=Bash(make lock);Bash(gh run *)"],
-     [f"{COMMAND} start design \"X\" --unattended --allow 'Bash(make lock)' "
-      "--allow 'Bash(gh run *)'"]),
+    ("design", ["UNATTENDED=1", "WRITE=kit/site/.venv;~/.cache/tool"],
+     [f"{COMMAND} start design \"X\" --unattended --write 'kit/site/.venv' "
+      "--write '~/.cache/tool'"]),
+    # An interactive session takes no grant: no sandbox confines it.
+    ("design", ["WRITE=kit/site/.venv"], [f'{COMMAND} start design "X"']),
     ("design", ["ARGUMENTS=x"], [f'{COMMAND} start design "X"']),
     ("design", ["UNATTENDED=1", "ARGUMENTS=it's"],
      [f"{COMMAND} start design \"X\" --arguments 'it'\\''s' --unattended"]),

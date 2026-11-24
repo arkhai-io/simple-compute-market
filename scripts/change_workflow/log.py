@@ -8,18 +8,33 @@ run's session and commit: the wrapper's for an unattended run, and
 orchestrating session's own lines: a `round` line recording the implementation
 round the owner agreed, and an `orchestrator` line recording a decision — the
 orchestrating session's own routing or recovery, or the owner's — naming the run
-whose denials it reads, the run it resolves, and, for the owner's alone, the node
-it directs the change to next, so the next-step computation routes on it, or the
-finished triage it revisits, which the wrapper then resumes. Reading
-and resolving are distinct because a run can be denied a call and still end with a
-question or a proposed return: its denials are read first, and its outcome is
-answered or decided after. This module is the log's only writer.
+whose denials and refusals it reads, the run it resolves, and, for the owner's alone,
+the node it directs the change to next, so the next-step computation routes on it,
+or the finished triage it revisits, which the wrapper then resumes. Reading and
+resolving are distinct because a run can be denied a call, or refused a write, and
+still end with a question or a proposed return: its denials and refusals are read
+first, and its outcome is answered or decided after. This module is the log's only
+writer.
 
-A run's line may carry `invoked`: each hook, part, and command the run invoked
-through `run` or the guarded push, with its owed workflow and phase where it has
-them, the command it resolved to, its exit status, when it started, and how long it
-took. The field is optional, so a line without it reads as before and the record
-set's format does not move.
+A run's line may carry `invoked`: each hook, kind, and command the run invoked
+through `run`, `gather`, the guarded push, or the actions and hooks around its
+session, with its owed argument and phase where it has them, the command it
+resolved to, its exit status, when it started, and how long it took; and `inputs`,
+its inputs directory relative to the change's records. Both fields are optional, so
+the record set's format does not depend on them. A run stopped because its checks
+after the session found a violation carries `invariants`: each check it failed, by
+name, and what it found (`invariants`). A run carries `refusals`, each write its
+sandbox refused and each push its `git` refused, with its tool, command or path,
+and error, which a decision `reads` as it reads denials; `writes_granted`, the
+paths the owner granted that run alone; and `unconfined: true` when the sandbox
+could not run. Each is optional, added beside the outcome as any field the writer
+is given is.
+
+A finished merge's or archive cleanup's outcome carries `landing`, the remote,
+branch, and commit the run fetched, which the writer checks against the checkout
+the run ran in before the line is written (`landing_problems`), recording on
+cleanup's line whether its commit contains the one fetched (`CONTAINED`). A line
+written before the record existed has neither, and keeps its meaning.
 
 The log holds only what the change's files cannot: session ids, the owner's round
 agreements, and the last outcome. Where the log and the files disagree, the files
@@ -50,22 +65,35 @@ import fcntl
 import json
 import os
 import tempfile
+from dataclasses import dataclass
 from datetime import timezone
 from pathlib import Path
-from typing import IO, Any, Callable, Mapping, Sequence
+from typing import IO, Any, Callable, Collection, Mapping, Sequence
 
-from .common import FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
-from .find import ARCHIVE, ChangeNotFound, change_directory, find_records
-from .graph import (NODES, ROUND, STEPS, Node, Standing, TargetError, entry_refusal, node_of,
-                    review_phase, section_ids)
+from .common import CHANGES, FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .find import (ARCHIVE, ChangeNotFound, change_directory, change_name, find_records,
+                   landing_branch)
+from .graph import (IMPLEMENTATION_TRIAGE, LATE_MERGE, NODES, ROUND, STEPS, Node, Standing,
+                    TargetError, entry_refusal, node_of, review_phase, section_ids)
+from .index import index_rows
 from .outcome import outcome_problems, triage_outcome_problems
-from .records import NUMBERED, has_records, next_number
+from .records import (NUMBERED, git_contains, git_remotes, git_resolve, has_records,
+                      latest_validation, next_number, validation_result)
 
 LOG = "workflow.jsonl"
 # The lines no step's run writes: the conversion's, and the one `start` opens a
 # step with. Neither names an exit, and nothing routes on either.
 CONVERSION = "convert"
 OPENING = "start"
+# The steps whose finished outcome records, as `landing`, the landing branch the
+# run fetched: the merge, before closeout and after the archive, and archive cleanup.
+MERGE = "merge"
+CLEANUP = "archive-cleanup"
+# On a finished archive cleanup line carrying `landing`: whether the run's commit
+# contains the commit it fetched, decided as the line is written, in the checkout
+# that fetched it. Archive cleanup's first exit to `done` reads only this, so no
+# later fetch, by anyone, changes where that exit leads.
+CONTAINED = "landing_contained"
 
 
 class LogError(StepError):
@@ -334,16 +362,184 @@ def _write_over(path: Path, lines: Sequence[Entry], mode: int,
         written.unlink(missing_ok=True)
 
 
+@dataclass(frozen=True)
+class Checkout:
+    """What the log's writer reads of the checkout a run ran in, to check the landing
+    record on a merge's or archive cleanup's line: the remotes it names, whether one
+    commit contains another (`contains(commit, ancestor)`), the branch the change's
+    clone recorded as the one it lands on, and the commit a full ref name names
+    (`resolve(ref)`, None for none)."""
+
+    remotes: Callable[[], Collection[str]]
+    contains: Callable[[str, str], bool]
+    base: Callable[[], str | None]
+    resolve: Callable[[str], str | None]
+
+
+def git_checkout(root: Path, change: str) -> Checkout:
+    """The checkout at `root`, read through Git, for `change`."""
+    return Checkout(remotes=lambda: git_remotes(root),
+                    contains=lambda commit, ancestor: git_contains(root, commit, ancestor),
+                    base=lambda: landing_branch(root, change),
+                    resolve=lambda ref: git_resolve(root, ref))
+
+
+def landing_ref(remote: str, branch: str) -> str:
+    """The ref a fetch of `branch` from `remote` leaves the fetched commit at: the
+    remote-tracking branch, or, for `.`, the branch the checkout holds itself."""
+    return f"refs/heads/{branch}" if remote == "." else f"refs/remotes/{remote}/{branch}"
+
+
+def _finished_merges(entries: Sequence[Entry]) -> list[Entry]:
+    return [entry for entry in entries
+            if entry.get("step") == MERGE and entry.get("outcome") == "finished"]
+
+
+def recorded_landing(entries: Sequence[Entry]) -> Mapping[str, Any] | None:
+    """The `landing` the last finished merge recorded; None when no finished merge
+    recorded one, as in a log written before the record existed."""
+    return next((entry["landing"] for entry in reversed(_finished_merges(entries))
+                 if isinstance(entry.get("landing"), Mapping)), None)
+
+
+def landing_source(entries: Sequence[Entry],
+                   base: Callable[[], str | None]) -> tuple[str | None, str] | None:
+    """The remote and branch archive cleanup fetches: those the last finished merge
+    recorded, else the branch the change's clone recorded, with no remote, which
+    cleanup chooses as the merge would; None with neither, for an older log's merge
+    of a change worked in place."""
+    if (landing := recorded_landing(entries)) is not None:
+        return landing["remote"], landing["branch"]
+    recorded = base()
+    return (None, recorded) if recorded else None
+
+
+def _repairs_unrecorded(entries: Sequence[Entry], reviews: Path) -> bool:
+    """Whether a finished merge may omit `landing`: a repair of a failed validation of
+    the merged `HEAD`, the change's latest validation failed, where no finished merge
+    before it recorded one, so the repair has none to carry. Never once archive
+    cleanup ran: the merge after the archive records one, and a repair carries it, so
+    a merge after cleanup without one is only an older line (`unrouted_merge`)."""
+    merges = _finished_merges(entries)
+    if not merges or any(isinstance(entry.get("landing"), Mapping) for entry in merges) \
+            or any(entry.get("step") == CLEANUP for entry in entries):
+        return False
+    record = latest_validation(reviews)
+    return record is not None and validation_result(record) == "failed"
+
+
+def landing_problems(entries: Sequence[Entry], step: str, outcome: Entry, commit: str | None,
+                     checkout: Checkout, reviews: Path) -> list[str]:
+    """Why the log's writer refuses the landing record of `step`'s outcome, a run whose
+    commit is `commit`, to follow `entries`; empty when it does not, or when nothing
+    is required of it.
+
+    Only a finished merge or archive cleanup is checked: a merge that asks at a
+    conflict holds the fetched commit in `MERGE_HEAD`, not `HEAD`, and one that
+    stops before its fetch has none. A merge's record names one of the checkout's
+    remotes, or `.` for a branch the checkout holds, and a commit `HEAD` contains,
+    which shows the merge brought it in; a repair of a merge logged before the
+    record existed may omit it (`_repairs_unrecorded`). Archive cleanup records
+    one whenever a source resolves (`landing_source`), on every run, so a fetch that
+    failed never passes for a check, and it must be what cleanup fetched from that
+    source (`_cleanup_landing_problems`); whether `HEAD` contains it is recorded, not
+    refused (`CONTAINED`).
+    """
+    if step not in (MERGE, CLEANUP) or outcome.get("outcome") != "finished":
+        return []
+    landing = outcome.get("landing")
+    if not isinstance(landing, Mapping):
+        if step == MERGE:
+            return [] if _repairs_unrecorded(entries, reviews) else [
+                "its finished outcome records no landing, the remote, branch, and commit it "
+                "fetched, which every finished merge records but a repair of a merge logged "
+                "before the record existed"]
+        if (source := landing_source(entries, checkout.base)) is None:
+            return []
+        remote, branch = source
+        return [f"its finished outcome records no landing, and it fetches {branch}"
+                + (f" from {remote}" if remote else "") + ": a fetch that fails ends it "
+                "stopped, never finished"]
+    if not commit:
+        return ["the run's commit could not be read, so its landing cannot be checked"]
+    if step == CLEANUP:
+        return _cleanup_landing_problems(landing, landing_source(entries, checkout.base),
+                                         checkout)
+    problems = []
+    if landing["remote"] != "." and landing["remote"] not in checkout.remotes():
+        problems.append(f"its landing.remote {landing['remote']!r} is none of the checkout's "
+                        "remotes, nor . for a branch the checkout holds")
+    if not checkout.contains(commit, landing["commit"]):
+        problems.append(f"its landing.commit {landing['commit'][:12]} is not contained in the "
+                        f"run's commit {commit[:12]}, so the merge did not bring it in")
+    return problems
+
+
+def _cleanup_landing_problems(landing: Mapping[str, Any], source: tuple[str | None, str] | None,
+                              checkout: Checkout) -> list[str]:
+    """Why a finished archive cleanup's `landing` is not what it fetched from `source`.
+
+    The first exit's guard trusts the containment recorded from this line, so a line
+    naming another branch, or a commit other than the one the fetch left, would let
+    a moved landing branch pass for a contained one. The branch is the source's. The
+    remote is the source's where that remote is `.` or one of the checkout's; a
+    source from the clone's recorded branch names none, and a recorded remote the
+    checkout lacks is replaced on the owner's word, so there it is any of the
+    checkout's or `.`. The commit is the one the fetch left at the ref for that remote
+    and branch, compared for equality: an older commit of the right branch, which
+    `HEAD` may well contain, is exactly the record the guard must not accept. A fetch
+    in the checkout between cleanup's and this write makes the line refused, and the
+    rerun fetches again.
+    """
+    problems = []
+    remote, branch = landing["remote"], landing["branch"]
+    if source is not None and branch != source[1]:
+        problems.append(f"its landing.branch {branch!r} is not {source[1]!r}, the branch "
+                        "cleanup fetches")
+    allowed = {".", *checkout.remotes()}
+    if source is not None and source[0] in allowed:
+        if remote != source[0]:
+            problems.append(f"its landing.remote {remote!r} is not {source[0]!r}, the remote "
+                            "cleanup fetches from")
+    elif remote not in allowed:
+        problems.append(f"its landing.remote {remote!r} is none of the checkout's remotes, "
+                        "nor . for a branch the checkout holds")
+    if not problems:
+        ref = landing_ref(remote, branch)
+        fetched = checkout.resolve(ref)
+        if fetched != landing["commit"]:
+            problems.append(f"its landing.commit {landing['commit'][:12]} is not the commit "
+                            f"{ref} names, "
+                            + (fetched[:12] if fetched else "none")
+                            + ", so it is not what the fetch left")
+    return problems
+
+
 def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None,
                    commit: str | None, extra: Entry | None = None,
-                   schema: dict[str, Any] | None = None, clock: Clock = utc_now) -> Entry:
-    """Append a step's outcome, refusing one that does not conform to the schema."""
+                   schema: dict[str, Any] | None = None, checkout: Checkout | None = None,
+                   clock: Clock = utc_now) -> Entry:
+    """Append a step's outcome, refusing one that does not conform to the schema, or,
+    for a finished merge or archive cleanup, whose landing record the `checkout` the
+    run ran in refuses (`landing_problems`); a finished archive cleanup line carrying
+    one is recorded with whether its commit contains it (`CONTAINED`)."""
     if step not in STEPS:
         raise StepError(f"unknown step {step!r}; expected one of {', '.join(STEPS)}")
     if problems := outcome_problems(outcome, schema):
         raise StepError(f"the {step} outcome does not conform to the schema: "
                         + "; ".join(problems))
-    run = {"step": step, "session": session, "commit": commit}
+    run: Entry = {"step": step, "session": session, "commit": commit}
+    if step in (MERGE, CLEANUP) and outcome.get("outcome") == "finished":
+        if checkout is None:
+            raise StepError(f"a finished {step} run's landing is checked in the checkout it "
+                            "ran in, and none was given")
+        if problems := landing_problems(read_log(path), step, outcome, commit, checkout,
+                                        path.parent):
+            raise StepError(f"the {step} outcome is refused: " + "; ".join(problems))
+        # A line carrying `landing` has a commit, which `landing_problems` requires.
+        if step == CLEANUP and commit and isinstance(landing := outcome.get("landing"),
+                                                     Mapping):
+            run[CONTAINED] = checkout.contains(commit, landing["commit"])
     if clash := (extra or {}).keys() & (run.keys() | outcome.keys()):
         raise StepError(f"the {step} run's fields {', '.join(sorted(clash))} are recorded "
                         "twice")
@@ -357,10 +553,13 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
 
 def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                        commit: str | None, invoked: Sequence[Entry] = (),
+                       checkout: Checkout | None = None, inputs: str | None = None,
                        clock: Clock = utc_now) -> Entry:
     """Append the outcome of a step the owner ran interactively, which records its
-    own: checked as the wrapper checks an unattended run's, and marked
-    `interactive`, with what the session `invoked`, when it invoked anything.
+    own: checked as the wrapper checks an unattended run's, a finished merge's or
+    archive cleanup's landing record against the `checkout` it ran in included, and
+    marked `interactive`, with what the session `invoked`, when it invoked anything,
+    and its `inputs` directory, when it had one.
 
     A triage's finished or returned outcome is refused unless it names the records
     it triaged (`triage_outcome_problems`), as the wrapper records such a run
@@ -378,8 +577,9 @@ def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                         + "; ".join(problems))
     return record_outcome(path, step, outcome, session=session, commit=commit,
                           extra={"interactive": True,
-                                 **({"invoked": list(invoked)} if invoked else {})},
-                          clock=clock)
+                                 **({"invoked": list(invoked)} if invoked else {}),
+                                 **({"inputs": inputs} if inputs else {})},
+                          checkout=checkout, clock=clock)
 
 
 def open_log(path: Path, change: str, step: str, *, interactive: bool,
@@ -421,6 +621,19 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     round recorded after the fact, whose records already exist. `commit` is `HEAD`
     as the round starts, the base its round view shows the round against: commits
     landing between rounds, a design revision among them, are not the round's.
+
+    A round recorded while the latest round is still open — no implementation
+    triage has finished or returned since it — continues it, whatever sections it
+    names: an owner's direction names only the sections left, and a plan amended
+    mid-round, after a return to design or planning, may split or renumber them,
+    yet everything committed since the open round's base is still untriaged, and
+    its reading, validation, and review must cover it. Such a line keeps the open
+    round's `after` and `commit` and names it as `continues`.
+
+    `carries` names the owner records numbered at or below `after` that no triage
+    has read: notes the owner wrote while no review awaited a triage, on a
+    triage's fixes or a re-plan. The round's triage reads them beside its own
+    records; they are never the round's reading.
     """
     if not section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
@@ -430,15 +643,63 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     if after is not None and (isinstance(after, bool) or not isinstance(after, int)
                               or after < 0):
         raise StepError(f"a round's after is a record number; got {after!r}")
+    continued = open_round(read_log(path) if path.exists() else []) if after is None else None
+    if continued is not None:
+        return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
+                                   "sections": sections, "by": by,
+                                   "after": continued["after"],
+                                   **({"commit": continued["commit"]}
+                                      if continued.get("commit") else {}),
+                                   **({"carries": continued["carries"]}
+                                      if continued.get("carries") else {}),
+                                   "continues": continued["seq"]}, clock)
+    if after is None:
+        after = next_number(path.parent) - 1
+    carries = untriaged_owner_notes(path.parent, after)
     return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
-                               "sections": sections, "by": by,
-                               "after": next_number(path.parent) - 1 if after is None
-                               else after, **({"commit": commit} if commit else {})}, clock)
+                               "sections": sections, "by": by, "after": after,
+                               **({"carries": carries} if carries else {}),
+                               **({"commit": commit} if commit else {})}, clock)
+
+
+def untriaged_owner_notes(reviews: Path, after: int) -> list[int]:
+    """The numbers of the owner records in `reviews` numbered at or below `after`
+    with no triage file beside them."""
+    if not reviews.is_dir():
+        return []
+    return sorted(int(match.group(1)) for entry in reviews.iterdir()
+                  if entry.name.endswith("-implementation-owner.md")
+                  and (match := NUMBERED.match(entry.name))
+                  and int(match.group(1)) <= after
+                  and not entry.with_name(entry.name[:-3] + ".triage.md").is_file())
+
+
+def open_round(entries: Sequence[Entry]) -> Entry | None:
+    """The latest round of the log `entries`, when it is still open: no
+    implementation triage has finished or returned since it. None otherwise. A
+    round recorded now would continue it."""
+    latest = next((e for e in reversed(entries) if e.get("outcome") == "round"), None)
+    if latest is None or not isinstance(latest.get("after"), int):
+        return None
+    if any(e["seq"] > latest["seq"] and e.get("outcome") in ("finished", "returned")
+           and ran(IMPLEMENTATION_TRIAGE, e, entries) for e in entries):
+        return None
+    return latest
+
+
+def _row_archived(directory: Path) -> bool:
+    """Whether the change index of the repository holding the change `directory` has
+    a row for it saying `archived`."""
+    archived = directory.parent.as_posix().endswith(ARCHIVE.as_posix())
+    root = directory.parents[len(ARCHIVE.parts) if archived else len(CHANGES.parts)]
+    name = change_name(directory)
+    return any(row.name == name and row.status == "archived" for row in index_rows(root))
 
 
 def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
     """What the entry guards read of the change whose log is at `path`: whether its
-    directory is under the archive, and the kinds of review awaiting triage.
+    directory is under the archive, the kinds of review awaiting triage, whether an
+    archive cleanup run has finished, and whether its index row says `archived`.
 
     A review — a numbered record of a review kind, `-external` included — awaits
     triage until a triage's finished or returned outcome, or a conversion line,
@@ -478,7 +739,10 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
                                                             for number in validations):
         awaiting.add(latest[1])
     return Standing(archived=directory.parent.as_posix().endswith(ARCHIVE.as_posix()),
-                    awaiting=frozenset(awaiting))
+                    awaiting=frozenset(awaiting),
+                    cleaned_up=any(entry.get("step") == CLEANUP
+                                   and entry.get("outcome") == "finished" for entry in entries),
+                    row_archived=_row_archived(directory))
 
 
 def direction(next_step: str, kind: str | None = None,
@@ -545,12 +809,13 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
                       sections: list[list[int | str]] | None = None,
                       target: str | None = None,
                       branch: str | None = None, change: str | None = None,
-                      resumes: int | None = None, clock: Clock = utc_now) -> Entry:
+                      resumes: int | None = None, waives: Sequence[str] | None = None,
+                      commit: str | None = None, clock: Clock = utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
-    `reads` names the run (its `seq`) whose recorded denials the decision has
-    read against the step's rules; `resolves` names the run the decision
+    `reads` names the run (its `seq`) whose recorded denials and refusals the
+    decision has read, each as a finding or a gap; `resolves` names the run the decision
     settles, so that run alone stops waiting on the owner: a decision clears
     nothing it does not name. They differ because a run denied a call can still
     end with a question or a proposed return, whose denials are read before the
@@ -579,20 +844,28 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     run, which `Wrapper.resume` then resumes once with the owner's words; it is
     refused unless that run is the latest triage of the reviews it triaged
     (`revisit_refusal`). It routes nothing: the resumed triage's outcome does.
+    `waives` names the evidence kinds the owner waives for later validations, on
+    the condition the decision states; it directs nothing, and validation reads it
+    through `waived_kinds`, judging whether the condition still holds. `commit`,
+    `HEAD` as the waiver is recorded, goes on its line, so a merge it follows does
+    not lapse it (`evidence.merge_lapse`).
     """
     if next_step is None and (kind, sections, target) != (None, None, None):
         raise StepError("a kind, sections, or target qualify the step a decision directs")
     directed = direction(next_step, kind, sections, target) if next_step is not None else None
     line = decision_line(path, read_log(path), decision, reason, by=by, resolves=resolves,
                          reads=reads, directs=directed, branch=branch, change=change,
-                         resumes=resumes)
+                         resumes=resumes, waives=waives)
+    if waives is not None and commit:
+        line["commit"] = commit
     return append_entry(path, line, clock)
 
 
 def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: str, *,
                   by: str, resolves: int | None = None, reads: int | None = None,
                   directs: Entry | None = None, branch: str | None = None,
-                  change: str | None = None, resumes: int | None = None) -> Entry:
+                  change: str | None = None, resumes: int | None = None,
+                  waives: Sequence[str] | None = None) -> Entry:
     """The decision `note_orchestrator` records, checked against `entries`, the lines
     of the log at `path` it would follow, and not yet numbered: `directs` is the
     target of the owner's direction. A line that breaks a rule raises, naming it."""
@@ -618,9 +891,9 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
         if reads not in runs:
             raise StepError(f"no run has seq {reads!r} in the workflow log; a decision "
                             "reads a step's run")
-        if not runs[reads].get("denials"):
-            raise StepError(f"the run at seq {reads} recorded no denial; a decision reads "
-                            "a run's denials")
+        if not (runs[reads].get("denials") or runs[reads].get("refusals")):
+            raise StepError(f"the run at seq {reads} recorded no denial or refusal; a "
+                            "decision reads a run's denials and refusals")
         line["reads"] = reads
     if resumes is not None:
         if by != "owner":
@@ -631,6 +904,14 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
         if refusal := revisit_refusal(entries, resumes):
             raise StepError(f"the revisit is refused: {refusal}")
         line["resumes"] = resumes
+    if waives is not None:
+        if by != "owner":
+            raise StepError("a waiver of validation's evidence kinds is the owner's")
+        if directs is not None:
+            raise StepError("a waiver of validation's evidence kinds directs no step")
+        if not waives or not all(isinstance(p, str) and p for p in waives):
+            raise StepError(f"a waiver names one or more evidence kinds; got {list(waives)!r}")
+        line["waives"] = list(waives)
     if directs is not None:
         if by != "owner":
             raise StepError("a decision directing a step is the owner's; the orchestrating "
@@ -645,14 +926,54 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
     return line
 
 
-def ran(node: Node, entry: Entry) -> bool:
-    """Whether `entry` is a run of `node`: a review of its kind; a triage naming a
-    review of its kind among the records it triaged; for the round, the line
-    recording it starting, or an implementation session."""
+def waived_kinds(entries: Sequence[Entry]) -> dict[str, Entry]:
+    """Each evidence kind the owner waived, with the latest decision waiving it."""
+    waived: dict[str, Entry] = {}
+    for entry in entries:
+        if entry.get("by") == "owner" and isinstance(entry.get("waives"), list):
+            for kind in entry["waives"]:
+                waived[kind] = entry
+    return waived
+
+
+def after_cleanup(entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether an archive cleanup run is logged before `entry` among `entries`: a
+    merge run so logged is the merge after the archive, since nothing returns an
+    archived change to the phase of the merge before closeout."""
+    return any(other.get("step") == CLEANUP and other["seq"] < entry["seq"]
+               for other in entries)
+
+
+def unrouted_merge(entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether `entry` is a merge run by hand on an archived change before the merge
+    after the archive was a node: a finished merge after an archive cleanup run that
+    records no `landing`, where no finished merge before it recorded one. Every
+    finished merge since records `landing`, and a repair may omit it only before
+    archive cleanup (`_repairs_unrecorded`), so only an older line has this shape;
+    it is a run of neither
+    merge node, and routes nothing, since the exit it named, often `done`, is one
+    neither declares."""
+    if entry.get("step") != MERGE or entry.get("outcome") != "finished" \
+            or isinstance(entry.get("landing"), Mapping) or not after_cleanup(entry, entries):
+        return False
+    return not any(isinstance(other.get("landing"), Mapping)
+                   for other in _finished_merges(entries) if other["seq"] < entry["seq"])
+
+
+def ran(node: Node, entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether `entry`, a line of the log whose lines are `entries`, is a run of
+    `node`: a review of its kind; a triage naming a review of its kind among the
+    records it triaged; for the round, the line recording it starting, or an
+    implementation session; for the merge before closeout or after the archive, a
+    merge run before or after an archive cleanup run (`after_cleanup`), but an older
+    merge after it that neither node ran (`unrouted_merge`)."""
     if node == ROUND and entry.get("outcome") == "round":
         return True
     if entry.get("step") != NODES[node].runs:
         return False
+    if NODES[node].runs == MERGE:
+        return not unrouted_merge(entry, entries) \
+            and (node == LATE_MERGE) == after_cleanup(entry, entries)
     if node.step == "review":
         return entry.get("kind") == node.kind
     if node.step == "triage":
@@ -678,7 +999,7 @@ def unused_direction(entries: Sequence[Entry]) -> Entry | None:
         node = node_of(direction_["next"])
     except TargetError:
         return None
-    return None if any(entry["seq"] > direction_["seq"] and ran(node, entry)
+    return None if any(entry["seq"] > direction_["seq"] and ran(node, entry, entries)
                        and entry.get("outcome") in ("finished", "returned", "round")
                        for entry in entries) else direction_
 

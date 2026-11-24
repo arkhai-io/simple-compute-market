@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import Any
 
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedRequest,
@@ -48,7 +48,7 @@ def authenticate_request(
         operation=operation,
         resource=resource,
         request_id=request_id or uuid.uuid4().hex,
-        timestamp=int(time.time()) if timestamp is None else timestamp,
+        timestamp=injected_time.now() if timestamp is None else timestamp,
         body_hash=canonical_body_hash(body),
     )
     return sign_request(signer=signer, envelope=envelope)
@@ -107,7 +107,7 @@ def verify_authenticated_response(
     result = verify_response(
         envelope,
         body=body,
-        now=int(time.time()) if now is None else now,
+        now=injected_time.now() if now is None else now,
         max_skew=300,
         expected_role="registry",
         expected_method=request.method,

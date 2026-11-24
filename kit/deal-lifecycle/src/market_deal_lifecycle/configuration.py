@@ -67,6 +67,8 @@ class DisputeCredential(AuthorityIdentity):
 
     ``api_key`` is the token itself, a secret setting a service states in its
     secret overlay; ``api_key_env`` names the environment variable holding it.
+    ``ca_bundle_path`` names a PEM bundle the authority's mediation client alone
+    verifies it under; absent, the client uses the default trust store.
     """
 
     # A validation error never shows the entry's input, which may hold the token.
@@ -77,6 +79,16 @@ class DisputeCredential(AuthorityIdentity):
     # Marked secret, as every credential setting is.
     api_key: SecretStr | None = Field(default=None, json_schema_extra={"secret": True})
     api_key_env: Annotated[str, Field(pattern=r"^[A-Z_][A-Z0-9_]*$")] | None = None
+    ca_bundle_path: str | None = None
+
+    @field_validator("ca_bundle_path")
+    @classmethod
+    def _refuse_empty_bundle(cls, value: str | None) -> str | None:
+        # An empty path names no bundle, so it is refused where the configuration
+        # is read rather than when a client is first built for a deal.
+        if value is not None and not value.strip():
+            raise ValueError("ca_bundle_path must name a file")
+        return value
 
     @field_validator("api_key")
     @classmethod

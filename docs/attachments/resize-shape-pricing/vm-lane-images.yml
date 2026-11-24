@@ -1,0 +1,17 @@
+services:
+  registry:
+    image: localhost/arkhai:registry-resize-525-d
+  registry-b:
+    image: localhost/arkhai:registry-resize-525-d
+  bob-storefront:
+    image: localhost/arkhai:storefront-resize-525-d
+  alice-storefront:
+    image: localhost/arkhai:storefront-resize-525-d
+  provisioning:
+    image: localhost/arkhai:compute-provisioning-resize-525-d
+  alice-provisioning:
+    image: localhost/arkhai:compute-provisioning-resize-525-d
+  anvil:
+    image: localhost/arkhai:dev-env-resize-525-d
+  payments-double:
+    image: localhost/arkhai:payments-lane-double-resize-525-d

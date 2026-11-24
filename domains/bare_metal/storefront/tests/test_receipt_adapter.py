@@ -65,7 +65,7 @@ def test_receipt_adapter_constructs_without_an_authority_credential():
     lifecycle = SimpleNamespace(agreement_bytes=lambda _: canonical_json(agreement), credential_available=lambda _: False,
         runtime=SimpleNamespace(settlement_composition=SimpleNamespace(disputes=SimpleNamespace(
             config=SimpleNamespace(credential_for=lambda _: None)))), clock=lambda: 1800001800)
-    adapter = BareMetalLifecycle.dispute(lifecycle, binding)
+    adapter = BareMetalLifecycle.dispute_adapter(lifecycle, binding)
     intent = DeliveryEndIntent(ended_at=1800000000, delivered=True, cause="payer")
     assert adapter.verify_delivery_end(adapter.sign_delivery_end(intent, signer), intent)
     assert asyncio.run(adapter.read()).outcome.status == "rejected"

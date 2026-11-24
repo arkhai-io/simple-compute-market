@@ -18,6 +18,8 @@ none is ever used on a network.
 from __future__ import annotations
 
 import os
+from base64 import b64encode
+
 from types import SimpleNamespace
 
 import pytest
@@ -44,7 +46,7 @@ _PUBLIC = {
 }
 
 
-def _seed(session_factory, host_id: str, *, key: str, version: int = 2) -> str:
+def _seed(session_factory, host_id: str, *, key: str, version: int = 3) -> str:
     """Store an enabled host whose private key is protected under ``key``;
     return its ciphertext."""
     ciphertext = encrypt_secret(_PEM, key)
@@ -106,6 +108,9 @@ class TestAKeyProtectedUnderAnotherKey:
         assert ciphertext not in job.error and "unreadable-fixture" not in job.error
         assert (job.retry_count, job.next_retry_at) == (0, None)
         assert fake_ansible.start_playbook.call_count == started
+        # Refused before its playbook: no start was recorded, and its finish was.
+        assert job.execution_started_at is None
+        assert job.finished_at is not None
 
     async def test_its_connectivity_check_answers_unreachable_with_the_reason(
         self, client_and_queue, fake_ansible, session_factory
@@ -126,9 +131,12 @@ class TestAKeyProtectedUnderAnotherKey:
     ):
         client, _ = client_and_queue
         rotated = _seed(session_factory, "rotated", key=Fernet.generate_key().decode())
+        # Deterministic test-only key, never a public-network identity.
+        blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"p" * 32
+        pin = "ssh-ed25519 " + b64encode(blob).decode("ascii")
         await client.family.register_host(
             HostCreate(host_id="current", connection=ssh_connection(
-                ssh_host="198.51.100.21", ssh_user="ops", private_key=_PEM,
+                ssh_host="198.51.100.21", ssh_user="ops", private_key=_PEM, host_keys=[pin],
             ))
         )
         with session_factory() as db:
@@ -156,7 +164,7 @@ async def test_status_names_a_host_stored_at_version_1_and_the_version_served(
 
     (reason,) = [reason for reason in detail.not_ready_reasons if "'legacy'" in reason]
     assert reason.startswith("host 'legacy' cannot be executed against: ")
-    assert "at version 2" in reason and "'ssh' at 1" in reason
+    assert "at version 3" in reason and "'ssh' at 1" in reason
     assert not any(key.referenced_by == ["legacy"] for key in detail.ssh_keys)
 
 

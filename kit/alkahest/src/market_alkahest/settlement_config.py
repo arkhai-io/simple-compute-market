@@ -9,7 +9,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from market_core.schemas import settlement_option_schema, settlement_option_params
+from market_core.schemas import (
+    AgreedPrice, EscrowProposal, PriceBasis, SettlementOption, settlement_option_schema, settlement_option_params,
+)
 from market_settlement_runtime import (
     ComparisonOperator,
     FieldDescriptor,
@@ -22,6 +24,7 @@ from market_settlement_runtime import (
     SettlementRole,
     decimal_rate_to_base_units,
 )
+from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
 from market_config.config_loader import derive_wallet_address
 from market_config.setting_types import PositiveSeconds
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -39,6 +42,9 @@ from .escrow_verification import verify_escrow_against_plan
 
 ALKAHEST_MECHANISM_ID = "alkahest.v1"
 ALKAHEST_CONFIG_KEY = "alkahest"
+# The readiness resource, and the public detail, naming the registries whose
+# recommended dispute authorities the composing storefront could not read.
+_DISPUTE_AUTHORITIES_UNREAD = "dispute_authorities_unread"
 _EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _ESCROW_KIND = re.compile(r"^[a-z][a-z0-9_]*$")
 _CLAUSE_OPERATORS = frozenset(
@@ -555,7 +561,10 @@ async def alkahest_preflight(
       a blocker;
     - ``chain_probe``: its :class:`~market_alkahest.chain_probe.AlkahestChainProbe`,
       whose last result per selected chain readiness reads; readiness makes no
-      chain call of its own.
+      chain call of its own;
+    - ``dispute_authorities_unread``: each registry whose recommended dispute
+      authorities it could not read, and when that read last failed, which
+      readiness copies into its public details.
 
     A buyer supplies none of them. A wallet stating no address is read as the
     account its key signs as (:func:`wallet_account_address`); a seller's wallet
@@ -669,6 +678,11 @@ async def alkahest_preflight(
     chain_probe = resources.get("chain_probe")
     if chain_probe is not None:
         details["chain_probe"] = chain_probe.public_results()
+    # A report, never a blocker: the options a seller's local dispute entries
+    # allow still publish while a registry's recommendations are unread.
+    unread = resources.get(_DISPUTE_AUTHORITIES_UNREAD)
+    if unread:
+        details[_DISPUTE_AUTHORITIES_UNREAD] = unread
     return MechanismReadiness(
         mechanism=ALKAHEST_MECHANISM_ID,
         configured=True,
@@ -932,6 +946,35 @@ def validate_alkahest_publication_input(
     return AlkahestPublicationInput.model_validate(value)
 
 
+def alkahest_billing_basis(option: SettlementOption) -> PriceBasis:
+    """An Alkahest escrow funds a whole-term total, never a recurring charge."""
+    if option.settlement_schema != ALKAHEST_MECHANISM_ID:
+        raise ValueError("billing projection requires an Alkahest option")
+    if option.lifecycle is not None:
+        raise ValueError("Alkahest billing requires an escrow option without lifecycle terms")
+    params = option.settlement_params
+    if set(params) == {"accepted_escrow"}:
+        if _alkahest_escrow(option) is None:
+            raise ValueError("Alkahest billing requires an accepted escrow")
+    else:
+        # Explicit proposal acceptances carry the negotiated escrow directly,
+        # while published selections wrap their advertised accepted escrow.
+        if not set(params) <= set(EscrowProposal.model_fields):
+            raise ValueError("Alkahest billing requires an escrow option")
+        EscrowProposal.model_validate(params)
+    return PriceBasis(unit="total")
+
+
+def alkahest_payment_presentation(
+    option: SettlementOption, duration_seconds: int | None, quote: AgreedPrice | None,
+) -> PaymentPresentation:
+    """A prepaid escrow has no separate setup charge or recurring reserve."""
+    basis = alkahest_billing_basis(option)
+    return PaymentPresentation(
+        quote=quote or amount_rate_quote(option, duration_seconds, basis), setup_once=0, initial_reserve=0,
+    )
+
+
 def create_alkahest_registration(
     *, command_group: Any | None = None
 ) -> MechanismRegistration:
@@ -943,6 +986,8 @@ def create_alkahest_registration(
         config_model=AlkahestSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
         negotiates_scalar_amount=True,
+        project_billing=alkahest_billing_basis,
+        present_payment=alkahest_payment_presentation,
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
@@ -976,7 +1021,7 @@ def create_alkahest_registration(
         publication_input_validator=validate_alkahest_publication_input,
         buyer_compatibility=alkahest_buyer_compatibility,
         public_detail_keys=frozenset(
-            {"chain", "asset", "release_models", "chain_probe"}
+            {"chain", "asset", "release_models", "chain_probe", _DISPUTE_AUTHORITIES_UNREAD}
         ),
     )
 

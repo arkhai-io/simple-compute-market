@@ -25,14 +25,18 @@ import sys
 import time
 import uuid
 from base64 import urlsafe_b64encode
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
 import httpx
+import injected_time
 import pytest
 import pytest_asyncio
+from injected_time import InjectedTime
 from arkhai_apicredits.settlement.credits_client import (
     CreditsServiceAuthenticationError,
+    CreditsServiceClient,
     CreditsServiceError,
     derive_credit_fulfillment_id,
 )
@@ -47,6 +51,12 @@ from market_identity import (
 )
 from market_resource_pools import read_site_declarations
 from market_resource_pools_contracts import BACKED
+
+from apicredits_service.db.database import (
+    IncompatibleDatabase,
+    create_db_engine,
+    migrate_database,
+)
 
 AUTHORITY_SEED = b"credits-authority-seed-32-byte!!"
 STOREFRONT_SIGNER = Ed25519Signer(b"credits-storefront-seed-32-byte!")
@@ -119,6 +129,10 @@ def _load_app(directory: Path, monkeypatch, *, with_identity: bool):
     for name in _MODULES:
         sys.modules.pop(name, None)
     main = importlib.import_module("apicredits_service.main")
+    # The service starts only on a database its migration command built.
+    engine = create_db_engine(f"sqlite:///{directory / 'credits.db'}", is_sqlite=True)
+    migrate_database(engine)
+    engine.dispose()
     # `main` imports the container under an alias, so the module is reached
     # directly rather than through it.
     importlib.import_module("apicredits_service.container").init()
@@ -143,6 +157,32 @@ def signed_app(tmp_path: Path, monkeypatch) -> Iterator[Any]:
     yield main.app
     for name in _MODULES:
         sys.modules.pop(name, None)
+
+
+def test_the_service_refuses_to_start_on_a_database_it_has_not_migrated(
+    tmp_path: Path, monkeypatch,
+):
+    """The composition's startup checks the database before building anything,
+    and leaves no file where none was migrated."""
+    _write_config(tmp_path, with_identity=False)
+    database = tmp_path / "credits.db"
+    monkeypatch.setenv("CONFIG_DIRECTORY", str(tmp_path))
+    monkeypatch.setenv("APICREDITS_DATABASE_URL", f"sqlite:///{database}")
+    monkeypatch.delenv("APICREDITS_SITE_SIGNING_KEY_FILE", raising=False)
+    monkeypatch.delenv("APICREDITS_TRUSTED_PRINCIPALS", raising=False)
+    for name in _MODULES:
+        sys.modules.pop(name, None)
+    try:
+        container = importlib.import_module("apicredits_service.container")
+        with pytest.raises(IncompatibleDatabase) as refused:
+            container.init()
+    finally:
+        for name in _MODULES:
+            sys.modules.pop(name, None)
+
+    assert "`apicredits-service-migrate`" in str(refused.value)
+    assert container.resolved_keys_service is None
+    assert not database.exists()
 
 
 @pytest_asyncio.fixture
@@ -398,6 +438,26 @@ async def test_the_operator_role_reaches_a_seller_route(client):
 
 
 @pytest.mark.asyncio
+async def test_the_operator_role_reaches_a_credits_route_naming_the_seller(signed_app):
+    """The key list, a credits ledger route whose contract names only
+    `seller`, answers the canonical credits client signing under `admin` as the
+    operator, and the client verifies the authority's signed response."""
+    operator = CreditsServiceClient(
+        "http://credits-service",
+        transport=httpx.ASGITransport(app=signed_app),
+        signer=OPERATOR_SIGNER,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(
+            identities=(Ed25519Signer(AUTHORITY_SEED).identity,),
+        ),
+    )
+
+    listed = await operator.list_keys(owner_id=BUYER)
+
+    assert listed["keys"] == []
+
+
+@pytest.mark.asyncio
 async def test_liveness_is_reachable_without_a_credential(client):
     for path in ("/health", "/api/v1/system/health"):
         response = await client.get(path)
@@ -580,6 +640,74 @@ async def test_the_canonical_clients_transact_against_this_service(signed_app):
         key_id=issued.key_id, amount=2, idempotency_key="i-1"
     )
     assert again.balance == 3, again
+
+
+#: The instant the injected-time test's source starts at.
+_INJECTED_AT = 1794821400
+
+
+@pytest.fixture
+def injected_source(signed_app) -> Iterator[InjectedTime]:
+    """The process time source, injected at ``_INJECTED_AT``. Every party in
+    this process — the service, its hosted ledger and the canonical clients —
+    reads it, so no hop is judged against the wall clock. Installed once the
+    service is composed, since its composition installs the source its
+    configuration names."""
+    before = injected_time.installed()
+    installed = InjectedTime(start=_INJECTED_AT)
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
+
+
+def _stored_times(tmp_path: Path, query: str, *args: Any) -> list[datetime]:
+    """Stored times as the UTC instants they denote: SQLite returns them as
+    written, with no zone."""
+    with sqlite3.connect(tmp_path / "credits.db") as db:
+        rows = db.execute(query, args).fetchall()
+    return [
+        datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+        for row in rows
+        for value in row
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_grant_and_its_spending_hold_the_injected_instant(
+    injected_source, signed_app, tmp_path
+):
+    """Issued at the injected instant and spent a minute later, every time the
+    service stores is the source's, never the wall clock's or the database's."""
+    await _seed_quota(signed_app)
+    issued = await _seller_client(signed_app).submit_credit_issuance(
+        _issuance_request("neg-injected")
+    )
+    at = datetime.fromtimestamp(_INJECTED_AT, timezone.utc)
+    assert _stored_times(
+        tmp_path, "SELECT granted_at FROM credit_grants WHERE key_id = ?", issued.key_id
+    ) == [at]
+    assert _stored_times(
+        tmp_path,
+        "SELECT created_at, updated_at FROM api_keys WHERE key_id = ?",
+        issued.key_id,
+    ) == [at, at]
+
+    injected_source.set(_INJECTED_AT + 60)
+    spent = await _gated_client(signed_app).consume(
+        key_id=issued.key_id, amount=1, idempotency_key="injected-1"
+    )
+    assert spent.ok is True, spent
+    later = datetime.fromtimestamp(_INJECTED_AT + 60, timezone.utc)
+    assert _stored_times(
+        tmp_path,
+        "SELECT occurred_at FROM consumption_events WHERE key_id = ?",
+        issued.key_id,
+    ) == [later]
+    assert _stored_times(
+        tmp_path,
+        "SELECT created_at, updated_at FROM api_keys WHERE key_id = ?",
+        issued.key_id,
+    ) == [at, later]
 
 
 @pytest.mark.asyncio

@@ -1,18 +1,12 @@
 """Market-state SQLite persistence shared by storefront composition roots.
 
-Owns domain-neutral market-state tables such as listings, negotiation
-threads/messages, escrows, publications, credentials, heartbeats, capacity
-holds, and stage events. Settlement lifecycle tables are composed from
-``market_settlement_runtime`` by domain roots. Domain storefronts subclass
-:class:`SQLiteClient` to add domain tables and migrations
-(``_ensure_domain_tables`` / ``_ensure_domain_indexes`` /
-``_domain_migrations``); the settings-bound singleton factory stays with each
-composition root.
-
-Hoisted from ``market_storefront.utils.sqlite_client`` when the
-API-credits domain became the second composition root. A few VM-era
-column names (e.g. ``ssh_commands`` on credentials) ride along until a
-future cross-root consolidation pass.
+Reads and writes domain-neutral market-state tables such as listings,
+negotiation threads/messages, escrows, publications, credentials, heartbeats,
+capacity holds, and stage events. Their schema is
+:data:`core_storefront.migrations.BASELINE` and the migrations after it, which
+each composition's chain composes with its kits' and its domain's; domain
+storefronts subclass :class:`SQLiteClient` to read their own tables, and the
+settings-bound singleton factory stays with each composition root.
 """
 
 from __future__ import annotations
@@ -22,13 +16,12 @@ import json
 import logging
 import os
 import sqlite3
-import time
 import uuid
-from collections.abc import Collection, Mapping, Sequence
-from datetime import datetime
+from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import injected_time
 from market_core import DomainIdentity
 from market_identity import Identity, ReplayIdentity, ReplayReservation
 
@@ -44,13 +37,21 @@ from core_storefront.domain_registry import (
 )
 from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 
-from .sqlite_migrations import (
-    LegacyMigrationInputs,
-    MigrationLike,
-    apply_schema_migrations,
-)
-
 logger = logging.getLogger(__name__)
+
+
+def store_timestamp() -> str:
+    """The process time source's instant as the market-state tables' text timestamps hold it.
+
+    ISO 8601 in UTC with no offset: the stale-negotiation sweep, among the
+    columns' readers, reads a timestamp with no offset as UTC. A domain store
+    writing this form uses it too; some write the same instant with its
+    `+00:00` offset, which sorts beside it, since both start with the same
+    nineteen characters. The instant is whole seconds, and the source may hold
+    one instant across many writes, so a query ordering by such a column breaks
+    ties by insertion order.
+    """
+    return injected_time.now_datetime().replace(tzinfo=None).isoformat()
 
 
 def _principal_columns(principal: Identity) -> tuple[str, str]:
@@ -235,7 +236,8 @@ def write_listing_update(
     updated_at: str | None = None,
     listing_resource: Any | None = None,
     fulfillment_resource: Any | None = None,
-    max_duration_seconds: int | None = None,
+    max_duration_seconds: Any = UNSET,
+    available_until_utc: Any = UNSET,
     storefront_url: str | None = None,
     seller_principal: Identity | None = None,
     oracle_address: str | None = None,
@@ -249,9 +251,9 @@ def write_listing_update(
 ) -> None:
     """Update the supplied listing columns inside the caller's transaction.
 
-    ``None`` on a column means "not supplied", except ``rate_structure``, which
-    is written whenever it is passed: a listing that stops recording a rate
-    structure must have it cleared, not kept.
+    ``None`` on a column means "not supplied", except the capacity bounds and
+    ``rate_structure``, which are written whenever passed: withdrawing a term
+    must clear it rather than keep advertising the previous value.
 
     A change to ``closed`` must name who closed the listing; any other status
     change clears the reason. A change to ``open`` on a listing its seller
@@ -292,10 +294,16 @@ def write_listing_update(
     if status is not None:
         updates.append("closed_by=?")
         values.append(closed_by)
-    add("updated_at", updated_at or datetime.now().isoformat())
+    add("updated_at", updated_at or store_timestamp())
     add("listing_resource", listing_resource, serialize=True)
     add("fulfillment_resource", fulfillment_resource, serialize=True)
-    add("max_duration_seconds", max_duration_seconds)
+    for name, value in (
+        ("max_duration_seconds", max_duration_seconds),
+        ("available_until_utc", available_until_utc),
+    ):
+        if value is not UNSET:
+            updates.append(f"{name}=?")
+            values.append(value)
     add("storefront_url", storefront_url)
     if seller_principal is not None:
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
@@ -316,22 +324,16 @@ def write_listing_update(
 
 
 class SQLiteClient:
-    def __init__(
-        self,
-        db_path: str,
-        *,
-        local_listing_principal: Identity | None = None,
-        expected_legacy_sellers: Collection[str] = (),
-        extra_migrations: Sequence[MigrationLike] = (),
-        legacy_migration_inputs: LegacyMigrationInputs | None = None,
-    ):
+    """Reads and writes the market-state tables of a migrated database.
+
+    Constructing a client issues no DDL: the tables are the storefront chain's,
+    applied to the database before anything opens it.
+    See openspec/specs/deployment-state/spec.md.
+    """
+
+    def __init__(self, db_path: str):
         self.db_path = db_path
-        self._local_listing_principal = local_listing_principal
-        self._expected_legacy_sellers = tuple(expected_legacy_sellers)
-        self._extra_migrations = tuple(extra_migrations)
-        self._legacy_migration_inputs = legacy_migration_inputs
         self._ensure_parent_dir()
-        self._ensure_tables_sync()
 
     def _ensure_parent_dir(self) -> None:
         # Resolve to absolute so log messages name the actual on-disk location,
@@ -346,802 +348,6 @@ class SQLiteClient:
                 f"(resolved from db_path={self.db_path!r}): {exc}"
             ) from exc
         logger.info("SQLite db path resolved to %s", abs_path)
-
-    def _ensure_tables_sync(self) -> None:
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cur = conn.cursor()
-            # ---------------------------------------------------------
-            # Legacy schema migration: rename `orders` → `listings`
-            # plus its columns to match the listings vocabulary used on
-            # the wire. Idempotent: skipped when the new table already
-            # exists.
-            # ---------------------------------------------------------
-            cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='orders'"
-            )
-            has_legacy_orders = cur.fetchone() is not None
-            cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='listings'"
-            )
-            has_listings = cur.fetchone() is not None
-            if has_legacy_orders and not has_listings:
-                cur.execute("ALTER TABLE orders RENAME TO listings")
-                for old_col, new_col in (
-                    ("order_id", "listing_id"),
-                    ("order_maker", "seller"),
-                    ("order_taker", "buyer"),
-                    ("maker_attestation", "seller_attestation"),
-                    ("taker_attestation", "buyer_attestation"),
-                ):
-                    try:
-                        cur.execute(
-                            f"ALTER TABLE listings RENAME COLUMN {old_col} TO {new_col}"
-                        )
-                    except sqlite3.OperationalError:
-                        pass
-                for old_idx in (
-                    "idx_orders_status",
-                    "idx_orders_created_at",
-                    "idx_orders_updated_at",
-                ):
-                    try:
-                        cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
-                    except sqlite3.OperationalError:
-                        pass
-
-            cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='negotiation_threads'"
-            )
-            if cur.fetchone() is not None:
-                for old_col, new_col in (
-                    ("our_order_id", "our_listing_id"),
-                    ("their_order_id", "their_listing_id"),
-                ):
-                    try:
-                        cur.execute(
-                            f"ALTER TABLE negotiation_threads RENAME COLUMN {old_col} TO {new_col}"
-                        )
-                    except sqlite3.OperationalError:
-                        pass
-                for old_idx in (
-                    "idx_negotiation_threads_our_order_id",
-                    "idx_negotiation_threads_their_order_id",
-                ):
-                    try:
-                        cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
-                    except sqlite3.OperationalError:
-                        pass
-
-            cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='credentials'"
-            )
-            if cur.fetchone() is not None:
-                try:
-                    cur.execute(
-                        "ALTER TABLE credentials RENAME COLUMN order_id TO listing_id"
-                    )
-                except sqlite3.OperationalError:
-                    pass
-
-            # stage_events: column rename order_id → listing_id (e2e tests
-            # query GET /api/v1/system/events?listing_id=... and the WHERE
-            # clause crashes if the legacy column name is still on disk).
-            cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='stage_events'"
-            )
-            if cur.fetchone() is not None:
-                try:
-                    cur.execute(
-                        "ALTER TABLE stage_events RENAME COLUMN order_id TO listing_id"
-                    )
-                except sqlite3.OperationalError:
-                    pass
-                for old_idx in (
-                    "idx_credentials_order_id",
-                    "idx_credentials_order_granted",
-                ):
-                    try:
-                        cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
-                    except sqlite3.OperationalError:
-                        pass
-
-            # Drop legacy policy / decision tables (procedural-policy refactor).
-            # Idempotent: noop once the tables are gone.
-            for legacy_table in (
-                "decision_outcomes",
-                "decisions",
-                "policy_composites",
-                "policies",
-            ):
-                try:
-                    cur.execute(f"DROP TABLE IF EXISTS {legacy_table}")
-                except sqlite3.OperationalError:
-                    pass
-            for legacy_idx in (
-                "idx_decisions_event_id",
-                "idx_decisions_event_type",
-                "idx_decisions_timestamp",
-                "idx_decisions_agent_id",
-            ):
-                try:
-                    cur.execute(f"DROP INDEX IF EXISTS {legacy_idx}")
-                except sqlite3.OperationalError:
-                    pass
-
-            # Negotiation threads table. ``buyer`` / ``matched_offer_id``
-            # capture the buyer↔seller pairing — they were previously stored
-            # on the listings row (one buyer per listing), but multi-escrow
-            # deals make the thread the natural place for that association.
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS negotiation_threads (
-                  negotiation_id TEXT PRIMARY KEY,
-                  our_listing_id TEXT,
-                  their_listing_id TEXT,
-                  our_agent_id TEXT,
-                  their_agent_id TEXT,
-                  status TEXT DEFAULT 'active',
-                  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                  terminal_state TEXT,
-                  -- Buyer's duration ask, captured at /negotiate/new and validated
-                  -- against the listing's max_duration_seconds (NULL there means
-                  -- unlimited). Stays for the lifetime of the thread; the agreed
-                  -- value below is just an echo when the negotiation succeeds.
-                  requested_duration_seconds INTEGER,
-                  requested_start_utc TEXT,
-                  -- Buyer's escrow shape proposal — opaque JSON blob captured at
-                  -- /negotiate/new (validated against the listing's acceptance
-                  -- set). Persisted because settlement-time verification
-                  -- reconstructs the expected on-chain obligation_data from
-                  -- this; reading from the thread instead of re-deriving from
-                  -- the listing means the negotiated artifact is the literal
-                  -- source of truth.
-                  buyer_escrow_proposal TEXT,
-                  -- Accepted schema-owned delivery input, reloaded server-side
-                  -- rather than trusted from a later settlement request.
-                  provision_terms TEXT,
-                  -- Immutable accepted settlement plan pinned at seller acceptance.
-                  settlement_plan TEXT,
-                  -- Committed agreement artifact: populated when terminal_state='success'.
-                  -- Captures the negotiation's output as queryable state so settlement
-                  -- can run (or be retried) as a separate step without replaying rounds.
-                  agreed_price TEXT,
-                  agreed_duration_seconds INTEGER,
-                  agreed_at TEXT,
-                  agreement_bytes BLOB,
-                  settlement_data TEXT,
-                  buyer_scheme TEXT,
-                  buyer_identifier TEXT,
-                  seller_scheme TEXT,
-                  seller_identifier TEXT,
-                  matched_offer_id TEXT,
-                  CHECK ((buyer_scheme IS NULL) = (buyer_identifier IS NULL)),
-                  CHECK ((seller_scheme IS NULL) = (seller_identifier IS NULL))
-                )
-                """
-            )
-            # Add columns if they don't exist (for existing databases)
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN our_listing_id TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN their_listing_id TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN our_agent_id TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN their_agent_id TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN terminal_state TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            # Committed-agreement columns (see CREATE TABLE above for semantics).
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN agreed_price TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN agreed_duration_seconds INTEGER"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN requested_duration_seconds INTEGER"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN requested_start_utc TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN buyer_escrow_proposal TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN provision_terms TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN settlement_plan TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            # Migrate: rename pre-cutover column buyer_escrow_terms_proposal →
-            # buyer_escrow_proposal. The shape of the persisted JSON also
-            # changed (drops escrow_kind / arbiter_kind / token,
-            # adds chain_name / escrow_address / fields). We copy the
-            # blob unchanged — settlement that reads it back must handle
-            # both old and new shapes during the rollover, then we drop
-            # the old column. Safe to re-run.
-            existing_neg_cols = {
-                r[1] for r in cur.execute("PRAGMA table_info(negotiation_threads)")
-            }
-            if (
-                "buyer_escrow_terms_proposal" in existing_neg_cols
-                and "buyer_escrow_proposal" in existing_neg_cols
-            ):
-                cur.execute(
-                    "UPDATE negotiation_threads SET buyer_escrow_proposal = "
-                    "buyer_escrow_terms_proposal "
-                    "WHERE buyer_escrow_proposal IS NULL"
-                )
-                try:
-                    cur.execute(
-                        "ALTER TABLE negotiation_threads DROP COLUMN buyer_escrow_terms_proposal"
-                    )
-                except sqlite3.OperationalError:
-                    pass
-            try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_at TEXT")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN agreement_bytes BLOB"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute(
-                    "ALTER TABLE negotiation_threads ADD COLUMN settlement_data TEXT"
-                )
-            except sqlite3.OperationalError:
-                pass
-            existing_neg_cols = {
-                r[1] for r in cur.execute("PRAGMA table_info(negotiation_threads)")
-            }
-            if "agreed_duration_hours" in existing_neg_cols:
-                cur.execute(
-                    "UPDATE negotiation_threads SET agreed_duration_seconds = "
-                    "CAST(agreed_duration_hours * 3600 AS INTEGER) "
-                    "WHERE agreed_duration_seconds IS NULL AND agreed_duration_hours IS NOT NULL"
-                )
-                try:
-                    cur.execute(
-                        "ALTER TABLE negotiation_threads DROP COLUMN agreed_duration_hours"
-                    )
-                except sqlite3.OperationalError:
-                    pass
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS negotiation_local_state (
-                  negotiation_id TEXT NOT NULL,
-                  owner_id TEXT NOT NULL,
-                  our_initial_price TEXT,
-                  our_strategy TEXT,
-                  PRIMARY KEY(negotiation_id, owner_id),
-                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
-                )
-                """
-            )
-            # Negotiation messages table
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS negotiation_messages (
-                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  negotiation_id TEXT NOT NULL,
-                  round INTEGER NOT NULL,
-                  sender_role TEXT NOT NULL,
-                  sender_scheme TEXT NOT NULL,
-                  sender_identifier TEXT NOT NULL,
-                  our_price TEXT,
-                  their_price TEXT,
-                  proposed_price TEXT,
-                  action_taken TEXT NOT NULL,
-                  message_type TEXT NOT NULL,
-                  timestamp TEXT NOT NULL,
-                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),
-                  UNIQUE(negotiation_id, round)
-                )
-                """
-            )
-            # Migrate listings table: add columns that may be missing from older DBs
-            try:
-                cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            # Listings table (local source of truth for the seller's own
-            # advertisements). Multi-escrow deal records live on the
-            # ``escrows`` table joined via the winning ``negotiation_id``;
-            # the buyer/match association lives on ``negotiation_threads``.
-            # accepted_escrows is a JSON array of {chain_name, escrow_address,
-            # literal_fields, rates} — the canonical pricing+escrow
-            # advertisement. The legacy ``demand_resource`` and per-deal
-            # ``escrow_uid``/``buyer``/``matched_offer_id``/
-            # ``seller_attestation``/``buyer_attestation`` columns are
-            # backfilled+dropped by the versioned escrow/listing migration.
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS listings (
-                  listing_id TEXT PRIMARY KEY,
-                  status TEXT NOT NULL,
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
-                  listing_resource TEXT NOT NULL,
-                  fulfillment_resource TEXT,
-                  max_duration_seconds INTEGER,
-                  seller TEXT NOT NULL,
-                  seller_scheme TEXT NOT NULL,
-                  seller_identifier TEXT NOT NULL,
-                  oracle_address TEXT,
-                  paused INTEGER NOT NULL DEFAULT 0,
-                  accepted_escrows TEXT,
-                  settlement_options TEXT,
-                  publication_clauses TEXT,
-                  demands TEXT
-                )
-                """
-            )
-            # Migrate: add accepted_escrows column if missing (existing
-            # databases). Backfill in a separate pass so we don't fail when
-            # the column has already been added by an earlier process.
-            try:
-                cur.execute("ALTER TABLE listings ADD COLUMN accepted_escrows TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            try:
-                cur.execute("ALTER TABLE listings ADD COLUMN settlement_options TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            try:
-                cur.execute("ALTER TABLE listings ADD COLUMN publication_clauses TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            try:
-                cur.execute("ALTER TABLE listings ADD COLUMN demands TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            # Migrate: add paused column if missing (existing databases).
-            try:
-                cur.execute(
-                    "ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0"
-                )
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            # Migrate: add max_duration_seconds; backfill from legacy
-            # duration_hours if it's still around. NULL = unlimited.
-            try:
-                cur.execute(
-                    "ALTER TABLE listings ADD COLUMN max_duration_seconds INTEGER"
-                )
-            except sqlite3.OperationalError:
-                pass
-            existing_cols = {r[1] for r in cur.execute("PRAGMA table_info(listings)")}
-            if "duration_hours" in existing_cols:
-                cur.execute(
-                    "UPDATE listings SET max_duration_seconds = "
-                    "CAST(duration_hours * 3600 AS INTEGER) "
-                    "WHERE max_duration_seconds IS NULL AND duration_hours IS NOT NULL"
-                )
-                try:
-                    cur.execute("ALTER TABLE listings DROP COLUMN duration_hours")
-                except sqlite3.OperationalError:
-                    pass
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS capacity_holds (
-                  negotiation_id TEXT PRIMARY KEY,
-                  listing_id TEXT,
-                  capacity_reservation_id TEXT NOT NULL,
-                  payload TEXT,
-                  expires_at TEXT,
-                  created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                )
-                """
-            )
-            self._ensure_domain_tables(cur)
-            # Core migrations run before fallback table creation so legacy
-            # tables can be renamed without colliding with fresh schemas.
-            apply_schema_migrations(
-                conn,
-                local_listing_principal=self._local_listing_principal,
-                expected_legacy_sellers=self._expected_legacy_sellers,
-                legacy_inputs=self._legacy_migration_inputs,
-            )
-            # Credentials table (off-chain only, never exposed on-chain)
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS credentials (
-                  id TEXT PRIMARY KEY,
-                  listing_id TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  granted_to TEXT NOT NULL,
-                  password TEXT,
-                  ssh_commands TEXT,
-                  ssh_key_path_host TEXT,
-                  key_type TEXT,
-                  created_at TEXT NOT NULL
-                )
-                """
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_credentials_listing_id ON credentials(listing_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_credentials_listing_granted ON credentials(listing_id, granted_to)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_negotiation_id ON negotiation_messages(negotiation_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_round ON negotiation_messages(negotiation_id, round)"
-            )
-            # Indexes for negotiation tracking
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_listing_id ON negotiation_threads(our_listing_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_listing_id ON negotiation_threads(their_listing_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_agent_id ON negotiation_threads(our_agent_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_agent_id ON negotiation_threads(their_agent_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_status ON negotiation_threads(status)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_listings_created_at ON listings(created_at)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_listings_updated_at ON listings(updated_at)"
-            )
-            # Stage events — structured log of stage-boundary transitions,
-            # queryable via CLI. Each row is the functional output of one
-            # stage transition (discovery, negotiation, settlement, etc.).
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS stage_events (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  ts TEXT NOT NULL,
-                  stage TEXT NOT NULL,
-                  event TEXT NOT NULL,
-                  negotiation_id TEXT,
-                  listing_id TEXT,
-                  escrow_uid TEXT,
-                  data TEXT NOT NULL
-                )
-                """
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_stage_events_ts ON stage_events(ts)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_stage_events_stage ON stage_events(stage)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_stage_events_negotiation_id ON stage_events(negotiation_id)"
-            )
-            # Escrows — per-attached-escrow lifecycle record. One row per
-            # on-chain escrow lockup attached to a deal; multi-escrow deals
-            # (primary payment + bond + penalty, etc.) get one row each. The
-            # primary escrow drives provisioning (provisioning_job_id,
-            # tenant_credentials, connection_details only populated there);
-            # non-primary rows are lifecycle-tracked but don't trigger
-            # fulfillment.
-            #
-            # ``escrow_uid`` (PK) is the buyer's escrow attestation UID;
-            # ``fulfillment_uid`` is the seller's fulfillment attestation UID
-            # — the matching obligation pair on chain.
-            #
-            # Evolved from the legacy ``settlement_jobs`` table (one row per
-            # deal, single attestation_uid column). The versioned migrations
-            # rename the old table + widen columns + backfill from the
-            # listings row when present.
-            # ``escrow_uid`` is the EAS attestation UID of the buyer's escrow
-            # obligation — i.e. it IS the buyer's attestation; no separate
-            # column needed. ``fulfillment_uid`` is the seller's
-            # fulfillment attestation, paired with the escrow at settle time.
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS escrows (
-                  escrow_uid TEXT PRIMARY KEY,
-                  negotiation_id TEXT NOT NULL,
-                  status TEXT NOT NULL,
-                  chain_name TEXT,
-                  escrow_address TEXT,
-                  is_primary INTEGER NOT NULL DEFAULT 1,
-                  fulfillment_uid TEXT,
-                  provisioning_job_id TEXT,
-                  connection_details TEXT,
-                  tenant_credentials TEXT,
-                  reason TEXT,
-                  -- A physical fulfillment's identity, distinct from
-                  -- fulfillment_uid above (the on-chain settlement-claim
-                  -- identity) -- see ARCHITECTURE.md's "Shared vocabulary and
-                  -- identities". VM restart convergence reads the identity
-                  -- from its delivery record, not from these columns.
-                  capacity_reservation_id TEXT,
-                  settlement_resource_id TEXT,
-                  fulfillment_id TEXT,
-                  fulfillment_context TEXT,
-                  fulfillment_phase TEXT,
-                  processing_owner TEXT,
-                  processing_lease_until TEXT,
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL
-                )
-                """
-            )
-            # Add columns if they don't exist (for existing databases)
-            for _escrow_column in (
-                "capacity_reservation_id",
-                "settlement_resource_id",
-                "fulfillment_id",
-                "fulfillment_context",
-                "fulfillment_phase",
-                "processing_owner",
-                "processing_lease_until",
-            ):
-                try:
-                    cur.execute(f"ALTER TABLE escrows ADD COLUMN {_escrow_column} TEXT")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_escrows_status ON escrows(status)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_escrows_negotiation ON escrows(negotiation_id)"
-            )
-            # Deal heartbeats — buyer-signed liveness attestations
-            # persisted as evidence (core_storefront.heartbeats owns
-            # validation/replay semantics).
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS deal_heartbeats (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  deal_ref TEXT NOT NULL,
-                  buyer_scheme TEXT NOT NULL,
-                  buyer_identifier TEXT NOT NULL,
-                  seller_scheme TEXT NOT NULL,
-                  seller_identifier TEXT NOT NULL,
-                  sent_at_unix REAL NOT NULL,
-                  payload TEXT,
-                  received_at_unix REAL NOT NULL
-                )
-                """
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_heartbeats_deal "
-                "ON deal_heartbeats(deal_ref, sent_at_unix)"
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS auth_replay_reservations (
-                  principal_scheme TEXT NOT NULL,
-                  principal_identifier TEXT NOT NULL,
-                  request_id TEXT NOT NULL,
-                  request_hash TEXT NOT NULL,
-                  response_status INTEGER,
-                  response_body TEXT,
-                  attempt_token TEXT,
-                  lease_until INTEGER,
-                  created_at TEXT NOT NULL,
-                  PRIMARY KEY (principal_scheme, principal_identifier, request_id)
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS service_peers (
-                  peer_id TEXT PRIMARY KEY,
-                  role TEXT NOT NULL,
-                  site_id TEXT NOT NULL,
-                  principal_scheme TEXT NOT NULL,
-                  principal_identifier TEXT NOT NULL,
-                  status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'retired')),
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
-                  UNIQUE (role, site_id),
-                  UNIQUE (role, principal_scheme, principal_identifier)
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS identity_subjects (
-                  authority TEXT NOT NULL,
-                  subject TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  created_at INTEGER NOT NULL,
-                  updated_at INTEGER NOT NULL,
-                  PRIMARY KEY (authority, subject)
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS identity_bindings (
-                  authority TEXT NOT NULL,
-                  subject TEXT NOT NULL,
-                  principal_scheme TEXT NOT NULL,
-                  principal_identifier TEXT NOT NULL,
-                  status TEXT NOT NULL CHECK (
-                    status IN ('primary', 'overlap', 'disabled', 'retired')
-                  ),
-                  overlap_until INTEGER,
-                  created_at INTEGER NOT NULL,
-                  updated_at INTEGER NOT NULL,
-                  PRIMARY KEY (
-                    authority, subject, principal_scheme, principal_identifier
-                  ),
-                  FOREIGN KEY (authority, subject)
-                    REFERENCES identity_subjects(authority, subject)
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_binding_active_owner
-                ON identity_bindings (
-                  authority, principal_scheme, principal_identifier
-                )
-                WHERE status IN ('primary', 'overlap')
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS identity_rotations (
-                  authority TEXT NOT NULL,
-                  subject TEXT NOT NULL,
-                  nonce TEXT NOT NULL,
-                  intent_hash TEXT NOT NULL,
-                  current_scheme TEXT NOT NULL,
-                  current_identifier TEXT NOT NULL,
-                  replacement_scheme TEXT NOT NULL,
-                  replacement_identifier TEXT NOT NULL,
-                  overlap_until INTEGER NOT NULL,
-                  applied_at INTEGER NOT NULL,
-                  PRIMARY KEY (authority, subject, nonce)
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS identity_claims (
-                  claim_id TEXT PRIMARY KEY,
-                  resource_id TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  principal_scheme TEXT NOT NULL,
-                  principal_identifier TEXT NOT NULL,
-                  operation_id TEXT NOT NULL,
-                  status TEXT NOT NULL,
-                  created_at TEXT NOT NULL,
-                  UNIQUE (resource_id, role, operation_id)
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS identity_audit (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  authority TEXT NOT NULL,
-                  subject TEXT NOT NULL,
-                  action TEXT NOT NULL,
-                  actor_scheme TEXT NOT NULL,
-                  actor_identifier TEXT NOT NULL,
-                  target_scheme TEXT,
-                  target_identifier TEXT,
-                  operation_id TEXT NOT NULL,
-                  created_at INTEGER NOT NULL,
-                  UNIQUE (authority, operation_id)
-                )
-                """
-            )
-            # Publications — record of which registries received which
-            # payload for which listing. Updates and deletes consult this
-            # to know what's where; per-registry payload mode (milestone b)
-            # uses this as the durable record of fan-out shape divergence.
-            # status: 'published' | 'failed' | 'unpublished'.
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS publications (
-                  listing_id TEXT NOT NULL,
-                  registry_url TEXT NOT NULL,
-                  payload_json TEXT NOT NULL,
-                  published_at INTEGER NOT NULL,
-                  registry_assigned_id TEXT,
-                  status TEXT NOT NULL,
-                  last_error TEXT,
-                  PRIMARY KEY (listing_id, registry_url)
-                )
-                """
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_publications_registry ON publications(registry_url)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_publications_status ON publications(status)"
-            )
-            # Domain migrations run only after the shared tables exist.
-            apply_schema_migrations(
-                conn,
-                extra_migrations=(
-                    *self._domain_migrations(),
-                    *self._extra_migrations,
-                ),
-                local_listing_principal=self._local_listing_principal,
-                expected_legacy_sellers=self._expected_legacy_sellers,
-                legacy_inputs=self._legacy_migration_inputs,
-            )
-            # Domain-owned indexes may depend on migrated columns.
-            self._ensure_domain_indexes(cur)
-            conn.commit()
-        finally:
-            conn.close()
 
     def _serialize_resource(self, value: Any) -> str | None:
         return _serialize_json(value)
@@ -1198,21 +404,6 @@ class SQLiteClient:
             return all(b_clean.get(k) == v for k, v in a_clean.items())
         except Exception:
             return False
-
-    # ------------------------------------------------------------------
-    # Domain hooks — storefront composition roots override these to add
-    # their domain tables beside the core market state.
-    # ------------------------------------------------------------------
-
-    def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:
-        """Create domain-owned tables. Runs before schema migrations."""
-
-    def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
-        """Create domain-owned indexes. Runs after schema migrations."""
-
-    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
-        """Composition-owned migrations appended to the core set."""
-        return ()
 
     async def save_capacity_hold(
         self,
@@ -1321,6 +512,7 @@ class SQLiteClient:
         demands: Any | None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         _require_consistent_closure(status, closed_by)
         # An upsert names no reopener, so it may never overwrite a seller's
@@ -1351,9 +543,10 @@ class SQLiteClient:
               publication_clauses,
               demands,
               closed_by,
-              rate_structure
+              rate_structure,
+              available_until_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
               closed_by=excluded.closed_by,
@@ -1370,7 +563,8 @@ class SQLiteClient:
               settlement_options=excluded.settlement_options,
               publication_clauses=excluded.publication_clauses,
               demands=excluded.demands,
-              rate_structure=excluded.rate_structure
+              rate_structure=excluded.rate_structure,
+              available_until_utc=excluded.available_until_utc
             """,
             (
                 listing_id,
@@ -1391,6 +585,7 @@ class SQLiteClient:
                 self._serialize_resource(demands),
                 closed_by,
                 self._serialize_resource(rate_structure),
+                available_until_utc,
             ),
         )
 
@@ -1414,6 +609,7 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -1436,6 +632,7 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    available_until_utc=available_until_utc,
                 )
 
         await asyncio.to_thread(_save)
@@ -1460,6 +657,7 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
@@ -1496,6 +694,7 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    available_until_utc=available_until_utc,
                 )
                 conn.execute(
                     """
@@ -1647,7 +846,8 @@ class SQLiteClient:
         updated_at: str | None = None,
         listing_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
-        max_duration_seconds: int | None = None,
+        max_duration_seconds: Any = UNSET,
+        available_until_utc: Any = UNSET,
         storefront_url: str | None = None,
         seller_principal: Identity | None = None,
         oracle_address: str | None = None,
@@ -1679,6 +879,7 @@ class SQLiteClient:
                     listing_resource=listing_resource,
                     fulfillment_resource=fulfillment_resource,
                     max_duration_seconds=max_duration_seconds,
+                    available_until_utc=available_until_utc,
                     storefront_url=storefront_url,
                     seller_principal=seller_principal,
                     oracle_address=oracle_address,
@@ -1722,7 +923,8 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           available_until_utc
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1749,6 +951,7 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "available_until_utc",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -2246,6 +1449,7 @@ class SQLiteClient:
         action_taken: str,
         message_type: str,
         timestamp: str,
+        provision_terms: Mapping[str, Any] | None = None,
     ) -> int:
         """Save a negotiation message to the database.
 
@@ -2324,9 +1528,10 @@ class SQLiteClient:
                     INSERT INTO negotiation_messages(
                         negotiation_id, round, sender_role,
                         sender_scheme, sender_identifier, our_price, their_price,
-                        proposed_price, action_taken, message_type, timestamp
+                        proposed_price, action_taken, message_type, timestamp,
+                        provision_terms
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(negotiation_id, round) DO UPDATE SET
                         sender_role = excluded.sender_role,
                         sender_scheme = excluded.sender_scheme,
@@ -2336,7 +1541,8 @@ class SQLiteClient:
                         proposed_price = excluded.proposed_price,
                         action_taken = excluded.action_taken,
                         message_type = excluded.message_type,
-                        timestamp = excluded.timestamp
+                        timestamp = excluded.timestamp,
+                        provision_terms = excluded.provision_terms
                     """,
                     (
                         negotiation_id,
@@ -2350,6 +1556,8 @@ class SQLiteClient:
                         action_taken,
                         message_type,
                         timestamp,
+                        json.dumps(dict(provision_terms), allow_nan=False)
+                        if provision_terms is not None else None,
                     ),
                 )
                 conn.commit()
@@ -2374,7 +1582,7 @@ class SQLiteClient:
                     """
                     SELECT round, sender_role, sender_scheme, sender_identifier,
                            our_price, their_price, proposed_price,
-                           action_taken, message_type, timestamp
+                           action_taken, message_type, timestamp, provision_terms
                     FROM negotiation_messages
                     WHERE negotiation_id = ?
                     ORDER BY round ASC
@@ -2397,6 +1605,9 @@ class SQLiteClient:
                             "action_taken": row[7],
                             "message_type": row[8],
                             "timestamp": row[9],
+                            "provision_terms": (
+                                json.loads(row[10]) if row[10] is not None else None
+                            ),
                         }
                     )
                 return result
@@ -2423,7 +1634,7 @@ class SQLiteClient:
                     SET terminal_state = ?, status = 'terminated', updated_at = ?
                     WHERE negotiation_id = ?
                     """,
-                    (terminal_state, datetime.now().isoformat(), negotiation_id),
+                    (terminal_state, store_timestamp(), negotiation_id),
                 )
                 conn.commit()
             finally:
@@ -2435,7 +1646,7 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        agreed_price: int | str | float,
+        negotiated_scalar: int | str | float,
         agreed_duration_seconds: int,
         agreed_start_utc: str | None = None,
         accepted_at: str | None = None,
@@ -2448,10 +1659,11 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_price`` is the absolute payment amount in base units of
-        the payment token (the column name is retained from before the
-        per-hour → absolute refactor; semantically it now holds the
-        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        ``negotiated_scalar`` stores the exact domain-negotiated policy
+        quantity, whose units belong to the domain (a basis-point multiplier
+        on shape-priced listings, an absolute amount on flat paths); the
+        accepted Agreement carries the derived monetary amount, when applicable.
+        ``agreed_duration_seconds`` echoes
         the buyer's negotiation-init ask and is used by settlement-time
         arbiter codecs that bind the seller's delivery window.
         """
@@ -2468,16 +1680,16 @@ class SQLiteClient:
             settlement_data_json = None
 
         def _save() -> None:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             agreed_at_value = accepted_at or now
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
-                agreed_price_text = _amount_to_db_text(agreed_price)
+                negotiated_scalar_text = _amount_to_db_text(negotiated_scalar)
                 cur.execute(
                     """
                     UPDATE negotiation_threads
-                    SET agreed_price = ?,
+                    SET negotiated_scalar = ?,
                         agreed_duration_seconds = ?,
                         requested_start_utc = COALESCE(requested_start_utc, ?),
                         agreed_at = ?,
@@ -2487,7 +1699,7 @@ class SQLiteClient:
                     WHERE negotiation_id = ?
                     """,
                     (
-                        agreed_price_text,
+                        negotiated_scalar_text,
                         int(agreed_duration_seconds),
                         agreed_start_utc,
                         agreed_at_value,
@@ -2561,7 +1773,7 @@ class SQLiteClient:
                     "UPDATE negotiation_threads "
                     "SET settlement_plan = ?, updated_at = ? "
                     "WHERE negotiation_id = ?",
-                    (encoded, datetime.now().isoformat(), negotiation_id),
+                    (encoded, store_timestamp(), negotiation_id),
                 )
                 conn.commit()
             except Exception:
@@ -2598,7 +1810,7 @@ class SQLiteClient:
                            buyer_escrow_proposal,
                            provision_terms,
                            settlement_plan,
-                           agreed_price, agreed_duration_seconds, agreed_at,
+                           negotiated_scalar, agreed_duration_seconds, agreed_at,
                            agreement_bytes, settlement_data, buyer_scheme, buyer_identifier,
                            seller_scheme, seller_identifier, matched_offer_id
                     FROM negotiation_threads WHERE negotiation_id = ?
@@ -2623,7 +1835,7 @@ class SQLiteClient:
                     "buyer_escrow_proposal",
                     "provision_terms",
                     "settlement_plan",
-                    "agreed_price",
+                    "negotiated_scalar",
                     "agreed_duration_seconds",
                     "agreed_at",
                     "agreement_bytes",
@@ -2673,8 +1885,8 @@ class SQLiteClient:
                         result["settlement_data"] = json.loads(raw_settlement_data)
                     except (ValueError, TypeError):
                         pass
-                result["agreed_price"] = _amount_from_db_text(
-                    result.get("agreed_price")
+                result["negotiated_scalar"] = _amount_from_db_text(
+                    result.get("negotiated_scalar")
                 )
                 return result
             finally:
@@ -2709,7 +1921,7 @@ class SQLiteClient:
             if not updates:
                 return
             updates.append("updated_at = ?")
-            values.append(datetime.now().isoformat())
+            values.append(store_timestamp())
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute(
@@ -2919,7 +2131,7 @@ class SQLiteClient:
                             reservation.request_hash,
                             attempt_token,
                             now + lease_seconds,
-                            datetime.now().isoformat(),
+                            store_timestamp(),
                         ),
                     )
                     conn.commit()
@@ -3075,7 +2287,7 @@ class SQLiteClient:
         PRIMARY KEY conflict (idempotent by escrow_uid)."""
 
         def _insert() -> bool:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             conn = sqlite3.connect(self.db_path)
             try:
                 try:
@@ -3125,7 +2337,7 @@ class SQLiteClient:
                         "UPDATE escrows SET fulfillment_phase = "
                         "COALESCE(fulfillment_phase, 'delivery_started'), updated_at = ? "
                         "WHERE escrow_uid = ? AND status = 'provisioning'",
-                        (datetime.now().isoformat(), escrow_uid),
+                        (store_timestamp(), escrow_uid),
                     )
                 return cursor.rowcount == 1
             finally:
@@ -3143,7 +2355,7 @@ class SQLiteClient:
         """
 
         def _record() -> dict[str, Any]:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             conn = sqlite3.connect(self.db_path, isolation_level=None)
             try:
                 conn.execute("BEGIN IMMEDIATE")
@@ -3201,7 +2413,7 @@ class SQLiteClient:
                         conn.execute(
                             "UPDATE escrows SET status = ?, updated_at = ? "
                             "WHERE escrow_uid = ? AND status = 'refunding'",
-                            (prior_status, datetime.now().isoformat(), escrow_uid),
+                            (prior_status, store_timestamp(), escrow_uid),
                         )
             finally:
                 conn.close()
@@ -3260,7 +2472,7 @@ class SQLiteClient:
             if not updates:
                 return
             updates.append("updated_at = ?")
-            values.append(datetime.now().isoformat())
+            values.append(store_timestamp())
 
             conn = sqlite3.connect(self.db_path)
             try:
@@ -3300,7 +2512,7 @@ class SQLiteClient:
                     LEFT JOIN settlement_obligations o
                       ON o.mechanism_ref = e.escrow_uid
                     WHERE o.obligation_ref IS NULL
-                    ORDER BY e.created_at ASC
+                    ORDER BY e.created_at ASC, e.rowid ASC
                     LIMIT ?
                     """,
                     (limit,),
@@ -3326,7 +2538,7 @@ class SQLiteClient:
                     SELECT {", ".join(self._ESCROW_COLS)}
                     FROM escrows
                     WHERE is_primary = 1 AND status NOT IN ('ready', 'failed', 'refunded')
-                    ORDER BY updated_at ASC
+                    ORDER BY updated_at ASC, rowid ASC
                     LIMIT ?
                     """,
                     (limit,),
@@ -3343,7 +2555,7 @@ class SQLiteClient:
         """Atomically claim unfinished escrow convergence until ``lease_until``."""
 
         def _claim() -> bool:
-            now = datetime.now().isoformat()
+            now = store_timestamp()
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.execute(
@@ -3374,7 +2586,7 @@ class SQLiteClient:
                     """UPDATE escrows SET processing_owner = NULL,
                        processing_lease_until = NULL, updated_at = ?
                        WHERE escrow_uid = ? AND processing_owner = ?""",
-                    (datetime.now().isoformat(), escrow_uid, owner),
+                    (store_timestamp(), escrow_uid, owner),
                 )
                 conn.commit()
             finally:
@@ -3420,7 +2632,7 @@ class SQLiteClient:
                     SELECT {", ".join(self._ESCROW_COLS)}
                     FROM escrows
                     WHERE negotiation_id = ? AND is_primary = 1
-                    ORDER BY created_at ASC LIMIT 1
+                    ORDER BY created_at ASC, rowid ASC LIMIT 1
                     """,
                     (negotiation_id,),
                 ).fetchone()
@@ -3453,7 +2665,7 @@ class SQLiteClient:
                     JOIN negotiation_threads nt
                       ON nt.negotiation_id = e.negotiation_id
                     WHERE nt.our_listing_id = ? AND e.is_primary = 1
-                    ORDER BY e.created_at ASC LIMIT 1
+                    ORDER BY e.created_at ASC, e.rowid ASC LIMIT 1
                     """,
                     (listing_id,),
                 ).fetchone()
@@ -3473,6 +2685,7 @@ class SQLiteClient:
         registry_assigned_id: str | None = None,
         last_error: str | None = None,
         published_at: int | None = None,
+        published_payload: dict[str, Any] | str | None = None,
     ) -> None:
         """Record (or refresh) a publish attempt for one (listing, registry)
         pair. The row carries the exact payload sent — the registry may have
@@ -3481,6 +2694,11 @@ class SQLiteClient:
 
         ``payload`` accepts a dict (json.dumps'd) or a pre-serialised string.
         ``published_at`` defaults to the current epoch second.
+
+        ``published_payload`` is given only for a publish the registry
+        accepted, and replaces the row's last successfully published payload.
+        Omitted, that payload is kept as it was, so a failed attempt or a
+        status update never loses what the registry last accepted.
         """
 
         def _upsert() -> None:
@@ -3488,21 +2706,30 @@ class SQLiteClient:
                 payload_str = payload
             else:
                 payload_str = json.dumps(payload)
-            now = published_at if published_at is not None else int(time.time())
+            if published_payload is None or isinstance(published_payload, str):
+                published_str = published_payload
+            else:
+                published_str = json.dumps(published_payload)
+            now = published_at if published_at is not None else injected_time.now()
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute(
                     """
                     INSERT INTO publications
                       (listing_id, registry_url, payload_json, published_at,
-                       registry_assigned_id, status, last_error)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                       registry_assigned_id, status, last_error,
+                       published_payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id, registry_url) DO UPDATE SET
                       payload_json = excluded.payload_json,
                       published_at = excluded.published_at,
                       registry_assigned_id = excluded.registry_assigned_id,
                       status = excluded.status,
-                      last_error = excluded.last_error
+                      last_error = excluded.last_error,
+                      published_payload_json = COALESCE(
+                        excluded.published_payload_json,
+                        publications.published_payload_json
+                      )
                     """,
                     (
                         listing_id,
@@ -3512,6 +2739,7 @@ class SQLiteClient:
                         registry_assigned_id,
                         status,
                         last_error,
+                        published_str,
                     ),
                 )
                 conn.commit()
@@ -3570,6 +2798,43 @@ class SQLiteClient:
                 return [_publication_row_to_dict(r) for r in rows]
             finally:
                 conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_published_payloads(
+        self,
+        *,
+        listing_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Each registry's last successfully published payload for one listing.
+
+        Keyed by registry URL. A registry that has never accepted a publish of
+        the listing, or whose recorded payload is not a JSON object, is absent.
+        """
+
+        def _load() -> dict[str, dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT registry_url, published_payload_json
+                    FROM publications
+                    WHERE listing_id = ? AND published_payload_json IS NOT NULL
+                    ORDER BY registry_url
+                    """,
+                    (listing_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+            published: dict[str, dict[str, Any]] = {}
+            for registry_url, payload_json in rows:
+                try:
+                    payload = json.loads(payload_json)
+                except ValueError:
+                    continue
+                if isinstance(payload, dict):
+                    published[str(registry_url)] = payload
+            return published
 
         return await asyncio.to_thread(_load)
 
@@ -3794,7 +3059,7 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                now = datetime.now().isoformat()
+                now = store_timestamp()
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO negotiation_threads(
@@ -4060,7 +3325,7 @@ class SQLiteClient:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 cur = conn.cursor()
-                timestamp = datetime.now().isoformat()
+                timestamp = store_timestamp()
                 proposal_blob = (
                     json.dumps(buyer_escrow_proposal)
                     if buyer_escrow_proposal is not None
@@ -4353,7 +3618,7 @@ class SQLiteClient:
                             updated_at = ?
                         WHERE negotiation_id = ?
                         """,
-                        (datetime.now().isoformat(), neg_id),
+                        (store_timestamp(), neg_id),
                     )
                     canceled.append(
                         {
@@ -4406,7 +3671,7 @@ class SQLiteClient:
                         ssh_commands,
                         ssh_key_path_host,
                         key_type,
-                        datetime.now().isoformat(),
+                        store_timestamp(),
                     ),
                 )
                 conn.commit()
@@ -4433,7 +3698,7 @@ class SQLiteClient:
                            ssh_commands, ssh_key_path_host, key_type, created_at
                     FROM credentials
                     WHERE listing_id = ? AND granted_to = ?
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, rowid ASC
                     """,
                     (listing_id, granted_to),
                 )
@@ -4490,6 +3755,21 @@ class SQLiteClient:
     # Orders API helpers
     # ------------------------------------------------------------------
 
+    async def open_listing_ids(self) -> frozenset[str]:
+        """The ID of every listing this storefront holds open, paused or not."""
+
+        def _read() -> frozenset[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT listing_id FROM listings WHERE status = 'open'"
+                ).fetchall()
+            finally:
+                conn.close()
+            return frozenset(str(row[0]) for row in rows)
+
+        return await asyncio.to_thread(_read)
+
     async def list_listings(
         self,
         *,
@@ -4528,9 +3808,10 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           available_until_utc
                     FROM listings {where}
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),
@@ -4554,6 +3835,7 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "available_until_utc",
                 ]
                 rows = cur.fetchall()
                 result = []
@@ -4596,7 +3878,7 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     "UPDATE listings SET paused = ?, updated_at = ? WHERE listing_id = ?",
-                    (1 if paused else 0, datetime.now().isoformat(), listing_id),
+                    (1 if paused else 0, store_timestamp(), listing_id),
                 )
                 conn.commit()
             finally:
@@ -4658,11 +3940,11 @@ class SQLiteClient:
                            status, terminal_state,
                            requested_duration_seconds,
                            requested_start_utc,
-                           agreed_price, agreed_duration_seconds,
+                           negotiated_scalar, agreed_duration_seconds,
                            agreed_at, created_at, updated_at
                     FROM negotiation_threads
                     {where}
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),
@@ -4678,9 +3960,9 @@ class SQLiteClient:
                     "terminal_state",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column stays ``agreed_price``; wire field is
-                    # ``agreed_amount`` (absolute amount in base units).
-                    "agreed_amount",
+                    # The wire exposes the domain-negotiated scalar; monetary
+                    # settlement terms are carried by the accepted Agreement.
+                    "negotiated_scalar",
                     "agreed_duration_seconds",
                     "agreed_at",
                     "created_at",
@@ -4698,8 +3980,8 @@ class SQLiteClient:
                         item.pop("seller_identifier"),
                         field="negotiation seller",
                     )
-                    item["agreed_amount"] = _amount_from_db_text(
-                        item.get("agreed_amount"),
+                    item["negotiated_scalar"] = _amount_from_db_text(
+                        item.get("negotiated_scalar"),
                     )
                 return result
             finally:
@@ -4733,7 +4015,7 @@ class SQLiteClient:
                            seller_scheme, seller_identifier,
                            requested_duration_seconds,
                            requested_start_utc,
-                           agreed_price, agreed_duration_seconds, agreed_at,
+                           negotiated_scalar, agreed_duration_seconds, agreed_at,
                            created_at, updated_at
                     FROM negotiation_threads
                     WHERE negotiation_id = ? AND our_listing_id = ?
@@ -4758,10 +4040,9 @@ class SQLiteClient:
                     "seller_identifier",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column is named ``agreed_price`` (kept from before the
-                    # per-hour → absolute refactor); the wire field is
-                    # ``agreed_amount`` since it holds an absolute amount.
-                    "agreed_amount",
+                    # The column and wire field carry the exact negotiated
+                    # scalar, whose units belong to the domain.
+                    "negotiated_scalar",
                     "agreed_duration_seconds",
                     "agreed_at",
                     "created_at",
@@ -4778,8 +4059,8 @@ class SQLiteClient:
                     thread.pop("seller_identifier"),
                     field="negotiation seller",
                 )
-                thread["agreed_amount"] = _amount_from_db_text(
-                    thread.get("agreed_amount"),
+                thread["negotiated_scalar"] = _amount_from_db_text(
+                    thread.get("negotiated_scalar"),
                 )
 
                 # Message log
@@ -4829,7 +4110,7 @@ class SQLiteClient:
                     SELECT ts, stage, event, data
                     FROM stage_events
                     WHERE negotiation_id = ?
-                    ORDER BY ts ASC
+                    ORDER BY ts ASC, id ASC
                     """,
                     (neg_id,),
                 )
@@ -4857,7 +4138,7 @@ class SQLiteClient:
                            escrow_address, is_primary, status
                     FROM escrows
                     WHERE negotiation_id = ?
-                    ORDER BY is_primary DESC, created_at ASC
+                    ORDER BY is_primary DESC, created_at ASC, rowid ASC
                     """,
                     (neg_id,),
                 )

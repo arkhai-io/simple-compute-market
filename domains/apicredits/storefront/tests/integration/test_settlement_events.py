@@ -17,6 +17,7 @@ from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.settlement_composition import (
     build_api_credit_settlement_composition,
 )
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
 # Deterministic development keys; never use them on a public network.
@@ -27,6 +28,7 @@ _BUYER = Ed25519Signer(b"\x23" * 32)
 async def test_a_failing_servicing_step_is_recorded_as_a_claims_event(
     tmp_path, caplog
 ) -> None:
+    migrate_storefront_database(tmp_path / "events.db")
     composition = build_api_credit_settlement_composition(
         domain=get_market_domain_contract(),
         sqlite_client=SQLiteClient(str(tmp_path / "events.db")),

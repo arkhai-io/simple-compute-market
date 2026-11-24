@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Sequence
 
 import pytest
+import yaml
 
 import change_namespace
 
@@ -55,11 +56,11 @@ def _tags(commands: str) -> list[str]:
 # --- IMAGE_SUFFIX ---------------------------------------------------------------
 
 ROOT_IMAGE_TARGETS = {
-    "build-bare-metal-storefront": ["arkhai:bare-metal-storefront"],
     "build-apicredits-service": ["arkhai:apicredits-service"],
     "build-apicredits-storefront": ["arkhai:apicredits-storefront"],
     "build-apicredits-sample-app": ["arkhai:apicredits-sample-app"],
-    "build-payments-lane-double": ["arkhai:payments-lane-double"],
+    # The lane doubles, built through tools/Makefile.
+    "build-tools": ["arkhai:payments-lane-double", "arkhai:mediation-lane-double"],
 }
 # Each subproject's image target, and the root target that delegates to it.
 SUBPROJECT_IMAGE_TARGETS = {
@@ -95,18 +96,20 @@ def test_a_subproject_image_target_appends_the_suffix_to_every_tag(project: str)
 
 def _commit() -> str:
     """The suffix of a bare build's commit tag, as the Makefiles derive it."""
-    return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
+    return subprocess.run(["git", "rev-parse", "--short=9", "HEAD"], cwd=REPO_ROOT,
                           capture_output=True, text=True, check=True).stdout.strip()
 
 
-def test_the_frps_plugins_image_is_tagged_with_its_commit_unless_suffixed() -> None:
-    # The root builds this image itself, from the plugin's own directory, and
-    # `make push-images` pushes it from its commit tag.
-    image = "arkhai:frp-grant-admission"
-
-    assert _tags(_make_n("build-frp-grant-admission")) == [image, f"{image}-{_commit()}"]
-    assert _tags(_make_n("build-frp-grant-admission", f"IMAGE_SUFFIX={SUFFIX}")) == [
-        image + SUFFIX]
+@pytest.mark.parametrize("target, image", [
+    ("build-frp-grant-admission", "arkhai:frp-grant-admission"),
+    ("build-bare-metal-storefront", "arkhai:bare-metal-storefront"),
+])
+def test_a_release_image_the_root_builds_is_tagged_with_its_commit_unless_suffixed(
+        target: str, image: str) -> None:
+    # The root builds these release images itself, and `make push-images` pushes
+    # each from its commit tag.
+    assert _tags(_make_n(target)) == [image, f"{image}-{_commit()}"]
+    assert _tags(_make_n(target, f"IMAGE_SUFFIX={SUFFIX}")) == [image + SUFFIX]
 
 
 @pytest.mark.parametrize("project", sorted(SUBPROJECT_IMAGE_TARGETS))
@@ -428,12 +431,16 @@ def test_resume_of_a_namespace_stating_no_workloads_fails(tmp_path: Path,
     assert not (tmp_path / "kubectl.log").exists()
 
 
-def _fake_docker(bin_dir: Path, present: Sequence[str], *, refuse: str = "") -> Path:
+def _fake_docker(bin_dir: Path, present: Sequence[str], *, refuse: str = "",
+                 containers: Sequence[str] = ()) -> Path:
     log = bin_dir / "docker.log"
     _executable(bin_dir, "docker", f"""echo "$*" >> {log}
 case "$1 $2" in
   "image inspect") case " {' '.join(present)} " in *" $3 "*) exit 0;; esac; exit 1;;
   "image rm") [ "$3" = "{refuse}" ] && {{ echo "image is in use" >&2; exit 1; }}; exit 0;;
+  "ps -aq") [ "$4" = "label=io.kubernetes.pod.namespace={NAMESPACE}" ] && \
+    printf '%s\\n' {' '.join(containers)}; exit 0;;
+  "rm -f") exit 0;;
 esac
 exit 1
 """)
@@ -458,6 +465,21 @@ def test_teardown_deletes_the_changes_namespace_and_the_images_it_built(
     assert [call for call in calls if call.startswith("image rm")] == [
         "image rm arkhai:e2e-tests-pilot", "image rm arkhai:storefront-pilot"]
     assert "arkhai:registry-pilot is not here" in torn_down.stdout
+
+
+def test_teardown_removes_the_namespaces_exited_containers_before_its_images(
+        tmp_path: Path) -> None:
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log")
+    docker_log = _fake_docker(tmp_path, ["arkhai:e2e-tests-pilot"],
+                              containers=["2883e4628c2f", "5f750490339e"])
+
+    torn_down = _make("teardown", "CHANGE=pilot", path=tmp_path)
+
+    assert torn_down.returncode == 0, torn_down.stderr
+    calls = docker_log.read_text().splitlines()
+    removed = [call for call in calls if call.startswith(("rm -f", "image rm"))]
+    assert removed == ["rm -f 2883e4628c2f", "rm -f 5f750490339e",
+                       "image rm arkhai:e2e-tests-pilot"]
 
 
 def test_teardown_deletes_only_in_the_context_it_is_given(tmp_path: Path) -> None:
@@ -553,8 +575,10 @@ def test_topology_secrets_writes_the_payments_key_into_each_storefronts_overlay(
 
 def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Path) -> None:
     """Bob's runtime overlay states the Compose overlay's dispute credential,
-    bound to the pinned dispute authority release 1's registry recommends; the
-    bare-metal storefront, whose lane carries none, gets none."""
+    bound to the mediation double release 1's registry recommends, its
+    ca_bundle_path the file the storefront chart mounts his CA bundle as rather
+    than the Compose lane's mount; the bare-metal storefront, whose lane carries
+    none, gets none."""
     stored = tmp_path / "secrets"
     _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
     # Development values only: cast answers every derivation with Anvil account 0's
@@ -569,10 +593,16 @@ def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Pat
     assert created.returncode == 0, created.stderr
     with (REPO_ROOT / "dev-env/identities/bob.storefront.secrets.toml").open("rb") as handle:
         compose = tomllib.load(handle)["DisputeCredential"]
-    with (REPO_ROOT / "tools/payments-lane-double/fixtures/dispute-authority.toml").open("rb") as handle:
+    with (REPO_ROOT / "tools/mediation-lane-double/fixtures/authority.toml").open("rb") as handle:
         authority = tomllib.load(handle)
     bob = tomllib.loads((stored / "arkhai-bob-runtime" / "storefront.secrets.toml").read_text())
-    assert bob["DisputeCredential"] == compose
+    chart_ca_file = re.search(
+        r'define "storefront\.caBundleFile" -}}(\S+?){{',
+        (HELM / "charts/storefront/templates/_helpers.tpl").read_text(),
+    ).group(1)
+    (compose_credential,) = compose
+    assert compose_credential["ca_bundle_path"] != chart_ca_file
+    assert bob["DisputeCredential"] == [compose_credential | {"ca_bundle_path": chart_ca_file}]
     (credential,) = bob["DisputeCredential"]
     assert credential["api_key"]
     assert {key: credential[key] for key in ("interface", "origin", "account", "record_key")} == {
@@ -582,3 +612,72 @@ def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Pat
         (stored / "arkhai-bare-metal-storefront-runtime" / "storefront.secrets.toml").read_text()
     )
     assert "DisputeCredential" not in bare_metal
+
+
+def _dotted(document: dict, path: str) -> object:
+    value: object = document
+    for part in path.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
+
+
+def test_topology_secrets_holds_every_credential_the_helm_lane_time_parties_name(
+        tmp_path: Path) -> None:
+    """The local release's lane_time parties, passed through the e2e-tests
+    chart's config, name their credentials by e2e-secret key; topology-secrets
+    writes every key they name, and the registry's administrator key it writes
+    there is the one the registry's secret profile gives it."""
+    stored = tmp_path / "secrets"
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
+    # Development values only: cast answers every derivation with Anvil account 0's
+    # published key and address, never for a public network.
+    _executable(tmp_path, "cast", 'case "$2" in\n'
+                "  private-key) echo 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;;\n"
+                "  address) echo 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;;\n"
+                "esac\n")
+
+    created = _make("topology-secrets", "CHANGE=pilot", path=tmp_path)
+
+    assert created.returncode == 0, created.stderr
+    local = yaml.safe_load((HELM / "local-values.yaml").read_text())
+    lane_time = local["e2e-tests"]["config"]["lane_time"]
+    secret = yaml.safe_load((stored / "arkhai-e2e-credentials" / "config-e2e-secret.yml").read_text())
+    # The URLs and pins are named in the shared helm profile, which a render
+    # test holds; the credentials are named here.
+    named = {path for party in lane_time["parties"].values()
+             for key, path in party.items()
+             if key.endswith(("_credential_setting", "_key_setting"))}
+    assert lane_time["mode"] == "wall"
+    assert named == {"seller.admin_credential", "provisioning.admin_credential",
+                     "buyer.marketplace_credential", "registry.admin_key"}
+    assert all(_dotted(secret, path) for path in named), named
+    profile = local["registry"]["secretProfile"]
+    admin_env = (stored / profile["secretName"] / f"config-{profile['profile']}.env").read_text()
+    assert admin_env == f"REGISTRY_ADMIN_API_KEY={secret['registry']['admin_key']}\n"
+
+
+def test_topology_secrets_leaves_a_credential_stating_no_ca_bundle_without_one(
+        tmp_path: Path) -> None:
+    """Only a ca_bundle_path the Compose overlay states is rewritten: an entry
+    trusting the default store keeps doing so."""
+    stored = tmp_path / "secrets"
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
+    # Development values only: cast answers every derivation with Anvil account 0's
+    # published key and address, never for a public network.
+    _executable(tmp_path, "cast", 'case "$2" in\n'
+                "  private-key) echo 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;;\n"
+                "  address) echo 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;;\n"
+                "esac\n")
+    with (REPO_ROOT / "dev-env/identities/bob.storefront.secrets.toml").open("rb") as handle:
+        (credential,) = tomllib.load(handle)["DisputeCredential"]
+    without_bundle = {key: value for key, value in credential.items() if key != "ca_bundle_path"}
+    overlay = tmp_path / "bob.storefront.secrets.toml"
+    overlay.write_text("[[DisputeCredential]]\n" + "".join(
+        f'{key} = "{value}"\n' for key, value in without_bundle.items()))
+
+    created = _make("topology-secrets", "CHANGE=pilot", f"BOB_COMPOSE_SECRETS_FILE={overlay}",
+                    path=tmp_path)
+
+    assert created.returncode == 0, created.stderr
+    bob = tomllib.loads((stored / "arkhai-bob-runtime" / "storefront.secrets.toml").read_text())
+    assert bob["DisputeCredential"] == [without_bundle]

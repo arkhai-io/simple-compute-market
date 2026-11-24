@@ -4,7 +4,7 @@ This directory describes the implemented system by capability.
 
 - `spec.md` is the normative, machine-validated contract: observable behavior, invariants, ownership, and acceptance scenarios.
 - `architecture.md` is optional durable explanatory context: conceptual models, design motivation, trade-offs, relationships, and current limits.
-- A capability organized by an index keeps that context in its `README.md` instead, its human-readable description with its diagrams, and has no `architecture.md`; its `index.md` lists its requirements by id under the parts and groups of its table of contents, with the ids it retired ([the pattern](../README.md#a-capability-organized-by-an-index)).
+- A capability organized by an index keeps that context in its `README.md` instead, its human-readable description with its diagrams, and has no `architecture.md`; its `index.md` lists its requirements by id under the parts and groups of its table of contents, with the ids it retired ([the pattern](../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index)).
 - [`docs/development/ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md) is the repository-wide map connecting the capabilities.
 - [`openspec/changes/`](../changes/) contains proposed transitions and temporary implementation plans.
 
@@ -18,12 +18,14 @@ An architecture companion does not replace a normative requirement. When explana
 | Buyer orchestration | [Spec](buyer-orchestration/spec.md) | [Architecture](buyer-orchestration/architecture.md) |
 | Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md), [index](change-workflow/index.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
+| Compute delivery | [Spec](compute-delivery/spec.md) | [Architecture](compute-delivery/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
 | Contact-exchange settlement | [Spec](contact-exchange-settlement/spec.md) | — |
 | Deal lifecycle | [Spec](deal-lifecycle/spec.md) | [Architecture](deal-lifecycle/architecture.md) |
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
 | frp grant admission | [Spec](frp-grant-admission/spec.md) | [Architecture](frp-grant-admission/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
+| Injected time | [Spec](injected-time/spec.md) | [Architecture](injected-time/architecture.md) |
 | Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |
 | Market change workflow | [Spec](market-change-workflow/spec.md) | [README](market-change-workflow/README.md), [index](market-change-workflow/index.md) |
 | Market composition | [Spec](market-composition/spec.md) | [Architecture](market-composition/architecture.md) |
@@ -48,10 +50,13 @@ An architecture companion does not replace a normative requirement. When explana
 |---|---|
 | Peer mechanism registration, typed configuration, readiness, and account/credential separation | [Settlement configuration](settlement-configuration/spec.md) and [architecture](settlement-configuration/architecture.md) |
 | Exact Agreement bytes and shared opaque `settlement_data` persistence | [Negotiation protocol](negotiation-protocol/spec.md) |
-| Post-commitment counterparts, lifecycle terms, end/admission journals, evidence, cases and current limits | [Deal lifecycle architecture](deal-lifecycle/architecture.md) |
-| Mandate derivation, transaction identity, signed receipts/snapshots, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
+| Post-commitment counterparts, lifecycle terms, end/admission journals, seller notice, the rate buyer end, evidence, cases and current limits | [Deal lifecycle architecture](deal-lifecycle/architecture.md) |
+| Mandate derivation, rate and setup parts, the composed payments transaction adapter, transaction identity, signed receipts/snapshots, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
+| Recurring payments presets and the servicing declaration's doors | [Storefront publication](storefront-publication/spec.md) and [architecture](storefront-publication/architecture.md) |
+| The buyer's watchdog | [Buyer orchestration architecture](buyer-orchestration/architecture.md#the-buyers-watchdog) |
 | Negotiate → settle → provision composition and external payments authority | [Market composition](market-composition/spec.md) and [repository architecture](../../docs/development/ARCHITECTURE.md) |
 | Receipt-gated selected-site execution and idempotent credit issuance | [Physical provisioning](physical-provisioning/spec.md) and [API credits](api-credits/spec.md) |
+| Compute delivery order after verified settlement: Agreement window, authorization, activation before billing start, the undelivered hand-off and live credential reads | [Compute delivery](compute-delivery/spec.md) and [architecture](compute-delivery/architecture.md) |
 | Package/deployment ownership and scoped validation evidence | [Deployment](deployment-state/spec.md) and [testing](test-compatibility/spec.md) |
 
 ## Reading order

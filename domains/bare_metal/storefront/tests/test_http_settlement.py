@@ -26,7 +26,12 @@ from storefront_client import StorefrontClient, StorefrontClientError
 from storefront_client.models import SettleResponse, SettleStatusResponse
 from market_core.schemas import Agreement, EscrowProposal, SettlementPlan
 from market_core import VersionedEnvelope
-from arkhai_bare_metal_storefront.settlement_stages import legacy_alkahest_option
+from compute_provisioning_contracts import (
+    FulfillmentAcceptanceResponse,
+    FulfillmentScheduleResponse,
+    FulfillmentStatusResponse,
+)
+from arkhai_bare_metal_storefront.settlement_stages import SettlementRequestError, legacy_alkahest_option
 from datetime import datetime, timezone
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
@@ -40,6 +45,7 @@ from market_identity import (
 
 from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -200,9 +206,11 @@ def _alkahest(escrow: EscrowOnChain | None = None):
 
 
 async def _accepted_runtime(
-    path: str, verifier, *, commit_plan: bool = True
+    path: str, verifier, *, commit_plan: bool = True, start: datetime | None = None
 ) -> tuple[BareMetalStorefrontRuntime, str]:
+    """An accepted Alkahest deal for one hour from ``start``, by default now."""
     domain = get_market_domain_contract()
+    migrate_storefront_database(path)
     db = SQLiteClient(path, domain=domain)
     runtime = BareMetalStorefrontRuntime(
         db=db,
@@ -270,7 +278,7 @@ async def _accepted_runtime(
         amount=100,
         asset=settlement.price_asset,
         duration_seconds=3600,
-        start_utc=now,
+        start_utc=start.isoformat() if start is not None else now,
         provision_terms=message.model_dump(mode="json", exclude_none=True),
         accepted_at=now,
     )
@@ -554,11 +562,24 @@ class _CapacityClient:
         self.reservation_sites = {}
         self.reserve_calls = []
         self.commit_calls = []
+        self.activations = []
         self.committed_window: tuple[str, str] | None = None
+        self.activated_at: str | None = None
 
     def site(self, site_id):
         assert site_id == "site-a"
         return self.site_client
+
+    async def activate_lease(self, **request):
+        """Write-once, as the site's: the first activation's instant is kept."""
+        self.activations.append(request)
+        if self.activated_at is None:
+            self.activated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "activated_at_utc": self.activated_at,
+            "site": request["site_id"],
+        }
 
     async def reserve(self, **request):
         self.reserve_calls.append(request)
@@ -584,17 +605,26 @@ class _CapacityClient:
 
 
 class _ProvisioningClient:
+    # The fulfillment's state before any teardown; a test or subclass changes
+    # it to have the site report a delivery not yet made.
+    state = "active"
+
     def __init__(
         self,
         *,
         torn_down: bool = False,
+        tears_down_on_termination: bool = True,
         scheduled_host_id: str | None = "machine-1",
         scheduled_physical_host_id: str = "host-1",
     ) -> None:
+        """``tears_down_on_termination`` false leaves the fulfillment as the
+        site last reported it once the lease is terminated, as a site that
+        has not yet begun the teardown reports it."""
         self.begin_calls = []
         self.teardown_calls = []
         self.terminations = []
         self.torn_down = torn_down
+        self.tears_down_on_termination = tears_down_on_termination
         self.scheduled_host_id = scheduled_host_id
         self.scheduled_physical_host_id = scheduled_physical_host_id
         # The account the site's delivery names; a test changes it to have the
@@ -605,7 +635,7 @@ class _ProvisioningClient:
         """The resource as a major-3 schedule response names it: the host its
         declaration names, and its machine among its top-level attributes,
         with no copy of either in its publication settings."""
-        return SimpleNamespace(
+        return FulfillmentScheduleResponse(
             settlement_resource_id="settlement-resource-a",
             pool_id="pool-a",
             resource_kind="compute.bare-metal",
@@ -616,7 +646,7 @@ class _ProvisioningClient:
 
     async def begin_fulfillment(self, body):
         self.begin_calls.append(body)
-        return SimpleNamespace(
+        return FulfillmentAcceptanceResponse(
             fulfillment_id="fulfillment-a",
             capacity_reservation_id="reservation-a",
             state="dispatch_pending",
@@ -624,10 +654,10 @@ class _ProvisioningClient:
 
     async def get_fulfillment_status(self, fulfillment_id, **request):
         assert fulfillment_id == "fulfillment-a"
-        return SimpleNamespace(
-            state="torn_down" if self.torn_down else "active",
-            failure_reason=None,
-            failure_message=None,
+        return FulfillmentStatusResponse(
+            fulfillment_id=fulfillment_id,
+            capacity_reservation_id="reservation-a",
+            state="torn_down" if self.torn_down else self.state,
         )
 
     async def get_fulfillment_result(self, fulfillment_id, **request):
@@ -659,9 +689,12 @@ class _ProvisioningClient:
         )
 
     async def terminate_lease(self, capacity_reservation_id, *, reason=None):
-        """The site ends the lease, then converges teardown through its fulfillment."""
+        """The site ends the lease, then converges teardown through its
+        fulfillment: torn down at once, unless ``tears_down_on_termination`` is
+        false, when the fulfillment reads as it did until the teardown begins."""
         self.terminations.append((capacity_reservation_id, reason))
-        self.torn_down = True
+        if self.tears_down_on_termination:
+            self.torn_down = True
         return SimpleNamespace(capacity_reservation_id=capacity_reservation_id, status="releasing")
 
     async def begin_fulfillment_teardown(self, fulfillment_id, **request):
@@ -737,7 +770,7 @@ async def test_alkahest_recovery_refuses_non_active_journal_before_physical_effe
     )
     restarted = replace(runtime, db=SQLiteClient(path, domain=runtime.domain))
     with pytest.raises(BareMetalFulfillmentError, match="no longer active"):
-        await restarted.fulfillment_service().begin(
+        await restarted.fulfillment_service().deliver(
             negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
         )
     assert await restarted.db.load_bare_metal_fulfillment_lifecycle(
@@ -779,7 +812,7 @@ async def test_alkahest_recovery_rechecks_chain_before_physical_effects(
     restarted = replace(runtime, db=SQLiteClient(path, domain=runtime.domain))
     source_valid = False
     with pytest.raises(BareMetalFulfillmentError, match="stored escrow source"):
-        await restarted.fulfillment_service().begin(
+        await restarted.fulfillment_service().deliver(
             negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
         )
     assert await restarted.db.load_bare_metal_fulfillment_lifecycle(
@@ -789,14 +822,16 @@ async def test_alkahest_recovery_rechecks_chain_before_physical_effects(
     assert provisioning.begin_calls == []
 
     source_valid = True
-    first = await restarted.fulfillment_service().begin(
+    first = await restarted.fulfillment_service().deliver(
         negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
     )
-    repeated = await restarted.fulfillment_service().begin(
+    repeated = await restarted.fulfillment_service().deliver(
         negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
     )
     assert repeated == first
     assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+    # Verification and every drive, the refused one included, recheck the
+    # chain before any protected step.
     assert len(calls) == 4
     assert all(call["escrow_uid"] == ESCROW_UID for call in calls)
     thread = await restarted.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
@@ -911,12 +946,10 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         assert forbidden not in serialized_result
 
 
-async def test_a_delivery_other_than_the_recorded_result_is_a_conflict(
-    tmp_path,
-) -> None:
-    """The site reports a different delivery: the buyer's status, result, and
-    access reads answer 409 ``delivery_conflict``, and the recorded result
-    stands."""
+async def _accepted_deal(
+    tmp_path, provisioning: _ProvisioningClient
+) -> tuple[BareMetalStorefrontRuntime, str]:
+    """An accepted deal over ``provisioning``, its runtime and negotiation."""
 
     async def verifier(**_kwargs):
         return 1
@@ -924,36 +957,130 @@ async def test_a_delivery_other_than_the_recorded_result_is_a_conflict(
     runtime, negotiation_id = await _accepted_runtime(
         str(tmp_path / "storefront.db"), verifier
     )
-    provisioning = _ProvisioningClient()
     runtime = replace(
         runtime, capacity_client=_CapacityClient(), fulfillment_client=provisioning
     )
+    return runtime, negotiation_id
+
+
+async def _settle(base_url: str, negotiation_id: str) -> None:
+    """The buyer settles the deal, which starts its fulfillment."""
+    async with StorefrontClient(
+        base_url,
+        signer=BUYER_SIGNER,
+        caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+    ) as storefront:
+        await storefront.settle_evm(
+            ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+        )
+
+
+@pytest.mark.parametrize(
+    "teardown_begun",
+    [False, True],
+    ids=["site-still-reports-the-delivery", "site-tore-it-down"],
+)
+async def test_a_delivery_other_than_the_recorded_result_is_a_conflict(
+    tmp_path, teardown_begun
+) -> None:
+    """The site reports a different delivery: the buyer's status, result, and
+    access reads answer 409 ``delivery_conflict``, and the recorded result
+    stands. The buyer's end of the deal is not refused for the conflict: the
+    production buyer's teardown, the lifecycle ``end``, terminates the lease.
+    Afterwards the reads report the ending, as for any ended lease: status
+    reports the lease ending, the result read answers the recorded result,
+    and access is refused outside an active lease, none with
+    ``delivery_conflict`` — whether the site still reports the other delivery,
+    not having begun the teardown, or has torn it down. Spec scenario "A buyer
+    ends a deal while the site reports a different delivery"."""
+
+    provisioning = _ProvisioningClient(tears_down_on_termination=teardown_begun)
+    runtime, negotiation_id = await _accepted_deal(tmp_path, provisioning)
     with serving(_app(runtime)) as base_url:
-        async with StorefrontClient(
-            base_url,
-            signer=BUYER_SIGNER,
-            caller_role="buyer",
-            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
-        ) as storefront:
-            await storefront.settle_evm(
-                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
-            )
+        await _settle(base_url, negotiation_id)
         buyer = _fulfillment_client(base_url)
-        recorded = buyer.result(negotiation_id)["result"]
+        recorded = buyer.result(negotiation_id)
         provisioning.delivered_user = "tenant-b"
+
         refusals = []
         for read in (buyer.status, buyer.result, buyer.access):
             with pytest.raises(AuthenticatedHTTPError) as refused:
                 read(negotiation_id)
             refusals.append(refused.value)
+        ended = buyer.teardown(negotiation_id)
+        status_after_end = buyer.status(negotiation_id)
+        result_after_end = buyer.result(negotiation_id)
+        with pytest.raises(AuthenticatedHTTPError) as access_after_end:
+            buyer.access(negotiation_id)
 
-    assert recorded["ssh_user"] == "tenant-a"
+    assert recorded["result"]["ssh_user"] == "tenant-a"
     assert [refusal.status_code for refusal in refusals] == [409, 409, 409]
     assert [refusal.body["detail"]["error"] for refusal in refusals] == [
         "delivery_conflict"
     ] * 3
+    assert ended["delivery"]["progress"] == "tearing_down"
+    assert provisioning.terminations == [
+        ("reservation-a", stable_ref(negotiation_id, "terminate", "terminate"))
+    ]
+    assert status_after_end["state"] == ("torn_down" if teardown_begun else "terminating")
+    assert result_after_end == recorded
+    assert access_after_end.value.status_code == 409
+    assert access_after_end.value.body["detail"] == (
+        "bare-metal access is unavailable outside an active lease"
+    )
     stands = await runtime.db.load_bare_metal_result(negotiation_id=negotiation_id)
-    assert stands.model_dump(mode="json") == recorded
+    assert stands.model_dump(mode="json") == recorded["result"]
+
+
+async def test_a_result_is_read_as_recorded_while_its_lease_ends(tmp_path) -> None:
+    """A delivered deal, no conflict, whose lease the buyer ends while the
+    site has not yet begun the teardown: the lease reads ``terminating``, and
+    the result read answers the recorded result and receipt. Spec scenario "A
+    buyer reads the result of a deal whose lease is ending"."""
+
+    provisioning = _ProvisioningClient(tears_down_on_termination=False)
+    runtime, negotiation_id = await _accepted_deal(tmp_path, provisioning)
+    with serving(_app(runtime)) as base_url:
+        await _settle(base_url, negotiation_id)
+        buyer = _fulfillment_client(base_url)
+        recorded = buyer.result(negotiation_id)
+        buyer.teardown(negotiation_id)
+        ending = buyer.status(negotiation_id)
+        result_while_ending = buyer.result(negotiation_id)
+
+    assert recorded["receipt"]["status"] == "ready"
+    assert ending["state"] == "terminating"
+    assert result_while_ending == recorded
+
+
+async def test_a_lease_ended_before_delivery_has_no_result(tmp_path) -> None:
+    """The site has not made the delivery when the buyer ends the deal: its
+    fulfillment begun, the lease is terminated and reads ``terminating``,
+    and with no receipt or result recorded the result read answers that it
+    is not ready. Spec scenario "A lease ends before delivery"."""
+
+    provisioning = _ProvisioningClient(tears_down_on_termination=False)
+    provisioning.state = "dispatch_pending"
+    runtime, negotiation_id = await _accepted_deal(tmp_path, provisioning)
+    with serving(_app(runtime)) as base_url:
+        await _settle(base_url, negotiation_id)
+        buyer = _fulfillment_client(base_url)
+        ended = buyer.teardown(negotiation_id)
+        ending = buyer.status(negotiation_id)
+        with pytest.raises(AuthenticatedHTTPError) as refused:
+            buyer.result(negotiation_id)
+
+    assert len(provisioning.begin_calls) == 1
+    assert ended["delivery"]["progress"] == "tearing_down"
+    assert provisioning.terminations == [
+        ("reservation-a", stable_ref(negotiation_id, "terminate", "terminate"))
+    ]
+    assert ending["state"] == "terminating"
+    assert refused.value.status_code == 409
+    assert refused.value.body["detail"] == "bare-metal fulfillment result is not ready"
+    assert await runtime.db.load_bare_metal_result(negotiation_id=negotiation_id) is None
+    assert await runtime.db.load_bare_metal_receipt(negotiation_id=negotiation_id) is None
 
 
 @pytest.mark.parametrize(
@@ -1018,6 +1145,7 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
         return 0
 
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
     runtime = BareMetalStorefrontRuntime(
         db=db,
@@ -1124,6 +1252,23 @@ PAYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
 
 
+def _payment_composition(payments, service_identity):
+    """The storefront's payments composition trusting ``service_identity`` alone."""
+    return BareMetalStorefrontSettlementComposition.from_raw_config(
+        {
+            "priority": ["arkhai.payments.v1"],
+            "arkhai_payments": {
+                "enabled": True,
+                "service_url": "http://127.0.0.1:3180",
+                "development_auth": True,
+                "service_identity": service_identity.model_dump(mode="json"),
+                "fee_bps": 0,
+            },
+        },
+        payments_client_for_owner=payments,
+    )
+
+
 async def _payment_deal(tmp_path, *, provisioning=None) -> SimpleNamespace:
     """An accepted ``arkhai.payments.v1`` deal whose payment is not yet
     approved: its storefront runtime, the parties' signers, the payments fake,
@@ -1134,20 +1279,9 @@ async def _payment_deal(tmp_path, *, provisioning=None) -> SimpleNamespace:
     receipt_signer = Ed25519Signer(bytes.fromhex("55" * 32))
     payments = FakePaymentsClient(signer=receipt_signer)
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "payment.db")
     db = SQLiteClient(str(tmp_path / "payment.db"), domain=domain)
-    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
-        {
-            "priority": ["arkhai.payments.v1"],
-            "arkhai_payments": {
-                "enabled": True,
-                "service_url": "http://127.0.0.1:3180",
-                "development_auth": True,
-                "service_identity": receipt_signer.identity.model_dump(mode="json"),
-                "fee_bps": 0,
-            },
-        },
-        payments_client_for_owner=payments,
-    )
+    composition = _payment_composition(payments, receipt_signer.identity)
     params = {"payee_account": PAYEE, "window": "PT1H", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
     option = SettlementOption(
@@ -1268,7 +1402,7 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
     )
     assert (pending.status_code, pending.payload["status"]) == (202, "pending")
     with pytest.raises(BareMetalFulfillmentError, match="not authoritatively verified"):
-        await delivery.begin(
+        await delivery.deliver(
             negotiation_id=negotiation_id, buyer_principal=buyer.identity
         )
     assert capacity.reserve_calls == [] and provisioning.begin_calls == []
@@ -1279,11 +1413,17 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
     )
     assert verified.status_code == 200
     assert verified.payload["settlement_ref"] == data.transaction_id
-    # Settlement started delivery itself; a later begin is the same delivery.
-    first = await delivery.begin(
+    # Settlement drove delivery itself; a later drive is the same delivery.
+    first = await delivery.deliver(
         negotiation_id=negotiation_id, buyer_principal=buyer.identity
     )
     assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+    # Activated before billing start and availability; the payment deal has no
+    # step after availability but recording its result, so it converges.
+    assert len(capacity.activations) == 1
+    assert first.public_result == {
+        "outcome": "converged", "disposition": "fulfilled", "available": True,
+    }
 
     original = await runtime.settlement_service().verified_evidence(
         negotiation_id=negotiation_id, buyer_principal=buyer.identity
@@ -1304,7 +1444,7 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
         )
 
     restarted = replace(runtime, db=SQLiteClient(db.db_path, domain=domain))
-    repeated = await restarted.fulfillment_service().begin(
+    repeated = await restarted.fulfillment_service().deliver(
         negotiation_id=negotiation_id, buyer_principal=buyer.identity
     )
     ready = await restarted.fulfillment_service().status(
@@ -1331,6 +1471,52 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
     ):
         await restarted.fulfillment_service().status(
             negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+
+async def test_a_receipt_identity_cutover_refuses_a_deal_the_removed_identity_approved(
+    tmp_path,
+):
+    """A receipt key change is a cutover: a storefront restarted trusting only
+    the new identity re-proves no deal the old one approved, so its stored
+    receipt is refused and nothing is reserved or provisioned again."""
+    deal = await _payment_deal(tmp_path)
+    runtime, db, domain = deal.runtime, deal.db, deal.domain
+    negotiation_id, buyer, data = deal.negotiation_id, deal.buyer, deal.data
+    capacity, provisioning = deal.capacity, deal.provisioning
+    request = BareMetalSettleRequest(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    deal.payments.serve(build_signed_receipt(signer=deal.receipt_signer, mandate=data.mandate))
+    verified = await runtime.settlement_service().verify(
+        escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
+    )
+    assert verified.status_code == 200
+    delivered = await runtime.fulfillment_service().status(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    assert delivered["state"] == "active"
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+    # A public deterministic development key; never use it on a public network.
+    new_identity = Ed25519Signer(bytes.fromhex("56" * 32)).identity
+    switched = replace(
+        runtime,
+        db=SQLiteClient(db.db_path, domain=domain),
+        settlement_composition=_payment_composition(deal.payments, new_identity),
+    )
+    with pytest.raises(
+        BareMetalFulfillmentError, match="stored payment receipt is invalid"
+    ):
+        await switched.fulfillment_service().status(
+            negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    with pytest.raises(
+        SettlementRequestError, match="stored payment receipt does not prove this Agreement"
+    ):
+        await switched.settlement_service().verify(
+            escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
         )
     assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
 

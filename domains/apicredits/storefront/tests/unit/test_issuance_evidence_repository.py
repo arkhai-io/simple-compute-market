@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-
 import pytest
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
@@ -12,7 +10,7 @@ from apicredits_storefront.services.issuance_evidence import (
     IssuanceEvidenceRepository,
     PrivateResultAccessError,
 )
-from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from arkhai_apicredits.settlement.issuance_evidence import (
     ApiCreditsIssuanceEvidenceBodyV1,
 )
@@ -21,8 +19,7 @@ from arkhai_apicredits.settlement.issuance_evidence import (
 @pytest.fixture
 def repositories(tmp_path):
     db_path = tmp_path / "storefront.db"
-    with sqlite3.connect(db_path) as connection:
-        _migrate_issuance_evidence(connection)
+    migrate_storefront_database(db_path)
     return (
         IssuanceEvidenceRepository(db_path),
         ApiCreditPrivateResultRepository(db_path),

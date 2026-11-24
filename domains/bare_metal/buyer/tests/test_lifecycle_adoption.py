@@ -64,3 +64,22 @@ def test_a_credential_that_does_not_resolve_is_a_transport_error_at_io(monkeypat
     with pytest.raises(MediationTransportError, match="unavailable"):
         asyncio.run(port.case("case-ref", agreement="a", transaction="t"))
     assert port.client is None
+
+
+def test_the_credentials_ca_bundle_reaches_the_client_and_failing_to_load_is_a_transport_error(
+    tmp_path,
+):
+    # The client loads its bundle when built, so a credential naming one that
+    # does not exist fails construction, before any request: the bundle reached
+    # the client, and the port answers as it does for a missing credential.
+    authority = DisputeAuthority.model_validate(MediationContractFake().authority)
+    missing = tmp_path / "absent" / "lane-ca.pem"
+    credential = DisputeCredential.model_validate(
+        dict(zip(("interface", "origin", "account", "record_key"), authority.identity))
+        | {"api_key": "fixture-payer", "ca_bundle_path": str(missing)}
+    )
+    port = _MediationPort(authority, credential)
+    with pytest.raises(MediationTransportError, match="CA bundle") as refused:
+        asyncio.run(port.case("case-ref", agreement="a", transaction="t"))
+    assert isinstance(refused.value.__cause__, FileNotFoundError)
+    assert port.client is None

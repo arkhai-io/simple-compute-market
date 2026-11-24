@@ -2,9 +2,9 @@
 
 The lane's registration of its host, the jobs it finds and waits for, the VM
 list it reads the guest's absence from, its checks of the service's execution,
-the delivered access, and the settlement preview; the resource's one listing,
-created offering every ready mechanism or adopted by a module of either
-mechanism, and the re-reservation's claim; and the lease view's reading of a
+the delivered access, and the settlement preview; the resource's sole open listing,
+created offering every ready mechanism or adopted with closed history retained,
+and the re-reservation's claim; and the lease view's reading of a
 GPU-less declaration. The scenario module is imported by name, never its
 stage classes, so pytest does not collect them here.
 """
@@ -12,6 +12,7 @@ stage classes, so pytest does not collect them here.
 from __future__ import annotations
 
 import importlib
+from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -33,17 +34,19 @@ from storefront_client.models import ListingListResponse, ListingSummary
 
 from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal import DealLease
+from tests.e2e.roles.helpers.real_provisioning import pin_registered_vm
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
     LISTED_HOURLY_RATE,
     Stage09b_SettlementReadyAndCredentials,
 )
 from tests.e2e.roles.scenarios.vms.composed_listing import (
-    ALKAHEST_SETTLEMENT, create_or_adopt_listing, listing_mechanisms,
+    ALKAHEST_SETTLEMENT, create_or_adopt_listing, listing_mechanisms, real_target_resource,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor, register_e2e_host, register_e2e_pool,
 )
+from tests.e2e.roles.scenarios.vms.real_purchase_driver import RealVmPurchaseDriver
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_POOL_ID,
     REAL_RESOURCE_ID,
@@ -140,6 +143,41 @@ def test_a_new_host_is_registered_with_the_connection_given():
     assert_registered_as_target(hosts.get_host(HOST), TARGET)
 
 
+def test_a_configured_vm_key_is_stated_and_a_captured_pin_is_restated():
+    # Test-only SSH wire bytes with no corresponding private key.
+    blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"t" * 32
+    key = "ssh-ed25519 " + b64encode(blob).decode("ascii")
+    configured = VmHost.model_validate({
+        **TARGET.model_dump(), "ssh_host_public_key": key,
+    })
+    hosts = FakeHosts()
+    register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(configured))
+
+    assert hosts.get_host(HOST).connection.public["host_keys"] == [key]
+    assert target_connection(TARGET, registered_pins=[key]).public["host_keys"] == [key]
+
+
+def test_an_unpinned_vm_is_refused_before_supply_without_capturing_what_it_presents():
+    host = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
+    client = MagicMock()
+    client.get_host.return_value = host
+
+    with pytest.raises(AssertionError, match="ssh_host_public_key"):
+        pin_registered_vm(client, host)
+    client.check_connectivity.assert_not_called()
+    client.capture_host_key.assert_not_called()
+
+
+def test_a_vm_pinned_before_the_run_keeps_its_stored_pin():
+    host = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
+    pinned = _host(HOST, REAL_POOL_ID, target_connection(TARGET, registered_pins=["fixture"]))
+    client = MagicMock()
+    client.get_host.return_value = pinned
+
+    assert pin_registered_vm(client, host) is pinned
+    client.capture_host_key.assert_not_called()
+
+
 def test_an_unchanged_host_is_left_as_it_is():
     hosts = FakeHosts(**{HOST: _host(HOST, REAL_POOL_ID, target_connection(TARGET))})
     register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
@@ -164,6 +202,7 @@ def test_a_host_an_earlier_run_left_disabled_is_enabled_again():
 def test_a_host_an_earlier_run_left_has_its_connection_replaced():
     stale = ConnectionSubmission(
         kind="ssh",
+        version=2,
         public={**target_connection(TARGET).public, "ssh_host": "192.0.2.99"},
     )
     hosts = FakeHosts(**{HOST: _host(HOST, REAL_POOL_ID, stale)})
@@ -182,13 +221,13 @@ def test_without_a_connection_a_new_host_gets_the_placeholder_and_an_old_one_kee
     assert body.connection.public == {
         "ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"
     }
-    assert body.connection.version == 2
+    assert body.connection.version == 3
     (update,) = hosts.updates
     assert update.connection is None and update.pool_id == "pool"
 
 
 def test_the_target_connection_is_at_the_version_the_service_accepts():
-    assert target_connection(TARGET).version == 2
+    assert target_connection(TARGET).version == 3
     hosts = FakeHosts(**{HOST: _host(
         HOST, REAL_POOL_ID,
         ConnectionSubmission(kind="ssh", version=1, public=target_connection(TARGET).public),
@@ -197,14 +236,16 @@ def test_the_target_connection_is_at_the_version_the_service_accepts():
         assert_registered_as_target(hosts.get_host(HOST), TARGET)
     register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
     (update,) = hosts.updates
-    assert update.connection.version == 2
+    assert update.connection.version == 3
     assert_registered_as_target(hosts.get_host(HOST), TARGET)
 
 
 def test_a_host_registered_otherwise_is_not_the_target():
     hosts = FakeHosts(**{HOST: _host(
         HOST, REAL_POOL_ID,
-        ConnectionSubmission(kind="ssh", public={**target_connection(TARGET).public, "ssh_port": 2200}),
+        ConnectionSubmission(
+            kind="ssh", version=3, public={**target_connection(TARGET).public, "ssh_port": 2200}
+        ),
     )})
     with pytest.raises(AssertionError, match="not the target's"):
         assert_registered_as_target(hosts.get_host(HOST), TARGET)
@@ -555,12 +596,13 @@ def _listing_for(
     )
 
 
-def _driver(*, storefront_admin_client=None) -> RealVmComputeDealDriver:
+def _driver(*, storefront_admin_client=None, storefront_client=None,
+            target=TARGET) -> RealVmComputeDealDriver:
     return RealVmComputeDealDriver(
-        provisioning_client=None, storefront_client=None,
+        provisioning_client=None, storefront_client=storefront_client,
         storefront_admin_client=storefront_admin_client, storefront_service_client=None,
         site_capacity_admin_client=None, site_capacity=None, site_id="site",
-        vm_operator_client=None, target=TARGET, buyer_public_key="k",
+        vm_operator_client=None, target=target, buyer_public_key="k",
         listing_shape={}, jobs=JobWatch(None),
     )
 
@@ -573,6 +615,16 @@ def test_the_re_reservation_claims_the_resource_and_the_sold_capacity_as_dimensi
         listing_id="listing-1",
         escrow_uid="0xescrow",
     )
+
+
+def test_selected_vm_resource_is_shared_by_listing_and_capacity_checks():
+    target = VmHost.model_validate({**TARGET.model_dump(), "resource_id": "example-cpu-resource"})
+    admin = MagicMock()
+    driver = _driver(storefront_admin_client=admin, target=target)
+    assert real_target_resource(target)["resource_id"] == "example-cpu-resource"
+    driver.reserve_released_capacity(admin, listing_id="listing-1", escrow_uid="escrow-1")
+    assert driver.reserved_resource_id == "example-cpu-resource"
+    assert admin.admin_reserve_capacity.call_args.kwargs["required_attributes"]["resource_id"] == "example-cpu-resource"
 
 
 @pytest.mark.parametrize(
@@ -650,14 +702,33 @@ def test_a_listing_already_paused_is_adopted_without_another_pause():
     assert storefront.paused == []
 
 
+@pytest.mark.parametrize("mechanism", BOTH)
+@pytest.mark.parametrize("closed_first", [True, False])
+def test_the_only_open_listing_is_adopted_without_changing_closed_history(
+    mechanism, closed_first,
+):
+    closed = _listing("historical", status="closed", disk_gb=100)
+    current = _listing("current")
+    rows = (closed, current) if closed_first else (current, closed)
+    storefront = FakeStorefront(*rows)
+
+    adopted, was_adopted = _listing_for(storefront, mechanism)
+
+    assert was_adopted and adopted is current
+    assert storefront.paused == ["current"] and storefront.created == []
+    assert storefront.listings["historical"] is closed
+    assert (closed.status, closed.paused) == ("closed", False)
+
+
 @pytest.mark.parametrize(
     "listings",
     [
         (_listing("listing-1", status="closed"),),
         (_listing("listing-1"), _listing("listing-2", paused=True)),
         (_listing("listing-1", disk_gb=100),),
+        (_listing("listing-1", status="unknown"), _listing("listing-2")),
     ],
-    ids=["closed", "two", "another shape"],
+    ids=["closed", "two", "another shape", "unknown status"],
 )
 def test_a_listing_this_run_cannot_adopt_fails_naming_the_listings_and_the_capacity(listings):
     storefront = FakeStorefront(*listings)
@@ -999,6 +1070,42 @@ def test_relay_endpoint_is_the_reservations_leased_port():
         driver.delivered_access(state)
 
 
+class _SettleStatus:
+    """Settle status as the buyer reads it, by escrow."""
+
+    def __init__(self, credentials):
+        self.credentials = credentials
+        self.read: list[str] = []
+
+    def get_settle_status(self, escrow_uid):
+        self.read.append(escrow_uid)
+        return SimpleNamespace(tenant_credentials=self.credentials)
+
+
+def test_the_tenant_password_is_the_one_the_deals_settle_status_delivers():
+    settlement = _SettleStatus({"password": "example-tenant-password", "key_type": "provided"})
+    driver = _driver(storefront_client=settlement)
+    assert driver.tenant_password(RealVmDealState(real_escrow_uid="escrow")) == \
+        "example-tenant-password"
+    assert settlement.read == ["escrow"]
+
+
+def test_the_second_deals_tenant_password_is_read_from_the_second_escrow():
+    settlement = _SettleStatus({"password": "example-tenant-password"})
+    driver = _driver(storefront_client=settlement)
+    state = RealVmDealState(real_escrow_uid="first-escrow", second_escrow_uid="second-escrow")
+    driver.tenant_password(driver.second_deal_state(state))
+    assert settlement.read == ["second-escrow"]
+
+
+@pytest.mark.parametrize("credentials", [None, {}, {"password": "", "key_type": "provided"}])
+def test_no_delivered_tenant_password_fails_naming_the_fields_never_a_value(credentials):
+    driver = _driver(storefront_client=_SettleStatus(credentials))
+    with pytest.raises(AssertionError, match="delivered no tenant password") as failed:
+        driver.tenant_password(RealVmDealState(real_escrow_uid="escrow"))
+    assert "provided" not in str(failed.value)
+
+
 def test_released_relay_port_requires_release_expiry_and_no_active_owner():
     driver = _driver()
     driver.target = _relay_target()
@@ -1122,3 +1229,50 @@ def test_pool_registration_sends_and_reconciles_relay_config_through_typed_clien
     )
     assert host.host_id == HOST and transport.row["provider_config"] == relay
     assert site.register_resource.await_args.kwargs["capacity"] == CAPACITY
+
+
+@pytest.mark.parametrize("resource_id", [None, "example-cpu-resource"])
+@pytest.mark.parametrize("listing_ids", [[], ["selected"], ["other"], ["selected", "other"]])
+def test_real_purchase_refuses_ambiguous_discovery_before_payment(resource_id, listing_ids):
+    target = TARGET.model_copy(update={"resource_id": resource_id})
+    registry = MagicMock()
+    registry.list_listings.return_value.listings = [SimpleNamespace(id=value) for value in listing_ids]
+    listing = SimpleNamespace(id="selected", listing_resource=real_target_resource(target))
+    registry.get_listing.return_value = listing
+    admin = MagicMock()
+    admin.admin_refresh_site_projections.return_value = {"sites": {"site": {"resource_pool": {"state": "loaded"}}}}
+    driver = RealVmPurchaseDriver(
+        provisioning_client=None, storefront_client=None,
+        storefront_admin_client=admin, storefront_service_client=None,
+        site_capacity_admin_client=None, site_capacity=None, site_id="site",
+        vm_operator_client=None, target=target, buyer_public_key="k",
+        listing_shape={}, jobs=JobWatch(None), purchase_registry=registry,
+        seller_account="seller", dispute_window="P7D",
+    )
+    if listing_ids == ["selected"]:
+        assert driver.discover("selected") is listing
+        assert driver.second_purchase("other-key").reserved_resource_id == (resource_id or REAL_RESOURCE_ID)
+    else:
+        with pytest.raises(AssertionError, match="ambiguous"):
+            driver.discover("selected")
+        registry.get_listing.assert_not_called()
+    registry.list_listings.assert_called_once_with(region="e2e-real-host", limit=2)
+
+
+def test_real_purchase_refuses_unconfirmed_projection_before_registry_discovery():
+    admin, registry = MagicMock(), MagicMock()
+    admin.admin_refresh_site_projections.return_value = {
+        "sites": {"site": {"resource_pool": {"state": "unavailable"}}},
+    }
+    driver = RealVmPurchaseDriver(
+        provisioning_client=None, storefront_client=None,
+        storefront_admin_client=admin, storefront_service_client=None,
+        site_capacity_admin_client=None, site_capacity=None, site_id="site",
+        vm_operator_client=None, target=TARGET, buyer_public_key="k",
+        listing_shape={}, jobs=JobWatch(None), purchase_registry=registry,
+        seller_account="seller", dispute_window="P7D",
+    )
+    with pytest.raises(AssertionError, match="site projections did not confirm"):
+        driver.discover("selected")
+    registry.list_listings.assert_not_called()
+    registry.get_listing.assert_not_called()

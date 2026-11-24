@@ -3,7 +3,7 @@
 
 Every accepted decision is promoted to a permanent document before the change is
 complete, so the proposal's "Knowledge to promote" names where each one goes
-(`openspec/README.md`, "Change documentation requirements"). A design records its
+(`docs/guidance/workflow/changes.md`, "Change documentation requirements"). A design records its
 decisions under `### D<n>` headings in its `## Decisions` section; each must have
 a bullet in "Knowledge to promote" starting `D<n>`, which names the destination
 or says `D<n>: no permanent destination — <reason>`. A design with no such

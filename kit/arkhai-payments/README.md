@@ -41,7 +41,7 @@ an attacker. Keep `fee_bps` in the caller's trusted service policy. The dispute
 authority comes from the selected option's `lifecycle.adjudication.dispute`;
 `[Settlement.arkhai_payments].dispute_authority` is rejected with a diagnostic
 naming root `[[Dispute]]` preferences. See
-[dispute authority preferences](../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences)
+[dispute authority preferences](../../openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences)
 for local preferences, registry recommendations and identity-bound credentials.
 Authorities are explicit per-part permissions; the service has no implicit
 privileged dispute account.
@@ -53,9 +53,10 @@ Receipts carry a signed `livemode`, true only from a live payments service.
 
 `MandatePolicy` carries the accepted Agreement's payment facts without defining
 or parsing a shared Agreement model. `derive_mandate(agreement_json, policy)`
-commits to the exact JSON object using RFC 8785, creates one `once` part, and
-returns a generated `Mandate`. The generated models also carry the contract's
-`rate` parts; the once-only builder does not derive them. Every part carries its
+commits to the exact JSON object using RFC 8785 and returns a generated
+`Mandate`: one `once` part for a total quote, or optional setup `once` followed
+by `rate` for a per-period quote. Prices come through the unit-bearing agreed-price
+accessor from the accepted bytes, never today's listing. Every part carries its
 own authorities and hold-extension cap. A once-only mandate has no start or stop
 permission, and preserves the seller and accepted option's dispute authority as reverse
 authorities. Only the dispute authority can extend or lift a hold. Each once
@@ -89,9 +90,10 @@ transaction = PaymentApproval(config, payer_account).approve(
 ```
 
 Approval retries send the identical mandate and therefore retain the same
-transaction identity. For a local development service, use the explicit
-`development_account` authentication option; it sends `X-Account-ID` and is
-not available outside the service's development authenticator.
+transaction identity. Against a local service that takes the caller's account
+from a header, use the explicit `development_account` authentication option; it
+sends `X-Account-ID` in place of a credential, and only a service that admits
+header identity accepts it.
 
 ## Settlement configuration integration
 
@@ -110,9 +112,9 @@ kit names no concrete dispute interface.
 
 `ArkhaiPaymentsConfig` keeps the service origin, pinned Ed25519 receipt identity,
 fee policy, optional receipt identity history, the API key, an optional CA bundle,
-the local development-auth switch, and the buyer-only `attach_agreement` setting
-(off by default; a seller configuration that sets it fails preflight) in trusted
-role configuration. The key takes one of two forms, which are mutually exclusive
+the `development_auth` switch for loopback header identity, and the buyer-only
+`attach_agreement` setting (off by default; a seller configuration that sets it
+fails preflight) in trusted role configuration. The key takes one of two forms, which are mutually exclusive
 and each exclusive with `development_auth`:
 
 - `api_key`, the key itself, a secret setting a service states in its secret
@@ -130,9 +132,9 @@ unavailable, never the key. `ca_bundle_path` names a PEM bundle the payments
 client verifies the service against instead of the default trust store, for that
 client alone: no other client's trust, and no process setting such as
 `SSL_CERT_FILE`, changes. `payments_client_for_owner(config, owner_account)`
-validates the owner account and uses it for loopback development authentication;
-normal service calls use the resolved key, and the client is given the configured
-bundle as `PaymentsClient(..., ca_bundle=...)`:
+validates the owner account and uses it for loopback header identity when
+`development_auth` is set; normal service calls use the resolved key, and the
+client is given the configured bundle as `PaymentsClient(..., ca_bundle=...)`:
 
 ```python
 from market_arkhai_payments import create_arkhai_payments_registration
@@ -216,47 +218,67 @@ state, then translates each remaining held part into a voluntary lifecycle
 `NotPaid`, `NothingToReverse`, `RefundUnavailable` or `RefundBlocked`. A lost
 response is recovered by verified read and same-key retry. It does not send an
 exceptional-end claim or compute a dispute remedy. `stage.payment_adapter`
-exposes the same payee adapter for lifecycle composition; its verifier factory
-can be injected for key rotation.
+exposes the same payee adapter for lifecycle composition, verifying under the
+configured receipt identities; its verifier factory can be injected.
 
 `reconcile_accepted_payments` still advances every domain-supplied accepted
 candidate, including a buyer that approved and never sent commit. The domain's
 idempotent settle callback decides whether to serve or refund; a crash or one
 candidate failure does not discard the remaining candidates.
 
-## Once payment lifecycle
+## The payment lifecycle adapter
 
-`market_arkhai_payments.adapter.PaymentAdapter` binds one exact accepted
-Agreement and its stored `PaymentSettlementData`. It supports voluntary
-`reverse` commands with exactly `payload={"part": "0", "amount": "100"}`:
-part references and positive minor-unit amounts are canonical decimal strings.
-Only the part's reverse authorities may send them. Rate commands, supplied
-`at`, and exceptional-end fields refuse before I/O. Exceptional seller ends
-belong to the dispute adapter, not to this payment adapter.
+`market_arkhai_payments.adapter.PaymentAdapter` is the one payments transaction
+adapter, for once-only and rate mandates alike. It binds one exact accepted
+Agreement and its stored `PaymentSettlementData`, and is composed of parts every
+part kind shares — verified reads, event projection, reverse, refusal
+classification and descriptor recording — with rate behaviour
+(`market_arkhai_payments.rate_parts`) composed in only when the mandate has a
+rate part. Once and rate behaviour do not inherit from one another. Every
+mandate supports voluntary `reverse` commands with exactly
+`payload={"part": "0", "amount": "100"}`: part references and positive
+minor-unit amounts are canonical decimal strings. Only the part's reverse
+authorities may send them. A once-only mandate refuses rate commands, and its
+billing start is a no-op once its commitment and the activation evidence are
+verified. A supplied `at` on a reverse, and exceptional-end fields, refuse
+before I/O. Exceptional seller ends belong to the dispute adapter, not to this
+payment adapter.
 
 Construction takes the acting account, `client_for_owner`, a required
 `verify_snapshot(signed, minimum_sequence) -> bool`, and an optional durable
-`minimum_sequence` floor. The composition owns key rotation and cursor storage;
-`pinned_snapshot_verifier(agreement, data, config)` binds the current single
-receipt identity for deployments without key rotation. Reads reject unverified,
+`minimum_sequence` floor. The composition owns cursor storage;
+`pinned_snapshot_verifier(agreement, data, config)` binds the configured current
+and retiring receipt identities (`receipt_identities`, or `service_identity` alone
+without one). A deal approved under an identity the configuration does not list
+stops verifying, so a receipt identity change drains open deals first
+(`openspec/specs/settlement-configuration/configuration.md`, "Settlement consumer
+configuration and cutover"). Reads reject unverified,
 cross-commitment, incomplete or regressing authority records. They return all
 per-part events for the seller watch to replay, and open extensions independently
 by ref and case. Partial refunds never imply a delivery end. Once-only delivery
 authorization verifies commitment evidence; billing start makes no financial
 operation.
 
-Every part request uses `OperationKeys.part_event`. Submit reads before sending
-to recover an earlier lost answer and reject changed content; after sending it
-reads again, because an unsigned POST response does not prove the outcome.
-An unreachable or unverifiable post-write read is `unknown`, resolved by read
-and an identical-key retry, never by assuming the money moved or did not move.
-Callers use the foundation's durable operation store before submit; the adapter
-keeps no ledger, cursor store or daemon.
+Every part request uses `OperationKeys.part_event`. Before any I/O, submit
+records each operation's descriptor digest through the caller's operation store,
+`OperationKeys.store`, under a key derived from the operation key, the part and
+the kind: a retry with changed content is refused there, before any authority
+call, and an identical retry resends the same request identity, which the
+authority answers with the event it recorded. A rate deal's every monetary
+operation requires the store; a once-only reverse sent without one, as the
+seller's refund path does, relies on the authority's `request_id_reused`
+refusal of changed bytes. After sending, submit reads again, because an unsigned
+POST response does not prove the outcome. An unreachable or unverifiable
+post-write read is `unknown`, resolved by read and an identical-key retry, never
+by assuming the money moved or did not move. The adapter keeps no ledger, cursor
+store or daemon.
 
 From the repository root, `make dist && make -C kit/arkhai-payments first-use`
 starts an invocation-owned fixture and demonstrates a lost reverse response,
 signed-read recovery and a same-key replay, plus observation-only scripted case
 effects and overlapping extensions. No service, secrets or network are needed.
+`tests/test_first_use_examples.py` runs this example and `examples/rate.py` with
+the kit's unit suite.
 
 ## Testing with the kit
 
@@ -327,7 +349,17 @@ maturity yet in one `hold:<transaction>:<part>:until` entry held until `stop` or
 `lift`. `FakePaymentsClient.get_balance` serves the same view.
 `advance(transaction)` performs due stops, maturity and reservation refill;
 reads/commands apply due stops without driving the refill scheduler, matching the
-producer's read boundary. The caller owns HTTP, authentication, controls and
+producer's read boundary. `reserve(transaction, through)` is the scheduler's
+decision made by a test: it brings the transaction to the clock as a read does,
+then reserves each started, unstopped rate part through `through`, on the
+arithmetic of the reservation at `start`, as far as the part's end and the
+payer's balance allow, and returns each such part's `part`, `reserved_through`
+(the snapshot's `reservedThrough`) and `periods_added`; a transaction with none
+is refused `PaymentsAPIError(409, "no_running_rate_part")` with nothing changed.
+A lead reserves to cover 60 seconds past it, as at `start`, so a `through` on a
+period boundary short of the part's end reserves the period after it too. Without
+it or a refilling `advance`, a rate part holds what approval and `start` reserved,
+so time past that reads as a `terms` stop at its end. The caller owns HTTP, authentication, controls and
 mediation composition; the kit imports none of that tooling.
 
 The fixture applies only the permissions encoded in each part: no favourable
@@ -348,44 +380,148 @@ Snapshot proofs are real fixture signatures, not placeholders. Default fixture
 identities are public deterministic development values and must never be used on
 a public network. Production clients and transport/authentication checks are unchanged.
 
+## Recurring publication and stateless rate servicing
+
+`PaymentsRatePresetHelper` implements the settlement runtime's injected helper
+for both compute storefronts. Terms resolves notices, setup opt-out, bounds,
+delivery deadlines and penalty recommendations; the helper only encodes the
+resolved terms. `period` and `reserve_ahead_seconds` are paired positive fixed-unit
+parameters. Optional `setup_amount` is additional positive minor-unit money in the
+price's asset. `window` and `approval_window` name one term, approval expiry:
+readers accept either and refuse a document naming both. Rate presets write
+`approval_window`; once options keep writing `window`, whichever name the
+seller's clause used, so released buyers keep reading them. A rate's maximum end is the accepted whole-second start plus its finite
+Agreement duration, never shifted after late activation.
+
+The public registration projects `arkhai_payments.period` as text or missing
+(`None`), and `arkhai_payments.billing_kind` as `total` or `per_period`. Setup
+beside rate remains `per_period`; there is no fabricated zero-length period.
+`arkhai_payments.approval_window` projects approval timing, not adjudication, for
+every option; `arkhai_payments.window` projects it only for once options.
+Missing values use the existing clause descriptor's missing-value rule; no
+presence operator is added.
+
+A composition's `RateServicing` declares, per mechanism, the treatments
+(`charged`, `returned`, `prorated`) it has qualified and whether it services a
+setup charge. Publication, acceptance and new materialization each refuse a rate
+option whose treatments or setup charge it does not list;
+`PaymentSettlementData.for_agreement` refuses with `RateServicingUnavailable` and
+`settlement_option_withdrawn_refetch`. `payments_rate_wiring` supplies the helper
+and timing projection both compute compositions install, and `servicing_stage`
+takes the composition's declaration. The default deployed compositions have no
+declaration and emit no recurring offers. Withdrawal refuses new materialization
+but does not reinterpret stored mandates during recovery. The helper and a
+passing fixture are not a running continuation or live authority qualification.
+A setup price is the seller's explicit choice in either domain; the helper
+invents no domain setup default. The helper's `pricing()` returns its clause's
+own delivery deadline, and one conversion, `clause_rate_minor_units`, turns a
+clause's rate into minor units, refusing a rate finer than the asset's precision.
+
+The rate `authorize` decides on a verified snapshot whose `observedAt` lags the
+storefront's clock by at most `[Settlement.arkhai_payments]
+snapshot_freshness_seconds` (default 5); every stop, end and funding bound is
+still checked at the storefront's clock. `PaymentApproval(terms_policy=...)`
+refuses at approval the default-buyer refusals the run's policy did not waive.
+
+For a rate mandate the adapter also takes an injectable clock and the freshness
+window. It exports immutable `PaymentOperation` descriptors through `describe`
+and `billing_operations` for audit. `start_billing(keys, evidence)` starts every
+rate part under end service's one billing-start key, `keys.operation_key`, and
+records each per-part descriptor through `keys.store` before the first call; it
+takes the shared versioned `DeliveryEvidence`, and activation, ready,
+reservation and fulfillment references are required. `authorize(phase,
+evidence, billing)` reads end service's `JournaledBillingStart` at disclosure:
+a start not bound to that intent is pending, and a refused journaled result
+refuses. Site verification and journal persistence belong to the caller. No
+rate call allocates another billing-start key or stores a ledger.
+
+Seller `notice` is admitted by seller servicing against its immutable accepted
+payee entitlement. The adapter expands it into explicit per-rate-part stops
+using that same command key, records all descriptor digests through the caller's
+operation store before the first authority call, and returns verified
+controlling pending/final stops. A same-key retry recovers a lost response and
+never postpones an earlier payer stop: a stop the authority answers with an
+already winning stop is satisfied only when that stop is effective no later.
+Notice carries no treatment override or local scheduling promise. An ordinary
+deal-level payer `stop` with an empty payload uses the same expansion and
+recording; each derived stop retains the accepted payer notice.
+
+Command failures are classified from their structured API codes. HTTP 409
+request_id_reused and hold_not_reversible return a rejection requiring repair;
+insufficient_held_funds requires a verified read before another delta, and
+hold_matured exposes the shortfall for the case path. Server errors stay unknown.
+At approval, HTTP 409 insufficient_funds raises the exported
+PaymentApprovalInsufficientFunds exception, carrying status_code/code and an
+instruction to fund the payer account. The buyer does not poll for a receipt
+after this refusal.
+
+`authorize` is read-only for commit, dispatch, physical start and disclose.
+Disclosure additionally requires `billing_operation_key` and a matching verified
+start event containing the same activation envelope. A caller-supplied journaled
+`billing_start_result` reports definitive refusal rather than leaving disclosure
+pending; it must be paired with that operation identity. Unknown, unverified,
+regressing or stale snapshots never allow delivery. Pre-start reservations prove
+initial funding without inventing a funded-through date. Effective stops,
+exhaustion and maximum ends refuse; a future pending stop remains a bound.
+
+`read` exposes per-part starts, funding, pending and winning final stops, release
+instants, ordered events and open extension references. A raw `stop_request` is
+not a final stop. Watch consumes the winning per-part final record independently
+of the event cursor, because a notice can mature without a new event sequence.
+The winning entry owns partial-period treatment. No local refund or clawback
+corrects it; seller exceptional ends still use the dispute adapter's
+`delivery_end` path, not a seller payment command.
+
 ## Local first use
+
+From a clean checkout, run `make dist-ci` once, then:
+
+```sh
+make -C kit/arkhai-payments first-use-rate
+```
+
+This starts no server and needs no credentials. The invocation owns its deterministic
+fixture accounts, signer, funding/state and injected clock. It opens the library's
+rate surface directly: setup/rate derivation, buyer check, pure admission,
+activation-bound start with response loss and same-key replay, disclosure, seller
+notice, an earlier payer protection stop and the verified controlling final stop.
+Its JSON is labelled lane-double evidence, never live evidence: it carries the
+installed contract's identity and hashes (`get_contract().metadata`), the target's
+selector and mode (in-process, `livemode` false), the control trace of every lost
+response and clock step the fixture applied, and the buyer's waivers, none for the
+shipped presets' default buyer. It makes no hosted-readiness claim; the published
+conformance vectors stay a separate, content-identified replay
+(`make check-vectors`). Its fixture asset is `USD/6`; production derivation reads
+the accepted Agreement's asset. `examples/rate.py` is also the runnable entry point
+for a fresh verifier.
+
 
 The committed `examples/local_e2e.py` exercises the `PaymentsClient` primitives
 (approval, buyer and seller polling, Agreement deposit, receipt verification,
-and reverse) against the service's local development authenticator, using a
-minimal deal object rather than a market Agreement. Start the payments repo's checkout-
-owned ledger with `FORMANCE_PORT=3168 bun run ledger:local`, then start its HTTP
-service from that repository in another shell with `bun run service` and
-`PAYMENTS_MODE=development`, `FORMANCE_PORT=3168`, `PAYMENTS_PORT=3180`,
-`ARKHAI_DISPUTE_AUTHORITY`, `RECEIPT_SIGNING_KEY`, and `DEV_OPERATOR_TOKEN`
-set. Both service and client need the same `RECEIPT_SIGNING_KEY`; the operator
-funding request and client need the same `DEV_OPERATOR_TOKEN`.
+and reverse) against a local payments service, using a minimal deal object
+rather than a market Agreement. It needs what any client of that service has:
 
-Before running the example, make the payee a ledger party through the service's
-development-only operator route. `DEV_OPERATOR_TOKEN` must be set in this shell
-to the same value as the service process:
+- `PAYMENTS_URL`, the service's origin, which must be a loopback address;
+- `PAYMENTS_SERVICE_IDENTITY`, the service's public receipt identity, the
+  unpadded base64url Ed25519 key a role states as `service_identity.identifier`;
+- optionally, `PAYMENTS_FEE_BPS`, the service's fee policy, which a role states
+  as `fee_bps` (250 when unset), and `ARKHAI_DISPUTE_AUTHORITY`, the account the
+  mandate names as its dispute authority (the payer when unset);
+- a service that admits `development_account`'s header identity;
+- the payer, `00000000-0000-4000-8000-000000000011`, funded with at least the
+  fixture amount, `1000000` units of `USD/6`, and the payee,
+  `00000000-0000-4000-8000-000000000012`, an existing ledger party.
 
-```sh
-curl --fail-with-body http://127.0.0.1:3180/operator/test-funds \
-  -H "Authorization: Bearer $DEV_OPERATOR_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"account":"00000000-0000-4000-8000-000000000012","asset":"USD/2","amount":"1","requestId":"arkhai-payments-kit-e2e-payee"}'
-```
-
-The request ID makes repeating setup idempotent. In the package directory,
-build and install the internal identity wheel, then run the example against
-that wheel source:
+Starting such a service and preparing its accounts belong to the payments
+service's own documentation. In the package directory, build and install the
+internal identity wheel, then run the example against that wheel source:
 
 ```sh
 make reinit
-PAYMENTS_URL=http://127.0.0.1:3180 \
+PAYMENTS_URL='http://127.0.0.1:<port>' PAYMENTS_SERVICE_IDENTITY='<public receipt identity>' \
 uv run --project . --locked --find-links ../../.dist --python 3.12 -- \
   python examples/local_e2e.py
 ```
 
-The example refuses non-loopback targets. In local development only, it uses
-`RECEIPT_SIGNING_KEY` to derive the service's public receipt identity; ordinary
-clients pin that public identity from trusted configuration and never need the
-service's signing secret. Stop the service, then run
-`FORMANCE_PORT=3168 scripts/ledger-local.sh down` from the payments-service
-checkout when finished.
+The example refuses non-loopback targets, and a receipt that does not verify
+against the pinned identity.

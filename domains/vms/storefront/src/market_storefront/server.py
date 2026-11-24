@@ -14,6 +14,7 @@ negotiation runtime.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -46,14 +47,19 @@ from market_alkahest import (
     ProbedChain,
     json_rpc_call,
 )
+import injected_time
+from market_arkhai_payments import payments_livemode
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
+    StorefrontTimeRouteService,
     alkahest_client_constructor,
+    announce_time_source,
     build_composed_storefront_app,
+    install_time_source,
 )
 
 import market_storefront.container as _container
@@ -77,14 +83,18 @@ from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
     chain_address_books,
+    configured_time_source,
+    default_premature_stop_penalty_periods,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
     get_service_peer_configs,
+    negotiation_multiplier_floor,
     resolve_marketplace_signer,
     settings,
     settlement_config_mapping,
     storefront_domain_registry,
 )
+from market_storefront.utils.migrations import require_compatible_storefront_database
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
 from market_storefront.services.capacity_client import site_pool_projection
@@ -358,11 +368,19 @@ def _build_vm_services(
     # without it. An Alkahest section that is coherent but cannot settle makes
     # Alkahest unready instead. A retired address-book key is refused before
     # the release model resolves the section, which would refuse it only as
-    # an unknown key.
+    # an unknown key. A multiplier floor above the advertised rates is refused
+    # here too, rather than at the first shape-priced negotiation, and so is a
+    # default penalty multiple that is not a positive integer.
     admissibility_default = parse_configured_admissibility_default()
+    negotiation_multiplier_floor()
+    default_premature_stop_penalty_periods()
     refuse_retired_address_book_keys()
     require_coherent_release_model()
     seams.startup_refusal()
+    # Before anything opens the database: `market-storefront-migrate` builds
+    # it, and nothing here issues DDL, so a database not exactly at the chain
+    # is refused naming the command, and none is created.
+    require_compatible_storefront_database(settings.db_path)
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
@@ -414,6 +432,8 @@ def _build_vm_services(
             settlement_composition.accepted_obligation_dispatch()
         ),
         arkhai_payments_stage=settlement_composition.arkhai_payments_stage,
+        rate_servicing=settlement_composition.rate_servicing,
+        rate_term_projections=settlement_composition.rate_term_projections,
     )
     listing_service = _build_listing_service(
         registry=registry,
@@ -506,6 +526,12 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_contact_exchange = services.contact_exchange
         _container.resolved_introduction_delivery = services.introduction_delivery
         await services.settlement_composition.disputes.refresh(_make_registry_client)
+        await _report_unserviceable_deals(services.settlement_composition)
+        announce_time_source(
+            injected_time.installed(),
+            payments_livemode=payments_livemode(settlement_config_mapping()),
+            logger=logger,
+        )
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(
             registry=services.registry,
@@ -515,6 +541,20 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
     except BaseException:
         _container.clear_lifespan_state(registry=services.registry)
         raise
+
+
+async def _report_unserviceable_deals(composition: Any) -> None:
+    """Log each open deal the configuration composes no adapter for.
+
+    The storefront starts regardless, so one mechanism's missing configuration
+    does not stop its other business; system status reports the same deals,
+    each lists repair required, and its read names the configuration.
+    """
+    lifecycle = getattr(composition, "lifecycle", None)
+    if lifecycle is None:
+        return
+    for negotiation_id, reason in await asyncio.to_thread(lifecycle.seller.unserviceable):
+        logger.warning("[STARTUP] Deal %s cannot be serviced: %s", negotiation_id, reason)
 
 
 async def _stop_vm_services(services: VmStorefrontServices) -> None:
@@ -549,6 +589,9 @@ from market_storefront.controllers.admin_controller import (  # noqa: E402
 )
 from market_storefront.controllers.admin_controller import (  # noqa: E402
     router as admin_router,
+)
+from market_storefront.controllers.admin_controller import (  # noqa: E402
+    time_router,
 )
 from market_storefront.controllers.deals_controller import (  # noqa: E402
     router as deals_router,
@@ -592,6 +635,8 @@ def build_vm_storefront_app(
     """Build the VM HTTP application from one explicit frozen registry.
 
     ``seams`` defaults to production's service-peer trust and startup refusal.
+    The time-setting route is mounted only when the process's installed source
+    is injected time.
     """
 
     registration = registry.resolve_mode("vm")
@@ -638,6 +683,7 @@ def build_vm_storefront_app(
                     admin_settle_router,
                     introductions_router,
                     lease_reports_router,
+                    *((time_router,) if StorefrontTimeRouteService().mounted else ()),
                     create_lifecycle_router(lambda _: _container.resolved_settlement_composition.lifecycle.routes(
                         TrustedIdentitySet(identities=tuple(_active_administrators(
                             _container.resolved_sqlite_client.db_path,
@@ -655,4 +701,9 @@ def build_vm_storefront_app(
     )
 
 
+# The process's time source is installed here, before the application is built
+# and before anything reads the time: `[Time] source` decides whether the
+# time-setting route is mounted, and a value other than "wall" or "injected"
+# refuses startup naming it.
+install_time_source(configured_time_source())
 app = build_vm_storefront_app(registry=storefront_domain_registry())

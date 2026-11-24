@@ -26,6 +26,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.utils import config as storefront_config
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting
 
@@ -112,6 +113,7 @@ async def test_the_root_hands_readiness_and_the_loop_one_probe_over_one_client_m
     builds the client, never composition."""
     chain = _Chain()
     domain = build_vm_storefront_domain()
+    migrate_storefront_database(tmp_path / "storefront.db")
     sqlite_client = SQLiteClient(
         db_path=str(tmp_path / "storefront.db"),
         registry=build_vm_storefront_registry(domain),

@@ -250,7 +250,7 @@ def test_default_on_missing_is_fail(tmp_path: Path) -> None:
 
 
 def test_repo_default_spec_loads() -> None:
-    """The shipped filter-spec.yaml at the registry root is valid."""
+    """The filter-spec.yaml packaged with the registry is valid."""
     spec = load_filter_spec()
     assert spec.version >= 1
     names = {f.name for f in spec.filters}
@@ -275,7 +275,7 @@ def test_the_compute_listing_resource_requires_only_its_region() -> None:
     listing vocabulary, which is unchanged."""
     spec = load_filter_spec()
 
-    assert spec.version == 8
+    assert spec.version == 9
     assert spec.schema_identity is not None
     assert (spec.schema_identity.id, spec.schema_identity.version) == (
         "compute.market",

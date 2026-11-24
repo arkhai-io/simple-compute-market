@@ -29,9 +29,14 @@ from pydantic import (
 )
 
 from market_core.query_dsl import FieldDescriptor, field_reference_json
-from market_core.schemas import SettlementOption, settlement_option_rates
+from market_core.schemas import (
+    AgreedPrice, Agreement, BillingProjection, PriceBasis, SettlementOption,
+    agreed_price, settlement_option_rates,
+)
 from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS
 from .ports import ConditionalEscrowClient
+from .presentation import PaymentPresentation, PaymentPresenter
+from .rate_servicing import RateServicing
 
 SETTLEMENT_CONFIG_SCHEMA_VERSION = 1
 SettlementRole = Literal["buyer", "seller"]
@@ -137,11 +142,16 @@ class MechanismReadiness(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class SettlementConfig:
-    """One resolved settlement root with typed installed mechanism sections."""
+    """One resolved settlement root with typed installed mechanism sections.
+
+    ``rate_servicing`` is a seller's declaration of the rate treatments it has
+    qualified; a buyer's root has none, and an empty one services no rate.
+    """
 
     schema_version: int = SETTLEMENT_CONFIG_SCHEMA_VERSION
     priority: tuple[str, ...] = ()
     mechanisms: Mapping[str, BaseModel] = field(default_factory=dict)
+    rate_servicing: RateServicing = field(default_factory=RateServicing)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "priority", tuple(self.priority))
@@ -274,6 +284,10 @@ class MechanismRegistration:
     # surface — but its ownership lives here so domains resolve it from
     # the registration instead of importing a mechanism function.
     settlement_verifier: Callable[..., Any] | None = None
+    # Accepted billing interpretation is independent of offer enablement:
+    # disabling new offers must not prevent reading an existing commitment.
+    project_billing: BillingProjection | None = None
+    present_payment: PaymentPresenter | None = None
     command_group: Any | None = None
     public_detail_keys: frozenset[str] = frozenset()
 
@@ -422,6 +436,42 @@ class SettlementConfigurationRegistry:
                 f"uninstalled settlement mechanism {mechanism_id!r}"
             ) from exc
 
+    def project_billing(self, option: SettlementOption) -> PriceBasis:
+        """Resolve an accepted option's billing unit through its installed owner."""
+        registration = self.registration(option.settlement_schema)
+        if registration.project_billing is None:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {registration.mechanism_id!r} has no billing projection"
+            )
+        return PriceBasis.model_validate(registration.project_billing(option))
+
+    def present_payment(
+        self, option: SettlementOption, *, duration_seconds: int | None = None,
+        quote: AgreedPrice | None = None,
+    ) -> PaymentPresentation:
+        """Disclose owner-priced money without reading mechanism payment fields."""
+        registration = self.registration(option.settlement_schema)
+        if registration.present_payment is None:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {registration.mechanism_id!r} has no payment presentation"
+            )
+        result = PaymentPresentation.model_validate(
+            registration.present_payment(option, duration_seconds, quote)
+        )
+        if result.quote.asset != option.price_asset or PriceBasis.model_validate(
+            {key: getattr(result.quote, key) for key in ("unit", "period", "period_seconds")}
+        ) != self.project_billing(option) or (quote is not None and result.quote != quote):
+            raise SettlementConfigurationError("payment presentation differs from selected or accepted quote")
+        return result
+
+    def agreed_price(
+        self,
+        agreement: Agreement | Mapping[str, Any],
+        listing: Mapping[str, Any] | None = None,
+    ) -> AgreedPrice:
+        """Label accepted money without consulting current offer configuration."""
+        return agreed_price(agreement, listing, project_billing=self.project_billing)
+
     def canonical_mechanism_id(
         self,
         value: str,
@@ -510,6 +560,8 @@ class SettlementConfigurationRegistry:
         if role not in ("buyer", "seller"):
             raise SettlementConfigurationError(f"unknown settlement role {role!r}")
         known_root = {"schema_version", "priority", *self._config_keys}
+        if role == "seller":
+            known_root.add("rate_servicing")
         unknown_root = sorted(str(key) for key in raw if key not in known_root)
         if unknown_root:
             raise SettlementConfigurationError(
@@ -558,11 +610,21 @@ class SettlementConfigurationRegistry:
                 raise SettlementConfigurationError(
                     f"invalid Settlement.{config_key}"
                 ) from None
+        servicing = raw.get("rate_servicing", {})
+        if not isinstance(servicing, Mapping):
+            raise SettlementConfigurationError("Settlement.rate_servicing must be a table")
+        try:
+            rate_servicing = RateServicing.from_tables(servicing, mechanism_for={
+                key: mechanism_id for key, mechanism_id in self._config_keys.items()
+            })
+        except ValueError as exc:
+            raise SettlementConfigurationError(f"invalid Settlement.rate_servicing: {exc}") from None
         return self.validate(
             SettlementConfig(
                 schema_version=schema_version,
                 priority=priority,
                 mechanisms=typed,
+                rate_servicing=rate_servicing,
             ),
             role=role,
         )

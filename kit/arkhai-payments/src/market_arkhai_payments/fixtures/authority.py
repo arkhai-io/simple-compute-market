@@ -335,24 +335,71 @@ class PaymentsAuthority:
             self._refill(tx, now)
 
     def _refill(self, tx: _Transaction, now: int) -> None:
-        balance = self.balances.setdefault(tx.mandate["from"], {})
         for part in tx.parts:
             p = part.terms
             if p["kind"] != "rate" or part.start is None or part.stop:
                 continue
-            paid_through = add_duration(part.start, p["period"], part.paid)
-            lead = max(add_duration(now, p["period"]), add_duration(now, p["reserveAhead"]))
-            if paid_through >= part.deadline or lead < paid_through:
-                continue
-            wanted = periods_through(part.start, p["period"], lead + 60)
-            if math.isfinite(part.deadline):
-                wanted = min(wanted, periods_through(
-                    part.start, p["period"], int(part.deadline)))
-            amount = int(p["amount"])
-            count = min(max(0, wanted - part.paid), max(0, balance.get(p["asset"], 0)) // amount)
-            part.paid += count
-            part.gross += count * amount
-            balance[p["asset"]] = balance.get(p["asset"], 0) - count * amount
+            self._reserve_to(tx, part, max(
+                add_duration(now, p["period"]), add_duration(now, p["reserveAhead"])))
+
+    def _reserve_to(self, tx: _Transaction, part: _Part, lead: int) -> None:
+        """Reserve a started rate part's periods to cover ``lead``, as far as its
+        end and the payer's balance allow."""
+
+        p = part.terms
+        assert part.start is not None
+        balance = self.balances.setdefault(tx.mandate["from"], {})
+        paid_through = add_duration(part.start, p["period"], part.paid)
+        if paid_through >= part.deadline or lead < paid_through:
+            return
+        wanted = periods_through(part.start, p["period"], lead + 60)
+        if math.isfinite(part.deadline):
+            wanted = min(wanted, periods_through(
+                part.start, p["period"], int(part.deadline)))
+        amount = int(p["amount"])
+        count = min(max(0, wanted - part.paid), max(0, balance.get(p["asset"], 0)) // amount)
+        part.paid += count
+        part.gross += count * amount
+        balance[p["asset"]] = balance.get(p["asset"], 0) - count * amount
+
+    def reserve(self, transaction: str, through: int) -> list[dict[str, int]]:
+        """Reserve each running rate part's further periods through ``through``.
+
+        The payments service's scheduler decides when a started part is reserved
+        further. Reads and commands here never reserve: a rate part is reserved at
+        approval, at ``start``, and by a refilling ``advance``, which an HTTP double
+        does not call, so a test programs the scheduler's decision here. The
+        transaction is first brought to the clock as a read brings it. Each started, unstopped rate part is reserved with ``through``
+        as its lead, on the arithmetic of the reservation at ``start``, as far as
+        the part's end and the payer's balance allow; the answer gives, per such
+        part, its index, the instant it is then reserved through — the signed
+        snapshot's ``reservedThrough`` — and the periods added. A transaction
+        with no running rate part is refused with ``no_running_rate_part`` and
+        nothing changes.
+        """
+
+        self.advance(transaction, refill=False)
+        tx = self._get(transaction)
+        running = [(index, part) for index, part in enumerate(tx.parts)
+                   if part.terms["kind"] == "rate" and part.start is not None and part.stop is None]
+        if not running:
+            raise PaymentsAPIError(409, "no_running_rate_part")
+        answers = []
+        for index, part in running:
+            before = part.paid
+            self._reserve_to(tx, part, through)
+            answers.append({"part": index, "reserved_through": self._reserved_through(part),
+                            "periods_added": part.paid - before})
+        return answers
+
+    @staticmethod
+    def _reserved_through(part: _Part) -> int:
+        """The instant a started rate part is reserved through: its paid periods,
+        cut at its end and its stop."""
+
+        assert part.start is not None
+        return int(min(add_duration(part.start, part.terms["period"], part.paid),
+                       part.deadline, part.stop["effectiveAt"] if part.stop else math.inf))
 
     def submit(self, transaction: str, request: EventRequest | Mapping[str, Any]) -> dict[str, Any]:
         """Apply one authenticated event; a lost response can be retried unchanged."""
@@ -518,8 +565,7 @@ class PaymentsAuthority:
                 progress: dict[str, Any] = {
                     "periodsEarned": str(part.earned), "grossEarned": str(part.gross_earned)}
                 if part.start is not None:
-                    through = int(min(add_duration(part.start, p["period"], part.paid),
-                                      part.deadline, part.stop["effectiveAt"] if part.stop else math.inf))
+                    through = self._reserved_through(part)
                     progress["reservedThrough"] = through
                     if part.stop is None:
                         boundaries.append(through)

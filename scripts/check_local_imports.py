@@ -3,7 +3,9 @@
 
 Imports go at module level unless one has a reason to stay local — a circular
 import the move was tried against, or a deliberate lazy load — recorded beside it
-(`openspec/README.md`, "Plan closeout requirements", part 2). This check reads
+(`docs/guidance/engineering/dependencies-python.md`, "Imports go at module
+level"; closeout confirms it,
+`docs/guidance/workflow/closeout.md`, "Import placement"). This check reads
 the imports a change's diff adds or touches inside a function and fails on each
 with no comment: one ending a line of the statement, or one on its own on the
 line above. A comment that is only a tool's directive (`noqa`, `type:`,

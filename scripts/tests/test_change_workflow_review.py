@@ -7,27 +7,39 @@ import json
 import os
 import signal
 import subprocess
+import sys
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Sequence
 
 import pytest
 
-from change_workflow import config, find
+from change_workflow import codex, config, find, review, sandbox
+from change_workflow.claude_code import TOOLS
+from change_workflow.common import SESSION_ID
+from change_workflow.sandbox import BWRAP
 from change_workflow.log import log_path, note_orchestrator, read_log
-from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
-                                    review_models, run_review)
-from change_workflow.running import Terminated, live_runs
-from change_workflow.steps import Model, load_steps
+from change_workflow.review import (ReviewError, check_review, claim_record, prior_session,
+                                    review_models)
+from change_workflow.running import (Terminated, invocations_directory, keep_invocations,
+                                     kept_invocations, live_runs)
+from change_workflow.harness import Model
 from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
-                                      RECORDS, VALIDATED, FakeClaude, claude_review, clock,
-                                      codex_missing, codex_saying, configured, not_installed,
-                                      option, option_rules, repository, review_text, reviews_of,
-                                      validation_text, writing)
+                                      NO_SANDBOX, RECORDS, VALIDATED, FakeClaude, claude_review,
+                                      clock, codex_missing, codex_saying, configured,
+                                      ignore_evidence, needs_bwrap, not_installed,
+                                      option, option_rules, prompted, reading, repository,
+                                      review_text, reviews_of, validation_text, writing)
 
 # The branch the change lands on, given for each review run here: the change is
 # worked in place, with no clone to have recorded one.
 BASE = "dev"
+
+# The review runner with the sandbox stood in for, so each test reads the reviewer's
+# own command; the tests that confine a reviewer for real give the sandbox themselves.
+run_review = partial(review.run_review, confinement=NO_SANDBOX)
+review_and_log = partial(review.review_and_log, confinement=NO_SANDBOX)
 
 
 def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> None:
@@ -55,7 +67,9 @@ def test_numbering_follows_records_and_transcripts(tmp_path: Path) -> None:
     assert path.name == "04-implementation.md"
 
 
-def test_reviewer_runs_read_only_with_the_skill(tmp_path: Path) -> None:
+def test_reviewer_runs_with_the_skill_in_the_engines_sandbox_alone(tmp_path: Path) -> None:
+    """The reviewer runs the review skill; the sandbox confines it, so Codex runs
+    without its own (CW-t6mb)."""
     root = repository(tmp_path)
     calls: list[list[str]] = []
 
@@ -64,7 +78,7 @@ def test_reviewer_runs_read_only_with_the_skill(tmp_path: Path) -> None:
                head=lambda _: HEAD)
 
     command = calls[0]
-    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert command[command.index("--sandbox") + 1] == "danger-full-access"
     assert command[command.index("--model") + 1] == "m1"
     assert command[command.index("--config") + 1] == 'model_reasoning_effort="high"'
     assert command[-1] == ("Use the change-review skill. Review kind: pre-closeout. "
@@ -88,6 +102,7 @@ def test_a_review_reads_the_branch_the_clone_recorded(tmp_path: Path) -> None:
     Git directory."""
     root = repository(tmp_path)
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    ignore_evidence(root)
     (root / ".git" / find.CLONE_MARKER).write_text(
         json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
         "utf-8")
@@ -187,6 +202,34 @@ def test_a_review_on_the_rows_models_is_no_override(tmp_path: Path) -> None:
 
     assert "override" not in line
     assert "reviewer-override" not in (reviews_of(root) / f"01-{kind}.md").read_text("utf-8")
+
+
+def test_the_owners_direction_rides_on_the_prompt_and_marks_the_line(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+    direction = "check the guidance edits sit where the new layers put them"
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, direction=direction,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    assert calls[0][-1] == prompted(
+        f"Use the change-review skill. Review kind: design. Change: {CHANGE}. The owner's "
+        f"direction to this review, in their words: {direction!r}. Look harder where it "
+        "points, and still review the whole change in the skill's format.", "review")
+    assert (line["outcome"], line["direction"]) == ("finished", direction)
+    assert "override" not in line
+
+
+def test_a_review_with_no_direction_records_none(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    assert "direction" not in line and "owner's direction" not in calls[0][-1]
 
 
 def test_the_owners_unavailable_model_has_no_fallback(tmp_path: Path) -> None:
@@ -339,7 +382,32 @@ def test_a_closeout_review_of_an_active_change_is_refused(tmp_path: Path) -> Non
     assert not (reviews_of(root) / "transcripts").exists()
 
 
-def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) -> None:
+def test_a_merge_review_of_an_active_change_is_refused(tmp_path: Path) -> None:
+    """CW-xo82: the review of a merge after the archive needs the archive, read from
+    its node's entry guard."""
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    with pytest.raises(ReviewError, match="not archived; a merge review"):
+        run_review(CHANGE, "merge", base=BASE, root=root, head=lambda _: HEAD,
+                   runner=writing(review_text("merge"), calls=calls))
+
+    assert calls == []
+
+
+def test_a_merge_review_of_an_archived_change_is_recorded_in_the_archive(
+        tmp_path: Path) -> None:
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-14-{CHANGE}"
+    archived.mkdir(parents=True)
+    configured(tmp_path)
+
+    path = run_review(CHANGE, "merge", base=BASE, root=tmp_path,
+                      runner=writing(review_text("merge")), head=lambda _: HEAD)
+
+    assert path == archived / "reviews" / "01-merge.md"
+
+
+def test_a_later_review_continues_the_last_reviewer(tmp_path: Path) -> None:
     root = repository(tmp_path)
     run_review(CHANGE, "design", root=root, runner=writing(review_text(), session="first"),
                head=lambda _: HEAD)
@@ -351,7 +419,7 @@ def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) ->
 
     command = calls[0]
     assert command[:4] == ["codex", "exec", "resume", "first"]
-    assert command[command.index("--config") + 1] == 'sandbox_mode="read-only"'
+    assert command[command.index("--config") + 1] == 'sandbox_mode="danger-full-access"'
     assert "01-design" in command[-1] and "triage records" in command[-1]
     assert path.stem == "02-design"
     assert path.read_text("utf-8").count("<!-- reviewer-session: codex:first -->\n") == 1
@@ -439,7 +507,7 @@ def test_a_record_written_during_the_run_takes_the_earlier_number(tmp_path: Path
     root = repository(tmp_path, "01-design.log")
     inner = writing(review_text("implementation"))
 
-    def runner(command: Sequence[str], log: Path) -> int:
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
         # A validation started beside the review publishes its record meanwhile.
         (reviews_of(root) / "02-validation.md").write_text("x", "utf-8")
         return inner(command, log)
@@ -527,10 +595,24 @@ def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
     assert path.name == "05-pre-closeout.md"
 
 
-def test_with_no_inert_path_declared_a_document_commit_needs_validating(
+def test_with_no_inert_path_declared_a_document_commit_admits_the_next_review(
         tmp_path: Path) -> None:
-    """CW-n7ra: the engine reads no inert path of its own."""
+    """CW-n7ra: where a repository declares none, the workflow's default makes
+    `openspec/` and every Markdown file inert."""
     root = _triaged_pre_closeout(tmp_path, CONFIGURED)
+
+    path = run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
+                      changed_since=lambda *_: DOCUMENTS,
+                      runner=writing(review_text("pre-closeout")))
+
+    assert path.name == "05-pre-closeout.md"
+
+
+def test_with_an_empty_declaration_a_document_commit_needs_validating(
+        tmp_path: Path) -> None:
+    """CW-n7ra: an empty declaration replaces the default, and no path is inert."""
+    root = _triaged_pre_closeout(tmp_path, CONFIGURED.replace(
+        "[repository]\n", "[repository]\ninert-paths = []\n"))
 
     with pytest.raises(ReviewError, match="openspec/changes/README.md"):
         run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
@@ -600,7 +682,7 @@ def test_an_implementation_review_never_waits_for_validation(tmp_path: Path) -> 
 def test_an_interrupted_run_still_numbers_its_transcript(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    def runner(command: Sequence[str], log: Path) -> int:
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
         log.write_text("partial\n", "utf-8")
         raise KeyboardInterrupt
 
@@ -626,7 +708,7 @@ def test_a_claimed_name_is_never_overwritten(tmp_path: Path) -> None:
 def test_an_interrupted_run_leaves_no_empty_record(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    def runner(command: Sequence[str], log: Path) -> int:
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
@@ -658,6 +740,7 @@ def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
 
     assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2, "step": "review",
                     "session": "codex:codex-1", "commit": HEAD, "kind": "design",
+                    "inputs": "runs/20261021T091540Z-review",
                     "record": f"01-{kind}.md", "harness": "codex", "model": "gpt-6-sol",
                     "effort": "high", "outcome": "finished",
                     "next": {"step": "triage", "kind": "design"},
@@ -680,13 +763,16 @@ def test_a_review_falls_back_to_claude_when_codex_is_unavailable(
                           runner=codex, claude=claude, head=lambda _: HEAD, echo=None)
 
     command = claude.commands[0]
-    assert command[:3] == ["claude", "-p", ("Use the change-review skill. Review kind: "
-                                            f"implementation. Change: {CHANGE}. Base: dev.")]
+    assert command[:3] == ["claude", "-p", prompted("Use the change-review skill. Review kind: "
+                                                    f"implementation. Change: {CHANGE}. Base: dev.",
+                                                    "review")]
     assert "--json-schema" not in command
     assert (option(command, "--model"), option(command, "--effort")) == ("claude-opus-5-5",
                                                                          "high")
-    assert option_rules(command, "--allowedTools") == list(load_steps()["review"].allow)
-    assert "Edit" in option_rules(command, "--disallowedTools")
+    # Every tool is allowed: the review's sandbox, not a rule, keeps what it reviews
+    # read-only.
+    assert option_rules(command, "--allowedTools") == list(TOOLS)
+    assert option_rules(command, "--disallowedTools") == ["Bash(git push*)"]
     record = reviews_of(root) / "01-implementation.md"
     text = record.read_text("utf-8")
     assert "<!-- reviewer-session: claude:c-1 -->" in text
@@ -759,7 +845,7 @@ def test_a_file_the_reviewer_cannot_find_is_no_unavailability(tmp_path: Path,
     root = repository(tmp_path)
     claude = claude_review(review_text())
 
-    def codex_lost(command, log) -> int:
+    def codex_lost(command, log, key: str | None = None) -> int:
         raise not_installed(str(log))
 
     def claude_lost(command, cwd, feed, step) -> int:
@@ -782,10 +868,13 @@ def test_a_failed_claude_reviews_denials_are_on_its_stopped_line(tmp_path: Path)
     denied = [{"tool_name": "Edit", "tool_use_id": "t1", "tool_input": {}}]
 
     line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
-                          claude=claude_review("not a review", denials=denied),
+                          claude=claude_review("not a review", denials=denied,
+                                               then=["still not a review"]),
                           head=lambda _: HEAD, echo=None)
 
-    assert line["outcome"] == "stopped"
+    assert (line["outcome"], line["refused"]) == ("stopped", [
+        f"the first line is not the title of a design review of {CHANGE}: "
+        "'still not a review'"])
     assert (line["denials"], line["transcript"]) == (denied, "transcripts/01-design.log")
     assert line["unavailable"][0]["harness"] == "codex"
 
@@ -808,7 +897,7 @@ def test_a_reviews_network_error_is_retried_and_never_falls_back(tmp_path: Path)
     root = repository(tmp_path)
     calls: list[list[str]] = []
 
-    def unreachable(command: Sequence[str], log: Path) -> int:
+    def unreachable(command: Sequence[str], log: Path, key: str | None = None) -> int:
         calls.append(list(command))
         return codex_saying("ERROR: stream error: connection error; retrying")(command, log)
 
@@ -858,7 +947,7 @@ def test_a_refused_review_on_the_owners_model_is_marked_an_override(tmp_path: Pa
 def test_an_interrupted_review_is_logged_stopped(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    def runner(command, log: Path) -> int:
+    def runner(command, log: Path, key: str | None = None) -> int:
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
@@ -878,7 +967,7 @@ def test_a_review_signalled_mid_run_is_logged_stopped_and_publishes_nothing(
     runs = tmp_path / "git" / "change-runs"
     previous = signal.getsignal(signal.SIGTERM)
 
-    def signalled(command, log: Path) -> int:
+    def signalled(command, log: Path, key: str | None = None) -> int:
         writing(review_text())(command, log)
         with log.open("a", encoding="utf-8") as stream:
             stream.write("tokens used\n1,234\n")
@@ -993,7 +1082,7 @@ def test_a_review_quoting_an_earlier_records_markers_is_logged_with_its_own(
 def test_a_reviewer_that_cannot_start_is_logged_stopped_with_head(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    def broken(command, log: Path) -> int:
+    def broken(command, log: Path, key: str | None = None) -> int:
         raise PermissionError("codex")
 
     line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=broken,
@@ -1010,7 +1099,7 @@ def test_a_review_is_recorded_in_progress_while_it_runs_and_forgotten_after(
     seen: list[list] = []
     review = writing(review_text(), session="codex-1")
 
-    def watched(command: Sequence[str], log: Path) -> int:
+    def watched(command: Sequence[str], log: Path, key: str | None = None) -> int:
         seen.append(live_runs(runs))
         return review(command, log)
 
@@ -1025,3 +1114,554 @@ def test_a_review_is_recorded_in_progress_while_it_runs_and_forgotten_after(
     assert all([(run.step, run.change) for run in live] == [("review", CHANGE)]
                for live in seen)
     assert list(runs.iterdir()) == []
+
+
+# A draft the format check refuses is sent back to its reviewer.
+
+# The kind of the reviews below.
+KIND = "design"
+NO_EVIDENCE = review_text().replace("- **Evidence:** `kit/pool-overrides/records.py:43`",
+                                    "- **Evidence:**")
+
+
+def writing_each(*texts: str, calls: list[list[str]] | None = None, session: str = "s-1"):
+    """Codex answering each run with the next of `texts`, its transcript appended to
+    as the real runner appends it."""
+    answers = list(texts)
+
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
+        if calls is not None:
+            calls.append(list(command))
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write(f"--------\nsession id: {session}\n--------\nattempt {len(answers)}\n")
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            answers.pop(0), "utf-8")
+        return 0
+    return runner
+
+
+def test_each_codex_attempt_keeps_what_it_invokes_under_a_key_of_its_own(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CW-w3oa: each Codex attempt — here a draft and its correction — runs with a key
+    the engine makes for it, distinct from the starting session's, from Codex's
+    session, and from the other attempt's, and the review's line takes what each kept.
+    Library integration: a real Git checkout keeps the invocations, Codex doubled."""
+    monkeypatch.setenv(SESSION_ID, "the-starting-session")
+    root = _tracking(repository(tmp_path))
+    write, keys = writing_each(NO_EVIDENCE, review_text()), []
+
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
+        keys.append(key)
+        keep_invocations(invocations_directory(root), key, [
+            {"change": CHANGE, "hook": "pre-commit", "command": f"attempt {len(keys)}",
+             "exit_status": 0}])
+        return write(command, log, key)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=runner,
+                          head=lambda _: HEAD)
+
+    assert line["outcome"] == "finished", line.get("reason")
+    assert len(set(keys)) == 2 and all(key.startswith("review-codex-") for key in keys)
+    assert not {"the-starting-session", "s-1"} & set(keys)
+    assert [entry["command"] for entry in line["invoked"]] == ["attempt 1", "attempt 2"]
+    assert all(kept_invocations(invocations_directory(root), key) == [] for key in keys)
+
+
+def test_a_refused_draft_is_sent_back_to_its_reviewer_and_published_corrected(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(NO_EVIDENCE, review_text(), calls=calls),
+                          head=lambda _: HEAD)
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+    assert calls[1][:4] == ["codex", "exec", "resume", "s-1"]
+    assert calls[1][calls[1].index("--model") + 1] == "gpt-6-sol"
+    assert "- F1 has no Evidence" in calls[1][-1]
+    assert f"check review design {CHANGE}" in calls[1][-1]
+    assert (line["outcome"], line["record"], line["session"]) == (
+        "finished", f"01-{KIND}.md", "codex:s-1")
+    assert line["sent_back"] == [["F1 has no Evidence"]]
+    assert "failed the format check and was sent back" in line["message"]
+    assert "F1 has no Evidence" in line["message"]
+    assert "corrected review passed" in line["message"]
+    transcript = (reviews_of(root) / "transcripts" / "01-design.log").read_text("utf-8")
+    assert transcript.count("session id: s-1") == 2
+    assert not (reviews_of(root) / "transcripts" / "01-design.rejected.md").exists()
+
+
+def test_a_claude_reviewers_refused_draft_is_sent_back_to_its_session(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    claude = claude_review(NO_EVIDENCE, then=[review_text()])
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
+                          claude=claude, head=lambda _: HEAD, echo=None)
+
+    assert option(claude.commands[1], "--resume") == "c-1"
+    assert option(claude.commands[1], "--model") == "claude-opus-5-5"
+    assert "- F1 has no Evidence" in claude.commands[1][2]
+    assert (line["outcome"], line["session"], line["sent_back"]) == (
+        "finished", "claude:c-1", [["F1 has no Evidence"]])
+
+
+def test_a_refusal_that_survives_its_send_back_is_kept_and_marked(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    still = NO_EVIDENCE.replace("blocking", "urgent")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(NO_EVIDENCE, still, calls=calls),
+                          head=lambda _: HEAD)
+
+    assert len(calls) == 2
+    assert line["outcome"] == "stopped"
+    assert line["session"] == "codex:s-1"
+    assert line["sent_back"] == [["F1 has no Evidence"]]
+    assert line["refused"] == [
+        "F1 has Severity 'urgent', not one of blocking, minor, should", "F1 has no Evidence"]
+    assert line["rejected"] == "transcripts/01-design.rejected.md"
+    assert "after 1 send-back for correction" in line["reason"]
+    assert "continues the refused session" in line["reason"]
+    assert (reviews_of(root) / "transcripts" / "01-design.rejected.md").read_text(
+        "utf-8") == still
+    assert not list(reviews_of(root).glob("*.md"))
+
+
+@pytest.mark.parametrize("retries,runs", [(0, 1), (2, 3)])
+def test_the_configuration_sets_how_often_a_draft_is_sent_back(
+        tmp_path: Path, retries: int, runs: int) -> None:
+    root = configured(repository(tmp_path),
+                      CONFIGURED + f"\n[review]\nformat-retries = {retries}\n")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(*[NO_EVIDENCE] * runs, calls=calls),
+                          head=lambda _: HEAD)
+
+    assert len(calls) == runs
+    assert line["outcome"] == "stopped" and line["refused"] == ["F1 has no Evidence"]
+    assert line.get("sent_back", []) == [["F1 has no Evidence"]] * retries
+    assert ("send-back" in line["reason"]) == bool(retries)
+
+
+def test_a_reviewer_that_exited_non_zero_is_never_sent_back(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(NO_EVIDENCE, 1, calls=calls), head=lambda _: HEAD)
+
+    assert len(calls) == 1
+    assert line["outcome"] == "stopped"
+    assert "refused" not in line and "sent_back" not in line
+
+
+def test_the_next_review_continues_the_refused_session_with_its_problems(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing_each(NO_EVIDENCE, NO_EVIDENCE, session="refused"),
+                   head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(review_text(), calls=calls, session="refused"),
+                          head=lambda _: HEAD)
+
+    assert calls[0][:4] == ["codex", "exec", "resume", "refused"]
+    assert "was not published" in calls[0][-1] and "- F1 has no Evidence" in calls[0][-1]
+    assert (line["outcome"], line["record"]) == ("finished", f"02-{KIND}.md")
+    assert prior_session(reviews_of(root), "design") == ("codex", "refused", "02-design")
+
+
+def test_fresh_starts_a_new_reviewer_after_a_refusal(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing_each(NO_EVIDENCE, NO_EVIDENCE, session="refused"),
+                   head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    review_and_log(CHANGE, "design", fresh=True, root=root, clock=clock,
+                   runner=writing_each(review_text(), calls=calls, session="new"),
+                   head=lambda _: HEAD)
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+
+
+def test_a_refusal_of_another_kind_is_not_continued(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing_each(NO_EVIDENCE, NO_EVIDENCE, session="refused"),
+                   head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    review_and_log(CHANGE, "implementation", base=BASE, root=root, clock=clock,
+                   runner=writing_each(review_text("implementation"), calls=calls),
+                   head=lambda _: HEAD)
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+
+
+# The format check a reviewer runs before it answers is the one before publishing.
+
+def test_the_review_check_passes_a_review(capsys: pytest.CaptureFixture[str]) -> None:
+    assert check_review("Some narration first.\n\n" + review_text(), "design", CHANGE) == 0
+
+    out, err = capsys.readouterr()
+    assert out == f"OK: the design review of {CHANGE} passes the format check.\n"
+    assert err == ""
+
+
+@pytest.mark.parametrize("text,problems", [
+    (NO_EVIDENCE, ["F1 has no Evidence"]),
+    # Evidence given as a nested list under an empty field states none.
+    (review_text().replace("- **Evidence:** `kit/pool-overrides/records.py:43`",
+                           "- **Evidence:**\n  - `kit/pool-overrides/records.py:43`\n"
+                           "  - `kit/pool-overrides/schema.py:12`"),
+     ["F1 has no Evidence"]),
+    (review_text().replace("## Questions", "## Notes").replace("blocking", "urgent"),
+     ["missing section '## Questions'"]),
+    (review_text("implementation"),
+     [f"the first line is not the title of a design review of {CHANGE}: "
+      f"'# Implementation review — {CHANGE}'"]),
+])
+def test_the_review_check_reports_each_problem_on_its_own_line(
+        capsys: pytest.CaptureFixture[str], text: str, problems: list[str]) -> None:
+    assert check_review(text, "design", CHANGE) == 1
+
+    out, err = capsys.readouterr()
+    assert (out, err.splitlines()) == ("", problems)
+
+
+# A review's hooks, run by its runner: library integration, the reviewer doubled and
+# each hook a real `sh` command.
+
+RUN = "runs/20261021T091540Z-review"
+# The record the design review a test runs publishes, the change's first.
+DESIGN = "design"
+PUBLISHED = f"01-{DESIGN}.md"
+
+
+def _hooked(root: Path, *hooks: str) -> Path:
+    return configured(root, CONFIGURED.replace(
+        "[hooks]\n", "[hooks]\n" + "".join(f"{hook}\n" for hook in hooks)))
+
+
+def test_a_reviews_hooks_run_around_its_reviewer(tmp_path: Path) -> None:
+    """CW-h3ks: `before-review` is given the kind and the run's directory, which the
+    reviewer's prompt names; `after-review` sees the published record."""
+    record = f"openspec/changes/{CHANGE}/reviews/{PUBLISHED}"
+    root = _hooked(repository(tmp_path), "before-review = 'echo {kind} > {inputs}/kind.md'",
+                   f"after-review = 'cp {record} {{inputs}}/seen.md'")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    run = reviews_of(root) / RUN
+    assert calls[0][-1] == prompted(
+        f"Use the change-review skill. Review kind: design. Change: {CHANGE}.", "review")
+    assert (run / "before/kind.md").read_text("utf-8") == "design\n"
+    assert (run / "after/seen.md").read_text("utf-8") == (root / record).read_text("utf-8")
+    assert (line["outcome"], line["inputs"], line["record"]) == ("finished", RUN, PUBLISHED)
+
+
+def test_no_hook_is_declared_before_a_review(tmp_path: Path) -> None:
+    """CW-h3ks's scenario, the engine's half: the review runs, and its inputs say no
+    `before-review` was declared, for the orchestrating session to say so."""
+    root = repository(tmp_path)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1"), head=lambda _: HEAD)
+
+    assert line["outcome"] == "finished" and "invoked" not in line
+    assert "## before-review\n\nNot declared; nothing ran." in (
+        reviews_of(root) / RUN / "before/status.md").read_text("utf-8")
+
+
+def test_a_reviews_hooks_run_in_the_environment_given(tmp_path: Path) -> None:
+    root = _hooked(repository(tmp_path), "before-review = 'echo $GREETING > {inputs}/greeting'")
+
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing(review_text(), session="codex-1"), head=lambda _: HEAD,
+                   environ={**os.environ, "GREETING": "hello"})
+
+    assert (reviews_of(root) / RUN / "before/greeting").read_text("utf-8") == "hello\n"
+
+
+def test_a_failing_hook_before_a_review_prevents_nothing(tmp_path: Path) -> None:
+    root = _hooked(repository(tmp_path), "before-review = 'exit 2'")
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1"), head=lambda _: HEAD)
+
+    assert line["outcome"] == "finished"
+    assert "failed, exit 2: exit 2 (exit 2)" in (
+        reviews_of(root) / RUN / "before/status.md").read_text("utf-8")
+
+
+def test_a_hook_after_a_review_fails(tmp_path: Path) -> None:
+    """CW-a4fl: the run ends as a question naming the hook; the reviewer is not
+    resumed, and no second record is published or claimed."""
+    root = _hooked(repository(tmp_path), "after-review = 'echo unreachable; exit 1'")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), session="codex-1", calls=calls),
+                          head=lambda _: HEAD)
+
+    assert len(calls) == 1
+    assert (line["outcome"], line["record"]) == ("question", PUBLISHED)
+    assert line["message"] == (
+        f"{PUBLISHED} is published and stands, and after-review failed after it: "
+        "after-review: failed, exit 1. No reviewer is resumed for it. See "
+        f"reviews/{RUN}/after/status.md and the logs it names.")
+    assert line["awaiting"] == "the owner's decision on the failing after-review"
+    assert (reviews_of(root) / PUBLISHED).is_file()
+    assert not list(reviews_of(root).rglob("02-*"))
+    assert read_log(reviews_of(root) / "workflow.jsonl") == [line]
+    assert "unreachable" in (reviews_of(root) / RUN / "after/after-review.log").read_text("utf-8")
+
+
+def test_a_review_its_guard_refuses_runs_no_hook(tmp_path: Path) -> None:
+    root = _hooked(repository(tmp_path), "before-review = 'touch ran'")
+
+    line = review_and_log(CHANGE, "implementation", root=root, clock=clock,
+                          runner=writing(review_text("implementation")), head=lambda _: HEAD)
+
+    assert line["outcome"] == "stopped" and line["inputs"] == RUN
+    assert not (root / "ran").exists()
+
+
+# The reviewer's invariants: library integration on a real Git checkout.
+
+def _tracking(root: Path) -> Path:
+    """`root` as a Git checkout tracking one source file, its configuration, the
+    change's directory, and evidence ignored."""
+    env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "init", "-q", "-b", "feat/change", str(root)], check=True)
+    (root / ".git/info/exclude").write_text("/.agents/\n/openspec/\n/.snapshot/\n/ran\n",
+                                            "utf-8")
+    (root / "src.py").write_text("code\n", "utf-8")
+    for args in (("add", "src.py"), ("commit", "-qm", "base")):
+        subprocess.run(["git", *args], cwd=root, env=env, check=True)
+    return root
+
+
+def test_a_reviewer_that_edits_what_it_reviews_publishes_nothing(tmp_path: Path) -> None:
+    """CW-f9le, for the review: its reviewer changed a tracked file, so the run is logged
+    stopped naming it, nothing is published, and the hook after it does not run."""
+    root = _tracking(_hooked(repository(tmp_path), "after-review = 'touch ran'"))
+    write = writing(review_text())
+
+    def editing(command: Sequence[str], log: Path, key: str | None = None) -> int:
+        (root / "src.py").write_text("reviewed and edited\n", "utf-8")
+        return write(command, log)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=editing,
+                          head=lambda _: HEAD)
+
+    assert line["outcome"] == "stopped"
+    assert line["invariants"] == [{"check": "unchanged", "found": "tracked files changed: src.py"}]
+    assert line["reason"].startswith(
+        "the run broke its invariants: unchanged: tracked files changed: src.py; nothing was "
+        "published")
+    assert not list(reviews_of(root).glob("[0-9]*.md"))
+    assert not (root / "ran").exists()
+
+
+def test_a_reviewer_that_changes_nothing_is_published(tmp_path: Path) -> None:
+    root = _tracking(repository(tmp_path))
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text()), head=lambda _: HEAD)
+
+    assert line["outcome"] == "finished" and "invariants" not in line, line.get("reason")
+
+
+# A reviewer launched in the review's sandbox: external-process integration, the
+# runner launching real bubblewrap around a program that stands in for Codex, in a
+# real Git checkout; skipped, saying why, where the engine's own probe finds the
+# sandbox cannot run, and failed there under `SANDBOX_REQUIRED=1`.
+
+
+# Codex stood in for: it runs each command it is given in the directory it is told to
+# work in, printing it and its output as Codex does, then writes its final message
+# where Codex is told to.
+_CODEX = r"""
+import subprocess, sys
+draft, review, cwd, *commands = sys.argv[1:]
+print("session id: r-1")
+for command in commands:
+    done = subprocess.run(["sh", "-c", command], capture_output=True, text=True, cwd=cwd)
+    print("exec")
+    print(f"/bin/bash -lc '{command}' in /repo")
+    print(f" exited {done.returncode} in 1ms:" if done.returncode else " succeeded in 1ms:")
+    print(done.stdout + done.stderr, end="")
+open(draft, "w").write(review)
+"""
+
+
+def _confined_reviewer(text: str, *commands: str, seen: list[list[str]] | None = None):
+    """Codex's command replaced by `_CODEX` inside the sandbox's command, run through
+    Codex's adapter's own runner with the engine's key for the run; each command
+    launched, the sandbox's around Codex's, added to `seen`."""
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
+        assert command[0] == BWRAP
+        if seen is not None:
+            seen.append(list(command))
+        draft = command[command.index("--output-last-message") + 1]
+        cwd = command[command.index("--cd") + 1]
+        start = command.index("--", command.index("--die-with-parent")) + 1
+        return codex.run([*command[:start], sys.executable, "-c", _CODEX, draft, text, cwd,
+                          *commands], log, key)
+    return runner
+
+
+@needs_bwrap
+def test_a_confined_reviewer_cannot_write_what_it_reviews_but_records_its_invocations(
+        tmp_path: Path) -> None:
+    """CW-m8wq's "A review tries to write" and the engine's invocation record writable
+    beside it: the reviewer's write of a file it reviews fails, its write under
+    `.git/change-invocations/` succeeds, its final message, written outside the
+    checkout, is published, and the line names the refusal."""
+    root = _tracking(repository(tmp_path / "work"))
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    reviewed, invocations = root / "openspec/changes/x.md", root / ".git/change-invocations"
+    runner = _confined_reviewer(review_text(), f"echo y > {reviewed}",
+                                f"echo y > {invocations}/probe")
+
+    kind = "design"
+
+    line = review_and_log(CHANGE, kind, root=root, clock=clock, runner=runner,
+                          head=lambda _: HEAD, echo=None, confinement=reading(tmp_path),
+                          home=tmp_path / "home", temporary=temporary)
+
+    assert line["outcome"] == "finished", line.get("reason")
+    assert (reviews_of(root) / f"01-{kind}.md").is_file()
+    assert not reviewed.exists()
+    assert (invocations / "probe").read_text("utf-8") == "y\n"
+    [refusal] = line["refusals"]
+    assert (refusal["tool"], refusal["command"]) == ("exec", f"echo y > {reviewed}")
+    assert "Read-only file system" in refusal["error"]
+    assert not list(temporary.iterdir())
+
+
+@needs_bwrap
+def test_a_codex_reviewers_final_message_written_inside_is_the_review_published(
+        tmp_path: Path) -> None:
+    """CW-m8wq's "A Codex review writes its final message": the drafts directory the
+    engine makes under the host's `/tmp` is in the review's scope and bound at its own
+    path inside the reviewer's private `/tmp`, so the draft
+    the reviewer writes there is the one the engine publishes; the directory is gone
+    after the run."""
+    root = _tracking(repository(tmp_path / "work"))
+    seen: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=_confined_reviewer(review_text(), seen=seen),
+                          head=lambda _: HEAD, echo=None, confinement=reading(tmp_path),
+                          home=tmp_path / "home", temporary=Path("/tmp"))
+
+    assert line["outcome"] == "finished", line.get("reason")
+    draft = Path(seen[0][seen[0].index("--output-last-message") + 1])
+    assert draft.parent.parent == Path("/tmp")
+    assert ["--bind", str(draft.parent), str(draft.parent)] == seen[0][
+        seen[0].index(str(draft.parent)) - 1:seen[0].index(str(draft.parent)) + 2]
+    assert (reviews_of(root) / PUBLISHED).read_text("utf-8").startswith(
+        review_text().rstrip("\n"))
+    assert not draft.parent.exists()
+
+
+# The engine itself, which the reviewer runs as the review skill lets it, for evidence.
+ENGINE = Path(__file__).resolve().parents[1] / "change-workflow"
+
+
+def _checking(root: Path) -> Path:
+    """`root`, a repository whose check before a commit asks Git where its checkout
+    is, with the workflow's default checks turned off, as a Git checkout."""
+    disabled = ", ".join(f"{{ check = '{check}', reason = 'a test repository' }}"
+                         for check in config.DEFAULT_CHECKS)
+    configured(root, CONFIGURED.replace(
+        "[hooks]\n", "[hooks]\npre-commit = ['git rev-parse --show-toplevel']\n")
+        + f"\n[defaults]\ndisable = [{disabled}]\n")
+    return _tracking(root)
+
+
+@needs_bwrap
+def test_a_confined_codex_reviewers_git_commands_reach_the_systems_git(
+        tmp_path: Path) -> None:
+    """CW-t6mb's "Codex runs a review": inside the engine's sandbox Codex runs without
+    its own, and a Git command the reviewer runs, alone or through the engine's
+    `run pre-commit`, reaches the system's Git through the engine's `git`."""
+    root = _checking(repository(tmp_path / "work"))
+    seen: list[list[str]] = []
+    runner = _confined_reviewer(review_text(), "git rev-parse --show-toplevel",
+                                f"{ENGINE} run pre-commit {CHANGE}", seen=seen)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=runner,
+                          head=lambda _: HEAD, echo=None, confinement=reading(tmp_path),
+                          home=tmp_path / "home")
+
+    assert line["outcome"] == "finished", line.get("reason")
+    assert "danger-full-access" in seen[0]
+    transcript = (reviews_of(root) / "transcripts/01-design.log").read_text("utf-8")
+    assert f" succeeded in 1ms:\n{root}\n" in transcript, transcript
+    assert f"+ git rev-parse --show-toplevel\n{root}\n" in transcript, transcript
+    [check] = [entry for entry in line["invoked"] if entry.get("hook") == "pre-commit"]
+    assert (check["command"], check["exit_status"]) == ("git rev-parse --show-toplevel", 0)
+
+
+@needs_bwrap
+def test_a_codex_reviewers_refused_push_and_checks_reach_the_reviews_line(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CW-w3oa's "A Codex reviewer pushes": the sandbox's `git` refuses the reviewer's
+    push, and the review's line records it in `refusals`, beside the check the reviewer
+    ran among its invocations, both kept under the engine's key for the run; the
+    starting session keeps neither."""
+    monkeypatch.setenv(SESSION_ID, "the-starting-session")
+    root = _checking(repository(tmp_path / "work"))
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=root, check=True)
+    runner = _confined_reviewer(review_text(), "git push --no-verify origin HEAD:dev",
+                                f"{ENGINE} run pre-commit {CHANGE}")
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=runner,
+                          head=lambda _: HEAD, echo=None, confinement=reading(tmp_path),
+                          home=tmp_path / "home")
+
+    assert line["outcome"] == "finished", line.get("reason")
+    assert [(refusal["tool"], refusal["command"]) for refusal in line["refusals"]] == [
+        ("git", "git push --no-verify origin HEAD:dev")]
+    assert [entry["command"] for entry in line["invoked"]
+            if entry.get("hook") == "pre-commit"] == ["git rev-parse --show-toplevel"]
+    invocations = root / ".git/change-invocations"
+    assert kept_invocations(invocations, "the-starting-session") == []
+    assert subprocess.run(["git", "ls-remote", str(remote)], capture_output=True,
+                          text=True).stdout == ""
+
+
+def test_without_the_sandbox_a_review_is_unconfined_and_says_so(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-v5ny, for the review: with the probe failing, the reviewer runs unconfined,
+    a warning says why, and the line records `unconfined: true`."""
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+    missing_bwrap = sandbox.Confinement(probe=lambda: "bwrap is not installed")
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(review_text(), calls=calls), head=lambda _: HEAD,
+                          echo=None, confinement=missing_bwrap)
+
+    assert calls[0][0] == "codex"
+    # CW-t6mb's "Codex runs a review without the sandbox": in its own read-only one.
+    assert calls[0][calls[0].index("--sandbox") + 1] == "read-only"
+    assert (line["outcome"], line["unconfined"]) == ("finished", True)
+    assert "review run is unconfined: bwrap is not installed" in capsys.readouterr().err

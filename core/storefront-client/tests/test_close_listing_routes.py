@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 import httpx
 import pytest
@@ -37,7 +36,7 @@ def _signed_response(request: httpx.Request) -> httpx.Response:
             operation="close_listing",
             resource="listing-abc",
             request_id=request.headers[REQUEST_ID_HEADER],
-            timestamp=int(time.time()),
+            timestamp=int(request.headers[TIMESTAMP_HEADER]),
             status=200,
             body_hash=canonical_body_hash(_RESPONSE),
         ),
@@ -98,12 +97,7 @@ def test_async_close_listing_posts_empty_body_to_versioned_route():
     asyncio.run(_run())
 
 
-def test_sync_close_listing_resigns_semantic_retry(monkeypatch):
-    ticks = iter([1_000, 1_000, 1_000, 1_001, 1_001, 1_001])
-    monkeypatch.setattr(
-        "storefront_client.auth.time.time",
-        lambda: next(ticks, 1_001),
-    )
+def test_sync_close_listing_resigns_semantic_retry(held_time):
     transport = _CapturingSyncTransport()
     with SyncStorefrontClient(
         "http://test",
@@ -115,6 +109,7 @@ def test_sync_close_listing_resigns_semantic_retry(monkeypatch):
         transport=transport,
     ) as client:
         resp = client.close_listing("listing-abc", request_id="request-1")
+        held_time.set(1_001)
         client.close_listing("listing-abc", request_id="request-1")
         with pytest.raises(ValueError, match="changed request content"):
             client.close_listing("listing-other", request_id="request-1")

@@ -67,35 +67,18 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed, so
-  if a chained command is denied, run its commands one call at a time. If a single
-  command or any other tool call is denied, finish every part of the work that does
-  not depend on it. If the step cannot complete without that call, end with
-  `stopped`, `reason` naming that exact call and why the step needed it, and
-  `denials` listing the calls as you saw them; the wrapper replaces them with the
-  run's own record. Otherwise go on and end as the step ends: the wrapper records
-  the denial on the outcome whatever it is, and the orchestrating session reads it
-  before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it, except where the rule exists only to keep file writes on the Edit and
-  Write tools — the step table's comments name those rules: sed's in-place forms,
-  find's deleting, running, and writing actions, and the diff family's
-  output-to-file forms — whose refused shell write may be made with the Edit or
-  Write tool this step's rules allow. A call denied because no rule allows it —
-  the harness reports it as don't ask mode — may be done instead by a tool this
-  step's rules allow for the same work, such as the Edit tool for a shell write or
-  Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question. Remove a
+  tracked file with `git rm`, which Git can restore.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
-  the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`: `-C` names only a subdirectory a skill names, such as `make -C
-  helm test-render`. Remove a tracked file with
-  `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
 - **Every reply is a turn.** This step is a discussion: each reply to the owner
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
@@ -105,8 +88,8 @@ the session, and every turn ends with an outcome matching
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
   with `run_in_background`. Run a long command such as `scripts/change-workflow run
   pre-commit <change>` in the
-  background as written, with no redirect of its output — a redirect is a write no
-  rule admits, and the harness keeps a background command's output in a file — and
+  background as written, with no redirect of its output — the harness keeps a
+  background command's output in a file — and
   wait for it inside one Bash call, with `scripts/change-workflow wait <that-file>
   '<pattern>'` matching the line it prints when it ends — for `run pre-commit`, the
   closing line of `pre-commit`, its last hook, `[change-workflow] pre-commit at`
@@ -172,12 +155,34 @@ correct what it names and run it again. A session closed before it records leave
 the triage in progress, whatever its files say: the computation names it again,
 to be resumed, or its outcome recorded with the command above.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-triage` hook, given the
+kind of review triaged, and kept what it did in the run's inputs directory, which
+your prompt names (`Inputs`, `reviews/runs/<run>/before`). Read it first:
+`status.md`, the hook's closing lines, exit status, and log, and every other
+top-level Markdown file there, each a message from the repository's hook, in full.
+Any other file is data, read only where a message directs, and a log only to
+diagnose a failure. A failing hook prevented nothing: tell the owner what its
+failure means for the triage, and ask before going on when the triage cannot be
+made soundly with it. Interactively, with no wrapper, run `scripts/change-workflow
+run before triage <change>` first; its last line names the directory. Once `##
+Next` is written and any fix committed and pushed, run `scripts/change-workflow run
+after triage <change>` before `record`, and, when it fails, fix what it found if
+the triage can, and run it again, or tell the owner. Unattended, an after-hook that
+fails resumes this session once with its failure; a second failure goes to the
+owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
 ## 1. Find the review and load the context
 
 The change's directory is what `scripts/change-workflow find <change>` prints:
 `openspec/changes/<change>/`, or, once closeout has archived it, its dated
-directory under `openspec/changes/archive/` — a closeout review is always of an
-archived change. The reviews to triage are its numbered records in `reviews/` —
+directory under `openspec/changes/archive/` — a closeout review and a merge review
+are always of an archived change. The reviews to triage are its numbered records in `reviews/` —
 `NN-<kind>.md` — that have no `NN-<kind>.triage.md` beside them. Never read
 `reviews/transcripts/`: those are raw reviewer sessions, not records.
 
@@ -187,9 +192,10 @@ a change's clone, the owner's workspace's, which holds the history of every
 cleaned-up change.
 
 When the owner pastes a review from elsewhere, save it verbatim as the change's
-next numbered record, `NN-<kind>-external.md`, numbered after every file in
-`reviews/` and `reviews/transcripts/`, so later reviews read it as history. Never
-overwrite a record: if the name exists when you write, take the next number. Its
+next numbered record, at the path `scripts/change-workflow find --next-record
+<kind>-external <change>` prints when you write it, so later reviews read it as
+history; never count the number yourself, or take it from the log's `seq`. Never
+overwrite a record: if the path exists when you write, ask again. Its
 findings may carry no lens, basis, severity, or alternatives; you assign them in
 step 2 and say that you did.
 
@@ -202,10 +208,11 @@ For an implementation round, also take:
 - **The validation record** of the commit the reviews describe — the latest
   `NN-validation.md`, with no triage file beside it. Its `V<n>` failures, caused by
   the commit or of unknown cause, are findings: lens `testing`, basis `evidence`,
-  severity `blocking`. Check each diagnosis against the logs it cites, under
-  `.snapshot/`, rather than trusting it. Its `## Environment` entries and an
-  `inconclusive` part are missing evidence, never findings: say what evidence is
-  missing and whether the round can be judged without it. A `waived` part is the
+  severity `blocking`. Check each diagnosis against the evidence it cites, read as
+  its evidence kind's guide says, rather than trusting it. Its `## Environment`
+  entries and an `inconclusive` kind are missing evidence, never findings: say what
+  evidence is missing and whether the round can be judged without it. A `waived`
+  kind is the
   owner's omission of that evidence: name it, and the decision the record cites,
   but it is neither a finding nor missing evidence to raise. A waiver the validation
   recommended, which its `## Environment` records with its criterion, is a ledger
@@ -226,7 +233,7 @@ For an implementation round, also take:
   only if the owner waives the rule, judging the changes between the commits: name
   both, summarize what changed (`git log --oneline <reviewed>..<validated>` and the
   paths of `git diff --stat <reviewed> <validated>`), and ask. Recommend the waiver
-  when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds — here,
+  when a criterion of `change-workflow`'s CW-q3dm holds — here,
   typically, that the two commits differ only in records or documentation —
   naming the criterion and the paths; with none holding, recommend none. Record a
   waiver in the triage file of each record involved and as one ledger line
@@ -262,8 +269,12 @@ For an implementation round, also take:
   triage finished is the earlier pass's, never this one's. Under orchestration the orchestrating session
   saves the notes as the round's record. Otherwise ask for them if the owner has
   not pasted them, naming that command so the owner can read what the notes are
-  about, and save them exactly as pasted as the next numbered record,
-  `NN-implementation-owner.md`.
+  about, and save them exactly as pasted as the next numbered record, at the path
+  `scripts/change-workflow find --next-record implementation-owner <change>`
+  prints. Notes the owner saved while no review awaited a
+  triage — on an earlier triage's fixes, or on a re-plan — are carried by the next
+  round: its line in the workflow log names them under `carries`, and you triage
+  them with the round's own notes, as points of their own.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and then each commit the owner made
   while reading, which the pull above brought in, as a point after them; and
@@ -285,7 +296,9 @@ corrections, or new decision numbers — for issues a review already named.
 
 Then read what you need to judge the findings: the documents
 `scripts/change-workflow config load triage` prints, every file in the change, earlier reviews and their triage, and the code,
-specifications, and guidance each finding cites.
+specifications, and guidance each finding cites — with each cited specification, its
+companion and every other Markdown file in its capability's directory but its
+`index.md`, the capability's own guidance — before deciding a fix.
 
 ## 2. Check every finding
 
@@ -316,14 +329,13 @@ For each finding, open what it cites and decide:
   A defect a finding shows outside the change's stated scope is an `edit` or a
   `fix` when its fix is understood and small beside the change, recorded in the
   task notes or the triage record; one that is large, or not understood well enough
-  to fix without a design of its own, is `none`, recorded where `AGENTS.md`'s
-  "Deferred work" says — its own change, or an unowned gap
-  (`openspec/README.md#defects-found-during-a-change`).
+  to fix without a design of its own, is `none`, recorded where deferred work goes
+  (`docs/guidance/workflow/working-model.md#deferred-work`) — its own change, or an
+  unowned gap (`docs/guidance/workflow/changes.md#defects-found-during-a-change`).
 - **Section:** the `tasks.md` section the finding concerns, when it concerns one.
 - **Default acceptance:** whether the finding is accepted by default or discussed.
   It is accepted by default when every condition of the default rule holds
-  (`change-workflow`'s CW-d5ac; `docs/agents/change-workflow.md`, "Default
-  acceptance"), and discussed otherwise:
+  (`change-workflow`'s CW-d5ac), and discussed otherwise:
   - it comes from a review — not a validation record, the owner's notes, or the
     orchestrating session's observations;
   - its severity, as triaged, is not `blocking`;
@@ -366,24 +378,26 @@ typography.
 A finding looks like this:
 
 ```markdown
-### 🟡✅ 20 F2 — tasks.md still says stage 07c hasn't run against a stack
+### 🟡✅ 20 F2 — tasks.md still says the refund scenario hasn't run deployed
 *consistency*
 
-The note on the round-3 fix under section 6 ends "Stage 07c has not run against a
-stack: the fix commit's validation runs it." That was true when it was written,
-but validation 18 has since run the whole pipeline at `443f9505`, stage 07c
-included, and passed, and the ledger records it as confirming the fix. The
-reviewer points out that the task notes and the ledger now disagree.
+The note on the round-3 fix under section 6 ends "The refund scenario has not run
+against a deployment: the fix commit's validation runs it." That was true when it
+was written, but validation 18 has since run every end-to-end scenario at
+`443f9505`, the refund scenario included, and passed, and the ledger records it as
+confirming the fix. The reviewer points out that the task notes and the ledger now
+disagree.
 
-I agree. Someone recording the end-to-end evidence at 7.9 from `tasks.md` alone
-would take 07c for unproven and ask for a pipeline run that has already happened.
+I agree. Someone recording the end-to-end evidence at closeout from `tasks.md` alone
+would take the refund scenario for unproven and ask for a run that has already
+happened.
 Narrative compression at closeout would catch it, but it is a one-sentence
 correction, and until then the record is wrong.
 
 Evidence: `tasks.md:576`, `reviews/18-validation.md:3`
 
-→ **edit:** replace the sentence with "Validation 18 ran stage 07c at `443f9505`;
-it passed."
+→ **edit:** replace the sentence with "Validation 18 ran the refund scenario at
+`443f9505`; it passed."
 ```
 
 The heading starts with the severity (🔴 blocking, 🟠 should, 🟡 minor) and your
@@ -408,7 +422,7 @@ still without a disposition and ask about it. The owner may answer several at on
 or say to batch the rest; never propose it.
 
 The default acceptances reach the owner in one table, the form
-`docs/agents/change-workflow.md`'s "Default acceptance" gives — each finding's
+`change-workflow`'s CW-t9bx gives — each finding's
 label, its severity, the finding in one line, and its outcome:
 
 ```markdown
@@ -416,7 +430,7 @@ label, its severity, the finding in one line, and its outcome:
 
 | Finding | Severity | The finding | Outcome |
 |---|---|---|---|
-| 04 F5 | should | design.md cites a ROADMAP heading that was renamed | edit: cite `#goal-8-post-commitment-lifecycle` |
+| 04 F5 | should | design.md cites a roadmap heading that was renamed | edit: cite `#goal-3-refunds` |
 ```
 
 It rides on the last question you ask, after its `→` line: the question whether
@@ -526,14 +540,14 @@ owner's revisit resumes this session (step 7). A later revision of that entry us
 `revises` as any other:
 
 ```json
-{"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the goal's row in ROADMAP's table instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}
+{"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the goal's row in the roadmap's table instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}
 ```
 
 A waiver you recommended (step 1) is an entry whether the owner takes it or not:
 its `agent_position` names the recommendation and its criterion, and its
 `owner_disposition` the owner's word, with their reason when they decline it. So
 is a waiver the validation recommended, under its record (`NN-validation`), its
-`finding` the part it waived.
+`finding` the evidence kind it waived.
 
 After writing ledger entries, say how many you appended and for which findings.
 The ledger is often a new, untracked file whose changes do not show in a diff, so
@@ -555,7 +569,8 @@ acceptances' outcomes are carried out with the rest.
 - **task:** append it to `tasks.md` in the section it concerns, amending rather than
   replacing, with the finding cited in its note.
 - **none:** nothing to carry out, except for a large or vague out-of-scope defect
-  (step 2): record it where `AGENTS.md`'s "Deferred work" says, and name where in
+  (step 2): record it where deferred work goes
+  (`docs/guidance/workflow/working-model.md#deferred-work`), and name where in
   the finding's `Result`.
 - **fix, at a closeout triage:** the change is archived, and its code was reviewed
   and validated before closeout, so a closeout triage makes documentation fixes
@@ -566,17 +581,30 @@ acceptances' outcomes are carried out with the rest.
   the archived change, before archive cleanup. Once it is validated, suggest
   a review of the fix's diff — an external one, or `make review KIND=implementation`
   — and say why; whether to have it is the owner's call, and nothing requires it.
+- **fix, at a merge review's triage:** the change is archived and its archive
+  cleaned up, and the merge after the archive may have changed its code, so a
+  finding whose fix needs code is fixed here, by the steps below, as any fix is: no
+  exit returns the change to implementation. The fix commit is validated before
+  archive cleanup or another merge review, by the guard on either exit, when it
+  changes a path outside the repository's inert paths. Keep the change's row
+  `archived`; the change documents the dispositions edit are its archived
+  directory's. Append to `reviews/pull-request.md` what the fix changed, never
+  rewriting it.
 - **fix:** once every finding has a disposition or is accepted by default, make
   the accepted fixes, as `change-implement` makes a section's changes: the change
   and the decision it rests on, and no more, an out-of-scope defect's fix (step 2)
   recorded as outside the plan; at the lowest test level that proves it; comments
-  describing the current system. Every step is denied edits under `.claude/`, so
-  an accepted fix there — the step table, the project's Claude Code settings — is
+  describing the current system. No step writes a protected path — the harness's
+  settings, the workflow's configuration, or one the repository protects, as
+  `scripts/change-workflow config --json` lists them — so an accepted fix to one is
   made by the orchestrating session or the owner, on the owner's word, and you
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
-  committing (its step 5): the focused suites, `scripts/change-workflow run
+  committing (its step 5): the focused suites, a fix's new test run against the
+  commit before it with `scripts/change-workflow run test-before` where it should
+  fail there (naming in `TEST_BEFORE_DIST` the wheels to rebuild when the fix is
+  in an internal dependency, as `change-implement` says), `scripts/change-workflow run
   pre-commit <change>`, whose hooks follow from the paths the fixes change — a fix
   only under the repository's inert paths runs `pre-commit` alone — staging what
   the hooks rebuilt (before closeout its citations check may report only files the
@@ -586,7 +614,8 @@ acceptances' outcomes are carried out with the rest.
   fresh-context compliance check of the diff against the `HEAD` recorded at the
   start. In the fix's task
   note, record each check as `change-implement` records a section's evidence: each
-  suite with its level as `TESTING.md` defines them and its result, each hook's
+  suite with its level as `docs/guidance/engineering/test-levels.md` defines them
+  and its result, each hook's
   closing line, and what the fresh-context check found and what was fixed or declined —
   so the next review and validation can see what the fix was proven by.
   Commit, as one commit
@@ -595,12 +624,12 @@ acceptances' outcomes are carried out with the rest.
   The triage records stay in `reviews/`, which is untracked. Then push the commit
   with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop
   and report its reasons. The fix commit is validated next (`make validate
-  CHANGE=<change>`), which dispatches the pipeline — unless, after a pre-closeout
-  review, it changes only the repository's inert paths (step 6).
+  CHANGE=<change>`), which gathers the evidence it lacks — unless, after a pre-closeout
+  or a merge review, it changes only the repository's inert paths (step 6).
 
 Then run `scripts/change-workflow run pre-commit <change>` and report the result.
 Its default OpenSpec check validates an active change with `validate <change>
---strict`, and an archived one — a closeout triage — with `validate --specs
+--strict`, and an archived one — a closeout or merge triage — with `validate --specs
 --strict`, since its deltas are merged and the permanent specifications are what
 its fixes touched.
 
@@ -616,8 +645,8 @@ interface's operations, or the change's scope — so the reviews just triaged no
 longer describe the change, naming the decisions that changed; advancing when the
 fixes are corrections the reviewer would only confirm.
 
-Advancing is the default exit (`docs/agents/change-workflow.md`, "Default
-acceptance"): when you recommend it, take it without asking, and report it in your
+Advancing is the default exit (`change-workflow`'s CW-9pbk): when you recommend
+it, take it without asking, and report it in your
 final report beside the table of default acceptances, with the reason, so the
 owner can revisit it (step 7). When you recommend another round, argue it and ask,
 the table riding on the question (step 3); the owner's answer chooses. The exit is
@@ -629,6 +658,7 @@ one of those the triage's node declares:
 | an implementation round | the plan's next round, `{"step": "round"}`; once every section before closeout is checked, `{"step": "review", "kind": "pre-closeout"}` | `{"step": "review", "kind": "implementation"}` | `{"step": "plan"}` or `{"step": "design"}` |
 | a pre-closeout review | the merge of the branch the change lands on, `{"step": "merge"}` | `{"step": "review", "kind": "pre-closeout"}` | `{"step": "plan"}` or `{"step": "design"}` |
 | a closeout review | `{"step": "archive-cleanup"}` | `{"step": "review", "kind": "closeout"}` | none: an archived change has no earlier phase |
+| a merge review, of a merge after the archive | `{"step": "archive-cleanup"}` | `{"step": "review", "kind": "merge"}` | none: an archived change has no earlier phase |
 
 An implementation round's triage may instead name sections out of the plan's order,
 `{"step": "implement", "sections": [["5"]]}`, sessions as `rounds` lists them,
@@ -652,9 +682,12 @@ the pre-closeout review, once that validation passed; after a pre-closeout revie
 the merge of the branch the change lands on into its own (`change-merge`), whose
 own exits validate the
 merged `HEAD`, the triage's fixes with it, before closeout or a review of the
-merge; after a closeout
+merge — the fixes are not validated before the merge, so a message naming that
+exit says the merged `HEAD`'s validation covers them; after a closeout
 review, archive cleanup, after a validation of `HEAD` when a path outside the
-repository's inert paths changed since the commit it reviewed. Another review of the
+repository's inert paths changed since the commit it reviewed; after a merge review,
+archive cleanup run again, or another merge review, each after a validation of a fix
+the triage committed outside the inert paths. Another review of the
 same kind follows the fix commit's validation for an implementation or
 pre-closeout review — for a pre-closeout one, only when the fix changed a path
 outside the inert paths; for an implementation one, once the owner has read
@@ -679,6 +712,7 @@ contradict its status misleads every agent that reads the index — then run
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
 | `pre-closeout` | unchanged — the merge before closeout follows, and sets `ready for closeout` as it advances |
 | `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
+| `merge` | unchanged — `archived`, which no step after the archive changes |
 
 Whichever exit it names, a triage of any kind then commits what it changed
 and no fix commit (step 5) already holds — the change's documents its
@@ -694,17 +728,18 @@ only changes' ledgers and reviews.
 
 A closeout triage that advances ends triage. Do not release dependents, set the row
 to `archived`, or draft the merge yourself: that is archive cleanup's, in a fresh
-session. Tell the owner archive cleanup is next, and end `finished`. With another
-review of the same kind as its exit, leave the status, and say what that review
-reads.
+session. Tell the owner archive cleanup is next, and end `finished`. A merge
+review's triage that advances ends the same way, archive cleanup running again on
+the archived row. With another review of the same kind as its exit, leave the
+status, and say what that review reads.
 
 ## 7. A revisit after the triage finished
 
 The owner may revisit a default acceptance, or the advancing exit you took, after
 this triage finished. The orchestrating session then stops any step started after
 it, records the owner's direction naming this run (`--resumes`), and resumes this
-session with the owner's words (`docs/agents/change-workflow.md`, "Revisiting a
-default acceptance"): a message resuming a finished triage is that revisit.
+session with the owner's words (`change-workflow`'s CW-r8vz): a message resuming
+a finished triage is that revisit.
 
 1. **Check again**: the branch carries the change and the worktree is clean, and,
    for an implementation round, `scripts/change-workflow check round-view` passes.

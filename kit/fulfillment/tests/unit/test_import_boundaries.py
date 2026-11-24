@@ -1,8 +1,9 @@
 """Module-level import boundaries inside ``market_fulfillment``.
 
 `make check-architecture` holds the package-level rules: this kit depends only
-downward, on ``kit/site``, ``kit/resource-pools`` and its contracts, and the
-core carrier package, and never on the compute family kit, a domain, or a
+downward, on ``kit/site``, ``kit/resource-pools`` and its contracts, the core
+carrier package, and the migration engine kit its baseline is exported for, and
+never on the compute family kit, a domain, or a
 storefront (``openspec/specs/fulfillment/spec.md#dependency-boundary``). What it
 cannot express is which module of the package may reach which of those, so the
 carrier modules stay free of the scheduling and persistence dependencies.
@@ -45,17 +46,21 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "scheduling.py": set(),
         "round_robin_policy.py": set(),
         "results.py": {"market_core", "pydantic", "typing"},
-        "scheduler.py": {"market_resource_pools", "market_resource_pools_contracts", "market_site"},
+        # The process time source decides whether a reservation has expired.
+        "scheduler.py": {
+            "injected_time", "market_resource_pools", "market_resource_pools_contracts", "market_site",
+        },
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
         # Preparation receives the acceptance session for local resource claims.
         "provider.py": {"market_core", "sqlalchemy"},
         "fulfillment.py": {"market_core", "market_resource_pools", "market_resource_pools_contracts"},
         "fulfillment_persistence.py": {"market_core", "market_resource_pools", "sqlalchemy"},
         "transitions.py": set(),
-        "db.py": {"sqlalchemy"},
-        "settlement_repository.py": {"market_core", "sqlalchemy"},
+        "db.py": {"injected_time", "sqlalchemy"},
+        # The tables' baseline, exported as the migration engine's type.
+        "migrations.py": {"market_schema_migrations", "sqlalchemy"},
+        "settlement_repository.py": {"injected_time", "market_core", "sqlalchemy"},
         "backoff.py": set(),
-        "backfill.py": set(),
         "recovery_diagnostics.py": set(),
     }
     violations = []

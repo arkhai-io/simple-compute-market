@@ -38,7 +38,7 @@ from vm_provisioning_adapter.services.ansible_pool_config_handler import (
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings as service_settings
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
@@ -85,7 +85,7 @@ def _entry(host_id: str, *, pool_id: str | None = None, ssh_host: str = "10.0.0.
     entry.update(fields)
     entry["connection"] = {
         "kind": "ssh",
-        "version": 2,
+        "version": 3,
         "public": {"ssh_host": ssh_host, "ssh_user": "ubuntu", "key_path": "/keys/id"},
     }
     return entry
@@ -105,7 +105,7 @@ class _Site:
 
     def __init__(self, tmp_path, monkeypatch, *, pool_document=_POOL_DOCUMENT, seed=None):
         self.engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
-        run_migrations(self.engine)
+        migrate_database(self.engine)
         self.session_factory = sessionmaker(bind=self.engine)
         with self.session_factory() as db, db.begin():
             # Service-internal state setup: the relay the relay pool dials. A
@@ -295,9 +295,9 @@ def test_a_structurally_invalid_document_fails_startup_and_the_next_start_retrie
         "hosts:\n"
         "  - host_id: kvm1\n"
         "    colour: blue\n"
-        "    connection: {kind: ssh, version: 2, public: {ssh_host: 10.0.0.1, key_path: /keys/id}}\n"
+        "    connection: {kind: ssh, version: 3, public: {ssh_host: 10.0.0.1, key_path: /keys/id}}\n"
         "  - host_id: kvm2\n"
-        "    connection: {kind: ssh, version: 2, public: {ssh_host: 10.0.0.2, key_path: /keys/id}}\n"
+        "    connection: {kind: ssh, version: 3, public: {ssh_host: 10.0.0.2, key_path: /keys/id}}\n"
     )
 
     for _ in range(2):

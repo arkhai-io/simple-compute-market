@@ -2,6 +2,8 @@
 
 ### Requirement: Commit snapshots an activation deadline when the pool resolves a delivery deadline
 
+> **Stale.** It writes `renew_by_utc` and `renewal_phase`, which do not exist: the landed activation added only `activated_at_utc`, from which whether a lease is activated is derived and stored nowhere else. Intended replacement: the commit writes this change's own nullable activation-deadline column (its name is open in `design.md`) and no phase; the anchor, the pool ceiling and the refusals are unchanged.
+
 On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus the deal's accepted delivery_deadline_seconds supplied with the commit, and renewal_phase to awaiting_activation; committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time.
 
 #### Scenario: The full policy is enforced
@@ -52,6 +54,8 @@ On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_s
 
 ### Requirement: Activation replaces the provisional deadline with the agreed end
 
+> **Stale.** The landed activation writes only `activated_at_utc` and changes nothing else, so it cannot replace a deadline. Intended replacement: "an activated lease is due only at its agreed end, and an elapsed deadline expiry has not claimed does not prevent activation"; the two scenarios keep their outcomes.
+
 Activation, as `activate-compute-leases-at-the-site` defines it, MUST replace an awaiting_activation lease's provisional deadline with its current lease_end_utc. An elapsed unclaimed deadline MUST NOT itself prevent activation.
 
 #### Scenario: Activation arrives after the deadline but before expiry claims it
@@ -65,6 +69,8 @@ Activation, as `activate-compute-leases-at-the-site` defines it, MUST replace an
 - **THEN** it is refused and neither release nor its deadline is undone
 
 ### Requirement: Deadline expiry claims the exact observed lease tuple
+
+> **Stale.** The observed tuple names a stored phase; with the phase derived, the intended tuple is the `leased` state, the agreed end, the deadline and whether `activated_at_utc` was null.
 
 A due query MUST return the observed end, deadline and phase. Expiry MUST claim `leased` state and equality of that tuple atomically before any release effect. A mismatch MUST cause no mutation, event, outbox item or provider call. The due instant MUST be the earlier non-null deadline or agreed end; ordinary term end MUST win ties. Successful claims MUST use the existing guarded release path without holding a transaction over provider I/O.
 
@@ -89,6 +95,8 @@ A due query MUST return the observed end, deadline and phase. Expiry MUST claim 
 - **THEN** expiry records ordinary term end rather than activation lapse
 
 ### Requirement: Activation deadlines do not shorten admission windows
+
+> **Stale.** "Truncation MUST cap any non-null deadline to the new end" assumes a copied deadline; the due instant of an unactivated lease is computed as the earlier of the deadline and the agreed end, so truncation moves only the end. Intended replacement: truncation stays earlier-only and the due instant follows the new end.
 
 Capacity admission MUST account the full agreed lease window, not the activation deadline. Truncation MUST remain earlier-only and MUST cap any non-null deadline to the new end. Capacity MUST remain unavailable until the ordinary guarded release succeeds, regardless of an elapsed activation deadline.
 

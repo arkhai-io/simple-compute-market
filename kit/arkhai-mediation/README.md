@@ -39,6 +39,14 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   break raises `ValueError`, so a positional call passing a variable name fails
   there rather than sending the name as a token.
   Non-loopback origins require HTTPS. Redirects are never followed.
+  `ca_bundle=` names a PEM bundle the client verifies the authority against in
+  place of the default trust store, for an authority behind a private CA; a role
+  passes its credential's `ca_bundle_path`. The bundle is loaded at construction,
+  so one that is missing, unreadable or malformed raises `OSError` before any
+  request, and an empty path raises `ValueError` rather than reading as the
+  default store. The process's trust store is never changed, and without
+  `ca_bundle` the client uses the default trust store. A `transport=` supplied
+  for a test keeps its own TLS settings; the bundle is still loaded.
 
   ```python
   # disputes is the role's DisputeConfig; resolve() raises ValueError when the
@@ -47,6 +55,7 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   if credential is not None:
       client = MediationClient(
           authority, MediationCredential(authority.identity, token=credential.resolve()),
+          ca_bundle=credential.ca_bundle_path,
       )
   ```
 - Construct `MediationAdapter(binding, exact_agreement, client)`, then inject it
@@ -64,11 +73,17 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   Concurrent callers without a signed original, multiple originals and changed
   requests return repair required rather than allocate another case or amend by
   append. Safe linked revision/netting is not mapped by this client.
-  The authority may have no record for an Agreement until its first filing.
-  An initial `404 invalid_request` allows the original delivery-end writer to
-  proceed to filing; it is not a verified empty history for ordinary reads.
-  A usable filing acknowledgement still requires the signed filed entry, and
-  later-page errors or inaccessible records remain failures.
+  The authority has no record for an Agreement until its first filing, and
+  answers a read of the first record page `404 invalid_request`. `read`, which
+  the delivery-end filing also reads through, takes that answer as an accepted,
+  empty record: no dispute, no case. The authority gives a reader who is no party
+  the same answer, and no published route says which account a token
+  authenticates, so this rests on the credential authenticating the Agreement's
+  party, which the contract gives no way to check: under a credential for another
+  account every unfiled deal, and any case filed before the first accepted read,
+  reads as none. A usable filing acknowledgement still requires the signed filed
+  entry, and a `404` after a page was read, any other refusal, and every
+  verification failure remain failures.
   Pass `client=None` when only local `DeliveryEndClaims` signing/verification is
   available: receipt-only surrender needs no authority credential or network.
 - `read` verifies the pinned key, Agreement, transaction, sequence continuity and
@@ -84,6 +99,23 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
 - Supply `capture=...` on the client to persist exact response bytes in the role's
   evidence store. The record projection also retains a canonical signed entry;
   that projection is not a substitute for exact transport-byte capture.
+- `access_check.check_mediation_access(credentials, origin)` proves a role's
+  access to one authority from its own process, since a role builds its client
+  only when a deal first needs it. From the role's `[[DisputeCredential]]` entries
+  it takes the `arkhai.mediation.v1` one naming the origin, resolves its token,
+  builds the client with its `ca_bundle_path`, and makes one authenticated
+  respondent read, asserting nothing about the answer. Its outcome is `ok`, or the
+  first failing step: `configuration` (no such credential naming the origin, or
+  more than one, which the origin alone cannot choose between; an account or
+  record key the contract refuses; plain HTTP outside loopback; a `ca_bundle_path`
+  that cannot be loaded), `credential` (the variable `api_key_env` names is unset,
+  empty or not a single-line token), `transport` (unreachable, untrusted, an answer
+  outside the contract, or, with no `ca_bundle_path`, a process `SSL_CERT_FILE`
+  that cannot be loaded), or `refused` with the authority's code. Every detail is
+  fixed text and public configuration, never a credential.
+  `check_configured_mediation_access` takes a reader of the role's credentials
+  and reports one that raises `ValueError` as the `configuration` step. A
+  malformed origin raises `ValueError` from either.
 - The installed `contract` APIs expose exact schema/vector bytes, publication
   status and hashes. `models` exposes generated transport models. `claims` signs
   and verifies the published frame under both marketplace identity schemes;

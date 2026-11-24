@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .rate_publication import RecurringPublicationPreset
+
 from .configuration import (
     SettlementConfig,
     SettlementConfigurationError,
@@ -53,6 +55,7 @@ class SettlementPublicationClause(BaseModel):
     asset: str = Field(min_length=1)
     rate: str | None = None
     per: str | None = None
+    recurring: RecurringPublicationPreset | None = None
     mechanism_input: dict[str, Any] = Field(
         default_factory=dict,
         description="Mechanism-owned public publication input.",

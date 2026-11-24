@@ -59,15 +59,11 @@ The implemented scheduling baseline remains deterministic two-level round-robin 
 
 ## Fulfillment acceptance and dispatch acknowledgement
 
+The fulfillment kit owns provider-neutral acceptance orchestration, whose preparation performs no external provider I/O. Domain adapters own provider-specific payloads and metadata interpretation; provisioning composition supplies the database unit of work and the concrete providers; storefront code does not import provider-specific types.
+
 Fulfillment acceptance freezes provider input before external side effects. One transaction serializes acceptance, loads the selected resource and provider configuration, prepares the provider-specific envelope, and persists it with `dispatch_pending`. Preparation receives that transaction's session for local resource claims, so a rejected request rolls back both its acceptance and any claim. Opening a second write transaction from preparation would wait on the acceptance transaction's SQLite writer lock; committing a claim independently would leave it behind after rejection. Validation uses the same preparation with acquisition disabled. Dispatch happens after commit. A second short transaction records normalized provider metadata and advances the aggregate to `dispatching`. The acknowledgement gap is intentional: recovery redispatches the immutable envelope with the same executor idempotency key, allowing the provider to return the original job.
 
 Shared orchestration never interprets Ansible fields. Teardown receives a provider-neutral settlement-result view, while the Ansible adapter validates its own metadata and derives the exact target it created.
-
-## Atomic legacy-lease cutover
-
-Active workloads and provider-operation identities are financially and operationally significant, while unused pre-release reservation rows are not authoritative. The cutover therefore joins reservation and resource-pool data around the legacy lease population, validates the complete population before writing, and commits all generated settlement aggregates and provisioned-resource rows in one transaction. Ambiguity is handled by aborting the cutover rather than by speculative repair.
-
-Per-candidate state derivation and provider-envelope preparation are implemented as a pure, domain-owned compiler (one already-read historical row in, a durable row draft or a validation error out — no database session). The enumerating migration owns everything the compiler does not: the SQL join, cross-candidate identity/target deduplication, comparison against already-persisted rows, and the single atomic write. Keeping per-candidate logic free of database access lets every historical state and validation branch be tested directly, independent of a live schema, while the population-level concerns that only make sense against a real connection are tested separately against one.
 
 ## Fulfillment result ownership
 
@@ -76,6 +72,8 @@ The fulfillment kit owns lifecycle identity, durable output identity through `pr
 This split creates two different consistency guarantees in the same response, deliberately. The outer envelope's aggregate-derived fields (state, failure detail, provisioned-resource identity) are durable-row reads and are therefore stable across repeated calls for as long as the aggregate itself hasn't changed. The inner `domain_result` is a live external read and carries no such guarantee — nothing in this design promises two calls return equal credentials, and a caller comparing them for equality is relying on a property this system does not provide. Choosing to fetch fresh on every call, rather than caching or memoizing, trades request cost for never serving stale access material; a credential-fetch failure therefore rejects the whole result rather than falling back to a cached or partial one, since there is nothing durable behind it to fall back to.
 
 ## Storefront pull composition
+
+The order in which a compute storefront calls the fulfillment contracts — commit, dispatch recorded before begin, poll, ready evidence, then activation and billing outside this capability — belongs to the compute family's delivery library, not to this kit, which stays provider-neutral and knows no deal lifecycle ([compute delivery](../compute-delivery/architecture.md)). The library reaches fulfillment only through the provisioning family's wire contracts and each storefront's site-routed client.
 
 A bare-metal storefront composes the public scheduler and fulfillment client rather than importing provisioning repositories or workers. The storefront reloads its accepted listing/site/domain binding, targets capacity reservation at that exact site, schedules the accepted Physical Resource, and calls begin with the returned settlement resource. It persists opaque lifecycle correlations so duplicate calls and process restart resume the same provisioning aggregate.
 

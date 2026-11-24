@@ -14,10 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import diagram, graph
+from change_workflow import cli, diagram, graph
 from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
-from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER, STEPS,
-                                   TABLE, WAIT, Node)
+from change_workflow.graph import (AFTER, ARCHIVE_CLEANUP, BEFORE, CLOSEOUT_TRIAGE, DESIGN,
+                                   HISTORY, HOOK_STEPS, NODES, OWNER, STEP_ACTIONS, STEPS,
+                                   TABLE, WAIT, Node, step_actions)
+from change_workflow.running import INVOCATIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = Path("openspec/specs/change-workflow/README.md")
@@ -181,12 +183,104 @@ def test_the_merge_follows_the_pre_closeout_triage_and_leads_to_closeout() -> No
     assert graph.NOT_ARCHIVED in graph.NODES[graph.MERGE].entry
 
 
+def test_the_merge_after_the_archive_runs_the_merge_step_once_cleanup_has_run() -> None:
+    late = NODES[graph.LATE_MERGE]
+    exits = {exit_.target: exit_ for exit_ in late.exits}
+
+    assert late.runs == "merge" and late.phases == ("closeout",)
+    assert _entry(graph.LATE_MERGE) == ["the change is archived", "archive cleanup has run",
+                                        "the change's index row says archived"]
+    assert set(exits) == {ARCHIVE_CLEANUP, graph.MERGE_REVIEW}
+    assert exits[ARCHIVE_CLEANUP].when == graph.ADVANCE
+    assert exits[ARCHIVE_CLEANUP].guards == (graph.LATE_MERGE_VALIDATED,)
+    assert exits[graph.MERGE_REVIEW].guards == (graph.LATE_MERGE_REVIEW_VALIDATED,)
+    # A failed validation of the merged HEAD names the merge after the archive.
+    for guard in (graph.LATE_MERGE_VALIDATED, graph.LATE_MERGE_REVIEW_VALIDATED):
+        assert (guard.remedy, guard.otherwise) == (graph.VALIDATE,
+                                                   graph.LATE_MERGE_VALIDATION_FAILED)
+    assert graph.LATE_MERGE_VALIDATED.condition.endswith("inert paths exempt")
+    assert graph.LATE_MERGE_REVIEW_VALIDATED.condition.endswith("records exempt")
+    assert graph.node_of({"step": "late-merge"}) == graph.LATE_MERGE
+    # The merge before closeout takes only an active change, by its four exits.
+    assert graph.NOT_ARCHIVED in NODES[graph.MERGE].entry
+    assert len(NODES[graph.MERGE].exits) == 4
+
+
+def test_the_merge_review_and_its_triage_follow_the_archive_and_return_nowhere() -> None:
+    assert "merge" in graph.KINDS
+    assert _entry(graph.MERGE_REVIEW) == ["the change is archived"]
+    assert [e.target for e in NODES[graph.MERGE_REVIEW].exits] == [graph.MERGE_TRIAGE]
+    awaits = "a review of its kind, or a validation after it, awaits triage"
+    assert _entry(graph.MERGE_TRIAGE) == ["the change is archived", awaits]
+    triage = {exit_.when: exit_ for exit_ in NODES[graph.MERGE_TRIAGE].exits}
+    assert set(triage) == {graph.ADVANCE, graph.ANOTHER_ROUND}
+    assert triage[graph.ADVANCE].target == ARCHIVE_CLEANUP
+    assert triage[graph.ANOTHER_ROUND].target == graph.MERGE_REVIEW
+    for exit_ in triage.values():
+        assert exit_.guards == (graph.DOCUMENTED_FIX_VALIDATED,)
+    # No node after the archive declares a return.
+    for node in (graph.LATE_MERGE, graph.MERGE_REVIEW, graph.MERGE_TRIAGE):
+        assert not [e for e in NODES[node].exits if e.when == graph.RETURN]
+
+
+def test_the_merge_after_the_archive_adds_no_step() -> None:
+    assert STEPS.count("merge") == 1
+    assert "late-merge" not in STEPS
+    assert "merge" not in cli.ACTIVE_ONLY and "merge" not in cli.ARCHIVED_ONLY
+
+
+@pytest.mark.parametrize("standing,refused", [
+    (graph.Standing(archived=False, awaiting=frozenset()), "the change is not archived"),
+    (graph.Standing(archived=True, awaiting=frozenset(), row_archived=True),
+     "no archive cleanup run has finished"),
+    (graph.Standing(archived=True, awaiting=frozenset(), cleaned_up=True),
+     "restore the row as archive cleanup left it"),
+    (graph.Standing(archived=True, awaiting=frozenset(), cleaned_up=True, row_archived=True),
+     None),
+], ids=["active", "before cleanup", "row pruned", "entered"])
+def test_the_merge_after_the_archive_is_entered_once_cleaned_up_with_its_row(
+        standing: graph.Standing, refused: str | None) -> None:
+    found = graph.entry_refusal({"step": "late-merge"}, standing, directed=True)
+
+    assert (found is None) if refused is None else (refused in (found or ""))
+
+
+class _Landing:
+    """Readings answering only whether an archive cleanup run's landing moved."""
+
+    def __init__(self, moved: bool) -> None:
+        self.moved = moved
+
+    def landing_moved(self, run) -> bool:
+        return self.moved
+
+
+@pytest.mark.parametrize("moved", [False, True], ids=["checked", "moved"])
+def test_archive_cleanups_exit_to_done_waits_for_the_landing_branch(moved: bool) -> None:
+    (exit_,) = NODES[ARCHIVE_CLEANUP].exits
+    (guard,) = exit_.guards
+    run = {"seq": 9, "step": "archive-cleanup",
+           "landing": {"remote": "origin", "branch": "main", "commit": "a" * 40}}
+
+    found = guard.check(_Landing(moved), {"run": run})
+
+    assert (exit_.target, guard.remedy) == (graph.DONE, graph.LATE_MERGE)
+    if moved:
+        # The merge step runs the node, which the reason names.
+        assert found["step"] == "merge" and found["reason"].startswith("late-merge: ")
+        assert "seq 9 fetched main" in found["reason"]
+    else:
+        assert found is None
+
+
 def test_the_phases_read_from_the_table() -> None:
     assert graph.phase_steps("planning") == ("plan",)
     assert "merge" in graph.phase_steps("implementation")
+    # The merge after the archive runs the merge step in closeout.
     assert set(graph.phase_steps("closeout")) == {"closeout", "review", "triage", "validate",
-                                                   "archive-cleanup"}
+                                                   "archive-cleanup", "merge"}
     assert graph.review_phase("pre-closeout") == "implementation"
+    assert graph.review_phase("merge") == "closeout"
     assert graph.review_phase("owner") is None
 
 
@@ -295,6 +389,65 @@ def test_the_report_lists_each_departure_and_fails(capsys) -> None:
         "source embedded:\n"
         "- no edge draws ('triage_closeout', 'design', ('a return',))\n"
         "- no edge draws ('archive_cleanup', 'design', ('a return',))\n")
+
+
+def test_the_engines_actions_around_validation_and_archive_cleanup() -> None:
+    """CW-g6th, CW-ikmm, CW-hak6: the engine's own actions around steps, each a
+    hook-table entry run as the step it is around, or the history copy after archive
+    cleanup."""
+    assert STEP_ACTIONS == {(BEFORE, "validate"): ("gather",),
+                            (BEFORE, "archive-cleanup"): ("cleanup",),
+                            (AFTER, "archive-cleanup"): (HISTORY,)}
+    for (when, step), actions in STEP_ACTIONS.items():
+        assert when in (BEFORE, AFTER) and step in STEPS
+        assert all(action == HISTORY or step in HOOK_STEPS[action] for action in actions)
+    assert HISTORY not in HOOK_STEPS
+    assert step_actions(BEFORE, "validate") == ("gather",)
+    assert step_actions(AFTER, "validate") == step_actions(BEFORE, "implement") == ()
+
+
+def test_every_step_with_a_run_has_one_definition() -> None:
+    assert set(graph.STEP_DEFINITIONS) == set(STEPS)
+    for name, definition in graph.STEP_DEFINITIONS.items():
+        assert definition.resume_from is None or definition.resume_from in STEPS, name
+
+
+def test_every_step_runs_its_own_skill_and_planning_resumes_the_design() -> None:
+    assert {name: definition.skill for name, definition in graph.STEP_DEFINITIONS.items()} \
+        == {name: f"change-{name}" for name in STEPS}
+    assert {name: definition.resume_from for name, definition in graph.STEP_DEFINITIONS.items()
+            if definition.resume_from is not None} == {"plan": "design"}
+
+
+def test_the_review_writes_no_path_of_its_checkout_but_the_engines_invocation_record() -> None:
+    """Outside its checkout it writes the tools' cache, as every step does, for the
+    checks it runs for evidence."""
+    review = graph.STEP_DEFINITIONS["review"]
+
+    assert review.profile == graph.READ_ONLY
+    checkout = [path for path in review.baseline
+                if path != graph.TEMPORARY and not path.startswith("~")]
+    assert checkout == [f".git/{INVOCATIONS}/"]
+    assert "~/.cache" in review.baseline
+
+
+def test_every_step_writes_the_temporary_directory() -> None:
+    for name, definition in graph.STEP_DEFINITIONS.items():
+        assert graph.TEMPORARY in definition.baseline, name
+
+
+def test_each_writing_step_writes_its_baseline_and_the_cache() -> None:
+    writing = {name: definition for name, definition in graph.STEP_DEFINITIONS.items()
+               if name != "review"}
+
+    assert {definition.profile for definition in writing.values()} == {graph.WRITING}
+    assert {name: set(definition.baseline) - {graph.TEMPORARY}
+            for name, definition in writing.items()} == {
+        "design": {"openspec/", ".git/", graph.PROPOSALS, "~/.cache"},
+        "plan": {"openspec/", ".git/", "~/.cache"},
+        "implement": {".", "~/.cache"}, "triage": {".", "~/.cache"}, "merge": {".", "~/.cache"},
+        "validate": {".", "~/.cache"}, "closeout": {graph.INERT_PATHS, ".git/", "~/.cache"},
+        "archive-cleanup": {"openspec/changes/", ".git/", "~/.cache"}}
 
 
 def test_make_change_graph_reports_that_the_diagram_draws_the_table() -> None:

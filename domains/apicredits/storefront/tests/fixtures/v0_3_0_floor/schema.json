@@ -1,0 +1,3781 @@
+{
+  "tables": {
+    "api_credit_issuance_evidence": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "evidence_digest",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "signed_evidence",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "evidence_digest",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "fulfillment_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "api_credit_issuance_progress": {
+      "autoincrement": false,
+      "checks": [
+        "status IN('provisioning','ready','failed')"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "public_ref",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "hidden": 0,
+          "name": "public_result",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "credentials_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "delivery_started_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "public_ref",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "api_credit_private_results": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "credentials_ref",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "owner_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "owner_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "secret",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "credentials_ref",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "fulfillment_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "owner_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "owner_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "credentials_ref",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_api_credit_private_result_owner",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "api_credit_settlement_evidence": {
+      "autoincrement": false,
+      "checks": [
+        "status IN('pending','verified','failed','refunding','refunded')"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "mechanism",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "agreement_digest",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "evidence",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "settlement_ref",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "auth_replay_reservations": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "request_id",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "request_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "response_status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "response_body",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "attempt_token",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "lease_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "principal_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_identifier",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "request_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "capacity_holds": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "payload",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "credentials": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "granted_to",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "password",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "ssh_commands",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "ssh_key_path_host",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "key_type",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "listing_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "granted_to",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_credentials_listing_granted",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "listing_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_credentials_listing_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "credit_deal_terms": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "quantity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": "'new'",
+          "hidden": 0,
+          "name": "key_mode",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "key_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "deal_heartbeats": {
+      "autoincrement": true,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "deal_ref",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "buyer_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "buyer_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "seller_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "seller_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "sent_at_unix",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "REAL"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "payload",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "received_at_unix",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "REAL"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "deal_ref",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "sent_at_unix",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_heartbeats_deal",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "escrows": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "escrow_uid",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "chain_name",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "escrow_address",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "1",
+          "hidden": 0,
+          "name": "is_primary",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "provisioning_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "connection_details",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "tenant_credentials",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_context",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_phase",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "processing_owner",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "processing_lease_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "obligation_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "obligation_index",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "escrow_uid",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "obligation_index",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_credit_escrows_negotiation_obligation",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "obligation_ref",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_credit_escrows_obligation_ref",
+          "origin": "c",
+          "unique": true,
+          "where": "obligation_ref IS NOT NULL"
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_escrows_negotiation",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "status",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_escrows_status",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "identity_audit": {
+      "autoincrement": true,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "action",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "actor_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "actor_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "target_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "target_identifier",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "operation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "authority",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "operation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "identity_bindings": {
+      "autoincrement": false,
+      "checks": [
+        "status IN('primary','overlap','disabled','retired')"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 4,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "overlap_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "authority",
+            "subject"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "authority",
+            "subject"
+          ],
+          "table": "identity_subjects"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "authority",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "subject",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_identifier",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "authority",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_identifier",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_identity_binding_active_owner",
+          "origin": "c",
+          "unique": true,
+          "where": "status IN('primary','overlap')"
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "identity_claims": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "claim_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "operation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "claim_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "resource_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "role",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "operation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "identity_rotations": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "nonce",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "intent_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "current_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "current_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "replacement_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "replacement_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "overlap_until",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "applied_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "authority",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "subject",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "nonce",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "identity_subjects": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "authority",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "subject",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "listings": {
+      "autoincrement": false,
+      "checks": [
+        "closed_by IN('seller','reconciliation')"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_resource",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_resource",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "max_duration_seconds",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "seller_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "seller_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "oracle_address",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "hidden": 0,
+          "name": "paused",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "accepted_escrows",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_options",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "publication_clauses",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "demands",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "storefront_url",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "closed_by",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "rate_structure",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "listing_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "created_at",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_listings_created_at",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "status",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_listings_status",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "updated_at",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_listings_updated_at",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "negotiation_local_state": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "owner_id",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "our_initial_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "our_strategy",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "negotiation_id"
+          ],
+          "table": "negotiation_threads"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "owner_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "negotiation_messages": {
+      "autoincrement": true,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "message_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "round",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "sender_role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "sender_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "sender_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "our_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "their_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "proposed_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "action_taken",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "message_type",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "timestamp",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "negotiation_id"
+          ],
+          "table": "negotiation_threads"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "round",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_messages_negotiation_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "round",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_messages_round",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "negotiation_threads": {
+      "autoincrement": false,
+      "checks": [
+        "(buyer_scheme IS NULL)=(buyer_identifier IS NULL)",
+        "(seller_scheme IS NULL)=(seller_identifier IS NULL)"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "our_listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "their_listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "our_agent_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "their_agent_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'active'",
+          "hidden": 0,
+          "name": "status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "terminal_state",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "requested_duration_seconds",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "requested_start_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "buyer_escrow_proposal",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "provision_terms",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_plan",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "agreed_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "agreed_duration_seconds",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "agreed_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "agreement_bytes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "BLOB"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_data",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "buyer_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "buyer_identifier",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "seller_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "seller_identifier",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "matched_offer_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "domain_listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "site_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "offering_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "domain_identity",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "contract_major",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "contract_minor",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "domain_identity",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "contract_major",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "contract_minor",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "offering_mode",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_threads_domain_binding",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "domain_listing_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_threads_domain_listing",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "our_agent_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_threads_our_agent_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "our_listing_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_threads_our_listing_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "status",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_threads_status",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "their_agent_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_threads_their_agent_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "their_listing_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_negotiation_threads_their_listing_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "publications": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "registry_url",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "payload_json",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "published_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "registry_assigned_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "listing_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "registry_url",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "registry_url",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_publications_registry",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "status",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_publications_status",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "service_peers": {
+      "autoincrement": false,
+      "checks": [
+        "status IN('active','disabled','retired')"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "peer_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "site_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "peer_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "role",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_identifier",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "role",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "site_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "settlement_obligations": {
+      "autoincrement": false,
+      "checks": [
+        "obligation_index >= 0"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "obligation_ref",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "agreement_ref",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "obligation_index",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "obligation_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "obligation",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "hidden": 0,
+          "name": "mechanism_params",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "payer_principal",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "claimant_principal",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "mechanism_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "mechanism_status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "hidden": 0,
+          "name": "mechanism_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "buyer_action",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "condition_anchor",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "hidden": 0,
+          "name": "materialization_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "hidden": 0,
+          "name": "condition_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "hidden": 0,
+          "name": "collection_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "hidden": 0,
+          "name": "reclaim_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "materialization_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "collection_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "reclaim_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "hidden": 0,
+          "name": "version",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "obligation_ref",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "agreement_ref",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "obligation_index",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "agreement_ref",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "obligation_index",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_settlement_obligations_agreement",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "mechanism_ref",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_settlement_obligations_mechanism_ref",
+          "origin": "c",
+          "unique": true,
+          "where": "mechanism_ref IS NOT NULL"
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "settlement_operations": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "obligation_ref",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "operation",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "request_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "hidden": 0,
+          "name": "state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "hidden": 0,
+          "name": "attempts",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": "0",
+          "hidden": 0,
+          "name": "uncertain_acknowledgement",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "lease_owner",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "lease_until_unix",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "REAL"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "next_attempt_unix",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "REAL"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "hidden": 0,
+          "name": "awaiting_delivery",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "obligation_ref"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "obligation_ref"
+          ],
+          "table": "settlement_obligations"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "obligation_ref",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "operation",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "state",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "next_attempt_unix",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "lease_until_unix",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_settlement_operations_due",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "stage_events": {
+      "autoincrement": true,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "ts",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "stage",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "event",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "escrow_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "data",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_stage_events_negotiation_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "stage",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_stage_events_stage",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "ts",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_stage_events_ts",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "storefront_domain_artifacts": {
+      "autoincrement": false,
+      "checks": [
+        "contract_major >= 1",
+        "contract_minor >= 0"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "artifact_slot",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "offering_mode",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "domain_identity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "contract_major",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "contract_minor",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "artifact_json",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "negotiation_id"
+          ],
+          "table": "negotiation_threads"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "negotiation_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "artifact_slot",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "domain_identity",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "contract_major",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "contract_minor",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "offering_mode",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_storefront_domain_artifacts_binding",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "storefront_listing_bindings": {
+      "autoincrement": false,
+      "checks": [
+        "capacity_backing IN('backed','unbacked')",
+        "contract_major >= 1",
+        "contract_minor >= 0"
+      ],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "site_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "physical_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "offering_mode",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "domain_identity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "contract_major",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "contract_minor",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "derivation_key",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "source_envelope_json",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_reconciled_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_backing",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "listing_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "listing_id"
+          ],
+          "table": "listings"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "listing_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "derivation_key",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "domain_identity",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "contract_major",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "contract_minor",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_storefront_listing_bindings_domain",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "site_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "offering_mode",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_storefront_listing_bindings_site",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    }
+  },
+  "triggers": {
+    "listing_closed_by_consistent_insert": {
+      "sql": "CREATE TRIGGER listing_closed_by_consistent_insert BEFORE INSERT ON listings WHEN(NEW.status = 'closed' AND NEW.closed_by IS NULL)OR(NEW.status IS NOT 'closed' AND NEW.closed_by IS NOT NULL)BEGIN SELECT RAISE(ABORT,'a closed listing records closed_by; an open one does not'); END",
+      "table": "listings"
+    },
+    "listing_closed_by_consistent_update": {
+      "sql": "CREATE TRIGGER listing_closed_by_consistent_update BEFORE UPDATE ON listings WHEN(NEW.status = 'closed' AND NEW.closed_by IS NULL)OR(NEW.status IS NOT 'closed' AND NEW.closed_by IS NOT NULL)BEGIN SELECT RAISE(ABORT,'a closed listing records closed_by; an open one does not'); END",
+      "table": "listings"
+    },
+    "listings_principal_insert": {
+      "sql": "CREATE TRIGGER listings_principal_insert BEFORE INSERT ON listings WHEN NEW.storefront_url IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL BEGIN SELECT RAISE(ABORT,'canonical principal fields are required'); END",
+      "table": "listings"
+    },
+    "listings_principal_update": {
+      "sql": "CREATE TRIGGER listings_principal_update BEFORE UPDATE ON listings WHEN NEW.storefront_url IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL BEGIN SELECT RAISE(ABORT,'canonical principal fields are required'); END",
+      "table": "listings"
+    },
+    "negotiation_domain_binding_complete_insert": {
+      "sql": "CREATE TRIGGER negotiation_domain_binding_complete_insert BEFORE INSERT ON negotiation_threads WHEN(NEW.domain_listing_id IS NULL OR NEW.site_id IS NULL OR NEW.offering_mode IS NULL OR NEW.domain_identity IS NULL OR NEW.contract_major IS NULL OR NEW.contract_minor IS NULL)AND NOT(NEW.domain_listing_id IS NULL AND NEW.site_id IS NULL AND NEW.offering_mode IS NULL AND NEW.domain_identity IS NULL AND NEW.contract_major IS NULL AND NEW.contract_minor IS NULL)BEGIN SELECT RAISE(ABORT,'negotiation domain binding is incomplete'); END",
+      "table": "negotiation_threads"
+    },
+    "negotiation_domain_binding_immutable": {
+      "sql": "CREATE TRIGGER negotiation_domain_binding_immutable BEFORE UPDATE OF domain_listing_id,site_id,offering_mode,domain_identity,contract_major,contract_minor ON negotiation_threads WHEN OLD.domain_identity IS NOT NULL AND(NOT(OLD.domain_listing_id IS NEW.domain_listing_id)OR NOT(OLD.site_id IS NEW.site_id)OR NOT(OLD.offering_mode IS NEW.offering_mode)OR NOT(OLD.domain_identity IS NEW.domain_identity)OR NOT(OLD.contract_major IS NEW.contract_major)OR NOT(OLD.contract_minor IS NEW.contract_minor))BEGIN SELECT RAISE(ABORT,'negotiation domain binding is immutable'); END",
+      "table": "negotiation_threads"
+    },
+    "negotiation_domain_binding_owner_insert": {
+      "sql": "CREATE TRIGGER negotiation_domain_binding_owner_insert BEFORE INSERT ON negotiation_threads WHEN NEW.domain_identity IS NOT NULL AND NOT EXISTS(SELECT 1 FROM storefront_listing_bindings binding WHERE binding.listing_id = NEW.domain_listing_id AND binding.site_id = NEW.site_id AND binding.offering_mode = NEW.offering_mode AND binding.domain_identity = NEW.domain_identity AND binding.contract_major = NEW.contract_major AND binding.contract_minor = NEW.contract_minor)BEGIN SELECT RAISE(ABORT,'negotiation domain binding disagrees with listing'); END",
+      "table": "negotiation_threads"
+    },
+    "negotiation_domain_binding_owner_update": {
+      "sql": "CREATE TRIGGER negotiation_domain_binding_owner_update BEFORE UPDATE OF domain_listing_id,site_id,offering_mode,domain_identity,contract_major,contract_minor ON negotiation_threads WHEN NEW.domain_identity IS NOT NULL AND NOT EXISTS(SELECT 1 FROM storefront_listing_bindings binding WHERE binding.listing_id = NEW.domain_listing_id AND binding.site_id = NEW.site_id AND binding.offering_mode = NEW.offering_mode AND binding.domain_identity = NEW.domain_identity AND binding.contract_major = NEW.contract_major AND binding.contract_minor = NEW.contract_minor)BEGIN SELECT RAISE(ABORT,'negotiation domain binding disagrees with listing'); END",
+      "table": "negotiation_threads"
+    },
+    "negotiation_messages_principal_insert": {
+      "sql": "CREATE TRIGGER negotiation_messages_principal_insert BEFORE INSERT ON negotiation_messages WHEN NEW.sender_role IS NULL OR NEW.sender_scheme IS NULL OR NEW.sender_identifier IS NULL BEGIN SELECT RAISE(ABORT,'canonical principal fields are required'); END",
+      "table": "negotiation_messages"
+    },
+    "negotiation_messages_principal_update": {
+      "sql": "CREATE TRIGGER negotiation_messages_principal_update BEFORE UPDATE ON negotiation_messages WHEN NEW.sender_role IS NULL OR NEW.sender_scheme IS NULL OR NEW.sender_identifier IS NULL BEGIN SELECT RAISE(ABORT,'canonical principal fields are required'); END",
+      "table": "negotiation_messages"
+    },
+    "negotiation_threads_principal_insert": {
+      "sql": "CREATE TRIGGER negotiation_threads_principal_insert BEFORE INSERT ON negotiation_threads WHEN NEW.buyer_scheme IS NULL OR NEW.buyer_identifier IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL BEGIN SELECT RAISE(ABORT,'canonical principal fields are required'); END",
+      "table": "negotiation_threads"
+    },
+    "negotiation_threads_principal_update": {
+      "sql": "CREATE TRIGGER negotiation_threads_principal_update BEFORE UPDATE ON negotiation_threads WHEN NEW.buyer_scheme IS NULL OR NEW.buyer_identifier IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL BEGIN SELECT RAISE(ABORT,'canonical principal fields are required'); END",
+      "table": "negotiation_threads"
+    },
+    "settlement_principals_insert_required": {
+      "sql": "CREATE TRIGGER settlement_principals_insert_required BEFORE INSERT ON settlement_obligations WHEN NEW.payer_principal IS NULL OR NEW.payer_principal = '' OR NEW.claimant_principal IS NULL OR NEW.claimant_principal = '' BEGIN SELECT RAISE(ABORT,'settlement principals required'); END",
+      "table": "settlement_obligations"
+    },
+    "settlement_principals_update_required": {
+      "sql": "CREATE TRIGGER settlement_principals_update_required BEFORE UPDATE OF payer_principal,claimant_principal ON settlement_obligations WHEN NEW.payer_principal IS NULL OR NEW.payer_principal = '' OR NEW.claimant_principal IS NULL OR NEW.claimant_principal = '' BEGIN SELECT RAISE(ABORT,'settlement principals required'); END",
+      "table": "settlement_obligations"
+    },
+    "storefront_domain_artifact_immutable": {
+      "sql": "CREATE TRIGGER storefront_domain_artifact_immutable BEFORE UPDATE ON storefront_domain_artifacts WHEN NOT(OLD.negotiation_id IS NEW.negotiation_id)OR NOT(OLD.artifact_slot IS NEW.artifact_slot)OR NOT(OLD.offering_mode IS NEW.offering_mode)OR NOT(OLD.domain_identity IS NEW.domain_identity)OR NOT(OLD.contract_major IS NEW.contract_major)OR NOT(OLD.contract_minor IS NEW.contract_minor)OR NOT(OLD.artifact_json IS NEW.artifact_json)BEGIN SELECT RAISE(ABORT,'storefront domain artifact is immutable'); END",
+      "table": "storefront_domain_artifacts"
+    },
+    "storefront_domain_artifact_owner_insert": {
+      "sql": "CREATE TRIGGER storefront_domain_artifact_owner_insert BEFORE INSERT ON storefront_domain_artifacts WHEN NOT EXISTS(SELECT 1 FROM negotiation_threads thread WHERE thread.negotiation_id = NEW.negotiation_id AND thread.offering_mode = NEW.offering_mode AND thread.domain_identity = NEW.domain_identity AND thread.contract_major = NEW.contract_major AND thread.contract_minor = NEW.contract_minor)BEGIN SELECT RAISE(ABORT,'domain artifact disagrees with negotiation binding'); END",
+      "table": "storefront_domain_artifacts"
+    },
+    "storefront_listing_binding_backing_required": {
+      "sql": "CREATE TRIGGER storefront_listing_binding_backing_required BEFORE INSERT ON storefront_listing_bindings WHEN NEW.capacity_backing IS NULL BEGIN SELECT RAISE(ABORT,'listing binding requires capacity_backing'); END",
+      "table": "storefront_listing_bindings"
+    },
+    "storefront_listing_binding_immutable": {
+      "sql": "CREATE TRIGGER storefront_listing_binding_immutable BEFORE UPDATE OF listing_id,site_id,pool_id,physical_resource_id,offering_mode,domain_identity,contract_major,contract_minor,derivation_key,source_envelope_json,capacity_backing ON storefront_listing_bindings WHEN NOT(OLD.listing_id IS NEW.listing_id)OR NOT(OLD.site_id IS NEW.site_id)OR NOT(OLD.pool_id IS NEW.pool_id)OR NOT(OLD.physical_resource_id IS NEW.physical_resource_id)OR NOT(OLD.offering_mode IS NEW.offering_mode)OR NOT(OLD.domain_identity IS NEW.domain_identity)OR NOT(OLD.contract_major IS NEW.contract_major)OR NOT(OLD.contract_minor IS NEW.contract_minor)OR NOT(OLD.derivation_key IS NEW.derivation_key)OR NOT(OLD.source_envelope_json IS NEW.source_envelope_json)OR NOT(OLD.capacity_backing IS NEW.capacity_backing)BEGIN SELECT RAISE(ABORT,'storefront listing binding is immutable'); END",
+      "table": "storefront_listing_bindings"
+    },
+    "storefront_listing_binding_insert_owner": {
+      "sql": "CREATE TRIGGER storefront_listing_binding_insert_owner BEFORE INSERT ON storefront_listing_bindings WHEN NOT EXISTS(SELECT 1 FROM listings WHERE listing_id = NEW.listing_id)BEGIN SELECT RAISE(ABORT,'listing binding requires an existing listing'); END",
+      "table": "storefront_listing_bindings"
+    }
+  },
+  "views": {}
+}

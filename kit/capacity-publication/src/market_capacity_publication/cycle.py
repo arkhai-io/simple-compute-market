@@ -527,7 +527,46 @@ async def converge_registries(
         report.record("fail", listing_id=listing_id, reason="registry_not_converged")
 
 
+#: Why the registry sweep closes a listing: the storefront does not hold it open.
+NOT_HELD = "not_held"
+
+
+async def retire_unheld_listings(
+    runtime: PublicationRuntime[Any],
+    report: PublicationCycleReport,
+) -> None:
+    """Close at each registry the open listings the storefront does not hold.
+
+    Run after :func:`converge_registries`, so a listing whose registry record
+    convergence repairs is not also swept. Each close is reported as ``close``
+    with the reason :data:`NOT_HELD` and the registry it is made at; a dry run
+    reports the closes and makes none. A registry that could not be read is
+    reported as ``skip`` and swept by a later pass, and a close a registry did
+    not take is reported as ``fail``.
+    """
+    sweep = await runtime.retire_unheld(dry_run=report.dry_run)
+    for url in sweep.unreachable:
+        report.record("skip", registry=url, reason="registry_unreachable")
+    for close in sweep.closes:
+        if close.status == "failed":
+            report.record(
+                "fail",
+                listing_id=close.listing_id,
+                registry=close.registry_url,
+                reason="registry_close_failed",
+                error=close.error,
+            )
+            continue
+        report.record(
+            "close",
+            listing_id=close.listing_id,
+            registry=close.registry_url,
+            reason=NOT_HELD,
+        )
+
+
 __all__ = [
+    "NOT_HELD",
     "PAYLOAD_UNBUILDABLE",
     "SETTLEMENT_MECHANISM_UNKNOWN",
     "ListingLookup",
@@ -539,5 +578,6 @@ __all__ = [
     "SiteDerivationLog",
     "converge_registries",
     "record_payload_refusal",
+    "retire_unheld_listings",
     "site_derivations",
 ]

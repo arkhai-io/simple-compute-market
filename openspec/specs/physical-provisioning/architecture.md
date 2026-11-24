@@ -16,9 +16,9 @@ compute service composition
 
 The offering-mode-neutral composition root lets generic services dispatch by recorded executor or provider identity without importing a concrete domain implementation.
 
-The mock mechanism is a worked instance of the five-piece route pattern (`docs/development/ARCHITECTURE.md`, "Route contracts and their HTTP binding") in which the family owns every piece but the binding's location. `compute_provisioning_contracts.mock_rules` holds the route-contract template, `MockRouteMount`, a path prefix and an operation-name prefix whose `route_declarations()` yields the rule add, list, delete, and resume routes and the evaluate-job route, and the wire models those routes answer with (`MockRuleAdded`, `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, `MockJobEvaluation`, and the request `MockRuleCreate`). The family kit's `MockRuleRouteService` (`compute_provisioning.jobs.executor_mock`) answers with them, and `compute_provisioning_client`'s `MockRuleClient` and `SyncMockRuleClient` sign each call from a mount's declarations and return the same models. A domain states only its mount: VM's is `VM_MOCK_ROUTE_MOUNT`, `("/test", "provisioning_test")`, in `vm_provisioning_operator.routes`; bare metal's two values, `"/test/bare-metal"` and `"provisioning_test_bare_metal"`, live in `arkhai_bare_metal.provisioning_routes`, so `arkhai-bare-metal` keeps no compute dependency and its adapter builds the mount. Each adapter binds the route service under its mount's prefix and contributes the mount's declarations to the service's table. The evaluate-job request stays each domain's, since its fields are the domain's job parameters. A further compute domain mounts the mechanism by stating its two values.
+The mock mechanism is a worked instance of the five-piece route pattern ([`docs/guidance/engineering/implementation.md`, "Route contracts and their HTTP binding"](../../../docs/guidance/engineering/implementation.md#route-contracts-and-their-http-binding)) in which the family owns every piece but the binding's location. `compute_provisioning_contracts.mock_rules` holds the route-contract template, `MockRouteMount`, a path prefix and an operation-name prefix whose `route_declarations()` yields the rule add, list, delete, and resume routes and the evaluate-job route, and the wire models those routes answer with (`MockRuleAdded`, `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, `MockJobEvaluation`, and the request `MockRuleCreate`). The family kit's `MockRuleRouteService` (`compute_provisioning.jobs.executor_mock`) answers with them, and `compute_provisioning_client`'s `MockRuleClient` and `SyncMockRuleClient` sign each call from a mount's declarations and return the same models. A domain states only its mount: VM's is `VM_MOCK_ROUTE_MOUNT`, `("/test", "provisioning_test")`, in `vm_provisioning_operator.routes`; bare metal's two values, `"/test/bare-metal"` and `"provisioning_test_bare_metal"`, live in `arkhai_bare_metal.provisioning_routes`, so `arkhai-bare-metal` keeps no compute dependency and its adapter builds the mount. Each adapter binds the route service under its mount's prefix and contributes the mount's declarations to the service's table. The evaluate-job request stays each domain's, since its fields are the domain's job parameters. A further compute domain mounts the mechanism by stating its two values.
 
-The service's database holds VM's tables, so its metadata (`db/database.py`) and its one migration history (`db/migrations.py`) name them: the history is the record of how those tables were created and evolved, including VM's pool-configuration table and VM's legacy lease conversion. `deployment-state`'s "Service-owned migration history" still gives the migration entrypoint only its database; nothing injects VM's schema. A single chain is adequate while one compute domain owns provisioning-side tables. When a second domain needs its own, each adapter would own its chain, run in an order the contributions declare, which amends that requirement.
+The service's database holds VM's tables, so its metadata (`db/database.py`) maps them and its one chain (`db/migrations.py`) composes the VM adapter's baseline, `vm_provisioning_adapter.migrations.BASELINE`, beside the baselines `kit/resource-pools`, `kit/site`, `kit/fulfillment`, the family kit's hosts, jobs and relays, and the service's own tables export, in foreign-key order, followed by the migrations after the v0.3.0 baseline. `deployment-state`'s "Service-owned migration history" still gives the migration command only its database; nothing injects VM's schema. A single chain is adequate while one compute domain owns provisioning-side tables. When a second domain needs its own, its adapter exports its baseline and migrations and the service's chain composes them in an order the contributions declare.
 
 The resource-pool projection a site serves is neutral, and a domain that publishes more — a view of a whole machine it sells, or a pool's configured defaults — contributes an `InventoryViewProjection` from `compute_provisioning.inventory_views`, which owns the protocol and its composer. The service merges what each projection returns and never names a domain's view, attribute, or provider configuration. A resource view is built with its pool's context, an `InventoryPoolContext` of pool ID, provider, and the pool's resolved declarations, because what a view may carry depends on them: a bare-metal view carries its delivery terms only where the pool's backing delegate passes them through (see the [resource-pool management architecture](../resource-pool-management/architecture.md#advertisement-delivery-and-backing)). The provisioning service, as the composition root, reads the pool rows in its own resource pass, resolves each pool once through the shared resolver, and hands each declaration its pool's context, interpreting none of it; the pool pass reads raw tags and the provider from the same column, so the two passes cannot drift on a pool's provider. A stored pool whose declarations do not resolve, which startup refuses and no write path produces, gives its members no context, so they project with no views and no problems, and the service logs a warning. The declarations the service hands the composer are the site ledger's offered read, whose `enabled` already says whether the site offers each one, so a view that reports availability, such as bare metal's, reports a declaration with no usable host as unavailable without the service or the view reading a host (see the [site-capacity architecture](../site-capacity/architecture.md#declared-capacity-and-connection-identity)). Building the context is compute-family work, so it sits at the contributed-view seam and nothing above the compute family learns of it: `kit/site` copies the per-resource result into its projection without reading it, and `kit/resource-pools` and core do not see it.
 
@@ -65,8 +65,48 @@ Common begin, recovery/status, access/result and teardown load verified evidence
 through the accepted entry. Payment rechecks the mandate and trusted signed
 receipt. Alkahest requires an active journal (pending reclaim/collection and
 ready mechanism status) and rechecks chain evidence against the persisted
-proposal, amount/duration, selected chain and exact obligation index. Local
-materialization is adoption history, not current chain authority.
+proposal, amount/duration, selected chain and exact obligation index, on every
+drive of a deal. Local materialization is adoption history, not current chain
+authority.
+
+Delivery enters through core's `fulfill_domain` hook, as VM's does: payment
+settle, the Alkahest ready step, the delivery re-drive's `redeliver` and a status
+read each call the fulfillment service's `deliver`, which revalidates the settlement
+through the accepted entry and builds a `StorefrontFulfillmentContext`, and the
+registered hook builds the compute delivery path from the clients in `ports` and
+the storefront's lifecycle in `domain_input`, refusing before any call when the
+lifecycle is absent. There is therefore one registered entry, and it always admits
+and commits the Agreement's window, and core's identity check runs on every
+bare-metal delivery. No core type changed for this: `ports` and the opaque
+`domain_input` already carry what the hook needs. The hook drives under the deal's
+lock, drives the physical end after releasing it, and returns the lifecycle row as
+`domain_result` with a public result naming the outcome, its fulfilled, deferred
+or failed disposition, and whether the deal is available.
+
+`bare_metal_fulfillment_lifecycle` is the path's progress port for bare metal
+([compute delivery](../compute-delivery/architecture.md)), its step read from the
+activation instant, the fulfillment, a recorded `dispatch` state, then a
+reservation; its row is created only while the settlement record is verified, in
+the admission's transaction, so a seller refund that won the start refuses it. The
+domain port reserves the whole-machine claim with `escrow_uid` beside the
+`:settlement` placement key, so recovery replays by key rather than scanning the
+site's reservations, and schedules and records the assigned resource before
+building the materialization over the Agreement window, since the request names
+that resource. The `delivery-recovery` loop drives waiting and pending deals again
+through the compute family's re-drive
+([compute delivery, "Dispatch and recovery"](../compute-delivery/architecture.md#dispatch-and-recovery)):
+it lists the deals whose lifecycle row shows a delivery started and not finished,
+skips one whose lock is held, re-checks its settlement through the settlement
+service's `verified_evidence`, and drives it through `deliver`. A status read
+drives a deal whose fulfillment is active and not yet available before answering,
+so the administrator's settle wait and a buyer's status read reach availability;
+the access read does not drive, reaching no payment authority, and goes through the
+path's access check. `access` and `status` are declared credential-capable.
+Migration `bare-metal-storefront-0016-delivery-activation` adds the activation
+column, marks a row an earlier storefront left with a saved materialization and no
+fulfillment as dispatched, so it is adopted rather than released, and removes
+`host`, `port` and `username` from every recorded replay body whose `method` is
+`ssh`.
 
 The scheduler's recorded resource kind, provider, and executor selection remain authoritative for begin, status, result, and teardown. The storefront never substitutes a process-global provisioner, buyer-supplied URL, or guessed adapter. It pulls normalized status and the versioned result envelope through the same recorded site client after restart; provisioning remains the authority for jobs, provider metadata, execution credentials, and teardown convergence.
 
@@ -122,9 +162,17 @@ returns no capacity; normal release remains proof-driven below.
 
 ## Proof-driven release
 
-Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a second teardown operation. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. A kind-routed `ReleaseJobPort` connects the two: VM-backed reservations resolve release status by reading the fulfillment aggregate's teardown state; other offering modes continue reading the shared job queue. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues without an operator prompting it. A requeue re-observes the teardown's job, whose identity is fixed per reservation; it does not run a job whose own retries are exhausted again, so such a teardown stays failed and its capacity held until an operator verifies the host and force-releases it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
+Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a teardown itself. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. One provider-neutral release executor and one status port connect the two for every offering mode: release begins the fulfillment aggregate's teardown, and release status reads the aggregate's teardown state. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues without an operator prompting it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
 
-A create that was dispatched and then failed has host effects nothing proved removed, so it is not left to an operator by default. When its provider reported the failure and its job metadata names its create job, release compensates it: it begins the domain's ordinary teardown from the `failed` aggregate, marked `create_compensation`, and capacity returns only when that teardown reaches `torn_down`. Each domain's teardown is safe after a partial create: bare metal's reclaim reports an account its grant never created as absent rather than failing, and a VM teardown removes only what its own guest created, finding each artifact by the guest's name when its cleanup script is missing and failing on one it cannot attribute. Compute provisioning alone decides eligibility, through one predicate the release decision, status, and teardown ports share; a failed row it cannot compensate — quarantined, with unreadable metadata, or with its create job missing — still waits for an operator.
+A teardown's job is adopted, not run again, unless its record proves its execution never started. The job engine records two instants on every job from the process's time source: `execution_started_at`, committed when the executor reports, immediately before it starts anything that can act on the host, that the execution is starting — the Ansible executor before it spawns the playbook — and `finished_at`, stamped on every terminal transition. The start's report raises when it cannot be committed or the job has left `running`, so no attempt acts on a host without a recorded start and a job cancelled since its claim spawns nothing; a retry keeps the first instant. A job's execution never started when it is `failed`, not `cancelled`, and records `finished_at` but neither a start nor a handle: it was refused before anything acted on its host — by the engine, or by its executor's codec, inventory, host key or relay — so running it again does exactly what it should have. A job with no `finished_at` was finished by an engine that recorded the handle only after spawning the playbook, so a missing handle there proves nothing, and it is never so classified; a recorded start without a handle counts as started. The job view carries both instants.
+
+The Ansible executor checks a host's key against its pin ([The host registry owns the connection](#the-host-registry-owns-the-connection)) before it reports the start, so a host presenting another key, or one with no pin, fails its job as never started, unretried: a teardown so refused runs again once the operator settles the key, by the rerun rule below, and nothing touched the host meanwhile. A key that changes between that check and the playbook fails the playbook as started, and an operator handles it, as for any started teardown.
+
+The job-backed provider's `dispatch_teardown` adopts the reservation's latest teardown job. When that job's execution never started and a rerun is ready, it submits rerun *n* under `"{reservation}:teardown:rerun-{n}"`, *n* counting the teardown jobs already bound, from the frozen prepared teardown operation's parameters; the first teardown is `"{reservation}:teardown"`. A crash between submitting and recording finds the rerun as the latest job and adopts it, and concurrent dispatches collapse on the job identity. Rerun *n* is ready once the previous job has been finished for the job retry policy's delay after *n* − 1 retries, up to `teardown_rerun_limit` reruns. One compute-owned predicate (`teardown_rerun`) decides from the reservation's teardown jobs, read through one unpaginated engine-internal read, whether the teardown is not rerunnable, waiting, ready, or spent; dispatch acts on it, and the release status reads it beside the aggregate, as it reads the compensable predicate. A `teardown_failed` aggregate whose rerun is waiting or ready, or whose latest job is still unsettled, reads as tearing down, so the lease stays `releasing`; one not rerunnable or spent reads as failed, the message for a never-started teardown saying so and how many reruns were spent, and the lease enters `release_failed`, which then means only that an operator must act. A teardown whose execution started, a cancelled one, and one finished before starts were recorded stay failed, their capacity held, until an operator verifies the host and force-releases. The lease's `release_job_id` is the fulfillment, so a new teardown job touches neither it nor convergence, which requeues every `teardown_failed` row as before.
+
+The lease watchdog's grace is the backstop for every stuck release: a lease still `releasing` past `lease_watchdog_grace_period_seconds`, timed from when it entered `releasing`, enters `release_failed` with `teardown_timeout`, whether its teardown is in progress, a rerun is pending, its status read keeps failing, or its teardown keeps failing to begin. Its default, 3600 seconds, covers a teardown of expected length succeeding on a job retry or a rerun ([configuration](configuration.md#secrets-are-named-not-carried)). A longer teardown is timed out like any other, and since an operator's retry-release re-observes the same aggregate, one that has since reached `torn_down` is released by that call, and one with a rerun pending returns to `releasing` and waits for it.
+
+A create that was dispatched and then failed has host effects nothing proved removed, so it is not left to an operator by default. When its provider reported the failure and its job metadata names its create job, release compensates it: it begins the domain's ordinary teardown from the `failed` aggregate, marked `create_compensation`, and capacity returns only when that teardown reaches `torn_down`. Each domain's teardown is safe after a partial create: bare metal's reclaim reports an account its grant never created as absent rather than failing, and a VM teardown removes only what its own guest created, finding each artifact by the guest's name when its cleanup script is missing and failing on one it cannot attribute. Compute provisioning alone decides eligibility, through one predicate the release decision, status, and teardown ports share; a failed row it cannot compensate — quarantined, with unreadable metadata, or with its create job missing — still waits for an operator. A compensating teardown that fails before its execution starts is run again by the same rule as any teardown, keeping `create_compensation`.
 
 Readiness checks use local service dependencies. Slower outbound provider or storefront diagnostics belong to operator surfaces so an external failure does not unnecessarily make a healthy API/worker process unready.
 
@@ -310,6 +358,136 @@ the hardware does not have, and its failure mode is silent cross-guest DMA. In a
 marketplace renting isolation to strangers, the correct outcome is an accurate
 report that the device is unavailable.
 
+## Guests are isolated from each other
+
+Every VM guest on a host attaches to libvirt's `default` network (`virbr0`,
+`192.168.122.0/24`), and no guest shares a layer-2 segment with another by
+anyone's choice: a seller gains nothing by it, and different buyers' guests
+sharing one could reach each other and claim each other's addresses. A private
+network for one buyer's guests would be a buyer feature with its own
+representation in negotiation; no pool or seller setting places guests on a
+shared segment.
+
+**Port isolation and the anti-spoofing filter.** Every guest's interface is
+defined once, by the `vm-management` role's `templates/guest-interface-args.j2`,
+which every `virt-install` site looks up, GPU guests' included: a virtio NIC on
+`default` with `<port isolated='yes'/>` and libvirt's `clean-traffic` filter,
+its parameters `CTRL_IP_LEARNING=dhcp` and `DHCPSERVER=192.168.122.1`. It is a
+template rather than a variable because a pool's `extra_vars` override any
+variable. An isolated bridge port forwards only to ports that are not isolated,
+which on `virbr0` is the bridge itself, so a guest reaches DHCP, DNS and the NAT
+uplink but never another guest at layer 2; `clean-traffic` holds it to its MAC
+address and the address it leased, so it cannot claim another guest's address by
+ARP, and drops every frame that is not IPv4 or ARP. A libvirt network per guest
+would need subnet allocation, a dnsmasq per guest and a rewrite of every
+teardown path reading `default`; a filter of the host kit's own would have to
+keep ARP and DHCP correct by hand. Host preparation refuses, naming each missing
+item, a host whose libvirt predates 6.1 (port isolation), whose virt-install
+predates 3.0 (the `--xml` edits that set the filter's parameters), or which
+lacks the nwfilter driver's `clean-traffic` filter or `ebtables`, which host
+preparation installs.
+
+**The guest policy.** The host kit's `tasks/guest-policy.yml` installs chains of
+its own, each jumped to from the first position of its built-in chain for
+packets arriving from `virbr0`:
+
+- `ARKHAI-GUEST-IN` (from `INPUT`): a guest reaches DHCP, DNS to the bridge's
+  address, and replies of connections already established; everything else to
+  the host, its SSH included, is dropped;
+- `ARKHAI-GUEST-FWD` (from `FORWARD`): a forwarded packet going back out on
+  `virbr0` is dropped first, closing the hairpin through the gateway to another
+  guest; replies of established connections pass, a buyer connecting from a
+  private address included; an accept for each
+  `guest_allowed_private_destinations` entry, empty by default, follows; then
+  link-local (`169.254.0.0/16`, a cloud's metadata service among it) and the
+  private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `100.64.0.0/10`) are dropped, and anything else returns to `FORWARD`, where
+  libvirt's NAT accepts it;
+- `ARKHAI-GUEST-V6` (from ip6tables' `INPUT` and `FORWARD`): every IPv6 packet
+  from the bridge is dropped. A filtered guest sends none, so the drop takes
+  nothing from it; it closes the IPv6 path of a running guest whose filter waits
+  for its next start, on a host whose `default` network carries IPv6.
+
+A guest that reaches the seller's networks, its management route, or its cloud
+credentials has crossed the boundary a seller places beside buyers as surely as
+one that reaches another guest, so the private ranges are closed unless the
+seller lists a destination. A connection the guest opens toward a private
+address has its first packet dropped and never becomes established.
+
+The jumps lead their built-in chains because an appended rule would follow UFW's
+accepts on `INPUT` and libvirt's `LIBVIRT_FWO` accept on `FORWARD` and never
+run; under libvirt's nftables backend its accepts sit in a table of their own and
+stop no drop here. libvirt re-adds its rules when it starts and UFW when it
+reloads, so the policy is installed again after each. Host preparation renders
+the IPv4 rules to `/etc/arkhai/guest-policy.rules` and installs
+`/usr/local/sbin/arkhai-guest-policy`, which installs each family in one
+`iptables-restore -w --noflush` transaction, `ip6tables-restore` for IPv6,
+skipped on a kernel without IPv6: declaring each chain flushes and refills it,
+any jump to it already present is deleted by its rule, and a new one is inserted
+first, so no packet sees the chains empty or a jump missing, and every run leaves
+exactly one jump from each built-in chain at position one. It runs from
+`arkhai-guest-policy.service`, a oneshot ordered after UFW, the saved rules and
+libvirtd, wanted by `multi-user.target` and by `libvirtd.service`, keeping no
+active state so every libvirtd start, a socket activation included, runs it
+again; and from a block of UFW's `/etc/ufw/after.init`, which UFW runs each time
+it starts or reloads, leaving the rest of an operator's hook as it is.
+Installing the policy through UFW's `before.rules` instead would couple it to
+UFW's layout and leave hosts without UFW needing another path. Host
+preparation's security hardening saves the installed IPv4 rules with the host's
+others; nothing saves the IPv6 chain, which the unit installs at boot. The
+policy does not rely on the host kit's `iptables-restore` unit.
+
+What a guest reaches on its host is the policy's alone: no per-port guest rule
+sits behind it, and host preparation deletes from a host an earlier release
+prepared the exact port-22 drop and log forms, `ufw allow in on virbr0 from
+192.168.122.0/24` and `vm-network-isolation.service` with its script, a
+compatibility path with a scheduled retirement ([the release handbook,
+"Compatibility to retire"](../../../docs/release-handbook.md#compatibility-to-retire)).
+Its `allow out on virbr0` governs only the host's own connections to its guests
+and stays. A VM create inserts its guest's two forwarding accepts for DNATed
+buyer SSH at `FORWARD`'s first position, ahead of the policy's jump; they match
+no packet a guest originates, the inbound accept requiring `! -i virbr0` and the
+reply accept `--ctstate ESTABLISHED`. cloud-init reads a seed ISO, and the
+host's SSH into a guest, frpc's proxy and DNATed buyer SSH are connections the
+host opens or forwards, so none needs more.
+
+**Converging running guests.** An isolated port can still be reached from one
+that is not, so a running guest holding a port that is not isolated, or no
+filter, could reach every isolated guest at layer 2 for as long as it runs, and
+VM leases may be open-ended. Host preparation installs
+`/usr/local/sbin/arkhai-guest-converge` (`vm-setup/files/guest_converge.sh`) and
+runs it after the policy. For each running guest on `default` it sets the tap's
+bridge port isolated (`bridge link set dev <tap> isolated on`), which does not
+drop the link; applies `clean-traffic` through `virsh update-device --live`
+where libvirt accepts it, leaving the interface's `<port>` element as libvirt
+holds it, and otherwise leaves the filter for the guest's next start; and writes
+the isolated port and the filter into the saved definition through
+`virsh update-device --config`, so a restart, an autostart or a host reboot keeps
+them. No buyer session is interrupted: restarting running guests would interrupt
+every buyer, and isolating new guests only would leave their isolation to the
+oldest guest on the host. The command prints one JSON line per running guest —
+`name`, `port_isolated`, `filter` (`live`, `next_start` or `none`),
+`saved_definition`, `changed` and `error` — and reports a filter `live` only when
+the running definition names it and libvirt lists an active binding of it on
+the guest's tap (`virsh nwfilter-binding-list`). It exits non-zero only when it
+cannot run at all, and host preparation fails only then: it names each guest
+left unconverged and each whose filter waits for its next start, since failing
+would leave every other host step undone for one guest the operator can act on.
+Callers read these lines rather than `virsh`; the real-host proof of guest
+isolation runs the same command
+([test-compatibility](../test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation)).
+
+The convergence leaves residual exposure. Until a guest's filter applies at its
+next start, port isolation keeps it from other guests at layer 2 but not from
+claiming another guest's address to the host's own end of the bridge. A
+converged guest's running definition still says its port is not isolated, so a
+tap libvirt attaches to the bridge again before the guest restarts, as after the
+network is restarted, comes up not isolated until the saved definition applies
+at the guest's next start. The convergence is a compatibility path with a
+scheduled retirement ([the release handbook, "Compatibility to
+retire"](../../../docs/release-handbook.md#compatibility-to-retire)); a guest
+never converged keeps a port that is not isolated until it is torn down.
+
 ## The host registry owns the connection
 
 Address, user, key material, and port are one descriptor and live together in
@@ -325,13 +503,92 @@ pool has no buyer relay; for a relay-backed pool, the leased relay endpoint is
 delivered instead. A VM guest is reached at its own forwarded or relayed port,
 never the host's `public_host` or `public_port`.
 
-The `ssh` connection is served at version 2 alone, and a submission stating no
-version, or another, is refused. A host stored at version 1 is refused before
-any inventory is written, and runs nothing until it is submitted again at
-version 2 by an update or an inventory import. An update restates every stored
-public field. A protected key it neither resubmits nor replaces with a key file
-is carried forward from the stored row as ciphertext, never read or decrypted.
-Nothing rewrites a stored row on its own.
+The `ssh` connection is served at version 3 alone. A submission must state its
+version — the contract gives it no default — and one stating no version, or
+another, is refused. A host stored at a version no codec serves is refused
+before any inventory is written, and runs nothing until it is submitted again
+by an update or an inventory import. An update restates every stored public
+field. A protected key it neither resubmits nor replaces with a key file is
+carried forward from the stored row as ciphertext, never read or decrypted.
+
+No reader upgrades a stored connection. Besides a submission, only a recorded
+migration with an exact mapping rewrites one. Compute provisioning's chain
+rewrites every host's `ssh` connection stored at version 1 — which the v0.3.0
+chain wrote and v0.3.0 refuses — to version 2 with the same public fields and
+the same ciphertext, since version 2 is version 1 with an optional
+`public_port` falling back to the connection's port; a later migration rewrites
+every connection stored at version 2 to version 3 with the same public fields
+and protected values and no `host_keys`, since version 3 is version 2 with an
+optional pin, and marks each host it rewrites pending adoption (below). Each
+writes its literal target version, not the codec's current one, and validates
+each row before writing any, against the fields the versions share and refusing
+a row that already states `host_keys`; a host it refuses fails the migration,
+naming it, and nothing is rewritten. Only the `hosts` row stores a connection: a job reads its host's at
+dispatch, through the host lookup the job engine is given, and no job record,
+parameter or envelope carries a copy, so a job queued before the migration
+dispatches against the rewritten host. A teardown that had already failed on a
+version-1 host is not re-run by the migration ([Proof-driven
+release](#proof-driven-release)); the operator handbook's upgrade procedure
+recovers it.
+
+A host's SSH key is part of the same descriptor. The connection's `host_keys`
+are its pin: OpenSSH public keys, each its type and base64 without a comment,
+which identify the machine rather than its route, so a submission that omits
+them keeps the stored pin whatever else it changes, `ssh_host` and `ssh_port`
+included, and the INI import, which carries none, keeps it too. A pin is
+replaced only by stating other keys or by a capture with `replace`; stating the
+old key with the new lets a host rotate without a refusal between. Keeping the
+pin in the connection, rather than in a record beside it or a `known_hosts`
+file an operator mounts, keeps an SSH concept with the codec that owns its
+kind's fields and keeps the inventory reproducible from the registry.
+
+A pin is stated at registration, or captured: an operator's connectivity check
+of an unpinned host reports the key it presents, with its endpoint
+`[ssh_host]:ssh_port` and SHA-256 fingerprint, and stores nothing, and the
+capture route records that key only when the host presents the fingerprint the
+operator names, which the operator compared from an independent source. The
+probe that observes a key completes the SSH key exchange with authentication
+disabled, so it runs nothing and sends no credential. Capture is an operator's
+act rather than a job's because a host's first job is usually its preparation,
+which sends the relay's client token: capturing there would hand that token to
+whoever answered. A host-key certificate authority would need a CA the operator
+runs and would leave a host another party prepared unsigned; the
+representation leaves room for one.
+
+The rule is the Ansible executor's, whose concept the host key is. For every
+job and probe the runner writes an owner-only `known_hosts` holding the pin
+under `[ssh_host]:ssh_port`, removed with any decrypted key file, and renders
+verification as host variables, which outrank any Ansible configuration:
+`ansible_host_key_checking=true`, `ansible_ssh_args` with the service's own
+baseline, and `ansible_ssh_common_args` naming that file with
+`GlobalKnownHostsFile=/dev/null` and `StrictHostKeyChecking=yes`. A setting in
+a configuration file would not hold: an operator's `ansible_cfg` replaces the
+packaged file whole, Ansible's ssh plugin emits `StrictHostKeyChecking=no`
+ahead of the common arguments when checking is off, and `ssh` keeps the first
+value it reads. Before a job's recorded start, the executor makes one
+connection against the pin that runs nothing on the host, and refuses an
+unpinned or mismatched host, naming the host, its endpoint, the presented and
+pinned fingerprints and how to recover ([Proof-driven
+release](#proof-driven-release)). A host behind a management tunnel is checked
+at its tunnel port, so a port handed to another machine is refused on mismatch.
+The mock executor reaches no host and reads no pins, as every lane registers
+hosts without keys.
+
+A host the version-3 migration rewrote is pending adoption, a flag on its
+`hosts` row outside the connection that neither the export nor the host
+definitions document carries. For such a host, the check before a job's start,
+or a connectivity check, accepts the key presented into an empty file and
+records it as the pin, clearing the mark, in one compare-and-set that takes
+effect only while the host is still pending. Every job then checks against the
+committed pin, never the key it observed, so a job whose observation lost to
+another adoption fails before its start. The adopting connection sends nothing
+secret, and what it trusts is a deployed host's first answer after the upgrade,
+which is what such a host was trusted with on every earlier contact; strict
+refusal of every deployed host until an operator pins it would be an outage
+from the upgrade on. Stating `host_keys`, or capturing, clears the mark, and a
+host registered after the upgrade is never marked. The adoption is a
+compatibility path with a scheduled retirement ([the release handbook,
+"Compatibility to retire"](../../../docs/release-handbook.md#compatibility-to-retire)).
 
 The port renders explicitly even at its default, so an inventory line states
 what the registry holds rather than leaving the default implied by an absent
@@ -476,6 +733,14 @@ grant, relay token or admin password use Ansible `no_log`, and each domain's
 codec marks these values as secret fields for job redaction. Provider extras
 cannot override the client baseline, proxy targets or task controls.
 
+In the service, the relay token is decrypted only into a run's variables file,
+created owner-only and exclusively under a random name in the process's
+temporary directory and removed on every ending of the run, as decrypted host
+keys are. That protection rests on the provisioning container never being
+shared between users, which holds by design: a user who opens one to others, by
+adding their own SSH keys or running their own tunnel into it, has stepped
+outside what this repository and its deployment provide.
+
 The `grant_key_secret_key` profile value is one-line standard base64 encoding
 of an Ed25519 PKCS#8 DER private key; surrounding whitespace is stripped, and
 invalid or missing values fail relay creation without echoing the secret. It is
@@ -515,8 +780,9 @@ nonoverlapping issuer ranges and keys, but still shares its token and sessions;
 one operator's frps restart affects every user. A separate relay per operator
 is recommended. For a compromised signing key, remove it immediately and deny
 its next reconnects, or retain it until its leases end with the signing risk
-limited to its issuer. A leaked client token requires stopping admission,
-draining every lease sharing it, then rotating the token and host baselines.
+limited to its issuer. A leaked client token requires draining the relay in
+every provisioning service that registers its server, then rotating the token
+and host baselines.
 
 If teardown cannot reach the host, a relay operator must block the leased port
 and end established sockets in the relay namespace; where firewall control is
@@ -525,12 +791,93 @@ the shared relay. Keep containment until expiry and registration removal are
 verified. Relay containment closes the route only; reclaim still needs host
 activity termination and verified cleanup.
 
+A relayed delivery's port is leased on the relay its capacity declaration's pool
+references, whatever pool, if any, its host is placed in, and the job adding its
+proxy points the host's one buyer-facing client at that relay first:
+`relay-proxy`'s `add.yml` includes `relay-client`, whose baseline
+synchronization writes the job's relay address, port and token and restarts the
+client when they change, before the proxy is added. The job's relay is resolved
+from the lease, and the lease from the declaration's pool. That the relay the
+host's client dials is the relay its deliveries are leased on rests on three
+facts: a host has at most one capacity declaration, so every delivery on it is in
+one pool; a pool's relay reference cannot change while it holds a lease; and the
+site refuses to move a declaration to another pool while a reservation holds
+capacity against it. A change relaxing any of them answers for the rule. Tests
+hold both halves: a static test of the family roles, and an application test
+leasing a host placed under another relay, and an unplaced host, on its
+declaration's pool's relay.
+
+A host's own pool is placement intent, and three rules read it where the relay
+that matters is the declaration's pool's. The management-route rule claims only
+the obvious case, since any admission-enforcing relay refuses a management
+proxy; the host pool-change hook and the drain only refuse or withhold more than
+necessary. Each errs toward caution, so none is moved to the declaration's pool,
+which would need a relay seam into the site's declaration writes.
+
 ### Rebinding requires draining
 
 A host's relay binding cannot change while any affected lease remains active.
 The host authority composes the compute-family relay mechanism's pool-change
-check; it refuses a relay-changing move while relay leases exist. Disablement
-stops new scheduling but leaves existing leases to drain before rebinding.
+check; it refuses a relay-changing move while relay leases exist.
+
+A drain is one lifecycle — stop new work, let existing work finish — at two
+scopes, and there is no other. Disabling a pool drains that pool, which is what
+a pool's relay reference and a host's move to a pool on another relay wait on.
+Disabling a relay drains every pool referencing it, which is what a relay's
+address, port, or token waits on, since each change affects every pool on the
+relay. A refusal under the rebinding rule names the drain at the scope that
+clears it, so an operator facing a relay-side refusal is not sent to disable
+each pool on the relay in turn.
+
+### Disabling a relay drains it
+
+A relay's `enabled` is its drain, for VM and bare-metal delivery alike.
+Disabling it stops new work on the relay in two places and lets every delivery
+already holding a lease on it run to its end:
+
+- **No new delivery is placed on it.** The compute composition reports to the
+  site authority the hosts taking new delivery as the host authority's report
+  less every host placed in, or with a declaration in, a pool referencing a
+  disabled relay — the seam a disabled host already uses, so the site learns
+  nothing of relays. Both are counted because a host's placement and its
+  declaration's pool are recorded apart: a bare-metal host may be unplaced
+  while its one declaration sits in a pool, and a delivery takes its relay from
+  the declaration's pool.
+- **No port on it is leased to a new owner.** The allocator, the one place a
+  lease is created, refuses a new owner on a disabled relay, reading the relay
+  row under a lock a concurrent disable cannot pass, so a disable committed
+  while an acceptance is in flight either waits for it or is seen by it. An
+  owner already holding a lease receives it again. A disabled relay's active
+  leases therefore only shrink, and "drained" is stable once reached.
+
+Execution does not refuse a disabled relay: a create whose lease was allocated
+before the disable, and every teardown and reclaim, run, since refusing them
+would leave guests reachable past their lease end and hold every failed
+delivery's lease, and the relay would never drain.
+
+The relay read reports `active_lease_count` and `drained`, true exactly when
+the relay is disabled and holds no active lease, computed from the leases and
+required in the typed response, so a client reading a service that does not
+report them fails to parse rather than reading an unknown as an answer. The
+condition is stated by the service, where the lifecycle rule lives, rather than
+rebuilt by each reader, because the relay's operator relies on it to remove the
+server. It does not wait for a released lease's grant to expire: a lease is
+released only once its proxy is gone, and a grant is verified only by its own
+relay's keys, which go with the server.
+
+Disabling is reversible before or after the relay drains: it removes no proxy,
+releases no lease, and changes neither the token nor a grant key. Removing the
+relay server, or on a shared relay this relay's keys and range in the admission
+plugin, is the relay operator's, outside this repository; the service never
+verifies that a server exists, so a relay is enabled again only when one runs.
+Nothing deletes a relay: a drained relay's row stays, disabled, as the record
+its leases, retired keys, and pool references point at, and keeps holding its
+rendezvous, so a server reinstated there is the same relay. A relay the
+definition document stops listing is left as it is, since relays are also
+created through the API and omission cannot mean drain; a listed relay is
+drained through its entry's `enabled`. The procedure is the [seller relay
+guide](../../../docs/seller-frp-setup.md#retiring-a-relay) and the [relay
+runbook](../../../docs/development/VALIDATION_RUNBOOK.md#retire-a-relay).
 
 ## Bounded bare-metal working data
 

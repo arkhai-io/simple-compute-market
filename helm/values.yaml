@@ -328,9 +328,13 @@ provisioning:
     type: ClusterIP
     host: "0.0.0.0"
 
+  # The Secret holding the SSH key, `id_ed25519`, mounted only when
+  # provisioning is real (mockMode: false). Mock provisioning mounts no key, so
+  # no Secret is named here; a release with real provisioning names its own,
+  # and one that names none fails to render.
   sshKey:
     createSecret: false
-    secretName: arkhai-provisioning-ssh
+    secretName: ""
 
   sshDecryptionKey:
     createSecret: false
@@ -365,7 +369,7 @@ provisioning:
     ansible_timeout_seconds: 1800
     lease_watchdog_enabled: true
     lease_watchdog_poll_interval_seconds: 60
-    lease_watchdog_grace_period_seconds: 300
+    lease_watchdog_grace_period_seconds: 3600
     storefront_site_id: "default"
     enable_rate_limiting: false
     rate_limit_requests_per_minute: 30
@@ -405,10 +409,11 @@ integrationTests:
 
 # ---------------------------------------------------------------------------
 # e2e-tests subchart
-# Full buyer-seller deal lifecycle test suite. Dev / CI only — disabled by
-# default. Enable with --set e2e-tests.enabled=true or in a CI values overlay.
-# Credentials default to the deterministic Anvil test keys; override for other
-# environments.
+# Full buyer-seller deal lifecycle test suite, for development and CI. These
+# defaults enable it; a release that runs no tests sets e2e-tests.enabled=false,
+# as bare-metal-release-values.yaml does. Its credentials come only from
+# pre-existing Secrets, the one secretName names and the buyer's
+# buyer.credentialSecret: the chart carries no key value.
 # ---------------------------------------------------------------------------
 e2e-tests:
   enabled: true
@@ -439,5 +444,23 @@ payments-lane-double:
     repository: ""
     name: arkhai
     tag: payments-lane-double
+    digest: ""
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# mediation-lane-double subchart
+# A double of an arkhai.mediation.v1 dispute authority answering from programmed
+# rules, for a local release only: helm/local-values.yaml enables it beside the
+# payments double, which it reaches as `payments-double`, and no release values
+# do. Its Service is `mediation-double` in every release, so a namespace runs one.
+# ---------------------------------------------------------------------------
+mediation-lane-double:
+  enabled: false
+  # Restated from the subchart's defaults so that every image tag the release can
+  # deploy is set here, where a change's validation suffixes each one.
+  image:
+    repository: ""
+    name: arkhai
+    tag: mediation-lane-double
     digest: ""
     pullPolicy: IfNotPresent

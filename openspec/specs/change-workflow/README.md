@@ -7,8 +7,8 @@ them, and the interfaces an adopting repository may rely on. Its
 [index](index.md) organizes the requirements by id into five parts, and this document
 follows the same parts: the process; implementation and validation; reviews and
 triage; the engine; the public surface. It explains why the workflow is shaped as it
-is. How to run each step is in
-[`docs/agents/change-workflow.md`](../../../docs/agents/change-workflow.md); how this
+is. How the owner operates it is the
+[change workflow handbook](../../../docs/change-workflow-handbook.md); how this
 repository fills the roles the workflow leaves to a repository is in
 [`market-change-workflow`](../market-change-workflow/README.md).
 
@@ -80,8 +80,9 @@ even a rework of the returned round's own sections, which under the returned rou
 would reach the next round unread and unreviewed. A declined return is the owner's
 to settle, since the triage it ended no longer says what follows. A triage with
 nothing to discuss that recommends advancing advances without asking the owner
-anything. An implementation round, and the
-merge before closeout, advance only on a `passed` validation of their final commit,
+anything. An implementation round, the merge
+before closeout, and the merge after the archive advance only on a `passed`
+validation of their final commit,
 and after a closeout review a correction
 outside the repository's inert paths is validated before archive cleanup, so a code
 correction reaches the merge validated unless the owner waives it. The owner's own look at the pull request before merging is outside
@@ -121,14 +122,28 @@ review weighed — naming the criterion and its evidence (CW-q3dm); the merge be
 closeout keeps its own judgement. Criteria with no recommendation would leave the
 owner to spot every waiver. Each recommendation is a ledger line, taken or declined,
 so a guidance review can count them by criterion, the evidence a later change would
-need to take a criterion's waivers by default. The criteria themselves are in the
-workflow's guide, under "Waivers".
+need to take a criterion's waivers by default.
+
+A step's judgement of the exit it takes is followed without the owner's
+confirmation unless the exit needs a waiver. A confirmation of a judgement the owner
+almost always shares is a stop with a foregone answer; a waiver skips evidence, and
+so stays the owner's. The merge after the archive judges whether its resolutions
+need a review on written criteria and takes that exit without asking; the merge
+before closeout still asks the owner to confirm another pre-closeout review, until
+the workflow's use shows whether it should change too.
 
 The archive is the boundary no direction crosses. An archived change's deltas are
 already merged into `openspec/specs/`, so design, planning, and implementation
-refuse it; the closeout review, its triage, and archive cleanup need the archive,
-and archive cleanup would otherwise mark `archived` a change whose deltas were never
-merged.
+refuse it; the closeout review, its triage, archive cleanup, the merge after the
+archive, the merge review, and its triage need the archive, and archive cleanup
+would otherwise mark `archived` a change whose deltas were never merged. No step
+after the archive returns the change to an earlier phase either: once the landing
+branch's changes are interleaved with the archived deltas, the archive's merge of
+them cannot be undone, and archive cleanup's release of dependents would be left
+wrong. Where a merge after the archive cannot resolve a conflict so that both sides
+hold, or the landing branch has invalidated the change's design, the merge asks the
+owner and leaves the merge in progress; the owner resolves it as they direct, lands
+the change and follows up in a new change, or takes it off the workflow.
 
 ### The merge before closeout
 
@@ -164,19 +179,102 @@ which finds the branch merged, or merges what it gained meanwhile.
 Which branch a change lands on is recorded with its clone: the branch the workspace
 had checked out when the orchestrating session made the clone, or the clone's
 `--from` (["A change is worked in its own clone"](#a-change-is-worked-in-its-own-clone)).
-`start merge` adds that branch to the merge's invocation, and the skill merges the
-branch its invocation names and assumes none. The owner names another for one run,
-`FROM=<branch>` through the make fragment; a change worked in place, which has no
-clone and so no recorded branch, is merged only from a branch given, and the merge
+Each finished merge records in its outcome the branch it brought in, as `landing`
+with the remote it fetched from and the commit (["The log, its format, and the
+conversion"](#the-log-its-format-and-the-conversion)). `start merge` adds to the
+merge's invocation the branch it is given, else the branch the change's last
+finished merge recorded, else the clone's, and the skill merges the branch its
+invocation names and assumes none. The owner names another, `FROM=<branch>` through
+the make fragment, and every later merge of the change — a repair, the merge
+repeated after its review, a merge after the archive — brings that branch in again
+without the orchestrating session having to remember it: with the clone's branch
+first, the merge repeated after its review would bring in a branch other than the
+one reviewed whenever the argument was forgotten. A change worked in place, with no
+clone and no merge recorded yet, is merged only from a branch given, and the merge
 refuses without one. No repository default stands in: a default would be right for
-most changes and silently wrong for one branched from elsewhere.
+most changes and silently wrong for one branched from elsewhere. The record takes
+the branch name alone into `start merge`, never the remote: a merge after the
+archive may run in the workspace once the clone is gone, whose remotes are named
+otherwise, and it chooses its remote afresh where it runs and records it.
 
-The merge sits in the implementation phase, since it may change code, and sets
-`ready for closeout` as it advances only when the merged `HEAD` is already
-validated; closeout accepts a row still `in implementation` once the computation
-names it, as it did when a triage advanced before its fix was validated. A merge of
-the branch at any other time stays the owner's intervention, and does not replace this
-one.
+The merge before closeout sits in the implementation phase, since it may change
+code, and sets `ready for closeout` as it advances only when the merged `HEAD` is
+already validated; closeout accepts a row still `in implementation` once the
+computation names it, as it did when a triage advanced before its fix was validated.
+A merge of the branch at any other time before the archive stays the owner's
+intervention, and does not replace this one.
+
+#### The merge after the archive
+
+The landing branch keeps moving after the merge before closeout: while closeout, its
+review, and archive cleanup run, and while the pull request waits. When the
+change's branch then conflicts with it or falls behind it, the change is merged
+again through the merge after the archive, `late-merge`: a node of its own whose run
+is the merge step, with the same skill, mechanics, scope, and target, as `round`
+runs implementation. A new step would have needed a second definition beside the
+merge's, with its own skill, scope, hook rights, target, and model entry, and had the
+owner leave the orchestrating session to run it; a `merge`
+qualified by a kind would have needed a permanent rule that a kindless merge is the
+one before closeout; and one `merge` node with both sets of exits would declare exits
+wrong in every state it can be in. Un-archiving the change into a new round was
+rejected for the reasons the archive boundary gives
+([The owner is interrupted only for
+judgement](#the-owner-is-interrupted-only-for-judgement)), and because the common,
+mostly mechanical merge would go through a dozen steps whose resolution the merge has
+already made.
+
+It is entered only once archive cleanup has run and while the change's index row
+says `archived`: the merge keeps that row, and archive cleanup run again tells itself
+from a first run by it, so a change whose row was pruned has the row restored before
+the owner directs the merge. It resolves as the merge before closeout does, and also
+keeps the change archived. The change's own row stays `archived` and its archived
+directory as its branch has them. `openspec/specs/`, each `index.md`, and the
+permanent documents keep both sides — every requirement saying what each change
+meant, every id unique — since the change's deltas are already merged there and no
+later step reads them. A row the landing branch brought that depends on the change
+is released as archive cleanup releases a dependent, since archive cleanup run again
+releases nothing. The capacity figure kept is the one measured later. The pull
+request's drafts are appended to, never redrafted, since the history copy refuses a
+file that changed other than by growing.
+
+The merge judges whether its resolutions need a review of their own, a review of kind
+`merge`, on criteria its skill writes: a conflict resolved outside the mechanical
+files — the change index, other changes' documents, files the hooks rebuild,
+version-only bumps, and files an evidence kind's cleanup writes; a reconciliation
+of the change's own code or scenarios; a file outside the mechanical files that both
+sides changed since the merge base, since two changes' edits to one specification can
+merge cleanly into contradiction; and a contract the landing branch changed in
+meaning. Several changes on one goal run in parallel and promote into the same
+specifications, so such a review is often warranted, and a confirmation of it would
+be a foregone stop: the merge names the review or archive cleanup and the
+orchestrating session follows it. Always reviewing would spend a review and a triage
+on a merge whose only conflict was an index row.
+
+The merged `HEAD` is validated before the review or archive cleanup, as before
+closeout, and a failed validation names the merge after the archive again, which
+repairs what it found; the end-to-end pipeline is the only check that finds a stale
+call in a scenario. Only the owner waives that validation, and the waiver is the
+owner's direction to the exit the merge named, so a review the merge chose is not
+skipped with the validation; skipping both is a direction to archive cleanup whose
+reason says so. A direction checks no exit guard, so a waiver always directed to
+archive cleanup would have skipped a chosen review silently. The merge review's
+triage advances to archive cleanup, which runs again on the archived row and ends at
+`done`, or names another merge review; it does not return to the merge. The owner
+reviews the branch before merging the pull request and directs another merge after
+the archive when the landing branch has moved again: a loop ending only when the
+landing branch gained nothing would go round until the branch paused.
+
+Detection runs by itself only where nothing it moves is under the owner's review.
+Archive cleanup fetches the branch the last finished merge recorded, or else the
+clone's, and records what it fetched; its first exit to `done`, before the pull
+request opens, names the merge after the archive when that commit is not in the
+branch, and the orchestrating session runs it without asking. A long closeout is
+when the landing branch gains the other changes on the owner's goal, and the check
+costs one fetch. After the pull request opens, nothing detects that the landing
+branch moved: nothing runs after `done`, a poller or a trigger on pushes would need
+infrastructure the workflow lacks, and a merge started by itself would move the
+branch the owner is reviewing. The owner then starts the merge by telling the
+orchestrating session, which records the direction.
 
 ### Closeout and archival
 
@@ -187,18 +285,45 @@ land rather than inferring them from the delta. The steps after the archive find
 change by name under its dated directory; design, planning, and implementation have
 nothing to do with an archived change and refuse it.
 
-Closeout changes documentation only. The code was last reviewed at pre-closeout and
-the closeout review reads documentation, so a closeout code edit would go unreviewed
-as code; comment hygiene and import placement are therefore done before the
-pre-closeout review and only confirmed at closeout. A code defect a closeout review
-does find stops for the owner, who directs the correction and decides whether it
-needs another reader; reopening the change for a full round is not required for what
-is expected to be rare.
+Closeout changes only the repository's inert paths, changes' records, and the
+archive's own writes — the change's own documents and their move into the archive,
+its row of the change index, and its deltas merged into the specifications
+(CW-pkug). The code was last reviewed at pre-closeout and the closeout review reads
+documentation, so a closeout code edit would go unreviewed as code; comment hygiene
+and import placement are therefore done before the pre-closeout review and only
+confirmed at closeout, and a part that would change any other path, a citation inside
+a skill included, returns the change to implementation. The rule is stated in the
+inert paths, the set archive cleanup exempts from validation, rather than as
+"documentation", which the workflow never defined, so closeout's own commit is never
+one validation would have proved anything about. The archive's own writes are exempt
+whatever the declaration: under an empty one no path is inert, and an archive that
+returned to implementation could never archive. The merge transcribes delta text
+already validated and reviewed with the change's commits; promotion elsewhere follows
+the declaration. A code defect a closeout review does find stops for the owner, who
+directs the correction and decides whether it needs another reader; reopening the
+change for a full round is not required for what is expected to be rare.
+
+What closeout works through is the workflow's guidance
+([`closeout.md`](../../../docs/guidance/workflow/closeout.md)): the workflow's parts in
+order, archival last, with the repository's own parts — the checks and evidence that
+depend on how the repository builds, packages, deploys, or runs its system — at the
+position the list gives them, defined where the repository's root guidance names.
+Every part is the workflow's, since closeout exists only in the workflow; what a part
+confirms may be a rule of any layer, and the command it runs is the repository's, so
+the workflow's list names checks by role and names no repository path. A plan, a
+skill, or a review cites a part by its heading, never its number, so a part added,
+removed, or reordered breaks no citation. Its guidance placement part reads what the
+change added, moved, or rewrote in the guidance against the layer test, adjacency,
+and exception placement ([The repository's guidance is
+layered](#the-repositorys-guidance-is-layered)), after promotion and before the
+citations are checked: the mechanical check catches a link to a higher layer, but not
+a general rule written with one repository's example.
 
 Archive cleanup follows the closeout review's advancing triage as a step of its own,
 with its own entry checks, rather than as the end of triage: it releases the
-change's dependents, sets it `archived`, drafts the merge, runs the cleanup of every
-validation part that declares one (`run cleanup`), and copies its history into the
+change's dependents, sets it `archived`, drafts the merge, commits what the cleanup
+of every evidence kind that declares one wrote, which the engine ran before its
+session, and copies its history into the
 owner's workspace, and is the point at which the change lands. Its check that a
 correction outside the repository's inert paths
 was validated stands even for another change's commit on a shared branch, since the
@@ -237,6 +362,17 @@ conflict, and
 stacking the prerequisite on the blocked branch would put two changes in one pull
 request and stop the prerequisite landing alone. One change per branch is the rule
 this keeps.
+
+The engine makes the worktree, on the owner's word, with `propose <change>
+<prerequisite>`: `../<prerequisite>-proposal`, on a new branch
+`propose-<prerequisite>` from the landing branch as the remote holds it, without
+tracking, since tracking would write `.git/config`, which no step writes. Making a
+worktree is mechanical, so the engine does it rather than the design. The resumed
+design run's sandbox makes each such worktree registered in its checkout writable,
+and nothing else beside the checkout: mounting the checkout's parent would let a
+design write every sibling clone, which may only be read. Staging the files for the
+engine to place, a worktree inside `.git/`, and leaving the worktree to the owner were
+rejected.
 
 The blocked change then stays `in design`, with the prerequisite in `Depends on`
 gating design; `blocked in design` is kept for reasons that are not another change.
@@ -285,10 +421,12 @@ A section's verification names only evidence an implementation session can
 produce. Evidence only a push produces — a run of a CI workflow that a change
 branch's push does not trigger — is written on its own
 `Owed by validation:` line, naming the workflow, the job, and what the job must
-show, and gates no task. A task gated on evidence no session can produce stays
-unchecked, and the next-step computation names implementation for it
-indefinitely; a round advances only on a passed validation, and every validation
-dispatches what the change's complete sections owe unless the owner waived that part,
+show, and gates no task; the line names the evidence kind that produces it, `Owed by
+validation (ci tests.yml):`, as the kind's guide gives it. A task gated on evidence no
+session can produce stays unchecked, and the next-step computation names
+implementation for it indefinitely; a round advances only on a passed validation, and
+every validation gathers what the change's complete sections owe unless the owner
+waived that kind,
 so the owed evidence keeps its gate without a checkbox. An older plan that put such evidence inside a
 verification task is corrected by the implementation session, which checks the task
 on its own evidence and names the rest as owed; closeout records the owed
@@ -352,79 +490,166 @@ regenerates no tracked file: a regeneration such as relocking would silently rep
 the condition a check exists to report, so it belongs to implementation, and the
 condition sends the slice back.
 
-Validation's parts are the repository's: what evidence a commit needs depends on how
-the repository builds, deploys, and tests what it ships. The workflow fixes what
-every part shares — each part's evidence comes from the commit under validation, the
-worktree is clean and `HEAD` unmoved after every part, and a part that cannot show
-that produces no further evidence — and the record names the end-to-end scenarios
-that exercise the change, each with its basis. How this repository fills the parts
-is [`market-change-workflow`'s](../market-change-workflow/README.md#validations-parts).
+Validation's sandbox nonetheless writes the whole checkout: a new attempt builds
+environments in directories that do not exist when the run starts, and a list of
+them collapses to the checkout through the package directories. That it changes
+nothing is held after its session instead: the checks after every run find `HEAD` or
+any tracked file changed, and stop the run ([A step run's life](#a-step-runs-life)).
+Moving new attempts out of the session through an outcome field would buy prevention
+at the cost of the outcome contract and the skill's loop, and a read-only validation
+could build nothing.
 
-So the parts are declared in the repository's configuration
-([A repository's configuration](#a-repositorys-configuration)), not written into
-the skill. A part is one long command, `run`, or a dispatch that returns at once and
-a wait for what it started, `start` and `collect`; it may be `owed`, run once for
-each `Owed by validation:` line of a complete section with that line's workflow as
-`{owed}`; it may come `after` another part; it names the `evidence` directory its
-logs go to, which validation diagnoses from and history copies; and it may declare
-the `cleanup` archive cleanup runs for it. A `preflight` runs before every part, and
-its failure ends validation as environmental. The skill keeps the workflow's own
-rules — push first, waivers, diagnosis, and the result — and learns the parts from
-the engine, never from the file: `config parts <change>` prints the preflight, then
-each run in order, an owed part once per owed workflow, named by its part and that
-workflow (`ci ci.yml`), or once `not owed`. Every started part is dispatched first,
-in declared order, so the slowest evidence is under way before the long local parts
-run, and then the `run` parts in declared order, each after the part it names. A
-part's `after` names one declared before it, and a started part follows only another
-started part, so the file's check refuses every cycle and every order the dispatches
-could not keep. Ordering the plan topologically instead would have broken the
-promised order within each shape to tolerate a mistake the check can refuse. Which
-parts are waived stays out of the plan: whether a standing waiver has lapsed is
-judged against earlier records, which is the skill's reading.
+What evidence a commit needs depends on how the repository builds, deploys, and tests
+what it ships, so the workflow knows *evidence kinds*, never a repository's own steps.
+Each kind is declared in the repository's configuration
+([A repository's configuration](#a-repositorys-configuration)) — whether it is
+required, the pattern its evidence is found at, the commands that gather it, the kind
+it follows, its cleanup — and explained in a guide, prose telling an agent how to read
+the kind's evidence and tell its failures apart. Validation completes the evidence a
+commit still lacks and assesses all of it, rather than running every check blindly:
+implementation has often just run the same checks on the very tree it commits. The
+workflow fixes what every kind shares — its evidence describes the tree or commit
+under validation, and the gathering refuses a worktree whose tree is not `HEAD`'s —
+and the record names the end-to-end scenarios that exercise the change, each with its
+basis. How this repository fills the kinds is
+[`market-change-workflow`'s](../market-change-workflow/README.md#validations-evidence-kinds).
+
+Evidence describes a Git tree, or a commit where its result depends on history. A
+kind's pattern holds exactly one of `{tree}` and `{commit}`, so the pattern declares
+the identity and no field repeats it. A tree is `git write-tree` of the worktree as
+tested, its changes — staged, unstaged, and untracked but not ignored — added to a
+temporary copy of the index, never the checkout's own; tree evidence counts for any
+commit holding that tree, so the commit implementation makes just after its
+functional checks already has their evidence. A kind whose result depends on history
+— a run dispatched for the commit, a comparison with a baseline chosen by the commit's
+ancestry — describes the commit, `HEAD`'s full object name, and does not count for
+another commit sharing its tree, a message amended or a revert; that costs little,
+since nearly every new commit changes its tree. A commit for every kind was rejected,
+since implementation's evidence, gathered before its commit exists, would never count;
+a tree for every kind, since a reused run's head and baseline could describe another
+history. Inputs outside the tree — the machine's tools, a cluster's state — are not
+captured beyond the preflight.
+
+The tree is only as stable as the worktree's untracked files: a file the workflow
+writes that Git does not ignore would change the very tree its evidence describes. So
+everything validation, its gathering, or a step hook writes after implementation is
+ignored by Git, and the configuration's check refuses an evidence pattern whose fixed
+directory Git does not ignore. A tracked file a kind's cleanup writes after the last
+validation is committed alone, changing a tree no evidence needs to describe.
+
+Evidence counts by being present at its kind's pattern, whoever wrote it: a step's
+functional checks, the engine's gathering, an agent, or whatever placed it from beyond
+the checkout, such as a run against a topology no checkout holds. It is its writer's
+word; the workflow does not defend against agents misleading each other, who have no
+reason to, and fetches nothing itself. Counting only what validation gathered would
+leave implementation's evidence unused, and counting only what the engine ran would
+be a provenance rule protecting nothing the workflow defends.
+
+`evidence <change>` reports, for `HEAD`'s tree or commit as each pattern keys it,
+each required kind — an owed kind once for each owed argument — its filled pattern,
+and every match, as present, missing, waived with the decision's `seq`, or not
+required. Several matches for one kind and argument, such as a failed attempt and its
+rerun, are all listed, the last in path order current: writers name their attempts so
+that path order is time order, since a copy from beyond the checkout may carry any
+modification time. Before validation's session the engine gathers what is missing and
+not waived ([A step run's life](#a-step-runs-life)): it runs the preflight, pushes
+`HEAD` through the guarded push, dispatches every missing `start` kind, runs the
+missing `run` kinds in order, then collects each started kind. It never touches
+present evidence, and a failed preflight gathers nothing, since evidence gathered in
+an environment the preflight refused would count as present. The skill reads what the
+gathering found and `evidence`, and assesses each kind from its guide as passed,
+failed — the commit's or of unknown cause — or environmental. Present failing evidence
+is diagnosed, never gathered again for a pass; unreadable evidence is gathered again,
+and an environmental failure rerun on the owner's word, each through `gather <change>
+--kind <kind> [--owed <argument>]`, a new attempt that becomes current by path order,
+its reason written in the record beside its path. Evidence is never gathered again
+because another step wrote it or because it is old. The record names the tree beside
+the commit, and each kind's result and its source, `present` or `gathered`; the guards
+keep reading its commit and result. A machine verdict read from a field each guide
+names, with validation skipped when every kind passed, was rejected: it would couple
+the engine to each repository's evidence format, could not tell an environmental
+failure from the commit's, and would remove the assessment triage reads.
+
+A kind is required `always` or when `owed`. An owed kind is required once for each
+argument a complete section's `Owed by validation (<kind> <argument>):` line names,
+and its pattern holds `{owed}`, so one argument's evidence never makes another's
+present. The argument is one path segment — not empty, `.`, or `..`, and holding no
+`/`, whitespace, or glob character — so no argument reaches another's directory; the
+owed-line reader refuses any other, naming its section. A line naming no kind reads as
+the one owed kind, its first backticked word the argument, so a plan written before
+kinds reads as it did, and is refused where several kinds are owed. A repository
+whose optional pipeline is owed as a whole names it by the workflow that dispatches
+it. A kind of neither requirement, conditioned on the paths a change touches, waits
+with identity by declared inputs ([Current limits](#current-limits)).
+
+A kind is one long command, `run`, or a dispatch that returns at once and a wait for
+what it started, `start` and `collect`, and it may declare the `cleanup` archive
+cleanup runs for it. A `preflight` runs before every kind, and its failure ends
+validation as environmental. The skill keeps the workflow's own rules — waivers,
+diagnosis, and the result — and learns the kinds from the engine, never from the
+file. Every started kind is dispatched first, in declared order, so the slowest
+evidence is under way before the long local kinds run, and then the `run` kinds in
+declared order, each after the kind its `after` names. A kind's `after` names one
+declared before it, and a started kind follows only another started kind, so the
+file's check refuses every cycle and every order the dispatches could not keep.
+Ordering the kinds topologically instead would have broken the promised order within
+each shape to tolerate a mistake the check can refuse.
 
 A declared command promises only its exit status and, for a `start`, that its last
 line of standard output is the marker its `collect` waits past, such as the newest
-run before its dispatch. The engine keeps that marker in the validation's own state,
-keyed by the commit, the part, and an owed part's workflow, so owed runs dispatched
-side by side never share one, and a retried `start` replaces its key's marker so a
-collect always waits past the newest dispatch; it fills `{after}` from it, and the
-skill passes none. Each part ends with a closing line the engine writes itself, in a
-fixed form the skills match — the part, its owed workflow, the commit, the result,
-the exit status, and the evidence directory — whatever the command printed, so no
-repository's command has to print the workflow's wording. Make exits 2 whenever a
+run before its dispatch. The engine keeps that marker keyed by the tree or commit, the
+kind, and an owed argument, so owed runs dispatched side by side never share one, and
+a retried `start` replaces its key's marker so a collect always waits past the newest
+dispatch; it fills `{after}` from it, and the skill passes none. Each kind's gathering
+ends with a closing line the engine writes itself, in a fixed form the skills match —
+the kind, its owed argument, the tree or commit, the result, the exit status, and the
+current evidence — whatever the command printed, so no repository's command has to
+print the workflow's wording. Make exits 2 whenever a
 recipe fails, so no exit-status convention richer than zero and non-zero would
 survive the commonest implementation; classifying a failure as the commit's,
 environmental, or of unknown cause stays the skill's, from the evidence. A
 structured result each command writes was rejected, since it would move part of the
 diagnosis into repository code and ask every adopter to write a format.
 
-Evidence only a push produces is dispatched by validation, from the run of the
-validated commit, never judged from a sibling run. Every validation dispatches what
-its complete sections owe, unless the owner waived that part, because a fix commit
-can break evidence an earlier commit produced, as with the pipeline.
+Evidence only a push produces is dispatched for the validated commit, never judged
+from a sibling run. Every validation gathers what its complete sections owe, unless
+the owner waived that kind, because a fix commit can break evidence an earlier commit
+produced, as with the pipeline.
 
 "Fixes nothing" protects the commit, not the machine. A failure diagnosed as
-environmental is put to the owner with its remedy and its part rerun on the owner's
-word; only failures the commit caused, or whose cause is unknown, become findings.
-A result is `passed`, `failed`, or `inconclusive`, the last meaning no failure was
-the commit's but some part produced no evidence.
+environmental is put to the owner with its remedy and its kind gathered again on the
+owner's word; only failures the commit caused, or whose cause is unknown, become
+findings. A result is `passed`, `failed`, or `inconclusive`, the last meaning no
+failure was the commit's but some kind has no evidence.
 
-Any part may be waived, by the owner alone. The owner can already waive validation
-entirely, so forbidding a part would only push them to that when one part blocks
-them; and a repository's broadest part is often wider than a change confined to a
-few files needs. A waived part is an omission of evidence, recorded as `waived`:
+Any kind may be waived, by the owner alone. The owner can already waive validation
+entirely, so forbidding a kind would only push them to that when one kind blocks
+them; and a repository's broadest kind is often wider than a change confined to a
+few files needs. A waived kind is an omission of evidence, recorded as `waived`:
 neither passed, failed, nor inconclusive, and counted in no result, which is judged
-on the parts that ran. Recording it `inconclusive` would stop every validation for a
+on the kinds assessed. Recording it `inconclusive` would stop every validation for a
 ruling the owner already gave; an environmental failure the owner waives rather than
 remedies is recorded so too. A waiver for later validations — the Helm and pipeline
-parts for the rest of a change, say, while nothing it touches affects what they
-validate — is the owner's decision in the change's workflow log, naming the parts and
-the condition, which validation reads before it runs any part. An instruction passed
-in a validation's invocation is no waiver: a validation started by hand would miss
-it, and two places would have to remember it. A standing waiver lapses, and the part
-runs, when the commits since that part last ran include a merge, which brings in code
-the change did not write, or break the condition. Waiving every part is no
-validation at all, but the owner's direction past the guard it remedies.
+kinds for the rest of a change, say, while nothing it touches affects what they
+validate — is the owner's decision in the change's workflow log, naming the kinds and
+the condition, which validation reads before it assesses any kind. An instruction
+passed in a validation's invocation is no waiver: a validation started by hand would
+miss it, and two places would have to remember it. A standing waiver lapses, and the
+kind is gathered, when the commits since the last validation that ran it — or since
+the latest validation, when none did — include a merge, which brings in code the
+change did not write, or when the commits since it was last assessed break the
+condition. The merge is measured from the last run because a run's record of what it
+invoked names what its gathering ran, not what it found present; the error is only
+toward gathering a waived kind again. A merge the waiver was recorded after is no
+lapse, since the owner waived with it in view: the decision records the commit `HEAD`
+was at, and an older one is taken at the latest logged line before it naming a
+commit. `evidence` reads the lapse, listing a lapsed kind present or missing as if
+unwaived, so the report, the gathering, and the record agree. The engine's gathering
+skips a waived kind unless such a merge lapses it, which is mechanical; whether the
+condition still holds
+is the skill's judgement, which gathers a lapsed kind with `gather --kind <kind>
+--lapsed`. Waiving every kind is no validation at all, but the owner's direction past
+the guard it remedies.
 
 ### An implementation round is triaged together, in a fresh session
 
@@ -457,6 +682,22 @@ format, so an error or a truncated answer never becomes history, while narration
 before the title is left to the transcript; a run that published nothing is a
 failed run however many earlier records exist.
 
+A reviewer that finishes with a draft the format check refuses is sent the problems
+in its own session, on the same model, and its answer is checked again — once,
+unless `review.format-retries` says otherwise. Refusing outright would lose a whole
+review, the costliest run of a round, to a defect of form such as an empty field,
+and the rerun would start from nothing; a send-back costs one turn of a session
+that still holds the review. Only a format refusal goes back: an unavailable reviewer, a
+network failure, or a non-zero exit says nothing a correction could fix. The run's
+line records each send-back's problems and its message says the review was sent
+back, which the owner is told without being asked anything. A refusal that survives
+keeps its draft under `transcripts/`, where no triage reads it, and its line records
+the reviewer's session and the problems, so the next review of the kind continues
+that session with them rather than starting again; a fresh review starts anew. The
+reviewer runs the same check before it answers, `check review <kind> <change>` on
+its draft piped on standard input, since it writes no file; the command and the
+publisher call the one check, so they cannot disagree.
+
 Every finding states its alternatives: each option a reasonable owner might choose,
 with its trade-off, or `none` and why the fix is evident (CW-a2lf). "None" is a
 statement, not an omission, and the publishing check refuses a finding without the
@@ -464,12 +705,62 @@ field, since an absent line cannot tell "none" from "not considered". The field 
 default acceptance's weakest condition — that no alternative exists — a reading
 independent of the triaging agent's, usually by another model, at no cost of a run.
 
+Each review is of a kind — design, implementation, pre-closeout, closeout, or merge
+— and each kind asks its own questions and has its own triage, with the exits that
+kind's place in the graph allows. The review of the merge before closeout is the
+pre-closeout review asking one question more, since its triage's exits — the merge
+again, planning, design — are the right ones there. After the archive they are all
+wrong, so the merge after the archive has a kind of its own, `merge`: it reads each
+resolution against both parents and every commit since the merge's first parent,
+each specification and index the merge touched for what both changes meant with no
+id duplicated or dropped, and the change's code and end-to-end scenarios against what
+the landing branch renamed, removed, moved, or changed in meaning. The closeout
+review with those questions added was rejected: built to read documentation, since
+closeout edits no code, it would gain a duty to read code, its own questions would
+mostly not apply, and its records would mean two things.
+
 `reviews/` is untracked: it is working history, and anything durable in it reaches
 permanent documentation through promotion. It moves with the change into the
 archive; for a change worked in its own clone, archive cleanup copies it into the
 owner's workspace ([History lives in the owner's
 workspace](#history-lives-in-the-owners-workspace)), where it stays until an export
 flow carries it elsewhere.
+
+The publishing check reads the draft as a review of the kind and the change asked
+for, its sections in order, and every finding carrying a lens, a basis, a severity,
+evidence, and its alternatives; the run's line lists each send-back's problems as
+`sent_back`, and a refusal that survives as `refused`. A review pasted from
+elsewhere is saved verbatim as the next record, `NN-<kind>-external.md`, and
+triaged with any other review of its kind, the triage assigning its findings' lens,
+basis, severity, and alternatives. The directory reads as the change's history:
+
+```text
+openspec/changes/<change>/reviews/
+  01-design.md                       a review: summary, assessment, questions, findings
+  01-design.triage.md                each finding's position and the owner's disposition
+  02-implementation.md               an implementation review, run beside 03
+  03-validation.md                   validation of the same commit
+  04-implementation-owner.md         the owner's notes on the round, verbatim
+  02-implementation.triage.md        one triage file beside each record triaged
+  03-validation.triage.md
+  04-implementation-owner.triage.md
+  05-design-external.md              a review pasted from elsewhere
+  06-orchestrator.md                 the orchestrating session's observations of the tooling
+  pull-request.md                    archive cleanup's merge drafts
+  workflow.jsonl                     one line per run, unattended or recorded, and per orchestrator decision
+  transcripts/
+    01-design.log                    the reviewer's whole session
+    07-implement.jsonl               an unattended step's event stream
+    07-implement.progress            one line per tool call, as `make change-watch` shows it
+```
+
+A run whose answer was still not a review after its send-back publishes nothing,
+its draft kept beside its transcript as `transcripts/NN-<kind>.rejected.md`.
+`workflow.jsonl` is written by the command alone, which `log <change>` prints: each
+run's outcome with its session, commit, model, cost, and denials, an interactive one
+marked `interactive`; each `round` line; each `orchestrator` line, a decision naming
+the run it resolves or whose denials it read, and, for the owner's direction, its
+target; and a conversion's `convert` line.
 
 ### A finding has a lens, a basis, and a severity
 
@@ -603,6 +894,22 @@ criterion, a declined one being a correction like any other (CW-n6wy). A step th
 commits nothing leaves the line to the step that next commits: a validation's to the
 triage that reads its record, or archive cleanup for a record no triage reads.
 
+Each line is one JSON object:
+
+```json
+{"review": "03-design", "finding": "F2", "section": null, "lens": "consistency", "basis": "evidence", "severity": "blocking", "agent_position": "agree: <reason>", "owner_disposition": "<what the owner decided>", "summary": "<one line>"}
+```
+
+`review` names the record the finding came from, or `design` for a redirection no
+review raised; `section` is the `tasks.md` section, or `null`. An entry revising an
+earlier one starts its disposition `revises <review> <finding>:`, a revision of a
+revisit included. A standing waiver of validation's kinds given as a triage's
+disposition is that triage's line; one given outside a triage, with no step's
+recommendation, is the workflow log's decision alone, where a guidance review finds
+the waivers no step recommended. The owner's waiver of archive cleanup's validation
+of a correction is a line under the closeout review's record, its finding
+`validated`.
+
 ## The engine
 
 ### Its parts
@@ -618,19 +925,34 @@ import, so nothing outside it imports any of them.
   may read of its output is its structured form ([The public
   surface](#the-public-surface)).
 - **The repository's configuration.** `config` reads `.agents/workflow.toml` and
-  checks all of it as it loads, and answers `config`, `config load`, `config parts`,
-  and `check config`. `hooks` runs the repository's hooks and validation's parts
-  through `run`, ends each with the engine's closing line, keeps a dispatch's marker
-  for its collect, and runs `pre-commit`'s default checks alone (`check change`) and
-  the configured OpenSpec command (`openspec`).
-- **Starting a step.** `steps` reads the step table — each step's skill and its
-  permission rules — and defines what a model a step runs on is; which models it runs
-  on are the configuration's. `wrapper` runs an unattended step: it chooses the
-  first available model, builds the run's prompt and permissions, and starts the
-  harness through `harness`, which holds the Claude Code and Codex command lines and
-  how each says it cannot serve a model. `stream` reads the run's event stream into a
-  transcript, a progress file, and the run's denials, and `subagents` the denials its
-  subagents met. `outcome` checks the outcome the run ends with against the outcome
+  checks all of it as it loads, and answers `config`, `config load`, and `check
+  config`. `hooks` runs the repository's hooks through `run`, ends each with the
+  engine's closing line, and runs `pre-commit`'s default checks alone (`check
+  change`) and the configured OpenSpec command (`openspec`).
+- **Evidence.** `evidence` computes a worktree's tree and `HEAD`'s commit and reports
+  which evidence each required kind has; `gather` gathers what is missing, keeps a
+  dispatch's marker for its collect, and ends each kind with the engine's closing
+  line; `around` runs the engine's actions and the repository's step hooks before and
+  after a step, into the run's inputs directory.
+- **Starting a step.** Each step's definition — its skill, the session it resumes,
+  its profile, and its baseline scope — sits in `graph` beside the graph; which
+  models a step runs on are the configuration's. `wrapper` runs an unattended step:
+  it chooses the first available model, builds the run's prompt, and starts the
+  harness through its adapter inside the step's sandbox. `harness` states what the
+  engine needs of a harness, what a model is, and the errors a refused write fails
+  with; `claude_code` and `codex` are the two adapters, each its harness's command
+  lines, the state it writes, the settings it loads, how it says it cannot serve a
+  model, and how its events show a refusal; `adapters` finds a harness's. `stream`
+  reads a Claude Code run's event stream into a transcript, a progress file, and the
+  run's denials and refusals, and `subagents` the denials its subagents met.
+- **The sandbox.** `scope` resolves a step's scope for one run — the engine's
+  baseline, the adapter's state and protected paths, the repository's `[sandbox]`,
+  and the owner's grants — each path with its source. `sandbox` renders a scope as a
+  bubblewrap command around any program, probes whether bubblewrap can run, and falls
+  back to running unconfined. `sandbox_git` is the engine's `git`, mounted over the
+  system's, which refuses every push of an unattended run but the guarded push's.
+  `invariants` records the state a session starts from and runs the seven checks
+  against it after the session ([A step run's life](#a-step-runs-life)). `outcome` checks the outcome the run ends with against the outcome
   schema. `cost` measures what the run cost. `running` records each run in progress in
   a checkout, and keeps each session's invocations through `run` and the guarded
   push until the session's log line records them. `review` runs a review read-only and publishes its answer as the
@@ -650,8 +972,9 @@ import, so nothing outside it imports any of them.
   graph. `diagram` holds the graph's hand-laid diagram to the table.
 - **A change's places.** `clone` creates, reads, and removes a change's own clone of
   the owner's workspace; `history` copies a change's history from its clone into the
-  workspace; `round_view` shows an implementation round as uncommitted changes for the
-  owner to read.
+  workspace; `propose` makes a prerequisite's proposal worktree beside the checkout;
+  `round_view` shows an implementation round as uncommitted changes for the owner to
+  read.
 - **Guards and support.** `push` is the guarded push of a change's own branch;
   `wait` blocks until a file holds a line matching a pattern, so an unattended step
   waits for a background command inside one call; `skills` checks that every skill loads from its one source; `hook` tells a Claude
@@ -677,23 +1000,91 @@ with the modules.
 A step starts through the command, `start <step> <change>`, which checks the change,
 refuses while a round view is open, and opens the change's log with a line carrying
 its format before any step it starts runs. Interactively, it launches the harness on
-the step's skill under the owner's own permissions; the session records its outcome
-as its last act through `record`. Unattended, the wrapper starts the harness headless
-with the step's skill, permissions, model, and the outcome schema; the harness's
-event stream is written to a transcript and a progress file under `reviews/` as the
-run goes; and when the run ends, the wrapper checks its outcome and appends one line
-to the log with the run's session, model, cost, and denials, or a `stopped` line of
-its own for a run that ended without one. The next-step computation then reads the
-change's files and that log and names what runs next.
+the step's skill under the owner's own permissions; the session runs the step's
+actions and hooks itself, `run before <step> <change>` first and `run after` before
+it records its outcome as its last act through `record`; no sandbox confines it and
+nothing checks it after. Unattended, the wrapper first runs what comes before the
+step — the engine's own action, then the repository's `before-<step>` hook ([The
+hooks](#the-hooks)). It then probes the sandbox, resolves the step's scope, creates
+what the sandbox mounts that does not yet exist, and records the state the session
+starts from: `HEAD` and its reflog, the tracked files of a validation or review, the
+workflow log and the ledger, each review record, `refs/stash`, and each remote's
+change branch and protected branches, read by listing the remote. It starts the
+harness headless inside the sandbox, or unconfined where the probe failed, with the
+step's skill, model, and the outcome schema, its prompt ending with the run's inputs
+directory; the harness's event stream is written to a transcript and a progress file
+under `reviews/` as the run goes. When the session ends, whatever its outcome, the
+wrapper runs the seven checks against the recorded state before anything else:
 
-The line also records, as `invoked`, every hook, part, and command the run asked the
-engine to run through `run` or the guarded push: its owed workflow and phase, the
-command it resolved to, its exit status, when it started, and how long it took. `run`
-and `push` keep these by the session's id until a line takes them — the wrapper's for
-an unattended run, the one `record` writes for an interactive run — and keep nothing
-outside a session. With the validation record and the evidence directories, that is
-the durable account of what ran and how it ended, one the agent cannot write. A
-hook's output stays in the run's transcript. A clone's bootstrap belongs to no step's
+1. `HEAD` is on the change's branch and descends from the start commit;
+2. for validation and review, `HEAD` and every tracked file are unchanged;
+3. the workflow log was only appended to, since a review runs beside a validation
+   and appends its line meanwhile;
+4. each existing review record is unchanged, and the ledger only grew at its end;
+5. `refs/stash` is unchanged;
+6. on each remote, the change's branch is unchanged, at the run's last successful
+   guarded push, or at a commit not made in the run, and no protected branch has a
+   commit made in the run at its tip; a remote unreadable at either end is not
+   checked;
+7. for closeout, every path changed since the start, committed or not, is one
+   closeout may change ([Closeout and archival](#closeout-and-archival)).
+
+A violation logs the run `stopped`, its reason and an `invariants` field naming each,
+the step's own message kept ahead; no action or hook after the session runs, and
+nothing is repaired, since a resumed session rarely helps and a violation recorded
+beside a standing outcome would route as if nothing happened. Otherwise the wrapper
+checks the run's outcome, sets a missing upstream from the run's guarded pushes
+([Pushing is guarded, never repaired](#pushing-is-guarded-never-repaired)), runs
+`after-<step>` after a `finished` outcome, and appends one line to the log with the
+run's session, model, cost, denials, refusals, grants, whether it ran unconfined, and
+inputs directory, or a `stopped` line of its own for a run that ended without one.
+The next-step computation then reads the change's files and that log and names what
+runs next.
+
+Each check stands for a guarantee the sandbox cannot give by itself. Checks 1 and 5
+hold history and the stash, which a writable `.git/` lets a step rewrite; check 2 holds validation, whose scope is the checkout; checks 3 and 4
+hold the records closeout's archive may move, so no mount can protect them; check 6
+is the one backstop for a push to a protected branch by another route than `git`;
+check 7 holds closeout, whose README mounts can reach code its review, reading only
+documentation, would not see. Check 6 is no guarantee about the remote: a run's
+commit someone else built on within the run, or a remote lost between a push and the
+check, is no mistake's route, and an offline run is not stopped, since the sandbox
+never gates the workflow. Nor does it count the owner's own moves: a round view the
+owner opens in the workspace while a review runs in the change's clone puts the
+workspace's change branch at the round's base, at no commit of the run's. The
+configuration and the harness's settings need no check, since they are mounted
+read-only.
+
+Deterministic work belongs to the engine, freeform judgement to the skill. The engine
+holds, beside the table of which step may run each hook, a table of its own actions
+before and after each step, with two: before validation it gathers the evidence a
+commit lacks ([Validation observes a committed slice](#validation-observes-a-committed-slice)),
+and before archive cleanup it runs every kind's cleanup. Waiting on a pipeline then
+leaves the agent's session, and no adopter rewrites the gathering as a hook of its
+own. What only judgement settles — reading the evidence, diagnosing a failure,
+judging whether a waiver's condition holds — stays in the skill.
+
+A run's inputs reach its session through a directory under the change's records,
+`reviews/runs/<run>/before/` and `…/after/`, named on its log line and given to its
+hooks as `{inputs}`. The engine writes `status.md` there — each action's or hook's
+closing line, exit status, and log — and keeps everything each printed as a log, read
+only to diagnose a failure, so build noise never becomes instructions. Every top-level
+Markdown file a hook writes there is a message the session reads in full as it loads;
+any other file is data, read where a message directs, so a large artifact never
+passes through an argument or the prompt. The gathering's `status.md` says what it
+found present or gathered and each kind's result; the evidence stays at its patterns.
+The directory is ignored by Git and copied with the rest of the records.
+
+The line also records, as `invoked`, every hook, kind, and command the run or its
+actions asked the engine to run through `run`, `gather`, or the guarded push: its owed
+argument and phase, the command it resolved to, its exit status, when it started, and
+how long it took. The engine keeps these by the session's id until a line takes them
+— the wrapper's for an unattended run, the one `record` writes for an interactive run
+— and keeps nothing outside a session; what an action runs is kept under a session id
+the engine makes for it, so none lands under the session of whoever started the
+wrapper. With the validation record and the evidence, that is the durable account of
+what ran and how it ended, one the agent cannot write. A hook's output a session runs
+stays in its transcript. A clone's bootstrap belongs to no step's
 run: the orchestrating session starts it in the background and it outlives the call,
 so its record is the clone's bootstrap state, which holds the command it resolved
 to beside its log and exit status. The field is optional, and a line without it
@@ -735,9 +1126,10 @@ exported to the SVG beside it, and maintained by review.
 Every operation the engine offers is a subcommand of the one command: starting,
 resuming, and stopping steps, recording outcomes and decisions, running a review, finding a change
 and its records, the next-step computation, clones and their history, round views,
-following runs, cost, the guarded push, the repository's hooks and validation's parts
-(`run`), the configuration's resolution and plans (`config`, `config load`, `config
-parts`), the configured OpenSpec command (`openspec`), and the checks of the
+following runs, cost, the guarded push, the repository's hooks and a step's actions
+and hooks (`run`), the evidence a commit has and its gathering (`evidence`, `gather`),
+the configuration's resolution (`config`, `config load`), the configured OpenSpec
+command (`openspec`), and the checks of the
 configuration, a change's default checks, the index, a task list, the push's
 preconditions, and the skills. The command is the engine's promise, and its
 name is the one extraction installs unchanged; nothing can import it, so a repository
@@ -746,6 +1138,38 @@ too, reading `find --json` or `clone where` rather than the package's functions.
 make fragment's targets, and the repository's own, are conveniences around the
 command and carry no promise. Which subcommands and outputs another party may rely
 on is set out under [The public surface](#the-public-surface).
+
+```text
+scripts/change-workflow start <step> <change> [--unattended] [--write …] [--sections …] [--session …] [--arguments …] [--fresh]
+scripts/change-workflow next | record | note | review | find | clone | clone-remove [--base …] | clone where | propose <change> <prerequisite>
+scripts/change-workflow resume | stop | log | watch | denials | round-view | round-done | cost | history | push [--remote …]
+scripts/change-workflow run <hook> <change> [--base …] | run before|after <step> <change> | run cleanup <change>
+scripts/change-workflow evidence <change> [--json] | gather <change> [--kind <kind> [--owed <argument>] [--lapsed]]
+scripts/change-workflow config [--json] | config load <step>|common | openspec <arguments>
+scripts/change-workflow check config | check change | check index | check tasks | check push | check skills | check review | check round-view | check graph
+scripts/change-workflow hook post-compaction | convert | wait
+```
+
+`start` checks the configuration whole and refuses, naming it, a field the step
+needs that is absent, before launching anything (CW-t5hz); it refuses an archived
+change for design, planning, and implementation — the merge takes one after the
+archive — and refuses implementation and the steps after it while a round view is
+open. `find --json` prints the change's `name`, `directory`, `archived`, `records`,
+the record set's `format`, and `base`, the landing branch its clone recorded or
+`null`; the merge, every review but the design's, and the closing checks read
+`base`, an argument overriding it for one run. `clone-remove --base` overrides the
+clone's record of the landing branch too, and is needed where it records none.
+`wait <file> <pattern> [--timeout <seconds>]` prints the file's first line matching
+the pattern as soon as it is there, one written before it began included, and exits
+1 after its bound, nine minutes by default, inside a call's ten-minute limit:
+following a command's output with `tail -f … | grep -m1` hangs when the matching
+line is the command's last, so an unattended step's prompt tells it to wait through
+`wait`. `propose <change> <prerequisite>` makes a prerequisite's proposal worktree
+([A prerequisite is proposed apart and halts its
+dependent](#a-prerequisite-is-proposed-apart-and-halts-its-dependent)). `start
+--unattended` and `resume` take `--write <path>`, a writable path granted for that one
+run ([Restrictions bind unattended runs only](#restrictions-bind-unattended-runs-only)),
+and the step's make target `WRITE=`.
 
 ### The orchestrator relays and routes
 
@@ -757,8 +1181,16 @@ finding or a design question. An orchestrating session that stated its own posit
 on each finding read again what the step had read, which cost tokens and blurred
 whose recommendation the owner was weighing. It runs at medium effort: it needs a
 large context for a change's relayed turns, not the effort of judging them. Its
-model and effort are the step table's `[orchestrator]` row, which carries no
-permission rules, since the session runs on the owner's own.
+model and effort are the configuration's `orchestrator` entry under `[models]`, and
+no sandbox confines it, since the session runs on the owner's own settings.
+
+The orchestrating session is no step, so it has no guide, no hook, and no inputs
+directory. A step run without a hook the repository did not declare it reports in one
+sentence. A run that ends as a question after its `after-` hook failed twice, or a
+review's after a failing `after-review`, it relays as any question, without judging
+the failure: a review's names no resume, since no reviewer is resumed, and the
+owner's word is their direction. A value of the owner's machine reaches a
+repository's command through the environment, never through the session.
 
 The owner can always reach a running step. The orchestrating session starts a long
 step in the background and stays free, so the owner can speak to it mid-step, and on
@@ -798,6 +1230,12 @@ included, was reached. The harness's own stop of a background command was reject
 since a SIGKILL leaves no log line, and delivering words into a running session is
 not something a headless run accepts.
 
+The owner instructs the orchestrating session rather than leaving it to run a
+separate target: a transition the owner starts, such as a merge after the archive,
+is the owner's direction, which the session records on their word, and the session
+then runs whatever the computation names. A step of its own that the owner ran by
+hand would bypass the log, the validation, and the review the session carries.
+
 What only the orchestrating session sees is still reported. Misbehaviour of the
 workflow's tooling that shows across steps — an answer delivered to the wrong
 session, a denial missing from a line, a table rule several steps trip — it writes
@@ -822,7 +1260,8 @@ A merge of the landing branch is made between steps, never while a round view is
 open, nor between a round's sections being committed and that round's triage, so it
 never moves the commit a round's validation and review describe or falls inside a
 round's diff. Conflicts are tiered by who understands them. In the change index,
-change documents, the step table, and skills, the orchestrating session resolves them
+change documents, the repository's configuration, and skills, the orchestrating
+session resolves them
 itself: it knows the workflow's files, and there is rarely a real decision in them.
 A conflict in code goes to the owner as it stands, and one the owner does not rule
 on goes to an implementation run naming the conflicted files, with no planning,
@@ -909,6 +1348,12 @@ session's report is lost. The review is the exception: run interactively it
 publishes no record, its text pasted into a triage as an external review, so it has
 nothing to record.
 
+An interactive run is launched in no sandbox, and nothing checks its invariants
+after it: the owner is present, their own settings and prompts apply, and the
+container that will hold every session gives interactive and unattended runs one
+boundary. Checking them at `record`, sandboxing the make targets' interactive
+launches, and an opt-in flag were rejected.
+
 ### The log, its format, and the conversion
 
 The log is written through one module, `scripts/change_workflow/log.py`, by four
@@ -939,6 +1384,32 @@ steps. How the format is versioned, and what a reader does with a newer one, is 
 of the public surface ([A change's records carry one format
 version](#a-changes-records-carry-one-format-version)).
 
+A merge's finished outcome, and archive cleanup's, records the landing branch the run
+fetched as `landing`: the remote as the run's checkout names it, or `.` for a branch
+the checkout holds itself, the branch, and the commit, recorded whether or not
+anything merged. The branch alone would not say which of two different commits a
+merge brought in, since a clone fetches a branch only the workspace holds from its
+`workspace` remote. The engine checks it in code rather than leaving it to the
+skills. The outcome check refuses a malformed record. The log's writer, which reads
+the log, refuses a finished merge without one or naming a remote the checkout lacks
+or a commit `HEAD` does not contain, and a finished archive cleanup without the
+record whenever a source resolves, or with one other than what it fetched from that
+source: its branch, its remote, and the commit the checkout's ref names as the line
+is written, since an older commit of the right branch is what `HEAD` would contain
+while the branch moved. A merge's question, stop, or return need not carry it: at a
+conflict left for the owner the fetched commit is in `MERGE_HEAD`, not `HEAD`. A
+repair after a failed validation fetches nothing and carries the record of the merge
+it repairs; only a repair, before archive cleanup, of a merge logged before the
+record existed omits it. On archive cleanup's line the writer also records whether the
+run's commit contains the fetched commit, decided in the checkout that fetched it,
+so the guard that reads it needs neither a ref nor the network. A refusal is logged
+as the run stopping, its message kept, since a run must leave a line; the rerun
+fetches again. The engine never fetches itself, which would put network Git in the
+engine: a cleanup that skips its fetch while the ref has not moved since the merge
+still passes, and the skill's text governs that. Reading the record is compatible,
+since a line without it keeps its meaning; writing it is not, since a skill that does
+not record it can no longer finish a merge.
+
 ### Routing is code, with the model as backstop
 
 Where a change stands, and what runs next, is computed by
@@ -949,7 +1420,9 @@ can be tested under `scripts/tests`, and the owner can run the same computation
 (`make change-next`). Routing by the orchestrating session's own reading would be
 only as reliable as the model on a given turn, and least reliable late in a long
 session; a transition table written into a skill would still be read by a model, and
-untestable.
+untestable. The same division holds around a step: what is deterministic, such as
+gathering evidence before validation, is the engine's action, and judgement stays in
+the skill ([A step run's life](#a-step-runs-life)).
 
 The workflow's graph is one table in code, `scripts/change_workflow/graph.py`, which
 the computation interprets: each node a step, qualified by its review kind — a
@@ -988,6 +1461,51 @@ passed validation clears the guard and a failed one names the owner. The target'
 entry guards are checked on validation's exit rather than its entry: a round's
 validation starts beside the review its target triages, before that review is
 published.
+
+The wrapper gives an unattended validation its target: it computes it before the
+session starts, passes it in the prompt, records it on the run's line, and logs a
+finished validation with that target as its exit, whatever exit the session named. A
+session asking the computation itself would meet its own run: once a validation's
+question or stop is logged, the computation reads that run and names the owner,
+which is no exit, and a validation that passed would be logged stopped. So a resume
+takes the target from the line it resumes and never computes it again. An interactive
+validation, with no wrapper, reads the target from the computation as it starts,
+before any line of its own exists.
+
+The graph declares no exit that is wrong in a state its node can be in. Where one
+step runs in two places with different exits, as the merge does before closeout and
+after the archive, the table has a node for each, and the computation tells which a
+run was from the log alone: a `merge` run logged after an archive cleanup run is a
+run of the merge after the archive, which holds because nothing returns an archived
+change to an earlier phase. A finished merge after archive cleanup that records no
+`landing`, with no finished merge before it recording one, routes nothing: it can
+only be a merge run by hand before the merge after the archive was a node, and its
+change stays where archive cleanup left it. A result for the merge after the archive
+names the step to run, `{"step": "merge"}`, with the node in its reason, so the
+orchestrating session's target and the merge skill's own route check need nothing
+added.
+
+For an archived change the computation reads the route rather than answering `done`
+from the row, so a direction or a guard's remedy after archive cleanup is followed:
+`done` is answered while the route ends at archive cleanup's exit to `done`, or the
+change has no log. It answers in an order that keeps `done` cheap and correct. A
+newer log and an undeclared line are refused first. A change with a live clone is
+computed in that clone, where its log is current and the owner's direction is
+written, rather than answered `done` from the workspace's copy. Then `done` is
+answered before any check of the branch checked out, since an archived change
+without a clone has landed and its branch is rarely checked out; only a route with a
+step to run goes on to those checks and to the index row, so a directed merge names
+the owner until the change's branch is checked out, and one for a change with no row
+names the owner as for any change the index does not list.
+
+The guard on archive cleanup's first exit to `done` reads only what the log's writer
+recorded on the run's line, never a ref. A guard reading the fetched ref whenever the
+route is computed would make the same exit name a merge the owner never asked for
+after any later fetch, and would send every change archived before the record
+existed, its landing branch long moved on, to a merge. A later archive cleanup run's
+exit is not guarded, and a cleanup line with no `landing` reads as checked: the same
+check on every exit to `done` would merge again until the landing branch paused,
+and stopping it would need a waiver of a node no direction reaches.
 
 A durable change to the workflow is an OpenSpec change, so the table is code,
 reviewed as code; a data file of nodes and named guards would trade a code edit for
@@ -1033,24 +1551,185 @@ denials are read.
 
 ### Restrictions bind unattended runs only
 
-An unattended run uses Claude Code's `dontAsk` permission mode with its step's allow
-and deny rules from `.claude/change-steps.toml`, so a tool it was not given is
-denied and recorded rather than prompting a person nobody is watching. The rules
-turn each skill's "never" lines into rules the harness enforces: validation's
-"never changes the commit" stops being an instruction only. The table lives in
-Claude Code's own directory because its rules are that harness's syntax, and it is
-TOML because the scripts run on the standard library and its comments carry each
-row's reason. No step may edit it or the project's Claude Code settings, so no step
-widens its own or a later step's permissions; a step's permissions change as a
-tracked edit the owner commits, or the orchestrating session commits on the owner's
-word, or by a grant for one run. An interactive run is unaffected: the owner's own
-settings apply, with prompts.
+The restrictions on an unattended step guard against its mistakes, not against an
+agent working around them: they give the owner categorical guarantees about what a
+step can and cannot change on their machine, for every run the sandbox confines. A
+step keeps the owner's ambient credentials — GitHub, the cloud, the cluster — since
+its work needs them, and the sandbox neither scrubs the environment nor refuses the
+network; its one change to the environment is `TMPDIR`, which withholds nothing.
+Withholding the push credential and the route to the Git host, the engine making
+every remote operation itself, was rejected: adversarial containment is not the aim,
+and protection against a bad remote write belongs at the Git host's authorization,
+where a hosted runner's narrower keys will sit. A Docker socket, reachable by every
+writing step, is a way out of any local sandbox; under this threat model it is
+accepted. An interactive run is unaffected: the owner's own settings apply, with
+prompts.
 
-No step may edit the repository's configuration either, `.agents/workflow.toml`:
-`[common]` denies the Edit and Write tools on that one file, beside `.claude/**`, so
-no step changes what its own hooks run. Only the file is denied, since a workflow
-change edits skills under `.agents/`; it changes as a tracked edit by the owner, or
-by the orchestrating session on the owner's word.
+The guarantees are enforced below the harness, so they hold on any harness. The
+engine starts every unattended step's harness process inside an operating-system
+sandbox it owns, which confines the harness's file tools, its shell, and every
+process they start alike; inside it a step may run any command. A list of permitted
+commands could not carry the workflow: it names one repository's commands in the
+forms sessions type them, it is one harness's syntax, it leaks at its edges and grows
+to patch them, and it bounds commands, not files. Mapping scopes onto each harness's
+own sandbox was rejected too, since a harness's sandbox confines only its shell and
+the workflow would have to know every harness. There is one implementation, on
+Linux, behind the wrapper's launch seam and no backend interface; Ubuntu is
+canonical, and the container that will hold an orchestrating session and every
+session it starts confines each step inside it by the same mechanism.
+
+The sandbox is bubblewrap: the root file system read-only, the step's writable paths
+bound read-write over it, each protected path bound read-only over those, the
+engine's `git` bound read-only over the system's two, the network shared, and the
+process tree ended with the sandbox, so a background process a step started ends with
+the wrapper. A write outside the scope fails as a read-only file system; replacing a
+protected file by rename fails as busy, so `git config` cannot rewrite
+`.git/config`. A Unix socket on a read-only mount stays connectable, so Docker needs
+no setting. Landlock was rejected because its rights only add up per tree, so
+`.git/config` could not be protected while Git creates its lock files in `.git/`;
+a separate Unix user would take the owner's credentials away. On native Ubuntu 24.04
+and later, AppArmor's restriction on unprivileged user namespaces may need an
+allowance for `bwrap`.
+
+Each step writes only its scope, stopped rather than caught:
+
+| Step | Writes |
+|---|---|
+| review | in its checkout, only `.git/change-invocations/` |
+| design, plan | `openspec/` and `.git/`; design also each registered `../<prerequisite>-proposal` worktree |
+| implement, triage, merge, validate | the checkout |
+| closeout | its inert paths and `.git/` |
+| archive cleanup | `openspec/changes/` and `.git/` |
+
+Every step, the review included, also writes a private `/tmp`, its adapter's state,
+without which its harness cannot run, and `~/.cache`, and every step writes the
+repository's additions ([A repository's configuration](#a-repositorys-configuration)),
+the review only those outside its checkout, as written and where their links lead, so
+the checks it runs for evidence can write their tools' caches. The review writes
+nothing it reviews: its harness keeps its session state in its adapter's paths, and
+its one path in the checkout is where `run` keeps what a session invoked, so the
+checks it runs record themselves. Reads are open everywhere but the host's `/tmp`: an
+orchestrating session and its steps may read every change's checkout and write only
+their own change. Two coarse profiles, with each step's finer scope checked after the
+run, were rejected because a step should be stopped, not caught; a writable checkout
+for the review held by a check, because prevention is cheap there. The change's log
+is not mount-protected, since closeout's archive moves its directory; the checks
+after the run hold it. Archive cleanup's copy of a change's history into the owner's
+workspace is the engine's action after its session, so no step writes the workspace.
+
+A file or pattern entry — closeout's `**/README.md` and `AGENTS.md` — mounts each
+match's directory writable, since tools replace a file by rename and a single file
+cannot be bound writable. Where that exposes code beside a README, or, for a file at
+the root, the whole checkout, the checks after the run stop closeout on any path it
+may not change: its review reads only documentation and cannot be relied on to see a
+code edit. Binding every other entry of such a directory read-only, with a check for
+new files, would cost a mount per entry for what the check already catches. An
+adapter's state file whose directory is the home directory, Claude Code's
+`~/.claude.json`, is mounted alone instead, since its directory would make the whole
+home writable: it can be written in place but not replaced by rename, and Claude Code
+catches the failed save.
+
+Inside the sandbox's user namespace only the owner's uid is mapped, and every other
+uid, root's included, shows as the kernel's overflow uid, 65534. The host's `/tmp`
+would show so, world-writable, and a suite trusting only ancestors owned by root or
+the caller — the bare-metal working-data helper's — refuses it. So every step gets a
+`/tmp` of its own, a tmpfs owned by the owner with mode `0700`, mounted before every
+bind, with `TMPDIR` set to it, so a `TMPDIR` the owner set elsewhere does not bring
+the failure back. A path under the host's `/tmp` that the scope names — the review's
+drafts directory, a grant — is bound at its own path inside the tmpfs, so it names
+the same file on both sides; the tmpfs ends with the sandbox and leaves nothing on
+the host. The host's `/tmp` is hidden from reads inside the step but for those paths,
+an exception to open reads. `/`, `/home`, and `/usr` still show as the overflow uid's,
+which the container remedies. A seam in the helper trusting the overflow uid would
+change production security code for the workflow; skipping its tests, or running the
+suites outside the sandbox, would leave the step's own code unconfined or untested;
+and a per-run host directory bound at `/tmp` would need paths translated across the
+boundary and leave a directory behind when the engine is killed.
+
+No step writes the protected paths: the workflow's configuration, `.git/config`, the
+engine's `git`, every settings file the harness loads, and what the repository's
+`protected` adds, each mounted read-only inside every scope. A settings file is
+protected present or absent: one absent at launch is created first in its harness's
+empty form, `{}` for JSON and an empty file otherwise, and the placeholder stays, so
+no step can create one during its run. Each writable and protected path is mounted
+where its symlinks lead, and an absent target is created there, so a clone's
+`.claude/settings.local.json`, linked to the workspace's, launches, and a write
+through it fails; copying the settings into each clone would let them diverge.
+
+A read-only mount protects the file it binds, not its name in the directory around
+it. Three routes around a protected mount are boundaries of the threat model, with
+the step's review as backstop, and nothing checks them: renaming a writable directory
+that holds a protected mount and creating a file at the old name; removing or
+replacing a link to a protected file inside a writable directory, as every clone's
+`.claude/settings.local.json` is; and a repository's `protected` naming a directory
+that holds an engine or adapter writable path, which stays writable inside it. None
+is a route a step's ordinary edits take: the harness's edit tools refuse to write
+through a link, and its target is read-only. A shell rewrite, `sed -i` or a temporary
+file renamed over the link, replaces a link without meeting a refusal, but only after
+the step has already broken its skill's rule that no step writes the harness's
+settings. An eighth check comparing each protected path's kind, link target, and
+content after the run was rejected, and so was mounting each protected path's parent
+read-only, which would stop every legitimate write beside it. Likewise Claude Code's
+writable `~/.claude` holds what the owner's own sessions load beside its protected
+`settings.json` — instructions, skills, agents, commands, and hook scripts — and a
+step writing them has broken its skill's rule as one writing settings has.
+
+A write the sandbox refused is read from the run's events, never from the step's
+message: the harness's adapter finds a read-only file system, or a protected file
+busy, and the wrapper records each on the run's line as `refusals`, with its tool,
+its command or path, and the error. A push the engine's `git` refused is a refusal
+too, read from the engine's own record of it, so every harness reports it alike.
+`denials` remain for what the harness itself denies, such as an adapter's command
+rule. A step's prompt tells it that such an error is outside its scope: it stops,
+naming the path, when it cannot go on, and otherwise says what it did instead. The
+orchestrating session reads both and classifies each: the step reaching beyond its
+job, a finding for the owner, after which it checks the run's later calls for the
+same work done another way; or its scope too narrow, a gap, answered with the
+narrowest path from the step's resolved scope. A denial by the harness's own guard
+rather than a rule — Claude Code refusing to write through a link — is a finding
+where its target makes it one, and otherwise neither, since no path answers it. The
+next-step computation treats a line with refusals as one with denials.
+
+A step's scope changes only on the owner's word: as a tracked edit of the
+configuration's `[sandbox]`, which the owner commits or the orchestrating session
+commits for them, or by a grant for one run, a writable path. `start` and `resume`
+take `--write <path>`, the step's make target `WRITE=`; each value is split on `;`,
+each part trimmed and empty parts dropped, and each path resolved as a `[sandbox]`
+entry is. A grant names a path, never a pattern, since a gap is answered with the
+narrowest path; the engine refuses, before launching anything, a value with a glob
+character, a path that is or lies under a protected path, as written or where its
+links lead, and `/tmp` itself, which would hide the step's private `/tmp` with the
+host's. A directory containing a protected path is granted, the protected path
+staying read-only inside it, as in every scope. A path absent at launch is created as
+a directory before it is mounted. The grant is recorded on the run's line as
+`writes_granted` and never kept, since a waiting grant would be state a run nobody
+meant could take. It reaches a fresh run as well as a resumed one: otherwise a grant
+the owner decides before a run would cost that run a refused turn, and between a
+round's sections being committed and its triage, where no configuration edit may be
+committed, a fresh run could not be widened at all. A new key, rather than the rules
+an older line's `granted` holds, keeps a reader from taking one for the other.
+
+Before launch the engine probes the sandbox. Where it cannot run — no `bwrap`, user
+namespaces refused — the step runs unconfined, with a warning and `unconfined: true`
+on its line, which the orchestrating session relays to the owner; the checks after
+the session run either way. The guarantees hold for the runs logged confined: an
+unconfined run has no path bound and no engine `git`, Claude Code runs with its
+working tools allowed, and only the checks after it, and an adapter's command rules,
+hold it. The sandbox guards against
+mistakes and never gates the workflow, so refusing to start, with or without an
+override for one run, was rejected; the container remedies the interval, and no
+further control is added for it.
+
+Each skill's "never" lines are held by the sandbox and the checks, not by command
+rules; only an adapter adds its harness's own, as Claude Code's refuses `git push`
+beside the engine's `git`. Rewriting history and stashing are found by the checks
+after the run; validation's relock or commit by its tracked files unchanged;
+an edit of the harness's settings or the configuration fails on its read-only mount;
+a push is the engine's `git`'s to refuse. `round-view` and `round-done` refuse under
+the unattended marker, since the round view is the owner's. Waiting on a background
+command through `wait` rather than following its output, cleaning the worktree,
+opening the pull request, dispatching the pipeline, and pushing an image remain the
+skills' text, with the step's review as backstop.
 
 Which hooks a step may run is the workflow's structure, held in the engine beside
 the graph, and no repository changes it:
@@ -1060,64 +1739,43 @@ the graph, and no repository changes it:
 | `after-functional-change`, `pre-commit-functional` | implement, triage, merge |
 | `pre-commit` | design, plan, implement, triage, merge, closeout, archive cleanup, review |
 | `pre-archive` | closeout |
-| validation's preflight and parts | validate |
-| `cleanup`, every part's cleanup as one list | archive cleanup |
+| `gather`, validation's preflight and evidence kinds | validate |
+| `cleanup`, every kind's cleanup as one list | archive cleanup |
+| `test-before`, a test file run against an earlier commit in a throwaway worktree | implement, triage |
 
 `pre-push` and `post-clone` are run by no step, only by the engine's own `push` and
-`clone`. The unattended-run marker the wrapper sets names the run's step, and `run`
+`clone`, and a step's own hooks, `before-<step>` and `after-<step>`, only around its
+session; the engine's actions before a step run as that step, so this table holds
+them too. The unattended-run marker the wrapper sets names the run's step, and `run`
 refuses a hook that step is not listed for, naming both; with no marker, as in an
 interactive run or the owner's `make check-change`, nothing is restricted. So
 validation, which repairs nothing (CW-af15), cannot ask for the relock a functional
 change runs, whatever a repository declares. The table governs what a step asks the
-engine to run, not what commands it may run, which the step table does: the rules
-that only ran what is now a hook — validation's parts and preflight, archive
-cleanup's teardown — are not granted, and each writing step keeps its grants for
-engineering work. Per-step lists in the configuration were rejected, since they
-would let an adopter give validation a functional hook, and so was a per-run token
-matched against the runs in progress, which a step can read. A forged marker is a
-step breaking its skill, which the deny rules and the skill already govern; making
-forgery impossible needs credentials the step does not hold.
+engine to run; what commands it may run inside its sandbox is unrestricted. Per-step
+lists in the configuration were rejected, since they would let an adopter give
+validation a functional hook, and so was a per-run token matched against the runs in
+progress, which a step can read. The marker is an environment variable a step could
+unset or forge: that is a step breaking its skill, outside this threat model, and
+making forgery impossible would need credentials the step does not hold, which the
+threat model rules out; the checks after the run are what hold validation whatever
+the marker says.
 
-A grant reaches a fresh run as well as a resumed one. A fresh run is started
-through `start`, which checks the change, refuses while a round
-view is open, and adds each `--allow` rule to the run's rules; the step's make target
-passes `ALLOW`, several rules separated by `;`, as one `--allow` each. A rule holding
-`;` could never match, since the harness matches each command of a chain on its own.
-Without it, a grant the owner decides before a run costs that run a refused turn
-before its resume carries the grant, and between a round's sections being committed
-and its triage, where no table edit may be committed, a fresh run could not be
-granted at all. The grant is recorded on the run's log line and never kept for a
-later run: a waiting grant would be state a run nobody meant could take.
-
-Auto mode was rejected because what a step may do would rest on a classifier's call
-per action, unreviewable in advance; a permission-prompt tool routing prompts to the
-orchestrating session would leave an hour-long validation blocked on a prompt while
-the owner is away, where a denial ends cleanly and resumably; bypass is ruled out by
-validation driving the repository's deployment tooling and the push.
-
-A denial is read from the run's own record, never from the step's message: the
-record names the call, while the message generalizes ("Bash is not allowed" for a
-chain missing one utility). The harness's reason classifies it: `mode` is a gap in
-the table, `rule` met a deny rule — a forbidden action, but for the one exception
-below — and `subcommandResults`
-refused a shell command by one of its parts without saying which way, so the
-command's parts are matched against the step's deny rules. A step that cannot go on without a
-denied call stops naming it; one that can goes on, and every denial is recorded on
-its outcome either way. After a `mode` denial, the same work done by a tool the
-step's rules allow for it — the Edit tool for a shell write — is the rules being
-used, not a workaround, and the orchestrating session reads it as a gap. After a
-deny-rule denial, no other tool may do the work, except where the rule exists only
-to keep file writes on the Edit and Write tools — the step table's comments name
-those rules: sed's in-place forms, find's deleting, running, and writing actions,
-and the diff family's output-to-file forms. Such a rule's refused shell write, made
-with the Edit or Write tool the step's rules allow, is the rule doing what it is
-for: the orchestrating session reads it as a gap and asks the owner for no ruling.
-Every other deny rule forbids the work itself, `git stash` or a push other than
-the guarded one, and the denial stands whatever tool attempts it. A gap is answered with the
-narrowest rule that matches the call. A deny rule is matched against the command as
-typed, so it holds the plain and quoted forms of an option but not a word a shell
-assembles from pieces: the deny rules stop a step's mistakes, and its skill stops
-the rest.
+Each harness has an adapter, internal to the engine, stating its unattended launch
+inside the sandbox with its prompts off, the state it writes, the settings files it
+loads, which the sandbox protects, how its events show a refusal or a denial, the
+steps it can run, and any command rules it adds; the engine reaches a harness only
+through it, so coupling to a harness lives in its adapter alone. Claude Code runs in
+`dontAsk` mode with every built-in tool a step works with allowed and its own sandbox
+off, so nothing prompts a person nobody is watching; a tool that waits for a later
+turn — a monitor, a wake-up, a scheduled task — stays denied, since an unattended
+turn's end is its outcome, and its one command rule refuses `git push`, so its denial
+records mean what the adapter adds; it writes `~/.claude` and `~/.claude.json`, and loads `.claude/settings.json`,
+`.claude/settings.local.json`, and `~/.claude/settings.json`. Codex writes `~/.codex`
+and loads `~/.codex/config.toml` inside it. Auto mode was rejected because what a
+step may do would rest on a classifier's call per action, and a permission-prompt
+tool routing prompts to the orchestrating session would leave a long validation
+blocked while the owner is away. How Codex runs a review inside the sandbox is
+[Models are policy, with no same-vendor fallback](#models-are-policy-with-no-same-vendor-fallback).
 
 ### Pushing is guarded, never repaired
 
@@ -1149,6 +1807,43 @@ runs the hook itself rather than leaving it to Git's own hook, which each checko
 enables by hand: a clone without the hook would otherwise push unchecked. The push's
 run of the hook is recorded on the run's line like any other (`invoked`).
 
+During an unattended run no `git push` but the guarded push's leaves the checkout.
+The sandbox binds the engine's own `git` read-only over both of the system's Git
+executables, the one on `PATH` and the one in Git's exec path, which Git puts first
+on `PATH` for its scripted commands and aliases; the real binary sits at a path only
+the engine's `git` names. It refuses a `push` while the unattended-run marker is set
+and the guarded push's marker is not, whatever the push's options — `--no-verify` and
+`-c core.hooksPath=…` among them — records the refusal with its command line among
+the session's invocations, and otherwise runs the real `git`. The checkout's hooks and
+`core.hooksPath` stay as they are, so the guarded push runs the repository's
+pre-push as ever, and the owner's pushes, outside any sandbox, meet nothing of the
+engine's. The guarantee is about `git push`, the route a mistake takes: a plain push,
+then a retry with the hooks skipped. Other routes to the remote — the real binary
+called by its own path, the Git host's API with the ambient credential, the wire
+protocol directly, or a push spelled so the engine's `git` misreads its subcommand,
+such as an alias defined on the command line — are a step working around the
+refusal: the orchestrating session looks for them in a finding's run, the checks
+after the run find one that reached a protected branch, and the Git host's
+authorization bounds them. A pre-push hook the engine wired through `core.hooksPath`
+was rejected, since Git skips it on `--no-verify` and a command-line `-c
+core.hooksPath` overrides it without writing `.git/config`; a command rule alone,
+since it is one harness's and Codex has none; and the engine pushing at the run's
+edge, since once the step holds the credential that buys nothing and loses the
+per-section pushes.
+
+Under a run, the guarded push records each push it attempts once Git returns: its
+branch, its remote, the commit sent, and Git's exit status. It sets no upstream,
+since `.git/config` is protected: where the branch has none and a remote is given, it
+pushes without `--set-upstream`, and once the session ends the engine sets the
+branch's upstream, outside the sandbox, to the remote of the run's last successful
+guarded push of that branch. A failed push, or none, sets nothing, nor does a run
+whose checks found a violation. Setting a missing upstream before the run would have
+the engine choose the remote for the step, and refusing a push without one would stop
+the step for the owner. The record is the push's own, rather than read from the
+transcript or the pre-push hook's invocations: the hook's are kept before Git runs,
+whatever Git then does, a repository may declare no hook, and a transcript is the
+harness's.
+
 Work left uncommitted in a checkout is stranded when no session follows to commit
 it, as when the owner is away and steps run in clones, and a dirty checkout blocks
 every later step's guarded push. So a step commits its
@@ -1169,10 +1864,8 @@ change branch, provided a pushed change branch starts nothing by itself.
 The configuration's `[models]` names each step's models in priority order, each with
 its harness and effort, and the orchestrating session's model and effort, and the
 wrapper runs the first available. They are the repository's preference, so they sit
-with its other fields rather than in the step table, which holds permissions a
-sandbox will replace and keeps only each step's skill, its rules, and where a waiting
-run resumes. A model is
-unavailable when its program is missing, it is not signed in, or it reports a usage
+with its other fields, while each step's skill, scope, and the session it resumes
+are the engine's. A model is unavailable when its program is missing, it is not signed in, or it reports a usage
 limit. An unset model would inherit the account's default, which ran steps on the
 most expensive model without anyone choosing it. In this repository design, triage,
 implementation, and closeout run on Opus at high effort, which caught more problems and explained its
@@ -1182,11 +1875,26 @@ row, on Sonnet at medium.
 A repository keeps no list of forbidden models: one it never wants it does not list.
 The engine refuses, as the configuration loads and naming the step, a step listing
 two models of one vendor: an outage or a usage limit takes both
-down, so a second model of the same vendor is no fallback. Codex appears only where
-its sandbox can hold a step to its limits, which is the review alone, falling back to
-Claude when Codex is unavailable: a review on a second model reads the work with
-another eye, a review on Claude is better than none, and halting on a missing
-reviewer only costs the owner time. A step whose one model is unavailable stops with
+down, so a second model of the same vendor is no fallback. A model appears only for a
+step its harness's adapter can run: Codex's runs only the review, falling back to
+Claude Code when Codex is unavailable: a review on a second model reads the work with
+another eye, a review on Claude Code is better than none, and halting on a missing
+reviewer only costs the owner time. A public adapter interface, through which an
+owner supplies a harness the workflow has never heard of and Codex could run writing
+steps, is `add-workflow-harness-adapters`'.
+
+Codex's own sandbox and the engine's do not nest: Codex's mounts a fresh `/dev`,
+hiding the system's Git where the engine's `git` runs it, so every Git command of a
+reviewer inside both would fail. A confined review therefore runs Codex without its
+own sandbox, the review's scope keeping every file it reviews read-only, and an
+unconfined review, with no engine `git` mounted, keeps Codex's `--sandbox read-only`
+as its only guard. Codex names no session in its commands' environment, so the
+engine gives each Codex review attempt a run key of its own, distinct from the
+starting session's and from Codex's, under which the engine's `git` keeps a refused
+push and `run` keeps the checks the reviewer runs, and from which the review's line
+reads them. Codex refuses to run in a directory its configuration does not trust, so
+a review of a clone outside those directories ends with Codex's error, and does not
+fall back to Claude Code. A step whose one model is unavailable stops with
 the time its limit resets. A network error is retried, never a reason to fall back.
 A waiting run resumes only on the model it ran on, since a session cannot move
 between harnesses. The owner may name any model for a review run by hand, outside
@@ -1216,7 +1924,7 @@ directory under `<workspace>.changes/<change>/`, holding its branch, `reviews/`,
 workflow log and transcripts, built artifacts and environments, validation evidence,
 and step sessions; a round view's state lives in the workspace, whose branch the view
 moves. Almost everything a step touches is per checkout
-and mostly untracked, and validation holds `HEAD` for as long as its parts take; in
+and mostly untracked, and validation holds `HEAD` for as long as its gathering takes; in
 one checkout, working a second change only interleaves the two. The owner's
 workspace — their editor project — meets a change's workflow only for reading, when
 the owner reads a round.
@@ -1287,9 +1995,17 @@ row, and adjacent rows may conflict at a merge, resolved there.
 ### History lives in the owner's workspace
 
 A change's records and evidence are untracked, so no merge carries them out of its
-clone. As its last act archive cleanup copies the archived change's `reviews/`, and
-the validation evidence its records name, into the owner's workspace at the same
-paths; the workspace therefore holds the history of every cleaned-up change, and a
+clone. Once archive cleanup's session finishes, before its outcome is logged, the
+engine copies the archived change's `reviews/`, and the validation evidence its
+records name, into the owner's workspace at the same paths. The copy is an action
+of the engine's after the session, outside the sandbox, because it writes outside
+every step's scope: no step writes the owner's workspace. The evidence is what each record cites, with the attempt directory holding a
+cited file, and, for each record's tree and commit, what the pattern of each kind
+keyed by that identity matches: a match is copied with the directory holding it only
+when that directory is whole and no other kind's pattern reaches it, and alone
+otherwise, so nothing beside the evidence that no pattern describes — a retired
+kind's attempt, a stray file — is copied. The workspace therefore holds the history
+of every cleaned-up change, and a
 step that reads another change's records looks in its own checkout first, then
 there. The copy cannot be the last write: the wrapper appends the cleanup run's
 outcome to the log after the skill returns, its transcript is still being written,
@@ -1300,8 +2016,21 @@ and refuses, naming it and overwriting nothing, any file that differs otherwise.
 The orchestrating session repeats it once cleanup's own line is written, and clone
 removal runs it first, so the last copy always follows the last record. Teaching the
 wrapper to copy after recording cleanup's outcome would make a generic wrapper learn
-one step's special case, and later lines would still need the prefix rule. Reports
+one step's special case, and later lines would still need the prefix rule; the
+engine's action after the session is the step's, declared beside its other actions. Reports
 of a cleaned-up change's log and cost read the history wherever it is.
+
+Archive cleanup runs again after a merge after the archive, on a row already
+`archived`. It releases no dependent, leaves the row, and drafts no second pull
+request; the engine runs the cleanup of every evidence kind before it again, since
+the merge's validation recreated what the first run removed, and it commits what that
+cleanup wrote, pushes,
+copies the history, and appends what its cleanup reported to the pull request's
+drafts. `done` is still reached only by archive cleanup's exit: a merge that cleaned
+up and copied itself would duplicate cleanup's steps and need its hook. Records
+written after the first copy — the merge's notes, its review, the rerun's own —
+reach the workspace by the same synchronization, which is why the drafts are only
+appended to.
 
 A clone is removed only on the owner's command, after the merge: archive cleanup
 does not, since the pull request may need another round. Removal refuses, deleting
@@ -1325,6 +2054,27 @@ a step the orchestrating session runs and a step the owner runs are the same ste
 `guidance-review` is a skill of the workflow outside any change's steps, which the
 owner runs ([Guidance reviews](#guidance-reviews)).
 
+The skills are shared by every repository that adopts the workflow, so a skill names
+no make target or path of one repository's: an edit for one repository would be an
+edit for all, and a repository's own copy a fork. Where the workflow has a role, a
+skill names the role — the repository's comment check, the section the root guidance
+names for its closeout parts, the roadmap `config load design` prints — or the
+engine's command, or an evidence kind's guide, which holds what an agent is told
+about that kind. What a skill does name is the workflow's own: its guidance and the
+engineering guidance beneath it, OpenSpec's tree and the change index, the make
+fragment's targets, the engine's command and package, and the outcome schema. A test
+reads every skill and fails on any other target or path, naming the skill, but for an
+exemption a repository lists with the open change that removes it; a guidance file
+counts as the workflow's by its frontmatter's layer, and a change or capability only
+by a placeholder. Neutrality held by review alone had let such citations accumulate.
+
+A guide or a hook's message may add to or narrow what a skill says; nothing enforces
+that it does no more ([A repository's configuration](#a-repositorys-configuration)).
+Each step skill's opening reads its run's inputs directory — `status.md` and every
+top-level Markdown message in full — says what a failing `before-` hook means for its
+step, and names a contradiction it notices between a guide or message and its own
+text, following its own text.
+
 A skill has one source under `.agents/skills/`, and each harness loads it through a
 link (`.claude/skills/`, `.codex/skills/`). Two copies drift, and the drift is
 silent: the rule that differs is the one nobody re-reads. `make check-agent-skills`
@@ -1345,9 +2095,10 @@ used only by the engine and its shipped skills.
 
 | Interface | Tier |
 |---|---|
-| The subcommands `start`, `next`, `record`, `note`, `stop`, `review`, `find` (with `--records` and `--json`), `clone`, `clone-remove` (with `--base`), `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `run` (with `run validation`, `run cleanup`, and `--owed`), `config` (with `--json`), `config load`, `config parts` (with `--json`), `openspec`, `check config`, `check change`, `check index`, `check tasks`, `check push`, `check skills`, and `push` (with `--remote`); their flags, exit-status categories, and structured outputs | public |
+| The subcommands `start`, `next`, `record`, `note`, `stop`, `review`, `find` (with `--records`, `--next-record`, and `--json`), `clone`, `clone-remove` (with `--base`), `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `run` (with `run before`, `run after`, and `run cleanup`), `evidence` (with `--json`), `gather` (with `--kind`, `--owed`, and `--lapsed`), `config` (with `--json`), `config load`, `openspec`, `check config`, `check change`, `check index`, `check tasks`, `check push`, `check skills`, and `push` (with `--remote`); their flags, exit-status categories, and structured outputs | public |
 | The repository's configuration, `.agents/workflow.toml`: its tables, keys, kinds, and placeholders | public input, versioned by the engine's release |
-| The closing line a hook or part ends with, and the marker a `start` prints last | internal: the shipped skills match the line, and the engine keeps the marker |
+| The closing line a hook or an evidence kind's gathering ends with, and the marker a `start` prints last | internal: the shipped skills match the line, and the engine keeps the marker |
+| A run's inputs directory, `reviews/runs/<run>/before/` and `…/after/`, its `status.md`, and the `{inputs}` a hook writes its messages to | public, as part of the record set's layout |
 | Those subcommands' report text for a person | outside the promise |
 | The skill names `change-<step>`, `change-orchestrate`, and `guidance-review`, and their argument forms (`<change>`, `<change> sections 3-4`, `<change> from <branch>`) | public |
 | `hook post-compaction` | provisional: the installer and the harness adapters take its wiring |
@@ -1357,9 +2108,10 @@ used only by the engine and its shipped skills.
 | The unattended-run marker in a step's environment | internal |
 | The make fragment's targets and its `CHANGE_WORKFLOW_*` variables | a convenience outside the surface, with no compatibility promise |
 
-`config --json` and `config parts --json` are the configuration's structured forms,
-so a program never reads the file's internals; a skill learns its documents from
-`config load`, validation's plan from `config parts`, and runs OpenSpec through
+`config --json` and `evidence --json` are the configuration's and the evidence's
+structured forms, so a program never reads the file's internals; a skill learns its
+documents from `config load`, the evidence kinds and their guides from `config
+--json`, which evidence a commit has from `evidence`, and runs OpenSpec through
 `openspec`, rather than interpreting the file. Listing the resolution only in `check
 config`'s report was rejected, since it gives a program nothing to parse.
 
@@ -1397,6 +2149,13 @@ moves when any of them changes incompatibly, with a migration command. `next`'s 
 format in its `$id`. One marker for the whole set means a reader never handles
 combinations of per-format markers for records it reads together.
 
+Compatibility is owed only by a newer reader to older lines: no older reader is
+expected to meet newer records. A field added to a line that a reader without it can
+ignore therefore moves no format — the run's `invariants`, `refusals`,
+`writes_granted`, and `unconfined` among them — and a reader of an older line takes
+its absence as the field's empty value. An older line's `granted` holds rules, not
+paths, and no reader takes it for `writes_granted`.
+
 A reader tells older, current, and newer formats apart before it routes or writes. A
 log line with no `format`, or a lower one, is older, and the owner converts it with
 `convert`; a higher one, or a mark that is no whole number, is newer, and both the
@@ -1422,7 +2181,6 @@ log it opens then governs the ledger.
 |---|---|
 | Log line, outcome schema, records layout and names, parsed record fields, ledger line (versioned where a log exists), `next` and `find --json` output | public |
 | Change index row and status legend, `tasks.md` section layout | public input, versioned by the engine's release |
-| Step table schema | provisional, unversioned |
 | Transcripts' and progress files' contents, runs-in-progress records, round-view state, clone bootstrap status | internal |
 
 ### Compatibility is judged by semantic versioning
@@ -1469,46 +2227,107 @@ repository's values. Four principles shape it:
 - **Removal is deliberate.** A repository removes a safeguard of the workflow only by
   a deliberate, visible act, never by omission.
 
+A repository injects into the workflow two ways. Its configuration is the engine's
+injection: it holds every value the engine reads — what it runs, computes, orders,
+copies, or checks. Its guides are the skill's: prose telling an agent what it needs to
+know of the repository, an evidence kind's guide saying how to read that kind's
+evidence, how its failures are told apart, what its section of the validation record
+adds, what its cleanup writes, and what a plan names for it. A value both need lives
+in the configuration, and a skill learns it from the engine's structured output,
+never from the file; a guide restates nothing the configuration holds, which review
+holds it to, so one fact never has two places to go stale. Guides live under
+`.agents/evidence/`, beside the skills they extend: they are extensions to steps, not
+guidance, carry no layer tag, and are not loaded by `load.common`; a step reads the
+guides of the kinds it handles, and a review reads them wherever it reads a validation
+record. The guide as the whole declaration, TOML frontmatter above its prose, was
+rejected, since it would put what the engine reads in the skill's injection; so was an
+optional guide with a fallback assessment, which would need a result format every
+writer shares.
+
+The workflow does not defend its obligations against its own repository. A guide or
+a hook's message may add to or narrow what a skill says, and nothing enforces that it
+does no more: injected text can always steer a model, and whoever controls the
+repository controls the files that would enforce it — a hook could replace a skill
+outright. A skill that notices a guide or message contradicting its own text says so
+in its report and follows its own text, which surfaces an accidental contradiction,
+such as a guide left stale. A deviation declared per requirement was rejected as
+ceremony around an honour system.
+
 A value is a field when another adopting repository could reasonably need a
 different one and neither Git nor the invocation supplies it. The workflow's own
 conventions stay fixed in the engine, as [the engine's own
 assumptions](#the-engines-own-assumptions) list: a change's `reviews/` layout,
-versioned by the record set's format; the outcome schema's and the step table's
-paths; the `workspace` remote; the harness's session id and local settings; the
+versioned by the record set's format; the outcome schema's path; each step's
+definition and baseline scope; the `workspace` remote; the harness's session id and local settings; the
 graph diagram's path; OpenSpec's tree and the change index; and the model rules. The
 file is TOML, read on the standard library, which carries each field's reason in a
-comment as the step table does; its keys are kebab-case, as Git's hook names are.
+comment; its keys are kebab-case, as Git's hook names are.
 
 | Table | Fields | Who uses it |
 |---|---|---|
 | `[repository]` | `protected-branches`, required; `inert-paths` | the guarded push; the next-step computation and `run pre-commit`'s tier |
-| `[hooks]` | `after-functional-change`, `pre-commit`, `pre-commit-functional` (required), `pre-archive`, `pre-push`, `post-clone` | `run`, by the steps the engine's hook table lists; `push`; `clone` |
+| `[hooks]` | `after-functional-change`, `pre-commit`, `pre-commit-functional` (required), `pre-archive`, `pre-push`, `post-clone`; `before-<step>` and `after-<step>` for each step | `run`, by the steps the engine's hook table lists; `push`; `clone`; the wrapper and the review around a step's session, and `run before\|after` |
 | `[defaults]` | `disable`: each default check turned off, with its reason | `run pre-commit` and `check change` |
 | `[openspec]` | `command` | the default validation, closeout's archive, `openspec` |
 | `[load]` | `common`, and a key per step | `config load`, every skill, the post-compaction hook |
+| `[sandbox]` | `writable.common`, and `writable.<step>` for a step but the review, each a list of paths; `protected` | the scope of each step's sandbox, through `scope`; `config` |
 | `[models]` | `orchestrator`, and a key per step, each an ordered list of a harness, a model, and an effort | `start orchestrate`, the wrapper, the review |
-| `[validation]` | `preflight`; `parts.<name>` with `run`, or `start` and `collect`, and `owed`, `after`, `evidence`, `cleanup`; at least one part required | `config parts`, `run validation`, `run cleanup`, history |
+| `[review]` | `format-retries`: how many times a draft the format check refuses is sent back to its reviewer, 1 when absent, 0 never | the review |
+| `[validation]` | `preflight`; `evidence.<kind>` with `required` (`always` or `owed`), `evidence`, a pattern holding `{tree}` or `{commit}`, `run`, or `start` and `collect`, `guide`, and optionally `after` and `cleanup`; at least one kind required | `evidence`, `gather`, `run cleanup`, history; the skills, through `config --json` |
 
 A field is required or optional. A required field's absence refuses the steps that
 need it, before `start` launches anything, naming the field: the functional checks,
 since a repository has to decide how a functional change is checked; at least one
-validation part, since a round advances only on a passed validation; the protected
+evidence kind, since a round advances only on a passed validation; the protected
 branches; and the models of each step run unattended and of the orchestrating
 session. An explicit empty value counts as declared, so a repository can say "nothing
 here" on purpose. Every other field is optional, skipped when absent with the run
 saying so. Permissive defaults for every hook were rejected: they would let a
 repository adopt the workflow without deciding how a functional change is checked.
 
-Every subcommand that reads the file checks all of it as it loads, as the step
-table's loader refuses a malformed table, and refuses, naming the field, an unknown
+Every subcommand that reads the file checks all of it as it loads, and refuses, naming the field, an unknown
 table or key — an adopter adds none, so one is a typo or a newer workflow's — a value
-of the wrong type, a part of neither or both shapes, an `after` it could not keep, and
+of the wrong type, a kind of neither or both shapes, an `after` it could not keep, and
 a placeholder unavailable where it is used; `check config` runs the same check alone.
-Checking only at `start` was rejected, since `push` or `next` would then read a
-malformed file. With no file, every field is absent.
+Of an evidence kind it also refuses a `required` other than `always` or `owed`; a
+pattern holding neither or both of `{tree}` and `{commit}`, absolute, climbing with
+`..`, or with no fixed directory; a fixed directory Git does not ignore, asked of Git
+once for every kind as the file loads, and nothing outside a Git checkout; an owed
+kind's pattern without `{owed}`, or `{owed}` in another; and no guide, or one naming
+a missing or empty file, failing closed as a missing `load` directory does. A hook
+key other than `before-` or `after-` a step is refused as naming no step. A guide
+restating the configuration is review's to catch, since the configuration is the one
+place a guide is named and no separate check of guides is needed. Checking only at
+`start` was rejected, since `push` or `next` would then read a malformed file. With
+no file, every field is absent.
 
 `config` lists every field and how it resolved — declared, default, disabled, or
-absent — with the command it resolves to.
+absent — with the command it resolves to, each evidence kind's guide, and each step
+hook, and each step's resolved scope, its writable and protected paths each named by
+its source — the engine, the adapter, or the repository — so the orchestrating
+session can propose the narrowest path for a gap; the private `/tmp` is listed as
+the private `/tmp`. `config --json` gives the same as structured output.
+
+`[sandbox]` extends a step's scope and never narrows it, as `[load]` adds documents:
+`writable.common` is every step's, the review taking only its paths outside the
+checkout, as written and where their links lead; `writable.<step>` one step's; and
+`protected` only adds to the paths no step writes. A relative path is from the
+checkout's root and `~` is the home directory; a pattern matches the checkout's files,
+so a `~` or absolute entry, and any `protected` entry, which is mounted whole, holds
+none. The check refuses a writable path that is or lies under a protected one, the
+engine's, an adapter's, or the configuration's own, compared as written and where its
+links lead, since the sandbox could not honour it; `/tmp` itself, which every step
+writes as its own; `writable.review`, since the review writes nothing it reviews; and
+an unknown step. A writable directory containing a protected path is admitted, the
+protected path mounted read-only inside it, as the engine's own scopes hold
+`.agents/workflow.toml` inside the checkout and Codex's `config.toml` inside
+`~/.codex`: refusing it would hold a repository to a stricter rule than the engine's
+scopes for no protection the read-only mount does not give. Each step's skill, the
+session it resumes, and its baseline scope live in the engine beside the graph, in
+the workflow's own terms, as the hook table does: in the configuration a repository
+could rename a step's skill or loosen a baseline, and a second file beside it would
+split what the configuration declares. A `writable.review` key for the review's
+caches was rejected as carrying what `writable.common` already declares.
 
 #### The hooks
 
@@ -1517,12 +2336,50 @@ moment it runs, as Git names its hooks: `after-functional-change`, after a step'
 last functional change and before its pre-commit hooks; `pre-commit`, before every
 commit; `pre-commit-functional`, also before a commit with a functional change;
 `pre-archive`, before closeout's archive; `pre-push`, before the guarded push sends;
-`post-clone`, as a clone is made. Validation's preflight and parts, and a part's
-cleanup, are hooks of validation's own
+`post-clone`, as a clone is made; and `before-<step>` and `after-<step>`, around
+each step's session. Validation's preflight and evidence kinds, and a kind's cleanup,
+are hooks of validation's own
 ([Validation observes a committed slice](#validation-observes-a-committed-slice)).
 Operations named by what they do — `test`, `lock`, a packaging check — were rejected:
 in another repository they do more or less than their names. A hook the workflow
 adds later is a compatible change.
+
+The step hooks are the repository's dependency injection onto the workflow, for the
+nine steps a run is logged as — design, review, triage, plan, implement, validate,
+merge, closeout, archive cleanup; the merge and the merge after the archive run one
+step and share its hooks. A `before-` hook runs after the engine's own action before
+that step, and a review's and a triage's hooks are given `{kind}`. None has a
+default: an absent or empty hook runs nothing, and the orchestrating session says in
+one sentence that it ran the step without it. The engine probes for no make target,
+so a declared target that is missing fails like any command and a typo fails loudly,
+and it assumes no build tool; the make fragment documents each hook as a commented
+target, where an adopter looks. Every hook defaulting to a target the repository must
+implement was rejected, since it starts each adopter with failing hooks and adds
+`make` to the engine's assumptions.
+
+A failure before a step informs that step and gates nothing, as a failing test must
+reach the triage that fixes it: a failing `before-` hook or gathering starts the
+session with the failure in its inputs, and the skill says what it means —
+validation diagnoses it, and implementation whose environment refresh failed stops
+and asks. A hook the configuration's check refuses refuses the step. A failure after
+a step goes back to the step that can fix it: an `after-` hook runs only after a
+`finished` outcome, before that outcome is logged as final; on failure the wrapper
+resumes the same session once with the failure, and a second failure ends the run as
+a question to the owner naming the hook, so routing reads one outcome. Validation,
+which cannot act on a failure, explains it in the resumed turn. A failure carried to
+the next session, which may not be able to fix it, or brought straight to the owner,
+was rejected.
+
+A review runs through its own runner, read-only, not the wrapper, so the runner holds
+its hooks. It runs `before-review` before it starts the reviewer, naming the run's
+inputs directory in the reviewer's first prompt, which is all a read-only reviewer
+needs — a coordinator can hand it there what it knows of another repository — and
+`after-review` once it has published the record, so a hook may read the record. A
+failing `after-review` resumes no reviewer, whose final message would be taken for a
+second review and who can fix nothing: the run ends at once as a question to the
+owner naming the hook, the published record standing and never published again. A
+review run interactively is no run — it logs nothing and has no inputs directory — so
+it runs no hooks, and says so.
 
 A hook holds one command or a list. A list runs every command in order, whatever an
 earlier one reported, and the hook fails if any failed, so one call reports every
@@ -1531,8 +2388,12 @@ lists are clearer and adopters need only not add keys. Each command is a shell
 command, run with `sh -c` from the repository's root, so the contract holds whatever
 the repository's language. It names the values it needs as placeholders the engine
 fills in, each shell-quoted: `{change}` and `{base}`, the landing branch; `{remote}`
-in `pre-push` only, where the push has no change to give; `{owed}` in an owed part
-only, from `run`'s `--owed`; and `{after}` in a `collect` only. Environment variables
+in `pre-push` only, where the push has no change to give; `{owed}` in an owed kind
+only, the owed argument; `{after}` in a `collect` only; `{tree}` and `{commit}` in a
+kind's commands and pattern and in the functional hooks, the tree read from the
+worktree as each functional hook starts, so `pre-commit-functional` sees what
+`after-functional-change` rebuilt; `{kind}` in a review's and a triage's hooks; and
+`{inputs}` in the step hooks. Environment variables
 the workflow exported would make the repository's own code read the workflow's
 names, and positional arguments would be read by make as targets. A value of the
 owner's machine is no placeholder and no field: it reaches the command through the
@@ -1556,8 +2417,9 @@ other commit runs `pre-commit` alone. The skill then stages what the hooks rebui
 such as a lock. One line for every commit would make every design commit build and
 test the whole repository; tiers keyed by step would put back in the skills the
 knowledge the configuration takes out. Only implementation, triage, and the merge
-make functional commits. A tracked file a part's cleanup writes is the exception:
-archive cleanup commits it on its own with no hook before it, since it is the
+make functional commits. A tracked file a kind's cleanup writes is the exception:
+archive cleanup commits it on its own with no hook before it, before any other check,
+since it is the
 repository's own record, made by its declared command, and running every suite after
 the archive to commit one measured figure would cost far more than it proves.
 
@@ -1566,18 +2428,94 @@ the archive to commit one measured figure would cost far more than it proves.
 `repository.inert-paths` names the paths a change to which alters nothing validation
 or a code check would prove — documentation, and in another repository images or
 metadata. They tier the pre-commit hooks, and after a pre-closeout review a commit
-changing only inert paths or changes' records needs no new validation. A path
-belongs in the list only where the closing checks cover what it can break. With none
-declared, no path is inert, and only changes' records are exempt where a requirement
-exempts them.
+changing only inert paths or changes' records needs no new validation. An entry
+names a directory or file whole, or, with a glob character, is a pattern over the
+whole path, as `**/README.md` marks every README. A path belongs in the list only
+where the closing checks cover what it can break. A document a test checks for
+currency, such as the run instructions `e2e-tests/README.md` must name, stays inert:
+a commit to it alone skips `make test`, and the next full run of the suites catches
+what it broke. With none
+declared, the workflow's default applies: `openspec/` and every Markdown file,
+`**/*.md`, whose changes alter nothing validation or a code check would prove but a
+test of a document's currency. A declaration, an empty one included, replaces the
+default; with an empty one no path is inert, and only changes' records and the
+archive's own writes are exempt, where a requirement exempts them (CW-n7ra). A
+repository that declares nothing has its documents exempt, as almost every adopter
+would want; one that wants none exempt says so by declaring an empty list, a visible
+act rather than an omission.
 
 `load.common` lists the documents every step's skill reads as it starts, and
 `load.<step>` a step's additions; `config load <step>` prints the two together, so no
 skill merges them, and `config load common` prints the first alone for a session no
 step runs, the orchestrating session or a guidance review. The post-compaction hook,
-not knowing the session's step, re-reads `load.common`. The entries are paths; a
-single list for every step was rejected, since steps already read different
-documents.
+not knowing the session's step, re-reads `load.common`. A single list for every step
+was rejected, since steps already read different documents.
+
+An entry is a path. One ending in `/` names a directory and stands for every
+Markdown file beneath it, in sorted path order, each printed once, so a guidance file
+added or moved within it is read without editing the configuration. The trailing `/` tells a missing directory from a missing
+file, and a directory entry fails closed: `config load` refuses, naming the entry,
+one that is missing, unreadable, or holds no Markdown file, rather than reading it as
+nothing, and the post-compaction hook then tells the session its documents are
+unknown. A literal entry is not checked for its file, so an adopting repository's
+existing configuration means what it meant, and an absent or empty list still means no
+documents. The expansion selects nothing by tag: listing every file was rejected,
+since a forgotten entry is silently unread, and loading by tag is a loader of its own.
+
+### The repository's guidance is layered
+
+What a repository adopting the workflow tells its agents divides into three layers,
+by what each piece of guidance depends on: **engineering**, which holds in a
+repository using neither the workflow nor OpenSpec; **workflow**, which holds in any
+adopting repository, OpenSpec included, and names nothing of one; and **repository**,
+which names the adopting repository's own packages, services, tools, documents, or
+targets (CW-g7lt). A rule that would hold without the workflow is engineering even
+when written with one repository's example, and is stated with a neutral one, the
+repository's statement being its instance. OpenSpec's documentation model is
+workflow material, since the workflow requires OpenSpec and an adopter takes both. A
+lower layer never links to a higher one (CW-d2rw) — the package direction rule applied
+to documents — so lifting a layer out of a repository is a move rather than a rewrite,
+and where workflow guidance needs something a repository supplies it names it by role.
+The workflow's guidance states the layers for whoever works a change
+([`docs/guidance/workflow/README.md`, "The layers of guidance"](../../../docs/guidance/workflow/README.md#the-layers-of-guidance)).
+Within the workflow, a statement is placed by what it constrains: the
+specification what the engine and skills do, the guidance what a change's work must
+produce, and the handbook what the owner does.
+
+Each guidance file states its layer in YAML frontmatter, its `tags` holding exactly
+one layer tag and otherwise only tags from its layer's vocabulary table or a lower
+layer's, so a file can carry a topic, a tool, and its layer at once, which no
+directory structure allows. A file's tags name what it covers, and content on another
+subject goes in another file; no selection formula is assumed, since how a loader
+selects by tag is undecided ([Current limits](#current-limits)). The vocabularies are
+Markdown tables, each layer's in its own README, its layer tag the first row, and a
+tag no file carries is not kept. Directories carry no meaning (CW-n6dm): they organize
+guidance for people, start flat with each file named by its subject, and may nest once
+a layer grows too large to navigate; the frontmatter alone states the layer, so a
+lift-out selects files by tag and a reorganization changes nothing the workflow does.
+Tags were preferred to the path as the tag, which forces every section into one
+place, and to a marker beside each heading, which needs a section extractor in any
+loader.
+
+Repository guidance sits beside the system it pertains to (CW-p9sa): what pertains to
+one capability is a guidance file in its directory under `openspec/specs/`, read
+wherever its specification and companion are read (CW-r8cg), and what spans several
+systems sits in the repository's cross-system documents. A capability's guidance is
+found by its place — every Markdown file in its directory but its specification, its
+companion, and its index — so an untagged guide is still read and still checked.
+Naming capability files in the configuration's load lists was rejected, since it
+would reload every capability's guidance into every step.
+
+A repository's exception to shared guidance — selecting a case the guidance leaves
+open, or overriding one of its rules — is a row of a table headed "Exceptions to
+shared guidance", beside the component it applies to, or in the root guidance when it
+spans several systems (CW-x4ex). An inline note beside each affected rule cannot
+survive a lift-out and cannot be audited, and one root table for every exception would
+load every capability's exceptions into every step. Narrowing a shared rule is an
+ordinary repository rule, and work not yet meeting a shared rule is deferred work,
+not an exception. Engineering guidance describes what may enter a private repository
+as well as a public one, because the workflow runs in both; a repository's root
+guidance selects its case as an exception row.
 
 ### What an adopting repository provides
 
@@ -1590,21 +2528,25 @@ supplies, a convention the workflow fixes, or, for the make fragment, the
 repository's `Makefile`. How a repository fills each is its own statement; this
 repository's is
 [`market-change-workflow`'s](../market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles).
-A test fails when a make target or repository path the skills, the step table, or
-the make fragment name, the fragment's own targets among them, is missing from that
-statement and from the commands the repository's workflow configuration declares,
-or when a role here has no provision there, or one there no role here. The
-configuration's own check holds the rest: a field it does not define, or a command
-in the wrong shape, is refused as the file loads.
+A test fails when a make target or repository path the make fragment names, the
+fragment's own targets among them, is missing from that statement
+and from the commands the repository's workflow configuration declares, or when a
+role here has no provision there, or one there no role here; the skills name none
+([Leaf skills from one source](#leaf-skills-from-one-source)). The configuration's
+own check holds the rest: a field it does not define, or a command in the wrong
+shape, is refused as the file loads. Validation's roles are evidence kinds, each with
+the guide its steps read. Beside the roles, a repository may hook any step, before
+and after its session ([The hooks](#the-hooks)); no step hook is required, so none is
+a role.
 
 | Role | Used by | Provided through |
 |---|---|---|
-| Local validation of a commit: the repository's own checks and suites against the commit, built from it | `change-validate` | a `run` part of `validation.parts`, after `validation.preflight` |
-| Validation in a deployed environment: the change's services built and run as the repository deploys them | `change-validate`, `change-plan` | a part of `validation.parts` |
-| The end-to-end pipeline: a run whose head is the commit, its logs fetched | `change-validate`, `change-implement`, `change-merge`, `change-plan` | a `start` and `collect` part of `validation.parts`, its `evidence` the logs |
-| CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | `change-validate`, `change-implement`, `change-plan` | an `owed` part of `validation.parts`, run once per owed workflow |
-| Removing a change's validation resources, and recording what they used, at archive cleanup | `change-archive-cleanup` | each part's `cleanup`, run by `run cleanup` |
-| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | `change-implement`, `change-triage`, `change-merge`, `change-validate`, `change-plan` | `hooks.after-functional-change` and `hooks.pre-commit-functional`; the step table's grants for engineering work |
+| Local validation of a commit: the repository's own checks and suites against the commit, built from it | `change-validate` | a `run` kind of `validation.evidence`, keyed by tree, after `validation.preflight`, its evidence also left by `hooks.pre-commit-functional` where the repository's functional checks write at its pattern |
+| Validation in a deployed environment: the change's services built and run as the repository deploys them | `change-validate`, `change-plan` | a kind of `validation.evidence` and its guide |
+| The end-to-end pipeline: a run whose head is the commit, its logs fetched | `change-validate`, `change-implement`, `change-merge`, `change-plan` | a `start` and `collect` kind of `validation.evidence`, keyed by commit, whose guide says where its scenarios are named |
+| CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | `change-validate`, `change-implement`, `change-plan` | an `owed` kind of `validation.evidence`, keyed by commit and gathered once per owed argument, whose guide says what may be owed |
+| Removing a change's validation resources, and recording what they used, at archive cleanup | `change-archive-cleanup` | each kind's `cleanup`, run by the engine before archive cleanup's session and again by `run cleanup`, its guide saying what it writes |
+| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | `change-implement`, `change-triage`, `change-merge`, `change-validate`, `change-plan` | `hooks.after-functional-change` and `hooks.pre-commit-functional`; `sandbox.writable.common`, and `writable.<step>`, for the tool state they write outside the checkout |
 | The packaging check before closeout | `change-implement`, `change-triage`, `change-merge`, `change-closeout`, `change-validate` | `hooks.pre-commit-functional` and `hooks.pre-archive` |
 | The closing checks a step ends with | every step that commits | `hooks.pre-commit`, after the workflow's default checks, which only `defaults.disable` turns off |
 | The change index at a known path | every step | fixed by the workflow, beside OpenSpec's tree |
@@ -1630,25 +2572,21 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
 | The change index's path | `index.INDEX` |
 | Its command and package, beside each other under `scripts/` | the command's own path, and the skills that name it |
 | The repository's workflow configuration, at a fixed path, checked whenever it is read | `config.CONFIGURATION` |
-| The step table, at a fixed path, in Claude Code's permission-rule syntax | `steps.STEP_TABLE`; provisional, replaced by `sandbox-unattended-workflow-steps` and `add-workflow-harness-adapters` |
 | The outcome schema, at a fixed path | `outcome.SCHEMA` |
 | The skills' one source, linked into each harness's directory | `skills` |
-| The harness's local settings, which a clone links to the workspace's | `clone.SETTINGS` |
+| The harness's local settings, which a clone links to the workspace's | `clone.SETTINGS`; the sandbox protects it where the link leads |
 | The changes' directory, its archive, and each change's records under `reviews/` | `common.CHANGES`, `find`, `records` |
 | The graph diagram's place in this capability | `diagram.DIAGRAMS` |
 | The `workspace` remote a clone names the owner's workspace by | `find.WORKSPACE_REMOTE` |
 | The harness's session id in the environment, `CLAUDE_CODE_SESSION_ID` | `common.SESSION_ID` |
-| The tools it invokes, `git`, `claude`, `codex`, and `sh`, which runs every command the configuration declares | `harness`, `cli`, and `review` for the harnesses, `clone` and `push` for `git`, `hooks` and `clone` for `sh` |
+| The tools it invokes, `git`, `claude`, `codex`, `bwrap`, which confines every unattended step, and `sh`, which runs every command the configuration declares | `claude_code` and `codex` for the harnesses, `sandbox` for `bwrap`, which its probe finds or the step runs unconfined, `clone`, `push`, and `sandbox_git` for `git`, which the engine's `git` runs from a path of its own, `hooks` and `clone` for `sh` |
+| Inside the sandbox only the owner's uid is mapped, so a root-owned path shows as the overflow uid, 65534 | `sandbox`, which gives every step a private `/tmp` of the owner's |
 
 ## Current limits
 
 - One orchestrating session advances one change. Several changes run at once, each
   in its own clone, but each needs a session of its own; orchestrating several from
   one session is not built.
-- An unattended step's Read, Glob, and Grep reach any file the owner can read — the
-  workspace's records, which history needs, and equally another clone's or the
-  owner's own files — while its shell reads stay in its checkout. The step table
-  bounds commands, not the files a step may read.
 - The round view resets the branch to the round's base, so a merge of the landing
   branch made inside a round shows that branch's changes as uncommitted beside the
   round's own, with nothing to tell them apart.
@@ -1657,9 +2595,24 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
 - The computation's check for a merge in progress runs in whichever checkout
   computes, so an unrelated merge in progress in the owner's workspace makes the
   workspace's computation name the owner rather than the change's clone.
-- Leaf steps other than the review run on Claude Code only. Codex can hold only the
-  review to its step's limits; running other steps on Codex with the step table's
-  guarantees and its record of denials is not built.
+- Leaf steps other than the review run on Claude Code only, and the two adapters are
+  internal: an owner supplying a harness's adapter, and Codex running writing steps,
+  are
+  [`add-workflow-harness-adapters`'](../../changes/add-workflow-harness-adapters/proposal.md).
+  A Codex review of a clone outside the directories Codex's configuration trusts ends
+  with Codex's error rather than as unavailable, and does not fall back to Claude
+  Code.
+- The sandbox's guarantees hold for the runs it confines. Where `bwrap` cannot run, a
+  step runs unconfined, held only by the checks after it and an adapter's command
+  rules, until the harness runs in the container
+  [`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)
+  designs. Inside the sandbox root-owned paths but `/tmp` show as the overflow uid's,
+  which that container remedies too.
+- A protected path's name is not guarded, and Claude Code's writable `~/.claude`
+  holds instructions, skills, and hook scripts the owner's own sessions load: a step
+  writing them, or replacing a protected link by a shell rewrite, has broken its
+  skill's rule, and its review is the backstop
+  ([Restrictions bind unattended runs only](#restrictions-bind-unattended-runs-only)).
 - Choosing what to work on next across changes, and starting a prerequisite's
   workflow, stay with the owner.
 - Following a wrapper run from inside the orchestrating session is not built: the
@@ -1671,7 +2624,13 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   archive, and a step reverting the archive commit is not built, since it raises
   questions of its own — which commit to revert once later commits touched the same
   specifications, what becomes of the closeout review's records. A closeout triage
-  that needs a code correction stops for the owner.
+  that needs a code correction stops for the owner. An archived change's branch
+  merges its landing branch again through the merge after the archive, whose
+  unresolvable conflicts are the owner's.
+- Nothing notices that the landing branch moved while the pull request is open: the
+  owner directs the merge after the archive then. A poller or a trigger on pushes to
+  the landing branch is infrastructure a hosted runner would supply
+  ([`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)).
 - A direction may name a node that makes no sense from where the change stands;
   only its unwaivable entry guards and the owner hold it.
 - `scripts/change-workflow convert` and the computation's detection of a
@@ -1689,36 +2648,47 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   rule governs the engine's modules; the engine's own layering is
   [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md).
 - The workflow's own conventions stay fixed in the engine, not in the configuration:
-  the configuration's own path, the step table's and the outcome schema's, the
+  the configuration's own path, the outcome schema's, each step's definition, the
   changes' directory and its `reviews/`, the change index, the `workspace` remote, and
   the rest of the engine's own assumptions above. Another adopting repository has no
   reason to change them; one that needed to would be a case for a field.
-- What the agent is told about one repository's validation failures stays in the
-  validation skill: the skill keeps this repository's Helm namespace, pipeline, and
-  capacity record where its diagnosis needs them, until
-  [`add-skill-extension-points`](../../changes/add-skill-extension-points/proposal.md)
-  moves them into a repository's addenda.
-- A validation part reports only its exit status and its marker; a part that could
-  say its own failure was environmental has no way to, and the skill diagnoses it from
-  the evidence. An optional placeholder for a structured result would add it
-  compatibly.
-- The engine's hook table holds an unattended step to the hooks it may run, but the
-  marker naming the step is the step's own environment, which it could forge; making
-  that impossible needs credentials the step does not hold, which
-  [`sandbox-unattended-workflow-steps`](../../changes/sandbox-unattended-workflow-steps/proposal.md)
-  owns, as it owns checking after each step that the configuration is unchanged.
-- `[load]` lists paths; loading guidance by tag waits on
-  [`layer-engineering-guidance`](../../changes/layer-engineering-guidance/proposal.md)'s
-  vocabulary.
+- An evidence kind's command reports only its exit status and its marker; a kind that
+  could say its own failure was environmental has no way to, and the skill diagnoses
+  it from the evidence as its guide says. An optional placeholder for a structured
+  result would add it compatibly.
+- Evidence is identified by the whole tree or the commit, and a kind is required
+  always or when owed: a commit touching only the engine still needs a deployment's
+  evidence anew. A kind might declare the paths it depends on, its evidence identified
+  by their digest and its requirement conditioned on a change touching them, but a
+  missing declaration would then reuse stale evidence or skip a kind silently; it
+  would be reopened once a mapping from paths to suites with a check on undeclared
+  reads exists, which
+  [`test-affected-suite-selection`](../../changes/test-affected-suite-selection/proposal.md)
+  builds.
+- A repository hooks the nine steps, not each node: a review or triage of one kind,
+  the merge after the archive, the round view, and `done` share their step's hooks or
+  have none. Hooks keyed by node would be reopened with the first caller needing one.
+- Tree evidence is only as stable as what Git ignores: a file the workflow writes
+  after implementation that Git does not ignore, outside an evidence pattern's
+  directory, which the check covers, would change the tree its evidence describes.
+- The diagrams of the engine's parts and of a step run's life draw neither the
+  evidence modules nor the actions and hooks around a step, and the engine's parts
+  still label the configuration's validation entries as parts; redrawing them in
+  draw.io is
+  [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md),
+  which redraws the engine's boundary.
+- `[load]` lists paths and directories, and selects nothing by tag: every step reads
+  every guidance file under a directory entry, and a capability's guidance with its
+  specification. Which tags a session carries, how they select files, and whether the
+  loader is the workflow's or a repository's are undecided, and no change owns them
+  yet; until one does, the skills keep restating the guidance they apply, since only
+  such a loader can promise a harness without a post-compaction hook the rule again.
+  Moving the shared layers out of the repository, and how a permanent document cites
+  guidance held elsewhere, are likewise unowned.
 - Decision destinations and the specification index are this repository's checks,
   not the workflow's defaults; whether they move into the engine is
   [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md)
   question.
-- The step table's place and its Claude Code rule syntax are provisional:
-  [`sandbox-unattended-workflow-steps`](../../changes/sandbox-unattended-workflow-steps/proposal.md)
-  replaces the allowlists with sandbox profiles, and
-  [`add-workflow-harness-adapters`](../../changes/add-workflow-harness-adapters/proposal.md)
-  maps them for each harness.
 - The graph is closed to adopters: no adopting repository may add a node or a review
   kind. Its closed vocabulary keeps a later extension additive; it would be reopened
   when an adopter, this repository included, needs a node or kind an extension point

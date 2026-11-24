@@ -23,6 +23,7 @@ from core_registry.config import load_settings
 pytestmark = pytest.mark.asyncio
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
+_COMPUTE_SPEC = _REPO_ROOT / "core/registry/src/core_registry/filter-spec.yaml"
 _API_CREDITS_SPEC = _REPO_ROOT / "domains/apicredits/registry/filter-spec.yaml"
 _INTRODUCTIONS_SPEC = (
     _REPO_ROOT / "core/registry/filter-spec.introductions.yaml"
@@ -98,6 +99,40 @@ class TestApiCreditsEnvelope:
         fetched = await registry_client.get_listing("credits-1")
         assert fetched.listing_resource == {"service_name": "embeddings"}
 
+    async def test_a_credits_listing_with_a_market_settlement_option_is_admitted(
+        self, served_spec, registry_client
+    ):
+        """Publication validates the whole schema, so the option shape it
+        declares must be the market's settlement option, which its own
+        mechanism and asset filters read."""
+        served_spec(_API_CREDITS_SPEC)
+        option = {
+            "option_id": "b" * 64,
+            "price": {
+                "asset": "0x" + "22" * 20,
+                "rates": [{"field": "amount", "per": "token", "value": "1"}],
+            },
+            "settlement": {"schema": "arkhai.payments.v1", "interaction": "hosted"},
+            "lifecycle": {"delivery_deadline_seconds": 600},
+        }
+
+        await registry_client.publish_listing(
+            ListingRequest(
+                listing_id="credits-option",
+                listing_resource={"service_name": "completions"},
+                accepted_escrows=[],
+                settlement_options=[option],
+                storefront_url="http://seller",
+            )
+        )
+
+        matched = await registry_client.list_listings(
+            service_name="completions", settlement_mechanism="arkhai.payments.v1"
+        )
+        assert {str(row.id) for row in matched.listings} == {"credits-option"}
+        fetched = await registry_client.get_listing("credits-option")
+        assert fetched.settlement_options == [option]
+
     async def test_its_filter_reads_the_settled_path(self, served_spec):
         spec = served_spec(_API_CREDITS_SPEC)
 
@@ -162,7 +197,7 @@ class TestAllThreeSpecificationsAgree:
         specification left behind would mean the same field had two names
         depending on which registry served it."""
         for path in (
-            _REPO_ROOT / "core/registry/filter-spec.yaml",
+            _COMPUTE_SPEC,
             _API_CREDITS_SPEC,
             _INTRODUCTIONS_SPEC,
         ):
@@ -176,7 +211,7 @@ class TestAllThreeSpecificationsAgree:
         identities = {
             served_spec(path).schema_identity.id
             for path in (
-                _REPO_ROOT / "core/registry/filter-spec.yaml",
+                _COMPUTE_SPEC,
                 _API_CREDITS_SPEC,
                 _INTRODUCTIONS_SPEC,
             )

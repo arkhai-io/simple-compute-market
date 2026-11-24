@@ -10,7 +10,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from change_workflow.steps import Model
+import pytest
+
+from change_workflow.around import inputs_note
+from change_workflow.harness import Model
+from change_workflow.log import Checkout
+from change_workflow import sandbox
+from change_workflow.sandbox import Confinement, Launch
 from change_workflow.wrapper import Wrapper
 
 CHANGE = "shape-bounds"
@@ -31,6 +37,13 @@ VALID = {
     "stopped": {"outcome": "stopped", "message": "Denied make lock.", "reason": "denied",
                 "denials": [{"tool_name": "Bash", "tool_input": {"command": "make lock"}}]},
 }
+
+# The landing branch a finished merge or archive cleanup records it fetched, and a
+# checkout that names a clone's remotes, contains every commit, and holds that commit
+# at every ref, for a test that is not about the landing record.
+LANDED = {"remote": "origin", "branch": "dev", "commit": HEAD}
+ACCEPTING = Checkout(remotes=lambda: {"origin", "workspace"}, contains=lambda *_: True,
+                     base=lambda: None, resolve=lambda _: HEAD)
 
 OPUS = Model("claude", "claude-opus-5-5", "high")
 SONNET = Model("claude", "claude-sonnet-5-5", "medium")
@@ -121,6 +134,15 @@ class FakeClaude:
         return status
 
 
+def _as_given(scope, program, *, probing=None) -> Launch:
+    return Launch(tuple(program))
+
+
+# The sandbox stood in for: it confines nothing and creates nothing, so a test reads
+# the harness's own command, and the checkout as the test left it.
+NO_SANDBOX = Confinement(probe=lambda: None, prepare=lambda _: None, launch=_as_given)
+
+
 def conversations(tmp_path: Path) -> Path:
     """Where the tests keep Claude Code's conversation files, never the owner's own."""
     return tmp_path / "conversations"
@@ -133,7 +155,16 @@ def make_wrapper(tmp_path: Path, claude: FakeClaude) -> Wrapper:
     return Wrapper(root=tmp_path, runner=claude, head=lambda _: COMMIT, clock=clock,
                    echo=None,
                    conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl",
-                   runs=lambda _: None)
+                   runs=lambda _: None, checkout=lambda *_: ACCEPTING,
+                   target=lambda *_: None, kind=lambda *_: None, confinement=NO_SANDBOX)
+
+
+def prompted(invocation: str, step: str, number: int = 1) -> str:
+    """A step's invocation as its run's session is prompted: the run's inputs
+    directory, claimed at the tests' clock, the `number`th that second, named after
+    it."""
+    run = f"{AT.strftime('%Y%m%dT%H%M%SZ')}-{step}" + (f"-{number}" if number > 1 else "")
+    return f"{invocation} {inputs_note(Path('r') / 'runs' / run / 'before', Path('r'))}"
 
 
 def option(command: list[str], flag: str) -> str:
@@ -195,6 +226,27 @@ def review_text(kind: str = "design", findings: str = FINDING) -> str:
             f"Yes.\n\n## Findings\n\n{findings}\n## Readiness\n\nNot yet.\n")
 
 
+def with_test_directory(command: Sequence[str], base: Path) -> list[str]:
+    """A sandbox's `command` with `base`, a test's directory under the host's `/tmp`,
+    bound read-only inside the step's private `/tmp`, before the scope's own binds: the
+    files beside a test's checkout, its stand-in home directory, and a checkout the
+    scope does not write are then read-only, as the real ones outside `/tmp` are,
+    rather than hidden by the private `/tmp`."""
+    after = list(command).index("--setenv") + 3
+    return [*command[:after], "--ro-bind", str(base), str(base), *command[after:]]
+
+
+def reading(base: Path) -> Confinement:
+    """The engine's sandbox, each confined launch reading the test's directory `base`
+    (`with_test_directory`)."""
+    def launch(found, program: Sequence[str], **options) -> Launch:
+        launched = sandbox.launch(found, program, **options)
+        if launched.unconfined is not None:
+            return launched
+        return Launch(tuple(with_test_directory(launched.command, base)), fds=launched.fds)
+    return Confinement(launch=launch)
+
+
 def repository(tmp_path: Path, *records: str) -> Path:
     """A repository holding the change's `records`, and the least configuration."""
     reviews = tmp_path / "openspec/changes" / CHANGE / "reviews"
@@ -207,7 +259,7 @@ def repository(tmp_path: Path, *records: str) -> Path:
 
 def writing(text: str, status: int = 0, calls: list[list[str]] | None = None,
             session: str = "s-1"):
-    def runner(command: Sequence[str], log: Path) -> int:
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
         if calls is not None:
             calls.append(list(command))
         log.write_text(f"--------\nsession id: {session}\n--------\nsession output\n", "utf-8")
@@ -220,16 +272,21 @@ def reviews_of(root: Path) -> Path:
     return root / "openspec/changes" / CHANGE / "reviews"
 
 
-def claude_review(text: str, session: str = "c-1", denials: list | None = None) -> FakeClaude:
-    """Claude Code ending a review run with `text` as its final message."""
-    events = [{"type": "system", "subtype": "init", "session_id": session},
-              {"type": "result", "subtype": "success", "is_error": False, "session_id": session,
-               "result": text, "permission_denials": denials or []}]
-    return FakeClaude(([json.dumps(event) + "\n" for event in events], 0))
+def claude_review(text: str, session: str = "c-1", denials: list | None = None,
+                  then: Sequence[str] = ()) -> FakeClaude:
+    """Claude Code ending a review run with `text` as its final message, and each run
+    after it, a draft sent back for correction, with the next of `then`."""
+    def run(final: str) -> tuple[list[str], int]:
+        events = [{"type": "system", "subtype": "init", "session_id": session},
+                  {"type": "result", "subtype": "success", "is_error": False,
+                   "session_id": session, "result": final,
+                   "permission_denials": denials or []}]
+        return [json.dumps(event) + "\n" for event in events], 0
+    return FakeClaude(*(run(final) for final in (text, *then)))
 
 
 def codex_saying(said: str, status: int = 1):
-    def runner(command: Sequence[str], log: Path) -> int:
+    def runner(command: Sequence[str], log: Path, key: str | None = None) -> int:
         with log.open("a", encoding="utf-8") as stream:
             stream.write(f"OpenAI Codex v0.157.0\n{said}\n")
         return status
@@ -241,7 +298,7 @@ def not_installed(program: str) -> FileNotFoundError:
     return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
 
 
-def codex_missing(command: Sequence[str], log: Path) -> int:
+def codex_missing(command: Sequence[str], log: Path, key: str | None = None) -> int:
     raise not_installed("codex")
 
 
@@ -262,8 +319,26 @@ closeout = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 """
 
+# The guides a test configuration's evidence kinds name, which `configured` writes.
+GUIDES = ("local", "helm", "pipeline", "ci")
+
+
+def evidence_kind(name: str, *, required: str = "always", identity: str = "tree",
+                  **fields: str) -> str:
+    """An evidence kind's table: its requirement, its pattern under the ignored
+    `.snapshot/evidence/`, its guide, and the commands and fields given, each a TOML
+    string."""
+    owed = "-{owed}" if required == "owed" else ""
+    lines = [f"[validation.evidence.{name}]", f'required = "{required}"',
+             f'evidence = ".snapshot/evidence/{{{identity}}}/{name}{owed}/*/summary.json"',
+             f'guide = ".agents/evidence/{name}.md"']
+    lines += [f"{key} = {json.dumps(value)}" for key, value in fields.items()]
+    return "\n".join(lines) + "\n"
+
+
 # A repository's workflow configuration: the least every step needs, its protected
-# branches, its functional checks declared empty, one part, and every step's models.
+# branches, its functional checks declared empty, one evidence kind, and every step's
+# models.
 CONFIGURED = """
 [repository]
 protected-branches = ["main", "dev"]
@@ -271,15 +346,29 @@ protected-branches = ["main", "dev"]
 [hooks]
 pre-commit-functional = []
 
-[validation.parts.local]
-run = "true"
-""" + MODELS
+""" + evidence_kind("local", run="true") + MODELS
+
+
+def ignore_evidence(root: Path) -> Path:
+    """`root`, a Git checkout, ignoring `.snapshot/` as a repository with evidence
+    kinds must, through its own exclude file rather than a tracked `.gitignore`."""
+    exclude = root / ".git/info/exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8") as lines:
+        lines.write(".snapshot/\n")
+    return root
 
 
 def configured(root: Path, text: str = CONFIGURED) -> Path:
-    """`root` given `.agents/workflow.toml` holding `text`."""
-    (root / ".agents").mkdir(parents=True, exist_ok=True)
+    """`root` given `.agents/workflow.toml` holding `text`, and a guide for each kind
+    a test configuration names; in a Git checkout, `.snapshot/` ignored."""
+    (root / ".agents/evidence").mkdir(parents=True, exist_ok=True)
     (root / ".agents/workflow.toml").write_text(text, "utf-8")
+    for name in GUIDES:
+        (root / ".agents/evidence" / f"{name}.md").write_text(
+            f"# The {name} evidence kind\n\nHow to read its evidence.\n", "utf-8")
+    if (root / ".git").is_dir():
+        ignore_evidence(root)
     return root
 
 
@@ -291,3 +380,8 @@ RECORDS = f"openspec/changes/{CHANGE}"
 def validation_text(commit: str, result: str) -> str:
     return (f"# Validation — {CHANGE} — {commit[:12]}\n\n- **Commit:** {commit} on feat/x\n"
             f"- **Result:** {result} — why\n")
+
+
+# A test that launches the real sandbox: skipped where it cannot run, failed instead
+# under `SANDBOX_REQUIRED=1` (`conftest.sandbox_runs`).
+needs_bwrap = pytest.mark.usefixtures("sandbox_runs")

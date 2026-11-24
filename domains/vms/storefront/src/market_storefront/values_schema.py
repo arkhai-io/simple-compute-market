@@ -40,6 +40,7 @@ from market_storefront.retired_settings import RETIRED_KEYS
 from market_storefront.utils.config import (
     IdentityConfigDeclaration,
     RegistryConfigDeclaration,
+    TimeConfigDeclaration,
     WalletConfigDeclaration,
 )
 
@@ -107,6 +108,7 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
         "identity": model_fragment(IdentityConfigDeclaration, role=role),
         "registry": model_fragment(RegistryConfigDeclaration, role=role),
         "settlement": _settlement_section(role),
+        "time": model_fragment(TimeConfigDeclaration, role=role),
         "wallet": model_fragment(WalletConfigDeclaration, role=role),
     }
     return accepting_null(config_definition(sections, retired=RETIRED_KEYS))

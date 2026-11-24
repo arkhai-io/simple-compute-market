@@ -1,5 +1,5 @@
 """Wire models of the provisioning service's health, status, version, worker
-control, and identity rotation routes."""
+control, time-setting, and identity rotation routes."""
 
 from __future__ import annotations
 
@@ -70,10 +70,20 @@ class SystemStatusResponse(BaseModel):
     )
     execution: ExecutionStatus
     components: list[SystemStatusComponent] = Field(default_factory=list)
+    #: The service's time source: ``{"source": "injected", "now": <Unix
+    #: seconds>}`` or ``{"source": "wall"}``.
+    time: dict[str, Any] | None = None
 
     def component(self, name: str) -> SystemStatusComponent | None:
         """The component named ``name``, or ``None`` when none is reported."""
         return next((c for c in self.components if c.name == name), None)
+
+
+class TimeSettingResponse(BaseModel):
+    """``POST /api/v1/system/time``: the instant an injected service is set to."""
+
+    source: Literal["injected"]
+    now: int
 
 
 class VersionResponse(BaseModel):
@@ -161,6 +171,7 @@ __all__ = [
     "PrincipalRotationResponse",
     "SystemStatusComponent",
     "SystemStatusResponse",
+    "TimeSettingResponse",
     "VersionResponse",
     "WorkerPauseResponse",
 ]

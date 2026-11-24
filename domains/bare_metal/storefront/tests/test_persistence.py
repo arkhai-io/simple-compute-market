@@ -15,6 +15,7 @@ from arkhai_bare_metal import (
     BareMetalResult,
     BareMetalTerms,
 )
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_identity import Ed25519Signer
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
@@ -25,6 +26,12 @@ NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
 LATER = NOW + timedelta(hours=1)
 SELLER = Ed25519Signer(bytes.fromhex("22" * 32)).identity
 BUYER = Ed25519Signer(bytes.fromhex("11" * 32)).identity
+
+
+def _client(path) -> SQLiteClient:
+    """A client over the database at ``path``, migrated to the current chain."""
+    migrate_storefront_database(path)
+    return SQLiteClient(str(path))
 
 
 def _artifacts():
@@ -115,7 +122,7 @@ async def _seed_opening(
 @pytest.mark.asyncio
 async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
     path = tmp_path / "storefront.db"
-    client = SQLiteClient(str(path))
+    client = _client(path)
     listing = await _seed_listing(client)
     artifacts = _artifacts()
     await _seed_opening(
@@ -195,7 +202,7 @@ async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
 async def test_artifact_updates_are_isolated_by_column_and_negotiation(
     tmp_path,
 ) -> None:
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path / "storefront.db")
     await _seed_listing(client)
     artifacts = _artifacts()
     await _seed_opening(
@@ -245,7 +252,7 @@ async def test_artifact_updates_are_isolated_by_column_and_negotiation(
 @pytest.mark.asyncio
 async def test_invalid_payload_is_rejected_before_write(tmp_path) -> None:
     path = tmp_path / "storefront.db"
-    client = SQLiteClient(str(path))
+    client = _client(path)
 
     with pytest.raises(ValidationError):
         await client.save_bare_metal_message(
@@ -266,7 +273,7 @@ async def test_invalid_payload_is_rejected_before_write(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_corrupt_stored_json_fails_closed(tmp_path) -> None:
     path = tmp_path / "storefront.db"
-    client = SQLiteClient(str(path))
+    client = _client(path)
     await _seed_listing(client)
     artifacts = _artifacts()
     await _seed_opening(
@@ -293,7 +300,7 @@ async def test_corrupt_stored_json_fails_closed(tmp_path) -> None:
 
 def test_common_artifact_table_contains_only_opaque_artifact_columns(tmp_path) -> None:
     path = tmp_path / "storefront.db"
-    SQLiteClient(str(path))
+    migrate_storefront_database(path)
     conn = sqlite3.connect(path)
     try:
         columns = {
@@ -320,7 +327,7 @@ def test_common_artifact_table_contains_only_opaque_artifact_columns(tmp_path) -
 
 
 async def test_a_listing_is_bound_under_the_key_its_own_shape_implies(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path / "storefront.db")
     listing = await _seed_listing(client)
 
     binding = await client.load_listing_binding(listing_id="listing-1")

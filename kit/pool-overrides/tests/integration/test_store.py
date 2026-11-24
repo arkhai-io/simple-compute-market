@@ -1,26 +1,32 @@
-"""The store and its migration on a real SQLite database."""
+"""The store on a real SQLite database holding its baseline's table."""
 
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from datetime import datetime, timezone
 
+import injected_time
 import pytest
+from injected_time import InjectedTime
 
 from market_pool_overrides import (
     PoolOverrideAddress,
     PoolOverrideRecord,
     SQLitePoolOverrideStore,
-    pool_override_migrations,
 )
+from market_pool_overrides.migrations import BASELINE
 
 SHAPE = {"gpu": {"count": 1, "model": "H100"}}
+
+#: The instant the injected source starts at.
+INSTANT = 1794821400
 
 
 def _migrated(path) -> SQLitePoolOverrideStore:
     conn = sqlite3.connect(path)
     try:
-        for migration in pool_override_migrations():
-            migration.apply(conn)
+        BASELINE.apply(conn)
         conn.commit()
     finally:
         conn.close()
@@ -37,9 +43,23 @@ def store(tmp_path) -> SQLitePoolOverrideStore:
     return _migrated(tmp_path / "store.db")
 
 
-def test_the_migration_creates_the_table_and_a_rerun_changes_nothing(tmp_path):
-    path = tmp_path / "rerun.db"
-    _migrated(path)
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, injected at ``INSTANT``; a test sets it forward."""
+    before = injected_time.installed()
+    installed = InjectedTime(start=INSTANT)
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
+
+
+def _text(instant: int) -> str:
+    """An instant in the table's text form: UTC, milliseconds, a trailing Z."""
+    return datetime.fromtimestamp(instant, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def test_the_store_is_keyed_by_site_pool_and_mode(tmp_path):
+    path = tmp_path / "keyed.db"
     store = _migrated(path)
 
     conn = sqlite3.connect(path)
@@ -51,14 +71,32 @@ def test_the_migration_creates_the_table_and_a_rerun_changes_nothing(tmp_path):
     assert store.db_path == str(path)
 
 
-async def test_replacement_clears_unset_fields_and_keeps_created_at(store):
+async def test_replacement_clears_unset_fields_and_keeps_created_at(store, source):
     first = await store.replace(_record(listing_shapes=[SHAPE], terms={"sla": 99.0}))
 
+    source.set(INSTANT + 1)
     second = await store.replace(_record(settlements=[{"mechanism": "m"}]))
 
     assert (second["listing_shapes"], second["terms"]) == (None, None)
     assert second["settlements"] == [{"mechanism": "m"}]
     assert second["created_at"] == first["created_at"]
+
+
+async def test_an_override_s_times_are_the_process_source_s_instants(store, source):
+    """Both times are returned to the operator, so they are the source's,
+    never the database's clock; a replacement moves only ``updated_at``."""
+    first = await store.replace(_record())
+    assert (first["created_at"], first["updated_at"]) == (
+        _text(INSTANT),
+        _text(INSTANT),
+    )
+
+    source.set(INSTANT + 60)
+    second = await store.replace(_record(terms={"sla": 98.0}))
+    assert (second["created_at"], second["updated_at"]) == (
+        _text(INSTANT),
+        _text(INSTANT + 60),
+    )
 
 
 async def test_one_pool_holds_an_independent_override_per_mode(store):

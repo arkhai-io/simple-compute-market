@@ -34,35 +34,24 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed, so
-  if a chained command is denied, run its commands one call at a time. If a single
-  command or any other tool call is denied, finish every part of the work that does
-  not depend on it. If the step cannot complete without that call, end with
-  `stopped`, `reason` naming that exact call and why the step needed it, and
-  `denials` listing the calls as you saw them; the wrapper replaces them with the
-  run's own record. Otherwise go on and end as the step ends: the wrapper records
-  the denial on the outcome whatever it is, and the orchestrating session reads it
-  before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it, except where the rule exists only to keep file writes on the Edit and
-  Write tools — the step table's comments name those rules: sed's in-place forms,
-  find's deleting, running, and writing actions, and the diff family's
-  output-to-file forms — whose refused shell write may be made with the Edit or
-  Write tool this step's rules allow. A call denied because no rule allows it —
-  the harness reports it as don't ask mode — may be done instead by a tool this
-  step's rules allow for the same work, such as the Edit tool for a shell write or
-  Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
-  the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`: `-C` names only a subdirectory a skill names, such as `make -C
-  helm test-render`. Remove a tracked file with
-  `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
+- **A project's tests and bring-up, by role.** Run one project's tests as the
+  repository's guidance names its test entry point, never a virtual environment's
+  runner directly. A section's local bring-up — a service's migrations, its image
+  run once, or a stack under a project name of the change's own, so it never
+  touches another change's — is taken down before the turn ends. Remove a tracked
+  file with `git rm`, which Git can restore. A subagent you start runs in the same
+  sandbox, and its prompt says so.
 - **A turn's end is its outcome.** Never end a turn with work still running: the
   wrapper logs that turn's report as the run's end, and what the work later finds
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
@@ -117,10 +106,41 @@ names it, before implementing — `scripts/change-workflow note <change> round
 --sections '<its sessions, as 1,2;3>' --by <its by>` — and implement its
 first session. When it names `implement`, the round is recorded already.
 
+## The run's inputs
+
+Before this session the engine ran the repository's `before-implement` hook, and
+kept what it did in the run's inputs directory, which your prompt names (`Inputs`,
+`reviews/runs/<run>/before`). Read it first: `status.md`, the hook's closing lines,
+exit status, and log, and every other top-level Markdown file there, each a message
+from the repository's hook, in full. Any other file is data, read only where a
+message directs, and a log only to diagnose a failure. A failing hook prevented
+nothing, but it may leave the environment broken — an environment refresh that
+failed, say — so stop and ask the owner, with what it reported, rather than code in
+it. Interactively, with no wrapper, run `scripts/change-workflow run before
+implement <change>` first; its last line names the directory. Once the sections are
+committed and pushed, run `scripts/change-workflow run after implement <change>`
+before `record`, and, when it fails, fix what it found, commit and push the fix, and
+run it again. Unattended, an after-hook that fails resumes this session once with
+its failure: fix what it found, commit and push the fix, and end with your outcome
+again; a second failure goes to the owner as a question.
+
+A guide or a message may add to or narrow what this skill says. When one
+contradicts this skill's text, name the file and the contradiction in your report
+and follow this skill.
+
+## The owner's direction
+
+Invoked with sections and an argument after the change, the argument is the owner's
+direction to those sections, relayed by the orchestrating session, with any routing
+note of its own marked as such. Follow it as the owner's word wherever it bears on
+the sections; where it conflicts with the plan or a written rule, stop and ask
+rather than choose.
+
 ## Resolving a merge's conflicts
 
 Invoked with no sections and an argument naming a merge's conflicted files —
-`resolve the merge conflicts in <files>` — you conclude a merge of `dev` that the
+`resolve the merge conflicts in <files>` — you conclude a merge of the branch the
+change lands on, or another the owner named, that the
 orchestrating session started on the owner's word and that stopped at conflicts in
 code the owner did not rule on. Steps 1 to 9 do not apply; this is the whole run,
 and it checks no task.
@@ -135,7 +155,7 @@ and it checks no task.
    tasks touch it and their notes, and what each side did to it: `git log --merge
    -p -- <file>`.
 3. **Resolve.** Edit each file so both sides hold: the change's behaviour as its
-   sections built it, and `dev`'s as its commits made it, with comments describing
+   sections built it, and the merged branch's as its commits made it, with comments describing
    the system that results. Where the two cannot both hold, the resolution is a
    decision: ask the owner, with the options and your recommendation. Then `git
    add` each resolved file.
@@ -148,7 +168,7 @@ and it checks no task.
    hooks rebuilt, to the merge.
 5. **Conclude.** `git commit -m "<Git's merge subject>" -m "<resolutions>"`
    concludes the merge without opening an editor: the subject is the one Git
-   wrote for it (`Merge branch 'dev' into <branch>`), and the paragraph names each
+   wrote for it (`Merge branch '<merged>' into <branch>`), and the paragraph names each
    conflicted file and how it was resolved. Push it with `scripts/change-workflow
    push`; if it refuses, stop and report its reasons. Report each file's resolution, and end `finished`. A merge is the
    owner's intervention, so where the change goes after it is theirs, not this
@@ -171,8 +191,8 @@ and it checks no task.
   `Depends on` gates implementation while unlanded. A change `in closeout` whose
   return to implementation the owner has confirmed is set `in implementation`.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
-  section's, or the edit under `.claude/` that a task of this section gives the
-  orchestrator (section 3). `scripts/change-workflow check round-view` passes:
+  section's, or the edit that a task of this section gives the orchestrator
+  (section 3). `scripts/change-workflow check round-view` passes:
   while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
   uncommitted, so committing a section then would squash the round into it.
@@ -197,7 +217,8 @@ Read in full, even if you believe you know it:
 - the triage of the latest implementation review in `reviews/`, if any: accepted
   findings may have become tasks in this section;
 - the permanent spec and architecture companion of every capability the section
-  touches;
+  touches, and every other Markdown file in its directory but its `index.md`: the
+  capability's own guidance;
 - the code the section changes, and the tests it extends.
 
 If the session compacts while working, read these again before continuing.
@@ -214,47 +235,55 @@ Work through the section's tasks in order. For each:
   change's stated scope, and recorded in the section's notes as outside the plan,
   so the round's review and the owner's reading see it; one that is large, or not
   understood well enough to fix without a design of its own, is recorded where
-  `AGENTS.md`'s "Deferred work" says
-  (`openspec/README.md#defects-found-during-a-change`).
-- A task the plan gives the orchestrator — an edit under `.claude/`, which every
-  step is denied — is never attempted: check that its edit is in the worktree and
-  commit it with the section. When it is missing, stop and name the edit.
-- Prove it at the lowest test level that can (`TESTING.md`), through the seams and
-  injected dependencies the code already offers rather than brute-force patching.
-- Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count.
-  Internal dependencies come from wheels and locks through `scripts/uv_project.py`,
-  never editable sibling paths.
+  deferred work goes (`docs/guidance/workflow/working-model.md#deferred-work`,
+  `docs/guidance/workflow/changes.md#defects-found-during-a-change`).
+- A task the plan gives the orchestrator — an edit of a protected path, which no
+  step writes: the harness's settings, the workflow's configuration, or one the
+  repository protects, as `scripts/change-workflow config --json` lists them — is
+  never attempted: check that its edit is in the worktree and commit it with the
+  section. When it is missing, stop and name the edit.
+- Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
+  `test-levels.md`), through the seams and injected dependencies the code already
+  offers rather than brute-force patching (`test-seams.md`).
+- Respect the dependency layers the repository's guidance draws, and take internal
+  dependencies as it says; `TYPE_CHECKING` imports count
+  (`docs/guidance/engineering/dependencies-python.md`).
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
-  what the code used to be (`AGENTS.md`, "Python comments and docstrings").
+  what the code used to be (`docs/guidance/engineering/comments.md`;
+  `docs/guidance/workflow/change-references.md`).
 - Imports the section adds go at module level, unless one has a reason to stay
   local that you verified by attempting the move — a circular import that fails, or
   a deliberate lazy load — and recorded beside it
-  (`openspec/README.md#plan-closeout-requirements`, part 2). Closeout only confirms
+  (`docs/guidance/engineering/dependencies-python.md`, "Imports go at module level";
+  `docs/guidance/workflow/closeout.md#import-placement`). Closeout only confirms
   comments and imports; it never edits code, so this is where they are done.
 - Mark the task `[x]` when its evidence passes, with a short note: each suite, its
-  level as `TESTING.md` defines them — unit, library integration (a real component
-  against real storage, no application), application integration (the running
+  level as `docs/guidance/engineering/test-levels.md` defines them — unit, library
+  integration (a real component against real storage, no application),
+  application integration (the running
   application through its typed client), or system — and its result, and anything
   that differed from the plan. Name a suite by what it actually exercises: a test
   that calls the reconciler directly is not application integration, and a test that
   shows a listing becomes a candidate to close does not show it closes.
 - Before the section's last task is checked, confirm or correct the end-to-end
-  scenarios its plan says cover it, in the section's notes: the pytest markers in
-  `e2e-tests/` that exercise its behaviour once deployed, including any the section
-  added, or that none does. Validation reads this to say whether the pipeline's
-  result is evidence for the section.
+  scenarios its plan says cover it, in the section's notes: the scenarios that
+  exercise its behaviour once deployed, named as the guide of the evidence kind that
+  runs them says — `scripts/change-workflow config` names each kind's guide —
+  including any the section added, or that none does. Validation reads this to say
+  whether the end-to-end result is evidence for the section.
 - Confirm or correct, the same way, the section's `Owed by validation:` lines:
   evidence only a push produces, such as a CI workflow run a change branch's push
-  does not trigger, named by its workflow, its job, and what the job must show.
-  Every validation of the change dispatches each one once the section is complete
-  and judges it, so a line naming the wrong job or observation misdirects them all.
+  does not trigger, named by the owed kind that produces it and its argument, then
+  what must be shown, as the kind's guide gives it. Every validation of the change
+  gathers each one once the section is complete and judges it, so a line naming the
+  wrong argument or observation misdirects them all.
   A verification task that demands such evidence itself — an older plan, or a slip
   — is checked on the section's own evidence once that passes, and the push-only
   evidence is written as an `Owed by validation:` line in the section's notes; it
   never holds the task open, since no implementation session can produce it. Only
-  a workflow `scripts/ci_evidence.py` lists can be owed: owing another is a design
-  question (step 4).
+  what the owed kind's guide says may be owed can be: owing anything else is a
+  design question (step 4).
 
 Never delete or rewrite a completed task; amend it with a correction note when
 something it established changes.
@@ -270,7 +299,7 @@ the design does not make, do not guess and do not work around it:
    tests, and notes — as one work-in-progress commit, checking no task for it: the
    message names the change and the section, says the work is in progress, and why
    the change returns. No check need pass first: the change's branch is not
-   protected — only `main` and `dev` are — and a commit known not to work harms
+   protected — only the configuration's protected branches are — and a commit known not to work harms
    nothing on it, while no session is left to commit the work, and a dirty
    checkout blocks every later step's guarded push. Push it with `scripts/change-workflow push`; if it refuses, stop
    and report its reasons, leaving the commit as it is.
@@ -295,6 +324,18 @@ Run each of these, and fix what it reports:
 
 - the focused suites the section's verification point names, and every suite that
   covers code the section changed;
+- where a test you wrote should fail without the change, show it:
+  `scripts/change-workflow run test-before <change> --test <path> [--at <commit>]`
+  runs the test file as `HEAD` holds it against the round's base, or the commit
+  given, in a throwaway worktree, and its closing line says whether it failed
+  there. It runs in the environment of the project owning the test, against the
+  checkout's wheels; where the code under test is an internal dependency's, name
+  the root `make` targets that rebuild its wheels from that commit in
+  `TEST_BEFORE_DIST` (`TEST_BEFORE_DIST=dist-compute-provisioning`), and `dist`
+  only when no narrower set will do. A test that imports what only the change adds
+  fails as it is collected, which shows less; read the error and say which it was.
+  Never stash, check out, or reset to see the
+  old code: the change's worktree is not touched to answer it;
 - `scripts/change-workflow run pre-commit <change>`, the repository's checks
   before a commit. The paths the worktree changes decide what it runs: when any
   lies outside the repository's inert paths, it runs `after-functional-change`,
@@ -320,7 +361,8 @@ command to see the diff (`git diff` against the section's starting commit, plus 
 untracked files), and this instruction — read the documents
 `scripts/change-workflow config load implement` prints and every document they
 require, plus the specs and architecture companions of the capabilities the diff
-touches; then report every place the diff breaks that guidance — layering,
+touches and every other Markdown file in their directories but their `index.md`;
+then report every place the diff breaks that guidance — layering,
 comments, test level, documentation placement, packaging — with file and line, and
 every evidence claim in the section's task notes that overstates what its tests
 exercise, and say plainly when it finds none. Fix what it finds that is right, and say what you
@@ -340,7 +382,7 @@ Commit the section's work, `tasks.md` included, as one commit, unreviewed: revie
 findings land as later commits. The message names the change and the section and
 says what it delivers. Then push it with `scripts/change-workflow push`, the
 guarded push of exactly `HEAD`; if it refuses, stop and report its reasons. A pushed branch starts
-nothing: validation dispatches the pipeline itself.
+nothing: validation's gathering dispatches what it needs itself.
 
 ## 8. Continue or stop
 
@@ -362,7 +404,10 @@ When the session stops, tell the owner, for each section implemented:
 - the evidence: each check and suite with its result;
 - what the fresh-context check found, what was fixed, and what was declined;
 - the handoff recorded;
-- what comes next — validation (`make validate CHANGE=<change>`) and one
+- what comes next. While the round's recorded sessions leave sections you were
+  not given, that is the round's next session, named by its sections, and nothing
+  else: validation and the review read the whole round. Once yours was the round's
+  last session, it is validation (`make validate CHANGE=<change>`) and one
   implementation review (`make review CHANGE=<change> KIND=implementation`), run
   side by side, and the owner's reading of the commits since the last round as
   uncommitted changes (`make round-view CHANGE=<change>`, closed with `make

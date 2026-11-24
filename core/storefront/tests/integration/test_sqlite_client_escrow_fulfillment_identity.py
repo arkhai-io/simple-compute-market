@@ -13,12 +13,13 @@ from datetime import datetime
 
 import pytest
 
+from core_database import core_database
 from core_storefront.sqlite_client import SQLiteClient
 
 
 @pytest.fixture
 def client(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "escrow-test.db"))
+    return SQLiteClient(db_path=core_database(tmp_path / "escrow-test.db"))
 
 
 async def _seed_escrow(client: SQLiteClient, escrow_uid: str) -> None:

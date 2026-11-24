@@ -30,7 +30,7 @@ _HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={
             "ssh_host": "198.51.100.7",
             "public_host": "192.0.2.7",
@@ -67,6 +67,7 @@ def _interpreted(parameters: dict, action: str = "create"):
         action=action,
         host=_HOST,
         parameters=parameters,
+        report_starting=lambda: None,
         report_handle=lambda handle: None,
         report_logs=lambda logs: None,
     )

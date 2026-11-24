@@ -383,9 +383,10 @@ class TestStage05b_PriceThePool:
 
         assert _refreshed_fields(report, state.listing_id) == ["asking_rate"], report
         listing = bare_metal_registry.get_listing(state.listing_id)
-        assert listing.listing_resource["asking_rate"] == {
+        assert listing.extra["pricing"]["asking_rate"] == {
             "amount": "12.50", "asset": "usd", "period": "hour",
         }
+        assert "asking_rate" not in listing.listing_resource
         assert state.listing_id in _found(bare_metal_registry, f"asking_rate<=12.50 {RATE_QUERY}")
         assert state.listing_id not in _found(
             bare_metal_registry, f"asking_rate<=12.49 {RATE_QUERY}"
@@ -415,7 +416,7 @@ class TestStage05c_OverrideThePrice:
 
         assert "asking_rate" in _refreshed_fields(report, state.listing_id), report
         listing = bare_metal_registry.get_listing(state.listing_id)
-        assert listing.listing_resource["asking_rate"]["amount"] == "9.00"
+        assert listing.extra["pricing"]["asking_rate"]["amount"] == "9.00"
         assert listing.max_duration_seconds == 7200
         statuses = pool_override_statuses(bare_metal_storefront_admin.get_system_status())
         assert (state.advertised_pool, "applied") in {
@@ -437,7 +438,7 @@ class TestStage05d_DeleteTheOverride:
 
         assert "asking_rate" in _refreshed_fields(report, state.listing_id), report
         listing = bare_metal_registry.get_listing(state.listing_id)
-        assert listing.listing_resource["asking_rate"]["amount"] == "12.50"
+        assert listing.extra["pricing"]["asking_rate"]["amount"] == "12.50"
         assert listing.status == "open"
 
 

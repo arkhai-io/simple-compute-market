@@ -30,6 +30,10 @@ The image includes Alembic configuration and a packaged command. A Helm migratio
 
 Before traffic cutover, snapshot SQLite and PostgreSQL and define the write-freeze/data-delta boundary. Rollback cannot safely accept writes independently in both databases; the runbook names the source of truth and restoration point.
 
+### Listing carrier columns are legacy-only
+
+Once `store-registry-listings-as-published` lands, a listing's content is its retained `published_document`; the old carrier columns (`listing_resource`, `accepted_escrows`, `settlement_options`, `demands`, `max_duration_seconds`) are stale or empty on republished and new rows, and serve only rows published before retention, rebuilt on read. `oracle_address` is the exception: `PUT` still writes it. Do not copy the stale carriers as listing content or build anything on them. Starting this change triggers the deferred carrier-removal migration recorded in `openspec/changes/README.md`.
+
 ## Risks / Trade-offs
 
 - **[Migration history does not match deployed SQLite variants]** → Build representative fixtures and compare ORM/Alembic schemas before cutover.

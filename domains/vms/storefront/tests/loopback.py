@@ -4,7 +4,9 @@ Some typed clients this storefront's routes answer to send through
 ``urllib`` and cannot take an injected ASGI transport: the production buyer's
 fulfillment and introduction clients. To drive those routes through those
 clients, the real app runs under uvicorn in a background thread on
-``127.0.0.1`` with its lifespan, and the client is pointed at it.
+``127.0.0.1`` with its lifespan, and the client is pointed at it. Where the
+app's routes start tasks a test's composition must await at teardown, the app
+runs on the test's own event loop instead (:func:`served`).
 """
 
 from __future__ import annotations
@@ -12,8 +14,8 @@ from __future__ import annotations
 import asyncio
 import socket
 import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
 import uvicorn
@@ -50,12 +52,17 @@ class _LoopbackServer(uvicorn.Server):
             self._loop.call_soon_threadsafe(self._stop.set)
 
 
-@contextmanager
-def serving(app: Any, *, startup_timeout: float = 10.0) -> Iterator[str]:
-    """Run ``app`` until the block exits; yields its base URL."""
+def _loopback_socket() -> socket.socket:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("127.0.0.1", 0))
+    return sock
+
+
+@contextmanager
+def serving(app: Any, *, startup_timeout: float = 10.0) -> Iterator[str]:
+    """Run ``app`` until the block exits; yields its base URL."""
+    sock = _loopback_socket()
     port = sock.getsockname()[1]
     server = _LoopbackServer(uvicorn.Config(app, lifespan="on", log_level="warning"))
 
@@ -76,4 +83,30 @@ def serving(app: Any, *, startup_timeout: float = 10.0) -> Iterator[str]:
     finally:
         server.stop()
         thread.join(timeout=startup_timeout)
+        sock.close()
+
+
+@asynccontextmanager
+async def served(app: Any, *, startup_timeout: float = 10.0) -> AsyncIterator[str]:
+    """Run ``app`` on the calling event loop until the block exits; yields its base URL.
+
+    Tasks the app's routes start then belong to the test's own loop, so a
+    composition the test tears down after the server stops can still await
+    them; under :func:`serving` they would belong to a loop already closed. A
+    client driving the app must then run off this loop, in a worker thread.
+    """
+    sock = _loopback_socket()
+    port = sock.getsockname()[1]
+    server = _LoopbackServer(uvicorn.Config(app, lifespan="on", log_level="warning"))
+    task = asyncio.create_task(server.serve(sockets=[sock]))
+    # A server that failed to start ends its task, and wakes the wait below.
+    task.add_done_callback(lambda _: server.running.set())
+    try:
+        started = await asyncio.to_thread(server.running.wait, startup_timeout)
+        if not started or not server.started:
+            raise RuntimeError("loopback storefront did not start")
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.stop()
+        await asyncio.wait_for(task, startup_timeout)
         sock.close()

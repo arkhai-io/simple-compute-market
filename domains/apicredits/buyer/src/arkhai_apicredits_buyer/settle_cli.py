@@ -25,6 +25,7 @@ from core_buyer.orchestration import (
 from core_buyer.orchestrator import BuyConfig
 from core_buyer.run_log import read_run
 from market_alkahest.proposals import derive_accepted_escrow_terms
+from market_alkahest.settlement_config import alkahest_billing_basis
 from market_identity import Signer
 from rich.console import Console
 from rich.panel import Panel
@@ -340,7 +341,7 @@ def run_settle_from_log(
                 escrow_terms_list = derive_accepted_escrow_terms(
                     accepted_proposal=deal.accepted_escrow_proposal,
                     listing_record=deal.listing_record,
-                    agreed_amount=exact_agreed_amount(deal),
+                    agreed_amount=exact_agreed_amount(deal, project_billing=alkahest_billing_basis),
                     duration_seconds=0,
                     settlement_plan=deal.settlement_plan,
                     addr_config_path=chain.alkahest_addr_config,

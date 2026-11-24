@@ -5,10 +5,13 @@ must never be used on a public network.
 """
 
 from __future__ import annotations
-import time
+
+from collections.abc import Iterator
 
 import httpx
+import injected_time
 import pytest
+from injected_time import InjectedTime
 from market_identity import (
     EMPTY_BODY,
     Ed25519Signer,
@@ -27,6 +30,17 @@ from market_site_client import (
     SiteCapacityClientError,
     SiteCapacityUnauthenticatedResponseError,
 )
+
+
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source the client signs by, injected at the wall instant
+    it is installed, so the fake site, on the wall clock, finds it fresh."""
+    before = injected_time.installed()
+    installed = InjectedTime()
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
 
 
 @pytest.fixture(params=("ed25519", "eip191"))
@@ -221,17 +235,15 @@ async def test_resource_registration_body_uses_json_defaults_and_omits_none(
 async def test_later_exact_retry_refreshes_signature_without_redispatch(
     capacity_client: SiteCapacityClient,
     site: FakeSite,
-    monkeypatch: pytest.MonkeyPatch,
+    source: InjectedTime,
 ) -> None:
-    clock = [int(time.time())]
-    monkeypatch.setattr("market_site_client.client.time.time", lambda: clock[0])
     first = await capacity_client.reserve(
         claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},
         request_id="stable-request",
     )
     dispatches = site.dispatch_count
-    clock[0] += 1
+    source.set(source.now() + 1)
     second = await capacity_client.reserve(
         claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},

@@ -1,0 +1,30 @@
+{#-
+  Every guest's interface: the virt-install arguments every create in this role
+  passes, GPU guests' included, each site through
+  `{{ lookup('template', 'guest-interface-args.j2') | trim }}`. They attach the
+  guest to libvirt's `default` network with a virtio NIC and add, through
+  virt-install's XPath edits of the domain XML:
+
+    <port isolated='yes'/>
+    <filterref filter='clean-traffic'>
+      <parameter name='CTRL_IP_LEARNING' value='dhcp'/>
+      <parameter name='DHCPSERVER' value='192.168.122.1'/>
+    </filterref>
+
+  An isolated bridge port forwards only to ports that are not isolated, which
+  on `virbr0` is the bridge itself, so a guest reaches DHCP, DNS and the NAT
+  uplink but never another guest at layer 2. clean-traffic holds the guest to
+  its MAC address and to the address it leased from `default`'s DHCP server, so
+  it cannot claim another guest's address by ARP. Host preparation refuses a
+  host whose libvirt or virt-install cannot apply either (vm-setup's
+  guest-policy.yml).
+
+  A template the sites look up, not a variable: an extra variable, such as a
+  pool's extra_vars, overrides any variable, and no pool or seller setting
+  places guests on a shared segment.
+-#}
+--network network=default,model=virtio \
+--xml ./devices/interface/port/@isolated=yes \
+--xml ./devices/interface/filterref/@filter=clean-traffic \
+--xml "./devices/interface/filterref/parameter[@name='CTRL_IP_LEARNING']/@value=dhcp" \
+--xml "./devices/interface/filterref/parameter[@name='DHCPSERVER']/@value=192.168.122.1"

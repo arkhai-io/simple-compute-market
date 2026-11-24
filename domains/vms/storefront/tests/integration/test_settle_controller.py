@@ -47,6 +47,7 @@ from market_storefront.middleware.admin_identity import (
     initialize_administrator_identities,
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 from market_storefront.publication_binding import prepare_vm_listing_binding
@@ -73,6 +74,7 @@ STOREFRONT_AUTHORITIES = TrustedIdentitySet(
 @pytest_asyncio.fixture
 async def db(tmp_path):
     db_path = tmp_path / "settle_test.db"
+    migrate_storefront_database(db_path)
     return SQLiteClient(
         db_path=str(db_path),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),
@@ -250,7 +252,7 @@ async def _accepted_deal(db: SQLiteClient, negotiation_id: str, listing_id: str)
     )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
-        agreed_price=_AMOUNT,
+        negotiated_scalar=_AMOUNT,
         agreed_duration_seconds=3600,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         settlement_data={

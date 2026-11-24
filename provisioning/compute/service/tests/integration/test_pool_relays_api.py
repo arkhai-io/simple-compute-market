@@ -144,6 +144,9 @@ async def test_a_relay_change_is_refused_during_a_lease(client_and_queue):
 
     assert refused.value.status_code == 409
     assert "bm-1:6100" in str(refused.value)
+    # The pool's drain clears it; the relay, which other pools may use, need not stop.
+    assert "Disable the pool" in str(refused.value)
+    assert "Disable the relay" not in str(refused.value)
     assert (await clients.pools.get_pool(_POOL)).provider_config == {"relay_id": "site-a"}
 
 

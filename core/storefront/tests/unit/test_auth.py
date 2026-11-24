@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import injected_time
 import pytest
 from market_identity import (
     REQUEST_PROTOCOL,
@@ -14,6 +15,7 @@ from market_identity import (
 )
 
 from core_storefront.auth import (
+    ADMIN_TIME_OPERATION,
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -23,6 +25,7 @@ from core_storefront.auth import (
     TIMESTAMP_HEADER,
     AuthError,
     ReplayClaim,
+    admin_time_setting_operation,
     authenticate_request,
 )
 
@@ -277,6 +280,52 @@ async def test_completed_exact_retry_survives_original_timestamp_age() -> None:
             expected_principal=signer.identity,
             replay_store=store,
             now=10_000,
+        )
+
+
+def test_only_an_injected_process_exempts_the_time_setting_operation() -> None:
+    before = injected_time.installed()
+    try:
+        injected_time.install(injected_time.WallTime())
+        assert admin_time_setting_operation() is None
+        injected_time.install(injected_time.InjectedTime(start=1_000))
+        assert admin_time_setting_operation() == ADMIN_TIME_OPERATION
+    finally:
+        injected_time.install(before)
+
+
+@pytest.mark.asyncio
+async def test_the_named_time_setting_operation_is_authenticated_without_freshness() -> None:
+    signer = Ed25519Signer(bytes(range(32)))
+    store = ReplayStore()
+    body = {"buyer_principal": signer.identity.model_dump(mode="json")}
+
+    exempt = await authenticate_request(
+        headers=_signed_headers(signer=signer, body=body),
+        method="POST",
+        operation="negotiate",
+        resource="listing-1",
+        body=body,
+        expected_role="buyer",
+        expected_principal=signer.identity,
+        replay_store=store,
+        now=1_900,
+        time_setting_operation="negotiate",
+    )
+    assert exempt.dispatch_allowed is True
+
+    with pytest.raises(AuthError, match="timestamp"):
+        await authenticate_request(
+            headers=_signed_headers(signer=signer, body=body, request_id="request-2"),
+            method="POST",
+            operation="negotiate",
+            resource="listing-1",
+            body=body,
+            expected_role="buyer",
+            expected_principal=signer.identity,
+            replay_store=store,
+            now=1_900,
+            time_setting_operation=ADMIN_TIME_OPERATION,
         )
 
 

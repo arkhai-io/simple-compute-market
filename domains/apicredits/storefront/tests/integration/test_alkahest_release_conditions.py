@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import sqlite3
 import threading
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import httpx
@@ -39,6 +41,7 @@ from apicredits_storefront.listing_publication import ApiCreditListingClient
 from apicredits_storefront.services import capacity_client as capacity_module
 from apicredits_storefront.utils import config as storefront_config
 from apicredits_storefront.utils import sqlite_client as sqlite_module
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from tests.integration.test_publish_reconcile import _QuotaRuntime
 
 SEED = b"\x22" * 32
@@ -165,9 +168,13 @@ def _app(seams=None):
 
 
 @asynccontextmanager
-async def _started(settlement: dict, *, probed: bool = True, seams=None):
+async def _started(settlement: dict, *, probed: bool = True, seams=None, migrated=True):
     """The started storefront under ``settlement``, its chain probed once
-    unless ``probed`` is false."""
+    unless ``probed`` is false, on the database its migration command built
+    unless ``migrated`` is false, for a startup refused before any check of
+    the database, which then leaves no file behind."""
+    if migrated:
+        migrate_storefront_database(storefront_config.settings.get("db_path"))
     app = _app(seams)
     with _replaced(settlement=settlement):
         async with app.router.lifespan_context(app):
@@ -237,6 +244,24 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
     ]
 
 
+async def test_a_published_listing_holds_the_injected_instant(storefront, injected_source):
+    """Every time the listing's ordering and reconciliation read is the
+    storefront's process source, never a read of the wall clock."""
+    async with _started(_settlement()) as (listings, _public, _admin):
+        created = await listings.publish_from_quota(_supplied_escrows())
+
+    instant = datetime.fromtimestamp(injected_source.now(), timezone.utc)
+    with sqlite3.connect(storefront) as conn:
+        stamped = conn.execute(
+            "SELECT l.created_at, l.updated_at, b.last_reconciled_at FROM listings l"
+            " JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id"
+            " WHERE l.listing_id = ?",
+            (created.listing_id,),
+        ).fetchone()
+    stored = instant.replace(tzinfo=None).isoformat()
+    assert stamped == (stored, stored, instant.isoformat())
+
+
 async def test_a_seller_stating_only_a_key_publishes_the_keys_account_as_recipient(
     storefront,
 ):
@@ -269,7 +294,7 @@ async def test_an_unsettleable_section_starts_and_its_status_names_the_blocker(
     Alkahest unready with the configuration blocker."""
     section, _blocker = UNSETTLEABLE[case]
     with pytest.raises(ReleaseModelError, match="cannot deliver"):
-        async with _started(_settlement(**section)):
+        async with _started(_settlement(**section), migrated=False):
             pass
     assert sqlite_module._sqlite_client is None
     assert not storefront.exists()
@@ -284,7 +309,7 @@ async def test_supplied_escrows_publish_no_alkahest_option_while_it_is_unready(
     option publishes, so a listing whose only option they were is refused."""
     section, _blocker = UNSETTLEABLE[case]
     with pytest.raises(ReleaseModelError, match="cannot deliver"):
-        async with _started(_settlement(**section)):
+        async with _started(_settlement(**section), migrated=False):
             pass
     assert sqlite_module._sqlite_client is None
     assert not storefront.exists()
@@ -318,7 +343,7 @@ async def test_alkahest_clauses_compile_no_option_while_it_is_unready(storefront
     readiness names the configuration blocker."""
     section, _blocker = UNSETTLEABLE[case]
     with pytest.raises(ReleaseModelError, match="cannot deliver"):
-        async with _started(_settlement(**section)):
+        async with _started(_settlement(**section), migrated=False):
             pass
     assert sqlite_module._sqlite_client is None
     assert not storefront.exists()
@@ -352,7 +377,7 @@ async def test_a_create_unready_for_configuration_before_the_chain_is_reached_an
     """Not retryable: the configuration blocker stands whatever the chain answers."""
     section, _blocker = UNSETTLEABLE[case]
     with pytest.raises(ReleaseModelError, match="cannot deliver"):
-        async with _started(_settlement(**section), probed=False):
+        async with _started(_settlement(**section), probed=False, migrated=False):
             pass
     assert sqlite_module._sqlite_client is None
     assert not storefront.exists()
@@ -364,7 +389,7 @@ async def test_a_clause_create_while_alkahest_is_unready_for_configuration_answe
 ):
     section, _blocker = UNSETTLEABLE[case]
     with pytest.raises(ReleaseModelError, match="cannot deliver"):
-        async with _started(_settlement(**section)):
+        async with _started(_settlement(**section), migrated=False):
             pass
     assert sqlite_module._sqlite_client is None
     assert not storefront.exists()

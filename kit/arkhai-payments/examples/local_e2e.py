@@ -3,12 +3,9 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 from datetime import datetime, timezone
 import os
 from pathlib import Path
-import re
 import sys
 import time
 from urllib.parse import urlsplit
@@ -17,7 +14,7 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from market_identity import create_signer  # noqa: E402
+from market_identity import Identity, IdentityScheme  # noqa: E402
 from market_arkhai_payments import (  # noqa: E402
     MandatePolicy,
     PaymentsClient,
@@ -43,22 +40,21 @@ def local_service_url() -> str:
     return value
 
 
-def local_service_identity():
-    key = os.environ.get("RECEIPT_SIGNING_KEY", "")
-    if re.fullmatch(r"[0-9a-fA-F]{64}", key):
-        seed = bytes.fromhex(key)
-    else:
-        try:
-            seed = base64.urlsafe_b64decode(key + "=" * (-len(key) % 4))
-        except (ValueError, binascii.Error) as exc:
-            raise SystemExit("set RECEIPT_SIGNING_KEY to the local service's seed") from exc
-    if len(seed) != 32:
-        raise SystemExit("RECEIPT_SIGNING_KEY must encode a 32-byte Ed25519 seed")
-    return create_signer("ed25519", seed).identity
+def local_service_identity() -> Identity:
+    identifier = os.environ.get("PAYMENTS_SERVICE_IDENTITY", "")
+    if not identifier:
+        raise SystemExit("set PAYMENTS_SERVICE_IDENTITY to the service's public receipt identity")
+    try:
+        return Identity(scheme=IdentityScheme.ED25519, identifier=identifier)
+    except ValueError as exc:
+        raise SystemExit(
+            "PAYMENTS_SERVICE_IDENTITY must be an unpadded base64url Ed25519 public key"
+        ) from exc
 
 
 def main() -> int:
     service_url = local_service_url()
+    service_identity = local_service_identity()
     dispute_authority = os.environ.get("ARKHAI_DISPUTE_AUTHORITY", PAYER)
     fee_bps = int(os.environ.get("PAYMENTS_FEE_BPS", "250"))
     accepted_at = int(time.time())
@@ -77,8 +73,10 @@ def main() -> int:
         accepted_at=accepted_at,
         start_utc=accepted_at,
         duration_seconds=0,
-        amount="100",
-        asset="USD/2",
+        # A fixture amount and asset; production derivation reads the accepted
+        # Agreement's.
+        amount="1000000",
+        asset="USD/6",
         fee_bps=fee_bps,
         lifecycle=LifecycleTerms.model_validate(dispute_lifecycle(dispute_authority)),
     )
@@ -94,7 +92,7 @@ def main() -> int:
         signed_receipt = snapshot.snapshot.receipt
         if not verify_receipt(
             signed_receipt,
-            local_service_identity(),
+            service_identity,
             mandate=mandate,
             agreement_json=agreement,
             livemode=False,

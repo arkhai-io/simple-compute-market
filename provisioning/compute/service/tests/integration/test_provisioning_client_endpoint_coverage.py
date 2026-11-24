@@ -9,11 +9,13 @@ contract authority for every public client operation.
 from __future__ import annotations
 from compute_provisioning_ansible import ssh_connection
 
+from base64 import b64encode
 from datetime import datetime, timezone
 
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
 from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
 from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning.jobs.db import JobRecord
 from compute_provisioning_service import container as _container_module
 import pytest
@@ -64,6 +66,15 @@ class TestVmClientEndpointCoverage:
 
 
 class TestHostClientEndpointCoverage:
+    async def test_capture_host_key_uses_the_family_route(self, client_and_queue):
+        client, _ = client_and_queue
+        digest = b64encode(b"x" * 32).decode().rstrip("=")
+
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.family.capture_host_key("absent-fixture-host", "SHA256:" + digest)
+
+        assert missing.value.status_code == 404
+
     async def test_import_hosts_from_path_uses_client_contract(self, client_and_queue, tmp_path):
         client, _ = client_and_queue
         inventory = tmp_path / "hosts.ini"

@@ -52,9 +52,11 @@ from the lease ``09c`` compares it with.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import subprocess
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Optional, Protocol
 
 from market_arkhai_payments import (
@@ -65,14 +67,21 @@ from market_arkhai_payments import (
     verify_snapshot,
 )
 from market_core.schemas import SettlementOption
+from market_deal_lifecycle_buyer import EndDeliveryProgress
+from market_deal_lifecycle_contracts.models import Accepted
 
 from tests.e2e.roles.helpers.compute_deal import assert_lease_watchdog_held
-from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealDriver, ComputeDealState
+from tests.e2e.roles.helpers.compute_deal_stages import (
+    ComputeDealDriver,
+    ComputeDealState,
+    utc_instant,
+)
 from tests.e2e.roles.helpers.domain_deal import (
     assert_market_run_succeeded,
     ordered_events,
     require_state,
 )
+from tests.e2e.roles.helpers.mediation import mediation_if_configured
 from tests.e2e.roles.helpers.payments import buyer_payments_client, payment_setting
 
 log = logging.getLogger(__name__)
@@ -89,8 +98,9 @@ class PurchaseState(ComputeDealState):
 
     The purchase writes the canonical deal's ``negotiation_id`` and
     ``settlement_id`` (the payments transaction), and the handoff its shared
-    stages read: ``settlement_ref`` (the negotiation), ``fulfillment_id`` and
-    ``expected_host_id``.
+    stages read: ``settlement_ref`` (the negotiation), ``fulfillment_id``,
+    ``expected_host_id``, and the Agreement's window, ``agreement_start`` and
+    ``agreement_end``.
     """
 
     #: The payer account the run names, whose balance ``Purchase01`` read.
@@ -150,8 +160,37 @@ class PurchaseDriver(ComputeDealDriver, Protocol):
         """Assert what the domain's purchase command records as it ends."""
 
 
-def _available(balance: Any) -> dict[str, int]:
+def available_balances(balance: Any) -> dict[str, int]:
+    """An account's available balance by asset, from the payments service's balance read."""
     return {asset: int(amount.root) for asset, amount in balance.available.items()}
+
+
+def accepted_purchase(
+    run: Any, *, listing_id: str, option_id: str,
+) -> tuple[str, dict[str, Any], PaymentSettlementData]:
+    """The run's negotiation, its Agreement and the seller's settlement data,
+    correlated as one paid deal.
+
+    Read from the run-log events every domain's purchase command writes: the
+    accepted negotiation, carrying the Agreement's exact bytes and the seller's
+    settlement data, and the approval naming its transaction. The Agreement
+    names the listing and option the buyer discovered, which a command
+    selecting its listing by discovery must have bought.
+    """
+    started, accepted, approved = ordered_events(
+        run.read_events(), "run_started", "negotiation_completed", "payment_approved",
+    )
+    assert all(event["run_id"] == run.run_id for event in (started, accepted, approved))
+    assert accepted["status"] == "agreed", accepted
+    negotiation_id = accepted["negotiation_id"]
+    agreement = agreement_from_bytes(base64.b64decode(accepted["agreement_bytes"], validate=True))
+    data = PaymentSettlementData.parse(accepted["settlement_data"])
+    data.require_bound_to(agreement)
+    assert agreement["negotiation_id"] == negotiation_id, agreement
+    assert agreement["listing_id"] == listing_id, agreement
+    assert agreement["settlement"]["option_id"] == option_id, agreement
+    assert approved["transaction_id"] == data.transaction_id, approved
+    return negotiation_id, agreement, data
 
 
 # ===========================================================================
@@ -164,13 +203,15 @@ class Purchase01_PayerBalanceBefore:
     ):
         """The payer's own available balance, before the scenario's first approval.
 
-        Read with the buyer's token, as the payments service answers a balance
-        only for the caller's own account. ``Purchase05`` compares the drop
-        with the purchase's debit.
+        The payer is the run's buyer account, unless an earlier stage of the
+        scenario named another, as one that funds its own payer does. Read
+        with the payer's token, as the payments service answers a balance only
+        for the caller's own account. ``Purchase05`` compares the drop with the
+        purchase's debit.
         """
-        payer = str(payment_setting("BUYER_ACCOUNT"))
+        payer = str(deal_state.payer_account or payment_setting("BUYER_ACCOUNT"))
         with buyer_payments_client(payments_config, payer) as client:
-            before = _available(client.get_balance(payer))
+            before = available_balances(client.get_balance(payer))
         deal_state.payer_account = payer
         deal_state.payer_available_before = before
         log.info("[p01] Payer %s available before the purchase: %s", payer, before)
@@ -262,31 +303,16 @@ class Purchase04_PurchaseCorrelated:
     ):
         """The run's Agreement, settlement data, transaction and fulfillment name one deal.
 
-        Read from the run-log events every domain's purchase command writes:
-        the accepted negotiation, carrying the Agreement's exact bytes and the
-        seller's settlement data, and the approval naming its transaction. The
-        Agreement names the listing and option the buyer discovered, which a
-        command selecting its listing by discovery must have bought.
-
-        The fulfillment is the one the seller reports to the buyer, read in
+        The run's events correlate one paid deal (``accepted_purchase``). The
+        fulfillment is the one the seller reports to the buyer, read in
         provisioning dispatched and not yet converged: fulfillment convergence
         is held for the module, so only ``Stage09a``'s advance moves it.
         """
         require_state(deal_state, "purchase_run", "seller_listing_id", "purchase_option_id")
         run = deal_state.purchase_run
-        started, accepted, approved = ordered_events(
-            run.read_events(), "run_started", "negotiation_completed", "payment_approved",
+        negotiation_id, agreement, data = accepted_purchase(
+            run, listing_id=deal_state.seller_listing_id, option_id=deal_state.purchase_option_id,
         )
-        assert all(event["run_id"] == run.run_id for event in (started, accepted, approved))
-        assert accepted["status"] == "agreed", accepted
-        negotiation_id = accepted["negotiation_id"]
-        agreement = agreement_from_bytes(base64.b64decode(accepted["agreement_bytes"], validate=True))
-        data = PaymentSettlementData.parse(accepted["settlement_data"])
-        data.require_bound_to(agreement)
-        assert agreement["negotiation_id"] == negotiation_id, agreement
-        assert agreement["listing_id"] == deal_state.seller_listing_id, agreement
-        assert agreement["settlement"]["option_id"] == deal_state.purchase_option_id, agreement
-        assert approved["transaction_id"] == data.transaction_id, approved
 
         status = deal_driver.purchase_fulfillment(negotiation_id)
         fulfillment_id = str(status.get("fulfillment_id") or "")
@@ -305,6 +331,12 @@ class Purchase04_PurchaseCorrelated:
         deal_state.fulfillment_id = fulfillment_id
         # Declared by the driver, never read from the lease 09c compares it with.
         deal_state.expected_host_id = deal_driver.declared_host_id
+        # The window the Agreement's exact bytes commit, which 09c holds the
+        # delivered lease to.
+        deal_state.agreement_start = utc_instant(agreement["start_utc"])
+        deal_state.agreement_end = deal_state.agreement_start + timedelta(
+            seconds=int(agreement["duration_seconds"])
+        )
         log.info("[p04] Run %s: Agreement %s, transaction %s, fulfillment %s; expected host %s",
                  run.run_id, negotiation_id, data.transaction_id, fulfillment_id,
                  deal_state.expected_host_id)
@@ -333,7 +365,7 @@ class Purchase05_PaymentRecordsChecked:
         mandate = deal_state.payment_settlement.mandate
         with buyer_payments_client(payments_config, payer) as client:
             signed = client.get_transaction(str(deal_state.settlement_id))
-            after = _available(client.get_balance(payer))
+            after = available_balances(client.get_balance(payer))
         snapshot = signed.snapshot
         assert snapshot.transaction.root == deal_state.settlement_id, snapshot.transaction
         # The receipt keys the buyer and seller trust, retiring keys included.
@@ -426,10 +458,11 @@ class Purchase10_BuyerTeardown:
         itself is outside the shared ending's design, so it fails here.
 
         The command also files the delivery's end with the deal's dispute
-        authority. That filing's outcome, ``Unknown`` where the authority does
-        not answer, is the authority's, and is no delivery, access-end or
-        refund evidence: nothing here reads it, and the run's success does not
-        depend on it.
+        authority. Where the run names that authority (MEDIATION), the filing
+        is accepted and each part held by the authority's extension, with no
+        rule installed and so no ruling: a filed case, never a refund. Its
+        outcome is no delivery or access-end evidence either, and where the
+        run names no authority nothing here reads it.
         """
         require_state(deal_state, "purchase_run", "negotiation_id", "settlement_status",
                       "deal_lease", "lease_id", "reserved_resource_id")
@@ -438,6 +471,16 @@ class Purchase10_BuyerTeardown:
         deal_state._buyer_teardown_requested = True
         run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
         assert_market_run_succeeded(run, command=deal_driver.teardown_command)
+        if mediation_if_configured() is not None:
+            ended = json.loads(run.stdout().strip().splitlines()[-1])
+            progress = EndDeliveryProgress.model_validate(ended["progress"])
+            case = progress.case
+            assert isinstance(case, Accepted) and case.filing is not None, progress
+            assert case.filing.parts and all(
+                part.status == "held" and part.extension_ref for part in case.filing.parts
+            ), case.filing
+            log.info("[p10] Buyer run %s filed case %s, every part held",
+                     deal_state.purchase_run.run_id, case.filing.case_ref)
 
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") != "leased", (

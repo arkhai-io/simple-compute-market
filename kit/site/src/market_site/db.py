@@ -3,8 +3,9 @@
 Extracted from the VM provisioning service as the shared site-authority
 scaffold (docs/development/ARCHITECTURE.md, "Capacity and the Site
 Authority"): any service hosting a site ledger mounts these tables on
-its own engine. The mounting service is responsible for
-``Base.metadata.create_all`` (or equivalent migrations) on its engine.
+its own engine. The tables' schema is ``market_site.migrations``, which a
+migration chain holding the ledger composes, so these mappings are read against
+that schema and a column added here needs a migration there.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import enum
 import uuid
 
+import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -105,8 +107,15 @@ class CapacityBucket(Base):
     attributes = Column(JSON, nullable=False, default=dict)
     enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Declarations are listed in the order they last changed, so the change is
+    # stamped from the process's time source rather than the database's clock;
+    # `created_at` is audit-only and keeps the database default.
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        onupdate=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
     )
 
 
@@ -152,6 +161,18 @@ class CapacityReservation(Base):
     )
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
+    # ``deal_ref["placement_key"]`` as reserve recorded it: the deal and the
+    # purpose of the placement, under which an exact replay of the reserve
+    # returns this row in whatever state it has reached. Unique, because a
+    # replay must find one recorded reservation; null for a reserve without
+    # the key.
+    placement_key = Column(String, nullable=True, unique=True, index=True)
+    # The reserve request a placement key was admitted for — claim, offering
+    # mode and lease window as asked — against which a replay is compared.
+    # Kept apart from the row's own window, which commit and truncation move
+    # after admission, so a replay is judged against what was asked rather
+    # than what the lease has since become. Null with no placement key.
+    placement_request = Column(JSON, nullable=True)
     hold_expires_at = Column(String, nullable=True)  # TTL soft hold (two-phase reserve)
     offering_mode = Column(String, nullable=True)
     executor_target = Column(String, nullable=True)
@@ -172,7 +193,15 @@ class CapacityReservation(Base):
     # only that no activation is recorded: a reservation stored before the
     # column existed records none, and that says nothing about delivery.
     activated_at_utc = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Reservations are listed, and an escrow's latest held reservation found,
+    # in creation order, so creation is stamped from the process's time source;
+    # `updated_at` is audit-only.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
@@ -236,4 +265,11 @@ class CapacityEvent(Base):
     # this column, which is a different answer from `{}` ("admitted
     # against no categorical constraint").
     claim_attributes = Column(JSON, nullable=True)
-    occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Sent to subscribers on the capacity feed, so the process source's instant
+    # rather than the database's clock.
+    occurred_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )

@@ -87,10 +87,15 @@ spec:
               mountPath: /app/config/config-provisioning-secrets.yml
               subPath: config-provisioning-secrets.yml
               readOnly: true
+            {{- if not .Values.mockMode }}
+            # The key a host's ssh connection names by its key_path. The mock
+            # runner opens no connection, so mock provisioning mounts no key
+            # and reads no Secret for one.
             - name: ssh-key
               mountPath: /home/appuser/.ssh/id_ed25519
               subPath: id_ed25519
               readOnly: true
+            {{- end }}
             {{- if .Values.definitions.relays }}
             - name: config
               mountPath: /app/config/relay-definitions.yaml
@@ -158,10 +163,12 @@ spec:
         - name: provisioning-secrets
           secret:
             secretName: {{ include "provisioning.sshDecryptionKeySecretName" . }}
+        {{- if not .Values.mockMode }}
         - name: ssh-key
           secret:
             secretName: {{ include "provisioning.sshKeySecretName" . }}
             defaultMode: 0400
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

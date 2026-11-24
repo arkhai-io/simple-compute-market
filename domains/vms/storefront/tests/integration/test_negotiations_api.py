@@ -36,6 +36,7 @@ from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import stage_event
 
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -77,6 +78,7 @@ def _capacity_runtime() -> CapacityRuntime:
 async def db(tmp_path) -> SQLiteClient:
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
+    migrate_storefront_database(tmp_path / "neg_test.db")
     return SQLiteClient(
         db_path=str(tmp_path / "neg_test.db"),
         registry=registry,
@@ -138,7 +140,7 @@ async def _seed_thread(
     order_id: str,
     *,
     terminal_state: str | None = None,
-    agreed_price: float | None = None,
+    negotiated_scalar: float | None = None,
 ) -> None:
     """Insert a minimal negotiation thread and two messages directly into SQLite."""
     now = datetime.now().isoformat()
@@ -152,7 +154,7 @@ async def _seed_thread(
                   (negotiation_id, our_listing_id, their_listing_id,
                    buyer_scheme, buyer_identifier,
                    seller_scheme, seller_identifier,
-                   terminal_state, agreed_price, agreed_duration_seconds,
+                   terminal_state, negotiated_scalar, agreed_duration_seconds,
                    agreed_at, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -165,9 +167,9 @@ async def _seed_thread(
                     _SELLER_SIGNER.identity.scheme.value,
                     _SELLER_SIGNER.identity.identifier,
                     terminal_state,
-                    agreed_price,
-                    7200 if agreed_price else None,
-                    now if agreed_price else None,
+                    negotiated_scalar,
+                    7200 if negotiated_scalar else None,
+                    now if negotiated_scalar else None,
                     now,
                     now,
                 ),
@@ -350,7 +352,7 @@ class TestListNegotiations:
         await _seed_order(db, "ord-b")
         await _seed_thread(db, "neg-active", "ord-b")
         await _seed_thread(db, "neg-success", "ord-b",
-                           terminal_state="success", agreed_price=9000)
+                           terminal_state="success", negotiated_scalar=9000)
         result = await c.list_negotiations("ord-b", terminal_state="success")
         ids = {n.negotiation_id for n in result.negotiations}
         assert "neg-success" in ids
@@ -483,7 +485,7 @@ class TestForceAccept:
         c, db = client
         await _seed_order(db, "ord-fa4")
         await _seed_thread(db, "neg-fa4", "ord-fa4",
-                           terminal_state="success", agreed_price=9000)
+                           terminal_state="success", negotiated_scalar=9000)
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.force_accept_negotiation("ord-fa4", "neg-fa4", amount=8000)
         assert "409" in str(exc_info.value)

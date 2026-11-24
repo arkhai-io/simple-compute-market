@@ -12,6 +12,7 @@ from .allocator import (
     DEFAULT_PORT_REUSE_MARGIN,
     FULFILLMENT_OWNER_KIND,
     PortLease,
+    RelayDisabledError,
     RelayPortAllocator,
     RelayWindowExhaustedError,
     fulfillment_lease_owner_is_released,
@@ -25,6 +26,7 @@ from .composition import (
     relay_contribution,
 )
 from .db import PoolRelay, Relay, RelayPortLease, RelayRetiredGrantKey
+from .deliverability import RelayDeliverableHosts
 from .definitions import (
     RELAY_DOCUMENT_KIND,
     RelayDefinitionError,
@@ -99,6 +101,8 @@ __all__ = [
     "RELAY_TOKEN_VARIABLE",
     "Relay",
     "RelayDefinitionError",
+    "RelayDeliverableHosts",
+    "RelayDisabledError",
     "RelayEndpointConflictError",
     "RelayExecutionResolver",
     "RelayGrantKeyNotStagedError",

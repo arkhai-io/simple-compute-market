@@ -58,6 +58,14 @@ RELEASE_TWO_VALUES = (*RELEASE_ONE_VALUES, OVERLAY)
 # The payments lane double, whose committed fixtures the releases' payments
 # values restate, and the script a Compose lane reads them with.
 DOUBLE = UMBRELLA.parent / "tools" / "payments-lane-double"
+# The lane CA, which the controls project generates for both lane doubles.
+LANE_CA = UMBRELLA.parent / "tools" / "lane-double-controls" / "tls" / "lane-ca.pem"
+# The mediation lane double's committed fixture, whose identity the release's
+# registry recommends.
+MEDIATION_AUTHORITY = UMBRELLA.parent / "tools" / "mediation-lane-double" / "fixtures" / "authority.toml"
+# Bob's Compose secret overlay, whose dispute credential topology-secrets copies
+# into his runtime overlay.
+BOB_COMPOSE_SECRETS = UMBRELLA.parent / "dev-env" / "identities" / "bob.storefront.secrets.toml"
 _LANE_ENV_SPEC = importlib.util.spec_from_file_location("lane_env", DOUBLE / "scripts" / "lane_env.py")
 assert _LANE_ENV_SPEC is not None and _LANE_ENV_SPEC.loader is not None
 lane_env = importlib.util.module_from_spec(_LANE_ENV_SPEC)
@@ -124,7 +132,7 @@ def _provisioning_document(manifest: str) -> dict:
 
 
 def _smoke_profile(manifest: str) -> dict:
-    return json.loads(_block(_source(manifest, "templates/tests/test-config.yaml"), "config-helm.yml"))
+    return json.loads(_block(_source(manifest, "templates/tests/helm-profile.yaml"), "config-helm.yml"))
 
 
 def _named(manifest: str, kind: str, name: str) -> str:
@@ -241,7 +249,7 @@ def test_release_two_runs_only_its_storefront_and_provisioning_service() -> None
     charts = {source.split("/")[2] for source in _sources(manifest) if source.split("/")[1] == "charts"}
 
     assert charts == {"bare-metal-storefront", "provisioning"}
-    # Its smoke-test profile names its own provisioning service and no VM agent
+    # Its helm profile names its own provisioning service and no VM agent
     # or registry, which release 2 does not run.
     profile = _smoke_profile(manifest)
     assert sorted(profile) == ["provisioning", "rpc", "settlement"]
@@ -249,7 +257,7 @@ def test_release_two_runs_only_its_storefront_and_provisioning_service() -> None
 
 
 def test_release_two_refuses_a_provisioning_service_that_does_not_trust_its_storefront() -> None:
-    """With the VM storefront disabled, the smoke-test profile checks the
+    """With the VM storefront disabled, the helm profile checks the
     bare-metal storefront's signer against provisioning's trust instead."""
     # Bob's principal, Anvil account 2: a well-known development address, never
     # for a public network.
@@ -287,6 +295,116 @@ def test_release_one_runs_bob_on_its_own_provisioning_service() -> None:
     profile = _smoke_profile(manifest)
     assert profile["seller"]["api_url"] == _service_url(manifest, f"{RELEASE_ONE}-storefront-bob")
     assert profile["registry"]["api_url"] == _service_url(manifest, f"{RELEASE_ONE}-registry")
+
+
+def _e2e_profile(manifest: str) -> dict:
+    return json.loads(_block(_source(manifest, "e2e-tests/templates/configmap.yaml"), "config-e2e-tests.yml"))
+
+
+def test_the_e2e_tests_config_passes_through_whole_to_the_e2e_pods_alone() -> None:
+    """Every key of e2e-tests.config is a setting of the e2e-tests profile,
+    which the deal and scenarios pods mount and layer between the shared helm
+    profile and the e2e-secret one, with no template line per setting; the
+    shared profile the other test pods read carries none of it."""
+    overlay = {"e2e-tests": {"config": {"pass_through": {"nested": [1, 2], "hex": "0x00ff"}},
+                             "scenarios": {"markers": "contracts"}}}
+    manifest = _release_one(overlay)
+
+    assert _e2e_profile(manifest)["pass_through"] == {"nested": [1, 2], "hex": "0x00ff"}
+    assert "pass_through" not in _smoke_profile(manifest)
+    for pod in ("e2e-deal-test.yaml", "e2e-scenarios-test.yaml"):
+        document = _source(manifest, f"charts/e2e-tests/templates/tests/{pod}")
+        lines = {line.strip() for line in document.splitlines()}
+        assert _env(document, "ACTIVE_PROFILES") == "helm,e2e-tests,e2e-secret", pod
+        assert {"mountPath: /app/config/config-e2e-tests.yml",
+                "subPath: config-e2e-tests.yml",
+                f"name: {RELEASE_ONE}-e2e-tests-profile",
+                f"name: {RELEASE_ONE}-helm-profile"} <= lines, pod
+
+
+def test_the_e2e_tests_config_refuses_a_credential_at_any_depth() -> None:
+    """The e2e-tests profile is a ConfigMap, so a key naming a credential is
+    refused wherever it sits, in any case, since the harness reads a party's
+    keys case-blind; a key naming the e2e-secret setting that holds one is
+    not."""
+    for key, refused in (("admin_credential", {"admin_credential": "x"}),
+                         ("admin_key", {"lane_time": {"parties": {"a": {"admin_key": "x"}}}}),
+                         ("private_key", {"a": [{"private_key": "x"}]}),
+                         ("token", {"control": {"token": "x"}}),
+                         ("admin_Credential",
+                          {"lane_time": {"parties": {"a": {"admin_Credential": "x"}}}}),
+                         ("Api_Token", {"a": [{"Api_Token": "x"}]}),
+                         ("Private_KEY", {"a": {"b": {"Private_KEY": "x"}}}),
+                         ("client_Secret", {"client_Secret": "x"})):
+        rendered = _render(RELEASE_ONE, RELEASE_ONE_VALUES, {"e2e-tests": {"config": refused}})
+        assert rendered.returncode != 0, refused
+        assert f"invalid propertyName '{key}'" in rendered.stderr, (refused, rendered.stderr)
+    _release_one({"e2e-tests": {"config": {"a": {"admin_key_setting": "registry.admin_key"}}}})
+
+
+def _e2e_secret_settings() -> set[str]:
+    """The dotted settings the config-e2e-secret.yml topology-secrets writes
+    holds: its heredoc's two-level keys."""
+    script = (UMBRELLA / "scripts" / "topology-secrets.sh").read_text()
+    body = re.search(r'cat >"\$work/config-e2e-secret\.yml" <<EOF\n(.*?)\nEOF', script, re.DOTALL)
+    assert body, "topology-secrets writes no config-e2e-secret.yml"
+    settings, section = set(), None
+    for line in body.group(1).splitlines():
+        key = line.strip().split(":", 1)[0]
+        if not line.startswith(" "):
+            section = key
+        else:
+            settings.add(f"{section}.{key}")
+    return settings
+
+
+def _dotted(profile: dict, path: str) -> object:
+    value: object = profile
+    for part in path.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
+
+
+def test_the_local_release_s_lane_time_names_its_services_on_wall_time() -> None:
+    """local-values.yaml's lane_time, passed through e2e-tests.config, runs the
+    release's scenarios in wall mode and names its storefront, provisioning
+    service and registry, stating none of their topology or credentials: each
+    URL and pin is named by the shared helm profile's setting the chart derives,
+    and each credential by the e2e-secret profile's key. The doubles it runs
+    are not named."""
+    manifest = _release_one()
+    profile = _smoke_profile(manifest)
+    lane_time = _e2e_profile(manifest)["lane_time"]
+    parties = {party["kind"]: party for party in lane_time["parties"].values()}
+    secrets = _e2e_secret_settings()
+
+    assert "lane_time" not in profile
+    assert lane_time["mode"] == "wall" and lane_time["target"]
+    assert sorted(parties) == ["provisioning", "registry", "storefront"]
+    for party in lane_time["parties"].values():
+        assert not any(key.endswith(("url", "_identifier", "_id", "_credential", "_key"))
+                       for key in party), party
+        for key, path in party.items():
+            if not key.endswith("_setting"):
+                continue
+            if key.endswith(("_credential_setting", "_key_setting")):
+                assert path in secrets, (key, path, secrets)
+            else:
+                assert _dotted(profile, path), (key, path)
+    resolved = {kind: {key.removesuffix("_setting"): _dotted(profile, path)
+                       for key, path in party.items() if key.endswith("_setting")}
+                for kind, party in parties.items()}
+    assert resolved["storefront"]["url"] == _service_url(manifest, f"{RELEASE_ONE}-storefront-bob")
+    assert resolved["provisioning"]["url"] == _service_url(manifest, f"{RELEASE_ONE}-provisioning")
+    assert resolved["registry"]["url"] == _service_url(manifest, f"{RELEASE_ONE}-registry")
+    bob = json.loads(_block(_source(manifest, "storefront/templates/configmap.yaml"), "storefront.json"))
+    assert resolved["storefront"]["publisher_scheme"] == bob["Identity"]["principal"]["scheme"]
+    assert resolved["storefront"]["publisher_identifier"] == bob["Identity"]["principal"]["identifier"]
+    # The registry's administrator key, which its status route takes, arrives
+    # in the secret profile topology-secrets writes.
+    registry = _source(manifest, "charts/registry/templates/deployment.yaml")
+    assert _resolver_environment(registry)["ACTIVE_PROFILES"] == "production,admin"
+    assert 'secretName: "arkhai-registry-runtime"' in registry
 
 
 def test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_states() -> None:
@@ -432,9 +550,9 @@ def test_topology_up_restarts_every_deployment_but_the_chain() -> None:
     components = {component for _, component in deployments}
 
     assert order == ["registry", "provisioning", "storefront", "bare-metal-storefront"]
-    # The payments lane double is left out for the same reason as the chain: it
-    # keeps every payment in memory, which a restart loses.
-    assert components == {*order, "dev-env", "payments-lane-double"}
+    # The lane doubles are left out for the same reason as the chain: they keep
+    # every payment and case in memory, which a restart loses.
+    assert components == {*order, "dev-env", "payments-lane-double", "mediation-lane-double"}
 
 
 def _mapping_under(lines: list[str], header: str) -> dict[str, str]:
@@ -504,6 +622,7 @@ _EXPECTED_TEST_TEMPLATES = {
         "templates/tests/e2e-deal-test.yaml",
         "templates/tests/chain-environment-test.yaml",
         "templates/tests/payments-check-test.yaml",
+        "templates/tests/mediation-check-test.yaml",
     },
     RELEASE_TWO: {
         "templates/tests/provisioning-smoke-test.yaml",
@@ -589,7 +708,7 @@ def _rendered_names(manifest: str, kind: str) -> set[str]:
 
 def test_topology_secrets_creates_every_configmap_the_releases_read_and_no_chart_renders() -> None:
     """The one such ConfigMap is the storefronts' CA bundle, created from the
-    payments lane double's committed lane CA under the key both storefronts
+    lane doubles' committed lane CA under the key both storefronts
     mount; `check-local-secrets` checks for it. Neither storefront reads a
     payments key from a Secret key: the key is in the runtime Secret's overlay
     each mounts (scripts/tests/test_change_build_and_helm_targets.py runs the
@@ -602,7 +721,7 @@ def test_topology_secrets_creates_every_configmap_the_releases_read_and_no_chart
 
     assert referenced - rendered == created == set(_make_words("LOCAL_CONFIGMAPS")) == {"payments-ca-bundle"}
     assert '"--from-file=ca-bundle.pem=$PAYMENTS_LANE_CA_FILE"' in script
-    assert (UMBRELLA / _make_variable("PAYMENTS_LANE_CA_FILE")).resolve() == DOUBLE / "tls" / "lane-ca.pem"
+    assert (UMBRELLA / _make_variable("PAYMENTS_LANE_CA_FILE")).resolve() == LANE_CA
     assert (UMBRELLA / _make_variable("PAYMENTS_LANE_ENV")).resolve() == DOUBLE / "scripts" / "lane_env.py"
     for manifest, chart, runtime in (
         (release_one, "storefront", "arkhai-bob-runtime"),
@@ -625,15 +744,29 @@ def _fixture(name: str) -> dict:
         return tomllib.load(handle)
 
 
+def _recommended_mediation_double() -> dict:
+    """The mediation double's identity, params and advertisement, as a registry
+    recommends it, from its committed fixture."""
+    with MEDIATION_AUTHORITY.open("rb") as handle:
+        authority = tomllib.load(handle)
+    return {key: authority[key] for key in
+            ("interface", "origin", "account", "record_key", "params", "advertisement")}
+
+
 def _lane_runner_payments() -> dict:
-    """The lanes' shared runner profile's `payments` mapping. The file is one
-    flat mapping of JSON scalars, quoted strings, numbers and booleans, read
-    here line by line because this suite has no YAML parser."""
+    """The lanes' shared runner profile's `payments` mapping. Each top-level
+    section is one flat mapping of JSON scalars, quoted strings, numbers and
+    booleans, read here line by line because this suite has no YAML parser."""
     path = UMBRELLA.parent / "e2e-tests" / "config" / "config-payments-lane.yml"
     values = {}
+    section = None
     for line in path.read_text(encoding="utf-8").splitlines():
+        heading = re.fullmatch(r"([a-z_]+):", line)
+        if heading:
+            section = heading[1]
+            continue
         match = re.fullmatch(r"  ([a-z_]+): (.+)", line)
-        if match:
+        if match and section == "payments":
             values[match[1]] = json.loads(match[2])
     return values
 
@@ -669,11 +802,11 @@ def _recommended_dispute_authorities(manifest: str) -> list:
 def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures() -> None:
     """Each payments value the two releases state restates the double's
     fixtures: the receipt identity and fee both storefronts pin, the seller
-    account both payments checks read, the dispute authority the registry
-    recommends, and the e2e-tests chart's PAYMENTS settings, which are the ones
-    a Compose lane's runner receives. No storefront uses development
-    authentication."""
-    accounts, authority = _fixture("accounts.toml"), _fixture("dispute-authority.toml")
+    account both payments checks read, and the e2e-tests chart's PAYMENTS
+    settings, which are the ones a Compose lane's runner receives. The registry
+    recommends the mediation double, restating its fixture. No storefront uses
+    development authentication."""
+    accounts = _fixture("accounts.toml")
     release_one, release_two = _release_one(), _release_two()
     seller = accounts["accounts"]["seller"]["account"]
 
@@ -694,7 +827,7 @@ def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures()
         assert f'- "{seller}"' in {line.strip() for line in _source(manifest, check).splitlines()}
         assert "development_auth" not in manifest
 
-    assert _recommended_dispute_authorities(release_one) == [authority]
+    assert _recommended_dispute_authorities(release_one) == [_recommended_mediation_double()]
 
     # The release's runner profile states the lanes' public payments settings, as
     # the lanes' committed runner profile does, which test_lane_env.py holds to
@@ -713,6 +846,31 @@ def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures()
     lane = _lane_runner_payments()
     assert {key: lane[key] for key in profile} == profile
     assert "payments" not in _smoke_profile(release_two)
+
+
+def test_bobs_mediation_check_reads_the_mediation_double_his_credential_names() -> None:
+    """Release 1 runs the mediation double behind `mediation-double`, the name
+    its leaf covers, and release 2 runs none. Bob's mediation check names the
+    origin that Service answers, which is the double's fixture origin and the
+    origin of the dispute credential his runtime overlay copies from his Compose
+    overlay, so the check selects that credential."""
+    release_one, release_two = _release_one(), _release_two()
+
+    deployments = [name for name, component in _labelled(release_one, "Deployment")
+                   if component == "mediation-lane-double"]
+    assert deployments == [f"{RELEASE_ONE}-mediation-lane-double"]
+    assert not any("/charts/mediation-lane-double/" in source for source in _sources(release_two))
+    service = _named(release_one, "Service", "mediation-double")
+    port = re.search(r"^\s+port: (\d+)$", service, re.MULTILINE)
+    assert port, "Service mediation-double renders no port"
+    origin = f"https://mediation-double:{port.group(1)}"
+
+    check = _source(release_one, "storefront/templates/tests/mediation-check-test.yaml")
+    assert f'- "{origin}"' in {line.strip() for line in check.splitlines()}
+    assert _recommended_mediation_double()["origin"] == origin
+    with BOB_COMPOSE_SECRETS.open("rb") as handle:
+        (credential,) = tomllib.load(handle)["DisputeCredential"]
+    assert credential["origin"] == origin
 
 
 def test_the_e2e_tests_chart_refuses_a_payments_credential() -> None:
@@ -798,8 +956,12 @@ def test_one_release_running_both_storefronts_on_its_provisioning_service_is_ref
 
 
 def _resolver_environment(deployment: str) -> dict[str, str]:
-    """The registry container's whole ``env`` block, as name and value."""
-    block = deployment.split("          env:\n", 1)[1].split("          volumeMounts:\n", 1)[0]
+    """The registry container's whole ``env`` block, as name and value.
+
+    The application container's, after the migration init container's, which
+    the registry chart's own render test holds equal to it."""
+    application = deployment.split("\n      containers:\n", 1)[1]
+    block = application.split("          env:\n", 1)[1].split("          volumeMounts:\n", 1)[0]
     pairs = re.findall(r'- name: (\S+)\n\s+value: "?([^"\n]*)"?', block)
     assert len(pairs) == block.count("- name: "), f"an env entry is not a plain value: {block}"
     return dict(pairs)
@@ -830,8 +992,10 @@ def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resol
     alias, renders its identity, descriptor, settings, port and filter
     specification into its own `config-production.env`, mounted under the
     configuration directory, and its pod environment holds only the two
-    resolver variables. The settings nothing reads are not rendered."""
-    manifest = _release_one({"api-credits-registry": {"enabled": True}})
+    resolver variables. The settings nothing reads are not rendered. The local
+    release's own secret profile, its administrator key, is cleared here."""
+    manifest = _release_one({"api-credits-registry": {"enabled": True},
+                             "registry": {"secretProfile": {"secretName": "", "profile": ""}}})
     expected = {
         "registry": {
             "REGISTRY_AUTHORITY_ID": "registry-a",
@@ -849,7 +1013,7 @@ def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resol
         deployment = _source(manifest, f"charts/{chart}/templates/deployment.yaml")
         name = f"{RELEASE_ONE}-{chart}"
 
-        # Release 1's registry alone recommends the pinned dispute authority.
+        # Release 1's registry alone recommends the mediation double.
         recommends = {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"} if chart == "registry" else set()
         assert set(profile) == _REGISTRY_SETTINGS | recommends, sorted(profile)
         assert {key: profile[key] for key in own} == own
@@ -965,8 +1129,11 @@ def test_the_registry_posture_checks_refuse_a_mismatched_descriptor() -> None:
 _REGISTRY_PROBE = """
 import json, sys
 from core_registry.config import load_settings
-settings = load_settings({"CONFIG_DIRECTORY": sys.argv[1], "ACTIVE_PROFILES": sys.argv[2]})
-print(json.dumps(settings.model_dump(mode="json")))
+from core_registry.settings_source import load_database_settings
+resolver = {"CONFIG_DIRECTORY": sys.argv[1], "ACTIVE_PROFILES": sys.argv[2]}
+settings = load_settings(resolver).model_dump(mode="json")
+settings["migration"] = load_database_settings(resolver).model_dump(mode="json")
+print(json.dumps(settings))
 """
 
 
@@ -977,7 +1144,8 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     and the sequences a single-quoted dotenv value decodes, a backslash pair and
     a backslashed quote. Each value arrives as given, the dispute authorities as
     the list, and the secret profile both adds a key and overrides one the
-    rendered profile states."""
+    rendered profile states. The migration's loader reads the same database URL
+    and log level from them."""
     python = os.environ.get("REGISTRY_PYTHON")
     if not python:
         print("skip: REGISTRY_PYTHON unset; the registry loader check did not run")
@@ -1012,7 +1180,7 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     profile = _registry_profile(manifest)
 
     assert settings["registry_descriptor_display_name"] == awkward
-    assert settings["registry_descriptor_recommended_dispute_authorities"] == [_fixture("dispute-authority.toml")]
+    assert settings["registry_descriptor_recommended_dispute_authorities"] == [_recommended_mediation_double()]
     for setting, line in (
         ("registry_authority_id", "REGISTRY_AUTHORITY_ID"),
         ("registry_authority_scheme", "REGISTRY_AUTHORITY_SCHEME"),
@@ -1032,6 +1200,9 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     # on the setting both state.
     assert profile["LOG_LEVEL"] == "debug" and settings["log_level"] == "warning"
     assert settings["admin_api_key"] == "placeholder-admin-key"
+    # The migration init container reads the same profiles through its own
+    # loader, and finds the database the application serves.
+    assert settings["migration"] == {"database_url": profile["DATABASE_URL"], "log_level": "warning"}
 
 
 # --- the storefront's own loader -----------------------------------------

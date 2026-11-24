@@ -29,6 +29,7 @@ from market_storefront.startup_refusal import (
     StorefrontStartupError,
 )
 from market_storefront.utils import sqlite_client as sqlite_module
+from market_storefront.utils.migrations import migrate_storefront_database
 from tests._settings_overrides import replaced_setting
 
 pytestmark = pytest.mark.asyncio
@@ -195,6 +196,7 @@ async def test_a_storefront_whose_terms_live_in_its_pools_starts(tmp_path, monke
         "capacity": {"sites": {"default": "http://site.test:8081"}, "poll_interval": 0},
         "db_path": str(db_path),
     }
+    migrate_storefront_database(db_path)
     with ExitStack() as stack:
         for key, value in configuration.items():
             stack.enter_context(replaced_setting(key, value))

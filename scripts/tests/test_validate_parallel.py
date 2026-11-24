@@ -20,7 +20,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASE = "arkhai-node-operator"
 POD = f"{RELEASE}-e2e-tests-e2e-scenarios"
 FIRST, SECOND = "pilot", "other-change"
-ATTEMPT = Path(".snapshot/validation/0123456789ab/helm/1")
+ATTEMPT_NAME = "20261021T190001.000000Z"
+ATTEMPT = Path(".snapshot/evidence/0123456789abcdef0123456789abcdef01234567/helm",
+               ATTEMPT_NAME)
 STARTED = datetime(2026, 10, 21, 19, 0, 0, 500000, tzinfo=timezone.utc)
 
 
@@ -161,12 +163,12 @@ class Fake:
             steps.append({"name": "e2e", "result": "failed"})
         (attempt / "summary.json").write_text(json.dumps(state.summary if state.summary
                                                          is not None else {
-            "part": "helm", "attempt": 1, "passed": state.passed, "steps": steps,
+            "kind": "helm", "attempt": ATTEMPT_NAME, "passed": state.passed, "steps": steps,
             "namespace": state.summary_namespace,
             "evidence": {"pod_statuses": str(ATTEMPT / "pods.json"),
                          "scenarios": {"pod": POD, "exit_code": 0}}}), "utf-8")
-        log.write_text(f"helm validation of 0123456789ab, attempt 1\n"
-                       f"Attempt 1 logs and summary.json: {ATTEMPT}\n", "utf-8")
+        log.write_text(f"helm evidence for the tree 0123456789ab, attempt {ATTEMPT_NAME}\n"
+                       f"Attempt {ATTEMPT_NAME} logs and summary.json: {ATTEMPT}\n", "utf-8")
 
     def read(self, command: Sequence[str]) -> str:
         command = list(command)
@@ -231,7 +233,8 @@ def test_two_isolated_runs_pass_every_check(tmp_path: Path) -> None:
         "pilot 19:00:01–19:31:00; other-change 19:00:02–19:30:00; "
         "their scenario pods ran together")
     assert found["results"].detail.splitlines() == [
-        f"pilot passed, attempt 1 in {ATTEMPT}", f"other-change passed, attempt 1 in {ATTEMPT}"]
+        f"pilot passed, attempt {ATTEMPT_NAME} in {ATTEMPT}",
+        f"other-change passed, attempt {ATTEMPT_NAME} in {ATTEMPT}"]
     assert found["namespaces"].detail == "validate-pilot, validate-other-change"
     assert found["tags"].detail == ("pilot: e2e-tests-pilot, storefront-pilot; "
                                     "other-change: e2e-tests-other-change, "

@@ -7,6 +7,8 @@ other route is under ``/api/v1/system``:
 - ``GET /system/status``: the operator's status, including execution and the
   readiness components.
 - ``GET /system/version``: the service version and active profiles.
+- ``POST /system/time``: set an injected service's time, mounted only under
+  injected time (``make_time_router``).
 - ``POST /system/check-leases``: one lease lifecycle cycle, run whether or not
   the watchdog's timer is paused, answering its counts.
 - ``POST /system/fulfillment-convergence/{run-cycle,advance-cycle,pause,resume}``
@@ -26,17 +28,20 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import injected_time
 from compute_provisioning.route_errors import require_composed
 from compute_provisioning_contracts import (
     ConvergenceCycleResponse,
     HealthResponse,
     LeaseCheckResponse,
     SystemStatusResponse,
+    TimeSettingResponse,
     VersionResponse,
     WorkerPauseResponse,
 )
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from injected_time import TimeRouteError, TimeRouteService
 
 from compute_provisioning_service.controllers.route_errors import routed
 from compute_provisioning_service.services.system_status import SystemStatusService
@@ -211,4 +216,38 @@ def make_system_routers(
     return health_router, system_router
 
 
-__all__ = ["make_system_routers"]
+def make_time_router() -> APIRouter:
+    """The ``/api/v1/system/time`` router, at its full path, which the service
+    mounts only while its source is injected, so a wall-time service serves no
+    such route.
+
+    The route sets the installed source to the instant the body carries: a
+    body other than ``{"now": <Unix seconds>}`` is 422 ``invalid_time``, an
+    earlier instant 409 ``time_moves_forward``, and the answer is signed at the
+    instant set. Should the router be mounted over a source that cannot be set,
+    it answers 404 and changes nothing.
+    """
+    time_router = APIRouter(prefix="/api/v1/system", tags=["system"])
+
+    @time_router.post(
+        "/time",
+        response_model=TimeSettingResponse,
+        summary="Set an injected service's time (admin)",
+    )
+    async def set_time(request: Request) -> JSONResponse:
+        routes = TimeRouteService(injected_time.installed())
+        if not routes.settable:
+            raise HTTPException(status_code=404, detail="Not Found")
+        try:
+            answer = routes.set_time(await request.body())
+        except TimeRouteError as error:
+            return JSONResponse(
+                status_code=error.status_code,
+                content={"code": error.code, "detail": error.detail},
+            )
+        return JSONResponse(content=answer)
+
+    return time_router
+
+
+__all__ = ["make_system_routers", "make_time_router"]

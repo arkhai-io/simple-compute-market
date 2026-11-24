@@ -20,7 +20,7 @@
           --features smm=on \
           --tpm none \
           --os-variant {{ vm_os_variant }} \
-          --network network=default,model=virtio \
+          {{ lookup('template', 'guest-interface-args.j2') | trim }} \
           --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
           --hostdev {{ vm_gpu_device }}{% if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %},romfile={{ vm_gpu_rom_file }}{% endif %} \
           {% if alternative_gpu_audio is defined and alternative_gpu_audio.stdout is defined and alternative_gpu_audio.stdout != 'NO_AUDIO_DEVICE' %}--hostdev {{ alternative_gpu_audio.stdout }} \{% endif %}

@@ -19,10 +19,13 @@ from core_storefront.identity_authority import (
     StorefrontIdentityAuthority,
 )
 
-from market_identity import Eip191Signer, TrustedIdentitySet
+from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
+from market_settlement_runtime import SettlementPublicationClause
 from settlement_compositions import alkahest_composition
 from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLifecycle
+from arkhai_bare_metal_storefront.lifecycle_steps import register_bare_metal_loops
 from arkhai_bare_metal_storefront.settlement_stages import DeclinedServicing
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal_storefront.contribution import (
@@ -30,7 +33,8 @@ from arkhai_bare_metal_storefront.contribution import (
 )
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import fulfill_bare_metal
-from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV
+from arkhai_bare_metal_storefront.publication_composition import build_publication_cycle
+from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV, BareMetalConfigurationError
 from arkhai_bare_metal_storefront.runtime import build_runtime_from_configuration
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -162,7 +166,10 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
         assert app.state.storefront_container.domain is runtime.domain
         started = runtime.loops.registered_loop_names()
     assert app.state.storefront_container is None
-    assert started == ["delivery_recovery", "negotiation_watchdog", "publication"]
+    assert started == [
+        "deal_servicing", "delivery_recovery", "negotiation_watchdog", "payment_reconciliation",
+        "publication", "settlement_servicing",
+    ]
     assert runtime.loops.registered_loop_names() == []
 
 
@@ -188,6 +195,7 @@ def test_installed_contribution_exposes_complete_bare_metal_contract() -> None:
 
 def _direct_runtime(tmp_path, **overrides):
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "storefront.db")
     values = dict(
         db=SQLiteClient(str(tmp_path / "storefront.db"), domain=domain),
         domain=domain,
@@ -208,7 +216,14 @@ async def test_a_runtime_without_a_settlement_composition_has_no_settlement(
     )
 
     assert runtime.settlement_worker is None
-    assert "settlement-servicing" not in runtime.loops.step_routes()
+    # The four servicing loops are registered whatever is composed; with no
+    # worker and no payments, their steps have nothing to do.
+    assert await runtime.loops.run_cycle("settlement-servicing") == {
+        "loop": "settlement_servicing", "processed": 0,
+    }
+    assert await runtime.loops.run_cycle("payment-reconciliation") == {
+        "loop": "payment_reconciliation", "attempted": 0, "failed": 0,
+    }
     with pytest.raises(RuntimeError, match="no bare-metal settlement mechanism is configured"):
         runtime.settlement_service()
     health = await runtime.health()
@@ -377,13 +392,17 @@ def _alkahest(document: dict, *, enabled: bool = True) -> dict:
     return document
 
 
+def _migrated_configuration(monkeypatch, tmp_path, document=None, *, secrets=None) -> None:
+    """Write the configuration files, and migrate the database they name, as
+    the storefront's migration command does before ``serve``."""
+    if document is None:
+        document = publishable_configuration(tmp_path / "storefront.db")
+    write_configuration(monkeypatch, tmp_path, document, secrets=secrets)
+    migrate_storefront_database(document["db_path"])
+
+
 def _configured_runtime(monkeypatch, tmp_path, document=None, *, secrets=None, **kwargs):
-    write_configuration(
-        monkeypatch,
-        tmp_path,
-        publishable_configuration(tmp_path / "storefront.db") if document is None else document,
-        secrets=secrets,
-    )
+    _migrated_configuration(monkeypatch, tmp_path, document, secrets=secrets)
     kwargs.setdefault("credential", SELLER_CREDENTIAL)
     return build_runtime_from_configuration(**kwargs)
 
@@ -401,15 +420,19 @@ def test_the_runtime_takes_its_principal_and_administrators_from_configuration(
     assert runtime.pool_override_service() is not None
 
 
-def _started_app(monkeypatch, tmp_path, document=None):
+def _started_app(monkeypatch, tmp_path, document=None, *, migrated=True):
     """The app over a runtime composed from the configuration files, only the
     site's transport replaced and its loops held, so starting it seeds the peers
-    and loads the site without any timer publishing."""
-    write_configuration(
-        monkeypatch,
-        tmp_path,
-        publishable_configuration(tmp_path / "storefront.db") if document is None else document,
-    )
+    and loads the site without any timer publishing. Unless ``migrated`` is
+    false, the database the files name is migrated first."""
+    if migrated:
+        _migrated_configuration(monkeypatch, tmp_path, document)
+    else:
+        write_configuration(
+            monkeypatch,
+            tmp_path,
+            publishable_configuration(tmp_path / "storefront.db") if document is None else document,
+        )
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
     sites = SignedSites({"site-a.test": SignedSite(SITE)})
     domain = get_market_domain_contract()
@@ -489,9 +512,7 @@ def test_a_credential_that_does_not_own_the_identity_is_refused(monkeypatch, tmp
 
 def test_the_credential_is_read_from_its_own_environment_variable(monkeypatch, tmp_path):
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
-    write_configuration(
-        monkeypatch, tmp_path, publishable_configuration(tmp_path / "storefront.db")
-    )
+    _migrated_configuration(monkeypatch, tmp_path)
 
     assert build_runtime_from_configuration().seller_principal == SELLER.identity
 
@@ -531,6 +552,28 @@ def test_every_interval_and_term_is_read_from_configuration(monkeypatch, tmp_pat
     assert runtime.default_max_duration_seconds == 7200
     assert [clause.mechanism for clause in runtime.publication_clauses] == ["alkahest.v1"]
     assert runtime.negotiation_policies == ["escrow_shape_guard", "bisection"]
+
+
+def test_the_servicing_loops_run_at_their_own_intervals_or_payment_reconciliations(
+    monkeypatch, tmp_path
+):
+    """``deal-servicing`` and ``delivery-recovery`` run at the payment
+    reconciliation interval until each states its own key."""
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document.update(payment_reconciliation_interval=8, settlement_servicing_interval_seconds=12)
+    unstated = register_bare_metal_loops(_configured_runtime(monkeypatch, tmp_path, document))
+    document.update(deal_servicing_interval_seconds=5, delivery_recovery_interval_seconds=6)
+    stated = register_bare_metal_loops(_configured_runtime(monkeypatch, tmp_path, document))
+
+    assert (unstated["deal_servicing"], unstated["delivery_recovery"]) == (8, 8)
+    assert (stated["deal_servicing"], stated["delivery_recovery"]) == (5, 6)
+
+
+def test_a_servicing_interval_that_is_not_positive_seconds_is_refused_by_key(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document.update(delivery_recovery_interval_seconds=0)
+    with pytest.raises(BareMetalConfigurationError, match="delivery_recovery_interval_seconds"):
+        _configured_runtime(monkeypatch, tmp_path, document)
 
 
 def test_the_seller_chain_defaults_when_none_is_configured(monkeypatch, tmp_path):
@@ -611,6 +654,46 @@ def test_publication_clauses_that_do_not_compile_are_refused_at_startup(
     document["pricing"] = {"settlements": [{"mechanism": "alkahest.v1"}]}
 
     with pytest.raises(RuntimeError, match=r"\[pricing\].settlements"):
+        _configured_runtime(monkeypatch, tmp_path, document)
+
+
+#: A configured clause; its asset is a deterministic development address, never
+#: to be used on a public network.
+_ALKAHEST_CLAUSE = {
+    "mechanism": "alkahest.v1",
+    "asset": "0x" + "9f" * 20,
+    "rate": "10",
+    "per": "hour",
+    "mechanism_input": {"chain": "anvil", "escrow_kind": "erc20_escrow_obligation_default"},
+}
+
+
+def test_per_model_clauses_reach_the_publication_cycle(monkeypatch, tmp_path):
+    """``[pricing.defaults.gpu.<model>]`` clauses are compiled at startup and
+    composed into the cycle as the tier between the pool's hints and
+    ``[pricing].settlements``; a model stating none adds no tier."""
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {"defaults": {"gpu": {"H100": {"settlements": [_ALKAHEST_CLAUSE]}, "A100": {}}}}
+
+    runtime = _configured_runtime(monkeypatch, tmp_path, document)
+    composed = build_publication_cycle(
+        runtime,
+        registry_configuration=runtime.registry_configuration,
+        cycle_factory=lambda **kwargs: kwargs,
+    )
+
+    assert {model: [clause.mechanism for clause in clauses]
+            for model, clauses in runtime.publication_clauses_by_model.items()} == {
+        "H100": ["alkahest.v1"]
+    }
+    assert composed["publication_clauses_by_model"] is runtime.publication_clauses_by_model
+
+
+def test_per_model_clauses_that_do_not_compile_are_refused_at_startup(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {"defaults": {"gpu": {"H100": {"settlements": [{"mechanism": "alkahest.v1"}]}}}}
+
+    with pytest.raises(RuntimeError, match=r"\[pricing\.defaults\.gpu\.H100\]\.settlements"):
         _configured_runtime(monkeypatch, tmp_path, document)
 
 
@@ -952,6 +1035,88 @@ def test_a_disabled_section_is_still_configured():
     assert composition.configures("contact-exchange.v1")
 
 
+def test_the_configured_rate_servicing_declaration_is_the_compositions():
+    """The seller root's ``rate_servicing`` tables are the one declaration
+    publication and acceptance read."""
+    root = {
+        "schema_version": 1,
+        "priority": ["contact-exchange.v1"],
+        "contact": CONTACT_SECTION,
+        # Development fixture: a disabled payments section still services
+        # accepted deals, so it yields the seller stage. The identity is the
+        # public all-sevens development key, never used on a public network.
+        "arkhai_payments": {
+            "enabled": False, "service_url": "http://127.0.0.1:9",
+            "service_identity": Ed25519Signer(b"\x07" * 32).identity.model_dump(mode="json"),
+        },
+        "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
+    }
+
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(root)
+
+    assert composition.rate_servicing is composition.config.rate_servicing
+    declared = composition.rate_servicing.select("arkhai.payments.v1")
+    assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+    # Materialization reads the same declaration, and the payments kit's preset
+    # helper and timing projection are installed beside it.
+    stage = composition.arkhai_payments_stage()
+    assert stage is not None and stage.rate_servicing is composition.rate_servicing
+    assert set(composition.rate_preset_helpers or {}) == {"arkhai.payments.v1"}
+    assert set(composition.rate_term_projections or {}) == {"arkhai.payments.v1"}
+
+
+def test_the_configured_penalty_multiple_is_the_compositions(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {**document.get("pricing", {}), "default_premature_stop_penalty_periods": 6}
+
+    composition = _configured_runtime(monkeypatch, tmp_path, document).settlement_composition
+
+    assert composition.default_penalty_periods == 6
+
+
+@pytest.mark.parametrize("pool_deadline", [900, None], ids=["pool", "none"])
+async def test_the_pool_port_s_deadline_for_the_candidate_reaches_the_option_builder(
+    monkeypatch, pool_deadline,
+):
+    """The composition looks the pool's deadline up for the candidate's site and
+    pool and hands it, or ``None``, to the option builder with the compute flag.
+    What a builder does with ``None`` is its mechanism's, tested there."""
+    lookups: list[tuple[str, str | None]] = []
+
+    def deadline(site: str, pool: str | None) -> int | None:
+        lookups.append((site, pool))
+        return pool_deadline
+
+    composition = replace(
+        BareMetalStorefrontSettlementComposition.from_raw_config(
+            {"schema_version": 1, "priority": ["contact-exchange.v1"], "contact": CONTACT_SECTION},
+            resources={"claimant_principal": COMPOSITION_SIGNER.identity},
+        ),
+        delivery_deadline_for_pool=deadline,
+    )
+    built: list[dict] = []
+    build_option = composition.registry.build_option
+
+    def recording(*args, resources, **kwargs):
+        built.append(dict(resources))
+        return build_option(*args, resources=resources, **kwargs)
+
+    monkeypatch.setattr(composition.registry, "build_option", recording)
+
+    await composition.publication_payload(
+        candidate={"host_id": "machine-1", "site_id": "site-a", "pool_id": "pool-1"},
+        clauses=[SettlementPublicationClause(
+            mechanism="contact-exchange.v1", asset="introduction",
+            mechanism_input={"profile": "default"},
+        )],
+        max_duration_seconds=3600,
+    )
+
+    assert lookups == [("site-a", "pool-1")]
+    (resources,) = built
+    assert (resources["compute"], resources["delivery_deadline_seconds"]) == (True, pool_deadline)
+
+
 def test_a_contact_only_root_composes_its_obligation_worker(monkeypatch, tmp_path):
     runtime = _configured_runtime(monkeypatch, tmp_path)
 
@@ -1064,9 +1229,7 @@ async def test_a_storefront_configured_through_files_starts_and_serves(
     projections before health reads them. The loops start held, so no timer
     publishes to the configured registry, which nothing serves. Spec scenario:
     "An operator overrides a setting on a development cluster"."""
-    write_configuration(
-        monkeypatch, tmp_path, publishable_configuration(tmp_path / "storefront.db")
-    )
+    _migrated_configuration(monkeypatch, tmp_path)
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
     monkeypatch.setenv("STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
     monkeypatch.setenv("STOREFRONT_CAPACITY__POLL_INTERVAL", "7")
@@ -1151,7 +1314,7 @@ async def test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_buil
     )
     document["Wallet"] = {"address": WALLET_ADDRESS}
     document["Chains"] = {"anvil": {"rpc_url": "ws://anvil.test:8545", "chain_id": 31337}}
-    write_configuration(
+    _migrated_configuration(
         monkeypatch, tmp_path, document, secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n'
     )
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)

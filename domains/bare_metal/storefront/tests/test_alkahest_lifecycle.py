@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from compute_provisioning_contracts import FulfillmentStatusResponse
 from market_deal_servicing.journal import stable_ref
 from market_identity import Eip191Signer, TrustedIdentitySet
 from market_settlement_runtime import (
@@ -81,11 +82,11 @@ class _Site(_ProvisioningClient):
 
     async def get_fulfillment_status(self, fulfillment_id, **request):
         state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
-        return type(
-            "Status",
-            (),
-            {"state": state, "failure_reason": None, "failure_message": None},
-        )()
+        return FulfillmentStatusResponse(
+            fulfillment_id=fulfillment_id,
+            capacity_reservation_id="reservation-a",
+            state=state,
+        )
 
     async def get_fulfillment_result(self, fulfillment_id, **request):
         envelope = await super().get_fulfillment_result(fulfillment_id, **request)
@@ -147,7 +148,7 @@ async def test_the_deal_waits_for_its_lease_then_publishes_its_digest_and_is_col
     chain = ChainClient(StringObligations(uid=ATTESTATION_UID))
     escrow = EscrowOnChain()
     runtime, _app_, obligation_ref = await _settled(
-        tmp_path, site=_Site("provisioning", "active"), chain=chain, escrow=escrow
+        tmp_path, site=_Site("dispatching", "active"), chain=chain, escrow=escrow
     )
 
     # Verification stepped the worker once: delivery began, the lease is not
@@ -271,7 +272,7 @@ async def test_a_restart_after_an_unrecorded_submission_parks_without_submitting
     # The site is not yet active, so verification's own step submits nothing.
     runtime, _app_, obligation_ref = await _settled(
         tmp_path,
-        site=_Site("provisioning", "active"),
+        site=_Site("dispatching", "active"),
         chain=chain,
         escrow=EscrowOnChain(),
     )
@@ -291,7 +292,7 @@ async def test_a_restart_after_a_recorded_publication_completes_without_submitti
     chain = ChainClient(StringObligations(uid="0x" + "99" * 32))
     runtime, _app_, obligation_ref = await _settled(
         tmp_path,
-        site=_Site("provisioning", "active"),
+        site=_Site("dispatching", "active"),
         chain=chain,
         escrow=EscrowOnChain(),
     )
@@ -314,7 +315,7 @@ async def test_a_restart_after_a_recorded_publication_completes_without_submitti
 async def test_an_uncollected_settlement_ends_the_lease_once_delivery_began(
     tmp_path, state, terminated
 ) -> None:
-    site = _Site("provisioning")
+    site = _Site("dispatching")
     runtime, _app_, obligation_ref = await _settled(
         tmp_path, site=site, chain=ChainClient(), escrow=EscrowOnChain()
     )
@@ -328,7 +329,7 @@ async def test_an_uncollected_settlement_ends_the_lease_once_delivery_began(
 
 
 async def test_a_parked_obligation_does_not_end_the_lease(tmp_path) -> None:
-    site = _Site("provisioning")
+    site = _Site("dispatching")
     runtime, _app_, obligation_ref = await _settled(
         tmp_path, site=site, chain=ChainClient(), escrow=EscrowOnChain()
     )
@@ -346,7 +347,7 @@ async def test_passes_spent_waiting_for_the_lease_do_not_count_as_rejections(
     chain = ChainClient(StringObligations(raises=RuntimeError("execution reverted")))
     runtime, _app_, obligation_ref = await _settled(
         tmp_path,
-        site=_Site("provisioning", "provisioning", "provisioning", "active"),
+        site=_Site("dispatching", "dispatching", "dispatching", "active"),
         chain=chain,
         escrow=EscrowOnChain(),
     )
@@ -381,7 +382,7 @@ async def test_a_deal_awaiting_its_lease_is_due_on_each_servicing_cycle(
     chain = ChainClient(StringObligations(uid=ATTESTATION_UID))
     runtime, app, obligation_ref = await _settled(
         tmp_path,
-        site=_Site("provisioning", "provisioning", "active"),
+        site=_Site("dispatching", "dispatching", "active"),
         chain=chain,
         escrow=EscrowOnChain(),
     )
@@ -542,7 +543,7 @@ async def test_the_buyers_fulfillment_status_names_the_published_evidence(
     chain = ChainClient(StringObligations(uid=ATTESTATION_UID))
     runtime, _app_, obligation_ref = await _settled(
         tmp_path,
-        site=_Site("provisioning", "active"),
+        site=_Site("dispatching", "active"),
         chain=chain,
         escrow=EscrowOnChain(),
     )

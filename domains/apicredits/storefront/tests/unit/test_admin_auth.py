@@ -18,6 +18,7 @@ from market_identity import (
 import apicredits_storefront.container as container
 from apicredits_storefront.middleware import admin_auth
 from apicredits_storefront.middleware.response_auth import authenticate_response
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
 
@@ -53,6 +54,7 @@ def test_admin_routes_require_exact_v2_principal_and_reject_replay(
     rotated_signer = Ed25519Signer(bytes.fromhex("55" * 32))
     stranger = Ed25519Signer(bytes.fromhex("66" * 32))
     signer = Ed25519Signer(bytes.fromhex("44" * 32))
+    migrate_storefront_database(tmp_path / "admin-auth.db")
     db = SQLiteClient(db_path=str(tmp_path / "admin-auth.db"))
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(
@@ -95,6 +97,7 @@ def test_a_refused_admin_can_verify_the_refusal(tmp_path, monkeypatch) -> None:
     signer = Ed25519Signer(bytes.fromhex("44" * 32))
     stranger = Ed25519Signer(bytes.fromhex("66" * 32))
     storefront = Ed25519Signer(bytes.fromhex("77" * 32))
+    migrate_storefront_database(tmp_path / "admin-refusal.db")
     db = SQLiteClient(db_path=str(tmp_path / "admin-refusal.db"))
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_marketplace_signer", storefront)

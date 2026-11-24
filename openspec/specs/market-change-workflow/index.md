@@ -8,7 +8,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ## 1. The workflow's roles
 
-- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — `.agents/workflow.toml` declares the workflow's fields, and the repository states how it fills each role outside them; every named target and path appears in one or the other.
+- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — `.agents/workflow.toml` declares the workflow's fields, and the repository states how it fills each role outside them; every target and path the make fragment names appears in one or the other, and the skills name none.
 
 ## 2. Validation
 
@@ -44,12 +44,13 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [MCW-farr](spec.md#requirement-mcw-farr-this-repositorys-protected-branches-are-main-and-dev) — the protected branches are `main` and `dev`, which the guarded push refuses.
 - [MCW-q8vd](spec.md#requirement-mcw-q8vd-the-pre-push-check-refuses-recognizable-private-content) — the pre-push check rejects private paths and denylisted identifiers across every commit, failing closed.
 - [MCW-k3vy](spec.md#requirement-mcw-k3vy-the-pre-push-checks-are-one-make-target) — the pre-push checks are one target, `make pre-push`, which the configuration's `pre-push` and the Git hook both run.
-- [MCW-r4tx](spec.md#requirement-mcw-r4tx-this-repositorys-hooks-and-validation-parts) — the configuration relocks, runs `make check-repository` before every commit, clears the wheelhouse, packages, and tests before a functional one, and declares the pipeline, owed CI, local, and Helm parts.
+- [MCW-r4tx](spec.md#requirement-mcw-r4tx-this-repositorys-hooks-and-validation-parts) — the configuration relocks, runs `make check-repository` before every commit, clears the wheelhouse, packages, and tests before a functional one, leaving `local` evidence for its tree, and declares the evidence kinds `local`, `helm`, `pipeline`, and owed `ci`, keyed by tree or commit, each with its guide.
 - [MCW-uqlq](spec.md#requirement-mcw-uqlq-a-clones-bootstrap-is-make-init) — a clone's bootstrap is `make init`, run as the clone is made; implementation and validation wait on it.
+- [MCW-s4bx](spec.md#requirement-mcw-s4bx-this-repositorys-sandbox-extensions) — the configuration gives design and planning `docs/`, and every step, the review included, the tool state its suites, builds, deployments, and OpenSpec command write outside the checkout, and protects nothing more.
 
 ## 5. This repository's checks
 
-- [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules) — the closing checks fail on a decision with no destination, history wording, a double version bump, an unexplained local import, or a capability index gap.
+- [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules) — the closing checks fail on a decision with no destination, history wording, a double version bump, an unexplained local import, a capability index gap, or the guidance check, which holds the tags, vocabularies, exception tables, link direction, and cited anchors of the guidance.
 - [MCW-s8gk](spec.md#requirement-mcw-s8gk-the-public-content-checks-refuse-private-keys-and-provider-credentials) — the public-content checks refuse private keys and provider-format credentials through a pinned scanner, passing development fixtures.
 - [MCW-u2dt](spec.md#requirement-mcw-u2dt-an-audit-reports-every-scanner-rule-and-gates-nothing) — an on-demand audit reports what every scanner rule but the default key rule finds in the tracked tree, gating nothing.
 - [MCW-l5rv](spec.md#requirement-mcw-l5rv-every-lock-carries-the-lock-revision-the-minimum-uv-writes) — every committed lock carries the minimum uv's lock revision, and the repository's relock and refresh commands refuse an older uv.

@@ -211,6 +211,14 @@ make test-render
 cd ..
 ```
 
+Helm's official binaries are served from `get.helm.sh`. An environment that cannot
+reach it can use a redistribution such as the npm package `helm-binary-linux`, which
+ships one binary with no install scripts. Such a copy is unverified and may be an
+older release: inspect the package before running it, and keep it out of the
+repository. The supported release is the one CI pins
+([`chart-render-tests.md`, "The supported Helm"](../guidance/repository/chart-render-tests.md#the-supported-helm));
+the render log records whichever version actually ran.
+
 Policy training/RL dependencies are not part of the standard local validation.
 The old `domains/vms/tests` integration suite was removed in the latest pull;
 future training or RL validation should be documented separately when runnable
@@ -887,6 +895,9 @@ A VM host needs:
 - an x86-64 Ubuntu 24.04 install, the platform the scenario has run against,
   with outbound network access, which scratch-image VM creation uses to fetch
   its cloud image;
+- libvirt 6.1 or later with the nwfilter driver's `clean-traffic` filter, and
+  virt-install 3.0 or later, which guest isolation needs; host preparation
+  installs `ebtables` and refuses a host lacking any of them, naming each;
 - no GPU. A host with an NVIDIA or AMD GPU is given passthrough boot
   configuration (section 22), and the scenario deals a GPU-less shape either
   way;
@@ -971,7 +982,12 @@ which the umbrella chart's values set to `true`. The stack must also:
 
 - give the provisioning service the private key whose public half section 22
   authorized, at a path in the service's filesystem; that path is the target's
-  `ssh_key_path`;
+  `ssh_key_path`. On a Helm release it is the `id_ed25519` key of the Secret
+  `provisioning.sshKey.secretName` names, mounted at
+  `/home/appuser/.ssh/id_ed25519` once `mockMode` is false. The umbrella chart's
+  values name no such Secret and a release that names none fails to render;
+  `make -C helm topology-secrets` creates none, since mock provisioning mounts
+  no key;
 - let the provisioning service reach the host's SSH;
 - run the controlled Anvil settlement chain and trust the selected fixture
   marketplace principals. External profiles may use Ed25519 marketplace signing
@@ -1011,13 +1027,48 @@ VM entry under `hosts`:
 - `capacity`, the sellable `vcpu_count`, `ram_gb`, and `disk_gb` from section 21;
 - `listing_shape`, an explicit guest shape fitting twice within that capacity.
 
+A VM entry may add `ssh_host_public_key`, the host's OpenSSH public key as its
+type and base64, confirmed independently of the host — from the host's console
+or its provider, say — and the scenario registers it as the host's pin. Without
+it, the host must already hold a pin in the provisioning service, stated by an
+earlier run or captured by an operator who compared the fingerprint the host
+presents ([the operator handbook, "Capturing and rotating a host key"](../operator-handbook.md#capturing-and-rotating-a-host-key));
+the scenario refuses a host with neither before declaring capacity, naming
+`ssh_host_public_key`, and never captures the key a host presents. A reapply
+restates the pin held at registration.
+
+For `e2e_vm_guest_isolation` (section 25), a VM entry adds the optional
+`guest_isolation` section:
+
+- `operator`: `host`, `port`, `user` and `key_path` of a harness-local route to
+  the KVM host's own sshd, whose user may run Python as root through `sudo -n`.
+  The key path is harness-local, separate from `connection.ssh_key_path`, and
+  referenced, never copied. The operator route is pinned to
+  `ssh_host_public_key` when the entry states one; otherwise the key it first
+  presents is trusted for the run;
+- `private_destinations`, optional: `refused` and `listed`, two distinct IPv4
+  addresses in the guest policy's private ranges (`10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), outside the guests'
+  network `192.168.122.0/24`. Neither needs to answer. Host preparation must
+  have been given `listed`, and not `refused`, in
+  `guest_allowed_private_destinations` (section 22,
+  `-e '{"guest_allowed_private_destinations": ["<listed>"]}'`), and `listed`
+  must be an address the host sends to rather than holding for ARP: through a
+  gateway, or answered on its link.
+
+Without the section, the module's host-side stages skip naming it; without
+`private_destinations`, its private-destination stages skip naming that. An
+older harness refuses the section as an unknown field. The committed example
+shows it commented, with invented values.
+
 A bare-metal entry uses `domain: bare_metal`, adds `physical_host_id` and its
 operator-verified `ssh_host_public_key`, and omits `listing_shape`. At most one
 host per domain is allowed. Direct and relay access fields cannot be mixed.
 The target names no relay token or grant key and carries no private host key.
 
-The scenario registers its host with an `ssh` connection at version 2, naming
-`connection.ssh_key_path` as the service's `key_path`. It reconciles an earlier
+The scenario registers its host with an `ssh` connection at version 3, naming
+`connection.ssh_key_path` as the service's `key_path` and the pin as its
+`host_keys`. It reconciles an earlier
 registration with the target; the key itself remains in the service filesystem.
 Git ignores the real target file; never commit it. The model in
 `e2e-tests/src/e2e_harness/real_provisioning_target.py` documents the fields.
@@ -1062,9 +1113,9 @@ and the log records:
 
 A second run against the same stack passes too: it reconciles the host's
 registration and adopts, paused, the listing the first run left, rather than
-creating another. A listing on the scenario's resource that it cannot adopt —
-several, a closed one, or one of another shape, as after the target's capacity
-changes — fails the run naming them; rerun with the target they were made for,
+creating another. Listings on the scenario's resource that it cannot adopt —
+several open ones, only closed ones, one of unknown status, or an open one of
+another shape, as after the target's capacity changes — fail the run naming them; rerun with the target they were made for,
 or against a fresh stack.
 
 The lane keeps the first guest's SSH heartbeat process open while a second guest
@@ -1084,6 +1135,53 @@ restore capacity. Management connectivity must survive. Unreachable SSH is not
 proof of successful revocation. Its relay port may remain quarantined after
 capacity is released. An absent target skips before mutation; skipped stages
 are not qualification evidence.
+
+### Prove guest isolation
+
+`e2e_vm_guest_isolation` proves VM guest isolation on the VM host: it makes the
+real VM scenario's two deals, and while both guests run and the first holds its
+heartbeat, probes from each guest and reads and acts on the host through the
+target's `guest_isolation` operator route (section 24). It restarts libvirtd,
+reloads UFW, and plants the first guest unconverged before running the host
+kit's `arkhai-guest-converge`, so run it only against a host whose guests are
+the run's alone:
+
+```bash
+make -C e2e-tests test-module MODULE=e2e_vm_guest_isolation ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+Beyond section 21's VM host, the run needs the `guest_isolation` section and its
+`private_destinations` as section 24 describes them, and UFW enabled on the
+host, or the reload stage skips. Guest probes become root in each guest with the
+tenant password the deal delivered to its buyer, so the guest's sudo needs no
+change. After its last stage the module logs each observation as made, failed or
+unproven, with what an unproven one names, and the host's libvirt version:
+
+- O1: ARP, ICMP and TCP from one guest to the other, directly and through the
+  gateway, refused;
+- O2: an ARP claim of the other guest's address dropped while its buyer still
+  reaches it, and the filter's parameters in each guest's live definition;
+- O3: DHCP and DNS pass, and another host port is refused by the policy's drop;
+- O4: the metadata address `169.254.169.254` refused by its drop;
+- O5: the refused destination refused by its drop, and the listed one admitted
+  by its accept and seen leaving the host on its routed interface;
+- O6: a buyer from a private address reaching their guest. It is unproven under
+  relay access, naming the route it lacks, and under direct access, naming the
+  create's masquerade, which shows the guest only the host's address;
+- O7: O3 to O5 again after a libvirtd restart and after a UFW reload, with the
+  policy's jumps first;
+- O8: the first guest, planted unconverged, converged with its heartbeat's
+  longest gap at most five seconds, its port isolated, its saved definition
+  carrying the isolation and the filter, and its probes of the other guest
+  refused again;
+- O9: the filter the fixture detached live bound live again. It is unproven,
+  naming the libvirt version, when libvirt refuses the fixture's live filter
+  removal or convergence leaves the filter for the guest's next start.
+
+A refusal counts only when its rule's counter rose across the probe, so a
+failure names the rule that did not count. A run's evidence leaves the
+deployment as a sanitized summary per observation, with its run identifier and
+the host's libvirt version, naming no host, address or credential.
 
 ### Run the qualification scenarios on a candidate
 
@@ -1116,7 +1214,12 @@ Before them, the deployment supplies what they cannot:
 Then run each storefront chart's `helm test`, whose payments-check pod runs
 `check-payments` from the storefront's own image, mounts and secret overlay. A
 failed check is a cause outside the scenarios: fix the deployment, and run no
-module until it passes. Then run the modules, observation 6 after the other two
+module until it passes. A VM storefront whose dispute credential names an
+authority that answers can be checked the same way, its chart's
+mediation-check pod running `check-mediation --origin` where the agent's
+`tests.mediationOrigin` names it ([operator handbook, "Payments access"](../operator-handbook.md#payments-access));
+the qualification needs no such check, since nothing need answer at the pinned
+authority's origin. Then run the modules, observation 6 after the other two
 on the same stack:
 
 ```bash
@@ -1335,16 +1438,20 @@ A changed program/unit restarts the plugin. A config-only issuer/key/range
 change HUP-reloads an already-running unchanged program without restarting
 frps. Initial/program startup does not immediately send HUP. The role waits for
 the listener before preparing frps. frps's first plugin entry requires one
-restart: drain existing leases before introducing it to an active relay.
+restart, and a restart ends every session the server carries. Before
+introducing it to an active relay, drain the server: disable the relay in every
+provisioning service that registers this server, one per operator on a shared
+relay, and wait until each reads `drained: true`. Enable them again once
+admission is proven.
 
 An ordinary role run refuses an existing listener change before publishing
 configuration or switching `current`. HUP retains the bound socket. To relocate
-the native listener, stop admission and drain all affected leases, stop both
-services, preserve the old protected configuration/program selection, and
-perform an explicit operator-managed reinstallation with the new listener and
-matching frps entry. Verify both services and admission before reopening. This
-is separate maintenance, not an automatic role/API migration. Do not delete
-active configuration simply to bypass the refusal during normal operation.
+the native listener, drain the server as above, stop both services, preserve
+the old protected configuration/program selection, and perform an explicit
+operator-managed reinstallation with the new listener and matching frps entry.
+Verify both services and admission before enabling the relays again. This is
+separate maintenance, not an automatic role/API migration. Do not delete active
+configuration simply to bypass the refusal during normal operation.
 
 ### Container relay
 
@@ -1373,9 +1480,12 @@ ops = ["NewProxy"]
 
 There is no repository frps deployment manifest to apply. The operator supplies
 the deployment, namespace and image reference. Wait for the plugin listener,
-then start frps. Changes to frps configuration/version require a drained restart;
-changes to plugin issuer/key/range configuration use HUP. Listener relocation
-requires drained coordinated restart and a matching frps address.
+then start frps. Changes to frps configuration/version require a restart of a
+drained server: disable the relay in every provisioning service that registers
+this server, wait until each reads `drained: true`, restart, and enable them
+again. Changes to plugin issuer/key/range configuration use HUP. Listener
+relocation requires the same drain, a coordinated restart, and a matching frps
+address.
 
 Native installer tests exercise installation/config publication and syntax in
 disposable fixtures. A container campaign proves its actual image/namespace
@@ -1442,19 +1552,49 @@ grant-validity bound has passed.
 
 Read retired keys' `grants_valid_until`. Match a key by the thumbprint printed
 by `frp-grant-admission check <path>`; remove it only once that time has passed,
-or is null because no unreleased lease remains. Drain affected grants before
-narrowing a range, removing an issuer/key, or changing an audience. A registered
-proxy is not rechecked until registration/reconnect: HUP is not revocation.
-Adding a key/issuer or widening a range is non-destructive, but still requires
-the deployed refusal check.
+or is null because no unreleased lease remains. Before narrowing a range,
+removing a key or issuer that still has grants in use, or changing an audience,
+drain the relay: disable it and wait until its read reports `drained: true`,
+then enable it again after the change. A registered proxy is not rechecked
+until registration/reconnect: HUP is not revocation. Adding a key/issuer or
+widening a range is non-destructive, but still requires the deployed refusal
+check.
 
 For a compromised signing key, choose explicitly: remove it immediately and
 refuse affected tenants at their next reconnect until their leases end, or keep
-it through lease drain while the attacker can sign within that issuer's range
-and audience. Neither choice reissues live grants. A leaked client token has no
-live-rotation shortcut: stop new admission, drain every lease across all
-operators sharing it, rotate the token on frps and every client baseline, then
-verify before reopening. Coordinated live credential reissue is not provided.
+it until the leases it signed have ended, as its `grants_valid_until` reports,
+while the attacker can sign within that issuer's range and audience. Neither
+choice reissues live grants. A leaked client token has no live-rotation
+shortcut: disable the relay in every operator's provisioning service that
+registers this server, wait until each reads `drained: true`, rotate the token
+on frps and every client baseline, send each service the signed
+`POST /api/v1/relays/{relay_id}/token`, verify, then enable the relays again.
+Coordinated live credential reissue is not provided.
+
+### Retire a relay
+
+Nothing in the provisioning service deletes a relay; disabling one drains it.
+Retiring one takes the site's administrator, who administers the relay in the
+provisioning service, and the relay's operator, who runs its server; one person
+may be both. Step 3 is the relay operator's:
+
+1. Disable the relay, through its definition entry's `enabled: false` when the
+   mounted document lists it, since an API disable is reverted when the
+   document next changes. Its pools' hosts then take no new delivery, and every
+   delivery it carries runs to its end.
+2. Wait until `GET /api/v1/relays/{relay_id}` reports `drained: true`.
+   `active_lease_count` shows the leases remaining, and
+   `GET /api/v1/relays/{relay_id}/leases` names what holds it open. `drained`
+   does not wait for released grants to expire: a released lease has no proxy
+   left, and no grant admits anything once the server or its keys are gone.
+3. Remove the relay server. On a shared relay, remove instead this relay's
+   active and retired keys and its port range from the admission plugin's
+   issuer configuration, check and reload it, and leave the other operators'
+   issuers in place.
+4. Point any pool still referencing the relay at another relay.
+5. Enable the relay again only once a server runs at its rendezvous. The
+   service never checks that a server exists, so an enabled relay with no
+   server sells capacity nothing can deliver.
 
 ### Contain access when teardown cannot reach a host
 
@@ -1493,7 +1633,7 @@ claims are sender-controlled; do not treat them as authenticated identities.
 
 ## 29. Qualify an ordinary Arkhai purchase
 
-Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence.
+Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Do not import a payment-specific full-deal driver merely to obtain operator visibility. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence, and correlate there the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations; leave credentials, private service records, and raw deployment data out of any public summary. What the evidence must rest on is [`qualification-evidence.md`](../guidance/repository/qualification-evidence.md).
 
 Before rollout, check the rebuilt consumer against both the currently deployed payment authority responses and the selected publication. If one check is reused for both, establish that the contracts are identical; if they differ, record a compatible rollout order before making a change. Separately verify retained historical signed bytes. Do not deploy or downgrade the authority to match the consumer.
 
@@ -1529,7 +1669,7 @@ market --config <buyer.toml> bare-metal access --run-id <run-id> --config <buyer
 Check the delivered host key, tenant identity and privilege, wrong-key refusal, and the workload on the paid guest. After the ordinary lease expires, independently observe successful teardown, absence of the guest/access, and restored capacity. A bare-metal buyer can request the ordinary teardown/recovery path with:
 
 ```bash
-market --config <buyer.toml> bare-metal teardown --run-id <run-id> --config <buyer.toml>
+market --config <buyer.toml> bare-metal end --run-id <run-id> --config <buyer.toml>
 ```
 
 Do not equate an accepted receipt with successful delivery or a payment hold with a refund. Keep raw authority responses and deployment data restricted; publish sanitized findings and explicit unrun items. A supplemental network-policy result is admissible only from an actual operator-only CPU guest on the same paid deployment, with the pinned guest base, actual default bridge and virtio NIC, and loaded policy structure bound to that deployment. A namespace-only probe is not a substitute. That guest proves only finite policy selectors it exercises and none of the paid tenant's identity, payment, grant, GPU, delivery, or lifecycle facts. Reusing this method does not claim that an older named marker ran.

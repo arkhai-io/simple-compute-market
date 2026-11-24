@@ -43,7 +43,12 @@ from tests.e2e.roles.scenarios.apicredits.conftest import lane_setting
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_credits_payment_deal
+pytestmark = [
+    # The payments target first, so a run without one is a blocked skip before
+    # the doubles' evidence is read.
+    pytest.mark.usefixtures("payments_config", "lane_doubles_evidence"),
+    pytest.mark.e2e_credits_payment_deal,
+]
 
 
 def _registry_pin(prefix: str) -> tuple[str, dict[str, Any]]:

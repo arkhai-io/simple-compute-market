@@ -32,10 +32,13 @@ VM_CLEANUP = ("ensure_storefront_resumed", "reap_buyer_settle_subprocess", "rele
 #: The real-provisioning VM module, and its cleanup in place of the lane's.
 REAL_VM_MODULE = SCENARIOS / "vms" / "test_real_provisioning_deal.py"
 REAL_VM_CLEANUP = ("ensure_storefront_resumed", "recover_failed_run")
+#: The guest-isolation proof, which extends the real VM deal on its fixtures.
+GUEST_ISOLATION_MODULE = SCENARIOS / "vms" / "test_vm_guest_isolation.py"
 #: Every VM module against the real-provisioning target, and the cleanup each
 #: takes in place of the lane's.
 REAL_VM_MODULES = {
     REAL_VM_MODULE: REAL_VM_CLEANUP,
+    GUEST_ISOLATION_MODULE: REAL_VM_CLEANUP,
     SCENARIOS / "vms" / "test_vm_qualification.py": (
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "purchase_cleanup",
     ),
@@ -53,6 +56,23 @@ QUALIFICATION_GATES = {
     SCENARIOS / "vms" / "test_real_provisioning_reapply.py": (
         "payments_config", "real_vm_target", "real_bare_metal_target", "real_executions",
     ),
+}
+
+#: The live verification modules, and the prerequisites each checks before any
+#: hold: the payments target, for a module filing a case the mediation target,
+#: the provenance, mock provisioning and the payer its deal pays from.
+LIVE = SCENARIOS / "vms" / "live"
+_LIVE_PREREQUISITES = ("payments_config", "live_provenance", "mock_provisioning")
+_LIVE_DISPUTE_PREREQUISITES = (
+    "payments_config", "mediation_target", "live_provenance", "mock_provisioning",
+)
+LIVE_GATES = {
+    LIVE / "test_buyer_stop.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_funds_exhausted.py": (*_LIVE_PREREQUISITES, "funded_rate_payer"),
+    LIVE / "test_preemption.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_term_end.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_seller_filing.py": (*_LIVE_DISPUTE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_buyer_contested_case.py": (*_LIVE_DISPUTE_PREREQUISITES, "funded_buyer"),
 }
 
 _FIXTURE_LINE = re.compile(r"^\s+(SETUP|TEARDOWN)\s+M (\S+)(?: \(fixtures used: (.*)\))?$")
@@ -156,7 +176,8 @@ def released_too_early(module: dict, finalisers: dict[str, bool]) -> list[str]:
 
 
 def _scenario_modules() -> list[Path]:
-    return [path for lane in LANES for path in sorted((SCENARIOS / lane).glob("test_*.py"))]
+    # A lane's modules may sit in a package of their own under its directory.
+    return [path for lane in LANES for path in sorted((SCENARIOS / lane).rglob("test_*.py"))]
 
 
 @pytest.fixture(scope="module")
@@ -188,8 +209,8 @@ def test_holds_are_released_after_the_modules_other_cleanup(path, plans, finalis
 
 @pytest.mark.parametrize(
     "path",
-    sorted(path for path in (SCENARIOS / "vms").glob("test_*.py") if path not in REAL_VM_MODULES),
-    ids=lambda path: path.name,
+    sorted(path for path in (SCENARIOS / "vms").rglob("test_*.py") if path not in REAL_VM_MODULES),
+    ids=lambda path: str(path.relative_to(SCENARIOS)),
 )
 def test_every_vm_module_still_runs_the_lane_cleanup(path, plans):
     set_up = {name for name, _ in plans[str(path.relative_to(PROJECT))]["setup"]}
@@ -220,11 +241,30 @@ def test_a_qualification_module_checks_both_targets_before_any_hold(path, plans)
     assert gates == sorted(gates) and max(gates) < min(holds), order
 
 
-def test_the_real_vm_module_checks_its_target_and_execution_before_any_hold(plans):
+def test_every_live_module_is_held_to_the_gate_check() -> None:
+    assert set(LIVE_GATES) == set(LIVE.glob("test_*.py"))
+
+
+@pytest.mark.parametrize("path", sorted(LIVE_GATES), ids=lambda path: path.name)
+def test_a_live_module_checks_its_prerequisites_before_any_hold(path, plans):
+    """A hold pauses a shared service when it is set up, and the module buys
+    only after its holds, so a topology that misses a requirement leaves the
+    observation unproven, with nothing bought at the live target, only if every
+    prerequisite is checked first."""
+    order = [name for name, _ in plans[str(path.relative_to(PROJECT))]["setup"]]
+    holds = [order.index(name) for name in order if name in HOLD_FIXTURE_NAMES]
+    assert holds, order
+    gates = [order.index(name) for name in LIVE_GATES[path]]
+    assert gates == sorted(gates) and max(gates) < min(holds), order
+
+
+@pytest.mark.parametrize("module", [REAL_VM_MODULE, GUEST_ISOLATION_MODULE],
+                         ids=lambda path: path.name)
+def test_each_real_vm_deal_module_checks_its_target_and_execution_before_any_hold(plans, module):
     """A hold pauses a shared service when it is set up, so the module writes
     nothing to the stack only if its target is validated and its VM execution
     found real first."""
-    order = [name for name, _ in plans[str(REAL_VM_MODULE.relative_to(PROJECT))]["setup"]]
+    order = [name for name, _ in plans[str(module.relative_to(PROJECT))]["setup"]]
     holds = [order.index(name) for name in order if name in HOLD_FIXTURE_NAMES]
     assert holds, order
     assert order.index("real_vm_target") < order.index("real_vm_execution") < min(holds), order

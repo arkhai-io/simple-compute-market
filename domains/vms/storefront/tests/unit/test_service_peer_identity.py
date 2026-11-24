@@ -19,6 +19,7 @@ import market_storefront.container as container
 from core_storefront.auth import AuthError
 from core_storefront.service_peers import ServicePeerTrust
 from core_storefront.sqlite_client import SQLiteClient
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.middleware.service_peer_auth import (
     _CALLBACK_OPERATIONS,
     _authenticate,
@@ -79,6 +80,7 @@ def _headers(*, signer, operation, resource, body, role="service"):
 
 
 def _compose(tmp_path, monkeypatch):
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"))
     service = _SERVICE_SIGNER
     seller = _SELLER_SIGNER

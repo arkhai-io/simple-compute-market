@@ -7,9 +7,10 @@ import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
+import injected_time
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
@@ -25,7 +26,7 @@ from market_alkahest import (
     json_rpc_call,
     wallet_account_address,
 )
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, payments_livemode
 from market_capacity_publication import (
     RESOURCE_POOL,
     SiteDerivationLog,
@@ -80,6 +81,7 @@ from .lifecycle_steps import (
     site_projection_status,
 )
 from .listing_source_check import build_listing_source_check
+from .migrations import require_compatible_storefront_database
 from .negotiation import default_seller_round_hook, seller_chain_check
 from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .pool_overrides import (
@@ -130,10 +132,6 @@ def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
     stage_event("claims", event, **fields)
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchdogPolicy:
     """The negotiation watchdog's timeout and sweep interval, as configured."""
     return NegotiationWatchdogPolicy(
@@ -169,6 +167,12 @@ class BareMetalStorefrontRuntime:
     payment_reconciliation_interval_seconds: float = field(
         default_factory=lambda: packaged_settings().payment_reconciliation_interval
     )
+    #: How often the kit's servicing cycle runs (``deal-servicing``) and unfinished
+    #: deliveries are re-driven (``delivery-recovery``); ``None`` runs each at the
+    #: payment reconciliation interval, so a configuration stating only that key
+    #: runs all three at it.
+    deal_servicing_interval_seconds: float | None = None
+    delivery_recovery_interval_seconds: float | None = None
     #: When an idle negotiation is abandoned, and how often that is swept for.
     negotiation_watchdog: NegotiationWatchdogPolicy = field(
         default_factory=lambda: _watchdog_policy(packaged_settings())
@@ -218,7 +222,12 @@ class BareMetalStorefrontRuntime:
     )
     #: The time a confirmation's age is measured at.
     source_confirmation_clock: Callable[[], datetime] = field(
-        default=_utc_now, repr=False, compare=False
+        default=injected_time.now_datetime, repr=False, compare=False
+    )
+    #: The Unix-second clock deal servicing reads: end service's admission, the
+    #: payment watch's observation instants and the delivery path's steps.
+    lifecycle_clock: Callable[[], int] = field(
+        default=injected_time.now, repr=False, compare=False
     )
     #: The live Alkahest client map, which ``alkahest_chain_probe`` updates in
     #: place as it rebuilds a client; every consumer holds this one map.
@@ -238,11 +247,22 @@ class BareMetalStorefrontRuntime:
     negotiation_policies: Any = None
     #: Every registry publication writes to; their reachability is a status check.
     registry_configuration: BareMetalRegistryConfiguration | None = None
-    #: The storefront's publication clauses, which a pool's override replaces.
+    #: The storefront's publication clauses, the lowest tier a listing's clauses
+    #: resolve through.
     publication_clauses: tuple[SettlementPublicationClause, ...] = ()
+    #: The configured clauses per GPU model, ``[pricing.defaults.gpu.<model>]``,
+    #: above ``publication_clauses`` and below the pool's hints.
+    publication_clauses_by_model: Mapping[str, tuple[SettlementPublicationClause, ...]] = field(
+        default_factory=dict
+    )
     #: The maximum lease duration a listing publishes unless its pool's override
-    #: states one; a pool for which neither is positive is held at publication.
+    #: or hint states one; a pool for which none is positive publishes with no
+    #: relative limit.
     default_max_duration_seconds: int | None = None
+    default_available_until_utc: str | None = None
+    #: Whether ``[Settlement.arkhai_payments]`` declares ``livemode = true``,
+    #: which startup warns of beside an injected time source.
+    payments_livemode: bool = False
     # Composes one publication cycle for the publication loop's timer and step;
     # None composes it from this runtime through ``compose_publication_cycle``.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
@@ -274,10 +294,7 @@ class BareMetalStorefrontRuntime:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "loops", self.loop_controller_factory())
-        repository = SettlementSQLiteRepository(
-            self.db.db_path,
-            apply_migrations=False,
-        )
+        repository = SettlementSQLiteRepository(self.db.db_path)
         clients = (
             self.settlement_composition.runtime_clients()
             if self.settlement_composition is not None
@@ -337,6 +354,14 @@ class BareMetalStorefrontRuntime:
                     else {}
                 ),
                 seller_stages=self.domain.settlement.seller_stages,
+                rate_servicing=(
+                    self.settlement_composition.rate_servicing
+                    if self.settlement_composition is not None else None
+                ),
+                rate_term_projections=(
+                    self.settlement_composition.rate_term_projections
+                    if self.settlement_composition is not None else None
+                ),
             ),
         )
         object.__setattr__(self, "lifecycle", BareMetalLifecycle(self))
@@ -507,15 +532,15 @@ class BareMetalStorefrontRuntime:
         """Build settlement from the configured mechanisms and their resources.
 
         A stage that verifies and delivers in one call (payment settlement)
-        starts fulfillment itself once the receipt verifies, so the service
-        carries fulfillment's start when the site authorities are composed.
+        drives delivery itself once the receipt verifies, so the service
+        carries delivery's entry when the site authorities are composed.
         """
         composition = self.settlement_composition
         if composition is None:
             raise RuntimeError("no bare-metal settlement mechanism is configured")
         if self.capacity_client is None or self.fulfillment_client is None:
             return self._settlement_service()
-        return self._settlement_service(self.fulfillment_service().begin)
+        return self._settlement_service(self.fulfillment_service().deliver)
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
         """Build durable fulfillment over exact selected-site clients."""
@@ -527,6 +552,7 @@ class BareMetalStorefrontRuntime:
             fulfillment_client=self.fulfillment_client,
             read_verified_evidence=self._settlement_service().verified_evidence,
             lifecycle=self.lifecycle,
+            domain=self.domain,
         )
 
     def contact_settlement_config(self) -> ContactSettlementConfig | None:
@@ -565,6 +591,7 @@ class BareMetalStorefrontRuntime:
         if self.capacity_client is None:
             return None
         state = self.site_projections
+
         return PoolOverrideService(
             store=SQLitePoolOverrideStore(self.db.db_path),
             site_ids=lambda: [binding.site_id for binding in self.site_bindings],
@@ -574,7 +601,7 @@ class BareMetalStorefrontRuntime:
                     BareMetalPoolOverrideContribution(
                         configured_max_duration_seconds=lambda: positive_lease_bound(
                             self.default_max_duration_seconds
-                        )
+                        ),
                     )
                 )
             },
@@ -705,6 +732,12 @@ class BareMetalStorefrontRuntime:
             if self.settlement_composition is not None
             else None
         )
+        # Each open deal the configuration composes no adapter for, with the
+        # configuration that would.
+        report["unserviceable_deals"] = [
+            {"negotiation_id": negotiation_id, "reason": reason}
+            for negotiation_id, reason in await asyncio.to_thread(self.lifecycle.seller.unserviceable)
+        ]
         return report
 
     def _disclosures(self) -> dict[str, dict[str, object]]:
@@ -887,6 +920,7 @@ def build_runtime_from_configuration(
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
         disputes=RegistryDisputePolicy.from_document(active.model_dump()),
+        default_penalty_periods=active.pricing.default_premature_stop_penalty_periods,
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,
@@ -908,6 +942,16 @@ def build_runtime_from_configuration(
         publication_clauses = compile_publication_clauses(active.pricing.settlements)
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"[pricing].settlements do not compile: {exc}") from exc
+    publication_clauses_by_model: dict[str, tuple[SettlementPublicationClause, ...]] = {}
+    for model, terms in active.pricing.defaults.gpu.items():
+        if terms.settlements is None:
+            continue
+        try:
+            publication_clauses_by_model[model] = compile_publication_clauses(terms.settlements)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"[pricing.defaults.gpu.{model}].settlements do not compile: {exc}"
+            ) from exc
     storefront_url = active.storefront_url
     try:
         site_bindings = parse_site_bindings(
@@ -915,12 +959,11 @@ def build_runtime_from_configuration(
         )
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"bare-metal storefront site bindings are invalid: {exc}") from exc
-    db = SQLiteClient(
-        active.db_path,
-        domain=selected_domain,
-        local_listing_principal=principal,
-        expected_legacy_sellers=(storefront_url,),
-    )
+    # Before anything opens the database: `bare-metal-storefront-migrate`
+    # builds it, and nothing here issues DDL, so a database not exactly at the
+    # chain is refused naming the command, and none is created.
+    require_compatible_storefront_database(active.db_path)
+    db = SQLiteClient(active.db_path, domain=selected_domain)
     # Built here and seeded when the server starts (``seed_service_peer_trust``),
     # so composing a runtime writes nothing to the identity state.
     service_peer_trust = ServicePeerTrust(db.db_path, active.service_peer_configs())
@@ -959,7 +1002,10 @@ def build_runtime_from_configuration(
             auth=active.registry_auth(),
         ),
         publication_clauses=publication_clauses,
+        publication_clauses_by_model=publication_clauses_by_model,
         default_max_duration_seconds=active.pricing.default_max_duration_seconds,
+        default_available_until_utc=active.pricing.default_available_until_utc,
+        payments_livemode=payments_livemode(settlement_config),
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,
@@ -983,5 +1029,7 @@ def build_runtime_from_configuration(
         source_confirmation_seconds=active.capacity.confirmation_window_seconds,
         settlement_servicing_interval_seconds=active.settlement_servicing_interval_seconds,
         payment_reconciliation_interval_seconds=active.payment_reconciliation_interval,
+        deal_servicing_interval_seconds=active.deal_servicing_interval_seconds,
+        delivery_recovery_interval_seconds=active.delivery_recovery_interval_seconds,
         negotiation_watchdog=_watchdog_policy(active),
     )

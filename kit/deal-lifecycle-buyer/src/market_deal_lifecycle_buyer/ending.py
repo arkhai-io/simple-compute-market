@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from market_deal_lifecycle.acknowledgements import verify_end_acknowledgement
 from market_deal_lifecycle.adapters import DeliveryEndIntent
@@ -29,6 +29,8 @@ class EndDeliveryProgress(WireModel):
     delivery: LifecycleOutcome = Pending(reason="surrender not yet attempted")
     case: LifecycleOutcome = Pending(reason="filing not yet attempted")
     acknowledgement: EndDeliveryAcknowledgement | None = None
+    mode: Literal["normal_stop", "immediate_surrender"] = "immediate_surrender"
+    hint: LifecycleOutcome | None = None
 
 
 class EndPlan(WireModel):
@@ -70,6 +72,12 @@ class BuyerEndJournal:
             raise ValueError("buyer end journal names a different committed deal")
         return plan
 
+    def read(self, negotiation_id: str) -> EndPlan | None:
+        """The deal's journaled end, or ``None`` when no end has begun."""
+        with sqlite3.connect(self.path, timeout=30) as db:
+            row = db.execute("SELECT plan FROM buyer_delivery_ends WHERE negotiation_id=?", (negotiation_id,)).fetchone()
+        return self._decode_plan(row[0]) if row is not None else None
+
     def save(self, previous: EndPlan, **updates) -> EndPlan:
         updated = previous.model_copy(update={**updates, "revision": previous.revision + 1})
         negotiation_id = previous.progress.negotiation_id
@@ -80,6 +88,36 @@ class BuyerEndJournal:
             )
             row = db.execute("SELECT plan FROM buyer_delivery_ends WHERE negotiation_id=?", (negotiation_id,)).fetchone()
         return self._decode_plan(row[0])
+
+
+async def end_rate(lifecycle: BuyerLifecycle, negotiation_id: str) -> EndDeliveryProgress:
+    """Persist the ordinary stop before I/O; keep paid notice service intact."""
+    deal = lifecycle._deal(negotiation_id)
+    journal = lifecycle.end_journal
+    if journal is None:
+        raise ValueError("rate end requires the durable buyer end journal")
+    key = hashlib.sha256(canonical_json(["buyer-end", negotiation_id, deal.commitment_ref])).hexdigest()
+    plan = journal.begin(EndPlan(
+        commitment_ref=deal.commitment_ref, operation_key=key,
+        progress=EndDeliveryProgress(
+            negotiation_id=negotiation_id, observed_at=lifecycle.clock(), mode="normal_stop",
+            delivery=Pending(reason="service retained until the effective authority stop"),
+            case=Rejected(reason="ordinary rate stop does not file an immediate-surrender case"),
+        ),
+        stop=LifecycleCommand(negotiation_id=negotiation_id, kind="stop", operation_key=key + ":stop"),
+    ))
+    if plan.progress.mode == "immediate_surrender":
+        return await end_delivery(lifecycle, negotiation_id)
+    if not isinstance(plan.progress.payment, (Accepted, Rejected)):
+        try:
+            payment = await lifecycle.submit(plan.stop)
+        except Exception:
+            payment = Unknown(reason="payment stop is unreachable; billing continues until it lands")
+        plan = journal.save(plan, progress=plan.progress.model_copy(update={"payment": payment}))
+    if not isinstance(plan.progress.payment, Rejected):
+        hint = await lifecycle._hint(plan.stop, plan.progress.payment)
+        plan = journal.save(plan, progress=plan.progress.model_copy(update={"hint": hint}))
+    return plan.progress
 
 
 async def end_delivery(lifecycle: BuyerLifecycle, negotiation_id: str) -> EndDeliveryProgress:
@@ -93,6 +131,10 @@ async def end_delivery(lifecycle: BuyerLifecycle, negotiation_id: str) -> EndDel
         progress=EndDeliveryProgress(negotiation_id=negotiation_id, observed_at=lifecycle.clock()),
         stop=LifecycleCommand(negotiation_id=negotiation_id, kind="stop", operation_key=key + ":stop"),
     ))
+    if plan.progress.mode != "immediate_surrender":
+        plan = journal.save(plan, progress=plan.progress.model_copy(update={
+            "mode": "immediate_surrender", "case": Pending(reason="filing not yet attempted"),
+        }))
     observed = canonical_json({
         "kind": "end_delivery", "negotiation_id": negotiation_id,
         "operation_key": key, "observed_at": plan.progress.observed_at,

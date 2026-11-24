@@ -9,9 +9,9 @@ baked deployments.
 """
 from __future__ import annotations
 
-import time
 import uuid
 
+import injected_time
 import pytest
 from alkahest_py import AlkahestClient, ArbitrationMode
 from eth_account import Account
@@ -87,7 +87,7 @@ async def test_an_escrow_released_by_a_trusted_oracle_is_collected() -> None:
         "demand": bytes.fromhex(demand.removeprefix("0x")),
     }
     escrow = await buyer.erc20.escrow.default.permit_and_create(
-        price, arbiter, int(time.time()) + 3600
+        price, arbiter, injected_time.now() + 3600
     )
     escrow_uid = escrow["log"]["uid"]
     assert escrow_uid

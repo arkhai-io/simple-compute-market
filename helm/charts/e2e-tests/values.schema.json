@@ -23,6 +23,10 @@
         "markers": {"type": "string"}
       }
     },
+    "config": {
+      "description": "End-to-end settings passed through whole as the e2e-tests profile, a ConfigMap: a key ending in credential, _key (private_key among them), token or secret, in any case, is refused at any depth; a setting needing a credential names the e2e-secret key holding it.",
+      "$ref": "#/definitions/publicSettings"
+    },
     "seller": {"$ref": "#/definitions/publicPrincipal"},
     "buyer": {"$ref": "#/definitions/buyerRuntime"},
     "payments": {
@@ -42,6 +46,20 @@
     }
   },
   "definitions": {
+    "publicSettings": {
+      "type": "object",
+      "propertyNames": {
+        "not": {"pattern": "([cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|_[kK][eE][yY]|[tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT])$"}
+      },
+      "additionalProperties": {"$ref": "#/definitions/publicValue"}
+    },
+    "publicValue": {
+      "anyOf": [
+        {"$ref": "#/definitions/publicSettings"},
+        {"type": "array", "items": {"$ref": "#/definitions/publicValue"}},
+        {"not": {"type": ["object", "array"]}}
+      ]
+    },
     "buyerRuntime": {
       "type": "object",
       "additionalProperties": false,

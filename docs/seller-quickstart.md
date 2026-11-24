@@ -39,9 +39,9 @@ cd simple-compute-market
 make build-seller
 ```
 
-`build-seller` builds the two images you need (`arkhai:storefront`,
-`arkhai:compute-provisioning`) and the wheels they consume — ~3 minutes on a
-warm machine. Build on Linux; macOS hits a known cross-platform
+`build-seller` builds the images you need (`arkhai:storefront`,
+`arkhai:bare-metal-storefront`, `arkhai:compute-provisioning`) and the release's
+wheels they are built from — ~3 minutes on a warm machine. Build on Linux; macOS hits a known cross-platform
 `uv sync` issue.
 
 ## 2. Configure
@@ -144,7 +144,7 @@ priority = ["arkhai.payments.v1"]
 [Settlement.arkhai_payments]
 enabled = true
 service_url = "https://<PAYMENTS_SERVICE>"
-service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
+service_identity = { scheme = "ed25519", identifier = "<SERVICE_RECEIPT_IDENTITY>" }
 fee_bps = 250
 livemode = true                          # false against the public test-mode service
 # api_key goes in the Secret overlay, storefront.secrets.toml, never here.
@@ -152,9 +152,13 @@ livemode = true                          # false against the public test-mode se
 
 [pricing]
 settlements = [
-  { mechanism = "arkhai.payments.v1", asset = "USD/2", rate = "200", per = "hour", mechanism_input = { payee_account = "<YOUR_PAYEE_ACCOUNT>", asset = "USD/2" } },
+  { mechanism = "arkhai.payments.v1", asset = "USD/2", rate = "200", per = "hour", mechanism_input = { payee_account = "<YOUR_PAYEE_ACCOUNT>", asset = "USD/2", delivery_deadline_seconds = 1800, dispute_window_seconds = 1296000 } },
 ]
 ```
+
+A payments clause must state its `dispute_window_seconds`, and states a
+`delivery_deadline_seconds` too, without which a default buyer refuses its
+options; "Offering on-demand and spot" below explains both.
 
 These clauses are the storefront-wide terms. A pool's own `pricing` declaration
 at its site, and the storefront's per-pool overrides, take precedence over them;
@@ -165,7 +169,7 @@ The receipt-signing identity and fee policy are trusted service configuration.
 Dispute authorities are root `[[Dispute]]` preferences followed by the registry's
 recommendations (enabled by default for a storefront), not a payments-service
 setting; an empty resolved list is reported at startup. See
-[dispute authority preferences](development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
+[dispute authority preferences](../openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences).
 The accepted option fixes its dispute authority for settlement and refunds.
 The API key is a secret setting: state it as `[Settlement.arkhai_payments]`
 `api_key` in the Secret overlay `storefront.secrets.toml`, never in the public
@@ -174,7 +178,12 @@ payments client, and nothing else in the process, trust a private CA for the
 service. Once the storefront runs, `market-storefront check-payments --account
 <YOUR_PAYEE_ACCOUNT>` reads that account's balance with exactly the client the
 storefront builds, and reports the first step that failed (see
-[settlement consumer configuration](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover)).
+[settlement consumer configuration](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)).
+A seller holding a `[[DisputeCredential]]` in the same overlay — with its own
+`ca_bundle_path` when the authority's certificate chains to a private CA — runs
+`market-storefront check-mediation --origin <the authority's origin>` the same
+way: one authenticated read at that authority with exactly the credential the
+storefront would use.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
@@ -204,7 +213,8 @@ Region is a physical fact, so only the pool states it; no override does. A
 pool that states no region publishes nothing new and leaves the listings it
 already published unrefreshed; system status reports it among its site's
 `publication_derivation` holds as `pool_region_missing`.
-`DEPLOYMENT_AND_CONFIG.md`'s "Storefront listing shapes and pool overrides"
+`storefront-publication`'s
+["Storefront listing shapes and pool overrides"](../openspec/specs/storefront-publication/configuration.md#storefront-listing-shapes-and-pool-overrides)
 describes each term. Capacity admission, physical selection, prepared
 execution, and teardown are owned by the selected provisioning site.
 
@@ -300,13 +310,27 @@ document declaring them before it starts.
        pool_id: vm-default
        connection:
          kind: ssh
-         version: 2
+         version: 3
          public:
            ssh_host: 10.0.0.5
            public_host: 203.0.113.9
            ssh_user: ubuntu
            key_path: /home/appuser/.ssh/id_ed25519
+           host_keys:
+             - ssh-ed25519 <base64 of the host's public key>
    ```
+
+   `host_keys` is the host's pin: its OpenSSH public keys, each its type and
+   base64 without a comment, as `/etc/ssh/ssh_host_ed25519_key.pub` on the host
+   holds it. Read it from the host's console or your provider, not over the
+   network you are protecting. The provisioning service checks the host against
+   it before every job and refuses a host presenting another key, or none
+   pinned, before the job starts. You may leave `host_keys` out and capture the
+   key instead once the service runs: its connectivity check reports the key
+   the host presents, and you record it only after comparing its fingerprint
+   with the one the host shows you (the operator handbook's
+   ["Capturing and rotating a host key"](operator-handbook.md#capturing-and-rotating-a-host-key)).
+   Until a host is pinned, no job runs against it.
 
    The provisioning service reconciles this document at startup whenever it
    changes: edit it and restart the service, and the hosts it names are
@@ -374,12 +398,37 @@ document declaring them before it starts.
    `libvirtd` is running. The playbook handles cloud-init, virt-install,
    and SSH port-forward NAT.
 
+   The host runs libvirt 6.1 or later with the nwfilter driver's
+   `clean-traffic` filter, and virt-install 3.0 or later; host preparation
+   installs `ebtables`, and refuses a host lacking any of them, naming each,
+   since each guest's isolation needs them.
+
    The host is x86-64 with hardware virtualization (`vmx` or `svm` in its CPU
    flags) and outbound network access. A scratch create uses one pinned, dated
    release of the Ubuntu Noble x86-64 cloud image and checks its SHA-256 before it
    backs any disk, so it refuses another architecture before touching the host, and
    refuses an image file at the pinned path whose digest differs until you remove
    it. The VM IaC README's "Prerequisites" says how to move the pin.
+
+4. Guests on one host are isolated from each other. Each guest's bridge port is
+   isolated and libvirt's `clean-traffic` filter holds it to its own addresses;
+   on its host a guest reaches only DHCP and DNS, and it reaches no link-local
+   address, a cloud's metadata service among them, and no private range
+   (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`): those are
+   your networks, your management route and your cloud credentials. Replies to
+   a buyer connecting from a private address pass. If guests should reach a
+   private destination, such as a package mirror on your LAN, list it when you
+   prepare the host:
+
+   ```bash
+   ansible-playbook -i <inventory> playbooks/host-kit/vm-setup.yaml \
+     -e '{"guest_allowed_private_destinations": ["10.20.0.8"]}'
+   ```
+
+   Each entry is an IPv4 address or CIDR block. Preparing a host also converges
+   every guest already running on it to an isolated, filtered port without
+   interrupting its sessions, and names any guest it could not converge, with
+   the reason. The VM IaC README's "Guest network isolation" describes both.
 
 ## 5. Bring it up
 
@@ -475,56 +524,137 @@ A buyer can now run
 `market buy --resource 'gpu_model=H200' --settlement 'mechanism=alkahest.v1'`
 and receive the connection details of a VM created on one of your hosts.
 
+## Offering on-demand and spot
+
+A storefront settling in Arkhai payments can also sell VMs by the period: an
+on-demand option, which runs until the buyer stops it or its balance runs out, and
+a spot option, which the seller may also stop after a notice. Both are paid period
+by period from the buyer's prepaid payments balance, up to the agreed term. The VM
+storefront chart's production example,
+[`helm/charts/storefront/examples/production-values.yaml`](../helm/charts/storefront/examples/production-values.yaml),
+offers both. Under Compose, add these tables to the payments-only configuration
+above, in place of its `[pricing]` table:
+
+```toml
+[Settlement.rate_servicing.arkhai_payments]
+treatments = ["charged", "returned"]
+setup = false
+
+[pricing]
+default_max_duration_seconds = 86400     # the longest deal: a day
+
+# On-demand: USD 1.00 an hour, paid by the hour.
+[[pricing.settlements]]
+mechanism = "arkhai.payments.v1"
+asset = "USD/6"
+rate = "1.00"
+per = "hour"
+recurring = { period = "PT1H", reserve_ahead_seconds = 3600 }
+
+[pricing.settlements.mechanism_input]
+payee_account = "<YOUR_PAYEE_ACCOUNT>"
+asset = "USD/6"
+approval_window = "PT10M"
+delivery_deadline_seconds = 1800
+dispute_window_seconds = 1296000
+
+# Spot: the same, and the seller may stop two minutes after its notice.
+[[pricing.settlements]]
+mechanism = "arkhai.payments.v1"
+asset = "USD/6"
+rate = "1.00"
+per = "hour"
+recurring = { period = "PT1H", reserve_ahead_seconds = 3600, payee_notice_seconds = 120 }
+
+[pricing.settlements.mechanism_input]
+payee_account = "<YOUR_PAYEE_ACCOUNT>"
+asset = "USD/6"
+approval_window = "PT10M"
+delivery_deadline_seconds = 1800
+dispute_window_seconds = 1296000
+```
+
+- **The declaration.** `[Settlement.rate_servicing.arkhai_payments]` names the
+  partial-period treatments the storefront services: `charged`, the buyer's stop
+  paying for the period it started, and `returned`, a seller's stop and the term end
+  returning the period in progress, which are the treatments the shipped presets
+  price. `setup = false` offers no setup charge beside the rate. Without the table no
+  recurring option publishes
+  ([settlement consumer configuration](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)).
+- **The term.** A recurring option needs a finite term: `default_max_duration_seconds`,
+  or a pool override's `max_duration_seconds`, bounds the longest deal, which
+  must leave room for the approval window, the delivery deadline and a whole period.
+  With no bound, every recurring clause is refused (`recurring_horizon_unbounded`).
+- **The clauses.** `recurring` makes a clause recurring: `period` is the billing
+  period, `reserve_ahead_seconds` how far ahead the buyer's balance is reserved, and
+  `payee_notice_seconds`, the seller's notice, makes the option spot. An on-demand
+  option carries a premature-stop penalty, which a default buyer requires: the price
+  of `[pricing].default_premature_stop_penalty_periods` periods (24 unless stated),
+  or the clause's own `recurring.premature_stop_penalty` in the asset's minor units.
+  It is collectible only from earnings of yours the payments service still holds.
+- **The delivery deadline.** `delivery_deadline_seconds` in the payments clause is
+  the deadline every option promises: the VM is active within it after the buyer's
+  approval, or the agreed start if later. A default buyer refuses an option
+  promising none. The storefront enforces it: a deal not delivered by then is
+  recorded as the seller's non-delivery and filed with the deal's dispute authority,
+  and its lease ended. The site does not enforce it, so while the storefront is not
+  servicing such a deal, its lease keeps its capacity until the operator ends it or
+  the term ends
+  ([operator handbook, "Serving rate deals"](operator-handbook.md#serving-rate-deals)).
+- **The dispute window.** `dispute_window_seconds` must cover the delivery deadline
+  plus the minimum dispute window the option's dispute authority advertises
+  (`minimum_dispute_window_seconds`); publication refuses a clause short of it
+  (`dispute_window_before_delivery_deadline`). The example's fifteen days cover its
+  half-hour deadline beside a fourteen-day minimum.
+- **Payout.** A part's earnings stay held at the payments service until the part's
+  stop plus the dispute window, and the service pays them out a fixed delay after
+  that release: 7 days in live mode, by the payments service's own documentation.
+  A deal stopped today is paid out, at the earliest, the dispute window plus those
+  7 days from now; a case filed in the window holds the money it protects longer.
+- **A spot seller's stop.** `market-storefront deals preempt <negotiation-id>
+  --operation-key <key>` submits the seller's notice at the payment authority, which
+  stops the deal once the notice has run.
+- **Withdrawal.** Remove the `[Settlement.rate_servicing.arkhai_payments]` table, or
+  empty its `treatments`, and restart the storefront, which reads the declaration
+  when it starts. It then publishes no recurring option, refusing each recurring
+  clause `rate_servicing_undeclared`, and a buyer's earlier selection of one is
+  refused before acceptance; a deal already under way keeps being serviced to its
+  end. `market-storefront publish --dry-run` shows what the next cycle would do to
+  your open listings.
+
 ## Upgrading from CSV inventory
 
-Earlier storefronts could hold their own inventory: a resource CSV seeded at
-startup (`resources_csv_path`, `resources_csv_inline`, or a file at
-`/app/resources.csv`) or imported through
-`POST /api/v1/admin/portfolio/resources/import`, with per-row prices drawn from
-`[escrow_templates]`. A storefront now reads inventory only from its sites'
-provisioning services, and nothing warns when the old source is still
-configured: an unmigrated storefront starts, finds no pools, and publishes
-nothing. The upgrade is one-way; there is no supported downgrade.
+A storefront reads inventory only from its sites' provisioning services; it
+holds no inventory of its own, and no setting replaces the retired resource CSV
+(`resources_csv_path`, `resources_csv_inline`), its pricing templates
+(`[escrow_templates]`), or `capacity.use_site_projection_for_listings`. Remove
+them from every storefront configuration file, and the chart's
+`secret.resourcesCsvInline` value: the chart refuses to render with any of them,
+and `market-storefront config set` refuses to write them. A storefront that
+still states them starts, finds no pools, and publishes nothing.
 
-Before upgrading, declare at provisioning everything the CSV described:
+Declare at provisioning what such a CSV described:
 
 1. **Hosts and capacity.** Register each host with the provisioning service, in
    its host definitions document or through the host API, and declare what it
-   sells as capacity, as "Declaring
-   capacity" above describes. A CSV row's `attribute.vm_host` names the host,
-   and its `value` and `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become
-   the declaration's `capacity`.
+   sells as capacity, as "Declaring capacity" above describes. A CSV row's
+   `attribute.vm_host` names the host, and its `value` and
+   `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become the declaration's
+   `capacity`.
 2. **Pools and their terms.** Put each resource in a pool, and declare the
    pool's `region` in its `policy_tags`, with its `listing_shapes` and
    `asking_rates` where you state them. Region can only be declared there, and
-   a pool without it is held until it states one. A
-   pool's `sla` hint is read only by a storefront with
-   `[pricing].accept_pool_declared_sla` on; otherwise state the SLA as an
-   override term.
-3. **Storefront terms.** Re-enter, with `market-storefront pool-override set`,
-   any pool term the storefront itself supplied. System status on the release
-   you are upgrading from lists, under `publication_derivation`, each field a
-   pool still took from the storefront's own pool record
-   (`legacy_overrides_in_effect`): `sla`, `max_duration_seconds`, and pricing
-   left there fall through to the pool's hint and then to the configured
-   default once you upgrade. A per-row `accepted_escrows` value has no
-   equivalent; state the clauses it priced as a `settlements` clause list in
-   the override or in `[pricing].settlements`.
-4. **Configuration.** Remove `resources_csv_path`, `resources_csv_inline`,
-   `[escrow_templates]`, and `capacity.use_site_projection_for_listings` from
-   every storefront configuration file, and the chart's
-   `secret.resourcesCsvInline` value. The chart refuses to render with any of
-   them, and `market-storefront config set` refuses to write them.
+   a pool without it is held until it states one. A pool's `sla` hint is read
+   only by a storefront with `[pricing].accept_pool_declared_sla` on; otherwise
+   state the SLA as an override term.
+3. **Storefront terms.** State, with `market-storefront pool-override set`, any
+   pool term the storefront itself supplies. A per-row `accepted_escrows` value
+   has no equivalent; state the clauses it priced as a `settlements` clause list
+   in the override or in `[pricing].settlements`.
 
-After upgrading, the storefront's database keeps the tables the old inventory
-lived in (`resources`, `hosts`, `resource_transition_events`,
-`compute_capacity_pools`, and `compute_pool_members`) exactly as they were. The
-storefront never reads or writes them again; they remain so you can extract
-anything you did not declare beforehand. Their rows are history, not current
-state: reconcile each against what the provisioning service already holds
-before declaring it there, through the provisioning service's own
-administration API or definition documents. Nothing copies them across
-automatically, and nothing should overwrite a declaration that is already live.
+The storefront's database keeps none of the tables a storefront-held inventory
+lived in: the migration after its v0.3.0 baseline drops them
+([operator handbook, "Upgrading a deployment"](operator-handbook.md#upgrading-a-deployment)).
 
 ## Common pitfalls
 

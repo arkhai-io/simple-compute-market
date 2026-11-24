@@ -23,8 +23,11 @@ COPY .dist/ /repo/.dist/
 COPY scripts/uv_project.py /repo/scripts/uv_project.py
 COPY domains/apicredits/service/pyproject.toml domains/apicredits/service/uv.lock /repo/domains/apicredits/service/
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+# The project's own wheel installs the service and its console scripts, the
+# migration command among them.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 /repo/scripts/uv_project.py image --project /repo/domains/apicredits/service -- --no-dev --no-install-project
+    python3 /repo/scripts/uv_project.py image --project /repo/domains/apicredits/service -- --no-dev --no-install-project && \
+    python3 /repo/scripts/uv_project.py install-wheel --project /repo/domains/apicredits/service
 
 # Stage 2: lean runtime.
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
@@ -34,9 +37,7 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && \
     mkdir -p /app/data && chown -R appuser:appuser /app
 
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
-COPY --chown=appuser:appuser domains/apicredits/service/src ./src
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/src"
 # Persist the SQLite DB on the named volume mounted at /app/data.
 ENV APICREDITS_DATABASE_URL="sqlite:////app/data/apicredits.db"
 USER appuser
@@ -48,4 +49,6 @@ EXPOSE ${PORT}
 HEALTHCHECK --interval=10s --timeout=5s --retries=6 --start-period=10s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')" || exit 1
 
-CMD ["uvicorn", "apicredits_service.main:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8082"]
+# The migration command runs before the application, which refuses a database
+# it has not migrated.
+CMD ["sh", "-c", "apicredits-service-migrate && exec uvicorn apicredits_service.main:app --host 0.0.0.0 --port 8082"]

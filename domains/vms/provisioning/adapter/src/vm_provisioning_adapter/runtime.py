@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from compute_provisioning import TeardownRerunPolicy
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
@@ -48,6 +49,9 @@ class VmProvisioningRuntime:
     # The family's one allocator, which every domain's relay ports lease from;
     # VM's plan leases through it when a create is accepted.
     relay_port_allocator: RelayPortAllocator
+    # The service's one teardown rerun policy, which the release status reads
+    # too, so both judge alike whether a teardown has a rerun pending.
+    teardown_rerun_policy: TeardownRerunPolicy
 
     def job_executor(self) -> AnsibleJobExecutor:
         """What runs every VM job action: this runtime's runner, codec, and playbook."""
@@ -56,6 +60,7 @@ class VmProvisioningRuntime:
             self.codec,
             self.config.resolved_vm_playbook_path,
             timeout_seconds=self.config.ansible_timeout_seconds,
+            adopt_host_key=self.host_authority.adopt_host_key,
             additional_non_retryable_errors=self.config.additional_non_retryable_errors,
         )
 
@@ -71,6 +76,7 @@ class VmProvisioningRuntime:
             plan=self.fulfillment_plan(),
             submission=self.job_submission,
             jobs=self.job_engine,
+            rerun_policy=self.teardown_rerun_policy,
         )
 
     def adapter_bundle(self):
@@ -92,6 +98,7 @@ def build_vm_runtime(
     relay_port_allocator: RelayPortAllocator,
     relay_resolver: RelayExecutionResolver,
     connection_codecs: ConnectionCodecs,
+    teardown_rerun_policy: TeardownRerunPolicy,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -129,6 +136,7 @@ def build_vm_runtime(
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=relay_port_allocator,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
 
 

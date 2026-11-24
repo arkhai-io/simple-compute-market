@@ -21,11 +21,13 @@ directly instead.
 from __future__ import annotations
 
 from dataclasses import replace
+import re
 import time
 import uuid
 from typing import Any
 
 import httpx
+import injected_time
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
@@ -48,6 +50,7 @@ from market_site.auth import (
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
     SiteAuthMiddleware,
+    SiteRouteContract,
 )
 
 AUTHORITY_SIGNER = Ed25519Signer(b"authority-seed-32-bytes-exactly!")
@@ -728,6 +731,129 @@ async def test_an_exact_retry_of_a_non_replay_safe_route_is_refused(app):
     assert "cannot be safely retried" in second.json()["detail"]
     # The refusal's whole purpose: the handler ran once.
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# The time-setting operation's freshness
+# ---------------------------------------------------------------------------
+
+# A time-setting route as a hosting service declares one beside the capacity
+# routes, admitting the administrator alone.
+_TIME_SETTING = SiteRouteContract(
+    method="POST",
+    pattern=re.compile(r"/api/v1/system/time"),
+    operation="system_time",
+    allowed_roles=frozenset({"admin"}),
+)
+
+
+def _time_app(calls: list[int], *, time_setting_operation: str | None) -> FastAPI:
+    application = FastAPI()
+
+    @application.post("/api/v1/system/time")
+    def set_time() -> dict[str, Any]:
+        calls.append(1)
+        return {"set": len(calls)}
+
+    application.add_middleware(
+        SiteAuthMiddleware,
+        signer_provider=lambda: AUTHORITY_SIGNER,
+        expected_principals=_expected_principals,
+        contracts=(*CAPACITY_ROUTE_CONTRACTS, _TIME_SETTING),
+        time_setting_operation=time_setting_operation,
+    )
+    return application
+
+
+async def _set_and_read_skewed(
+    application: FastAPI, skewed: int
+) -> tuple[httpx.Response, httpx.Response]:
+    body = {"now": skewed}
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://authority") as http:
+        setting = await http.post(
+            "/api/v1/system/time",
+            json=body,
+            headers=_signed_headers(
+                signer=SELLER_SIGNER,
+                role="admin",
+                method="POST",
+                operation="system_time",
+                resource="",
+                body=body,
+                timestamp=skewed,
+            ),
+        )
+        snapshot = await http.get(
+            "/api/v1/capacity/snapshot",
+            headers=_signed_headers(
+                signer=SELLER_SIGNER,
+                role="admin",
+                method="GET",
+                operation="capacity_snapshot",
+                resource="",
+                timestamp=skewed,
+            ),
+        )
+    return setting, snapshot
+
+
+@pytest.fixture
+def injected_source():
+    """The process source, injected at the wall instant, restored afterwards."""
+    before = injected_time.installed()
+    source = injected_time.InjectedTime()
+    injected_time.install(source)
+    yield source
+    injected_time.install(before)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skew", (900, -900))
+async def test_the_time_setting_operation_alone_is_admitted_outside_the_skew(
+    injected_source, skew
+):
+    calls: list[int] = []
+    setting, snapshot = await _set_and_read_skewed(
+        _time_app(calls, time_setting_operation="system_time"),
+        injected_source.now() + skew,
+    )
+
+    assert setting.status_code == 200, setting.text
+    _assert_signed_by_authority(setting)
+    assert snapshot.status_code == 403
+    assert snapshot.json() == {
+        "detail": "Marketplace authentication timestamp is outside the allowed skew"
+    }
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_an_unnamed_time_setting_operation_keeps_its_freshness(injected_source):
+    calls: list[int] = []
+    setting, _ = await _set_and_read_skewed(
+        _time_app(calls, time_setting_operation=None), injected_source.now() + 900
+    )
+
+    assert setting.status_code == 403
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_under_wall_time_the_named_operation_keeps_its_freshness():
+    calls: list[int] = []
+    before = injected_time.installed()
+    injected_time.install(injected_time.WallTime())
+    try:
+        setting, _ = await _set_and_read_skewed(
+            _time_app(calls, time_setting_operation="system_time"),
+            int(time.time()) + 900,
+        )
+    finally:
+        injected_time.install(before)
+
+    assert setting.status_code == 403
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------

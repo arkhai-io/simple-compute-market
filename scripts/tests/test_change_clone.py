@@ -59,10 +59,14 @@ def workspace(tmp_path: Path) -> Path:
     # records and evidence.
     (work / ".gitignore").write_text(
         ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
-    # The evidence directory history copies from, as a validation part declares it.
-    (work / ".agents").mkdir()
+    # The evidence directory history copies from, as an evidence kind's pattern fixes
+    # it, and the guide the kind names.
+    (work / ".agents/evidence").mkdir(parents=True)
+    (work / ".agents/evidence/local.md").write_text("# The local kind\n", "utf-8")
     (work / ".agents/workflow.toml").write_text(
-        "[validation.parts.local]\nrun = 'true'\nevidence = '.snapshot/validation/'\n", "utf-8")
+        "[validation.evidence.local]\nrequired = 'always'\nrun = 'true'\n"
+        "evidence = '.snapshot/validation/{tree}/local/*/summary.json'\n"
+        "guide = '.agents/evidence/local.md'\n", "utf-8")
     _commit(work, "README.md", "1\n")
     _git(work, "remote", "add", "origin", str(origin))
     # The workspace's dev tracks origin's, so a change landing on it pushes there.
@@ -459,7 +463,13 @@ def _committed_configuration(workspace: Path, text: str) -> None:
 
 def _waited(clone: Path) -> clones.Bootstrap:
     """The bootstrap's state once its process, this test's child, has ended."""
-    os.waitpid(json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"], 0)
+    try:
+        os.waitpid(json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"], 0)
+    except ChildProcessError:
+        # The spawn drops its Popen object, and Python's subprocess reaps a dropped
+        # child that has ended as the next Popen starts: the child is gone only once
+        # it has ended.
+        pass
     return clones.bootstrap_state(clone)
 
 
@@ -744,7 +754,9 @@ def test_the_command_line_reports_the_clone_and_its_bootstrap(
 # Removing a clone.
 
 REVIEWS = Path("openspec/changes/archive/2026-10-22-seed-pool/reviews")
-EVIDENCE = Path(".snapshot/validation/0123456789ab")
+VALIDATED = "0123456789abcdef0123456789abcdef01234567"
+# An attempt of the workspace's one kind, where its pattern puts the validated tree's.
+EVIDENCE = Path(".snapshot/validation") / VALIDATED / "local/20261022T1000Z"
 
 
 def _merged_clone(workspace: Path) -> Path:
@@ -754,8 +766,9 @@ def _merged_clone(workspace: Path) -> Path:
     _commit(clone, "feature.txt", "the change\n")
     _git(clone, "push", "-q", "origin", f"{BRANCH}:{BRANCH}", f"{BRANCH}:dev")
     (clone / REVIEWS).mkdir(parents=True)
+    # The workspace's one kind is keyed by the tree, so the record's tree names it.
     (clone / REVIEWS / "02-validation.md").write_text(
-        "- **Commit:** 0123456789abcdef on feat/seed-pool\n", "utf-8")
+        f"- **Tree:** {VALIDATED}\n", "utf-8")
     (clone / REVIEWS / "workflow.jsonl").write_text('{"step": "archive-cleanup"}\n', "utf-8")
     (clone / EVIDENCE).mkdir(parents=True)
     (clone / EVIDENCE / "summary.json").write_text("{}\n", "utf-8")
@@ -885,16 +898,16 @@ def test_named_evidence_the_clone_lacks_is_reported_and_does_not_refuse_removal(
     # Deleting the clone cannot lose evidence it does not hold, so evidence named
     # by a record and held nowhere is named in the report rather than refused.
     clone = _merged_clone(workspace)
-    pruned = Path(".snapshot/validation/fedcba987654")
+    pruned = Path(".snapshot/validation") / ("f" * 40)
     (clone / REVIEWS / "03-validation.md").write_text(
-        f"- **Commit:** {pruned.name}3210 on feat/seed-pool\n", "utf-8")
+        f"- **Tree:** {pruned.name}\n", "utf-8")
 
     assert clones.main(["remove", CHANGE], root=workspace) == 0
 
     assert not clone.exists()
     assert not (workspace / pruned).exists()
     assert ("Named by the records but not in this clone, so not copied: "
-            f"{pruned.as_posix()}") in capsys.readouterr().out
+            f"{pruned.as_posix()}/local/*/summary.json") in capsys.readouterr().out
 
 
 def test_a_record_that_differs_in_the_workspace_refuses_removal(workspace: Path) -> None:

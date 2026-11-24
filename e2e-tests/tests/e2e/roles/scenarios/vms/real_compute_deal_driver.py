@@ -22,10 +22,11 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Optional
 
+import injected_time
 import pytest
+from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import ConnectionSubmission
 from storefront_client import StorefrontClientError
 
@@ -37,7 +38,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     ComputeDealState,
 )
 from tests.e2e.roles.helpers.ssh_access import SshEndpoint, SshHeartbeat
-from tests.e2e.roles.helpers.real_provisioning import JobWatch, RealComputeObservations, configured_relay
+from tests.e2e.roles.helpers.real_provisioning import JobWatch, RealComputeObservations, configured_relay, pin_registered_vm
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmDealDriverBase
 from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
@@ -115,23 +116,27 @@ def vm_executor_is_real(execution: Any) -> Any:
 
 
 
-def target_connection(target: VmHost) -> ConnectionSubmission:
+def target_connection(
+    target: VmHost, *, registered_pins: list[str] | None = None,
+) -> ConnectionSubmission:
     """The connection the provisioning service reaches the target's host by.
 
-    The key is named by where the service reads it; the target never carries
-    key material. The service accepts an `ssh` connection only at version 2. A
+    The authentication key is named by where the service reads it. An
+    independently configured public host key takes precedence over an existing pin. The service accepts an `ssh` connection only at version 3. A
     guest is reached at its own forwarded or relayed port, never the host's
     tenant-facing port, so none is stated.
     """
     host = target
+    pins = [host.ssh_host_public_key] if host.ssh_host_public_key else registered_pins
     return ConnectionSubmission(
         kind="ssh",
-        version=2,
+        version=3,
         public={
             "ssh_host": host.connection.ssh_host,
             "ssh_port": host.connection.ssh_port,
             "ssh_user": host.connection.ssh_user,
             "key_path": host.connection.ssh_key_path,
+            **({"host_keys": pins} if pins else {}),
             **({"public_host": host.access.public_host} if host.access.mode == "direct" else {}),
         },
     )
@@ -227,6 +232,9 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
     reserved_resource_id: str = REAL_RESOURCE_ID
     dispatch_bound: float = DISPATCH_BOUND_SECONDS
 
+    def __post_init__(self) -> None:
+        self.reserved_resource_id = self.target.resource_id or self.reserved_resource_id
+
     @property
     def listing_status_after_first_fulfillment(self) -> str:
         return "open"
@@ -247,17 +255,26 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
         and no GPU, while the listing sells the explicit smaller guest shape.
         """
         configured_relay(self.provisioning_client, self.target)
+        try:
+            existing = self.provisioning_client.get_host(self.target.host_id)
+        except ComputeProvisioningError as exc:
+            if exc.status_code != 404:
+                raise
+            pins = None
+        else:
+            pins = existing.connection.public.get("host_keys")
         host = provision_e2e_executor(
             self.provisioning_client,
             self.site_capacity_admin_client,
             host=self.target.host_id,
             pool_id=REAL_POOL_ID,
-            resource_id=REAL_RESOURCE_ID,
+            resource_id=self.reserved_resource_id,
             sellable_units=None,
             capacity=self.capacity,
             attributes={"region": REAL_REGION, "sla": "90.0"},
             listing_shapes={"vm": [self.listing_shape]},
-            connection=target_connection(self.target),
+            connection=target_connection(self.target, registered_pins=pins),
+            before_declare=lambda host: pin_registered_vm(self.provisioning_client, host),
             provider_config=({"relay_id": self.target.access.relay_id}
                              if self.target.access.mode == "relay" else {}),
         )
@@ -305,6 +322,19 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
         self.assert_relay_delivery(deal_state.fulfillment_id, endpoint)
         return endpoint
 
+    def tenant_password(self, deal_state: Any) -> str:
+        """The tenant password the deal delivered with its access, as the buyer
+        reads it from settle status. A failure names the credential's fields,
+        never its values."""
+        status = self.storefront_client.get_settle_status(deal_state.real_escrow_uid)
+        credentials = status.tenant_credentials or {}
+        password = credentials.get("password")
+        assert isinstance(password, str) and password, (
+            "the settlement delivered no tenant password; its tenant credentials carry "
+            f"{sorted(credentials)}"
+        )
+        return password
+
     def _buyer_address(self) -> str:
         """The address a buyer reaches the guest at under the target's access mode."""
         if self.target.access.mode == "direct":
@@ -321,7 +351,7 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
         # quantities only from `dimensions`.
         return storefront_admin_client.admin_reserve_capacity(
             required_attributes={
-                "resource_id": REAL_RESOURCE_ID,
+                "resource_id": self.reserved_resource_id,
                 "dimensions": dict(self.capacity),
             },
             listing_id=listing_id,
@@ -468,8 +498,9 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
             # The lease is recorded once the fulfillment is active; the read
             # fails for one that never was, which is reported below.
             lease = self.provisioning_client.get_lease(reservation)
-            if lease.status == "active" and lease.lease_end_utc > datetime.now(timezone.utc):
-                end = datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+            now = injected_time.now_datetime()
+            if lease.status == "active" and lease.lease_end_utc > now:
+                end = now - E2E_LEASE_EXPIRY_BACKDATE
                 assert self.site_capacity.truncate_lease(
                     reservation, end.isoformat().replace("+00:00", "Z")
                 ) is not None, f"the site refused to truncate lease {reservation}"

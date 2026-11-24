@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 def advance_storefront(storefront_admin_client, loop: str) -> dict:
     """Run one cycle of a paused storefront loop and return what it reports.
 
-    `loop` is the loop's route name, such as `settlement-servicing`,
+    `loop` is the loop's route name, such as `deal-servicing`,
     `capacity-events`, or `site-projections`. Each calls the operation the
     timer was already invoking, so a stage advances production behaviour rather
     than a test-only path.
@@ -308,7 +308,7 @@ def advance_fulfillment_to(
 ) -> dict:
     """Advance convergence until a fulfillment reaches ``expected``.
 
-    No sleeps, per `docs/development/TESTING.md`'s async test discipline:
+    No sleeps, per `docs/guidance/engineering/test-determinism.md#no-sleeps`:
     each iteration is one *explicit* advance, and the only thing between
     iterations is a request the test made.
 
@@ -419,9 +419,10 @@ class DealLease:
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
 
-    ``status`` and ``release_job_id`` come from the compute family's lease
-    contract, read through the family client. ``release_job_id`` is the
-    durable fulfillment id: release goes through the fulfillment aggregate.
+    ``status``, ``release_job_id``, the lease window and ``activated_at_utc``
+    come from the compute family's lease contract, read through the family
+    client. ``release_job_id`` is the durable fulfillment id: release goes
+    through the fulfillment aggregate.
     The lease's end moves only through the site's truncation, which is how
     the scenario back-dates it.
     """
@@ -468,6 +469,11 @@ class DealLease:
             "status": data.get("status"),
             "fulfillment_id": data.get("release_job_id"),
             "create_job_id": data.get("create_job_id"),
+            # The window commit recorded and the instant the site's activation
+            # recorded, as the lease contract reports them (ISO-8601 or null).
+            "lease_start_utc": data.get("lease_start_utc"),
+            "lease_end_utc": data.get("lease_end_utc"),
+            "activated_at_utc": data.get("activated_at_utc"),
         }
 
     def backdate(self, lease_end_utc: str) -> dict:

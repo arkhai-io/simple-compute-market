@@ -2,10 +2,10 @@
 
 **Test level: unit.** This file exercises the installed ``registry_client``
 wheel against ``httpx.MockTransport``. It boots no application, opens no
-database, and wires no container, so by `docs/development/TESTING.md`'s
-definition it is not an integration test and does not discharge any
-interservice requirement. It proves what the client *sends*; whether a
-registry *accepts* it is answered by
+database, and wires no container, so by
+`docs/guidance/engineering/test-levels.md`'s definition it is not an integration
+test and does not discharge any interservice requirement. It proves what the
+client *sends*; whether a registry *accepts* it is answered by
 ``core/registry/tests/integration/test_settled_listing_vocabulary.py``.
 
 These tests verify that the ``registry_client`` wheel installed in the

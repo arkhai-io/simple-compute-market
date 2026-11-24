@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
+import injected_time
+
 
 class NegotiationRepository(Protocol):
     """Persistence surface required by the watchdog mechanism."""
@@ -108,7 +110,7 @@ async def sweep_stale_negotiations(
     """Mark one snapshot of stale active threads with the supplied terminal state."""
 
     active_logger = logger or logging.getLogger(__name__)
-    current_time = now or datetime.now(timezone.utc)
+    current_time = now or injected_time.now_datetime()
     cutoff = current_time - timedelta(seconds=policy.timeout_seconds)
     stale = stale_negotiations(repository.db_path, cutoff)
     for thread in stale:

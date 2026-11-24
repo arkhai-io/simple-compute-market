@@ -1,14 +1,16 @@
 """Provider-neutral resource-pool persistence model.
 
-Owns its own declarative ``Base``/metadata, matching the shape
-``market_site`` already uses for the site-authority ledger: a domain
-service composes this package's ``Base.metadata`` alongside its own at
-``create_all`` time, and re-exports the ORM classes it needs through its
-own ``db.models`` module so existing call sites keep working unchanged.
+Owns its own declarative ``Base``/metadata, as ``market_site`` does for the
+site-authority ledger, and a service re-exports the ORM classes it needs
+through its own ``db.models`` module. The table's schema is
+``market_resource_pools.migrations``, which a migration chain holding the table
+composes, so this mapping is read against that schema and a column added here
+needs a migration there.
 """
 
 from __future__ import annotations
 
+import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, String, func
 from sqlalchemy.orm import declarative_base
 
@@ -52,7 +54,18 @@ class ResourcePool(Base):
     provider = Column(String, nullable=False)
     enabled = Column(Boolean, nullable=False, default=True)
     policy_tags = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Both are returned on a pool's view, so they are the process source's
+    # instants rather than the database's clock.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=injected_time.now_datetime,
+        onupdate=injected_time.now_datetime,
+        server_default=func.now(),
+        nullable=False,
     )

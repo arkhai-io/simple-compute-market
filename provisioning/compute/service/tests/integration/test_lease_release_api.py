@@ -12,10 +12,14 @@ convergence timer is held.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 
+import injected_time
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
+from compute_provisioning.hosts.db import Host
+from injected_time import InjectedTime
 from market_fulfillment import CREATE_COMPENSATION, SettlementRecord, SettlementRecordState
 
 from bare_metal_provisioning_adapter.services.mock_output import (
@@ -23,7 +27,7 @@ from bare_metal_provisioning_adapter.services.mock_output import (
     shipped_output,
 )
 from compute_provisioning.jobs.db import JobRecord
-from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_ansible import SSH_CONNECTION_VERSION, MockAnsibleRunner
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
@@ -444,9 +448,9 @@ async def test_a_delivered_teardown_that_fails_once_is_not_read_as_compensated(
     client_and_queue, test_client
 ):
     """The reclaim of a delivered grant fails, and convergence records it.
-    A failed teardown job is not re-run, so its later success is the state
-    convergence would leave; the operator's retry then releases the lease, and
-    the aggregate never carries ``create_compensation``."""
+    A teardown job whose playbook ran and failed is not run again, so its later
+    success is the state convergence would leave; the operator's retry then
+    releases the lease, and the aggregate never carries ``create_compensation``."""
     clients, job_queue = client_and_queue
     capacity_reservation_id, _ = await begun_bare_metal_deal(clients, "escrow-bm-delivered-once")
     await test_client.wait_for_job(create_job_id(capacity_reservation_id), timeout=5.0)
@@ -474,6 +478,299 @@ async def test_a_delivered_teardown_that_fails_once_is_not_read_as_compensated(
     record = _aggregate(capacity_reservation_id)
     assert record.state == _State.torn_down.value
     assert record.failure_reason != CREATE_COMPENSATION
+
+
+# ----------------------------------------------------------------------
+# A teardown refused before its playbook is run again while the lease waits
+# ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, held at the wall instant it is installed; a
+    test sets it forward past a rerun's delay or the harness's 300-second
+    grace."""
+    before = injected_time.installed()
+    installed = InjectedTime()
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
+
+
+def _host_version(version: int) -> None:
+    """Store the bare-metal host's ssh connection at ``version``. At 1, which
+    no codec serves, every job against it is refused before its playbook, as a
+    job's executor refuses an inventory it cannot render; seeded directly, as
+    the API registers only the version it serves."""
+    with _container_module.resolved_session_factory() as db, db.begin():
+        db.get(Host, HOST_ID).connection_version = version
+
+
+async def _reclaim_refused(clients, test_client, job_queue, escrow_uid: str) -> str:
+    """A delivered deal whose lease was terminated and whose reclaim job was
+    refused before its playbook: the aggregate is ``teardown_failed``."""
+    capacity_reservation_id, _ = await _granted(clients, escrow_uid)
+    _host_version(1)
+    await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+    await _converge_cycle(clients)
+    (reclaim,) = _teardown_jobs(capacity_reservation_id)
+    refused = await clients.family.get_job(
+        (await test_client.wait_for_job(reclaim.id, timeout=5.0))["job_id"]
+    )
+    assert refused.status == "failed", refused
+    assert (refused.execution_started_at, refused.finished_at is not None) == (None, True)
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    await _converge_cycle(clients)
+    assert _aggregate_state(capacity_reservation_id) == _State.teardown_failed.value
+    return capacity_reservation_id
+
+
+def _teardown_keys(capacity_reservation_id: str) -> list[str]:
+    return sorted(job.idempotency_key for job in _teardown_jobs(capacity_reservation_id))
+
+
+async def test_a_reclaim_refused_before_its_playbook_is_run_again_while_the_lease_waits(
+    client_and_queue, test_client, source
+):
+    """No operator call: the lease stays releasing while the rerun waits for
+    its delay, the rerun runs once the host is repaired, and the capacity
+    returns when the aggregate is torn down."""
+    clients, job_queue = client_and_queue
+    capacity_reservation_id = await _reclaim_refused(
+        clients, test_client, job_queue, "escrow-bm-rerun"
+    )
+
+    await clients.family.check_leases()
+    assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+        LeaseState.RELEASING
+    )
+    assert await _capacity_held(clients, capacity_reservation_id)
+
+    _host_version(SSH_CONNECTION_VERSION)
+    source.set(source.now() + 60)
+    await _converge_cycle(clients)
+    assert _teardown_keys(capacity_reservation_id) == [
+        f"{capacity_reservation_id}:teardown",
+        f"{capacity_reservation_id}:teardown:rerun-1",
+    ]
+    rerun = _aggregate(capacity_reservation_id).teardown_provider_metadata["teardown_job_id"]
+    assert (await test_client.wait_for_job(rerun, timeout=5.0))["status"] == "succeeded"
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    await _converge_cycle(clients)
+
+    assert _aggregate_state(capacity_reservation_id) == _State.torn_down.value
+    assert (await clients.family.check_leases()).released == 1
+    assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+        LeaseState.RELEASED
+    )
+
+
+@pytest.mark.parametrize("teardown_rerun_limit", [0])
+async def test_with_reruns_disabled_a_refused_reclaim_waits_for_an_operator(
+    client_and_queue, test_client, source, teardown_rerun_limit
+):
+    clients, job_queue = client_and_queue
+    capacity_reservation_id = await _reclaim_refused(
+        clients, test_client, job_queue, "escrow-bm-disabled"
+    )
+
+    await clients.family.check_leases()
+    lease = await clients.family.get_lease(capacity_reservation_id)
+    _host_version(SSH_CONNECTION_VERSION)
+    source.set(source.now() + 86400)
+    await _converge_cycle(clients)
+    await _converge_cycle(clients)
+
+    assert (lease.status, lease.failure_reason) == (LeaseState.RELEASE_FAILED, "teardown_failed")
+    assert _teardown_keys(capacity_reservation_id) == [f"{capacity_reservation_id}:teardown"]
+    assert await _capacity_held(clients, capacity_reservation_id)
+
+
+async def test_a_reclaim_finished_before_starts_were_recorded_is_not_run_again(
+    client_and_queue, test_client, source
+):
+    """A job with no ``finished_at``, as one an earlier release left, proves
+    nothing about whether its playbook ran: the lease waits for an operator."""
+    clients, job_queue = client_and_queue
+    capacity_reservation_id = await _reclaim_refused(
+        clients, test_client, job_queue, "escrow-bm-upgrade"
+    )
+    with _container_module.resolved_session_factory() as db, db.begin():
+        for job in db.query(JobRecord).filter(
+            JobRecord.capacity_reservation_id == capacity_reservation_id,
+            JobRecord.action_kind == "teardown",
+        ):
+            job.finished_at = None
+
+    await clients.family.check_leases()
+    lease = await clients.family.get_lease(capacity_reservation_id)
+    _host_version(SSH_CONNECTION_VERSION)
+    source.set(source.now() + 86400)
+    await _converge_cycle(clients)
+
+    assert (lease.status, lease.failure_reason) == (LeaseState.RELEASE_FAILED, "teardown_failed")
+    assert _teardown_keys(capacity_reservation_id) == [f"{capacity_reservation_id}:teardown"]
+
+
+async def test_a_lease_timed_out_with_a_rerun_pending_is_retried_and_waits_for_it(
+    client_and_queue, test_client, source
+):
+    """Past the grace the lease is release_failed with teardown_timeout. An
+    operator's retry-release returns it to releasing under the same
+    fulfillment, timing its grace afresh, and the rerun releases it."""
+    clients, job_queue = client_and_queue
+    capacity_reservation_id = await _reclaim_refused(
+        clients, test_client, job_queue, "escrow-bm-timeout"
+    )
+    fulfillment_id = (await clients.family.get_lease(capacity_reservation_id)).release_job_id
+
+    source.set(source.now() + 301)
+    await clients.family.check_leases()
+    timed_out = await clients.family.get_lease(capacity_reservation_id)
+    assert (timed_out.status, timed_out.failure_reason) == (
+        LeaseState.RELEASE_FAILED,
+        "teardown_timeout",
+    )
+
+    retried = await clients.family.retry_lease_release(capacity_reservation_id, LeaseRetryRelease())
+    await clients.family.check_leases()
+    assert (retried.status, retried.release_job_id) == (LeaseState.RELEASING, fulfillment_id)
+    assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+        LeaseState.RELEASING
+    )
+
+    _host_version(SSH_CONNECTION_VERSION)
+    await _converge_cycle(clients)
+    rerun = _aggregate(capacity_reservation_id).teardown_provider_metadata["teardown_job_id"]
+    assert (await test_client.wait_for_job(rerun, timeout=5.0))["status"] == "succeeded"
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    await _converge_cycle(clients)
+
+    assert (await clients.family.check_leases()).released == 1
+    assert len(_teardown_jobs(capacity_reservation_id)) == 2
+
+
+async def test_a_teardown_that_outlasts_the_grace_is_released_by_one_retry(
+    client_and_queue, test_client, bare_metal_runner, source
+):
+    """The reclaim is held running past the grace: the lease times out. Once
+    it succeeds and the aggregate is torn down, one retry-release releases the
+    lease under the same fulfillment, and no second teardown is begun."""
+    clients, job_queue = client_and_queue
+    capacity_reservation_id, fulfillment_id = await _granted(clients, "escrow-bm-slow")
+    await test_client.add_bare_metal_mock_rule(
+        rule_id="slow-reclaim",
+        match={"action": NODE_RECLAIM_ACCESS_ACTION},
+        pause_before_result=True,
+    )
+    await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+    await _converge_cycle(clients)
+    await asyncio.wait_for(bare_metal_runner.rules.wait_until_held("slow-reclaim"), timeout=5.0)
+
+    try:
+        source.set(source.now() + 301)
+        await clients.family.check_leases()
+        timed_out = await clients.family.get_lease(capacity_reservation_id)
+    finally:
+        # The hold ends whatever the assertions find, and nothing stays held.
+        await test_client.resume_bare_metal_rule("slow-reclaim")
+        await asyncio.wait_for(
+            bare_metal_runner.rules.wait_until_released("slow-reclaim"), timeout=5.0
+        )
+        await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    (rule,) = [r for r in bare_metal_runner.list_rules() if r["rule_id"] == "slow-reclaim"]
+    assert rule["waiting"] == 0
+    assert (timed_out.status, timed_out.failure_reason) == (
+        LeaseState.RELEASE_FAILED,
+        "teardown_timeout",
+    )
+
+    await _converge_cycle(clients)
+    assert _aggregate_state(capacity_reservation_id) == _State.torn_down.value
+
+    lease = await clients.family.retry_lease_release(capacity_reservation_id, LeaseRetryRelease())
+
+    assert (lease.status, lease.release_job_id) == (LeaseState.RELEASED, fulfillment_id)
+    assert _teardown_keys(capacity_reservation_id) == [f"{capacity_reservation_id}:teardown"]
+
+
+async def test_a_reclaim_that_succeeds_on_its_job_retry_releases_the_lease(
+    client_and_queue, test_client, source
+):
+    """The reclaim's first attempt fails retryably after its playbook started;
+    the job's own retry succeeds within the grace, and the lease, releasing
+    while the retry waits, is released with no operator."""
+    clients, job_queue = client_and_queue
+    capacity_reservation_id, _ = await _granted(clients, "escrow-bm-retry")
+    await test_client.add_bare_metal_mock_rule(
+        rule_id="reclaim-busy",
+        match={"action": NODE_RECLAIM_ACCESS_ACTION},
+        fail_with="disk busy",
+    )
+    await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+    await _converge_cycle(clients)
+    (reclaim,) = _teardown_jobs(capacity_reservation_id)
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    retrying = await clients.family.get_job(reclaim.id)
+    assert (retrying.status, retrying.retry_count) == ("queued", 1)
+    assert retrying.execution_started_at is not None
+
+    await _converge_cycle(clients)
+    await clients.family.check_leases()
+    assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+        LeaseState.RELEASING
+    )
+
+    await test_client.delete_bare_metal_mock_rule("reclaim-busy")
+    source.set(source.now() + 60)
+    assert await _container_module.resolved_job_engine.requeue_due_retries(job_queue) == 1
+    assert (await test_client.wait_for_job(reclaim.id, timeout=5.0))["status"] == "succeeded"
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    await _converge_cycle(clients)
+
+    assert (await clients.family.check_leases()).released == 1
+    assert _teardown_keys(capacity_reservation_id) == [f"{capacity_reservation_id}:teardown"]
+
+
+async def test_a_compensating_reclaim_refused_before_its_playbook_runs_again_compensated(
+    client_and_queue, test_client, source
+):
+    """A failed create's compensating reclaim is refused before its playbook:
+    convergence keeps ``create_compensation`` on the failure, the lease waits,
+    and the rerun tears the aggregate down still marked compensated."""
+    clients, job_queue = client_and_queue
+    capacity_reservation_id, _ = await _grant_without_evidence(
+        clients, test_client, "escrow-bm-compensated-rerun"
+    )
+    _host_version(1)
+    await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+    await _converge_cycle(clients)
+    (reclaim,) = _teardown_jobs(capacity_reservation_id)
+    assert (await test_client.wait_for_job(reclaim.id, timeout=5.0))["status"] == "failed"
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    await _converge_cycle(clients)
+    record = _aggregate(capacity_reservation_id)
+    assert (record.state, record.failure_reason) == (
+        _State.teardown_failed.value,
+        CREATE_COMPENSATION,
+    )
+    await clients.family.check_leases()
+    assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+        LeaseState.RELEASING
+    )
+
+    _host_version(SSH_CONNECTION_VERSION)
+    source.set(source.now() + 60)
+    await _converge_cycle(clients)
+    rerun = _aggregate(capacity_reservation_id).teardown_provider_metadata["teardown_job_id"]
+    assert (await test_client.wait_for_job(rerun, timeout=5.0))["status"] == "succeeded"
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    await _converge_cycle(clients)
+
+    record = _aggregate(capacity_reservation_id)
+    assert (record.state, record.failure_reason) == (_State.torn_down.value, CREATE_COMPENSATION)
+    assert (await clients.family.check_leases()).released == 1
+    assert len(_teardown_jobs(capacity_reservation_id)) == 2
 
 
 async def test_a_release_is_durable_before_teardown_and_a_restart_resumes_it(
@@ -513,6 +810,8 @@ async def test_a_release_is_durable_before_teardown_and_a_restart_resumes_it(
         release_status=FulfillmentReleaseStatusPort(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
+            rerun_policy=_container_module._make_teardown_rerun_policy(configured._settings),
+            jobs=_container_module.resolved_job_engine,
         ),
     )
     await restarted.check_leases()
@@ -521,6 +820,37 @@ async def test_a_release_is_durable_before_teardown_and_a_restart_resumes_it(
     assert (await clients.family.get_lease(capacity_reservation_id)).status == (
         LeaseState.RELEASING
     )
+
+
+async def test_a_teardown_that_keeps_failing_to_begin_times_out_after_the_grace(
+    client_and_queue, monkeypatch, source
+):
+    """Beginning teardown keeps failing transiently: within the grace each
+    cycle leaves the lease releasing to try again; past it, the lease is
+    release_failed with teardown_timeout, its aggregate never torn down."""
+    clients, _ = client_and_queue
+    capacity_reservation_id, fulfillment_id = await _granted(clients, "escrow-bm-unbegun")
+
+    async def unreachable(self, fulfillment_id):
+        raise ConnectionError("fulfillment authority unreachable")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FulfillmentOrchestrator, "begin_fulfillment_teardown", unreachable)
+        await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+        await clients.family.check_leases()
+        waiting = await clients.family.get_lease(capacity_reservation_id)
+
+        source.set(source.now() + 301)
+        await clients.family.check_leases()
+        timed_out = await clients.family.get_lease(capacity_reservation_id)
+
+    assert (waiting.status, waiting.release_job_id) == (LeaseState.RELEASING, fulfillment_id)
+    assert (timed_out.status, timed_out.failure_reason, timed_out.release_job_id) == (
+        LeaseState.RELEASE_FAILED,
+        "teardown_timeout",
+        fulfillment_id,
+    )
+    assert _aggregate_state(capacity_reservation_id) == _State.active.value
 
 
 async def test_a_bare_metal_lease_reports_the_machine_its_activation_recorded(

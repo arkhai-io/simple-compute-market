@@ -38,6 +38,7 @@ feed is always consistent with a snapshot.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from collections.abc import Callable, Iterator
@@ -49,6 +50,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
+import injected_time
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
     DeliverableHosts,
@@ -184,7 +186,7 @@ def _lease_window(
         if seconds <= 0:
             raise ValueError("lease_duration_seconds must be > 0")
         if start is None:
-            start = datetime.now(timezone.utc)
+            start = injected_time.now_datetime()
         end = start + timedelta(seconds=seconds)
     return start, end
 
@@ -235,6 +237,55 @@ def _requested_offering_mode(
         )
     return raw
 
+
+def _placement_key(deal_ref: Mapping[str, Any]) -> str | None:
+    """The placement key a reserve's ``deal_ref`` carries, if any.
+
+    The key is opaque to the site: it names a deal and the purpose of one
+    placement for it, and the site uses it only to find the reservation that
+    placement recorded.
+    """
+    raw = deal_ref.get("placement_key")
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("deal_ref.placement_key must be a non-empty string")
+    return raw
+
+
+def _placement_request(
+    *,
+    resource_kind: str | None,
+    claim_attributes: Mapping[str, Any],
+    requested: Mapping[str, Decimal],
+    requested_mode: str | None,
+    lease_start_utc: str | None,
+    lease_duration_seconds: int | None,
+) -> dict[str, Any]:
+    """The reserve request a placement key records, as stored JSON.
+
+    The window is recorded as asked — its start, normalized, and its
+    duration — so a request whose start the site's clock supplied replays
+    equal to itself. The hold's TTL is not part of it: a replay returns the
+    recorded hold, whose expiry was fixed when it was admitted.
+    """
+    start = parse_utc(lease_start_utc)
+    return json.loads(
+        json.dumps(
+            {
+                "resource_type": resource_kind,
+                "attributes": dict(claim_attributes),
+                "offering_mode": requested_mode,
+                "dimensions": _serialize_dimensions(requested),
+                "lease_start_utc": start.isoformat() if start else None,
+                "lease_duration_seconds": (
+                    int(lease_duration_seconds)
+                    if lease_duration_seconds is not None
+                    else None
+                ),
+            }
+        )
+    )
 
 
 def _requested_units(
@@ -1175,7 +1226,20 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``.
 
-        Idempotent by ``deal_ref["escrow_uid"]`` when present: a repeat
+        Idempotent by ``deal_ref["placement_key"]`` when present: a replay
+        under a recorded key returns that reservation in whatever state it
+        has reached -- held, committed, released, or lapsed -- and admits
+        nothing, and a replay that asks for anything the recorded
+        reservation was not admitted for is refused with
+        :class:`CapacityConflictError` and nothing written. Unlike the
+        escrow lookup below, a released reservation still answers its key:
+        a caller whose acknowledgement was lost must learn that its own
+        placement lapsed, not receive a fresh hold in its place, and a new
+        placement for the same deal names a new key. A keyed reserve whose
+        escrow already holds a reservation placed without a key adopts that
+        reservation under its key; one held under another key is refused.
+
+        Otherwise idempotent by ``deal_ref["escrow_uid"]`` when present: a repeat
         call for the same escrow_uid returns the existing held reservation
         (``reserved``/``provisioning``/``leased``/etc. -- anything in
         ``HELD_RESERVATION_STATES``) rather than minting a second one. This
@@ -1204,11 +1268,24 @@ class CapacityLedgerService:
         # normalizes `resource_id` into the matched attribute mapping, so a
         # listing that named one resource is carried here as an ordinary
         # categorical constraint rather than needing a second mechanism.
-        _, claim_attributes = _split_claim_requirement(
+        resource_kind, claim_attributes = _split_claim_requirement(
             claim, unit_claim_keys=self._unit_claim_keys
         )
         deal = dict(deal_ref or {})
         escrow_uid = deal.get("escrow_uid")
+        placement_key = _placement_key(deal)
+        placement_request = (
+            _placement_request(
+                resource_kind=resource_kind,
+                claim_attributes=claim_attributes,
+                requested=requested,
+                requested_mode=requested_mode,
+                lease_start_utc=lease_start_utc,
+                lease_duration_seconds=lease_duration_seconds,
+            )
+            if placement_key is not None
+            else None
+        )
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
@@ -1216,6 +1293,19 @@ class CapacityLedgerService:
         with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             _begin_decision_transaction(db)
+            if placement_key is not None:
+                recorded = (
+                    db.query(CapacityReservation)
+                    .filter(CapacityReservation.placement_key == placement_key)
+                    .one_or_none()
+                )
+                if recorded is not None:
+                    if recorded.placement_request != placement_request:
+                        raise CapacityConflictError(
+                            f"placement {placement_key!r} was reserved for a "
+                            "different claim, offering mode or lease window"
+                        )
+                    return self._reservation_payload_for_reserve(db, recorded)
             if escrow_uid:
                 existing = self._find_reservation(db, escrow_uid=escrow_uid)
                 if existing is not None:
@@ -1223,6 +1313,20 @@ class CapacityLedgerService:
                         raise CapacityConflictError(
                             "offering_mode does not match the existing reservation"
                         )
+                    if placement_key is not None:
+                        # The escrow's held reservation belongs to another
+                        # placement, or to none. Another placement's row is not
+                        # this one's to answer with; a row placed without a key
+                        # is adopted under this one, so its replay finds the row
+                        # once it is released rather than admitting a fresh one.
+                        if existing.placement_key is not None:
+                            raise CapacityConflictError(
+                                f"escrow {escrow_uid!r} is held by placement "
+                                f"{existing.placement_key!r}, not {placement_key!r}"
+                            )
+                        existing.placement_key = placement_key
+                        existing.placement_request = placement_request
+                        db.commit()
                     return self._reservation_payload_for_reserve(db, existing)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
@@ -1231,7 +1335,7 @@ class CapacityLedgerService:
             hold_expires_at = None
             if ttl_seconds is not None:
                 hold_expires_at = (
-                    datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
+                    injected_time.now_datetime() + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
             mirrored_units = int(requested.get(self._mirror_dimension, Decimal(0)))
             reservation = CapacityReservation(
@@ -1242,6 +1346,8 @@ class CapacityLedgerService:
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
+                placement_key=placement_key,
+                placement_request=placement_request,
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
                 offering_mode=requested_mode,
@@ -1494,7 +1600,7 @@ class CapacityLedgerService:
         the time scheduling runs, since ``reserve()`` always creates it)
         would simply credit back nothing.
         """
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         instant_end = now + timedelta(microseconds=1)
         own_backing_resource_id = self._backing_resource_id(db, exclude_reservation_id)
         own_reservation = db.get(CapacityReservation, exclude_reservation_id)
@@ -1613,7 +1719,7 @@ class CapacityLedgerService:
             if window_start is not None:
                 reservation.lease_start_utc = window_start.isoformat()
             elif not reservation.lease_start_utc:
-                reservation.lease_start_utc = datetime.now(timezone.utc).isoformat()
+                reservation.lease_start_utc = injected_time.now_datetime().isoformat()
             db.add(
                 CapacityEvent(
                     kind="committed",
@@ -1685,7 +1791,7 @@ class CapacityLedgerService:
                 reason=failure_message or failure_reason,
             )
             reservation.state = state
-            reservation.released_at = datetime.now(timezone.utc).isoformat()
+            reservation.released_at = injected_time.now_datetime().isoformat()
             reservation.failure_reason = failure_reason
             reservation.failure_message = failure_message
             self._run_release_effect(db, reservation.capacity_reservation_id, state)
@@ -1783,7 +1889,7 @@ class CapacityLedgerService:
             old_dimensions = _reservation_dimensions(old_reservation, self._mirror_dimension)
             self._record_lease_end(db, old_reservation, cause="superseded")
             old_reservation.state = ReservationState.released.value
-            old_reservation.released_at = datetime.now(timezone.utc).isoformat()
+            old_reservation.released_at = injected_time.now_datetime().isoformat()
             old_reservation.failure_reason = "superseded"
             self._run_release_effect(
                 db, old_capacity_reservation_id, ReservationState.released.value
@@ -1808,7 +1914,7 @@ class CapacityLedgerService:
             hold_expires_at = None
             if ttl_seconds is not None:
                 hold_expires_at = (
-                    datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
+                    injected_time.now_datetime() + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
             mirrored_units = int(requested.get(self._mirror_dimension, Decimal(0)))
             new_reservation = CapacityReservation(
@@ -1827,6 +1933,9 @@ class CapacityLedgerService:
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
+                # No placement key: a key names the reserve that admitted a
+                # row, and stays on the superseded row, so a replay of that
+                # reserve answers with what it recorded, now released.
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
                 offering_mode=requested_mode,
@@ -1936,7 +2045,7 @@ class CapacityLedgerService:
                     "lease tail; cannot activate"
                 )
             if reservation.activated_at_utc is None:
-                reservation.activated_at_utc = datetime.now(timezone.utc).isoformat()
+                reservation.activated_at_utc = injected_time.now_datetime().isoformat()
                 db.commit()
             return self._reservation_payload(reservation)
 
@@ -2001,7 +2110,7 @@ class CapacityLedgerService:
             if reservation.state not in _BEGIN_RELEASING_FROM:
                 return None
             self._record_lease_end(db, reservation, context=end_context)
-            reservation.release_requested_at = datetime.now(timezone.utc).isoformat()
+            reservation.release_requested_at = injected_time.now_datetime().isoformat()
             reservation.state = ReservationState.releasing.value
             self._set_release_job_id(reservation, release_job_id=release_job_id)
             db.commit()
@@ -2251,7 +2360,7 @@ class CapacityLedgerService:
             "version": 1, "kind": "lease_ended", "event_id": event_id,
             "capacity_reservation_id": reservation.capacity_reservation_id,
             "site_id": self._site_id,
-            "effective_at": context.get("effective_at", int(datetime.now(timezone.utc).timestamp())),
+            "effective_at": context.get("effective_at", injected_time.now()),
             "source_state": reservation.state, "cause": context.get("cause", cause),
             "reason": context.get("reason", reason), "caller": context.get("caller"),
             "claimed_deadline": context.get("claimed_deadline"), "deadline_phase": context.get("deadline_phase"),
@@ -2309,7 +2418,7 @@ class CapacityLedgerService:
         transaction. A lapse the release guard refuses keeps its hold for a
         later sweep.
         """
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         stale = (
             db.query(CapacityReservation)
             .filter(
@@ -2611,7 +2720,7 @@ class CapacityLedgerService:
         return q.order_by(CapacityReservation.created_at.desc()).first()
 
     def _resource_payload(self, db: Session, row: CapacityBucket) -> dict[str, Any]:
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         capacity = _resource_capacity(row, self._mirror_dimension)
         held = self._held_dimensions(
             db,
@@ -2820,9 +2929,8 @@ class CapacityLedgerService:
         """``_reservation_payload`` plus ``resource_id``, matching the shape
         ``reserve()``'s fresh-reservation path returns (via
         ``_match_payload``), so an idempotent-hit return is byte-compatible
-        with a fresh one for callers that read ``resource_id`` (for
-        example ``vm_fulfillment_service.py``'s
-        ``reserved.get("resource_id")``). ``resource_id`` is resolved via
+        with a fresh one for callers that read ``resource_id`` from
+        either. ``resource_id`` is resolved via
         the same backing-resource lookup ``get_reservation_backing_resource_id``
         already exposes, not duplicated here.
         """

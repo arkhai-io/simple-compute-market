@@ -207,7 +207,7 @@ Provisioning operations MUST expose durable job identity and terminal status whi
 Lease expiry MUST invoke the configured executor release delegate before capacity is reported released; failed release MUST remain observable and operator-repairable.
 
 #### Scenario: Teardown fails
-- **WHEN** the release delegate returns a failure
+- **WHEN** the release delegate returns a failure that no rerun of the teardown will retry
 - **THEN** capacity remains unavailable, the lease enters `release_failed`, and retry/force-release controls remain available
 
 ### Requirement: Site-backed release lifecycle
@@ -218,7 +218,7 @@ Compute lease lifecycle MUST use an injected site-authority port and MUST NOT re
 - **THEN** compute lifecycle records successful allocation release through the site-authority port and capacity becomes available
 
 #### Scenario: Executor release fails
-- **WHEN** VM teardown or bare-metal reclaim returns a failure
+- **WHEN** VM teardown or bare-metal reclaim returns a failure that no rerun of the teardown will retry
 - **THEN** the allocation remains unavailable, the lease exposes `release_failed`, and retry and force-release controls retain the failure evidence
 
 #### Scenario: Operator force-releases allocation
@@ -439,6 +439,7 @@ Lease lifecycle SHALL own the reservation's `releasing` and terminal release sta
 - **GIVEN** a reservation is `releasing` and its fulfillment is `teardown_failed`
 - **WHEN** fulfillment convergence requeues teardown and an operator retries lease release
 - **THEN** both paths SHALL continue using the same `fulfillment_id`
+- **AND** any rerun of the teardown is submitted by the fulfillment's provider under that `fulfillment_id`, never by lease lifecycle
 - **AND** capacity SHALL remain unavailable until that aggregate reaches `torn_down`
 
 ### Requirement: Provisioning shape comes from committed capacity
@@ -646,7 +647,7 @@ Rendered inventories MUST emit `ansible_port` for every host, including hosts on
 
 An `ansible_port` supplied through the INI input format MUST be preserved rather than discarded. A value that is not a port number between 1 and 65535 MUST cause its entry to be rejected rather than replaced with a default, because a substituted port produces an unreachable host whose failure resembles a network fault rather than a bad inventory line.
 
-The registry MAY also record a tenant-facing port, `public_port`, for a host. The port belongs to version 2 of the `ssh` connection, which is version 1 with that one optional field, and version 2 is the only version of the kind the registry serves: every `ssh` connection is submitted and stored at version 2, whether it states a tenant-facing port, states none, or states it as null. A rendered inventory MUST emit `public_port` for a host whose record states one, and MUST NOT emit it for a host whose record states none. A host whose record states no tenant-facing port MUST be stored with no `public_port` field, not even a null one. A `public_port` supplied through the INI input format MUST be preserved, and a value that is not a port number between 1 and 65535 MUST cause its entry to be rejected, as for `ansible_port`. A connection built from the INI format or the typed connection factory MUST be submitted at version 2.
+The registry MAY also record a tenant-facing port, `public_port`, for a host. The port is optional on an SSH connection. A connection submission MUST state its version; the host contract carries no default. A rendered inventory MUST emit `public_port` for a host whose record states one, and MUST NOT emit it for a host whose record states none. A host whose record states no tenant-facing port MUST be stored with no `public_port` field, not even a null one. A `public_port` supplied through the INI input format MUST be preserved, and a value that is not a port number between 1 and 65535 MUST cause its entry to be rejected, as for `ansible_port`. A connection built from the INI format or the typed connection factory MUST use the served SSH connection version.
 
 #### Scenario: A host is registered on a tunnel port
 
@@ -681,12 +682,14 @@ The registry MAY also record a tenant-facing port, `public_port`, for a host. Th
 #### Scenario: A host is registered with no tenant-facing port
 
 - **WHEN** a host is registered or imported with an `ssh` connection that states no tenant-facing port
-- **THEN** it is stored at version 2 with no `public_port` field, and its rendered inventory carries the connection's own address and port
+- **THEN** it is stored at the served version with no `public_port` field, and its rendered inventory carries the connection's own address and port
 
 #### Scenario: A version-1 or unversioned connection is submitted
 
-- **WHEN** a host is submitted with an `ssh` connection at version 1, or stating no version
-- **THEN** the submission is refused naming version 2, the version served, and nothing is stored
+- **WHEN** a host is submitted with an `ssh` connection at a version the registry does not serve, or stating no version
+- **THEN** an unsupported submission is refused naming the version served; an
+  unversioned submission is refused as missing its required `version`; and nothing is
+  stored
 
 ### Requirement: Relays are administered resources
 
@@ -752,7 +755,7 @@ A pool's relay reference determines which relay a newly created delivery receive
 
 A host's pool assignment, a pool's relay reference, and a relay's address or port MUST NOT change while any affected host holds an active lease, unless the relay is the same on both sides of the change. The buyer holds a rendezvous address and a port; both are delivered, and a remote port is not portable between relays, so a rebinding that moved existing deliveries would strand every buyer on the affected hosts and request ports the new relay may already have leased.
 
-Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating existing workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables.
+Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating existing workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables. A change on the relay's side — its address or port, or its token — drains the relay instead, since it affects every pool referencing it: the operator disables the relay, waits until it reports drained, makes the change, and re-enables it. A refusal under this rule MUST state the drain at the scope that clears it: the pool for a pool's relay reference or a host's pool, the relay for a relay's address, port, or token.
 
 #### Scenario: A pool's relay reference is changed while VMs are running
 
@@ -777,7 +780,12 @@ Rebinding is therefore drain-then-change: disabling a pool already excludes it f
 #### Scenario: A relay is repointed while it carries leases
 
 - **WHEN** a relay's address or port is updated and it holds an active lease
-- **THEN** the update is rejected
+- **THEN** the update is rejected, and the refusal tells the operator to disable the relay, wait until it reports drained, make the change, and re-enable it
+
+#### Scenario: A pool's relay reference change is refused
+
+- **WHEN** a change to a pool's relay reference is rejected because a host in the pool holds an active lease
+- **THEN** the refusal tells the operator to disable the pool, wait for its leases to be released, make the change, and re-enable it
 
 #### Scenario: A VM is torn down after its pool was rebound
 
@@ -790,7 +798,7 @@ A relay's admission token MUST NOT be written into an accepted operation's persi
 
 An accepted operation MUST carry the relay reference and the leased remote port. The relay's address and admission token MUST be resolved immediately before the job's variables are written, so that a token rotated after acceptance takes effect on the next execution, including a retry of a job accepted before the rotation.
 
-A relay that is absent, disabled, or holds no token at execution MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically.
+A relay that is absent, or holds no token at execution, MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically. A disabled relay MUST NOT fail a job that holds a lease on it, whether the job adds the delivery's proxy or removes it: disabling a relay drains it, and a drain lets every leased delivery run to its end.
 
 The rendered variables file holds the decrypted token and MUST have the same lifetime and access restrictions as other decrypted secret material on the execution path.
 
@@ -811,8 +819,13 @@ The rendered variables file holds the decrypted token and MUST have the same lif
 
 #### Scenario: A relay becomes unusable between acceptance and execution
 
-- **WHEN** the referenced relay is disabled or its token cleared before the job executes
+- **WHEN** the referenced relay is absent or holds no token when the job executes
 - **THEN** the job fails as a configuration error and is not retried
+
+#### Scenario: A relay is disabled between acceptance and execution
+
+- **WHEN** the relay a job's lease names is disabled after the job is accepted and before it executes
+- **THEN** the job executes, whether it creates the delivery or tears it down
 
 ### Requirement: Relay port leases are unique per relay
 
@@ -1002,88 +1015,6 @@ hosts is a distinct concept and MUST keep its own name.
 - **THEN** each has its own `host_id`, and both declarations carry the same
   `physical_host_id` so cross-mode accounting sees one machine
 
-### Requirement: Existing host identities migrate without loss
-
-A compute provisioner MUST migrate every persisted host identity to `host_id` in one
-transaction before serving requests. It MUST read and validate every affected row
-before its first write, and the transaction MUST cover its schema changes as well as
-its data, so a failure leaves both unchanged. A declaration whose host spellings
-disagree, whose cross-mode accounting fields disagree between locations, or that
-names a host another declaration names, MUST abort the migration, naming the row.
-The migration MUST rewrite only the locations that carry a host identity; values an
-operator supplied, such as provider variables, MUST NOT be rewritten whatever their
-names.
-
-#### Scenario: A declaration carries both legacy spellings with one value
-
-- **WHEN** a declaration's `vm_host` and its publication `machine_id` name the same host
-- **THEN** the migration records that host as the declaration's `host_id` and removes
-  both legacy spellings
-
-#### Scenario: A declaration carries conflicting spellings
-
-- **WHEN** a declaration's `vm_host` and its publication `machine_id` name different hosts
-- **THEN** the migration aborts, names the declaration, and leaves the database's
-  schema and rows unchanged
-
-#### Scenario: An operator variable shares a retired key's name
-
-- **WHEN** a stored operation's provider variables include one named `machine_id`
-- **THEN** the migration rewrites the operation's host identity and leaves that
-  variable as it was
-
-### Requirement: A bare-metal storefront refuses state written under a retired listing kind
-
-A bare-metal storefront MUST refuse to start against a database whose persisted state
-was written under a listing kind it no longer decodes, and the refusal MUST name the
-operator procedure that resolves it. It MUST NOT start and then fail when a retired
-record is first decoded.
-
-#### Scenario: The storefront starts against a pre-rename database
-
-- **WHEN** a bare-metal storefront starts against a database written under
-  `bare_metal.v1`
-- **THEN** startup fails before serving requests, naming the reset procedure, and no
-  record is decoded or rewritten
-
-#### Scenario: The storefront starts against a fresh database
-
-- **WHEN** a bare-metal storefront starts against an empty database
-- **THEN** it creates its schema under the current listing kind and serves requests
-
-### Requirement: Host inventory is connection identity
-
-Host inventory records MUST describe how to reach and dispatch work to a machine —
-addressing, credentials, machine alias, pool membership, and enabled state — and
-MUST NOT be the authoritative source of a Physical Resource's sellable capacity.
-Capacity projection MUST NOT read host inventory records for capacity,
-attributes, or connection identity, and MUST NOT project a host that no capacity
-declaration names. A host record is joined to a capacity declaration only where
-its connection is used: at dispatch. Site admission, settlement scheduling, and
-capacity projection MUST learn of hosts only the identifiers of those taking new
-delivery, as the compute composition reports them.
-
-#### Scenario: Host record carries a legacy capacity column
-
-- **WHEN** a database still holds host capacity values from before capacity declarations
-  existed
-- **THEN** capacity projection does not read them, the projected capacity comes from the
-  declared capacity resource for that Physical Resource, and the ordered migrations drop the
-  values
-
-#### Scenario: Host inventory is inspected for capacity authority
-
-- **WHEN** the projection path is traced from host inventory to published capacity
-- **THEN** no host inventory record contributes capacity or attributes to the
-  projection, and the projection reads of hosts only the identifiers of those
-  taking new delivery
-
-#### Scenario: A host has no capacity declaration
-
-- **WHEN** no capacity declaration names a registered host
-- **THEN** the projection contains no entry for that host
-- **AND** no entry with empty or omitted capacity is published in its place
-
 ### Requirement: Execution inventory comes only from the registered host record
 
 The inventory an execution path hands to its executor SHALL be rendered from the
@@ -1144,53 +1075,6 @@ its host's tenant-facing address and port with the tenant account its job create
 - **WHEN** a tenant's connection details are produced for a host whose record names a
   tenant-facing address and no tenant-facing port
 - **THEN** they carry the tenant-facing address and the connection port
-
-### Requirement: Host writes declare no capacity
-
-A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when a host definitions document is applied, at startup or through its import API, not when an INI inventory is submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
-
-A host MUST be treated as already declared when any declaration names it as its
-`host_id`, which is also the only rule the capacity projection uses to correlate
-declarations to hosts.
-
-#### Scenario: Deployment configured only through host inventory
-
-- **WHEN** a provisioner applies a host definitions document, at startup or through its
-  import API, or an INI inventory through the host import API, and no capacity
-  declarations exist
-- **THEN** the hosts are registered, no capacity declaration is created for them, and
-  the capacity projection contains no entry for them
-
-#### Scenario: Existing hosts at upgrade
-
-- **WHEN** the ordered migration runs against a database holding hosts with legacy
-  GPU counts and no correlated declarations
-- **THEN** each such host receives a derived declaration before the service serves
-  requests
-
-#### Scenario: Operator declaration and legacy host value disagree
-
-- **WHEN** a host held a legacy GPU count and an operator has declared different capacity
-  for the same Physical Resource
-- **THEN** the operator's declaration is retained unchanged, and dropping the host's GPU
-  columns does not affect it
-
-#### Scenario: A host has no GPUs
-
-- **WHEN** a host is registered for a machine without GPUs
-- **THEN** no declaration is created for it, as for any host
-
-#### Scenario: A declaration's resource id differs from its host
-
-- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
-  host as its `host_id`
-- **THEN** the host is treated as declared
-
-#### Scenario: A host is created through the individual host API
-
-- **WHEN** an operator creates a host through the individual host API
-- **THEN** no declaration is created, and the host's capacity is declared through the
-  capacity administration surface
 
 ### Requirement: Capacity definitions are imported from a mounted document
 
@@ -1451,17 +1335,22 @@ A codec MUST validate the public fields it defines strictly, for every submissio
 type, such as a quoted number, MUST be refused rather than coerced.
 
 A deployment MUST register one codec per kind, and each codec serves one version;
-composition MUST refuse two codecs for one kind. A connection MUST be built by the codec
-of its own kind, at the version that codec serves. A connection at a kind no codec
-serves, or at another version than its kind's codec serves, MUST be refused naming the
-kinds or the version that is served. A reader of a stored connection MUST check its kind
-and version before reading its fields, and MUST refuse a version it does not serve
-rather than read it as another, so a host stored at a version no longer served runs no
-work until it is submitted again at the served version. Such a submission MUST carry
-forward a protected value it still needs and does not resubmit, whatever the previous
-connection's version, as opaque material it neither reads nor decrypts. A stored connection MUST NOT
-be rewritten to another version except by a submission that states that version, and
-nothing upgrades a stored connection on its own.
+composition MUST refuse two codecs for one kind. The `ssh` codec serves version 3. A
+connection MUST be built by the codec of its own kind, at the version that codec serves.
+A connection at a kind no codec serves, or at another version than its kind's codec
+serves, MUST be refused naming the kinds or the version that is served. A reader of a
+stored connection MUST check its kind and version before reading its fields, and MUST
+refuse a version it does not serve rather than read it as another, so a host stored at a
+version no longer served runs no work until it is submitted again at the served version.
+Such a submission MUST carry forward a protected value it still needs and does not
+resubmit, whatever the previous connection's version, as opaque material it neither
+reads nor decrypts. A stored connection MUST NOT be rewritten to another version except
+by a submission that states that version or by a recorded migration whose mapping from
+the stored version is exact; no reader upgrades a stored connection. The provisioning
+migration chain MUST rewrite every host's `ssh` connection stored at version 1 to
+version 2, and every one stored at version 2 to version 3, each with the same public
+fields and protected values, version 3 stating no `host_keys`; a job holds no copy of a
+connection, reading its host's when it is dispatched.
 
 #### Scenario: A compute domain needs another connection kind
 
@@ -1484,29 +1373,58 @@ nothing upgrades a stored connection on its own.
 #### Scenario: A stored connection is at an unsupported version
 
 - **WHEN** an execution path reads a stored connection whose version its codec does not
-  serve, such as a host stored at `ssh` version 1
+  serve
 - **THEN** it refuses the connection before any playbook runs, rather than reading it
   under another version's fields
 
+#### Scenario: A host stored at an earlier version is submitted again at version 3
+
+- **WHEN** a host stored at an `ssh` version no longer served, whose key is protected,
+  with no key file, is updated with a version-3 connection that restates its public
+  fields and submits no key
+- **THEN** the host is stored at version 3, its protected key is kept unchanged, and work
+  runs against it again
+
+#### Scenario: A host stored at an earlier version with a key file is submitted again at version 3
+
+- **WHEN** a host stored at an `ssh` version no longer served, whose key is a file, is
+  updated with a version-3 connection restating its public fields, `key_path` included
+- **THEN** the host is stored at version 3 with the same key file; an update omitting
+  `key_path` names no key and is refused
+
 #### Scenario: A host stored at version 1 is submitted again at version 2
 
-- **WHEN** a host stored at `ssh` version 1 whose key is protected, with no key file,
-  is updated with a version-2 connection that restates its public fields and submits
-  no key
-- **THEN** the host is stored at version 2, its protected key is kept unchanged, and work
-  runs against it again
+- **WHEN** a host stored at `ssh` version 1 is updated with a version-2 connection
+- **THEN** the submission is refused naming version 3, the version served, and the
+  stored host is unchanged
 
 #### Scenario: A host stored at version 1 with a key file is submitted again at version 2
 
 - **WHEN** a host stored at `ssh` version 1 whose key is a file is updated with a
   version-2 connection restating its public fields, `key_path` included
-- **THEN** the host is stored at version 2 with the same key file; an update omitting
-  `key_path` names no key and is refused
+- **THEN** the submission is refused naming version 3, and the stored host is unchanged
 
 #### Scenario: A host stored at version 1 is imported again
 
-- **WHEN** an inventory naming a host stored at `ssh` version 1 is imported
-- **THEN** the host is stored at version 2 with the connection and key its entry names
+- **WHEN** an inventory naming a host stored at an `ssh` version no longer served is
+  imported
+- **THEN** the host is stored at version 3 with the connection and key its entry names
+
+#### Scenario: A provisioning database holding version-1 connections is migrated
+
+- **WHEN** the provisioning migration command runs against a database with hosts stored
+  at `ssh` versions 1 and 2 and a queued create job and a queued teardown job naming
+  those hosts
+- **THEN** the hosts are stored at `ssh` version 3 with the same public fields and
+  protected values and no `host_keys`, each marked pending adoption, the jobs are
+  unchanged, and the create and the teardown run against version-3 connections when
+  they are dispatched
+
+#### Scenario: A version-1 connection's fields are not valid at version 2
+
+- **WHEN** the provisioning migration finds a host's stored `ssh` version 1 connection
+  whose public fields are invalid at version 2
+- **THEN** the migration fails naming the host, and nothing is rewritten
 
 ### Requirement: Connection secrets stay protected
 
@@ -1804,8 +1722,10 @@ MUST be refused. The lease's target MUST be the one the reservation's fulfillmen
 ### Requirement: Every provisioning route admits the administrator
 
 Every route on the provisioning service's route table MUST admit the `admin` role, in
-addition to any other role it admits. A route contract a domain contributes that does not
-admit `admin` MUST be refused when the table is assembled.
+addition to any other role it admits, since every resource the service holds — hosts,
+relays, leases, jobs, and the capacity and pools it hosts — is its operator's. A route
+contract a domain contributes that does not admit `admin` MUST be refused when the table
+is assembled.
 
 #### Scenario: An operator calls a storefront route
 
@@ -1904,9 +1824,12 @@ readiness component MUST refuse an enabled host's `ssh` connection exactly as ex
 refuses it, reporting itself not ready with a reason naming the host, and MUST report
 every other host as it would without it; it MUST skip a host of another connection kind.
 The Ansible component's detail MUST be of kind `compute_provisioning.ansible.readiness` at
-schema version 2, the only version it produces: an embedded key's `exists` says whether the
-key decrypts under the configured key, and a host whose stored connection execution refuses
-has no `ssh_keys` entry.
+schema version 3. An embedded key's existence flag says whether it decrypts under
+the configured key. A host whose stored connection execution refuses has no SSH key
+entry. When any Ansible executor is real, each enabled SSH host without a pin or a
+pending-adoption mark MUST make the component not ready, with the host named in its
+reasons. Hosts marked for adoption MUST be listed in hosts_pending_key_adoption.
+The absence of a pin for those hosts MUST NOT make the component unready.
 
 #### Scenario: Every executor is mocked
 
@@ -1933,13 +1856,18 @@ has no `ssh_keys` entry.
 A host connectivity check MUST run the probe registered for the host's connection kind and
 return a neutral connectivity result. A host whose connection kind has no registered probe
 MUST be refused. The probe's execution resources MUST be composed by the provisioning
-service, not borrowed from a domain's runtime.
+service, not borrowed from a domain's runtime. The result MUST carry, for a kind whose
+hosts present a key, a `host_key` member stating the endpoint, whether the host is pinned,
+the presented key's type and fingerprint, and for a pinned host whether it matched and the
+pinned fingerprints; that member MUST be null when the probe failed before the host
+presented a key.
 
 #### Scenario: A bare-metal host is probed
 
 - **WHEN** an operator checks connectivity to a registered bare-metal host with an `ssh`
   connection
-- **THEN** the `ssh` probe runs over the service's own runner and returns the neutral result
+- **THEN** the `ssh` probe runs over the service's own runner and returns the neutral
+  result with its `host_key` member
 
 ### Requirement: Delivery happens only through fulfillment
 
@@ -1956,11 +1884,19 @@ A lease's release MUST follow the state of its reservation's fulfillment aggrega
 a release MUST NOT write: the reservation MUST be recorded `releasing`, with the fulfillment
 as its release handle, before teardown is begun, so that a restart between the two resumes
 the release from `releasing`, and a failure to begin teardown leaves it for the lease
-lifecycle's next cycle. The grace period after which a stalled teardown is marked failed
-MUST run from when the reservation entered `releasing`, not from the lease's end. When the
-site refuses one of the lifecycle's writes because the reservation changed since it was
-read, the lifecycle MUST re-read the reservation and leave it in the state another actor
-recorded; in particular, it MUST NOT begin teardown after a refused move to `releasing`.
+lifecycle's next cycle. The lease stays `releasing` while its fulfillment's teardown is in
+progress or a rerun of it is pending, until the grace period passes: a lease still
+`releasing` after it MUST enter `release_failed` with the reason `teardown_timeout`, its
+capacity held, whatever its teardown's progress. The grace period MUST run from when the
+reservation entered `releasing`, not from the lease's end, and its default MUST exceed the
+default job retries' backoff and the default reruns' spacing with room for the playbook
+runs a teardown is expected to take, so that such a teardown succeeding on a retry or a
+rerun is not timed out. A teardown that outlasts the grace period is timed out like any
+other; an operator's retry-release then re-observes the same aggregate and releases the
+lease once it is `torn_down`. When the site refuses one of the lifecycle's
+writes because the reservation changed since it was read, the lifecycle MUST re-read the
+reservation and leave it in the state another actor recorded; in particular, it MUST NOT
+begin teardown after a refused move to `releasing`.
 
 - An `active` aggregate MUST be torn down before capacity returns.
 - An aggregate whose teardown has already begun — `teardown_dispatch_pending`, `tearing_down`, or `teardown_failed` — MUST have that teardown adopted, not a second one begun.
@@ -1972,7 +1908,7 @@ recorded; in particular, it MUST NOT begin teardown after a refused move to `rel
 - When a compensable aggregate's provider cannot prepare its teardown, because its create job is missing or names another resource, beginning the teardown MUST be refused writing nothing, and the lease MUST enter `release_failed` with the reason `compensation_refused`, its capacity held. The failure MUST be recorded under the release handle the lifecycle recorded when it entered `releasing`, so that a refusal observed for one release cannot land on another. Any other failure to begin is transient: the lease stays `releasing`, and the lifecycle's next cycle retries it.
 - Any other `failed` aggregate — quarantined, failed for metadata that cannot name its output, or carrying no or unreadable provider metadata — or an absent, `assigned`, or `abandoned` one without the provenance proof, MUST put the lease in `release_failed` for an operator to verify and force-release. An operator's retry-release of such a lease whose aggregate has since become compensable MUST begin the compensating teardown.
 - Only a release of the lease — termination, expiry, or an operator's retry-release — begins a compensating teardown. A lease already `released` or `force_released` MUST NOT be revisited.
-- A teardown observed as `teardown_failed` while the lease is `releasing` MUST put the lease in `release_failed`; an operator's retry-release MUST re-observe the same aggregate.
+- A teardown observed as `teardown_failed` while the lease is `releasing` MUST keep the lease `releasing` while a rerun of the teardown is pending, as "A teardown that never started is run again under a new job identity, within a bound" decides, until the grace period passes, and MUST put the lease in `release_failed` once none is pending. An operator's retry-release MUST re-observe the same aggregate, and the lease then waits for any rerun pending.
 
 The compute provisioning composition MUST supply the site authority's release guard, which permits freeing a reservation's capacity only for a `torn_down` aggregate or for an absent, `assigned`, or `abandoned` one whose provenance proof holds, and MUST check that proof in the transaction that frees the capacity. Every direct capacity return, whether by the lease lifecycle or by any caller of the site's release, MUST pass that guard; force-release remains the operator's recorded override.
 
@@ -2009,7 +1945,7 @@ The compute provisioning composition MUST supply the site authority's release gu
 
 #### Scenario: A compensating teardown fails
 
-- **WHEN** a compensating teardown reaches `teardown_failed`
+- **WHEN** a compensating teardown reaches `teardown_failed` and no rerun of it is pending
 - **THEN** the aggregate keeps the reason `create_compensation` with the teardown's diagnostic as its message, and the lease enters `release_failed` with capacity held, as for an active fulfillment's failed teardown
 
 #### Scenario: A delivered fulfillment's teardown fails once and then succeeds
@@ -2019,8 +1955,35 @@ The compute provisioning composition MUST supply the site authority's release gu
 
 #### Scenario: Teardown fails while the lease is releasing
 
-- **WHEN** a releasing lease's aggregate reaches `teardown_failed`
-- **THEN** the lease enters `release_failed`, and when convergence's retry later reaches `torn_down`, an operator's retry-release adopts that teardown and releases the capacity
+- **WHEN** a releasing lease's aggregate reaches `teardown_failed` and no rerun of its teardown is pending
+- **THEN** the lease enters `release_failed` with capacity held, and an operator's retry-release re-observes the same aggregate
+
+#### Scenario: A teardown that never started fails while the lease is releasing
+
+- **WHEN** a releasing lease's aggregate reaches `teardown_failed` and a rerun of its teardown is pending
+- **THEN** the lease stays `releasing`, and when the rerun reaches `torn_down` within the grace period the capacity is released without an operator
+
+#### Scenario: A teardown succeeds on a job retry within the grace period
+
+- **WHEN** a releasing lease's teardown job fails an attempt, is retried, and reaches `torn_down` within the grace period
+- **THEN** the lease stays `releasing` throughout, and the capacity is released without an operator
+
+#### Scenario: A teardown outlasts the grace period
+
+- **WHEN** a releasing lease is still `releasing` after the grace period, its teardown in progress, a rerun of it pending, or its status unreadable
+- **THEN** the lease enters `release_failed` with the reason `teardown_timeout` and capacity held, and an operator's retry-release re-observes the same aggregate
+
+#### Scenario: A timed-out teardown later succeeds
+
+- **GIVEN** a lease in `release_failed` with the reason `teardown_timeout`, whose teardown kept running past the grace period and has since reached `torn_down`
+- **WHEN** an operator retries its release
+- **THEN** the lease is released under the same fulfillment, and no second teardown is begun
+
+#### Scenario: A failed lease's teardown has a rerun pending
+
+- **GIVEN** a lease in `release_failed` whose aggregate is `teardown_failed` with a rerun of its teardown pending
+- **WHEN** an operator retries its release
+- **THEN** the lease becomes `releasing` under the same fulfillment, waits for the rerun, and is released when the aggregate reaches `torn_down`
 
 #### Scenario: A storefront releases a delivered lease
 
@@ -2038,12 +2001,12 @@ A host-import route that reads an implementation's inventory format MUST be cont
 
 ### Requirement: Lease release delegates to durable fulfillment teardown
 
-For every offering mode, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The release adapter SHALL be provider-neutral, SHALL use the durable `fulfillment_id` as the release tracking identifier, and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL read fulfillment aggregate state and SHALL NOT be selected by the reservation's offering mode.
+For every offering mode, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The release adapter SHALL be provider-neutral, SHALL use the durable `fulfillment_id` as the release tracking identifier, and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL read fulfillment aggregate state and SHALL NOT be selected by the reservation's offering mode. Its one source beyond the aggregate SHALL be the compute-owned predicates the job-backed provider's state answers: whether a failed create is compensable, and whether a `teardown_failed` aggregate's teardown has a rerun pending, as "A teardown that never started is run again under a new job identity, within a bound" decides from the reservation's teardown jobs.
 
 #### Scenario: Release status is read from the aggregate
 
 - **WHEN** lease lifecycle reads release status for a VM or a bare-metal reservation
-- **THEN** both reads go through the same status port to the fulfillment aggregate, whose teardown state decides the outcome
+- **THEN** both reads go through the same status port to the fulfillment aggregate, whose teardown state decides the outcome, except that a `teardown_failed` aggregate whose rerun is pending reads as still tearing down
 
 #### Scenario: Unexpected teardown submission failure remains diagnosable
 
@@ -2299,27 +2262,6 @@ periodic watchdog processing MUST reconcile missed transitions.
 - **THEN** the assignment becomes abandoned and its held capacity is released
   atomically
 
-### Requirement: Active fulfillment migration
-
-The migration MUST place existing hosts into a default resource pool and MUST
-backfill settlement/fulfillment records for every active or releasing VM
-capacity reservation. It MUST infer the selected resource, provider, and
-versioned teardown input from durable fields used by the existing release
-path. Historical create input MAY be absent for already-active fulfillments.
-The migration MUST fail when an active reservation cannot be mapped
-unambiguously.
-
-#### Scenario: Existing active VM
-- **WHEN** the migration encounters an active VM with resolvable host, target,
-  and executor metadata
-- **THEN** it creates a backfilled fulfillment record capable of durable
-  teardown without a legacy release branch
-
-#### Scenario: Ambiguous active VM mapping
-- **WHEN** an active VM cannot be mapped unambiguously to a resource and
-  teardown input
-- **THEN** migration fails visibly rather than creating a partial record
-
 ### Requirement: The provisioning service answers an unroutable request by what failed to match
 
 The provisioning service's authentication middleware MUST answer a request that resolves to
@@ -2403,37 +2345,6 @@ letters and digits, is not at most 32 characters starting with a letter.
 
 - **WHEN** an operator creates a VM named so that its login exceeds 32 characters
 - **THEN** the request is refused with 422 naming the rule, and no job is submitted
-
-### Requirement: A host record describes no hardware
-
-A host record MUST NOT carry a GPU count, a GPU model, or any other description of the
-machine's hardware: a Physical Resource's hardware is stated only by its capacity
-declaration. The host API's create, update, and response models MUST NOT define such a field,
-and a request carrying `gpu_count` or `gpu_model` MUST be accepted with those fields ignored,
-as any field the models do not define is. The INI inventory format MUST NOT read `gpus=` or
-`gpu_model=`; like any variable it does not read, they are ignored without a warning. The
-provisioning service's ordered migrations MUST drop the host table's GPU columns after the
-migration that derived declarations from them.
-
-#### Scenario: A host is created with GPU fields
-
-- **WHEN** an operator creates a host through the host API with a body carrying `gpu_count`
-  and `gpu_model`
-- **THEN** the host is created, and neither its stored record nor its response carries a GPU
-  field
-
-#### Scenario: An inventory line carries GPU variables
-
-- **WHEN** host inventory is applied from an INI line carrying `gpus=8 gpu_model=H200`
-- **THEN** the host is registered from its connection fields and its pool, and nothing is
-  recorded or reported for the GPU variables
-
-#### Scenario: An existing database is upgraded
-
-- **WHEN** the ordered migrations run against a database whose hosts carry GPU counts and
-  models
-- **THEN** every host keeps its identity, connection, pool, and enabled state, and the host
-  table has no GPU column
 
 ### Requirement: VM hosts must provide hardware virtualization
 
@@ -2821,7 +2732,7 @@ Every proxy the buyer-facing tunnel client registers MUST carry, in its own meta
 
 ### Requirement: Each relay holds its own grant-signing key
 
-Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. A profile key's value MUST be the single-line standard base64 of an Ed25519 key's PKCS#8 DER, read after stripping surrounding whitespace; a value that is not MUST fail the import before any relay is created, naming the relay and the profile key and not disclosing the value. A key's identifier MUST be its RFC 7638 JWK thumbprint, the identifier the admission plugin derives from the public key. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until, each public half as the single-line base64 of its DER SubjectPublicKeyInfo, the form the plugin's configuration takes. Rotation MUST be two explicit operations: staging takes a private key supplied in the request, in the profile's form and under the same checks, or generates one when none is supplied, and returns its public half without signing with it; activating makes the staged key sign every later grant. A supplied private key MUST NOT appear in an access log, an error body, or the response. A retired key's grants MUST be reported valid until the latest grant expiry among the relay's unreleased leases allocated before the key was retired, since a lease whose job was retried across a rotation may hold grants signed by more than one key.
+Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at rest under the deployment's configured encryption key. A relay definition entry MUST name the secrets-profile key holding it, read only when the relay is created; a relay created through the API with no key MUST be given one the service generates. A profile key's value MUST be the single-line standard base64 of an Ed25519 key's PKCS#8 DER, read after stripping surrounding whitespace; a value that is not MUST fail the import before any relay is created, naming the relay and the profile key and not disclosing the value. A key's identifier MUST be its RFC 7638 JWK thumbprint, the identifier the admission plugin derives from the public key. No read path MUST return a private key: relay reads MUST return the active key's identifier and public half, any staged key's, and each retired key's identifier with the time its grants remain valid until, each public half as the single-line base64 of its DER SubjectPublicKeyInfo, the form the plugin's configuration takes. Rotation MUST be two explicit operations: staging takes a private key supplied in the request, in the profile's form and under the same checks, or generates one when none is supplied, and returns its public half without signing with it; activating makes the staged key sign every later grant. A supplied private key MUST NOT appear in an access log, an error body, or the response. A retired key's grants MUST be reported valid until the latest grant expiry among the relay's unreleased leases allocated before, or in the same second as, the key's retirement, since a lease whose job was retried across a rotation may hold grants signed by more than one key, and whole-second times cannot tell a lease allocated just before the retirement from one just after it.
 
 #### Scenario: A relay is read
 
@@ -2837,6 +2748,11 @@ Each relay MUST hold its own Ed25519 grant-signing private key, encrypted at res
 
 - **WHEN** a job's attempt installs a grant signed with key A, key B is then activated, and a retry of the job signs its grant with B
 - **THEN** the relay read reports A's grants valid until that lease is released or its grant expires, whichever is first
+
+#### Scenario: A lease is allocated in the second its key is retired
+
+- **WHEN** a lease is allocated in the same second as key A's retirement
+- **THEN** the relay read reports A's grants valid at least until that lease's grant expiry while the lease is unreleased, and a lease allocated a second later does not extend it
 
 #### Scenario: A definition entry names a malformed grant key
 
@@ -2892,7 +2808,7 @@ The provisioning service MUST serve, to the administrator only, the leases a rel
 
 ### Requirement: The buyer-facing tunnel client is hardened on every host
 
-Host preparation for a VM host and for a bare-metal host MUST install the buyer-facing tunnel client from one shared family role, with its configuration readable only by root, and its admin API bound to a loopback port below 1024 and protected by a password generated for that host at preparation. Every task that reloads the client or reads its status MUST authenticate with that password. The client's configuration belongs to the host, which is sold either as VM slices or as a whole host, never both at once. Adding or removing a proxy MUST reload the client and MUST NOT restart it; the client MUST be restarted only when its relay baseline changes.
+Host preparation for a VM host and for a bare-metal host MUST install the buyer-facing tunnel client from one shared family role, with its configuration readable only by root, and its admin API bound to a loopback port below 1024 and protected by a password generated for that host at preparation. Every task that reloads the client or reads its status MUST authenticate with that password. The client's configuration belongs to the host, which is sold either as VM slices or as a whole host, never both at once. Adding or removing a proxy MUST reload the client and MUST NOT restart it; the client MUST be restarted only when its relay baseline or its service unit changes, as when its pinned frp version changes.
 
 #### Scenario: An unauthenticated call reaches the admin API
 
@@ -3310,11 +3226,13 @@ already placed on it MUST be unaffected: an assignment made before the host was
 disabled keeps the host, its create waits at dispatch until the host is enabled
 again, and teardown and operator jobs run against the host. Enabling the host MUST
 lift that restriction: its declarations are then offered as any other declaration
-is, subject to their own `enabled`, their pool, fit, and availability. The host
-authority MUST report the hosts taking new
-delivery, as the identifiers of registered, enabled hosts, to the compute
-composition, which supplies the report to the site authority, for admission and
-its projections, and to settlement scheduling.
+is, subject to their own `enabled`, their pool and its relay, fit, and
+availability. The host authority MUST report the hosts it registers and has
+enabled, as their identifiers, to the compute composition. The composition MUST
+supply the site authority, for admission and its projections, and settlement
+scheduling the hosts taking new delivery: those hosts, less every host placed in,
+or with a declaration in, a pool referencing a disabled relay ("Disabling a relay
+drains it").
 
 #### Scenario: A host is disabled
 
@@ -3383,6 +3301,20 @@ When an `ssh` connection's protected private key cannot be decrypted with the co
 - **WHEN** system status is read while that host is enabled and an Ansible executor is real
 - **THEN** the `ansible` component is not ready, its reasons naming the host, and its key is reported as not existing, while every other enabled host's key is reported as it would be without it
 
+### Requirement: Bare-metal delivery enters through the core fulfillment hook
+
+Bare-metal payment settlement and the Alkahest ready continuation MUST start delivery by calling core's `fulfill_domain` with a `StorefrontFulfillmentContext`, never by calling the bare-metal fulfillment service directly. The registered bare-metal hook MUST build its service and the compute delivery path from the clients in the context's `ports` and the storefront's lifecycle in its `domain_input`, so every bare-metal delivery passes end-service admission and core's check that the result keeps the deal's negotiation, settlement reference and site.
+
+#### Scenario: A bare-metal payment deal settles
+
+- **WHEN** a bare-metal buyer's payment receipt verifies
+- **THEN** settlement calls `fulfill_domain`, the hook runs the delivery path with admission, and core validates the returned identities
+
+#### Scenario: The hook is called without the storefront's lifecycle
+
+- **WHEN** the bare-metal hook is invoked with no lifecycle in `domain_input`
+- **THEN** it refuses before any capacity or fulfillment call
+
 ### Requirement: A VM host's diagnostics are read through an operator job
 
 The VM operator surface MUST offer a host diagnostics action that runs as a job on a
@@ -3420,6 +3352,547 @@ parameters.
 - **WHEN** the provisioning service runs its mock profile
 - **THEN** the diagnostics job succeeds with default output the typed result parses
 
+### Requirement: Host inventory is connection identity, not capacity
+
+Host inventory records MUST describe how to reach and dispatch work to a machine —
+addressing, credentials, machine alias, pool membership, and enabled state — and
+MUST NOT be the authoritative source of a Physical Resource's sellable capacity.
+Capacity projection MUST NOT read host inventory records for capacity,
+attributes, or connection identity, and MUST NOT project a host that no capacity
+declaration names. A host record is joined to a capacity declaration only where
+its connection is used: at dispatch. Site admission, settlement scheduling, and
+capacity projection MUST learn of hosts only the identifiers of those taking new
+delivery, as the compute composition reports them.
+
+#### Scenario: Host inventory is inspected for capacity authority
+
+- **WHEN** the projection path is traced from host inventory to published capacity
+- **THEN** no host inventory record contributes capacity or attributes to the
+  projection, and the projection reads of hosts only the identifiers of those
+  taking new delivery
+
+#### Scenario: A host has no capacity declaration
+
+- **WHEN** no capacity declaration names a registered host
+- **THEN** the projection contains no entry for that host
+- **AND** no entry with empty or omitted capacity is published in its place
+
+### Requirement: Host writes create no capacity declaration
+
+A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when a host definitions document is applied, at startup or through its import API, not when an INI inventory is submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import.
+
+A host MUST be treated as already declared when any declaration names it as its
+`host_id`, which is also the only rule the capacity projection uses to correlate
+declarations to hosts.
+
+#### Scenario: Deployment configured only through host inventory
+
+- **WHEN** a provisioner applies a host definitions document, at startup or through its
+  import API, or an INI inventory through the host import API, and no capacity
+  declarations exist
+- **THEN** the hosts are registered, no capacity declaration is created for them, and
+  the capacity projection contains no entry for them
+
+#### Scenario: A host has no GPUs
+
+- **WHEN** a host is registered for a machine without GPUs
+- **THEN** no declaration is created for it, as for any host
+
+#### Scenario: A declaration's resource id differs from its host
+
+- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
+  host as its `host_id`
+- **THEN** the host is treated as declared
+
+#### Scenario: A host is created through the individual host API
+
+- **WHEN** an operator creates a host through the individual host API
+- **THEN** no declaration is created, and the host's capacity is declared through the
+  capacity administration surface
+
+### Requirement: A host record carries no hardware description
+
+A host record MUST NOT carry a GPU count, a GPU model, or any other description of the
+machine's hardware: a Physical Resource's hardware is stated only by its capacity
+declaration. The host API's create, update, and response models MUST NOT define such a field,
+and a request carrying `gpu_count` or `gpu_model` MUST be accepted with those fields ignored,
+as any field the models do not define is. The INI inventory format MUST NOT read `gpus=` or
+`gpu_model=`; like any variable it does not read, they are ignored without a warning.
+
+#### Scenario: A host is created with GPU fields
+
+- **WHEN** an operator creates a host through the host API with a body carrying `gpu_count`
+  and `gpu_model`
+- **THEN** the host is created, and neither its stored record nor its response carries a GPU
+  field
+
+#### Scenario: An inventory line carries GPU variables
+
+- **WHEN** host inventory is applied from an INI line carrying `gpus=8 gpu_model=H200`
+- **THEN** the host is registered from its connection fields and its pool, and nothing is
+  recorded or reported for the GPU variables
+
+### Requirement: Provisioning time is configured and set on its system surface
+
+The compute provisioning service MUST install its process time source from `time.source`, `"wall"` by default or `"injected"`. Under injected time it MUST serve `POST /api/v1/system/time` behind its administrator authentication, taking `{"now": <Unix seconds>}`, answering `{"source": "injected", "now": <Unix seconds>}` and refusing an earlier instant with `409 time_moves_forward` and an invalid body with `422 invalid_time`; its system status, `GET /api/v1/system/status`, MUST carry the time section. Its lease watchdog, lease termination and job engine MUST read the process time source for every instant they record or compare. The provisioning client MUST offer the setting call.
+
+#### Scenario: A truncated lease ends at the set instant
+
+- **WHEN** a lease truncated to 1794822300 is held by the paused lease watchdog, provisioning is set to 1794822300, and one watchdog cycle is stepped
+- **THEN** the lease ends by expiry with effective instant and claimed deadline 1794822300
+
+#### Scenario: A termination is stamped in lane time
+
+- **WHEN** an injected provisioning service at 1794822300 terminates a lease
+- **THEN** the lease-ended report states effective instant 1794822300
+
+### Requirement: Disabling a relay drains it
+
+Disabling a relay MUST drain it: it stops new work on the relay and lets the work already holding a lease on it run to its end, for a VM guest and a bare-metal grant alike. While a relay is disabled, no host in a pool referencing it MAY be among the hosts taking new delivery that the compute composition reports to the site authority, so no claim is admitted against, placed on, or projected enabled for those hosts' declarations; and fulfillment preparation MUST refuse to lease a port on it. A create whose lease was allocated before the disable, and every teardown and reclaim of a delivery leased on the relay, MUST run.
+
+Once a relay is disabled, no lease MUST be allocated on it, whoever asks: the allocator MUST refuse a new owner on a disabled relay, reading the relay under a lock that a concurrent disable cannot pass, so that a disable committed while an acceptance is in flight either waits for it or is seen by it. An owner already holding an active lease on the relay MUST still receive that lease when allocation is repeated. The set of a disabled relay's active leases therefore only shrinks.
+
+Disabling MUST be reversible. Enabling the relay again MUST return its pools' hosts to new delivery and allow allocation on it, whether or not it has drained; disabling removes no proxy, releases no lease, and changes neither the token nor a grant key.
+
+Removing the relay server is its operator's, outside this repository, once the relay has drained. Nothing in the provisioning service deletes a relay: a drained relay's row is kept, disabled, as the record its leases, retired keys, and pool references point at, and it keeps holding its rendezvous, so a server later reinstated at the same rendezvous is the same relay, enabled again.
+
+#### Scenario: A relay is disabled while it carries deliveries
+
+- **GIVEN** a relay holding active leases for a VM guest and a bare-metal grant
+- **WHEN** an operator disables the relay
+- **THEN** no new claim is admitted against or placed on a declaration of a host in a pool referencing it, those declarations are projected not enabled, and the guest's teardown and the grant's reclaim run when their leases end and release their ports
+
+#### Scenario: A claim reaches fulfillment on a disabled relay
+
+- **WHEN** fulfillment preparation runs for a pool whose relay is disabled
+- **THEN** it refuses before leasing a port, naming the relay
+
+#### Scenario: A new owner asks the allocator for a port on a disabled relay
+
+- **GIVEN** a disabled relay, and an owner already holding an active lease on it
+- **WHEN** allocation is requested on the relay for a new owner, standalone or in a caller's transaction, and again for the existing owner
+- **THEN** the new owner is refused and no lease is recorded for it, and the existing owner receives the lease it already holds
+
+#### Scenario: A relay is disabled while an acceptance is in flight
+
+- **WHEN** a relay's disable commits while a fulfillment acceptance that read the relay enabled has not yet committed
+- **THEN** either the disable waits until the acceptance commits, its lease among the relay's active leases, or the acceptance is refused and the relay holds no lease from it; the relay is never reported drained and then holds a new lease
+
+#### Scenario: A relay disabled by mistake is enabled again before it drains
+
+- **GIVEN** a disabled relay still holding active leases
+- **WHEN** an operator enables it again
+- **THEN** its pools' hosts take new delivery again, allocation on it resumes, and the deliveries it carried were never interrupted
+
+#### Scenario: The definition document stops listing a drained relay
+
+- **WHEN** a relay definition document that listed a relay is reconciled without it
+- **THEN** the relay is left as it is, neither deleted nor changed
+
+### Requirement: A relay reports whether it has drained
+
+Every relay read the administrator receives MUST report the relay's number of active leases as `active_lease_count`, and whether it has drained as `drained`: true exactly when the relay is disabled and holds no active lease. An enabled relay MUST NOT be reported drained. Whether a released lease's grant has expired MUST NOT bear on it: a released lease has no proxy left to admit, and once the relay's server, or on a shared relay its keys, is removed, no grant it signed admits anything. The relay's operator relies on `drained` to know the relay may be removed.
+
+Both fields MUST be required in the typed relay response, with no default, so that a client reading a service that does not report them fails to parse the response rather than reading an unknown as drained or not drained.
+
+#### Scenario: A disabled relay still carries a lease
+
+- **WHEN** the administrator reads a disabled relay holding one active lease
+- **THEN** the read reports `active_lease_count` 1 and `drained` false
+
+#### Scenario: A disabled relay's last lease is released
+
+- **WHEN** the administrator reads a disabled relay after its last active lease is released, while that lease's grant has not yet expired
+- **THEN** the read reports `active_lease_count` 0 and `drained` true
+
+#### Scenario: An enabled relay holds no lease
+
+- **WHEN** the administrator reads an enabled relay holding no active lease
+- **THEN** the read reports `drained` false
+
+#### Scenario: A client reads a service that does not report the drain
+
+- **WHEN** the typed relay response parses a relay read carrying neither `active_lease_count` nor `drained`
+- **THEN** parsing fails, and no drained value is reported
+
+### Requirement: A relayed delivery's relay is its declaration's pool's
+
+A relayed delivery's port MUST be leased on the relay its capacity declaration's pool references, whatever pool, if any, its host is placed in. The job that adds the delivery's proxy MUST point the host's buyer-facing client at that relay — its address, port and admission token — before adding the proxy, restarting the client only when that baseline or its service unit changes. A host has at most one capacity declaration, a pool's relay reference cannot change while the pool holds a lease, and a declaration MUST NOT move to another pool while a reservation holds capacity against it, so every delivery on a host is leased on one relay at a time, and that relay is the one the host's client dials.
+
+#### Scenario: A host placed under another relay delivers through its declaration's
+
+- **GIVEN** a host placed in a pool referencing relay R2, whose capacity declaration sits in a pool referencing relay R1
+- **WHEN** a relayed create is accepted and dispatched for that declaration
+- **THEN** its port is leased on R1, and its job carries R1 as its relay
+
+#### Scenario: An unplaced host delivers through its declaration's relay
+
+- **GIVEN** a host placed in no pool, whose capacity declaration sits in a pool referencing a relay
+- **WHEN** a relayed create is accepted and dispatched for that declaration
+- **THEN** its port is leased on that relay, and its job carries it as its relay
+
+#### Scenario: A proxy is added on a host whose client names another relay
+
+- **WHEN** a job adds a buyer proxy on a host whose client baseline names another relay than the job's
+- **THEN** the baseline is rewritten to the job's relay address, port and token, the client is restarted, and the proxy is added
+
+#### Scenario: A declaration holding a lease is moved to a pool on another relay
+
+- **GIVEN** a capacity declaration in a pool referencing relay R1, whose reservation holds a relay port lease on R1
+- **WHEN** the declaration is moved to a pool referencing relay R2
+- **THEN** the move is refused, and the declaration stays in its pool
+
+### Requirement: A concurrent allocation for one owner receives that owner's lease
+
+Allocation MUST read whether the owner already holds an active lease after it takes the relay's lock and before it refuses a missing or disabled relay, not before the lock, so an allocation that waited on that lock receives a lease committed for the same owner meanwhile, and an owner already holding a lease on a disabled relay still receives it. When a claim fails a uniqueness constraint, allocation MUST read the owner's active lease again and return it when one exists, and MUST move on to another port only when none does. For a relay that exists, `RelayWindowExhaustedError` MUST be raised only when every port in its window is held or quarantined; a relay that does not exist is refused with the same error, since no port can be leased on it. The two constraints MUST be told apart by reading the leases again, not by the database's constraint name, so the rule holds on SQLite and PostgreSQL alike.
+
+#### Scenario: A claim for the owner waited on the relay's lock
+
+- **WHEN** an allocation for an owner waits on the relay's lock while another allocation for the same owner commits a lease
+- **THEN** it returns that lease and claims no port
+
+#### Scenario: The owner's lease is committed on another relay meanwhile
+
+- **WHEN** an allocation for an owner finds no lease, and its claim then fails because a lease for the same owner was committed meanwhile
+- **THEN** it returns the owner's lease rather than trying further ports, and raises no `RelayWindowExhaustedError`
+
+#### Scenario: Another owner holds the port
+
+- **WHEN** a claim fails because another owner holds the port
+- **THEN** allocation selects another free port, and raises `RelayWindowExhaustedError` only once every port in the window is held or quarantined
+
+#### Scenario: An owner's lease on a draining relay is read after the lock
+
+- **WHEN** an allocation for an owner already holding an active lease on a disabled relay takes that relay's lock
+- **THEN** it returns the owner's lease, and raises no `RelayDisabledError`
+
+### Requirement: A job records that its execution is starting before it starts
+
+An executor MUST report that a job's execution is starting immediately before it starts anything that can act on the host — the Ansible executor before it spawns the playbook — and the job authority MUST record that instant on the job, as `execution_started_at`, from the process's time source, before the executor goes on. When the instant cannot be recorded, or the job is no longer running — cancelled since it was claimed — the report MUST fail, the executor MUST NOT start the execution, and the attempt fails, leaving a cancelled job cancelled. A later attempt MUST keep the first recorded instant. A retry MUST NOT clear the recorded instant or the recorded execution handle.
+
+A job's execution never started when the job is `failed`, not `cancelled`, records neither `execution_started_at` nor an execution handle, and records when it finished (`finished_at`). A job that reached a terminal status before `finished_at` existed MUST NOT be classified as never started, whether or not it records an execution handle: its engine recorded the handle only after spawning the playbook. A recorded start without a handle MUST count as started.
+
+#### Scenario: A job is refused before its playbook runs
+
+- **WHEN** a job fails before its executor starts a playbook — its host is unregistered, its action unsupported, or its codec, inventory, host key or relay refuses it
+- **THEN** the job records no `execution_started_at` and no execution handle, and its execution never started
+
+#### Scenario: A job's playbook ran and failed
+
+- **WHEN** a job's playbook is started and the job then fails
+- **THEN** the job records when its execution started, and its execution started
+
+#### Scenario: The start cannot be recorded
+
+- **WHEN** the job authority cannot record that a job's execution is starting
+- **THEN** no playbook is spawned for that attempt, and the attempt fails
+
+#### Scenario: A job is cancelled before its start is recorded
+
+- **WHEN** a job claimed by the engine is cancelled before its executor reports that its execution is starting
+- **THEN** the report fails, no playbook is spawned, and the job stays `cancelled` with no `execution_started_at`
+
+#### Scenario: A retried job keeps its first start
+
+- **WHEN** a job whose execution started on one attempt is retried and starts again
+- **THEN** its `execution_started_at` stays the instant of its first start
+
+#### Scenario: A playbook is spawned and its handle cannot be recorded
+
+- **WHEN** a job's playbook is spawned and recording its execution handle fails
+- **THEN** the job's recorded start remains, and its execution counts as started
+
+#### Scenario: A job finished before starts were recorded
+
+- **WHEN** a failed job that reached its terminal status before `execution_started_at` and `finished_at` existed, and records no execution handle, is classified
+- **THEN** it is not classified as never started
+
+### Requirement: A teardown that never started is run again under a new job identity, within a bound
+
+When a fulfillment's teardown job failed and its execution never started, the compute family's job-backed provider MUST run the teardown again under a new job identity, within a bound. A teardown job whose execution started, or that was cancelled, MUST NOT be run again: its teardown stays failed, and its capacity held, until an operator verifies the host and force-releases it.
+
+Dispatching a teardown MUST adopt the reservation's latest teardown job, unless that job's execution never started and a rerun is ready; then it MUST submit rerun *n* under the job identity `"{reservation}:teardown:rerun-{n}"`, where *n* counts the teardown jobs already bound to the reservation, with the parameters of the teardown operation prepared before. A first teardown keeps the identity `"{reservation}:teardown"`. A dispatch that finds the rerun it submitted earlier as the latest job MUST adopt it. The fulfillment's teardown metadata MUST name the latest teardown job; its create job and the lease's release handle are unchanged.
+
+The job authority MUST record when a job reaches a terminal status, as `finished_at`, from the process's time source. Rerun *n* is ready once the previous teardown job's `finished_at` is the job retry policy's delay after *n* − 1 retries in the past. No more than `teardown_rerun_limit` reruns are run. `teardown_rerun_limit` MUST default to 3; 0 disables reruns, and the provisioning service MUST refuse to start with a negative value. One compute-owned predicate MUST decide whether a teardown is not rerunnable, waiting for a rerun, ready for one, or has spent its reruns, from every teardown job bound to the reservation — each one's status, whether its execution started, its `finished_at`, and its order — read in one unpaginated read; dispatch, the release status, and operator reporting MUST all use it. A compensating teardown is run again by the same rule and keeps the reason `create_compensation`.
+
+#### Scenario: A teardown fails before its playbook starts
+
+- **WHEN** a fulfillment's teardown job fails and its execution never started
+- **THEN** once the rerun's delay has passed since the job's `finished_at`, the teardown is dispatched again under `"{reservation}:teardown:rerun-1"`, and the fulfillment's teardown metadata names the new job
+
+#### Scenario: A rerun's delay has not passed
+
+- **WHEN** a teardown job failed without starting, and the rerun's delay has not yet passed since its `finished_at`
+- **THEN** no rerun is submitted yet, and the release status reports the teardown still in progress
+
+#### Scenario: A teardown left by an upgrade
+
+- **WHEN** a fulfillment's latest teardown job failed before `finished_at` existed and records no execution handle
+- **THEN** no rerun is submitted, and the teardown stays failed with its capacity held for an operator
+
+#### Scenario: A rerun succeeds
+
+- **WHEN** a teardown's rerun succeeds
+- **THEN** the fulfillment reaches `torn_down`, and the reservation's capacity is released through its lease without an operator
+
+#### Scenario: A teardown's playbook ran and failed
+
+- **WHEN** a fulfillment's teardown job fails after its execution started
+- **THEN** no further teardown job is submitted, and the teardown stays failed with its capacity held for an operator
+
+#### Scenario: A teardown job was cancelled
+
+- **WHEN** a fulfillment's teardown job was cancelled before its execution started
+- **THEN** no rerun is submitted
+
+#### Scenario: The reruns are spent
+
+- **WHEN** a teardown has failed without starting `teardown_rerun_limit` times after its first attempt
+- **THEN** no further teardown job is submitted, and the release status reports the teardown failed, saying its execution never started and how many reruns were spent
+
+#### Scenario: Dispatch is repeated after a rerun was submitted
+
+- **WHEN** a dispatch submitted a rerun and stopped before recording it, and dispatch runs again
+- **THEN** it adopts the rerun as the reservation's latest teardown job and submits no other
+
+#### Scenario: A compensating teardown fails before its playbook starts
+
+- **WHEN** a compensating teardown's job fails and its execution never started
+- **THEN** it is run again by the same rule, and the fulfillment keeps the reason `create_compensation`
+
+#### Scenario: Reruns are disabled
+
+- **WHEN** `teardown_rerun_limit` is 0 and a teardown job fails without starting
+- **THEN** no rerun is submitted, and the teardown stays failed for an operator
+
+#### Scenario: The rerun limit is negative
+
+- **WHEN** the provisioning service is configured with a negative `teardown_rerun_limit`
+- **THEN** it refuses to start, naming the setting
+
+### Requirement: A host's pinned keys are stated or captured by an operator
+
+An `ssh` connection MAY state `host_keys`: a non-empty list of OpenSSH public keys, each its key type and base64 encoding without a comment, which the codec MUST parse and MUST refuse when empty or malformed. The keys a host's connection states are its pin. A submission that omits `host_keys` MUST keep the stored pin, whatever else it changes, the connection's `ssh_host` and `ssh_port` included. The host definitions document and its canonical export MUST carry `host_keys` as a public field; the INI import carries none and MUST keep a stored pin. A pin MUST be replaced only by a submission stating other keys or by a capture with `replace`.
+
+A connectivity check of a host with no pin MUST connect accepting the key the host presents into a file it discards, MUST store nothing, and MUST report the presented key's type and SHA-256 fingerprint with the endpoint `[ssh_host]:ssh_port`; a check of a pinned host MUST report whether the presented key matches the pin. `POST /api/v1/hosts/{host}/host-keys/capture`, admitted to the administrator alone, MUST probe the host again and MUST record the presented key as the host's pin only when its fingerprint equals the one the request names. It MUST answer 404 for an unknown host; 422 naming the kind for a host whose connection kind presents no key, and 422 naming the field for an empty or malformed fingerprint; and, recording nothing, 409 with the code `host_key_mismatch` naming the endpoint and the presented fingerprint when the host presents another key, 409 with the code `host_key_pinned` naming the pinned fingerprints for a host that already has a pin unless the request states `replace`, and 409 with the code `no_host_key_presented` naming the endpoint and the probe's reason when the probe reaches no SSH handshake. A capture that records a pin MUST answer with the endpoint and the pinned fingerprints. The provisioning family client MUST offer the capture with the fingerprint and an optional `replace`, and MUST surface each refusal's code.
+
+#### Scenario: A host is registered with its key
+
+- **WHEN** an operator registers a host whose `ssh` connection states `host_keys: ["ssh-ed25519 AAAAC3Nz…"]`
+- **THEN** the host is stored with that pin, and its read and the export carry it
+
+#### Scenario: A connection states an empty pin
+
+- **WHEN** a host is submitted with `host_keys: []`
+- **THEN** the submission is refused naming the field, and nothing is stored
+
+#### Scenario: An update omits the pin
+
+- **WHEN** a pinned host is updated with a connection that changes its `ssh_port` and states no `host_keys`
+- **THEN** the host keeps its pin at the new port
+
+#### Scenario: An operator checks an unpinned host
+
+- **WHEN** an operator checks connectivity to a host with no pin
+- **THEN** the result reports the presented key's fingerprint and endpoint, and no pin is stored
+
+#### Scenario: An operator captures the key they compared
+
+- **WHEN** an operator captures an unpinned host's key naming the fingerprint the host presents
+- **THEN** the presented key becomes the host's pin
+
+#### Scenario: The host presents another key at capture
+
+- **WHEN** an operator captures a host's key naming a fingerprint other than the one the host presents
+- **THEN** the capture answers 409 with `host_key_mismatch` naming the presented fingerprint, and no pin is stored
+
+#### Scenario: A capture meets a pinned host
+
+- **WHEN** an operator captures a pinned host's key without `replace`
+- **THEN** the capture answers 409 with `host_key_pinned`, and the pin is unchanged
+
+#### Scenario: An operator replaces a pinned host's key by capture
+
+- **WHEN** an operator captures a pinned host's key with `replace`, naming the fingerprint the host presents
+- **THEN** the presented key becomes the host's pin in place of the old one
+
+#### Scenario: A capture reaches no handshake
+
+- **WHEN** an operator captures the key of a host whose probe times out or is refused before any key is presented
+- **THEN** the capture answers 409 with `no_host_key_presented` naming the endpoint and the probe's reason, and no pin is stored
+
+#### Scenario: A capture names a malformed fingerprint
+
+- **WHEN** an operator captures a host's key naming an empty fingerprint, or one that is not `SHA256:` followed by base64
+- **THEN** the capture answers 422 naming the field, and no probe runs
+
+#### Scenario: A capture names an unknown host or a kind without keys
+
+- **WHEN** an operator captures the key of a host that is not registered, or of one whose connection kind presents no key
+- **THEN** the capture answers 404 for the unknown host, and 422 naming the kind for the other
+
+#### Scenario: A connectivity check reaches no handshake
+
+- **WHEN** an operator checks connectivity to a host that presents no key before the probe fails
+- **THEN** the result is unreachable with the probe's reason, and its `host_key` is null
+
+#### Scenario: An INI import names a pinned host
+
+- **WHEN** an inventory naming a pinned host is imported
+- **THEN** the host keeps its pin
+
+### Requirement: The Ansible executor reaches only hosts matching their pinned key
+
+Every inventory the Ansible executor or its connectivity probe renders MUST verify the host's key against its pin: a transient, owner-only `known_hosts` holding the pin under `[ssh_host]:ssh_port`, removed when the run ends as a decrypted key file is, and host variables enabling strict checking against that file alone, which no Ansible configuration an operator names can override. Before recording a job's execution start, the Ansible executor MUST make one SSH connection to the host against its pin that runs nothing on the host. A host with no pin, unless it is pending adoption, or whose presented key matches no pinned key, MUST fail the job with no execution start recorded, unretried, with an error naming the host, its endpoint, the presented and pinned fingerprints, and how to recover, carrying no key material. A connectivity check of a pinned host whose key does not match MUST answer it unreachable with the same reason. Once any Ansible executor is real, readiness MUST name every enabled host with no pin. The mock executor reaches no host and MUST NOT read pins.
+
+#### Scenario: A job runs against a pinned host
+
+- **WHEN** a job is dispatched against a host whose presented key matches its pin
+- **THEN** the playbook runs with strict host-key checking against a transient `known_hosts`, which is removed when the run ends
+
+#### Scenario: A host presents another key
+
+- **WHEN** a job is dispatched against a host whose presented key matches no pinned key
+- **THEN** the job fails before its execution start is recorded, unretried, with an error naming the host, its endpoint and both fingerprints, and no playbook runs
+
+#### Scenario: A teardown is refused for its host key
+
+- **WHEN** a teardown is refused for its host's key and the operator then captures the host's new key
+- **THEN** the teardown counts as never started and is run again
+
+#### Scenario: A job meets an unpinned host
+
+- **WHEN** a job is dispatched against a host with no pin that is not pending adoption
+- **THEN** it fails before any connection with an error naming the host and how to pin it
+
+#### Scenario: An operator's configuration turns checking off
+
+- **WHEN** the profile's `ansible_cfg` names a configuration stating `host_key_checking = False` and its own `ssh_args`
+- **THEN** the command a job runs still checks the host strictly against its pin
+
+#### Scenario: A lane runs the mock executor
+
+- **WHEN** a job runs under the mock executor against a host registered with no pin
+- **THEN** it runs as it would without pins
+
+### Requirement: Hosts deployed before pins are adopted before their first job
+
+The provisioning migration that rewrites `ssh` connections to version 3 MUST mark every host it rewrites as pending adoption, on the host record outside its connection; no other write marks a host, and neither the host definitions document nor the export carries the mark. For a pending host, the Ansible executor's check before a job's start, and a connectivity check, MUST connect accepting the presented key into an empty file, running nothing on the host, and MUST record that key as the host's pin and clear the mark in one write that takes effect only while the host is still pending. Whichever adoption's write takes effect, a job MUST then make its check before the start against the committed pin, as for any pinned host, and its playbook MUST be checked against that committed pin, never against the key the job observed. A submission stating `host_keys`, or a capture, MUST clear the mark; a capture that meets a host an adoption has pinned answers as for any pinned host. Once any Ansible executor is real, readiness MUST list pending hosts without reporting itself not ready for them.
+
+#### Scenario: A deployed host's first job after the upgrade
+
+- **GIVEN** a host the version-3 migration marked pending adoption
+- **WHEN** a job is dispatched against it
+- **THEN** the key it presents becomes its pin, the mark is cleared, and the playbook runs checked against that pin
+
+#### Scenario: Two first jobs adopt one host
+
+- **GIVEN** a host pending adoption
+- **WHEN** two jobs against it are dispatched together and their adopting connections are answered with different keys
+- **THEN** exactly one key becomes the pin, and the job whose key lost fails before its execution start is recorded, with no playbook run against the key it observed
+
+#### Scenario: A capture races an adoption
+
+- **GIVEN** a host pending adoption
+- **WHEN** a job's adoption commits a pin before an operator's capture without `replace` reaches it
+- **THEN** the capture answers 409 with `host_key_pinned`, and the adopted pin is unchanged
+
+#### Scenario: A host registered after the upgrade
+
+- **WHEN** a host is registered with no pin after the migration ran
+- **THEN** it is not pending adoption, and a job against it is refused until it is pinned
+
+#### Scenario: An operator pins a pending host
+
+- **WHEN** an operator states `host_keys` for a pending host, or captures its key
+- **THEN** the mark is cleared, and the stated or captured key is its pin
+
+### Requirement: A VM guest reaches no other guest on its host
+
+Every VM guest MUST be created with its interface's bridge port isolated and with libvirt's `clean-traffic` filter binding it to its MAC address and the address it leased by DHCP. VM host preparation MUST drop forwarding from the guests' bridge back to it, in a chain of the host kit's own reached before any rule libvirt or UFW installs, and MUST keep that rule first across a restart of libvirt, a reload of UFW, and a reboot. A host whose libvirt is older than 6.1 or lacks the nwfilter driver's `clean-traffic` filter, whose virt-install is older than 3.0, or which lacks `ebtables`, MUST fail host preparation naming each item missing. A guest's address discovery, DHCP reservation, and teardown are unchanged.
+
+#### Scenario: A guest probes another guest on its host
+
+- **GIVEN** two guests running on one host
+- **WHEN** one sends ARP, ICMP and TCP to the other, directly or through the bridge's gateway
+- **THEN** none reaches the other guest
+
+#### Scenario: A guest claims another guest's address
+
+- **WHEN** a guest sends ARP claiming the address another guest leased
+- **THEN** the frames are dropped, and the other guest's buyer connections still reach it
+
+#### Scenario: A GPU guest is created
+
+- **WHEN** a guest with a passed-through GPU is created
+- **THEN** its interface is isolated and filtered as a CPU guest's is
+
+### Requirement: A VM guest reaches only DHCP and DNS on its host and no undeclared private destination
+
+VM host preparation MUST accept, from the guests' bridge to the host, only DHCP, DNS to the bridge's address, and traffic of connections already established, and MUST drop everything else. It MUST drop forwarding from the guests' bridge to link-local addresses and to private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), except traffic of connections already established and each destination the host-kit variable `guest_allowed_private_destinations` lists, which is empty by default. On a host whose kernel has IPv6, it MUST drop every IPv6 packet from the guests' bridge, to the host and forwarded alike. These rules MUST sit in chains of the host kit's own, reached before any rule libvirt or UFW installs and kept first across a restart of libvirt and a reload of UFW; host preparation MUST NOT leave in place a rule accepting all traffic from the guests' bridge to the host. Connections the host opens to a guest and DNATed buyer connections, from public or private addresses, are unaffected.
+
+#### Scenario: A guest reaches a service on its host
+
+- **WHEN** a guest connects to a port on its host other than DHCP or DNS
+- **THEN** the connection is dropped
+
+#### Scenario: A guest whose filter waits for its next start sends IPv6
+
+- **GIVEN** a host whose `default` network carries IPv6, and a running guest whose `clean-traffic` filter waits for its next start
+- **WHEN** the guest sends IPv6 to a port on its host or to an address beyond it
+- **THEN** the packets are dropped
+
+#### Scenario: A guest reaches the cloud metadata address
+
+- **WHEN** a guest connects to `169.254.169.254`
+- **THEN** the connection is dropped
+
+#### Scenario: A seller lists a private destination
+
+- **WHEN** `guest_allowed_private_destinations` lists a private address and a guest connects to it
+- **THEN** the connection is forwarded, while other private addresses stay dropped
+
+#### Scenario: A buyer reaches their guest
+
+- **WHEN** a buyer connects to their guest's forwarded or relayed port
+- **THEN** the connection reaches the guest, and the host's own SSH into the guest still works
+
+#### Scenario: A buyer connects from a private address
+
+- **WHEN** a buyer whose address is in a private range connects directly to their guest's forwarded port
+- **THEN** the connection is established and the guest's replies reach the buyer
+
+#### Scenario: The host's firewall rules are reloaded
+
+- **GIVEN** a prepared host whose UFW is enabled
+- **WHEN** libvirt is restarted and UFW is reloaded
+- **THEN** a guest still reaches DHCP and DNS on its host, and still cannot reach another host port or an unlisted private destination
+
+### Requirement: VM host preparation converges running guests
+
+VM host preparation MUST isolate the bridge port of every running guest without interrupting its link, MUST apply the `clean-traffic` filter to it live where libvirt accepts that and otherwise at the guest's next start, and MUST write both into the guest's saved definition so that a restart or a host reboot keeps them. It MUST report, for each running guest by name, whether its port is isolated, whether its filter applied live or waits for its next start, whether its saved definition carries both, and the reason for any step that failed, and MUST name every running guest it could not converge.
+
+#### Scenario: A host prepared before isolation is prepared again
+
+- **GIVEN** a host running guests created with ports that are not isolated
+- **WHEN** VM host preparation runs on it
+- **THEN** every running guest's port is isolated without its buyer's session being interrupted, and its saved definition carries the isolation and the filter
+
+#### Scenario: A guest cannot be converged
+
+- **WHEN** host preparation cannot isolate a running guest's port
+- **THEN** it reports the guest by name
+
+#### Scenario: libvirt refuses a live filter
+
+- **WHEN** host preparation converges a running guest whose filter libvirt will not apply live
+- **THEN** the guest's port is isolated, its saved definition carries the filter for its next start, and the report says the filter waits for that start
+
+#### Scenario: A host lacks a prerequisite of isolation
+
+- **WHEN** VM host preparation runs on a host whose virt-install is older than 3.0 and which lacks `ebtables`
+- **THEN** it fails before installing the guest policy, naming both
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
@@ -3429,12 +3902,12 @@ parameters.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
 - VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
-- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over the family's own schema; VM's pool configuration's relay reference, `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer and migrations, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_relay_migrations.py`, plus `provisioning/compute/service/tests/unit/services/test_definition_document_restart_safety.py`.
+- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over the family's own schema; VM's pool configuration's relay reference, `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_definition_document_restart_safety.py`.
 - Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
-- Host writes declaring no capacity — an INI import, a host definitions document applied at startup and through its import route, placed and unplaced, an inventory line carrying `gpus=` and `gpu_model=`, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- Host writes declaring no capacity — an INI import, a host definitions document applied at startup and through its import route, placed and unplaced, an inventory line carrying `gpus=` and `gpu_model=`, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`.
 - Host definitions documents — structural validation: `provisioning/compute/tests/unit/test_host_definitions.py`; stored-state evaluation, whole-entry replacement, codec-normalized equality, retention, the export and its round trip, and an import meeting a concurrent registration: `provisioning/compute/tests/integration/test_host_definitions.py`; the import and export routes through the typed client, a refused hook move, validate-only, and a quoted SSH port: `provisioning/compute/service/tests/integration/test_host_definitions_api.py`; the startup import, its order, a missing or refused document, the first document on a site with registered hosts, and a bare-metal pool binding: `provisioning/compute/service/tests/integration/test_host_definitions_startup.py`; the `hosts` digest kind: `provisioning/compute/service/tests/integration/test_definition_document_digest.py`; the retired inventory settings: `provisioning/compute/service/tests/unit/test_config.py` and `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's `definitions.hosts`: `helm/charts/provisioning/tests/test_render.py`.
-- A host record describing no hardware — the host models ignoring `gpu_count` and `gpu_model` and serializing neither: `provisioning/compute/contracts/tests/unit/test_contracts.py`; the INI parser ignoring `gpus=` and `gpu_model=`: `provisioning/compute/ansible/tests/unit/test_inventory.py`; no write recording a GPU field: `provisioning/compute/tests/integration/test_host_authority.py`; a host created and updated with GPU fields through the typed client, its stored row holding no GPU column: `provisioning/compute/service/tests/integration/test_hosts_api.py`; the column drop keeping every other value, leaving declarations and a fresh database alone, and rerunning as a no-op: `provisioning/compute/service/tests/integration/test_host_gpu_columns_drop_migration.py`.
-- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`; the `ansible_pool_configs` rebuild: `provisioning/compute/service/tests/integration/test_vm_pool_config_migration.py`.
+- A host record describing no hardware — the host models ignoring `gpu_count` and `gpu_model` and serializing neither: `provisioning/compute/contracts/tests/unit/test_contracts.py`; the INI parser ignoring `gpus=` and `gpu_model=`: `provisioning/compute/ansible/tests/unit/test_inventory.py`; no write recording a GPU field: `provisioning/compute/tests/integration/test_host_authority.py`; a host created and updated with GPU fields through the typed client, its stored row holding no GPU column: `provisioning/compute/service/tests/integration/test_hosts_api.py`.
+- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`.
 - A bare-metal grant and reclaim carrying the configured playbook, and the codec passing it to the plan: `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_plan.py` and `test_bare_metal_codec.py`; through the composed service: `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`.
 - `vm_playbook_path` resolution and refusal of the retired `playbook_path` in a profile and the environment layer: `provisioning/compute/service/tests/unit/test_config.py` and `test_worker.py`; through the app's lifespan: `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's renamed value and refused key: `helm/charts/provisioning/tests/test_render.py`.
 

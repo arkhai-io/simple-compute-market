@@ -822,10 +822,9 @@ async def site_capacity(
             "market_storefront.services.capacity_client.build_capacity_client",
             return_value=aggregate,
         ),
-        # fulfillment_service binds both factory names at import time, and
-        # failure_actions binds the runtime factory.
+        # These modules bind the factory names at import time.
         patch(
-            "market_storefront.services.fulfillment_service.build_capacity_runtime",
+            "market_storefront.delivery_ports.build_capacity_runtime",
             return_value=runtime,
         ),
         patch(

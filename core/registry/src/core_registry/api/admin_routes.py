@@ -1,4 +1,4 @@
-"""Admin endpoints for issuing and revoking API keys.
+"""Admin endpoints: API keys, the registry's status, and its time.
 
 Every endpoint here is gated by ``require_admin_api_key`` — operators
 authenticate with the single shared ``REGISTRY_ADMIN_API_KEY`` env
@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+import injected_time
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
+from injected_time import TimeRouteError, TimeRouteService
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -72,7 +75,8 @@ def create_api_key(
 def list_api_keys(db: Session = Depends(get_db)) -> List[ApiKeyListItem]:
     """List every key (including revoked) for audit. Raw values are
     not stored and therefore not returned."""
-    rows = db.query(ApiKey).order_by(ApiKey.created_at.desc()).all()
+    # Whole-second times tie; the key id is insertion order.
+    rows = db.query(ApiKey).order_by(ApiKey.created_at.desc(), ApiKey.id.desc()).all()
     return [
         ApiKeyListItem(
             id=r.id, name=r.name, scope=r.scope,
@@ -89,3 +93,66 @@ def revoke(key_id: int, db: Session = Depends(get_db)) -> None:
     when the id is unknown."""
     if not revoke_api_key(db, key_id=key_id):
         raise HTTPException(status_code=404, detail=f"API key {key_id} not found")
+
+
+class AdminStatusResponse(BaseModel):
+    """``GET /admin/status``: the registry's time source, ``{"source": "wall"}``
+    or ``{"source": "injected", "now": <Unix seconds>}``."""
+
+    time: dict[str, object]
+
+
+class TimeSettingResponse(BaseModel):
+    """``POST /admin/time``: the instant an injected registry is set to."""
+
+    source: Literal["injected"]
+    now: int
+
+
+status_router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_api_key)],
+)
+
+
+@status_router.get("/status", response_model=AdminStatusResponse)
+def admin_status() -> AdminStatusResponse:
+    """The registry's time source, in either mode."""
+    return AdminStatusResponse(
+        time=TimeRouteService(injected_time.installed()).status()
+    )
+
+
+def make_time_router() -> APIRouter:
+    """The ``POST /admin/time`` router, which the registry mounts only while its
+    source is injected, so a wall-time registry serves no such route.
+
+    Behind the administrator bearer key, as every ``/admin`` route is, and
+    answered unsigned as they are: a bearer request carries no timestamp, so no
+    freshness stands between a lane's advance and this route. A body other than
+    ``{"now": <Unix seconds>}`` is 422 ``invalid_time``, an earlier instant 409
+    ``time_moves_forward``, and neither changes anything. Should the router be
+    mounted over a source that cannot be set, it answers 404.
+    """
+    time_router = APIRouter(
+        prefix="/admin",
+        tags=["admin"],
+        dependencies=[Depends(require_admin_api_key)],
+    )
+
+    @time_router.post("/time", response_model=TimeSettingResponse)
+    async def set_time(request: Request) -> JSONResponse:
+        routes = TimeRouteService(injected_time.installed())
+        if not routes.settable:
+            raise HTTPException(status_code=404, detail="Not Found")
+        try:
+            answer = routes.set_time(await request.body())
+        except TimeRouteError as error:
+            return JSONResponse(
+                status_code=error.status_code,
+                content={"code": error.code, "detail": error.detail},
+            )
+        return JSONResponse(content=answer)
+
+    return time_router

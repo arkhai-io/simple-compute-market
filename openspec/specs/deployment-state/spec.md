@@ -25,7 +25,7 @@ Production topology MUST support independently operated registries, seller store
 ### Requirement: Schema-isolated registry composition
 
 One Helm release MAY compose multiple registry instances by aliasing the same
-registry role. Each enabled instance MUST select exactly one filter
+registry service. Each enabled instance MUST select exactly one filter
 specification and MUST have independent authority identity, credential Secret,
 descriptor, authentication, Service, persistence, and workload coordinates.
 Disabling an optional instance MUST emit no resource for that instance and MUST
@@ -65,11 +65,11 @@ Each service MUST own its database and migration history; cross-service identifi
 - **THEN** correlation identifiers cross the API while provisioning retains ownership of its allocation records
 
 ### Requirement: Service-owned migration history
-Each stateful service MUST run and record its own ordered migration chain against its owned database; a deployed provisioning service MUST apply pending migrations before application startup and MUST reject schema drift from its normal startup path instead of applying migrations in-process. The provisioning migration entrypoint MUST receive only its database and MUST NOT read operational configuration; configuration-driven seeding belongs to runtime initialization.
+Each stateful service — compute provisioning, the VM storefront, the bare-metal storefront, the API-credit storefront, the API-credit service, and the registry — MUST run and record its own ordered migration chain against its owned database through its packaged migration command, before its application starts, and MUST NOT apply migrations in-process. Its application startup MUST check its database without issuing DDL and MUST refuse a database that is absent, behind its chain, ahead of its chain, or below its supported baseline, naming the migration command and the migration IDs that differ. A database is compatible only when its recorded migrations are exactly its chain's. The migration command MUST receive only its database location and log level and MUST NOT read operational configuration; configuration-driven seeding belongs to runtime initialization, after the startup check passes.
 
 #### Scenario: Database initialization is repeated
-- **WHEN** a service initializes a database whose migrations are already applied
-- **THEN** initialization leaves the schema at the same current version without duplicate schema changes
+- **WHEN** a service's migration command runs against a database whose migrations are already applied
+- **THEN** it leaves the schema at the same current version without duplicate schema changes or duplicated rows
 
 #### Scenario: Provisioning deployment has pending migrations
 - **WHEN** a provisioning pod is created with an older owned database
@@ -80,12 +80,40 @@ Each stateful service MUST run and record its own ordered migration chain agains
 - **THEN** startup fails with an actionable schema-drift error and does not mutate the schema
 
 #### Scenario: A service has no separate deployment step for migrations
-- **WHEN** a stateful service has no Kubernetes init container or standalone migration CLI to apply migrations ahead of the application process (for example, the API-credit service, which has no Helm chart)
-- **THEN** it MAY apply its own ordered migration chain in-process at application startup, before serving requests, rather than rejecting drift from its normal startup path — this is a valid instantiation of service-owned migration history for a service without the provisioning service's deployment topology, not an exception to it
+- **WHEN** a stateful service has no Kubernetes chart, such as the API-credit service, which runs only under Compose
+- **THEN** its migration command still runs before its application, as the command followed by the application in one container, and its application refuses a database behind its chain rather than migrating in-process
 
 #### Scenario: Provisioning migration runs under different configuration
 - **WHEN** the provisioning migration runs against the same database under two configurations that differ in playbooks, host defaults, or pool and seed documents
 - **THEN** both runs produce the same schema and the same rows
+
+#### Scenario: A deployment has pending migrations
+- **WHEN** a service is deployed over an older owned database
+- **THEN** its migration phase applies the pending migrations before the application process starts
+
+#### Scenario: Application sees a database behind its chain
+- **WHEN** the application process starts against a database missing migrations its chain lists
+- **THEN** startup fails without mutating the schema, naming the migration command and each pending migration ID
+
+#### Scenario: Application sees a database ahead of its chain
+- **WHEN** the application process starts against a database recording a migration its chain does not list, such as after an image rollback over a migrated database, whether or not it also lacks migrations its chain lists
+- **THEN** startup fails without mutating the schema, reporting the database ahead and naming each unknown migration ID and each pending one, and recovery is restoring the pre-upgrade backup or rolling forward
+
+#### Scenario: The migration command meets an unknown migration
+- **WHEN** a service's migration command runs against a database recording a migration its chain does not list
+- **THEN** it applies nothing, changes nothing, and exits unsuccessfully reporting the database ahead with its unknown and pending migration IDs
+
+#### Scenario: Application finds no database
+- **WHEN** the application process starts and its database file does not exist or records no migrations
+- **THEN** startup fails naming the migration command and creates no database file
+
+#### Scenario: Migration runs under different configuration
+- **WHEN** a service's migration command runs against the same database under two configurations that differ in anything but the database location and log level
+- **THEN** both runs produce the same schema and the same rows
+
+#### Scenario: The API-credit service starts on a fresh database
+- **WHEN** the API-credit service starts against a database its migration command has just created
+- **THEN** its startup seeds the `default` resource pool after the startup check passes, and its migrations wrote no pool
 
 ### Requirement: Shared Dynaconf bootstrap preserves consumer policy
 
@@ -116,11 +144,11 @@ The bare-metal storefront MUST be buildable as a wheel from the repository `.dis
 - **THEN** the `bare-metal-storefront` entry point and `market.storefront_contributions` hook load without editable sibling packages
 
 #### Scenario: Operator enables only bare-metal
-- **WHEN** the bare-metal seller role is enabled and VM storefront is disabled
-- **THEN** the role starts with its own persistence and trusted-site configuration without waiting for or referencing a VM storefront
+- **WHEN** the bare-metal storefront service is enabled and VM storefront is disabled
+- **THEN** the service starts with its own persistence and trusted-site configuration without waiting for or referencing a VM storefront
 
 #### Scenario: Operator enables both compute storefronts
-- **WHEN** VM and bare-metal seller roles use one provisioning service
+- **WHEN** VM and bare-metal storefront services use one provisioning service
 - **THEN** they remain separate processes with separate writable storefront databases and explicit public service URLs or gateway paths
 
 #### Scenario: Site configuration is diagnosed
@@ -164,17 +192,17 @@ Deployment manifests and operator configuration MUST reference the destination p
 
 ### Requirement: Payment credentials stay with their owning process
 
-The Arkhai payments API key MUST reach only its owning buyer or seller process. Outside loopback the payments service origin MUST use HTTPS. Public renderings MUST omit resolved credentials and contain no payment authority, provider, database or worker deployment. The payments lane double is a development fixture, not a payment authority: only the end-to-end lanes and the local release, whose own values enable its subchart, run it, and release values never enable it.
+The Arkhai payments API key MUST reach only its owning buyer or seller process. Outside loopback the payments service origin MUST use HTTPS. Public renderings MUST omit resolved credentials and contain no payment authority, provider, database or worker deployment. The payments and mediation lane doubles are development fixtures, not payment or dispute authorities: only the end-to-end lanes and the local release, whose own values enable their subcharts, run them, and release values never enable them.
 
 #### Scenario: A non-loopback origin is plain HTTP
 
-- **WHEN** a role's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
+- **WHEN** a buyer or seller process's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
 - **THEN** its configuration is refused, naming the HTTPS requirement
 
 #### Scenario: A release is rendered from release values
 
 - **WHEN** the umbrella chart is rendered without the local release's values
-- **THEN** it renders no payments double and no other payment authority
+- **THEN** it renders no payments double, no mediation double and no other payment or dispute authority
 
 ### Requirement: Marketplace deployment config contains consumer data only
 
@@ -196,7 +224,7 @@ Marketplace builds MUST install `arkhai-kit-arkhai-payments` from the staged whe
 
 ### Requirement: Identity configuration separates public and secret material
 
-Private identity credentials MUST arrive through role-scoped Secret references and MUST NOT enter committed values, ConfigMaps, manifests, run logs, public principal fields, public URLs, or generated evidence. Payment consumer profiles MUST keep provider credentials and bank/card data out of marketplace roles. Owner-scoped API credentials are separate from marketplace signing credentials. Runtime MUST derive the public principal from the credential and compare it with configured public identity before readiness.
+Private identity credentials MUST arrive through service-scoped Secret references and MUST NOT enter committed values, ConfigMaps, manifests, run logs, public principal fields, public URLs, or generated evidence. Payment consumer profiles MUST keep provider credentials and bank/card data out of marketplace roles. Owner-scoped API credentials are separate from marketplace signing credentials. Runtime MUST derive the public principal from the credential and compare it with configured public identity before readiness.
 
 #### Scenario: Public identity configuration contains a private credential
 
@@ -221,25 +249,11 @@ Private identity credentials MUST arrive through role-scoped Secret references a
 #### Scenario: A service-peer profile is rendered
 
 - **WHEN** a storefront and provisioning authority are configured to trust one another
-- **THEN** ordinary configuration contains each exact scheme-tagged public principal and site trust binding, while each role's matching signer credential is supplied only through its own Secret boundary
-
-### Requirement: Identity migrations are coordinated and fail closed
-
-Each owning service MUST migrate its identity-bearing rows through its own ordered migration chain while preserving cross-service opaque IDs and provider-operation identity. Versioned buyer run logs MUST have an explicit migration path. Authorities MUST reject old schema, old signature versions, drift, ambiguous principals, or partially migrated state; production cutover MUST quiesce authenticated mutations until all required authorities and clients report the new identity capability.
-
-#### Scenario: One authority remains on the old signature contract
-
-- **WHEN** deployment readiness detects a registry, storefront, service peer that lacks the pinned identity version
-- **THEN** the affected workflow remains unavailable rather than downgrading or submitting a legacy proof
-
-#### Scenario: Migration encounters conflicting owners
-
-- **WHEN** two address-only rows would create an invalid active-principal ownership relation
-- **THEN** that service migration rolls back completely and readiness remains false
+- **THEN** ordinary configuration contains each exact scheme-tagged public principal and site trust binding, while each service's matching signer credential is supplied only through its own Secret boundary
 
 ### Requirement: Deployment uses one settlement hierarchy
 
-Role TOML, committed defaults, environment overlays, Helm values/schema/templates, Compose, examples, and generated configuration MUST use the same typed `[Settlement]` root and mechanism subsection names. Marketplace deployment MUST keep public identity, wallet/chains, and mechanism trust/policy separate from Secret-injected credentials, and MUST reject payment-provider/admin/webhook secrets or payment-service-owned state.
+Storefront and buyer TOML, committed defaults, environment overlays, Helm values/schema/templates, Compose, examples, and generated configuration MUST use the same typed `[Settlement]` root and mechanism subsection names. Marketplace deployment MUST keep public identity, wallet/chains, and mechanism trust/policy separate from Secret-injected credentials, and MUST reject payment-provider/admin/webhook secrets or payment-service-owned state.
 
 #### Scenario: Payment-only role starts
 
@@ -253,7 +267,7 @@ Role TOML, committed defaults, environment overlays, Helm values/schema/template
 
 ### Requirement: Configuration cutover is atomic and coordinated
 
-Migration tooling MUST be deployable before runtime rejection, and production cutover MUST preview, back up, migrate, and validate every role file, Secret mapping, Helm value, Compose environment, and automation caller before enabling the clean-cutover release. Old and new names MUST NOT be accepted concurrently by runtime. Rollback before activation MUST restore the matching config and prior artifacts together.
+Migration tooling MUST be deployable before runtime rejection, and production cutover MUST preview, back up, migrate, and validate every storefront and buyer configuration file, Secret mapping, Helm value, Compose environment, and automation caller before enabling the clean-cutover release. Old and new names MUST NOT be accepted concurrently by runtime. Rollback before activation MUST restore the matching config and prior artifacts together.
 
 #### Scenario: Helm values and image contract differ
 
@@ -559,25 +573,6 @@ not an extension of an image-owned domain choice.
 - **WHEN** an operator overlay selects VM and bare-metal registrations
 - **THEN** the effective configuration contains exactly those two registrations, with no packaged registration appended by configuration merging
 
-### Requirement: Legacy storefront domain migration is transactional
-
-An operator MUST quiesce effects and run the explicitly selected contribution's migration adapter in read-only check mode before write. Write MUST require a restrictive same-directory backup, fsync the complete validated replacement, atomically replace the source, and retain stable listing, negotiation, settlement, obligation, reservation, fulfillment, operation, and provider identities. Missing provenance, mixed kinds, orphan relationships, collision, binding disagreement, or unsupported version MUST abort without partial source mutation. No adapter may infer a domain from payload shape or from having one installed contribution.
-
-#### Scenario: A valid VM database is activated
-
-- **WHEN** every legacy derived row proves its site and pool or Physical Resource provenance and the configured registration matches exactly
-- **THEN** migration records common listing/thread/fulfillment bindings, retires the old mapping as a writable authority, and an idempotent check succeeds after replacement
-
-#### Scenario: A legacy row is ambiguous
-
-- **WHEN** a row lacks trusted site/provenance, conflicts with public mode, is orphaned, duplicates a derivation identity, or names another contract
-- **THEN** check and write fail with redacted diagnostics while the source database and backup set remain unchanged
-
-#### Scenario: Replacement is interrupted
-
-- **WHEN** failure occurs after the original backup but before atomic replacement
-- **THEN** the original database remains byte-identical, the restrictive backup is retained for recovery, and startup does not activate mixed state
-
 ### Requirement: Deployable stack per market domain
 
 Every market domain intended for deployment MUST have a stack definition that
@@ -585,7 +580,7 @@ stands its services up through the repository's ordinary images and public
 process contracts. Domain stack definitions MUST follow the same topology
 conventions, select an exact domain contribution and version, persist each
 authority's state independently, and carry credentials only through explicit
-role-scoped Secret references. A domain without such a stack MUST NOT be
+service-scoped Secret references. A domain without such a stack MUST NOT be
 described as deployable.
 
 #### Scenario: A domain is stood up
@@ -649,29 +644,6 @@ to the repository that produced the distribution, including from a fork.
 - **WHEN** a pull request from a fork builds and tests the repository
 - **THEN** it succeeds, because every dependency is publicly resolvable and none
   requires a credential a fork is not given
-
-### Requirement: Release verification is a publication-time activity
-
-Verification of an externally produced signed release MUST NOT be a prerequisite
-of building, initializing, or testing. A signed release describes a deployed
-service; establishing what a build compiled against is the lockfile's
-responsibility, and establishing what a publication contains belongs to
-publication.
-
-The verifier itself MUST retain its behaviour. What changes is which targets
-invoke it.
-
-#### Scenario: A suite is run without a staged release
-
-- **WHEN** a project's tests are run and no release is staged
-- **THEN** the suite runs, because nothing on the path to it verifies a release
-
-#### Scenario: A dependency is modified locally
-
-- **WHEN** a developer builds and tests against a locally modified copy of an
-  external dependency
-- **THEN** the build and the suite proceed, and no published artifact results
-  from them
 
 ### Requirement: Deployment documentation states how a dependency is obtained
 
@@ -975,11 +947,12 @@ The provisioning chart MUST render each entry of `configFiles` verbatim into its
 
 A chart MUST NOT hold a service back with init containers that wait for or validate its
 external dependencies, such as a registry, a chain, or a site, and a service MUST NOT
-wait for one, or refuse to start because one is unreachable, in its own startup. The
-service MUST start while a dependency is unreachable, report the dependency as degraded
-in its status while its process health check answers, and recover without a restart when
-the dependency answers. A chart whose service starts slowly MUST give it a startup probe,
-so that a slow start is not judged by its liveness probe.
+wait for one, or refuse to start because one is unreachable, in its own startup. The only
+init container a chart runs for a service is that service's own migration, which acts on
+its own state. The service MUST start while a dependency is unreachable, report the
+dependency as degraded in its status while its process health check answers, and recover
+without a restart when the dependency answers. A chart whose service starts slowly MUST
+give it a startup probe, so that a slow start is not judged by its liveness probe.
 
 #### Scenario: The VM storefront starts before its registry and chain
 
@@ -1002,8 +975,15 @@ so that a slow start is not judged by its liveness probe.
 #### Scenario: A storefront chart renders
 
 - **WHEN** the VM or bare-metal storefront chart is rendered
-- **THEN** its Deployment carries no init container that waits on a dependency, and its
+- **THEN** its Deployment carries exactly one init container, the storefront's migration
+  command from the application's image, none that waits on a dependency, and its
   container carries a startup probe
+
+#### Scenario: The registry chart renders
+
+- **WHEN** the registry chart is rendered
+- **THEN** its Deployment carries exactly one init container, the registry's migration
+  command from the application's image over the registry's data volume
 
 ### Requirement: Helm test pods carry no workload selector labels
 
@@ -1159,17 +1139,22 @@ A storefront's payments key, dispute credentials and wallet key MUST reach it as
 
 ### Requirement: The local release rehearses a deployment's payments interface
 
-The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the runtime secret overlay and the CA bundle option — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's subchart, which release values never enable, once per namespace, and the local deployment MUST supply the seller token in each storefront's runtime secret overlay, the VM storefront's dispute credential for the pinned dispute authority its registry recommends in that storefront's overlay, and the CA ConfigMap from the committed development fixtures by default, through its out-of-band step for local Secrets rather than through chart values. The subchart MUST take its server certificate and key from a named existing Secret when one is given.
+The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the runtime secret overlay and the CA bundle option — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's and the mediation double's subcharts, which release values never enable, once per namespace, and the local deployment MUST supply the seller token in each storefront's runtime secret overlay, the VM storefront's dispute credential for the mediation double its registry recommends in that storefront's overlay, with its `ca_bundle_path` naming the file the chart mounts the CA bundle as, and the CA ConfigMap from the committed development fixtures by default, through its out-of-band step for local Secrets rather than through chart values. Each double's subchart MUST take its server certificate and key from a named existing Secret when one is given.
 
 #### Scenario: The local release is deployed
 
 - **WHEN** the local deploy target installs the release
-- **THEN** the payments double runs, the storefronts are configured for payments through the deployment-facing values, the VM storefront's secret overlay holds its credential for the pinned dispute authority, and no storefront uses development authentication
+- **THEN** the payments double and the mediation double run, the storefronts are configured for payments through the deployment-facing values, the VM storefront's secret overlay holds its credential for the mediation double with the chart's CA file as its `ca_bundle_path`, the release's Helm tests check Bob's mediation configuration against the mediation double, and no storefront uses development authentication
 
 #### Scenario: A deployment supplies its own TLS
 
-- **WHEN** a release names an existing Secret for the double's server certificate and key
-- **THEN** the double serves with that Secret's material rather than the committed files
+- **WHEN** a release names an existing Secret for a double's server certificate and key
+- **THEN** that double serves with that Secret's material rather than the committed files
+
+#### Scenario: The copied dispute credential names the chart's CA file
+
+- **WHEN** the local deployment's out-of-band step copies the VM storefront's dispute credential from its Compose secret overlay
+- **THEN** the copy's `ca_bundle_path` is the file the storefront chart mounts the CA bundle as, not the Compose stack's path
 
 ### Requirement: A storefront checks its payments access from its own container
 
@@ -1197,12 +1182,12 @@ Each storefront CLI MUST offer `check-payments --account <id>`, which loads the 
 
 ### Requirement: A stack's configuration lives in committed files
 
-Every Compose stack the repository runs — each end-to-end lane and the full local stack — MUST take its configuration from committed overlay, profile and secret-overlay files. A Makefile MAY choose which configuration loads, such as the provisioning mode or the runner's profiles, and MUST NOT generate or carry configuration values. A base or domain Compose file MUST carry only values its topology fixes; a deployment's own binds and values MUST be in its overlay, and a base file MUST NOT give a credential or definition document a committed fallback.
+Every Compose stack the repository runs — each end-to-end lane and the full local stack — MUST take its configuration from committed overlay, profile and secret-overlay files. A Makefile MAY choose which configuration loads, such as the provisioning mode, the runner's profiles, or a release candidate's image suffix, and MUST NOT generate or carry configuration values. A base or domain Compose file MUST carry only values its topology fixes; a deployment's own binds and values MUST be in its overlay, and a base file MUST NOT give a credential or definition document a committed fallback.
 
 #### Scenario: A lane stack is brought up
 
 - **WHEN** a lane target brings its stack up
-- **THEN** it names only the lane's Compose files and the run's provisioning mode, and every value the stack reads is in a committed file
+- **THEN** it names only the lane's Compose files, the run's provisioning mode and, in release-image mode, the candidate's image suffix, and every value the stack reads is in a committed file
 
 #### Scenario: A base stack runs without its overlay
 
@@ -1233,11 +1218,514 @@ The registry MUST load, after its default dotenv files, `config-<profile>.env` f
 - **WHEN** a release's registry values set `auth.adminKeySecret` or `auth.bootstrapKeySecret`
 - **THEN** rendering fails naming `secretProfile`
 
+### Requirement: Identity cutover is coordinated and fails closed
+
+Versioned buyer run logs MUST have an explicit migration path. Authorities MUST reject old schema, old signature versions, drift, ambiguous principals, or partially migrated state; production cutover MUST quiesce authenticated mutations until all required authorities and clients report the new identity capability.
+
+#### Scenario: One authority remains on the old signature contract
+
+- **WHEN** deployment readiness detects a registry, storefront, service peer that lacks the pinned identity version
+- **THEN** the affected workflow remains unavailable rather than downgrading or submitting a legacy proof
+
+### Requirement: One migration mechanism serves every stateful service
+
+Every stateful service MUST expose a packaged migration command named for its service command with a `-migrate` suffix, such as `market-storefront-migrate`, that applies its chain, and a `--check` mode that reports the startup check's result and the pending or unknown migration IDs, changes nothing, and exits successfully only for a compatible database. A deployment MUST run the command before the application: a chart as an init container from the application's image with the application's configuration and data volume, and Compose as the command followed by the application in one container. The in-house services MUST apply their chains through one shared migration engine; the registry MUST keep Alembic behind the same command, check result, and refusal message.
+
+#### Scenario: An operator previews an upgrade
+
+- **WHEN** an operator runs a service's migration command with `--check` against a database behind the new image's chain
+- **THEN** it lists the pending migration IDs, changes nothing, and exits unsuccessfully
+
+#### Scenario: A storefront under Compose has pending migrations
+
+- **WHEN** a storefront container starts under Compose over a database behind its chain
+- **THEN** its migration command applies the pending migrations and the storefront starts only after it succeeds
+
+#### Scenario: The registry refuses a database behind its head
+
+- **WHEN** the registry starts against a database whose Alembic revision is not its script head
+- **THEN** startup fails without mutating the schema, naming the registry's migration command and both revisions, in the same form as every other service's refusal
+
+### Requirement: A chain begins at its supported baseline
+
+Each in-house chain MUST begin with baseline migrations, one for each package whose tables its database's startup builds, whose bodies are fixed DDL. The baselines of compute provisioning, the VM storefront, and the bare-metal storefront MUST reproduce the schema the marketplace v0.3.0 release builds at startup; the registry's chain MUST begin with one Alembic baseline revision reproducing its v0.3.0 schema; the baselines of the API-credit storefront and the API-credit service reproduce their schema as of their baseline. For compute provisioning, the VM storefront, the bare-metal storefront, and the registry, the migration command MUST adopt a database that records every migration the v0.3.0 chain recorded by replacing those records with the baseline's in one transaction, without running the baselines; every service MUST refuse any other non-empty database as unsupported. A defect in data or schema a supported database carries MUST be repaired by an ordinary migration after the baseline, so that an adopted database is one the release can serve. The tables and indexes the v0.3.0 release created outside its chain — when a store opened, or after the chain in the storefront's constructor — MUST be created by one such migration, which alone among migrations tolerates objects that already exist, since a v0.3.0 database may or may not hold them.
+
+#### Scenario: A fresh database is migrated
+
+- **WHEN** a service's migration command runs against an empty database
+- **THEN** the baselines and every later migration run, producing the baseline schema followed by the later migrations
+
+#### Scenario: A v0.3.0 database is adopted
+
+- **WHEN** the migration command of compute provisioning, the VM storefront, the bare-metal storefront, or the registry runs against a database that recorded every migration of the v0.3.0 chain
+- **THEN** it records the baselines as applied without running them, removes the v0.3.0 records, and applies the migrations after the baseline
+
+#### Scenario: A v0.3.0 storefront database never opened a store's tables
+
+- **WHEN** a VM storefront database that recorded every migration of the v0.3.0 chain lacks the deal-servicing tables because no deal was ever delivered, and its migration command runs
+- **THEN** it adopts the database, and the migration after the baseline creates the missing tables and indexes, leaving those that exist unchanged
+
+#### Scenario: A database older than v0.3.0 is refused
+
+- **WHEN** the migration command runs against a database missing any migration the v0.3.0 chain recorded
+- **THEN** it changes nothing and refuses the database as unsupported, naming the missing migrations and directing the operator to a fresh database
+
+#### Scenario: An API-credit database is refused
+
+- **WHEN** the API-credit storefront's or service's migration command runs against a non-empty database created before its baseline
+- **THEN** it refuses the database as unsupported and changes nothing
+
+### Requirement: A migration and its record commit together
+
+The shared migration engine MUST apply each migration and record its ID in one transaction, so that a failed migration leaves the migrations before it recorded and itself neither applied nor recorded.
+
+#### Scenario: A migration fails partway through a chain
+
+- **WHEN** a migration raises after earlier migrations in the same run succeeded
+- **THEN** the earlier migrations stay recorded, the failed one leaves no schema change and no record, the command exits unsuccessfully naming it, and application startup reports the database behind with that migration pending
+
+### Requirement: Opening a store changes no schema
+
+A service MUST NOT issue DDL outside its migration chain. Constructing a database client, opening a store, or starting the application MUST leave the database's schema unchanged.
+
+#### Scenario: A storefront opens its stores on a migrated database
+
+- **WHEN** a storefront starts and opens its database client and every store it composes against a database its migration command has migrated
+- **THEN** the database's tables, columns, indexes, and triggers are the same before and after
+
+### Requirement: Composition-owned migration ordering
+
+A concrete storefront composition MUST declare its chain from the shared core storefront's migrations, the migrations of each kit it composes that owns tables, and its domain's migrations, in a deterministic declared order, and MUST expose one compatibility result to its application startup.
+
+#### Scenario: Domain migration fails
+
+- **WHEN** shared migrations succeed but a composition-specific migration fails
+- **THEN** application startup does not begin and the failure identifies the unsuccessful migration without claiming a compatible chain
+
+### Requirement: A storefront checks its mediation configuration from its own container
+
+The VM storefront CLI MUST offer `check-mediation --origin <authority>`, which loads the storefront's configuration as the running storefront does, selects the dispute credential for the named authority, makes one authenticated read through the mediation kit with that credential's token and configured trust, prints one JSON outcome containing no credential, and exits nonzero naming the failing step: configuration, credential, transport, or the authority's refusal code. It MUST assert nothing about the read's answer and MUST change no state at the authority. The storefront chart MUST offer a Helm test that runs it directly, not through the storefront's entrypoint, for an agent with a dispute credential and a named authority to check, with the storefront's image, configuration and secrets mounts, identity credential and CA bundle mount, rendered from the same chart definitions as the storefront Deployment, and without the storefront's data volume, health probes, or network-overlay capabilities and device. Helm validation MUST run each such test and count it passed only on its pod's own exit status of 0.
+
+#### Scenario: The storefront can reach its dispute authority
+
+- **WHEN** an operator or Helm validation runs `check-mediation` for the authority a configured storefront's dispute credential names
+- **THEN** it prints an `ok` outcome naming the authority's origin and exits zero, whatever the read returned
+
+#### Scenario: The copied credential names a CA file the pod lacks
+
+- **WHEN** the dispute credential's `ca_bundle_path` names a file that is missing, unreadable or malformed
+- **THEN** the check prints a `failed` outcome naming the configuration step, before any request, and exits nonzero
+
+#### Scenario: The storefront does not trust the authority's certificate
+
+- **WHEN** the credential's CA bundle does not cover the certificate the authority's origin serves, or the origin does not resolve
+- **THEN** the check prints a `failed` outcome naming the transport step and exits nonzero
+
+#### Scenario: The credential's token cannot be resolved
+
+- **WHEN** the dispute credential names its token by a variable the storefront's environment does not set
+- **THEN** the check prints a `failed` outcome naming the credential step, before any request, and exits nonzero
+
+#### Scenario: The authority refuses the storefront's token
+
+- **WHEN** the authority refuses the read, as for a token it does not accept
+- **THEN** the check prints a `failed` outcome naming the refusal step with the authority's error code and exits nonzero
+
+#### Scenario: The storefront names no credential for the authority
+
+- **WHEN** no dispute credential in the storefront's configuration names the given origin
+- **THEN** the check prints a `failed` outcome naming the configuration step and exits nonzero
+
+### Requirement: Continuous integration publishes nothing
+
+A workflow MUST NOT upload an artifact to a public channel, a package or image registry,
+or a release page, and MUST NOT hold a credential that could. Continuous integration
+builds and tests, including building the wheelhouse and resolving every declared
+distribution against it. The packaging check MUST refuse a workflow that declares no
+top-level `permissions:`; that grants `id-token: write`, `packages: write`,
+`attestations: write` or `contents: write`; that references a secret other than
+`GITHUB_TOKEN`; or that contains a named publishing step. No workflow is excepted.
+
+#### Scenario: A change is merged
+
+- **WHEN** a change merges to the default branch
+- **THEN** no workflow publishes anything
+
+#### Scenario: A release tag is pushed
+
+- **WHEN** a `marketplace-v*` tag is pushed
+- **THEN** no workflow builds or publishes an artifact for it
+
+#### Scenario: A workflow gains an upload step
+
+- **WHEN** a workflow contains a step that publishes to PyPI, npm, an image registry or a
+  GitHub release
+- **THEN** the packaging check fails and names the workflow and the step
+
+#### Scenario: A workflow gains a publishing credential
+
+- **WHEN** a workflow grants `id-token: write` or `contents: write`, or references a
+  secret other than `GITHUB_TOKEN`
+- **THEN** the packaging check fails and names the workflow and the credential
+
+### Requirement: A release candidate is stored under its revision
+
+A release candidate is a default-branch commit loaded by the publish targets; a
+marketplace release is a release candidate the deployment promoted, named by its semver.
+Loading MUST store every release component under the commit's nine-character revision:
+each declared image as `arkhai:<name>-<rev9>`, and the declared wheels, the chart package
+and the `market` binary as revision-versioned packages in the candidate store. Loading
+MUST also push each declared development image as `arkhai:<name>-<rev9>`; a development
+image is not a release component. One load operation MUST build the wheelhouse once,
+check its versions, build every declared image and development image and the binary
+from it, each image that installs wheels from it labelled with the wheelhouse's digest,
+and MUST upload nothing unless the wheelhouse still has that digest and every such image
+carries it. Once every component is built and checked, reloading a revision MUST remove
+its stored wheels, chart package and binary before uploading any, and MUST NOT keep a
+file an earlier load stored.
+
+#### Scenario: A candidate is loaded
+
+- **WHEN** a default-branch commit is loaded
+- **THEN** every declared image, development image, wheel, chart package and binary is
+  stored under that commit's nine-character revision, and the store holds exactly the
+  declared wheels, one chart package and one binary for it
+
+#### Scenario: An image was built from another wheelhouse
+
+- **WHEN** the wheelhouse changes after the load built its images, or an image's
+  wheelhouse label differs from the wheelhouse being loaded
+- **THEN** the load uploads nothing and names the image or the wheelhouse
+
+#### Scenario: A revision is reloaded after a version changed
+
+- **WHEN** a revision is loaded again with a wheel at a different version
+- **THEN** the store holds only the new load's wheels, chart package and binary for that
+  revision
+
+#### Scenario: A reload fails after removing the stored files
+
+- **WHEN** a reload fails after removing the revision's stored files and before
+  uploading all of them
+- **THEN** the revision holds no file from the earlier load beside the new load's, and
+  lacks the files not yet uploaded
+
+### Requirement: One declaration of release components
+
+The distributions, service images, chart and binary a marketplace release comprises, and
+the development images a release candidate's validation runs, MUST have exactly one
+declaration, `manifests/release-components.json`. Its release components MUST be only
+what a release ships; development images are listed apart and are not release
+components. A package whose candidate bytes cannot be stored under the revision MUST NOT
+be a release component. Every category MUST be present except the npm package's, which
+is absent until the package is declared and MUST NOT be present and empty; a reader MUST
+refuse a missing or unknown category and a duplicated entry. Each image MUST be declared
+by its published name and its local build name. The publish targets, the lanes' release-image check and image pull, and the
+binary build MUST read it, and the packaging check MUST refuse a second list of
+components or development images in a workflow, publish target or lane target.
+
+#### Scenario: A component is added
+
+- **WHEN** a service image or distribution joins the release
+- **THEN** one declaration is edited beside the component's own build, every publish
+  target loads it without a second edit, and the packaging tests fail while the
+  candidate build does not build it
+
+#### Scenario: A publish target names its own list
+
+- **WHEN** a publish target or workflow lists distributions, images, the chart or the
+  binary itself
+- **THEN** the packaging check fails and names it
+
+### Requirement: Every declared image's build writes its revision tag
+
+A build with no image suffix MUST tag each declared image as `arkhai:<local>-<rev9>`
+beside its bare tag, where `<rev9>` is the nine-character revision of HEAD. Every
+Makefile that computes a revision MUST compute it with `git rev-parse --short=9`, and the
+packaging check MUST refuse a `git rev-parse --short` without `=9` in any Makefile.
+
+#### Scenario: A declared image is built
+
+- **WHEN** any declared image is built with no image suffix
+- **THEN** its local revision tag exists and names the built image
+
+#### Scenario: A Makefile abbreviates the revision by Git's default
+
+- **WHEN** a Makefile computes a revision with `git rev-parse --short` and no length
+- **THEN** the packaging check fails and names the Makefile
+
+### Requirement: The chart names no release
+
+The deployment chart's version MUST follow the chart's own semver and change only when
+the chart's packaged files change. Its default values MUST NOT name a release version, a
+revision-suffixed tag or a digest, and a chart MUST NOT declare an `appVersion`. Each of
+the deployment chart's dependency entries MUST name its subchart's own version.
+
+#### Scenario: A subchart's version changes
+
+- **WHEN** a subchart's `Chart.yaml` version differs from the version the deployment
+  chart's dependency entry names for it
+- **THEN** the chart's tests fail and name the subchart
+
+#### Scenario: Two releases share an unchanged chart
+
+- **WHEN** two marketplace releases are cut and the chart did not change between them
+- **THEN** both bills of materials name the same chart version and content digest
+
+#### Scenario: The chart's defaults are rendered
+
+- **WHEN** the chart is rendered with its default values
+- **THEN** no image reference carries a semver-shaped tag, a revision suffix or a digest
+
+### Requirement: Wheels build with a pinned backend
+
+The wheel build backend MUST be pinned exactly in one root declaration beside
+`.python-version`, which every build target applies. The packaging check MUST refuse a
+project with any `[build-system]` requirement that declaration does not pin.
+
+#### Scenario: A project declares an unconstrained build requirement
+
+- **WHEN** a project's `[build-system]` requires a backend or plugin the root declaration
+  does not pin
+- **THEN** the packaging check fails and names the project and the requirement
+
+#### Scenario: The pin moves
+
+- **WHEN** the pinned backend version changes
+- **THEN** every declared wheel's bytes change, and the version check refuses each
+  distribution whose version was not bumped
+
+### Requirement: A version changes when its contents change
+
+`make check-release-versions` MUST read the bill of materials at every `marketplace-v*`
+tag carrying one, except the tag being checked, and refuse a layout it does not know. It
+MUST refuse a wheel whose distribution and version an earlier record names with a
+different SHA-256, or a chart whose version an earlier record names with a different
+content digest. When a candidate is loaded, its subject is the wheelhouse the load built
+and the chart packaged with the pinned Helm, whose content digest is computed over the
+packaged files; a package storing a path more than once, or a file Git ignores under
+the chart's directory, MUST be refused rather than digested. At the cut, its subject is
+the release's own bill of materials, and it MUST NOT need a build. With no other bill of
+materials it MUST pass and say so. It
+compares the release tags the checkout holds, and its result MUST name every tag it
+compared. It guards the versions recorded releases name and reads no package registry;
+it is not a guard against versions a registry received by other means.
+
+#### Scenario: A wheel changed without a version bump
+
+- **WHEN** a built wheel has the previous release's version and different bytes
+- **THEN** the check fails and names the wheel
+
+#### Scenario: An older version is reused with different bytes
+
+- **WHEN** a built wheel has a version released two releases earlier, absent from the
+  previous release, with different bytes
+- **THEN** the check fails and names the wheel and the release that recorded it
+
+#### Scenario: The chart changed without a version bump
+
+- **WHEN** the packaged chart has the previous release's version and a different content
+  digest
+- **THEN** the check fails and names the chart
+
+#### Scenario: The check runs at the cut
+
+- **WHEN** the release's tag exists locally and the check runs against it
+- **THEN** it compares the tag's own bill of materials with every other release's,
+  without building, and never with itself
+
+#### Scenario: No earlier release carries a record
+
+- **WHEN** no `marketplace-v*` tag carries a bill of materials
+- **THEN** the check passes and says that no earlier record exists
+
+### Requirement: A marketplace release is recorded by a tagged commit on its release branch
+
+A marketplace release MUST be recorded as a `releases/<semver>` branch at a
+default-branch commit, one commit on it adding only `manifests/release-bom.cdx.json`, and
+a `marketplace-v<semver>` tag on that commit. `make check-release-record` MUST refuse a
+record of any other shape, one whose source revision is not the branch point or whose
+version is not the tag's, one whose components are not exactly the release components
+the declaration at the branch point declares, each once, or one the version check
+refuses with the record as its subject.
+
+#### Scenario: A well-formed record is checked
+
+- **WHEN** the tag's commit adds only the bill of materials on a release branch cut at a
+  default-branch commit, and the document names every declared component
+- **THEN** the record check passes
+
+#### Scenario: The release commit changes another file
+
+- **WHEN** the tag's commit changes any path besides the bill of materials
+- **THEN** the record check fails and names the path
+
+#### Scenario: The release branch has grown past its record
+
+- **WHEN** a `releases/<semver>` branch, locally or as any remote-tracking branch, is at a
+  commit other than the tag's
+- **THEN** the record check fails and names the branch and its commit
+
+#### Scenario: The record names an undeclared or duplicated component
+
+- **WHEN** the bill of materials names a component the declaration does not declare, a
+  development image, or one component twice
+- **THEN** the record check fails and names each such component
+
+### Requirement: The release bill of materials holds content identities only
+
+The bill of materials MUST be CycloneDX 1.6 in layout 1. Its subject carries the release
+semver, the layout and the full source revision. Each wheel carries its version and
+SHA-256, each image its manifest digest, the chart its version and the content digest of
+its packaged files, the binary its SHA-256, and a declared npm package its version and
+the SHA-512 of its tarball. It MUST NOT
+name a registry host, project or path; the record check refuses any field or URL layout 1
+does not admit.
+
+#### Scenario: A bill of materials names a registry
+
+- **WHEN** the release commit's bill of materials carries a purl with a `repository_url`
+  or any URL but the repository's public vcs link
+- **THEN** the record check fails and names the component
+
+#### Scenario: A product version is assigned
+
+- **WHEN** a release candidate is promoted under a semver
+- **THEN** the bill of materials carries the semver on its subject, and every wheel and
+  the chart keep the versions they were built with
+
+### Requirement: A local lane can run a release candidate's images
+
+With `RELEASE_IMAGES=1`, a local end-to-end lane MUST build no declared release image,
+MUST fail naming each declared release image it runs that is missing locally as
+`arkhai:<local><IMAGE_SUFFIX>`, MUST fail naming each declared release image its Compose
+files run without the suffix, and MUST refuse an empty suffix. After its stack starts it
+MUST record each release image it runs by published name and manifest digest, failing an
+image without exactly one repo digest from a registry, a release image its Compose files
+run that no running container runs, and a lane running none of the candidate's release
+images. A repo digest in the local `arkhai` repository names no registry and MUST NOT be
+counted. `pull-release-images`, given a registry and a
+suffix, MUST pull each declared release image by its published name and the suffix, and
+tag it `arkhai:<local><IMAGE_SUFFIX>`.
+
+#### Scenario: A candidate's images are pulled for a lane
+
+- **WHEN** `pull-release-images` runs with a registry and a candidate's suffix
+- **THEN** each declared release image is present locally as
+  `arkhai:<local><IMAGE_SUFFIX>`, carrying the repo digest it was pulled by
+
+#### Scenario: A lane runs a candidate's pulled images
+
+- **WHEN** a lane runs with `RELEASE_IMAGES=1` and the candidate's suffix, its release
+  images present locally
+- **THEN** it builds none of them, and its record names each by published name with the
+  manifest digest its container runs
+
+#### Scenario: A release image is missing
+
+- **WHEN** a lane runs with `RELEASE_IMAGES=1` and one of its release images is absent
+- **THEN** the lane fails before starting its stack and names the image
+
+#### Scenario: A lane's Compose files name a release image without the suffix
+
+- **WHEN** a lane runs with `RELEASE_IMAGES=1` and its Compose files name a declared release
+  image by its bare tag
+- **THEN** the lane fails before starting its stack and names the image
+
+#### Scenario: A release image the lane runs has no running container
+
+- **WHEN** a lane's stack is up with `RELEASE_IMAGES=1` and a release image its Compose files
+  run has no running container
+- **THEN** no record is written, and the lane fails naming the image
+
+#### Scenario: A release image has only a local repo digest
+
+- **WHEN** a release image the lane runs has repo digests only in the local `arkhai`
+  repository
+- **THEN** no record is written, and the lane fails naming the image
+
+### Requirement: The release binary is the buyer CLI with every declared buyer domain
+
+The release's `market` binary MUST freeze the same entry point as the published buyer
+CLI, and MUST bundle exactly the buyer CLI and every declared distribution that
+registers a `market.buyer_domains` entry point. It MUST be built in a build image pinned
+by digest, from a committed lock installed as every image installs one, with every
+repository distribution from the wheelhouse. The packaging check MUST refuse a binary
+project whose dependencies differ from that set, naming each missing and each extra
+distribution. A published distribution MUST NOT depend on the freezing tool at run time.
+
+#### Scenario: The binary is built
+
+- **WHEN** the release binary is built
+- **THEN** `market plugins` in the build image lists every declared buyer domain
+
+#### Scenario: A declared buyer domain is missing from the binary
+
+- **WHEN** a declared distribution registers a `market.buyer_domains` entry point and
+  the binary's project does not depend on it
+- **THEN** the packaging check fails and names it
+
+#### Scenario: The binary bundles an undeclared distribution
+
+- **WHEN** the binary's project depends on a distribution that is neither the buyer CLI
+  nor a declared buyer domain
+- **THEN** the packaging check fails and names it
+
+### Requirement: Committed configuration outside the lanes never injects time
+
+A static check MUST refuse `"injected"` as any party's time source in committed configuration outside the lanes' own: chart defaults, the local Helm release's values, production examples and shipped presets. The local Helm release MUST run on wall time; its validation scenarios MUST run in wall mode.
+
+#### Scenario: A production example sets injected time
+
+- **WHEN** a chart's production example values set a storefront's `[Time] source` to `"injected"`
+- **THEN** the static check fails naming the file and the party
+
+#### Scenario: The local release is validated
+
+- **WHEN** pre-review validation runs its scenarios against the local Helm release
+- **THEN** the session reads the status of the release's storefront, provisioning service and registry and finds each on wall time, and the scenarios set no time
+
+### Requirement: The VM storefront chart ships a production example offering on-demand and spot
+
+The VM storefront chart MUST ship a production example values file whose agent settles
+in `arkhai.payments.v1` in live mode, declares rate servicing for `charged` and
+`returned` with no setup charge, states a finite default listing horizon, and publishes
+an on-demand and a spot recurring clause whose payments clause sets
+`delivery_deadline_seconds` and a dispute window covering that deadline plus the
+authority's minimum filing window. The example MUST render, its
+rendered storefront configuration MUST pass the storefront's startup check, and it MUST
+set no injected time.
+
+#### Scenario: The production example is rendered
+
+- **WHEN** the chart render tests render the VM storefront chart with its production
+  example
+- **THEN** the render succeeds and the storefront's startup check accepts the rendered
+  configuration
+
+#### Scenario: The production example publishes both recurring options
+
+- **WHEN** the rendered example's configuration is loaded and its recurring clauses are
+  derived against a representative dispute authority advertisement under the example's
+  own default listing horizon
+- **THEN** an on-demand and a spot option are published, each with the clause's delivery
+  deadline, a dispute window covering it plus the authority's minimum filing window, and
+  the `charged` and `returned` treatments, and no clause is refused
+
+#### Scenario: The production example withdraws rate servicing
+
+- **WHEN** an operator removes the example's `rate_servicing` table
+- **THEN** the storefront publishes no recurring option and continues servicing the rate
+  deals it already holds
+
 ## Evidence
 
-- Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
-- Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/integration/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
-- The provisioning migration reading no operational configuration, the same database migrated under two configurations to equal schema and rows: `provisioning/compute/service/tests/integration/test_migration_reads_no_configuration.py`; job-envelope host evidence: `provisioning/compute/service/tests/integration/test_job_envelope_migration.py`.
+- Configurable registry endpoints and independently composed service stacks: core buyer registry configuration plus domain Compose and Helm manifests.
+- Service-owned persistence, each service's migration command and `--check`, and its startup check refusing absent, behind, ahead and unsupported databases: `provisioning/compute/service/tests/integration/test_database.py`; `domains/apicredits/service/tests/integration/test_migrations.py`; `test_migrate_command.py` and `test_store_open.py` under each storefront's `tests/integration/`; the registry's `core/registry/tests/integration/test_migrations.py` and `core/registry/tests/unit/test_migration_states.py`.
+- The shared engine — classification, refusal messages, atomic recording under every transaction control, adoption, the read-only check, and `schema_snapshot`: `kit/schema-migrations/tests/unit/` and `kit/schema-migrations/tests/integration/`.
+- Each chain reproducing its v0.3.0 floor fixture, adoption keeping rows, and the migrations after the baseline: `test_migration_chain.py` under `provisioning/compute/service/tests/integration/` and each storefront's `tests/integration/`, beside each service's `tests/fixtures/v0_3_0_floor/`; the shared storefront baselines against the bare-metal floor: `domains/bare_metal/storefront/tests/integration/test_shared_baselines.py`; deal servicing's store-open schema: `kit/deal-servicing/tests/integration/test_servicing_schema.py`.
+- The migration init containers: `helm/charts/provisioning/tests/test_render.py`, `helm/charts/storefront/tests/test_render.py`, `helm/charts/bare-metal-storefront/tests/test_render.py`, and `helm/charts/registry/tests/test_render.py`.
+- Migration reading no operational configuration, the same database migrated under two configurations to equal schema and rows: `provisioning/compute/service/tests/integration/test_migration_reads_no_configuration.py`, `domains/apicredits/service/tests/integration/test_migrations.py`, each storefront's `test_migrate_command.py`, and `core/registry/tests/integration/test_migrations.py`.
 - The provisioning chart's `configFiles` rendered, mounted, and named in the profile, exact content and names, and refused names: `helm/charts/provisioning/tests/test_render.py`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
 - Package architecture in the packaging check: `make check-architecture`, `scripts/check_architecture_*.py`, and `scripts/tests/test_check_architecture.py`.
@@ -1247,7 +1735,6 @@ The registry MUST load, after its default dotenv files, `config-<profile>.env` f
 - One Python version: the root `.python-version`, the `UV_PYTHON` export in each Makefile that runs uv, and the CI step that sets it.
 - Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
 - Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
-- Transactional legacy storefront migration, byte-stable refusal, restrictive backup, atomic replacement, and idempotency: `domains/vms/storefront/tests/unit/test_domain_migration.py`.
 - Bare-metal staged-wheel/image boundary and installed contribution: `domains/bare_metal/storefront/pyproject.toml`, `domains/bare_metal/storefront/Dockerfile`, `domains/bare_metal/storefront/tests/test_package.py`, `test_import_boundaries.py`, and `test_app_composition.py`.
 
-Repository-wide migration entrypoints and compatibility-preserving non-additive registry rollout remain proposed in `add-database-migration-commands` and `migrate-registry-to-postgres`.
+The registry's PostgreSQL cutover and its rollout remain proposed in `migrate-registry-to-postgres`.

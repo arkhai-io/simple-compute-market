@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-import time
+from datetime import timedelta
 import json
 
 from typing import Any
 import uuid
 
+import injected_time
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from market_identity import (
@@ -32,7 +33,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core_registry.db.models import PublisherReplayReservation
+from core_registry.db.models import PublisherReplayReservation, utcnow
 
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
 IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
@@ -161,7 +162,7 @@ def authenticate_publisher_request(
         PublisherReplayReservation.principal_identifier == claimed.identifier,
         PublisherReplayReservation.request_id == envelope_data["request_id"],
     ).first()
-    verification_now = int(time.time())
+    verification_now = injected_time.now()
     result = verify_request(
         envelope_data,
         body=body,
@@ -178,7 +179,7 @@ def authenticate_publisher_request(
 
     authenticated = AuthenticatedRequest.model_validate(envelope_data)
     attempt_owner = uuid.uuid4().hex
-    now = datetime.utcnow()
+    now = utcnow()
     lease_expires_at = now + timedelta(seconds=_REPLAY_LEASE_SECONDS)
     if replay_row is None:
         replay_row = PublisherReplayReservation(
@@ -248,6 +249,16 @@ def authenticate_publisher_request(
     )
 
 
+async def retained_request_evidence(
+    request: Request, authenticated: AuthenticatedPublisherRequest
+) -> dict[str, Any]:
+    """Retain transport bytes and the envelope that binds their canonical JSON hash."""
+    return {
+        "body_base64": base64.b64encode(await request.body()).decode("ascii"),
+        "request": authenticated.request.model_dump(mode="json"),
+    }
+
+
 def registry_authority_signer(request: Request) -> Signer:
     signer = getattr(request.app.state, "registry_authority_signer", None)
     if signer is None:
@@ -264,7 +275,7 @@ def signed_response(*, authenticated: AuthenticatedPublisherRequest, signer: Sig
         operation=authenticated.request.operation,
         resource=authenticated.request.resource,
         request_id=authenticated.request.request_id,
-        timestamp=int(time.time()),
+        timestamp=injected_time.now(),
         status=status,
         body_hash=canonical_body_hash(response_body),
     )
@@ -303,7 +314,7 @@ def complete_authenticated_request(*, authenticated: AuthenticatedPublisherReque
         {
             PublisherReplayReservation.response_status: status,
             PublisherReplayReservation.response_body: body,
-            PublisherReplayReservation.completed_at: datetime.utcnow(),
+            PublisherReplayReservation.completed_at: utcnow(),
             PublisherReplayReservation.lease_owner: None,
             PublisherReplayReservation.lease_expires_at: None,
         },
@@ -326,7 +337,7 @@ def complete_authenticated_error(*, authenticated: AuthenticatedPublisherRequest
         {
             PublisherReplayReservation.response_status: error.status_code,
             PublisherReplayReservation.response_body: {"detail": error.detail},
-            PublisherReplayReservation.completed_at: datetime.utcnow(),
+            PublisherReplayReservation.completed_at: utcnow(),
             PublisherReplayReservation.lease_owner: None,
             PublisherReplayReservation.lease_expires_at: None,
         },

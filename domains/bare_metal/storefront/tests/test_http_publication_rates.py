@@ -6,16 +6,24 @@ held from the start; publication is the administrator's step route, after a
 are the in-process doubles the cycle tests use, standing where this codebase
 wraps those services. A declared rate
 and a storefront override are each read back as the published listing a buyer
-fetches, and each refreshes the same listing in place.
+fetches, and each refreshes the same listing in place. Recurring payment options
+publish beside the listing's other options under the composition's servicing
+declaration.
 """
 
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
+from pathlib import Path
 
 import httpx
 import pytest
+import yaml
+from core_storefront.publication_runner import PublicationPayload
+from jsonschema import Draft202012Validator
+from market_core.schemas import derive_settlement_option_id
 from market_identity import TrustedIdentitySet
 from market_pool_overrides import PoolOverrideClient
 from storefront_client import StorefrontClient
@@ -25,11 +33,30 @@ from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from held_loops import held_loop_controller
-from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
+from recurring_world import (
+    AVAILABLE_UNTIL as RECURRING_AVAILABLE_UNTIL,
+    MAX_DURATION_SECONDS as RECURRING_MAX_DURATION_SECONDS,
+    MECHANISM as RECURRING_MECHANISM,
+    QUALIFIED,
+    recurring_world,
+    undeclared,
+)
+from test_http_system import (
+    ADMIN_SIGNER,
+    SELLER_SIGNER,
+    _admin_client,
+    _app,
+    _derivation_runtime,
+    _runtime,
+)
 from test_publication_cycle import (
+    CONFIGURED_CLAUSES_RAW,
+    DEFAULT_GPU_MODEL,
     REGISTRY_URL,
     RecordingRegistries,
     Site,
+    member,
+    pool,
     projections_over,
     Terms,
     _priced,
@@ -51,15 +78,25 @@ class _Sites:
 
 
 @contextlib.asynccontextmanager
-async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int | None = 3600):
+async def _storefront(
+    tmp_path,
+    site: Site,
+    *,
+    default_max_duration_seconds: int | None = 3600,
+    registries: RecordingRegistries | None = None,
+    build_payload: Terms | None = None,
+):
     """The running app over ``site``, its database under ``tmp_path``.
 
     ``default_max_duration_seconds`` is the configured
     ``[pricing].default_max_duration_seconds``; the runtime reads it when it is
     composed, so a configuration change is a second storefront over the same
-    database, as a restart is.
+    database, as a restart is. ``registries`` records what the registry is
+    sent, for a test that reads it; ``build_payload`` stands for the configured
+    settlement terms.
     """
-    registries = RecordingRegistries()
+    registries = registries if registries is not None else RecordingRegistries()
+    terms = build_payload if build_payload is not None else Terms()
 
     def cycle(runtime):
         return BareMetalPublicationCycle(
@@ -71,7 +108,7 @@ async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int
             registry_urls=(REGISTRY_URL,),
             storefront_url=runtime.storefront_url,
             seller_principal=runtime.seller_principal,
-            build_payload=Terms(),
+            build_payload=terms,
             default_max_duration_seconds=runtime.default_max_duration_seconds,
         )
 
@@ -138,6 +175,75 @@ async def test_a_declared_rate_and_an_override_reach_the_listing_a_buyer_reads(t
     assert withheld.status == "open"
 
 
+#: The compute registry's own listing schema, which a bare-metal registry
+#: serves and validates a publication against.
+_COMPUTE_SPEC = (
+    Path(__file__).resolve().parents[4] / "core/registry/src/core_registry/filter-spec.yaml"
+)
+
+
+def _compute_schema_errors(body: dict) -> list[str]:
+    shape = yaml.safe_load(_COMPUTE_SPEC.read_text())["listing_shape"]
+    return [
+        f"{list(error.absolute_path)}: {error.message}"
+        for error in Draft202012Validator(shape).iter_errors(body)
+    ]
+
+
+_OPTION_SETTLEMENT = {"schema": "arkhai.payments.v1"}
+
+
+class _OneOptionTerms(Terms):
+    """Configured terms publishing one rateless settlement option, standing for
+    a composed mechanism: the compute schema admits no listing that offers
+    neither an option nor an escrow, and the option's content is the
+    mechanism's, not this domain's."""
+
+    async def __call__(self, candidate: dict) -> PublicationPayload:
+        option = {
+            "option_id": derive_settlement_option_id(settlement=_OPTION_SETTLEMENT),
+            "settlement": dict(_OPTION_SETTLEMENT),
+        }
+        return PublicationPayload(
+            settlement_options=(option,), max_duration_seconds=self.max_duration_seconds
+        )
+
+
+async def test_every_publication_path_sends_a_document_the_compute_registry_admits(tmp_path):
+    """A priced machine's first publication, which the registry refuses, and the
+    repair the next step makes through the domain's publication candidate each
+    send a document the compute registry's schema admits, the asking rate in
+    its ``pricing`` and not in the machine's description, while the listing a
+    buyer reads from the storefront keeps the rate beside the shape."""
+    registries = RecordingRegistries()
+    registries.failing = {("publish", REGISTRY_URL)}
+    site = Site(_priced(_rate("12.50")))
+    async with _storefront(
+        tmp_path, site, registries=registries, build_payload=_OneOptionTerms()
+    ) as (admin, public):
+        listing_id = _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
+        # The refused first publication, then the cycle's own convergence retry.
+        refused = [body for operation, _, _, body in registries.sent if operation == "publish"]
+        registries.failing.clear()
+        registries.sent.clear()
+        repaired = await admin.admin_run_lifecycle_cycle("publication")
+        (repair,) = [body for operation, _, _, body in registries.sent if operation == "publish"]
+        local = await public.get_listing(listing_id)
+
+    assert [item["listing_id"] for item in repaired["actions"] if item["action"] == "converge"] == [
+        listing_id
+    ]
+    first = refused[0]
+    for body in (*refused, repair):
+        assert _compute_schema_errors(body) == []
+        assert body["pricing"] == {
+            "asking_rate": {"amount": "12.50", "asset": "usd", "period": "hour"},
+        }
+        assert "asking_rate" not in body["listing_resource"]
+        assert body == first
+    assert local.listing_resource["asking_rate"]["amount"] == "12.50"
+
+
 def _holds(report: dict) -> set[str]:
     return {item["reason"] for item in report["actions"] if item["action"] == "hold"}
 
@@ -183,25 +289,229 @@ async def test_a_bound_conflict_after_the_write_holds_rather_than_fails(tmp_path
     assert "min_duration_seconds" not in held.listing_resource
 
 
-async def test_a_pool_resolving_no_lease_bound_is_held_through_the_running_app(tmp_path):
-    """With no configured maximum, the step reports the pool held for its lease
-    bound and publishes nothing for it; an override stating a maximum then lets
-    the next step publish it. Spec scenario: "A bare-metal pool resolves no
-    lease bound"."""
-    site = Site(_priced(_rate("12.50")))
-    async with _storefront(tmp_path, site, default_max_duration_seconds=None) as (
-        admin,
-        public,
-    ):
-        held = await admin.admin_run_lifecycle_cycle("publication")
-        await PoolOverrideClient(admin).put_pool_override(
-            {"site_id": SITE, "pool_id": "pool-1", "offering_mode": "bare_metal",
-             "terms": {"max_duration_seconds": 7200}}
-        )
-        listing = await public.get_listing(
-            _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
-        )
+@contextlib.asynccontextmanager
+async def _composed(tmp_path, monkeypatch, site: Site, **changes):
+    """The running app over ``site``, each cycle composed from the runtime as
+    production composes it, under the configured Alkahest settlement."""
+    app = _app(_derivation_runtime(tmp_path, monkeypatch, {SITE: site}, **changes))
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            yield admin
 
-    assert _holds(held) == {"pool_lease_bound_missing"}
-    assert [item for item in held["actions"] if item["action"] == "publish"] == []
+
+async def test_a_reserved_option_publishes_with_no_relative_maximum(tmp_path, monkeypatch):
+    """With no maximum lease duration from any tier, the pool is not held: its
+    listing publishes its reserved escrow with no relative maximum. Spec
+    scenarios "A bare-metal pool states no maximum duration" (its publication
+    half) and "A bare-metal pool resolves no lease bound"."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    async with _composed(tmp_path, monkeypatch, site, default_max_duration_seconds=None) as admin:
+        report = await admin.admin_run_lifecycle_cycle("publication")
+        listing = await admin.get_listing(_listing_id(report))
+
+    assert _holds(report) == set()
     assert listing.status == "open"
+    assert listing.max_duration_seconds is None
+    assert listing.extra["accepted_escrows"]
+
+
+async def test_pool_level_clauses_publish_below_a_model_hint(tmp_path, monkeypatch):
+    """With no configured clause, a pool's ``pricing.settlements`` hint publishes
+    its clauses for each machine whose GPU model has no hint of its own, while a
+    model hint -- here an empty list, which withholds every option -- wins for
+    its model's machine. Spec scenarios "A bare-metal pool states pool-level
+    clauses" and "A pool-level hint below a model hint"."""
+    site = Site(pool(
+        "pool-1",
+        member("r1", "pool-1"),
+        member("r2", "pool-1", attributes={"gpu_model": "A100"}),
+        policy_tags={"pricing": {
+            "settlements": list(CONFIGURED_CLAUSES_RAW),
+            "gpu": {DEFAULT_GPU_MODEL: {"settlements": []}},
+        }},
+    ))
+    async with _composed(tmp_path, monkeypatch, site, publication_clauses=()) as admin:
+        report = await admin.admin_run_lifecycle_cycle("publication")
+        listing = await admin.get_listing(_listing_id(report))
+
+    assert listing.listing_resource["gpu_model"] == "A100"
+    assert listing.extra["accepted_escrows"]
+    refused = [item for item in report["actions"] if item["action"] == "refuse"]
+    assert [(item["physical_resource_id"], item["reason"]) for item in refused] == [
+        ("r1", "no_settlement_option")
+    ]
+
+
+_HINT_END = "2035-01-02T00:00:00Z"
+_OVERRIDE_END = "2035-01-01T00:00:00Z"
+_DEFAULT_END = "2035-01-03T00:00:00Z"
+
+
+async def test_each_capacity_bound_resolves_from_its_own_tier_onto_the_published_listing(
+    tmp_path, monkeypatch,
+):
+    """An override stating only the availability end replaces the hint's end and
+    keeps its relative bound; both travel as top-level listing terms, never in the
+    listing resource. A malformed hint holds the listing as it stood, reporting
+    its bounds unreadable, rather than guessing a default."""
+    hinted = pool("pool-1", member("r1", "pool-1"), policy_tags={"capacity_bounds": {
+        "bare_metal": {"max_duration_seconds": 7200, "available_until_utc": _HINT_END},
+    }})
+    site = Site(hinted)
+    runtime = _derivation_runtime(
+        tmp_path, monkeypatch, {SITE: site},
+        default_max_duration_seconds=86400, default_available_until_utc=_DEFAULT_END,
+        capacity_client=_Sites(site),
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            listing_id = _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
+            declared = await admin.get_listing(listing_id)
+
+            await PoolOverrideClient(admin).put_pool_override({
+                "site_id": SITE, "pool_id": "pool-1", "offering_mode": "bare_metal",
+                "terms": {"available_until_utc": _OVERRIDE_END},
+            })
+            await admin.admin_run_lifecycle_cycle("publication")
+            overridden = await admin.get_listing(listing_id)
+            sent = runtime.registry_configuration.recording.sent[-1][3]
+
+            broken = copy.deepcopy(hinted)
+            broken["pool_metadata"]["policy_tags"]["capacity_bounds"]["bare_metal"][
+                "available_until_utc"
+            ] = "not-a-date"
+            site.serve(broken)
+            await admin.admin_run_lifecycle_cycle("site-projections")
+            held = await admin.admin_run_lifecycle_cycle("publication")
+            after = await admin.get_listing(listing_id)
+
+    assert (declared.max_duration_seconds, declared.extra["available_until_utc"]) == (7200, _HINT_END)
+    assert (overridden.max_duration_seconds, overridden.extra["available_until_utc"]) == (
+        7200, _OVERRIDE_END,
+    )
+    assert sent["available_until_utc"] == _OVERRIDE_END
+    assert "available_until_utc" not in sent["listing_resource"]
+    assert "max_duration_seconds" not in sent["listing_resource"]
+    assert any(item.get("reason") == "capacity_bounds_unreadable" for item in held["actions"])
+    assert after == overridden
+
+
+# The servicing declaration at the publication door, through ``recurring_world``:
+# the running app's settlement composition with Arkhai payments added to its
+# configuration, the payments kit's installed recurring encoder and term timing,
+# and a declaration each test sets.
+
+
+def _recurring(options: list[dict]) -> list[dict]:
+    return [option for option in options if "period" in option["settlement"]]
+
+
+def _derived_class(option: dict) -> str:
+    """The class a buyer reads off an option: billed once is reserved; billed per
+    period, a payee entitlement makes it spot and its absence on-demand."""
+    if "period" not in option["settlement"]:
+        return "reserved"
+    entitlements = option["lifecycle"]["early_termination"]["entitlements"]
+    return "spot" if "payee" in entitlements else "on-demand"
+
+
+async def test_one_listing_offers_reserved_on_demand_and_spot_on_its_capacity_identity(tmp_path):
+    """Declaring rate servicing adds the on-demand and spot options to the
+    listing the pool already publishes, beside its reserved Alkahest and once
+    payment options: the same listing and machine, publishing both bounds, each
+    option separately identified, and the class each derives from its billing
+    and entitlements, never a stored field."""
+    async with recurring_world(tmp_path, treatments=None) as world:
+        listing_id = _listing_id(await world.publish())
+        dark = await world.admin.get_listing(listing_id)
+
+        world.declare(QUALIFIED)
+        report = await world.publish()
+        listing = await world.admin.get_listing(listing_id)
+
+    assert [_derived_class(option) for option in dark.extra["settlement_options"]] == ["reserved"] * 2
+    assert [item for item in report["actions"] if item["action"] == "publish"] == []
+    assert listing.status == "open"
+    assert listing.listing_resource == dark.listing_resource
+    assert (listing.max_duration_seconds, listing.extra["available_until_utc"]) == (
+        RECURRING_MAX_DURATION_SECONDS, RECURRING_AVAILABLE_UNTIL,
+    )
+    options = listing.extra["settlement_options"]
+    assert {option["option_id"] for option in dark.extra["settlement_options"]} < {
+        option["option_id"] for option in options
+    }
+    assert sorted(
+        (option["settlement"]["schema"], _derived_class(option)) for option in options
+    ) == [
+        ("alkahest.v1", "reserved"),
+        (RECURRING_MECHANISM, "on-demand"),
+        (RECURRING_MECHANISM, "reserved"),
+        (RECURRING_MECHANISM, "spot"),
+    ]
+    assert len({option["option_id"] for option in options}) == 4
+    assert all("class" not in option and "class" not in option.get("lifecycle", {})
+               for option in options)
+
+
+async def test_publication_omits_recurring_options_whose_treatments_are_undeclared(tmp_path):
+    """A recurring option publishes only under a declaration qualifying every
+    treatment it names. Narrowing the declaration omits both recurring options on
+    the next step, each with its diagnostic, while the reserved and once options
+    keep the listing's capacity identity."""
+    async with recurring_world(tmp_path) as world:
+        report = await world.publish()
+        listing_id = _listing_id(report)
+        published = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
+        recurring = _recurring(published)
+        assert (len(published), len(recurring)) == (4, 2)
+        assert not undeclared(report)
+        peers = {option["option_id"] for option in published if option not in recurring}
+
+        world.declare(frozenset({"charged"}))
+        report = await world.publish()
+        listing = await world.admin.get_listing(listing_id)
+
+    assert listing.status == "open"
+    assert [item for item in report["actions"] if item["action"] == "publish"] == []
+    assert {option["option_id"] for option in listing.extra["settlement_options"]} == peers
+    refusals = undeclared(report)
+    assert len(refusals) == 2
+    assert all("does not declare returned" in item["detail"] for item in refusals)
+
+
+@pytest.mark.parametrize(("clause_deadline", "refused"), [(900, 0), (None, 3)],
+                         ids=["clause-configured", "neither"])
+async def test_a_clause_s_deadline_publishes_where_the_pool_supplies_none(
+    tmp_path, clause_deadline, refused,
+):
+    """With no pool deadline, each payment option, once or recurring, publishes the
+    deadline its clause configures and no default buyer's refusal is reported; a
+    clause configuring none publishes no deadline, and each payment option is
+    reported as refused by a default buyer for lacking one."""
+    async with recurring_world(tmp_path, pool_deadline=None, clause_deadline=clause_deadline) as world:
+        report = await world.publish()
+        published = (await world.admin.get_listing(_listing_id(report))).extra["settlement_options"]
+
+    payments = [option for option in published if option["settlement"]["schema"] == RECURRING_MECHANISM]
+    assert len(payments) == 3
+    assert {option["lifecycle"].get("delivery_deadline_seconds") for option in payments} == {clause_deadline}
+    refusals = [item for item in report["actions"] if item.get("reason") == "default_buyer_refusal"]
+    assert len(refusals) == refused
+    assert all(item["detail"].endswith("no delivery deadline") for item in refusals)
+
+
+async def test_an_on_demand_option_stating_no_penalty_publishes_the_configured_multiple(tmp_path):
+    """The on-demand preset states no premature-stop penalty, so it publishes its
+    per-period price, 625000 at 2.5 an hour per 15 minutes, times the composition's
+    configured multiple; spot, which carries a seller stop, publishes none."""
+    async with recurring_world(tmp_path, default_penalty_periods=6) as world:
+        listing_id = _listing_id(await world.publish())
+        published = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
+
+    penalties = {
+        "payee" in option["lifecycle"]["early_termination"]["entitlements"]:
+            option["lifecycle"]["early_termination"].get("premature_stop_penalty")
+        for option in _recurring(published)
+    }
+    assert penalties == {False: str(625000 * 6), True: None}

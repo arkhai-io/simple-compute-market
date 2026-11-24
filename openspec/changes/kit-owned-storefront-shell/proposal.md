@@ -13,7 +13,7 @@ composes adapter bundles, where an adapter is codecs and hooks, not a second ser
 
 The duplication is the cost the kit extractions exist to remove. A defect in one copy
 of the settle route stays live in the other two; a cross-cutting change such as the
-pause-and-step convention `TESTING.md` makes repository-wide has to be built once per
+pause-and-step convention `deterministic-tests.md` makes repository-wide has to be built once per
 domain; and a fourth compute domain would begin by copying a shell.
 
 ## What Changes
@@ -69,7 +69,7 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md` — role map and package layers.
 - [x] Existing subsystem specification — `openspec/specs/market-composition/spec.md`.
-- [ ] `docs/development/TESTING.md` — the loop table already names the kit loop
+- [ ] `docs/guidance/repository/deterministic-tests.md` — the loop table already names the kit loop
       controller once `kit-owned-storefront-loop-lifecycle` lands; re-confirm.
 - [ ] New subsystem specification
 

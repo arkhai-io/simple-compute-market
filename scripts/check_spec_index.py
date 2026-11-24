@@ -2,7 +2,8 @@
 """Hold an indexed capability's `spec.md` to its `index.md`.
 
 A capability under `openspec/specs/` may organize its documentation by an index
-(`openspec/README.md#capability-documentation-pattern`). Its `index.md` declares the
+(`docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index`;
+the check itself, `openspec/README.md#the-index-check`). Its `index.md` declares the
 capability's id prefix on a line `Prefix: `CW``; lists each requirement by id, as a
 list item or table row whose first cell is a link `[CW-a8tf](spec.md#…)` followed by
 its summary line, under the parts and groups of its table of contents; and lists the

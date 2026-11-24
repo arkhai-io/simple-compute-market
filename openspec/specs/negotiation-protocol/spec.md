@@ -150,20 +150,6 @@ Every negotiation MUST persist durable ownership by the exact canonical scheme-t
 - **WHEN** Ed25519 buyer and seller principals complete deterministic rounds selecting `arkhai.payments.v1`
 - **THEN** the Agreement preserves both exact party principals and the settlement selection without requiring EVM addresses
 
-### Requirement: Negotiation identity migration and recovery are deterministic
-
-Address-shaped negotiation parties, message authors, and accepted Terms MUST migrate transactionally to canonical `eip191` principals while preserving negotiation, message, listing, option, settlement-plan, and operation identities. Migration MUST validate the complete owned population before committing and MUST leave the prior state intact when any row is malformed, conflicting, incomplete, or ambiguously owned. Recovery of a persisted thread MUST use its recorded buyer and seller principals and MUST authorize a continuation only for the recorded buyer or a replacement principal bound by a completed rotation.
-
-#### Scenario: Nonterminal thread is recovered after migration
-
-- **WHEN** a valid address-owned negotiation is migrated before its next round and the recorded `eip191` buyer resumes it
-- **THEN** the seller continues the same thread and canonical history without replaying prior policy decisions or changing accepted party ownership
-
-#### Scenario: Negotiation identity population is unsafe
-
-- **WHEN** migration encounters a malformed principal, conflicting identity representation, incomplete party population, or ambiguous owner
-- **THEN** the migration aborts atomically without leaving mixed address and principal authorization state
-
 ### Requirement: Negotiation inherits an immutable listing-domain binding
 
 Opening a negotiation MUST transactionally load the authoritative seller listing and common binding, resolve the exact pre-registered contract, validate the versioned provision envelope with that contract, and persist the thread, canonical parties, opening message, initial domain artifact, trusted site, offering mode, domain identity, and contract version before policy runs. Caller-supplied discriminators are assertions only. Continuation, Terms reduction, and acceptance MUST route from the recorded thread binding.
@@ -450,6 +436,367 @@ unaffected.
 - **WHEN** a buyer selects an option charging 1 base unit an hour for 60 seconds
 - **THEN** the seller refuses the selection, whatever amount it carries, and keeps nothing
 
+### Requirement: Negotiation recovery is deterministic
+
+Recovery of a persisted thread MUST use its recorded buyer and seller principals and MUST authorize a continuation only for the recorded buyer or a replacement principal bound by a completed rotation.
+
+#### Scenario: A nonterminal thread is recovered
+
+- **WHEN** the seller restarts with a nonterminal negotiation persisted and the thread's recorded buyer resumes it
+- **THEN** the seller continues the same thread and canonical history without replaying prior policy decisions or changing accepted party ownership
+
+### Requirement: Seller feasibility precedes pricing
+
+Before pricing a requested capacity shape, a seller policy MUST evaluate that shape
+against every dimension it constrains, quantitatively as well as categorically. A
+policy MUST NOT price a shape it has already determined it will not serve.
+
+#### Scenario: Requested shape exceeds a quantitative constraint
+
+- **WHEN** a requested shape exceeds a seller constraint on a quantitative dimension
+- **THEN** the seller declines on that basis rather than quoting a price for it
+
+#### Scenario: Requested shape fails a categorical constraint
+
+- **WHEN** a requested shape names a categorical attribute the seller does not offer
+- **THEN** the seller declines without pricing
+
+### Requirement: Rate-multiplier negotiation
+
+Where a domain's offering carries a resolvable rate structure, the quantity negotiated
+between the parties MUST be a multiplier over the offering's advertised minimum rate
+structure rather than an absolute amount for one shape. The multiplier MUST be carried
+as an integer in basis points (10,000 is the advertised minimum), and the storefront
+MUST record it as the negotiation's negotiated scalar, never under a name that reads
+as a price or an amount. The quote for a shape MUST be the selected settlement
+option's advertised rate scaled by the ratio of the requested shape's composed price
+to the advertised shape's, so the family rates set only that ratio, and then by the
+multiplier. Every amount derived from it MUST be computed in exact integer or decimal
+arithmetic, rounded upward to the asset's base unit once, and refused rather than
+truncated when it exceeds the asset's amount type. A round's concession MUST remain
+comparable to the previous round's when the requested capacity shape differs between
+them. A seller's commercial floor MUST be expressible once, as a bound on the
+multiplier of at most 10,000, and apply to every admissible shape without per-shape
+restatement. The quote for a round is derived by each party from the advertised rate
+structure and the round's shape and multiplier; it is not carried on the wire.
+
+A buyer reads the rate structure from the registry's listing, authenticated by the
+seller's publication. The seller MUST price and pin a negotiation from its most
+recent successful registry publication, the rates the buyer read, not from its own
+stored listing record. At opening, the seller MUST persist the digest of that rate
+structure. A later round or acceptance MUST be refused with the distinct reason
+`rate_structure_changed_reopen` if the published structure changed, even when the
+advertised shape's composed total is unchanged; a thread with no pin MUST be refused
+the same way. A republication no registry accepted changes nothing a negotiation
+reads. Where the seller's registries last accepted different rate structures, the
+seller MUST refuse openings, rounds and acceptances distinctly until they converge,
+and a shape-priced listing no registry has accepted a publication of MUST take no
+opening. A registry holding a publication record of a shape-priced listing but
+no retained accepted payload counts as holding a different rate structure while
+another registry's is known. The buyer may still exit the negotiation.
+
+A buyer MUST refuse an acceptance whose derived payment exceeds its own monetary
+ceiling. A price the buyer derives rather than states MUST price the shape it opens
+with, not the listing's advertised shape. Settlement MUST read money only from the
+Agreement and its bound mandate, never from the negotiated scalar.
+
+#### Scenario: Family rates change without changing the advertised total
+
+- **WHEN** family rates change after opening so the listing's own total is unchanged
+  but a revised shape would have a different price
+- **THEN** a continuation or acceptance is refused as `rate_structure_changed_reopen`
+  and the buyer must reopen against the new listing
+
+#### Scenario: Requested shape changes between rounds
+
+- **WHEN** a counterparty changes the requested capacity shape between two rounds
+- **THEN** the negotiated multiplier remains the axis of comparison, and prior
+  concessions are not discarded or re-anchored because the shape changed
+
+#### Scenario: Seller floor applies to an unanticipated shape
+
+- **WHEN** a shape the seller never explicitly priced is requested
+- **THEN** the seller's multiplier floor applies to it without a per-shape floor being
+  configured
+
+#### Scenario: Agreed terms are recorded
+
+- **WHEN** a negotiation concludes successfully
+- **THEN** the recorded terms determine one price, derivable from the agreed multiplier,
+  the agreed shape, and the advertised rate structure
+
+#### Scenario: A quote exceeds the asset's amount type
+
+- **WHEN** evaluating a shape at a multiplier would produce an amount the settlement
+  asset cannot represent
+- **THEN** the round is refused with that reason and no truncated amount is proposed
+
+#### Scenario: A smaller shape is quoted by the composed-price ratio
+
+- **WHEN** a selected option advertises a rate for the listing's shape and the
+  requested shape's composed price is half the advertised shape's
+- **THEN** the quote at 10,000 basis points is half what the option's rate charges for
+  the same duration, rounded upward once
+
+#### Scenario: A seller configures a floor above the advertised rates
+
+- **WHEN** a seller configures a multiplier floor above 10,000
+- **THEN** the storefront refuses the configuration at load
+
+#### Scenario: A republication fails during a negotiation
+
+- **WHEN** a seller's republication of a listing fails at every registry after a
+  negotiation opened
+- **THEN** the negotiation continues against the rates last published successfully
+
+#### Scenario: Registries hold different rates
+
+- **WHEN** one of a seller's registries accepted a republication with new rates and
+  another refused it
+- **THEN** the seller refuses openings, rounds and acceptances on the listing with a
+  distinct reason until its resend brings the registries to the same rates
+
+#### Scenario: A registry's accepted rates are unknown
+
+- **WHEN** after an upgrade from a release that kept no published payload, one of a
+  seller's registries accepts a republication of a shape-priced listing and another
+  that held the listing refuses it
+- **THEN** the seller refuses openings, rounds and acceptances on the listing with
+  the divergence reason until the other registry accepts a publication
+
+#### Scenario: A buyer's acceptance would exceed its ceiling
+
+- **WHEN** the payment derived from a seller's offer — its multiplier, the agreed
+  shape and duration, and the published rates — exceeds the buyer's monetary ceiling
+- **THEN** the buyer refuses to accept it
+
+#### Scenario: A buyer opening with a smaller shape derives its prices for that shape
+
+- **WHEN** a buyer opens with a shape smaller than the listing's and states no price
+- **THEN** its derived opening and ceiling prices are the selected option's rate
+  scaled by the opening shape's composed-price ratio and rounded up to a whole base
+  unit, so it opens at the advertised minimum for what it asks, not above it by the
+  inverse of that ratio
+
+#### Scenario: The negotiated scalar is not money
+
+- **WHEN** a shape-priced negotiation is accepted
+- **THEN** the storefront records the agreed multiplier as the negotiation's negotiated
+  scalar, and the Agreement, its mandate, and settlement carry the derived payment
+
+### Requirement: A round may revise the capacity shape
+
+A negotiation round after the first MAY carry a revised capacity shape as a child of
+`proposal.provision_terms`, in the domain's versioned provision envelope, expressed in the
+family-grouped capability shape the domain's schema validates. A round that carries
+no revised shape is evaluated against the shape most recently agreed. Effective
+provision terms MUST be durably recorded with each seller quote, and continuation
+and acceptance MUST resume that quote's terms without mutating the opening. Before pricing
+a revised shape the seller MUST evaluate, where its composition provides them,
+admissibility, authoritative feasibility, and commercial feasibility, and MUST report
+each refusal distinctly. A domain that composes no admissibility or feasibility check
+MUST state so in its composition rather than silently evaluating on price alone.
+Until a seller composes an authoritative feasibility check, it MUST refuse, with a
+distinct reason and before pricing, a requested shape exceeding the listing's
+advertised shape on any quantity. A first-round shape that differs from the listing's
+is evaluated the same way rather than refused.
+
+#### Scenario: A buyer proposes a smaller shape
+
+- **WHEN** a buyer's counter carries a revised shape within the seller's constraints
+- **THEN** the seller evaluates and prices that shape, and the next round's terms
+  refer to it
+
+#### Scenario: A revised shape is refused for admissibility
+
+- **WHEN** a revised shape is outside what the seller will consider
+- **THEN** the refusal names admissibility, distinct from a feasibility or commercial
+  refusal
+
+#### Scenario: A revised shape exceeds the advertised shape
+
+- **WHEN** a seller composes no authoritative feasibility check and a revised shape
+  asks for more of any quantity than the listing advertises
+- **THEN** the seller refuses it with a reason distinct from admissibility and
+  commercial refusals, without pricing it
+
+#### Scenario: A revised shape is unreadable
+
+- **WHEN** a revised shape does not validate against the domain's capability schema
+- **THEN** the round is refused at the boundary before any evaluation
+
+#### Scenario: A first-round shape differs from the listing
+
+- **WHEN** a negotiation opens with a shape differing from the listing's advertised
+  shape
+- **THEN** the seller evaluates it as a proposal rather than refusing it outright
+
+### Requirement: Agreed compute prices carry their unit
+
+Compute price consumers MUST use one core accessor returning the agreed quote and
+its unit, `total` or `per_period`, with the selected period available for display.
+`Agreement.amount` MUST contain the accepted monetary amount, not the multiplier.
+Before acceptance, prepaid quotes MUST use Agreement duration and recurring quotes
+one selected option period, preserving upward rounding once and asset amount limits.
+The multiplier MUST remain negotiation-transcript state; the accessor MUST return
+the accepted amount and label it using the selected option's acceptance-bound billing kind. Every
+consumer that spends, caps, displays, recovers or confirms accepted money MUST read it through
+the accessor, and each such consumer MUST be tested with a per-period Agreement; no repository
+check inventories reads of `Agreement.amount`.
+
+#### Scenario: Sub-hour recurring quote
+
+- **WHEN** a negotiation agrees 10,000 bps and selects PT1M at 2,500,000 USD/6 per hour
+- **THEN** acceptance writes the upward-rounded monetary amount 41,667 into the Agreement
+- **AND** the accessor returns that accepted 41,667 per period rather than the full maximum-term price
+
+#### Scenario: Prepaid recovery
+
+- **WHEN** an accepted two-hour prepaid Agreement at that rate is recovered
+- **THEN** the accessor returns 5,000,000 total from the accepted option
+
+#### Scenario: Publication is repriced before materialization
+
+- **WHEN** the pool rate changes after signed acceptance but before mandate derivation or restart recovery
+- **THEN** the accessor returns the accepted monetary amount with the accepted option's unit, and the agreed price does not change
+- **AND** recovery and buyer mandate checks verify it against the acceptance-bound rate structure and transcript multiplier, never the current listing
+
+#### Scenario: A money consumer reads a per-period Agreement
+
+- **WHEN** mandate derivation, a buyer cap or display, recovery or confirmation reads an accepted recurring Agreement
+- **THEN** each treats `Agreement.amount` as one period's price, as the accessor labels it, never as the deal's total
+
+### Requirement: Acceptance pins the published rate identity
+
+A multiplier-priced compute acceptance MUST bind the agreed multiplier and the same
+rate-structure digest pinned at opening in the seller-signed response. Every round
+MUST refer to that digest, computed over the publication's `pricing.rate_structure`. The buyer
+MUST verify it against the registry's retained seller-signed publication, with historical
+signature/context, listing identity, the publication's whole `pricing` object, exact selected
+option and transcript-price checks before accepted recovery or mandate use. Missing evidence
+MUST fail closed.
+
+#### Scenario: Opening, rounds and acceptance use one publication
+
+- **WHEN** a buyer negotiates a rate-structured listing
+- **THEN** opening, every round and acceptance carry the same digest of the published rate structure
+- **AND** acceptance binds that digest and the agreed multiplier in its signed response
+
+#### Scenario: A signed acceptance substitutes its rate identity
+
+- **WHEN** the accepted digest differs from the retained seller-signed registry publication or the pin differs from the transcript multiplier
+- **THEN** the buyer refuses the acceptance before persistence or funding
+
+#### Scenario: Historical evidence is incomplete
+
+- **WHEN** recovery lacks retained publication proof or the signed acceptance pricing pin
+- **THEN** it fails closed rather than substituting a current listing or a seller-returned snapshot
+- **AND** Agreement.listing_hash keeps its existing database-listing meaning, a known gap recorded in `openspec/changes/README.md`
+
+#### Scenario: Retained pricing differs from the signed publication
+
+- **WHEN** the retained listing's `pricing` object, or the family rates the buyer reads, differ from the seller-signed publication's `pricing`
+- **THEN** the buyer refuses the acceptance before persistence or funding
+
+### Requirement: Compute horizons bind both seller bounds
+
+Reserved duration MUST be positive and fit both bounds.
+
+#### Scenario: The full policy is enforced
+
+- **WHEN** a recurring negotiation resolves its final duration
+- **THEN** Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start, floored to whole seconds when the limiting bound is a fractional-second `available_until_utc`. Accepted duration/max term MUST equal that default or a shorter selection without rounding, and MUST include at least one whole period. Acceptance MUST refuse expired, excessive or sub-period selections. For a recurring option, acceptance MUST also refuse a horizon whose term end is earlier than `max(floor(accepted_at) + approval_window, start_utc) + delivery_deadline_seconds + period`, naming the minimum horizon that passes, and derivation MUST apply the same inequality to the default horizon so that no advertised recurring option fails it at its default selection.
+
+#### Scenario: The horizon leaves no runway
+
+- **WHEN** a buyer proposes a 15-minute horizon on an option with a 15-minute period, a 15-minute approval window and a 1200-second delivery deadline
+- **THEN** acceptance refuses with the minimum horizon of 50 minutes
+- **AND** a 50-minute proposal is accepted and a buyer approving at the last permitted instant still receives one whole period after the deadline
+
+#### Scenario: Absolute bound is earlier
+
+- **WHEN** max duration is 48 hours, availability is 20 hours after resolved start and a recurring buyer names no horizon
+- **THEN** the signed selection binds duration and max term to 20 hours
+
+#### Scenario: Maximum term is not a whole period
+
+- **WHEN** the effective seller bound or shorter buyer horizon is 125 seconds for a 60-second period
+- **THEN** duration and max term bind 125 seconds before signature, without rounding
+- **AND** the term end carries its own `settles_through` under the foundation codec: compute presets use `last_boundary` mapped to `end.partialPeriod: returned`, admitted where the mechanism supports it and the composition declares it qualified
+
+#### Scenario: The limiting absolute bound has fractional seconds
+
+- **WHEN** a recurring buyer names no horizon and the limiting bound is an `available_until_utc` 72000.4 seconds after the resolved start
+- **THEN** the default horizon binds 72000 seconds rather than being refused
+
+#### Scenario: Reserved term exceeds availability
+
+- **WHEN** a reserved duration fits the relative maximum but ends after absolute availability
+- **THEN** acceptance is refused
+
+#### Scenario: Buyer chooses a shorter horizon
+
+- **WHEN** a buyer chooses 10 hours under a 20-hour seller bound
+- **THEN** the final identity-bound option and Agreement both bind 10 hours before acceptance
+- **AND** no cached or accepted option is silently mutated
+
+### Requirement: The horizon is the Agreement's, and the option is unchanged by it
+
+A recurring selection MUST resolve its horizon into `Agreement.duration_seconds` at acceptance — the buyer's stated horizon, else the earliest listing bound at the agreed start — and the seller's signed acceptance MUST carry the advertised option unchanged, with its advertised ID. The option MUST NOT carry a maximum term of its own. The buyer MUST check `duration_seconds` against both listing bounds at `start_utc` before committing.
+
+#### Scenario: Two buyers accept one option
+
+- **WHEN** two buyers accept the same recurring option at different starts under a 20-hour relative bound
+- **THEN** each Agreement carries its own `duration_seconds` and the same option with the same ID
+
+#### Scenario: A horizon exceeds the advertised bound
+
+- **WHEN** a signed acceptance carries `duration_seconds` of 21 hours under an advertised 20-hour bound
+- **THEN** the buyer refuses to commit
+
+#### Scenario: A horizon ends after absolute availability
+
+- **WHEN** a signed acceptance's `start_utc + duration_seconds` falls after the listing's `available_until_utc`
+- **THEN** the buyer refuses to commit
+
+#### Scenario: The seller resolves an omitted horizon
+
+- **WHEN** a buyer names no horizon and the signed acceptance carries the default bound at its `start_utc`, while its provision terms carry no duration
+- **THEN** the buyer accepts, comparing a provision duration with the Agreement's only where the buyer requested one
+
+### Requirement: The negotiation runtime resolves acceptance through a domain hook
+
+The schema-opaque negotiation runtime MUST fix one acceptance instant and, on every acceptance
+path, call the optional `resolve_acceptance` domain hook with it before building artifacts or
+writing acceptance. The hook MAY refine the Agreement's start and duration and MAY refuse; the
+runtime MUST NOT interpret the domain's terms itself.
+
+#### Scenario: A counter is accepted
+
+- **WHEN** a buyer accepts a seller's counter on a recurring option
+- **THEN** the runtime calls the domain hook with its fixed acceptance instant before any artifact is built or acceptance persisted, and a refusal leaves no acceptance written
+
+### Requirement: Recurring starts resolve before signature
+
+The terms runtime MUST resolve recurring start_utc to whole-second precision before the final signature, with bound/horizon and canonical option identity fixed. It MUST reject a fractional rate start rather than round accepted bytes. Once-only timestamp handling MUST remain unchanged.
+
+#### Scenario: A recurring start is fractional
+
+- **WHEN** the final recurring proposal carries a fractional-second start
+- **THEN** acceptance refuses before signature rather than silently shifting the window
+
+### Requirement: Acceptance checks current rate servicing
+
+Seller acceptance MUST refuse recurring selections if the composition no longer
+declares compatible servicing, even if a cached advertised option carries recurring
+terms. The refusal MUST precede persistence and use the withdrawn-option/refetch
+outcome. The listing MUST NOT be treated as the servicing declaration.
+
+#### Scenario: Cached recurring option after servicing is disabled
+
+- **WHEN** a buyer selects a cached recurring option and composition no longer declares servicing
+- **THEN** the seller refuses before persisting acceptance and asks the buyer to refetch
+
 ## Evidence
 
 - Selection-scalar openings and materialized-plan checks: `kit/policy/tests/unit/test_selection_scalar.py`, `kit/alkahest/tests/unit/test_selected_escrow_plan.py`, and, against the served storefront, `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`.
@@ -458,7 +805,7 @@ unaffected.
 - Thread message ordering, terminal detection, exact message authorship, and uint256-domain storage: `domains/vms/storefront/tests/unit/test_negotiation_thread.py`.
 - History reconstruction and policy-chain primitives: `core/storefront/tests/unit/test_negotiation_sync.py`.
 - Agreed-term commit and authenticated administrator authorship: `domains/vms/storefront/tests/services/test_negotiation_service.py` and `domains/vms/storefront/tests/integration/test_negotiations_api.py`.
-- Transactional principal migration and fail-closed recovery ownership: `core/storefront/tests/unit/test_identity_migrations.py` and `core/buyer/tests/unit/test_identity_recovery.py`.
+- Fail-closed recovery ownership: `core/buyer/tests/unit/test_identity_recovery.py`.
 - Immutable listing-to-thread inheritance, cross-domain rejection, exact contract resolution, and restart binding: `domains/vms/storefront/tests/unit/test_domain_thread_bindings.py`, `test_sync_negotiation_domain.py`, and `core/storefront/tests/unit/test_domain_registry.py`.
 
 The complete live VM/bare-metal restart proof is owned by the multi-domain system lane and remains gated on the production bare-metal contribution.

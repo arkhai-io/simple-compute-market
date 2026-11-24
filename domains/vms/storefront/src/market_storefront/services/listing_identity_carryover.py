@@ -34,9 +34,9 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 
+import injected_time
 from arkhai_vms_listings.reconciler import LISTING_SOURCE_KIND, positive_gpu_count
 from market_identity import Identity
 
@@ -148,7 +148,7 @@ async def carry_over_seller_state(sqlite_client: Any) -> CarryOverReport:
             if problem is not None:
                 report.not_carried[listing_id] = problem
             continue
-        now = datetime.now(UTC).isoformat()
+        now = injected_time.now_datetime().isoformat()
         await sqlite_client.upsert_listing_with_binding(
             binding=binding,
             status="closed" if seller_closed else "open",
@@ -159,6 +159,7 @@ async def carry_over_seller_state(sqlite_client: Any) -> CarryOverReport:
             listing_resource=listing_resource,
             fulfillment_resource=record.get("fulfillment_resource"),
             max_duration_seconds=record.get("max_duration_seconds"),
+            available_until_utc=record.get("available_until_utc"),
             storefront_url=record["storefront_url"],
             seller_principal=Identity.model_validate(record["seller_principal"]),
             oracle_address=record.get("oracle_address"),

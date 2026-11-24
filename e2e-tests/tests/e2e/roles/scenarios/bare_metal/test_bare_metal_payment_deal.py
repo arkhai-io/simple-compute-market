@@ -109,7 +109,7 @@ pytestmark = [
     # other fixture of the module; the purchase's cleanup is listed after them.
     pytest.mark.usefixtures(
         "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
-        "purchase_cleanup",
+        "purchase_cleanup", "lane_doubles_evidence",
     ),
     pytest.mark.e2e_bare_metal_payment_deal,
 ]

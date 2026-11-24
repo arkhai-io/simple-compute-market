@@ -1,0 +1,163 @@
+---
+tags: [engineering, configuration]
+---
+
+# Configuration
+
+How a service reads its own settings and how a deployment supplies them: the layers
+a configuration resolves through, where secrets and trust travel, how a setting is
+named and retired, how a test control the production image carries stays off, and
+where a stack's configuration lives. The Python form, with
+Dynaconf, is [Configuration in Python](configuration-python.md); a cluster's and a
+chart's forms are [Kubernetes](kubernetes.md) and [Helm](helm.md). A document
+describing resources a service holds is a [definition document](definition-documents.md).
+
+## Profiles layer over committed defaults
+
+A service resolves its configuration from layers, highest priority first:
+
+1. Environment variables under the service's own prefix: a last-resort escape hatch,
+   never the normal way to supply configuration.
+2. Profile files, one per active profile, applied in the order the profiles are
+   listed.
+3. A base configuration file in the configuration directory, giving default values.
+4. Committed defaults packaged with the service.
+
+Two variables select which configuration loads: the list of profiles to layer and
+the directory the profile files are read from. These are the resolver variables.
+
+## Application settings stay out of the environment
+
+Environment variables are the highest-priority override layer. Baking application
+settings into an image's build instructions, or setting them as individual variables
+of a container, silently overrides anything an operator configures through a profile
+file — the opposite of the profile system's purpose. An image or a container sets
+only the resolver variables. A variable an external subprocess reads directly from
+the process environment, rather than through the service's own settings object,
+cannot travel through the configuration loader, so the service reads it from its
+resolved settings at startup and writes it into its process environment once,
+explicitly, rather than having the container set it. `ANSIBLE_CONFIG`, which the
+`ansible-playbook` subprocess reads itself, is such a variable.
+
+A third-party process that reads no configuration file of its own is started by a
+wrapper on the shared configuration loader. The wrapper resolves the process's
+profiles as a service resolves its own, and passes their values to it through its
+environment, never its arguments. Where the process reads configuration files of its
+own, those are preferred.
+
+## The configuration system carries every value
+
+Every configuration value reaches a service through its configuration system: its
+configuration files and its loader's documented override layer. A value travels
+outside that system only when it controls which configuration is loaded — the
+configuration directory and the profiles to layer. A deployment's definition knows a
+configuration value only where the deployment itself needs it for a stated reason,
+such as the port its container, probes, and service share, or the path of a file it
+mounts, and supplies outside the configuration system only the values that select
+which configuration loads.
+
+Conformance is a property of the source and the deployment definitions, judged there,
+never a runtime refusal: a service does not refuse to start because a value reached
+it through its environment, and the override layer stays available to an operator
+correcting a development cluster.
+
+## Secrets travel in a secret profile or overlay file
+
+In every stack, local or deployed, a service takes each secret it needs — an API
+key, a bearer token, a wallet key — as a setting in a file its configuration system
+layers: a secret profile added to the active profiles, or a secret overlay file. On a
+cluster that file is a key of a cluster secret, which the deployment's secret store
+writes; under a local container stack it is a mounted file. A setting that names an
+environment variable holding the secret is a second, weaker channel beside the one
+the deployment already writes, so a service's configuration does not name one.
+
+A production deployment's secret values should be managed externally from the chart,
+such as in a secret store, and injected into the pods using secret profiles. A local
+stack's secrets come from
+[A stack's configuration lives in committed files](#a-stacks-configuration-lives-in-committed-files).
+
+## Trust is configured where its client reads it
+
+Trust follows the same rule as secrets. A private CA is a configured bundle path that
+the one client needing it reads, never `SSL_CERT_FILE` or any other setting that
+replaces the whole process's trust store, which would replace its public trust as
+well. A client naming no bundle uses the default trust store.
+
+## A private CA is mounted once, and each client names it
+
+A deployment mounts a deployment-supplied CA bundle at one fixed path, and every
+client that trusts that CA names the file as its own bundle path; one CA that issues
+several services' certificates is one mount, however many clients name it. Where the
+deployment renders the setting, it derives the path from the mount rather than taking
+it as a value beside the mount, so the two cannot disagree ([Helm](helm.md) gives a
+chart's form). Where the setting lives in a secret overlay the deployment never
+renders, the deployment cannot derive it: whoever writes that secret states the
+deployment's mount path, and a check running the client's access check from the
+deployed service's own mounts proves the two agree. A client loads its bundle when it
+is built, so a bundle that cannot be loaded fails the access check at its
+configuration step, before any request.
+
+## A setting that belongs to one domain is named for it
+
+A setting that belongs to one domain is named for that domain, with no alias: a
+service running two kinds of job reads `batch_script_path` and `stream_script_path`,
+never one `script_path` serving both. A renamed setting is refused rather than
+ignored, because an ignored key would silently fall back to a default the operator
+meant to replace: the service's first startup step refuses a configuration stating
+the retired name in any layer, environment included, naming its replacement. A
+setting retired because the service stopped needing it is not refused, since ignoring
+it changes nothing the service does.
+
+## A test control the production image carries is off by default
+
+A test control that must live in the production image — because the test runs the
+images a release ships, not a test build — is a setting that defaults to off. The
+production configuration omits it, so a deployment that never names it never turns
+it on, and committed configuration outside the test stacks never sets it, which a
+static check over every committed configuration a deployment outside the test
+stacks would load holds. A service does not refuse the control in production: no service can
+reliably recognise production, and a refusal tied to one other setting protects
+only the services that carry that setting while suggesting every service is
+protected. Instead a service with the control on says so — at startup, and on its
+status surface — and warns where another setting it reads states that it is live.
+
+A service whose clock a test can set, for example, reads `time.source = "wall"` by
+default; a test stack sets `"injected"`, the service logs that and reports its
+instant on its status, and it warns beside a payment section configured for live
+payments.
+
+## A stack's configuration lives in committed files
+
+Every stack a repository runs, whether a development stack, an end-to-end lane or a
+local cluster, takes every non-secret value from committed profile, overlay and
+values files. Each of its secret files is one of two kinds:
+
+- **Committed public development values.** Used where the stack runs unattended from
+  a clean checkout, or where something else pins an identity derived from them, such
+  as a lane's fixed seed. They are never for a public network.
+- **A gitignored copy of a committed `.example` beside it.** Used wherever a person
+  runs the stack by hand or brings a credential of their own. The `.example` names
+  every field and says how to fill it: either a generated value and the command that
+  makes one, or a held credential and where its holder gets it. A copy is filled by
+  hand, or by a make target that only copies the `.example` and fills its generated
+  fields. The target leaves an existing copy untouched and prints no value. A
+  generated file with no fields, such as a private key, needs no `.example`: the
+  target that writes it and the committed file it pairs with name it.
+
+The compose layer reads the copies where it would read committed files, and a
+launcher refuses a missing copy, naming how to make one. A cluster gets a stack's
+secret files from a separate target at the Helm layer, which reads them and writes
+the cluster's secrets. Nothing generates a value straight into a cluster. A chart's
+committed development secret values are in a local values file, never in its
+defaults ([Helm](helm.md#a-charts-defaults-carry-no-secret-value)).
+
+A deployed stack's secret profile or overlay is never a committed file: it is the
+file an operator-supplied secret holds. The tooling that deploys the chart is
+responsible for selecting the configuration of that deployment. It should never
+carry a value itself. Configuration files should be populated by a separate step an
+operator runs before the deployment tooling runs.
+
+A value the base topology fixes stays in the base file; a deployment's own bindings
+and values are in its overlay. A base file binds no identity, configuration file, or
+secret, and gives none of them — no credential, no definition document — a committed
+fallback.

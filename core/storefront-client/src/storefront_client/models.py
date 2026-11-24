@@ -191,6 +191,9 @@ class HealthResponse:
     #: ``kind`` among it; present on /api/v1/system/status where the storefront
     #: reports it.
     settlement: list[dict[str, Any]] | None = None
+    #: The storefront's time source: ``{"source": "injected", "now": <Unix
+    #: seconds>}`` or ``{"source": "wall"}``; present on /api/v1/system/status.
+    time: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -205,6 +208,7 @@ class HealthResponse:
             "settlement_manual_required",
             "lifecycle",
             "settlement",
+            "time",
         }
         raw_settlement = d.get("settlement")
         raw_chain_id = d.get("chain_id")
@@ -231,8 +235,21 @@ class HealthResponse:
                 if raw_settlement is not None
                 else None
             ),
+            time=dict(d["time"]) if d.get("time") is not None else None,
             extra={k: v for k, v in d.items() if k not in known},
         )
+
+
+@dataclass
+class TimeSettingResponse:
+    """Response from POST /api/v1/admin/time: the instant the storefront is at."""
+
+    source: str
+    now: int
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TimeSettingResponse":
+        return cls(source=d["source"], now=int(d["now"]))
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +461,10 @@ class NegotiationSummary:
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: int | None = None
+    # The domain's accepted policy scalar, not money: a basis-point multiplier
+    # on shape-priced listings, an absolute amount on flat paths. The accepted
+    # Agreement carries the monetary amount.
+    negotiated_scalar: int | None = None
     round_count: int = 0
     created_at: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -458,7 +478,7 @@ class NegotiationSummary:
             "buyer_principal",
             "seller_principal",
             "terminal_state",
-            "agreed_amount",
+            "negotiated_scalar",
             "round_count",
             "created_at",
         }
@@ -469,9 +489,9 @@ class NegotiationSummary:
             buyer_principal=_identity(d.get("buyer_principal")),
             seller_principal=_identity(d.get("seller_principal")),
             terminal_state=d.get("terminal_state"),
-            agreed_amount=(
-                int(d["agreed_amount"])
-                if d.get("agreed_amount") is not None
+            negotiated_scalar=(
+                int(d["negotiated_scalar"])
+                if d.get("negotiated_scalar") is not None
                 else None
             ),
             round_count=int(d.get("round_count", 0)),
@@ -514,7 +534,8 @@ class NegotiationDetail:
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: int | None = None
+    # The domain's accepted policy scalar; see NegotiationSummary.
+    negotiated_scalar: int | None = None
     round_count: int = 0
     messages: list[NegotiationMessage] = field(default_factory=list)
     stage_events: list[dict[str, Any]] = field(default_factory=list)
@@ -530,7 +551,7 @@ class NegotiationDetail:
             "buyer_principal",
             "seller_principal",
             "terminal_state",
-            "agreed_amount",
+            "negotiated_scalar",
             "round_count",
             "messages",
             "stage_events",
@@ -543,9 +564,9 @@ class NegotiationDetail:
             buyer_principal=_identity(d.get("buyer_principal")),
             seller_principal=_identity(d.get("seller_principal")),
             terminal_state=d.get("terminal_state"),
-            agreed_amount=(
-                int(d["agreed_amount"])
-                if d.get("agreed_amount") is not None
+            negotiated_scalar=(
+                int(d["negotiated_scalar"])
+                if d.get("negotiated_scalar") is not None
                 else None
             ),
             round_count=int(d.get("round_count", 0)),

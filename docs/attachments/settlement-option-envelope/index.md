@@ -103,7 +103,7 @@ Task 2.5's three named end-to-end suites now pass. The original missing-target
 skip was an environment prerequisite, not a mediation-projection failure.
 The successful payment run used a real local authority, not a hosted deployment
 or a lane double. Deterministic isolated payment-lane doubles remain owned by
-[`add-arkhai-payments-lane-double`](../../../openspec/changes/add-arkhai-payments-lane-double/).
+[`add-arkhai-payments-lane-double`](../../../openspec/changes/archive/2026-11-10-add-arkhai-payments-lane-double/).
 The optional Alkahest release-model section 4 is outside this implementation.
 
 All owned lane containers, volumes and networks were removed. Native Anvil

@@ -43,6 +43,7 @@ would share, and no scenario declares it.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from market_resource_pools_contracts.backing import BACKED
@@ -65,12 +66,37 @@ E2E_DEAL_HOST = "kvm-deal"
 E2E_DEAL_CLI_HOST = "kvm-deal-cli"
 E2E_PAYMENT_DEAL_HOST = "kvm-payment-deal"
 E2E_PAYMENT_PURCHASE_HOST = "kvm-payment-purchase"
+E2E_RECURRING_PURCHASE_HOST = "kvm-recurring-purchase"
 E2E_MULTI_REGISTRY_HOST = "kvm-multi"
 E2E_NON_ERC20_HOST = "kvm-non-erc20"
 E2E_DYNAMIC_HOST = "kvm-dynamic"
 E2E_FUNGIBLE_HOSTS = ("kvm-fungible-a", "kvm-fungible-b")
 E2E_LISTING_SHAPES_HOST = "kvm-shapes"
 E2E_LISTING_SHAPES_CPU_HOST = "kvm-shapes-cpu"
+#: The VM dispute scenarios, each on its own deal and so its own executor.
+E2E_DISPUTE_RULED_END_HOST = "kvm-dispute-ruled-end"
+E2E_DISPUTE_DISCOUNT_HOST = "kvm-dispute-discount"
+E2E_DISPUTE_LOST_FILING_HOST = "kvm-dispute-lost-filing"
+E2E_DISPUTE_MEDIATION_UNAVAILABLE_HOST = "kvm-dispute-mediation-unavailable"
+E2E_DISPUTE_PAYMENTS_HOLD_HOST = "kvm-dispute-payments-hold"
+E2E_DISPUTE_HOLD_PASSED_HOST = "kvm-dispute-hold-passed"
+#: The VM rate servicing rows, each on its own deal and so its own executor.
+E2E_RATE_FUNDS_EXHAUSTED_HOST = "kvm-rate-funds-exhausted"
+E2E_RATE_PREEMPTION_HOST = "kvm-rate-preemption"
+E2E_RATE_MAXIMUM_TERM_HOST = "kvm-rate-maximum-term"
+#: The VM buyer watchdog's delivered-deal cases, on a deal of their own.
+E2E_RATE_WATCHDOG_HOST = "kvm-rate-watchdog"
+#: The VM rate-deal dispute rows, each on its own deal and so its own executor.
+E2E_RATE_SELLER_FILING_HOST = "kvm-rate-seller-filing"
+E2E_RATE_CONTESTED_CASE_HOST = "kvm-rate-contested-case"
+#: The VM live verification scenarios, each on its own deal and so its own
+#: executor.
+E2E_LIVE_BUYER_STOP_HOST = "kvm-live-buyer-stop"
+E2E_LIVE_FUNDS_EXHAUSTED_HOST = "kvm-live-funds-exhausted"
+E2E_LIVE_PREEMPTION_HOST = "kvm-live-preemption"
+E2E_LIVE_TERM_END_HOST = "kvm-live-term-end"
+E2E_LIVE_SELLER_FILING_HOST = "kvm-live-seller-filing"
+E2E_LIVE_CONTESTED_CASE_HOST = "kvm-live-contested-case"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
@@ -81,10 +107,68 @@ E2E_DEAL_POOL_ID = "compute-e2e-deal-pool"
 E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
 E2E_PAYMENT_DEAL_POOL_ID = "compute-e2e-payment-deal-pool"
 E2E_PAYMENT_PURCHASE_POOL_ID = "compute-e2e-payment-purchase-pool"
+E2E_RECURRING_PURCHASE_POOL_ID = "compute-e2e-recurring-purchase-pool"
 E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
 E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
 E2E_LISTING_SHAPES_CPU_POOL_ID = "compute-e2e-listing-shapes-cpu-pool"
+E2E_DISPUTE_RULED_END_POOL_ID = "compute-e2e-dispute-ruled-end-pool"
+E2E_DISPUTE_DISCOUNT_POOL_ID = "compute-e2e-dispute-discount-pool"
+E2E_DISPUTE_LOST_FILING_POOL_ID = "compute-e2e-dispute-lost-filing-pool"
+E2E_DISPUTE_MEDIATION_UNAVAILABLE_POOL_ID = "compute-e2e-dispute-mediation-unavailable-pool"
+E2E_DISPUTE_PAYMENTS_HOLD_POOL_ID = "compute-e2e-dispute-payments-hold-pool"
+E2E_DISPUTE_HOLD_PASSED_POOL_ID = "compute-e2e-dispute-hold-passed-pool"
+E2E_RATE_FUNDS_EXHAUSTED_POOL_ID = "compute-e2e-rate-funds-exhausted-pool"
+E2E_RATE_PREEMPTION_POOL_ID = "compute-e2e-rate-preemption-pool"
+E2E_RATE_MAXIMUM_TERM_POOL_ID = "compute-e2e-rate-maximum-term-pool"
+E2E_RATE_WATCHDOG_POOL_ID = "compute-e2e-rate-watchdog-pool"
+E2E_RATE_SELLER_FILING_POOL_ID = "compute-e2e-rate-seller-filing-pool"
+E2E_RATE_CONTESTED_CASE_POOL_ID = "compute-e2e-rate-contested-case-pool"
+E2E_LIVE_BUYER_STOP_POOL_ID = "compute-e2e-live-buyer-stop-pool"
+E2E_LIVE_FUNDS_EXHAUSTED_POOL_ID = "compute-e2e-live-funds-exhausted-pool"
+E2E_LIVE_PREEMPTION_POOL_ID = "compute-e2e-live-preemption-pool"
+E2E_LIVE_TERM_END_POOL_ID = "compute-e2e-live-term-end-pool"
+E2E_LIVE_SELLER_FILING_POOL_ID = "compute-e2e-live-seller-filing-pool"
+E2E_LIVE_CONTESTED_CASE_POOL_ID = "compute-e2e-live-contested-case-pool"
+
+#: The resource each VM dispute scenario lists. A listing's binding to its
+#: resource outlives the listing, so no two scenarios on one stack list the same.
+E2E_DISPUTE_RULED_END_RESOURCE_ID = "compute-e2e-dispute-ruled-end-001"
+E2E_DISPUTE_DISCOUNT_RESOURCE_ID = "compute-e2e-dispute-discount-001"
+E2E_DISPUTE_LOST_FILING_RESOURCE_ID = "compute-e2e-dispute-lost-filing-001"
+E2E_DISPUTE_MEDIATION_UNAVAILABLE_RESOURCE_ID = "compute-e2e-dispute-mediation-unavailable-001"
+E2E_DISPUTE_PAYMENTS_HOLD_RESOURCE_ID = "compute-e2e-dispute-payments-hold-001"
+E2E_DISPUTE_HOLD_PASSED_RESOURCE_ID = "compute-e2e-dispute-hold-passed-001"
+#: The resource each VM rate servicing row, the watchdog cases and each rate-deal
+#: dispute row list, and the GPU model only it declares, which the module's
+#: ``market buy`` discovers it by. Each model is one the registry's filter spec admits
+#: (``core_registry/filter-spec.yaml``): its publication route refuses a listing
+#: naming a model outside that list, so the storefront holds the listing open
+#: while the registry answers a read of it 404.
+E2E_RATE_FUNDS_EXHAUSTED_RESOURCE_ID = "compute-e2e-rate-funds-exhausted-001"
+E2E_RATE_PREEMPTION_RESOURCE_ID = "compute-e2e-rate-preemption-001"
+E2E_RATE_MAXIMUM_TERM_RESOURCE_ID = "compute-e2e-rate-maximum-term-001"
+E2E_RATE_FUNDS_EXHAUSTED_GPU_MODEL = "RTX 4080 Super"
+E2E_RATE_PREEMPTION_GPU_MODEL = "RTX 4070 Super"
+E2E_RATE_MAXIMUM_TERM_GPU_MODEL = "RTX 4070 Ti"
+E2E_RATE_WATCHDOG_RESOURCE_ID = "compute-e2e-rate-watchdog-001"
+E2E_RATE_WATCHDOG_GPU_MODEL = "RTX 4070 Ti Super"
+E2E_RATE_SELLER_FILING_RESOURCE_ID = "compute-e2e-rate-seller-filing-001"
+E2E_RATE_SELLER_FILING_GPU_MODEL = "RTX 5070 Ti"
+E2E_RATE_CONTESTED_CASE_RESOURCE_ID = "compute-e2e-rate-contested-case-001"
+E2E_RATE_CONTESTED_CASE_GPU_MODEL = "RTX 5070"
+E2E_LIVE_BUYER_STOP_RESOURCE_ID = "compute-e2e-live-buyer-stop-001"
+E2E_LIVE_BUYER_STOP_GPU_MODEL = "RTX 3090 Ti"
+E2E_LIVE_FUNDS_EXHAUSTED_RESOURCE_ID = "compute-e2e-live-funds-exhausted-001"
+E2E_LIVE_FUNDS_EXHAUSTED_GPU_MODEL = "RTX 3090"
+E2E_LIVE_PREEMPTION_RESOURCE_ID = "compute-e2e-live-preemption-001"
+E2E_LIVE_PREEMPTION_GPU_MODEL = "RTX 3080 Ti"
+E2E_LIVE_TERM_END_RESOURCE_ID = "compute-e2e-live-term-end-001"
+E2E_LIVE_TERM_END_GPU_MODEL = "RTX 3080"
+E2E_LIVE_SELLER_FILING_RESOURCE_ID = "compute-e2e-live-seller-filing-001"
+E2E_LIVE_SELLER_FILING_GPU_MODEL = "RTX 3070 Ti"
+E2E_LIVE_CONTESTED_CASE_RESOURCE_ID = "compute-e2e-live-contested-case-001"
+E2E_LIVE_CONTESTED_CASE_GPU_MODEL = "RTX 3070"
 
 
 def resource_gpus(resource: dict[str, Any]) -> tuple[int, str] | None:
@@ -299,6 +383,7 @@ def provision_e2e_executor(
     region: str | None = None,
     connection: ConnectionSubmission | None = None,
     provider_config: dict[str, Any] | None = None,
+    before_declare: Callable[[Any], Any] | None = None,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
 
@@ -328,6 +413,8 @@ def provision_e2e_executor(
     host_row = register_e2e_host(
         provisioning_client, name=host, pool_id=pool_id, connection=connection
     )
+    if before_declare is not None:
+        host_row = before_declare(host_row)
     declare_e2e_capacity(
         site_admin_client,
         resource_id=resource_id,

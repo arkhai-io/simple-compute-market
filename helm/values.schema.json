@@ -100,6 +100,14 @@
         }
       }
     },
+    "mediation-lane-double": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
     "provisioning": {
       "type": "object",
       "required": [
@@ -108,6 +116,9 @@
         "adminIdentity"
       ],
       "properties": {
+        "mockMode": {
+          "type": "boolean"
+        },
         "server": {
           "type": "object",
           "properties": {
@@ -126,7 +137,12 @@
           "$ref": "#/definitions/bootstrapIdentity"
         },
         "sshKey": {
-          "$ref": "#/definitions/externalSecretReference"
+          "description": "The existing Secret whose id_ed25519 key is the SSH key the provisioning service connects to hosts with, mounted at /home/appuser/.ssh/id_ed25519 only when provisioning is real (mockMode false), which then requires secretName; mock provisioning mounts no key and reads no Secret for one.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/optionalExternalSecretReference"
+            }
+          ]
         },
         "sshDecryptionKey": {
           "$ref": "#/definitions/externalSecretReference"
@@ -151,6 +167,23 @@
           }
         },
         "inventory": false
+      },
+      "if": {
+        "required": [
+          "mockMode"
+        ],
+        "properties": {
+          "mockMode": {
+            "const": true
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "sshKey": {
+            "$ref": "#/definitions/externalSecretReference"
+          }
+        }
       }
     },
     "integrationTests": {
@@ -259,6 +292,24 @@
         "secretName": {
           "type": "string",
           "minLength": 1
+        },
+        "sshPrivateKey": false,
+        "privateKey": false,
+        "key": false
+      }
+    },
+    "optionalExternalSecretReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "createSecret"
+      ],
+      "properties": {
+        "createSecret": {
+          "const": false
+        },
+        "secretName": {
+          "type": "string"
         },
         "sshPrivateKey": false,
         "privateKey": false,
@@ -666,6 +717,12 @@
           "additionalProperties": false,
           "properties": {
             "paymentsAccount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mediationOrigin": {
               "type": [
                 "string",
                 "null"
@@ -1716,6 +1773,14 @@
                     "null"
                   ]
                 },
+                "^[sS][nN][aA][pP][sS][hH][oO][tT]_[fF][rR][eE][sS][hH][nN][eE][sS][sS]_[sS][eE][cC][oO][nN][dD][sS]$": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 300,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "^[aA][tT][tT][aA][cC][hH]_[aA][gG][rR][eE][eE][mM][eE][nN][tT]$": {
                   "type": [
                     "boolean",
@@ -1830,6 +1895,125 @@
                   ]
                 }
               }
+            },
+            "^[rR][aA][tT][eE]_[sS][eE][rR][vV][iI][cC][iI][nN][gG]$": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[aA][lL][kK][aA][hH][eE][sS][tT]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "^[aA][rR][kK][hH][aA][iI]_[pP][aA][yY][mM][eE][nN][tT][sS]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "^[cC][oO][nN][tT][aA][cC][tT]$": {
+                  "additionalProperties": false,
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "patternProperties": {
+                    "^[tT][rR][eE][aA][tT][mM][eE][nN][tT][sS]$": {
+                      "items": {
+                        "enum": [
+                          "charged",
+                          "returned",
+                          "prorated"
+                        ],
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "^[sS][eE][tT][uU][pP]$": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "^[tT][iI][mM][eE]$": {
+          "additionalProperties": false,
+          "type": [
+            "object",
+            "null"
+          ],
+          "patternProperties": {
+            "^[sS][oO][uU][rR][cC][eE]$": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "wall",
+                    "injected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         },

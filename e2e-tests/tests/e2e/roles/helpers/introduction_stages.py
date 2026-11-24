@@ -168,7 +168,7 @@ class Stage01_BackedAndUnbackedSupply:
         assert not set(introduction_state.rateless_listings) & found
         for listing_id in found:
             listing = introduction_driver.listing(listing_id)
-            assert listing.listing_resource.get("asking_rate"), listing_id
+            assert listing.extra.get("pricing", {}).get("asking_rate"), listing_id
 
     def test_03_the_unbacked_listing_offers_only_an_introduction(
         self, introduction_driver: IntroductionDriver, introduction_state: IntroductionState

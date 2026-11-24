@@ -1,10 +1,11 @@
 export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath ../../build-constraints.txt)),$(error ../../build-constraints.txt not found))
 
 DIST_DIR ?= ../../.dist
 
 .PHONY: build reinit first-use typecheck test
 
-test: reinit
+test: reinit typecheck
 	uv run --find-links $(DIST_DIR) pytest -q
 
 build:
@@ -26,3 +27,4 @@ first-use: reinit
 	uv run --find-links $(DIST_DIR) python examples/budget_first_use.py
 	uv run --find-links $(DIST_DIR) python examples/respondent_first_use.py
 	uv run --find-links $(DIST_DIR) python examples/receipt_first_use.py
+	uv run --find-links $(DIST_DIR) python examples/preempt_first_use.py

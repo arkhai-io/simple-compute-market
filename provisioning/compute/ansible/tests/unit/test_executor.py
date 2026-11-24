@@ -44,7 +44,7 @@ _HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={
             "ssh_host": "10.0.0.1",
             "public_host": "203.0.113.1",
@@ -113,20 +113,35 @@ def _runner(*, failure: Exception | None = None, seen: dict | None = None):
     return runner
 
 
-def _run(**overrides) -> tuple[JobRun, list, list]:
+def _run(*, events: list | None = None, **overrides) -> tuple[JobRun, list, list]:
+    """A run whose reports are recorded; ``events`` receives ``"starting"``
+    each time the executor reports its start."""
     handles: list = []
     logs: list = []
+    events = [] if events is None else events
     values = dict(
         job_id="job-1",
         offering_mode="test",
         action="act",
         host=_HOST,
         parameters={"anything": "the codec reads"},
+        report_starting=lambda: events.append("starting"),
         report_handle=handles.append,
         report_logs=logs.append,
     )
     values.update(overrides)
     return JobRun(**values), handles, logs
+
+
+def _recording_start(runner, events: list) -> None:
+    """Record ``"start_playbook"`` in ``events`` when the runner is asked to spawn."""
+    spawned = runner.start_playbook.return_value
+
+    def start(**kwargs):
+        events.append("start_playbook")
+        return spawned
+
+    runner.start_playbook.side_effect = start
 
 
 def _executor(runner, codec=None, **kwargs) -> AnsibleJobExecutor:
@@ -165,6 +180,37 @@ def test_a_successful_run_reports_the_codecs_result_and_redacted_logs() -> None:
     assert runner.write_inventory.call_args.args[0][0].ssh_host == "10.0.0.1"
 
 
+def test_the_start_is_reported_once_immediately_before_the_playbook_is_spawned() -> None:
+    events: list = []
+    runner = _runner()
+    _recording_start(runner, events)
+    run, _, _ = _run(events=events)
+
+    asyncio.run(_executor(runner).execute(run))
+
+    assert events == ["starting", "start_playbook"]
+
+
+def test_a_start_that_cannot_be_recorded_spawns_nothing_and_leaves_no_file(
+    tmp_path, monkeypatch
+) -> None:
+    """The job authority raises when it cannot record the start; the error
+    leaves ``execute`` for the engine to record, and nothing was spawned."""
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    runner = _runner()
+
+    def refuse() -> None:
+        raise RuntimeError("start not recorded")
+
+    run, _, _ = _run(report_starting=refuse)
+
+    with pytest.raises(RuntimeError, match="start not recorded"):
+        asyncio.run(_executor(runner).execute(run))
+
+    runner.start_playbook.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_a_plan_may_name_its_own_playbook() -> None:
     runner = _runner()
     run, _, _ = _run()
@@ -201,25 +247,51 @@ def test_a_failure_is_classified(message, codec_retryable, operator, retryable) 
     assert "token: x" not in outcome.logs
 
 
-def test_an_extra_variable_naming_a_job_variable_is_refused_before_anything_runs() -> None:
+def test_a_job_the_codec_refuses_to_prepare_records_no_start() -> None:
+    """A codec refusing the job's parameters — its relay, say — raises from
+    ``prepare``, before the start is reported."""
+    events: list = []
     runner = _runner()
-    run, _, _ = _run()
+    codec = _Codec()
+
+    def refuse(run):
+        raise ValueError("relay 'site-a' holds no lease")
+
+    codec.prepare = refuse
+    run, _, _ = _run(events=events)
+
+    with pytest.raises(ValueError, match="holds no lease"):
+        asyncio.run(_executor(runner, codec).execute(run))
+    runner.start_playbook.assert_not_called()
+    assert events == []
+
+
+def test_an_extra_variable_naming_a_job_variable_is_refused_before_anything_runs() -> None:
+    """The variables file's refusal comes before the start, so no start is
+    recorded."""
+    events: list = []
+    runner = _runner()
+    run, _, _ = _run(events=events)
     codec = _Codec(extra_variables={"host_id": "elsewhere"})
 
     with pytest.raises(ValueError, match="host_id"):
         asyncio.run(_executor(runner, codec).execute(run))
     runner.start_playbook.assert_not_called()
+    assert events == []
 
 
 def test_a_host_reached_other_than_over_ssh_is_refused_before_anything_runs() -> None:
+    events: list = []
     runner = _runner()
     run, _, _ = _run(
-        host=ExecutionHost("node-1", "default", ConnectionEnvelope(kind="cloud_api", version=1))
+        events=events,
+        host=ExecutionHost("node-1", "default", ConnectionEnvelope(kind="cloud_api", version=1)),
     )
 
     with pytest.raises(ValueError, match="over ssh"):
         asyncio.run(_executor(runner).execute(run))
     runner.start_playbook.assert_not_called()
+    assert events == []
 
 
 def test_cancel_stops_the_reported_process() -> None:
@@ -253,13 +325,19 @@ def test_a_process_group_is_never_signalled(pid, monkeypatch) -> None:
 @pytest.mark.parametrize("ending", ["success", "failure", "timeout", "cancelled"])
 def test_no_file_outlives_its_run(ending) -> None:
     """Whatever ends the run, the variables file, the decrypted key, and the
-    inventory are removed."""
+    inventory and known-hosts files are removed."""
     key = Fernet.generate_key().decode()
     seen: dict = {}
     runner = _runner(seen=seen)
-    runner.write_inventory = AnsibleRunner(
-        SimpleNamespace(), ssh_codec=SshConnectionCodec(key)
-    ).write_inventory
+    real_runner = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(key))
+
+    def write_inventory(*args, **kwargs):
+        inventory = real_runner.write_inventory(*args, **kwargs)
+        (seen["known_hosts"],) = inventory.known_hosts_paths
+        assert seen["known_hosts"].is_file()
+        return inventory
+
+    runner.write_inventory = write_inventory
     inner_wait = runner.wait_for_playbook
 
     async def wait(run, timeout_seconds, log_callback=None, redact=None):
@@ -282,7 +360,7 @@ def test_no_file_outlives_its_run(ending) -> None:
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", encrypt_secret("PEM", key))},
         ),
@@ -298,6 +376,7 @@ def test_no_file_outlives_its_run(ending) -> None:
     assert seen["key existed"]
     assert not seen["key"].exists()
     assert not seen["inventory"].exists()
+    assert not seen["known_hosts"].exists()
     variables_path = runner.start_playbook.call_args.kwargs["extra_vars_path"]
     assert not variables_path.exists()
 
@@ -320,12 +399,13 @@ def test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host(
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", ciphertext)},
         ),
     )
-    run, _, _ = _run(host=host)
+    events: list = []
+    run, _, _ = _run(host=host, events=events)
 
     with pytest.raises(ProtectedKeyUnreadableError) as raised:
         asyncio.run(_executor(runner).execute(run))
@@ -333,4 +413,6 @@ def test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host(
     assert raised.value.host_id == "node-1"
     assert ciphertext not in str(raised.value)
     runner.start_playbook.assert_not_called()
+    # The inventory's refusal comes before the start, so none is recorded.
+    assert events == []
     assert list(tmp_path.iterdir()) == []

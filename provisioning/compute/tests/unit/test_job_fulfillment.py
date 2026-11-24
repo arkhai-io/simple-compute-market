@@ -13,8 +13,11 @@ from compute_provisioning.job_fulfillment import (
     PreparedJob,
     fulfillment_executor_target,
 )
+from compute_provisioning.jobs import JobRetryPolicy
 from compute_provisioning.jobs.db import JobStatus
+from compute_provisioning.jobs.engine import BoundJob
 from compute_provisioning.jobs.submission import JobSubmissionService, contract_operation_id
+from compute_provisioning.teardown_rerun import TeardownRerunPolicy
 from compute_provisioning_contracts import (
     ACCESS_DELIVERY_KIND,
     CREATE_JOB_RESULT_KIND,
@@ -89,6 +92,22 @@ class _Jobs:
         self.credentials: dict[str, list[CredentialEnvelope]] = {}
         self.submitted: list[dict] = []
 
+    def bound_jobs(self, capacity_reservation_id: str, action_kind: str) -> tuple[BoundJob, ...]:
+        """The jobs submitted under the reservation and action, oldest first;
+        none here failed before its start."""
+        bound: dict[str, BoundJob] = {}
+        for fields in self.submitted:
+            contract = fields["contract"]
+            if (contract.capacity_reservation_id, contract.action_kind) == (
+                capacity_reservation_id, action_kind
+            ):
+                job = self.jobs[fields["operation_id"]]
+                bound[job.job_id] = BoundJob(
+                    job_id=job.job_id, status=job.status, never_started=False,
+                    finished_at=None,
+                )
+        return tuple(bound.values())
+
     async def submit(self, **fields) -> JobSubmitResponse:
         self.submitted.append(fields)
         job_id = fields["operation_id"]
@@ -134,7 +153,13 @@ def _resource(host_id: str = "h1", mode: str = "fake") -> SettlementResource:
 def _provider():
     plan, jobs, hosts = _Plan(), _Jobs(), _Hosts()
     submission = JobSubmissionService(engine=jobs, hosts=hosts, job_queue_provider=lambda: None)
-    return JobFulfillmentProvider(plan=plan, submission=submission, jobs=jobs), plan, jobs, hosts
+    provider = JobFulfillmentProvider(
+        plan=plan,
+        submission=submission,
+        jobs=jobs,
+        rerun_policy=TeardownRerunPolicy(teardown_rerun_limit=3, retry_policy=JobRetryPolicy()),
+    )
+    return provider, plan, jobs, hosts
 
 
 def _request(**payload) -> VersionedEnvelope:

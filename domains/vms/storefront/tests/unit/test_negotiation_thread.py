@@ -13,6 +13,7 @@ from core_storefront.domain_registry import (
 )
 from market_identity import create_signer
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store, NegotiationThreadStore
@@ -125,6 +126,7 @@ def sqlite_client(temp_db):
     registry = build_vm_storefront_registry(domain)
     binding = registry.resolve_mode("vm").binding
     assert registry.resolve(binding) is domain
+    migrate_storefront_database(temp_db)
     client = SQLiteClient(db_path=temp_db, registry=registry)
     asyncio.run(_seed_owned_threads(client))
     return client
@@ -448,7 +450,7 @@ class TestSQLiteClientNegotiationMethods:
         timestamp="2025-01-01T00:00:00",)
         await sqlite_client.commit_agreed_terms(
             negotiation_id="test-large-agreed",
-            agreed_price=large_amount,
+            negotiated_scalar=large_amount,
             agreed_duration_seconds=3600,
         )
 
@@ -456,13 +458,13 @@ class TestSQLiteClientNegotiationMethods:
             negotiation_id="test-large-agreed",
         )
         assert row is not None
-        assert row["agreed_price"] == large_amount
+        assert row["negotiated_scalar"] == large_amount
 
         conn = sqlite3.connect(sqlite_client.db_path)
         try:
             stored = conn.execute(
                 """
-                SELECT typeof(agreed_price), agreed_price
+                SELECT typeof(negotiated_scalar), negotiated_scalar
                 FROM negotiation_threads
                 WHERE negotiation_id = ?
                 """,
@@ -472,188 +474,6 @@ class TestSQLiteClientNegotiationMethods:
             conn.close()
         assert stored == ("text", str(large_amount))
 
-    def test_legacy_amount_columns_migrate_to_text(self, tmp_path):
-        db_path = tmp_path / "legacy-amounts.db"
-        conn = sqlite3.connect(db_path)
-        try:
-            conn.executescript(
-                f"""
-                CREATE TABLE listings (
-                  listing_id TEXT PRIMARY KEY,
-                  status TEXT NOT NULL,
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
-                  listing_resource TEXT NOT NULL,
-                  seller TEXT NOT NULL
-                );
-                INSERT INTO listings (
-                  listing_id, status, created_at, updated_at,
-                  listing_resource, seller
-                ) VALUES (
-                  'legacy-listing', 'open', '2025-01-01T00:00:00',
-                  '2025-01-01T00:00:00', '{{}}', 'http://seller'
-                );
-                CREATE TABLE negotiation_threads (
-                  negotiation_id TEXT PRIMARY KEY,
-                  our_listing_id TEXT,
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
-                  buyer TEXT,
-                  agreed_price INTEGER
-                );
-                CREATE TABLE negotiation_local_state (
-                  negotiation_id TEXT NOT NULL,
-                  owner_id TEXT NOT NULL,
-                  our_initial_price INTEGER,
-                  our_strategy TEXT,
-                  PRIMARY KEY(negotiation_id, owner_id)
-                );
-                CREATE TABLE negotiation_messages (
-                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  negotiation_id TEXT NOT NULL,
-                  round INTEGER NOT NULL,
-                  sender TEXT NOT NULL,
-                  our_price INTEGER,
-                  their_price INTEGER,
-                  proposed_price INTEGER,
-                  action_taken TEXT NOT NULL,
-                  message_type TEXT NOT NULL,
-                  timestamp TEXT NOT NULL,
-                  UNIQUE(negotiation_id, round)
-                );
-                INSERT INTO negotiation_threads (
-                  negotiation_id, created_at, updated_at, buyer,
-                  our_listing_id, agreed_price
-                ) VALUES (
-                  'legacy-neg', '2025-01-01T00:00:00', '2025-01-01T00:00:00',
-                  '0x1111111111111111111111111111111111111111',
-                  'legacy-listing', 9000
-                );
-                INSERT INTO negotiation_local_state (
-                  negotiation_id, owner_id, our_initial_price, our_strategy
-                ) VALUES ('legacy-neg', 'owner', 8000, 'maximize');
-                INSERT INTO negotiation_messages (
-                  negotiation_id, round, sender, our_price, their_price,
-                  proposed_price, action_taken, message_type, timestamp
-                ) VALUES (
-                  'legacy-neg', 0, '0x1111111111111111111111111111111111111111', 8000, 9000, 8500,
-                  'COUNTER_OFFER', 'proposal', '2025-01-01T00:00:00'
-                );
-                """
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        domain = build_vm_storefront_domain()
-        registry = build_vm_storefront_registry(domain)
-        binding = registry.resolve_mode("vm").binding
-        assert registry.resolve(binding) is domain
-        migrated = SQLiteClient(
-            db_path=str(db_path),
-            registry=registry,
-            local_listing_principal=_SELLER_PRINCIPAL,
-            expected_legacy_sellers=("http://seller",),
-        )
-
-        assert migrated.domain_registry is registry
-        assert asyncio.run(migrated.list_storefront_domain_bindings()) == ()
-        conn = sqlite3.connect(migrated.db_path)
-        try:
-            thread_types = {
-                row[1]: row[2]
-                for row in conn.execute("PRAGMA table_info(negotiation_threads)")
-            }
-            local_types = {
-                row[1]: row[2]
-                for row in conn.execute("PRAGMA table_info(negotiation_local_state)")
-            }
-            message_types = {
-                row[1]: row[2]
-                for row in conn.execute("PRAGMA table_info(negotiation_messages)")
-            }
-        finally:
-            conn.close()
-
-        assert thread_types["agreed_price"] == "TEXT"
-        assert local_types["our_initial_price"] == "TEXT"
-        assert message_types["our_price"] == "TEXT"
-        assert message_types["their_price"] == "TEXT"
-        assert message_types["proposed_price"] == "TEXT"
-
-        thread = asyncio.run(
-            migrated.load_negotiation_thread(negotiation_id="legacy-neg"),
-        )
-        info = asyncio.run(
-            migrated.get_thread_info(negotiation_id="legacy-neg", owner_id="owner"),
-        )
-        row = asyncio.run(
-            migrated.load_negotiation_thread_row(negotiation_id="legacy-neg"),
-        )
-        assert thread[0]["proposed_price"] == 8500
-        assert info is not None
-        assert info["our_initial_price"] == 8000
-        assert row is not None
-        assert row["agreed_price"] == 9000
-
-        assert row["buyer_principal"] == {
-            "scheme": "eip191",
-            "identifier": "0x1111111111111111111111111111111111111111",
-        }
-        assert row["seller_principal"] == _SELLER_PRINCIPAL.model_dump(mode="json")
-
-    def test_legacy_population_rejects_missing_seller_ownership_transactionally(
-        self, tmp_path
-    ):
-        db_path = tmp_path / "legacy-missing-seller.db"
-        conn = sqlite3.connect(db_path)
-        try:
-            conn.executescript(
-                """
-                CREATE TABLE negotiation_threads (
-                  negotiation_id TEXT PRIMARY KEY,
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
-                  buyer TEXT,
-                  agreed_price INTEGER
-                );
-                INSERT INTO negotiation_threads (
-                  negotiation_id, created_at, updated_at, buyer, agreed_price
-                ) VALUES (
-                  'malformed-neg', '2025-01-01T00:00:00',
-                  '2025-01-01T00:00:00',
-                  '0x1111111111111111111111111111111111111111', 9000
-                );
-                """
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        domain = build_vm_storefront_domain()
-        registry = build_vm_storefront_registry(domain)
-        binding = registry.resolve_mode("vm").binding
-        assert registry.resolve(binding) is domain
-        with pytest.raises(ValueError, match="has no seller ownership"):
-            SQLiteClient(db_path=str(db_path), registry=registry)
-
-        conn = sqlite3.connect(db_path)
-        try:
-            row = conn.execute(
-                "SELECT buyer, agreed_price FROM negotiation_threads "
-                "WHERE negotiation_id='malformed-neg'"
-            ).fetchone()
-            columns = {
-                column[1]
-                for column in conn.execute("PRAGMA table_info(negotiation_threads)")
-            }
-        finally:
-            conn.close()
-
-        assert row == ("0x1111111111111111111111111111111111111111", "9000")
-        assert "buyer" in columns
-        assert "buyer_scheme" not in columns
-    
     @pytest.mark.asyncio
     async def test_load_negotiation_thread_ordered(self, sqlite_client):
         """Test that messages are loaded in round order."""

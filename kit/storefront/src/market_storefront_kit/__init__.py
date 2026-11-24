@@ -43,6 +43,16 @@ from .introduction_routes import (
 )
 from .lifecycle_routes import LifecycleRouteError, StorefrontLifecycleRouteService
 from .trading_pause import TradingPause, TradingPauseRouteService
+from .time_controls import (
+    TIME_SOURCE_SETTING,
+    StorefrontTimeRouteService,
+    TimeRouteError,
+    TimeSourceSetting,
+    announce_time_source,
+    configured_time_source,
+    install_time_source,
+    time_refusal_body,
+)
 from .negotiation_watchdog import (
     NegotiationRepository,
     NegotiationWatchdogPolicy,
@@ -82,6 +92,14 @@ __all__ = [
     "StorefrontServiceHooks",
     "TradingPause",
     "TradingPauseRouteService",
+    "TIME_SOURCE_SETTING",
+    "StorefrontTimeRouteService",
+    "TimeRouteError",
+    "TimeSourceSetting",
+    "announce_time_source",
+    "configured_time_source",
+    "install_time_source",
+    "time_refusal_body",
     "alkahest_client_constructor",
     "build_alkahest_clients",
     "build_composed_storefront_app",

@@ -21,6 +21,8 @@ The lease watchdog MUST consider the earlier of the agreed lease end and a non-n
 
 ### Requirement: Activation lapse is signed lease-end evidence
 
+> **Stale.** "claimed deadline/phase" names a stored phase the landed activation does not have; the intended record carries the claimed deadline, with activation derived from `activated_at_utc`.
+
 The signed lease_ended record MUST carry activation_deadline_lapsed, claimed deadline/phase and the base identity, correlation and intended effective end. It MUST NOT claim proven physical completion; guarded release supplies that separate fact. The outbox MUST preserve identity and signed bytes across retries. This evidence MUST NOT authorize payment effects.
 
 #### Scenario: The watchdog releases for activation lapse

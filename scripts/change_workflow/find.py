@@ -24,7 +24,12 @@ beside it. A change worked in place, or whose clone's marker records none, has n
 Run as a command, it prints the directory relative to the repository root — the
 records directory in the workspace as an absolute path — or names the problem and
 exits 1, or 2 for a malformed argument. With `--json` it prints the change as an
-object a program reads (`found`).
+object a program reads (`found`). With `--next-record <kind>` it prints the path a
+record a skill writes by hand — validation's, a triage's external copy — takes
+next: `reviews/NN-<kind>.md` in the change's directory, numbered after every record
+and transcript as the engine numbers the records and transcripts it writes itself
+(`records.next_number`), so no step counts by hand. It claims nothing: a run that
+started beside it may take the number first, and the writer asks again then.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-1iaz, CW-c3he, and CW-s3ju.
 """
@@ -39,6 +44,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .common import CHANGES, FORMAT, StepError, repository_root
+from .records import next_number
 
 ARCHIVE = CHANGES / "archive"
 REVIEWS = "reviews"
@@ -47,6 +53,8 @@ WORKSPACE_REMOTE = "workspace"
 # In a clone's Git directory: which change and branch the clone was made for, and
 # the branch the change lands on.
 CLONE_MARKER = "change-clone.json"
+# A record's kind, as its file names it: `NN-<kind>.md`.
+_KIND = re.compile(r"^[a-z]+(?:-[a-z]+)*$")
 # `openspec archive` prefixes the change's name with the date it was archived.
 _ARCHIVED = re.compile(r"^\d{4}-\d{2}-\d{2}-(?P<name>.+)$")
 
@@ -58,6 +66,12 @@ class ChangeNotFound(LookupError):
 def _check_name(name: str) -> None:
     if not name or name == "archive" or "/" in name or name.startswith("."):
         raise ChangeNotFound(f"{name!r} is not a change name")
+
+
+def check_name(name: str) -> None:
+    """Refuse, as `ChangeNotFound`, a name no change can have, such as one naming a
+    path, for a command that names a change it does not look up."""
+    _check_name(name)
 
 
 def _archived(root: Path, name: str) -> list[Path]:
@@ -90,6 +104,13 @@ def change_directory(root: Path, name: str) -> Path:
 
 def is_archived(root: Path, directory: Path) -> bool:
     return directory.parent == root / ARCHIVE
+
+
+def change_name(directory: Path) -> str:
+    """The name of the change whose directory is `directory`: an archived one's
+    without the date its archive prefixed."""
+    match = _ARCHIVED.match(directory.name) if directory.parent.name == ARCHIVE.name else None
+    return match.group("name") if match else directory.name
 
 
 def records_directory(root: Path, name: str) -> Path | None:
@@ -194,13 +215,20 @@ def found(root: Path, name: str, directory: Path) -> dict[str, object]:
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
+    kind: str | None = None
+    if "--next-record" in args:
+        at = args.index("--next-record")
+        kind = args[at + 1] if at + 1 < len(args) else ""
+        args = args[:at] + args[at + 2:]
     flags = {arg for arg in args if arg in ("--active", "--archived", "--records")}
     as_json = "--json" in args
     names = [arg for arg in args if arg not in flags and arg != "--json"]
-    if len(names) != 1 or len(flags) > 1 or (as_json and "--records" in flags):
-        print("usage: find [--active | --archived | --records] [--json] <change>; --json "
-              "prints the records of this checkout alone, so it takes no --records",
-              file=sys.stderr)
+    if (len(names) != 1 or len(flags) > 1 or (as_json and "--records" in flags)
+            or (kind is not None and (flags or as_json or not _KIND.match(kind)))):
+        print("usage: find [--active | --archived | --records | --next-record <kind>] "
+              "[--json] <change>; --json prints the records of this checkout alone, so it "
+              "takes no --records, and --next-record prints a path, so it takes no --json; "
+              "a kind is lowercase words joined by hyphens", file=sys.stderr)
         return 2
     try:
         root = repository_root() if root is None else root
@@ -208,6 +236,11 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     try:
+        if kind is not None:
+            reviews = change_directory(root, names[0]) / REVIEWS
+            print((reviews / f"{next_number(reviews):02d}-{kind}.md").relative_to(root)
+                  .as_posix())
+            return 0
         if "--records" in flags:
             records = find_records(root, names[0])
             print(records.relative_to(root).as_posix() if records.is_relative_to(root)

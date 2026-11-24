@@ -1,8 +1,10 @@
 ## Why
 
-`docs/development/DEPLOYMENT_AND_CONFIG.md` requires application configuration to travel
+`docs/guidance/engineering/configuration.md`, with its Kubernetes form in
+`docs/guidance/engineering/kubernetes.md`, requires application configuration to travel
 through mounted files, with environment variables only as the configuration loader's
-last-resort override layer. Nothing checks it. The bare-metal storefront drifted to reading
+last-resort override layer; `docs/development/DEPLOYMENT_AND_CONFIG.md` applies it to this
+repository's services. Nothing checks it. The bare-metal storefront drifted to reading
 about twenty-six application settings directly from its environment, and its chart to passing
 them as pod `env` entries, without any check noticing; `share-site-projection-state` corrects
 that drift and states the rule normatively in `deployment-state` ("A storefront reads no
@@ -44,8 +46,8 @@ None.
 - A check script and its unit tests under `scripts/`, a root `Makefile` target, and its wiring
   into `make check-packaging` and CI.
 - One declaration table in each storefront package's `pyproject.toml` that has an allowed read.
-- `docs/development/DEPLOYMENT_AND_CONFIG.md` and `docs/development/BUILD_AND_PACKAGING.md`
-  name the check.
+- `docs/guidance/repository/service-configuration.md` and
+  `docs/guidance/repository/packaging-checks.md` name the check.
 
 ## Permanent documentation impact
 
@@ -57,8 +59,8 @@ None.
 ### Knowledge to promote
 
 - The environment-read rule is enforced mechanically, with allowed reads declared per package —
-  `openspec/specs/deployment-state/spec.md`, `DEPLOYMENT_AND_CONFIG.md`, and
-  `BUILD_AND_PACKAGING.md`'s table of checks.
+  `openspec/specs/deployment-state/spec.md`, `service-configuration.md`, and
+  `packaging-checks.md`'s table of checks.
 
 ## Dependencies
 

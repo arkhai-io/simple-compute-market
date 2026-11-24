@@ -177,8 +177,7 @@ def _envelope(request: httpx.Request, *, operation: str, resource: str, body):
     )
 
 
-def test_admin_list_negotiations_binds_effective_canonical_query(monkeypatch):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+def test_admin_list_negotiations_binds_effective_canonical_query(held_time):
     transport = _SyncTransport()
     buyer = Ed25519Signer(bytes(range(2, 34))).identity
     with SyncStorefrontClient(
@@ -247,8 +246,7 @@ def test_negotiation_summary_exposes_scheme_tagged_buyer_principal():
     assert "seller_principal" not in summary.extra
 
 
-def test_identity_rotation_sync_async_contract_is_byte_equivalent(monkeypatch):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+def test_identity_rotation_sync_async_contract_is_byte_equivalent(held_time):
     authority = "storefront.administrator"
     subject = "tenant/admin"
     rotation = sign_rotation(
@@ -475,8 +473,7 @@ def _example(client, method, **kwargs):
     )
 
 
-def test_authenticated_requests_are_byte_equivalent_across_variants(monkeypatch):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+def test_authenticated_requests_are_byte_equivalent_across_variants(held_time):
     async_transport, sync_transport = _AsyncTransport(), _SyncTransport()
     async_client, sync_client = _admin_clients(async_transport, sync_transport)
     body = {"site_id": "a/b", "value": 1}
@@ -510,9 +507,8 @@ def test_authenticated_requests_are_byte_equivalent_across_variants(monkeypatch)
     ],
 )
 def test_an_authenticated_request_signs_exactly_what_it_is_given(
-    monkeypatch, method, kwargs, body
+    held_time, method, kwargs, body
 ):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
     transport = _SyncTransport()
     _, client = _admin_clients(_AsyncTransport(), transport)
 
@@ -535,10 +531,8 @@ def test_an_authenticated_request_signs_exactly_what_it_is_given(
     assert answer["method"] == method
 
 
-def test_an_unverifiable_answer_to_an_authenticated_request_raises(monkeypatch):
+def test_an_unverifiable_answer_to_an_authenticated_request_raises(held_time):
     from storefront_client import StorefrontClientError
-
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
     # The client expects a publisher the transport does not sign as.
     client = SyncStorefrontClient(
         "http://test", signer=_SIGNER, caller_role="admin",

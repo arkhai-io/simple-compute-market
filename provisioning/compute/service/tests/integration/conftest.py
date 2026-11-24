@@ -28,13 +28,13 @@ import asyncio
 import hashlib
 import json
 import re
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
+import injected_time
 import pytest
 import pytest_asyncio
 from arkhai_bare_metal import (
@@ -55,16 +55,16 @@ from market_identity import (
 )
 
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from compute_provisioning.relays import RelayExecutionResolver, RelayService
-from compute_provisioning.relays.db import Base as RelaysBase
+from compute_provisioning.relays import (
+    RelayDeliverableHosts,
+    RelayExecutionResolver,
+    RelayService,
+)
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 from compute_provisioning.executor_leases import ExecutorLeaseService
-from compute_provisioning.hosts.db import Base as HostsBase
-from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.leases import LeaseRouteService
@@ -81,9 +81,6 @@ from market_fulfillment import (
     SqlAlchemyFulfillmentUnitOfWork,
     SqlAlchemySchedulingUnitOfWork,
 )
-from market_fulfillment.db import Base as FulfillmentBase
-from market_resource_pools.db import Base as PoolsBase
-from market_site.db import Base as SiteBase
 from vm_provisioning_operator import VM_MOCK_ROUTE_MOUNT, VmOperatorClient
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
@@ -96,9 +93,8 @@ from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler imp
 from compute_provisioning_service.db.database import (
     create_db_engine,
     create_session_factory,
+    migrate_database,
 )
-
-from compute_provisioning_service.db.models import Base
 
 from compute_provisioning_ansible.host_import import AnsibleHostImportClient
 from compute_provisioning_client import ComputeProvisioningClient, MockRuleClient
@@ -237,7 +233,9 @@ def _install_signed_asgi_transport(monkeypatch) -> None:
                 operation=route.operation,
                 resource=resource,
                 request_id=uuid.uuid4().hex,
-                timestamp=int(time.time()),
+                # The process time source the service checks it against, so a
+                # test that moves that source signs at the instant it set.
+                timestamp=injected_time.now(),
                 body_hash=canonical_body_hash(body),
             ),
         )
@@ -386,7 +384,6 @@ from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import AnsibleJobExecutor, SshConnectionCodec
 from vm_provisioning_adapter.codec import VmAnsibleCodec
 from compute_provisioning.jobs.engine import JobEngine
-from compute_provisioning_ansible import probe_connectivity
 from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
@@ -470,23 +467,9 @@ FAKE_CREATE_STDOUT = fake_create_stdout("agent-vm-01")
 
 
 def _initialize_test_database(engine, *, default_pool: bool = True):
-    # resource_pools and relays must exist before VM's ansible_pool_configs
-    # foreign keys resolve.
-    PoolsBase.metadata.create_all(bind=engine)
-    # The relay tables ride the family's relay metadata.
-    RelaysBase.metadata.create_all(bind=engine)
-    # VM's pool-configuration table rides VM's own metadata.
-    VmBase.metadata.create_all(bind=engine)
-    # The host registry rides the host authority's own metadata.
-    HostsBase.metadata.create_all(bind=engine)
-    # So do the job authority's tables.
-    JobsBase.metadata.create_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    # Site-ledger tables ride market_site's own metadata.
-    SiteBase.metadata.create_all(bind=engine)
-    # Durable fulfillment tables (settlement_records, provisioned_resources,
-    # scheduling_cursors) ride market_fulfillment's own metadata.
-    FulfillmentBase.metadata.create_all(bind=engine)
+    # The schema is the migration chain's, as the deployed service's is: the
+    # models are read against it and never create it.
+    migrate_database(engine)
     # Migration creates no pool. The suite's tests place hosts and declare
     # capacity in a pool named "default", so the harness stores one, serving
     # both compute modes, unless a module asks for a site with no pool.
@@ -628,17 +611,30 @@ def job_retry_options():
 
 
 @pytest.fixture
+def teardown_rerun_limit():
+    """The service's default; a module overrides this fixture to vary it."""
+    return 3
+
+
+@pytest.fixture
 def bare_metal_plan_options():
     return {"reclaim_policy": "remove_lease_key", "working_data_policy_id": None}
+
+
+@pytest.fixture
+def connectivity_probe_runner(fake_ansible):
+    return fake_ansible
 
 
 @pytest_asyncio.fixture
 async def client_and_queue(
     session_factory,
     fake_ansible,
+    connectivity_probe_runner,
     bare_metal_runner,
     bare_metal_plan_options,
     job_retry_options,
+    teardown_rerun_limit,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
@@ -646,6 +642,7 @@ async def client_and_queue(
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
         **job_retry_options,
+        teardown_rerun_limit=teardown_rerun_limit,
         ansible_timeout_seconds=30,
         additional_non_retryable_errors=["UNREACHABLE", "Domain not found"],
         frp_server_addr="",
@@ -697,6 +694,7 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=connection_codecs,
+        pin_fields={SshConnectionCodec.kind: "host_keys"},
         # The pool- and connection-change hooks exactly as the production
         # container composes them, so a write refused there is refused here,
         # by every host route.
@@ -705,16 +703,18 @@ async def client_and_queue(
             connection_codecs
         ),
     )
+    # The hosts taking new delivery as the production container reports them:
+    # the host authority's, less the hosts of every pool on a disabled relay.
+    deliverable_hosts = RelayDeliverableHosts(host_authority)
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         site_id=identity_context.storefront_site_id,
         lease_end_effect=lease_end_reports.record,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
-        # The hosts taking new delivery, reported by the host authority as the
-        # production container wires it, so a declaration naming a disabled or
-        # unregistered host is refused and not offered here as it is there.
-        deliverable_hosts=host_authority,
+        # So a declaration naming a disabled or unregistered host, or a host
+        # on a disabled relay, is refused and not offered here as it is there.
+        deliverable_hosts=deliverable_hosts,
         # The release guard exactly as the production container composes it,
         # so capacity is freed here only on the proof it needs there.
         release_guard=FulfillmentReleaseGuard(SettlementRepository()),
@@ -758,10 +758,10 @@ async def client_and_queue(
         job_queue_provider=lambda: job_queue,
     )
 
-    async def probe_ssh(host):
-        return await probe_connectivity(fake_ansible, host)
-
-    connectivity_probes = {"ssh": probe_ssh}
+    connectivity_probes = _container_module._make_connectivity_probes(
+        connectivity_probe_runner, host_authority,
+    )
+    host_key_probes = _container_module._make_host_key_probes(connectivity_probe_runner)
 
     physical_settlement_scheduler = PhysicalSettlementScheduler(
         pool_service=resource_pool_service,
@@ -775,7 +775,7 @@ async def client_and_queue(
             session_factory,
             resource_pool_service,
             capacity_ledger_service,
-            deliverable_hosts=host_authority,
+            deliverable_hosts=deliverable_hosts,
         ),
     )
 
@@ -803,6 +803,9 @@ async def client_and_queue(
         connection_codecs=connection_codecs,
     )
 
+    # The one rerun policy both providers and the release status hold, built
+    # as the container builds it.
+    teardown_rerun_policy = _container_module._make_teardown_rerun_policy(mock_settings)
     ansible_fulfillment_provider = JobFulfillmentProvider(
         plan=VmFulfillmentPlan(
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
@@ -815,6 +818,7 @@ async def client_and_queue(
         ),
         submission=job_submission,
         jobs=job_engine,
+        rerun_policy=teardown_rerun_policy,
     )
     fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
         session_factory=session_factory,
@@ -855,6 +859,7 @@ async def client_and_queue(
                     ),
                     submission=job_submission,
                     jobs=job_engine,
+                    rerun_policy=teardown_rerun_policy,
                 ),
                 pool_config_handler=resource_pool_service_handlers["bare_metal.ansible"],
                 job_executor=bare_metal_executor,
@@ -885,6 +890,8 @@ async def client_and_queue(
         release_status=FulfillmentReleaseStatusPort(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
+            rerun_policy=teardown_rerun_policy,
+            jobs=job_engine,
         ),
         capacity_released_notifier=AsyncMock(return_value=True),
         capacity_release_outbox=capacity_release_outbox,
@@ -908,6 +915,7 @@ async def client_and_queue(
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=relay_port_allocator,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
 
     fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(
@@ -968,6 +976,7 @@ async def client_and_queue(
     )
     _container_module.resolved_host_authority = host_authority
     _container_module.resolved_connectivity_probes = connectivity_probes
+    monkeypatch.setattr(_container_module, "resolved_host_key_probes", host_key_probes)
     _container_module.resolved_bare_metal_mock_executor = (
         bare_metal_runner if isinstance(bare_metal_runner, MockAnsibleRunner) else None
     )

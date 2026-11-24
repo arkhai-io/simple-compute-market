@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
+import injected_time
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from market_identity import Identity, RotationRequest, canonical_rotation_bytes, verify_rotation
 from pydantic import ValidationError
@@ -27,12 +27,18 @@ from core_registry.api.utils import (
     find_identity_binding,
     find_publisher_by_id,
     identity_is_active,
+    instant_comparable_with,
     publisher_accepts_identity,
     publisher_to_dict,
 )
 from core_registry.config import settings
 from core_registry.db.database import get_db
-from core_registry.db.models import Publisher, PublisherIdentity, PublisherIdentityRotation
+from core_registry.db.models import (
+    Publisher,
+    PublisherIdentity,
+    PublisherIdentityRotation,
+    utcnow,
+)
 
 router = APIRouter()
 _MAX_ROTATION_OVERLAP_SECONDS = 86_400
@@ -79,7 +85,8 @@ async def list_publishers(
     else:
         publishers = (
             db.query(Publisher)
-            .order_by(desc(Publisher.created_at))
+            # Whole-second times tie; the publisher id is insertion order.
+            .order_by(desc(Publisher.created_at), desc(Publisher.publisher_id))
             .offset(offset)
             .limit(limit)
             .all()
@@ -143,11 +150,7 @@ async def get_publisher(
 def _rotation_to_dict(rotation: PublisherIdentityRotation) -> dict:
     status = rotation.status
     deadline = rotation.retire_at
-    instant = (
-        datetime.now(deadline.tzinfo)
-        if deadline is not None and deadline.tzinfo is not None
-        else datetime.utcnow()
-    )
+    instant = instant_comparable_with(deadline)
     if status == "overlap" and deadline is not None and deadline <= instant:
         status = "retired"
     return {
@@ -242,7 +245,7 @@ async def rotate_publisher_identity(
         raise HTTPException(status_code=400, detail="Rotation overlap exceeds registry bound")
     verification = verify_rotation(
         rotation_request,
-        now=int(time.time()),
+        now=injected_time.now(),
     )
     if not verification.verified:
         raise HTTPException(status_code=401, detail="Invalid or expired rotation proofs")
@@ -311,7 +314,7 @@ async def rotate_publisher_identity(
     if current is None or current.publisher_id != publisher_id:
         raise HTTPException(status_code=403, detail="Current principal does not own publisher")
 
-    now = datetime.utcnow()
+    now = utcnow()
     retire_at = now + timedelta(seconds=intent.overlap_seconds)
     if intent.overlap_seconds:
         current.status = "overlap"
@@ -471,7 +474,7 @@ async def retire_publisher_identity(
         )
         if current is None or current.publisher_id != publisher_id:
             raise HTTPException(status_code=409, detail="Rotation current binding is incomplete")
-        now = datetime.utcnow()
+        now = utcnow()
         current.status = "retired"
         current.active_until = now
         current.retired_at = now

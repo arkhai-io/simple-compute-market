@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from market_identity import Identity, IdentityScheme
+from settlement_tables import settlement_database
 
 from market_settlement_runtime import (
     MANUAL_REASON_KEY,
@@ -140,7 +141,7 @@ class Client:
 
 @pytest.fixture
 def repository(tmp_path) -> SettlementSQLiteRepository:
-    return SettlementSQLiteRepository(str(tmp_path / "settlement.db"))
+    return SettlementSQLiteRepository(settlement_database(tmp_path / "settlement.db"))
 
 
 async def register(runtime: SettlementRuntime, value: dict[str, Any]):

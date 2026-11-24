@@ -29,13 +29,15 @@
 #                                           token>", from its committed fixtures
 #   arkhai-bare-metal-provisioning-identity `credential`: Anvil account 9's key
 # Its storefront shares release 1's CA bundle ConfigMap, which the same target
-# creates from the payments lane double's committed lane CA:
+# creates from the lane doubles' committed lane CA:
 #   ConfigMap payments-ca-bundle            `ca-bundle.pem`: the committed lane CA
-# Release 2's provisioning reuses release 1's SSH and runtime Secrets, which mock
-# provisioning does not read for delivery. `topology-check` also needs release
-# 1's e2e-tests Secrets: arkhai-buyer-profile-credential (`credential`, Anvil
-# account 1's key) and arkhai-e2e-credentials, whose `config-e2e-secret.yml` the
-# deal test and the registry smoke test layer as their `e2e-secret` profile:
+# Release 2's provisioning reuses release 1's runtime Secret, which mock
+# provisioning does not read for delivery. Like release 1's, it mounts no SSH
+# key, since mock provisioning opens no connection. `topology-check` also needs
+# release 1's e2e-tests Secrets: arkhai-buyer-profile-credential (`credential`,
+# Anvil account 1's key) and arkhai-e2e-credentials, whose
+# `config-e2e-secret.yml` the deal test and the registry smoke test layer as
+# their `e2e-secret` profile:
 #   buyer:        marketplace_credential, private_key: "<account 1's key>"
 #   seller:       private_key, admin_credential: "<account 2's key>" (Bob)
 #   provisioning: admin_credential: "<account 5's key>",
@@ -63,10 +65,13 @@ global:
     identifier: "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"
 
 # Release 1 runs these; this release runs none of them. Their tests target Bob
-# and release 1's chain. The payments lane double's Service, `payments-double`,
-# is not release-scoped, so the namespace runs release 1's alone, which this
-# release's storefront reaches by that name.
+# and release 1's chain. The lane doubles' Services, `payments-double` and
+# `mediation-double`, are not release-scoped, so the namespace runs release 1's
+# alone; this release's storefront reaches the payments double by its name and
+# holds no dispute credential.
 payments-lane-double:
+  enabled: false
+mediation-lane-double:
   enabled: false
 dev-env:
   enabled: false

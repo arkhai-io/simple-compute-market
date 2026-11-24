@@ -5,11 +5,11 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+import injected_time
 from market_core.schemas import settlement_option_schema
 from core_storefront.stage_log import stage_event
 from market_alkahest.alkahest import get_escrow_codec_for
@@ -316,7 +316,7 @@ async def _end_failed_delivery(db, ctx, capacity):
     if not thread or not _accepted_mechanism(thread):
         return None
     negotiation_id = thread["negotiation_id"]
-    now = int(time.time())
+    now = injected_time.now()
     with transaction(db.db_path) as conn, atomic(conn):
         committed = conn.execute(
             "SELECT 1 FROM vm_settlement_evidence WHERE negotiation_id=? AND status IN ('verified','refunding','refunded')",
@@ -331,7 +331,12 @@ async def _end_failed_delivery(db, ctx, capacity):
         end.admit(negotiation_id, record.phase, record.revision, now=now)
         record = end.read(negotiation_id)
         ref = "fulfillment-failure:" + (ctx.provider_job_id or ctx.capacity_reservation_id or negotiation_id)
-        prior = next((request for request in end.requests(negotiation_id) if request.source_ref == ref), None)
+        # The compute delivery path records the failure it observes with its
+        # classification and filing; that end is the failure's, not another.
+        prior = next((
+            request for request in end.requests(negotiation_id)
+            if request.source_ref == ref or request.source == "delivery"
+        ), None)
         if prior is None:
             selected = end.selected_end(negotiation_id)
             controlling = classification_for(end, negotiation_id, selected.source_ref) if selected else None
@@ -358,7 +363,7 @@ async def _end_failed_delivery(db, ctx, capacity):
             )
     lifecycle = getattr(_container.resolved_settlement_composition, "lifecycle", None)
     service = lifecycle.end if lifecycle is not None and lifecycle.db is db else EndService(
-        db.db_path, VmPhysicalEnd(db, capacity=capacity), clock=lambda: int(time.time()),
+        db.db_path, VmPhysicalEnd(db, capacity=capacity), clock=injected_time.now,
     )
     await service.drive_physical(negotiation_id)
     with transaction(db.db_path) as conn:
@@ -390,7 +395,10 @@ async def _release_capacity(
     if not ctx.listing_id:
         raise RuntimeError("capacity release requires the persisted listing binding")
     binding = await capacity_binding_for_listing(db, ctx.listing_id)
-    runtime = capacity or build_capacity_runtime(lambda: db)
+    # The storefront deal lifecycle's capacity runtime when it was given one.
+    lifecycle = getattr(_container.resolved_settlement_composition, "lifecycle", None)
+    composed = getattr(lifecycle, "capacity", None) if getattr(lifecycle, "db", None) is db else None
+    runtime = capacity or composed or build_capacity_runtime(lambda: db)
     reservation = await runtime.release(
         binding,
         capacity_reservation_id=str(ctx.capacity_reservation_id or ""),

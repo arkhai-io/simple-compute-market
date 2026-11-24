@@ -24,7 +24,7 @@ Awaiting delivery is not the deferred fulfillment *outcome*. A deferred outcome 
 
 Every step scheduled for retry is logged at warning with its obligation, operation, and error, whether or not a storefront composed an event callback, so a failing step is never silent; each storefront that composes the worker also composes its callback, writing its `claims` stage events.
 
-The administrator's settle wait (`GET /api/v1/admin/settle/{ref}/wait`) is the settlement-runtime kit's `SettlementAdminRouteService`, and the kit decides what a reference names. At each poll it resolves the reference afresh (`SettlementLookup.resolve`): by the settlement evidence whose settlement reference it is — an Alkahest escrow, an Arkhai payments transaction — and otherwise by the evidence of the negotiation it names, whatever the mechanism, since evidence may be recorded, or its reference established, while the wait runs. A reference that resolves to nothing is a poll that found nothing terminal. The kit owns the terminal states, `ready` and `failed`. A storefront supplies only its two evidence lookups, by settlement reference and by negotiation, each returning `market_core.SettlementEvidence` or nothing, and its delivery status for a resolved settlement, which the wait returns to the administrator as reported. So every storefront answers a payments deal by its negotiation or its transaction, and an Alkahest deal by its escrow, in the same way; a domain-local resolution would let one storefront's wait miss a deal another's finds. The resolver is a public kit operation, so another caller can resolve a reference the same way without waiting.
+The administrator's settle wait (`GET /api/v1/admin/settle/{ref}/wait`) is the settlement-runtime kit's `SettlementAdminRouteService`, and the kit decides what a reference names. At each poll it resolves the reference afresh (`SettlementLookup.resolve`): by the settlement evidence whose settlement reference it is — an Alkahest escrow, an Arkhai payments transaction — and otherwise by the evidence of the negotiation it names, whatever the mechanism, since evidence may be recorded, or its reference established, while the wait runs. A reference that resolves to nothing is a poll that found nothing terminal. The kit owns the terminal states, `ready`, `failed` and `ended` — delivered, or never to be. A storefront supplies only its two evidence lookups, by settlement reference and by negotiation, each returning `market_core.SettlementEvidence` or nothing, and its delivery status for a resolved settlement, which the wait returns to the administrator as reported. So every storefront answers a payments deal by its negotiation or its transaction, and an Alkahest deal by its escrow, in the same way; a domain-local resolution would let one storefront's wait miss a deal another's finds. The resolver is a public kit operation, so another caller can resolve a reference the same way without waiting.
 
 The wait treats a failed read, a lookup's or the delivery status's, as a poll that reached nothing terminal and returns the last error beside `ready: false` at its deadline, so a site briefly unreachable does not fail a wait that would have succeeded; a refusal, such as a settlement the storefront does not know, is an answer and ends the wait. Bare metal's delivery status keeps its live fulfillment read and also wakes the obligation's servicing once it finds delivery ready, which a scenario holding the servicing loops relies on; it wakes one only for evidence whose source names an obligation, the Alkahest path, since a payments deal adopts no settlement-runtime obligation. Each buyer-facing settle status route still resolves a reference its own way, and each domain keeps its own settlement evidence table.
 
@@ -167,31 +167,115 @@ current snapshot without changing its bytes. Published vectors and the shared
 clock-injected `PaymentsAuthority` fixture cover these proofs and per-part events;
 `FakePaymentsClient` consumes that same engine, not a second financial model.
 
-The once-only adapter reads/watches and reverses; it has no start/stop operation.
-Each prepaid once part ends at Agreement term end; setup encodes Agreement start
-and the service clamps it to approval if later. Each hold is after that part's own
-end by the dispute window, separate from approval expiry. Only the Agreement's
-dispute authority gets extend/lift with the accepted cap. Party rate rights are
-codec-derived, not independent client permission defaults.
+**A receipt key change drains rather than re-anchors.** The retiring pin serves the
+moment of a switch, so a fresh approval does not fail while clocks and configurations
+differ; it keeps no deal alive past the removal of its entry, and nothing re-anchors
+a running deal to the new key. Draining suffices because every payment deal has a
+fixed end: a once-only deal's at its term end, and a rate deal's at its rate part's
+absolute end, the Agreement's start plus its duration, which a late start never
+extends. Removing the
+retired identity at the cutover is what closes it: every snapshot must be signed by
+an identity valid at the snapshot's own claimed `observedAt`, so a retired identity
+left configured with a closed window still lets a holder of that key, were it
+compromised, sign a snapshot backdated into its window. A drain can last as long as
+the dispute window and any hold extension, so a seller facing a fixed switch date ends
+or refunds what remains; the cutover's rule is
+[settlement configuration's](../settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover).
+
+**One transaction adapter, composed by part kind.**
+`market_arkhai_payments.adapter.PaymentAdapter` implements the lifecycle
+`PaymentAdapter` protocol for every mandate. Shared components — verified snapshot
+reads, descriptor recording and refusal classification (`transaction.py`) — and the
+`once` behaviour (reverse, extend, observations) serve every deal; the rate behaviour
+(`rate_parts.py`: start, stop, notice, rate observations and the `authorize` phases) is
+composed in when the mandate has a rate part. Neither subclasses the other: a
+once-only mandate's `start_billing` is a no-op, and it refuses every rate command.
+Every monetary rate operation — start, `start_billing`, stop, notice and reverse —
+records its immutable descriptor's digest through the caller's `OperationStore`
+(`OperationKeys.store`, under a part-derived key) before any I/O, so a changed retry
+is refused before the authority is called and an identical retry resends one request
+identity, with the authority's `request_id_reused` as the backstop; a once-only
+reverse records when its caller supplies a store. The stop path reads nothing first:
+an authority answering a stop of a stopped part with its winning stop satisfies the
+new one only when that stop is effective no later. The adapter keeps no database and
+imports neither `kit/deal-servicing` nor a domain: end service journals the one
+billing-start key with the activated-delivery envelope, the adapter derives per-part
+request identities from it, and `start` refuses before any call on missing,
+malformed or mismatched activation evidence.
+
+**Rate mandates.** For a rate option the kit derives, through the foundation codec,
+the setup `once` part when the seller priced one and then the time-rate part. The rate
+part charges one period's price, read through the agreed-price accessor, per `period`,
+with `reserveAhead`, an absolute end at `start + duration_seconds` that a late start
+never extends, `{afterStop: dispute_window}` holds and `maxHoldExtension`. `start` is
+the payee's alone; stop entries exist only for accepted entitlements — the payer's,
+and the payee's with its priced notice on spot, none on on-demand — and the dispute
+authority's entry is `{notice: PT0S, partialPeriod: chosen}`, so each of its stops
+carries its own treatment. Each prepaid `once` part ends at Agreement term end; the
+setup part encodes Agreement start and the service clamps it to approval if later,
+and both carry the inert `returned` end the schema requires. Each hold is after that
+part's own end by the dispute window, separate from approval expiry. Only the
+Agreement's dispute authority gets extend/lift with the accepted cap. Party rights are
+codec-derived, not independent client permission defaults. The buyer re-derives every
+part, its order, authorities, notices, holds, end, cap, asset and amount before
+approval, and approves under its run's terms policy.
+
+**The payment authority prices the period in progress.** Every rate stop entry and the
+rate end carry a `partialPeriod` mapped from the accepted `settles_through`:
+`started_period` is `charged`, `last_boundary` `returned`, `stop` `prorated`. The
+authority computes the price, from the winning stop record — a party's entry, the
+end's own treatment, the dispute authority's chosen one — and SCM computes no end
+correction, cumulative target or refund. Periods earn at their end or at the part's
+stop; exhaustion stops every co-funded part at `fundedThrough`. A seller's exceptional
+end is a `delivery_end` filing to the dispute authority, whose self-penalty stops
+rates `returned`; the seller sends no stop or reverse of its own. Beside a rate part
+every raw stop is projected as a stop request, the setup part's terms end included,
+and the deal's payment end is a rate part's final stop; in a once-only mandate a
+part's stop stays the deal's end.
+
+**Rate authorization is pure.** `authorize(phase, evidence, billing)` answers commit,
+dispatch, start and disclose with allow, refuse or pending, a reason, the operation
+identity and verified evidence references, and starts no billing. A snapshot decides
+only within `snapshot_freshness_seconds` of the storefront's clock, and every stop,
+end and funding bound is checked at the storefront's `now`; missing, unverifiable or
+regressing state is pending, never allow. Disclosure needs a verified rate `start`
+bound to end service's journaled billing start. Refusals are classified by the
+authority's structured code: `transaction_stopped` at `start` is a delivery end,
+`request_id_reused` and `hold_not_reversible` require repair,
+`insufficient_held_funds` is reconciled from a read, `hold_matured` surfaces the
+shortfall and the case path, and `insufficient_funds` at buyer approval is
+`PaymentApprovalInsufficientFunds`; transport and server errors stay unknown.
 
 Watch keeps payment/dispute cursors independent and last verified history separate
 from the current refresh outcome. Respondent discovery signs or contests from
 retained facts and journals the answer before advancing; deal watch waits for
 that answer or confirmed closure. Original semantic filings have one durable
 writer; lost responses resolve/adopt a signed equivalent case, never a fresh
-case key. Initial missing mediation history permits the first filing only.
+case key. A dispute authority learns an Agreement from its first filing and until
+then answers a first-page read `404 invalid_request`; the mediation adapter reads that
+answer, for every read, as an accepted read of an empty record — no dispute and no
+case — so a deal nobody has filed on has its view saved and its cases observed, and a
+404 after a page was read is a failure. The authority gives a reader who is no party
+the same answer, and no published route says which account a credential
+authenticates, so that read rests on a premise the contract cannot check: that the
+credential authenticates the Agreement's party.
 Neither cached history nor an absent authority is a current successful refresh.
 
 ## Current limits
 
-Production rate start/stop, funding-timer classification and revised monetary
-remedy execution are not implemented by the once-only adapter. Local case
-filing/observation is not deployed rate/ruling-execution qualification. The
+Both compute storefronts deliver and service rate deals, but hosted execution of
+every offered treatment, the dispute entry's `chosen` stop included, is unqualified;
+lane runs are lane-double evidence only. Local case filing/observation is not
+deployed rate/ruling-execution qualification. A seller whose mediation credential
+authenticates another account than the Agreement's party reads every unfiled deal,
+and any case filed against it before its first accepted read, as no case, so a
+released, paid deal with a case open can list `ended`. An operator meets that
+misconfiguration as filings the authority refuses (`filer_not_party`) and an empty
+respondent listing, neither of which corrects the list. The
 Agreement pins the dispute origin/key for deal life without mid-deal rotation.
 An unresolved unanswered case holds its deal's dispute cursor. The retention
 observer and refresh-before-prune API are composed, but no production storefront
-prune trigger exists, so seller evidence is retained indefinitely. VM/bare-metal
-respondent lifetimes and term-end recovery differ as recorded in
+prune trigger exists, so seller evidence is retained indefinitely. See
 [lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
 
 Heartbeat evidence remains persisted but is not an automated adjudication

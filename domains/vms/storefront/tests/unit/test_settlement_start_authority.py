@@ -11,7 +11,10 @@ from fastapi import HTTPException
 from market_identity import Ed25519Signer
 from starlette.requests import Request
 
+from compute_delivery import AccessRefused
+
 import market_storefront.container as _container
+from market_storefront import delivery_ports
 from market_storefront.controllers.settle_controller import SettleController
 from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.middleware import buyer_auth
@@ -140,6 +143,11 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
         local_principal=_SELLER,
     )
     monkeypatch.setattr(_container, "resolved_settlement_composition", composition)
+    # A deal still provisioning has nothing to disclose.
+    monkeypatch.setattr(
+        delivery_ports, "read_vm_credentials",
+        AsyncMock(side_effect=AccessRefused("not_available", "the deal is not available")),
+    )
 
     response = await _controller(db).settle_escrow("escrow-1", _body(), _request())
 

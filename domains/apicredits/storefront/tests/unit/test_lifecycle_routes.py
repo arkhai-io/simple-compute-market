@@ -44,6 +44,7 @@ from apicredits_storefront.lifecycle_steps import (
 )
 from apicredits_storefront.middleware import admin_auth
 from apicredits_storefront.middleware.response_auth import authenticate_response
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 
@@ -126,6 +127,7 @@ async def start_storefront(tmp_path, monkeypatch):
     Returns a factory taking the servicing interval and the capacity runtime;
     every other interval is far longer than any test waits.
     """
+    migrate_storefront_database(tmp_path / "lifecycle.db")
     db = SQLiteClient(db_path=str(tmp_path / "lifecycle.db"))
     obligations = _Obligations()
     monkeypatch.setattr(container, "resolved_sqlite_client", db)

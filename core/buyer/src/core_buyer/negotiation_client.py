@@ -15,12 +15,10 @@ the pinned-shape guard plus the configured policy's middlewares; domain
 plugins may add schema middlewares (e.g. the API-credits
 ``answer_key_challenge`` pass-through) via ``default_guards``.
 
-Units: listings broadcast **per-unit** rates (per lease hour for VM
-compute, per token for API credits). ``unit_count`` is the schema
-plugin's per-unit→absolute seam — the number of priced units this deal
-spans; once it is fixed at round 0 the whole negotiation runs on
-absolute totals. The VM plugin passes ``duration_seconds / 3600``, the
-API-credits plugin passes the requested token quantity.
+Units: listings broadcast per-unit rates. Without a domain amount codec,
+``unit_count`` scales them to absolute payment totals. A domain amount codec
+can instead negotiate a scalar and derive payment from the accepted terms;
+core keeps policy scalars in transcripts and monetary totals in outcomes.
 """
 
 from __future__ import annotations
@@ -29,7 +27,6 @@ import base64
 import binascii
 import json
 import logging
-import time
 import urllib.error
 import urllib.request
 import uuid
@@ -38,6 +35,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Optional
 
+import injected_time
 from market_policy.negotiation_middleware import (
     NegotiationChainExhausted,
     NegotiationContext,
@@ -255,7 +253,9 @@ class NegotiationOutcome:
     ``agreed_amount`` is the absolute total payment in base units of
     the escrow's payment token (i.e. ``accepted_escrow_proposal.fields
     ["amount"]``). Per-unit rates only exist as listing broadcasts;
-    once a negotiation starts everything is absolute. ``unit_count``
+    a domain codec may instead negotiate a scalar while deriving this payment
+    from the accepted terms. ``negotiated_scalar`` records that policy quantity.
+    ``unit_count``
     echoes the buyer's ask from negotiation init (None on resume,
     where the prior run-log is the source of truth).
     """
@@ -273,6 +273,7 @@ class NegotiationOutcome:
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None
+    negotiated_scalar: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
@@ -280,6 +281,8 @@ class NegotiationOutcome:
             d["negotiation_id"] = self.negotiation_id
         if self.agreed_amount is not None:
             d["agreed_amount"] = self.agreed_amount
+        if self.negotiated_scalar is not None:
+            d["negotiated_scalar"] = self.negotiated_scalar
         if self.unit_count is not None:
             d["unit_count"] = self.unit_count
         if self.reason is not None:
@@ -719,7 +722,7 @@ def _authenticated_json(
     if not isinstance(expected_response_principals, TrustedIdentitySet):
         raise ValueError("a pinned response principal set is required")
     request_id = request_id or uuid.uuid4().hex
-    timestamp = int(time.time()) if timestamp is None else timestamp
+    timestamp = injected_time.now() if timestamp is None else timestamp
     body_value: Any = EMPTY_BODY if body is None else body
     authenticated = sign_request(
         signer=signer,
@@ -814,10 +817,11 @@ def _authenticated_json(
             f"{method} {url} -> HTTP {response_status} "
             f"{_authentication_description(response_headers)}"
         ) from exc
+    reference = injected_time.now()
     verification = verify_response(
         signed_response,
         body=payload if text else EMPTY_BODY,
-        now=int(time.time()),
+        now=reference,
         max_skew=_MAX_RESPONSE_SKEW,
         expected_role=expected_response_role,
         expected_principals=expected_response_principals,
@@ -834,7 +838,7 @@ def _authenticated_json(
             f"{method} {url} response authentication failed: {verification.code.value}"
         )
     capture_envelope(capture, envelope=authenticated, raw_body=data or b"", headers=headers,
-                     verified_at=int(time.time()),
+                     verified_at=reference,
                      expected_principals=TrustedIdentitySet(identities=(principal,)))
     if not 200 <= response_status < 300:
         raise AuthenticatedHTTPError(
@@ -845,6 +849,21 @@ def _authenticated_json(
     if not isinstance(payload, dict):
         raise RuntimeError(f"{method} {url} returned non-object JSON")
     return payload
+
+
+@dataclass(frozen=True)
+class NegotiationAmountCodec:
+    """Domain conversion and verification of authenticated pricing replies.
+
+    Reply/acceptance validators run before an accepted round is observed or
+    passed to settlement. Conversion alone cannot authenticate pricing inputs.
+    """
+
+    scalar_from_price: Callable[[Any], int]
+    payment_from_scalar: Callable[[int, Any], int]
+    effective_terms: Callable[[Any, Mapping[str, Any] | None], Any] | None = None
+    validate_reply: Callable[[Mapping[str, Any]], None] | None = None
+    validate_accepted: Callable[[NegotiationOutcome, Mapping[str, Any]], None] | None = None
 
 
 @dataclass
@@ -894,6 +913,7 @@ def negotiate_with_seller(
     policy_params: Optional[dict[str, Any]] = None,
     validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
     validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
+    amount_codec: NegotiationAmountCodec | None = None,
     capture: EnvelopeCapture | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
@@ -905,7 +925,10 @@ def negotiate_with_seller(
     amounts the negotiation runs on, and is required (> 0) for fresh
     starts — the schema plugin owns the translation (lease hours for
     compute, token quantity for credits). In resume mode the prices are
-    treated as absolute (the prior run fixed the totals).
+    treated as absolute (the prior run fixed the totals). With ``amount_codec``,
+    the domain converts the public prices into its policy scalar and derives
+    payment from accepted terms; neither duration nor a shape revision re-anchors
+    that scalar. The codec also normalizes proposed domain terms for comparison.
 
     `provision_terms` describes what the buyer wants the seller to
     deliver (the schema-tagged off-chain payload) and `escrow_proposal`
@@ -946,6 +969,10 @@ def negotiate_with_seller(
         reply: dict[str, Any],
     ) -> NegotiationOutcome:
         assert outcome.agreement is not None
+        if amount_codec is not None and outcome.agreement.provision_terms != _dump_payload(
+            outcome.accepted_provision_terms, mode="json"
+        ):
+            raise RuntimeError("seller Agreement provision terms differ from accepted terms")
         _validate_agreement_acceptance(
             agreement=outcome.agreement,
             expected_listing_id=listing_id,
@@ -956,6 +983,8 @@ def negotiate_with_seller(
             buyer_principal=principal,
             trusted_seller_principals=trusted_seller_principals,
         )
+        if amount_codec is not None and amount_codec.validate_accepted is not None:
+            amount_codec.validate_accepted(outcome, reply)
         if validate_acceptance is not None:
             validate_acceptance(outcome)
         if on_round:
@@ -1018,6 +1047,11 @@ def negotiate_with_seller(
             }
         )
         expected_selection = accepted_selection
+        if amount_codec is not None and amount_codec.effective_terms is not None:
+            for entry in resume.transcript:
+                revision = (entry.proposal or {}).get("provision_terms")
+                if entry.sender == "us" and revision is not None:
+                    accepted_prov = amount_codec.effective_terms(accepted_prov, revision)
         if resume.agreement is not None and resume.agreement_bytes is not None:
             accepted_agreement = Agreement.model_validate(resume.agreement)
             accepted_agreement_bytes = resume.agreement_bytes
@@ -1133,10 +1167,14 @@ def negotiate_with_seller(
                 "unit_count must be > 0 to translate per-unit bounds "
                 "into absolute amounts."
             )
-        initial_amount = scaled_base_units(
-            initial_price, unit_count, field="initial_price"
+        initial_amount = (
+            amount_codec.scalar_from_price(initial_price) if amount_codec is not None
+            else scaled_base_units(initial_price, unit_count, field="initial_price")
         )
-        ceiling_amount = scaled_base_units(max_price, unit_count, field="max_price")
+        ceiling_amount = (
+            amount_codec.scalar_from_price(max_price) if amount_codec is not None
+            else scaled_base_units(max_price, unit_count, field="max_price")
+        )
 
         # Pin the buyer's first proposal: the policy chain owns the
         # round-0 opening (ARCHITECTURE.md, "Buyer negotiation policy surface") — run it
@@ -1228,6 +1266,8 @@ def negotiate_with_seller(
             capture=capture,
         )
 
+        if amount_codec is not None and amount_codec.validate_reply is not None:
+            amount_codec.validate_reply(reply)
         raw_neg_id = reply.get("negotiation_id")
         neg_id = raw_neg_id if isinstance(raw_neg_id, str) and raw_neg_id else None
         seller_action = reply.get("action")
@@ -1246,13 +1286,21 @@ def negotiate_with_seller(
             raise RuntimeError(
                 "seller negotiation reply omitted accepted_provision_terms"
             )
-        _validate_accepted_provision_terms(accepted_prov, provision_terms)
+        expected_provision = (
+            amount_codec.effective_terms(provision_terms, None)
+            if amount_codec is not None and amount_codec.effective_terms is not None
+            else provision_terms
+        )
+        _validate_accepted_provision_terms(accepted_prov, expected_provision)
         if expected_selection is not None and seller_action in {"counter", "accept"}:
             _validate_selection_echo(accepted_selection, expected_selection)
         agreed_amount = _amount(reply.get("proposal"))
         if agreed_amount is None and expected_selection is None:
             agreed_amount = initial_amount
         if seller_action == "accept":
+            negotiated_scalar = agreed_amount
+            if amount_codec is not None and agreed_amount is not None:
+                agreed_amount = amount_codec.payment_from_scalar(agreed_amount, accepted_prov)
             accepted_agreement, accepted_agreement_bytes = _parse_accepted_agreement(
                 reply, expected_negotiation_id=neg_id
             )
@@ -1291,6 +1339,7 @@ def negotiate_with_seller(
                 agreed_amount=agreed_amount,
                 unit_count=unit_count,
                 rounds=0,
+                negotiated_scalar=negotiated_scalar,
                 accepted_provision_terms=accepted_prov,
                 accepted_escrow_proposal=accepted_esc,
                 settlement_selection=accepted_selection,
@@ -1359,18 +1408,21 @@ def negotiate_with_seller(
                     proposal=seller_counter_proposal,
                 )
             )
-        ceiling_amount = scaled_base_units(
-            max_price,
-            unit_count if unit_count is not None else 1,
-            field="max_price",
+        ceiling_amount = (
+            amount_codec.scalar_from_price(max_price) if amount_codec is not None
+            else scaled_base_units(
+                max_price, unit_count if unit_count is not None else 1, field="max_price"
+            )
         )
         ctx = NegotiationContext(
             direction="minimize",
             our_reference_amount=ceiling_amount,
-            our_opening_amount=scaled_base_units(
-                initial_price,
-                unit_count if unit_count is not None else 1,
-                field="initial_price",
+            our_opening_amount=(
+                amount_codec.scalar_from_price(initial_price) if amount_codec is not None
+                else scaled_base_units(
+                    initial_price, unit_count if unit_count is not None else 1,
+                    field="initial_price",
+                )
             ),
             listing={},
             our_escrow_proposal=pinned_proposal,
@@ -1433,6 +1485,15 @@ def negotiate_with_seller(
             capture=capture,
         )
 
+        if amount_codec is not None and amount_codec.validate_reply is not None:
+            amount_codec.validate_reply(reply)
+        revision = (next_move.proposal or {}).get("provision_terms")
+        if (
+            revision is not None and reply.get("action") in {"counter", "accept"}
+            and amount_codec is not None and amount_codec.effective_terms is not None
+        ):
+            accepted_prov = amount_codec.effective_terms(accepted_prov, revision)
+
         # If our chain rejected (shape guard veto), the buyer terminates
         # locally without trusting any seller reply.
         if next_move.action == "reject":
@@ -1471,6 +1532,9 @@ def negotiate_with_seller(
                 agreed_amount = _amount(reply.get("proposal"))
                 if agreed_amount is None:
                     agreed_amount = _amount(next_move.proposal)
+                negotiated_scalar = agreed_amount
+                if amount_codec is not None and agreed_amount is not None:
+                    agreed_amount = amount_codec.payment_from_scalar(agreed_amount, reply_prov or accepted_prov)
                 if expected_selection is not None:
                     _validate_settlement_acceptance(
                         reply=reply,
@@ -1492,6 +1556,7 @@ def negotiate_with_seller(
                     agreed_amount=agreed_amount,
                     unit_count=unit_count,
                     rounds=round_idx,
+                    negotiated_scalar=negotiated_scalar,
                     accepted_provision_terms=reply_prov or accepted_prov,
                     accepted_escrow_proposal=reply_esc or accepted_esc,
                     settlement_selection=(
@@ -1572,6 +1637,9 @@ def negotiate_with_seller(
             agreed_amount = _amount(seller_reply_proposal)
             if agreed_amount is None:
                 agreed_amount = _amount(next_move.proposal)
+            negotiated_scalar = agreed_amount
+            if amount_codec is not None and agreed_amount is not None:
+                agreed_amount = amount_codec.payment_from_scalar(agreed_amount, reply_prov or accepted_prov)
             if expected_selection is not None:
                 _validate_settlement_acceptance(
                     reply=reply,
@@ -1593,6 +1661,7 @@ def negotiate_with_seller(
                 agreed_amount=agreed_amount,
                 unit_count=unit_count,
                 rounds=round_idx,
+                negotiated_scalar=negotiated_scalar,
                 accepted_provision_terms=reply_prov or accepted_prov,
                 accepted_escrow_proposal=reply_esc or accepted_esc,
                 settlement_selection=(

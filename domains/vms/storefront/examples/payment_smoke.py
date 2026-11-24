@@ -53,6 +53,7 @@ from market_storefront.domain_runtime import (
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 PAYER = "00000000-0000-4000-8000-000000000011"
@@ -129,7 +130,9 @@ async def main(*, end_before_delivery=False):
     settlement_data = stage.settlement_data(json.loads(raw)).to_wire()
 
     with tempfile.TemporaryDirectory(prefix="vm-payment-demo-") as directory:
-        db = SQLiteClient(str(Path(directory) / "storefront.db"), registry=registry)
+        db_path = Path(directory) / "storefront.db"
+        migrate_storefront_database(db_path)
+        db = SQLiteClient(str(db_path), registry=registry)
         binding = prepare_vm_listing_binding(
             listing_id="vm-demo",
             candidate={
@@ -177,7 +180,7 @@ async def main(*, end_before_delivery=False):
         )
         await db.commit_agreed_terms(
             negotiation_id="payment-demo",
-            agreed_price=100,
+            negotiated_scalar=100,
             agreed_duration_seconds=3600,
             agreement_bytes=raw,
             accepted_at=now,
@@ -188,14 +191,15 @@ async def main(*, end_before_delivery=False):
             negotiation_id="payment-demo", terminal_state="success"
         )
         coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
-        lifecycle = VmDealLifecycle(db, seller, coordinator, RegistryDisputePolicy.from_document({}))
-        coordinator.lifecycle = lifecycle
 
         class Physical:
             async def apply_end(self, *_args, **_kwargs):
                 return PhysicalResult(progress="released" if not deliveries else "tearing_down", done=not deliveries)
 
-        lifecycle.end.physical = Physical()
+        lifecycle = VmDealLifecycle(
+            db, seller, coordinator, RegistryDisputePolicy.from_document({}), physical=Physical(),
+        )
+        coordinator.lifecycle = lifecycle
         container.resolved_sqlite_client = db
         container.resolved_marketplace_signer = seller
         container.resolved_settlement_composition = SimpleNamespace(

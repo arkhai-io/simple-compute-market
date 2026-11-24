@@ -29,14 +29,19 @@ from market_alkahest import (
 from apicredits_storefront.services.publication_service import _make_registry_client
 from market_core import MarketDomainContract
 from market_settlement_runtime import SettlementJobCoordinator
+import injected_time
+from market_arkhai_payments import payments_livemode
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
+    StorefrontTimeRouteService,
     alkahest_client_constructor,
+    announce_time_source,
     build_composed_storefront_app,
+    install_time_source,
 )
 
 import apicredits_storefront.container as _container
@@ -72,16 +77,20 @@ from apicredits_storefront.settlement_composition import (
 )
 from apicredits_storefront.utils.config import (
     AGENT_ID,
-    BASE_URL_OVERRIDE,
     CHAINS,
     chain_address_books,
+    configured_time_source,
     resolve_admin_identities,
     resolve_identity_signer,
     resolve_registry_authorities,
     settings,
     settlement_config_mapping,
 )
-from apicredits_storefront.utils.sqlite_client import get_sqlite_client
+from apicredits_storefront.utils.migrations import require_compatible_storefront_database
+from apicredits_storefront.utils.sqlite_client import (
+    get_sqlite_client,
+    refuse_unbound_listings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -220,10 +229,13 @@ def _build_api_credit_services(
             constructor=seams.alkahest_client_constructor,
             json_rpc=seams.alkahest_json_rpc,
         )
-    sqlite_client = get_sqlite_client(
-        local_listing_principal=marketplace_signer.identity,
-        expected_legacy_sellers=(BASE_URL_OVERRIDE,),
-    )
+    # Before anything opens the database: `apicredits-storefront-migrate`
+    # builds it, and nothing here issues DDL, so a database not exactly at the
+    # chain is refused naming the command, and none is created. The
+    # unbound-listing refusal reads data, so it runs once the check passes.
+    require_compatible_storefront_database(settings.db_path)
+    refuse_unbound_listings(settings.db_path)
+    sqlite_client = get_sqlite_client()
     set_stage_event_db_path(sqlite_client.db_path)
     failure_policy = build_api_credit_failure_policy()
     settlement_composition = build_api_credit_settlement_composition(
@@ -331,6 +343,11 @@ async def _start_api_credit_services(
     await services.settlement_composition.disputes.refresh(
         _make_registry_client if settings.enable_registry_discovery else None
     )
+    announce_time_source(
+        injected_time.installed(),
+        payments_livemode=payments_livemode(settlement_config_mapping()),
+        logger=logger,
+    )
     logger.info("[STARTUP] Singletons initialized")
     await _startup_tasks(domain=services.domain)
     logger.info("[STARTUP] Background tasks started")
@@ -371,6 +388,9 @@ from apicredits_storefront.controllers.system_controller import (  # noqa: E402
 from apicredits_storefront.controllers.trading_pause_controller import (  # noqa: E402
     router as trading_pause_router,
 )
+from apicredits_storefront.controllers.time_controller import (  # noqa: E402
+    router as time_router,
+)
 
 
 def build_api_credits_storefront_registry(
@@ -390,7 +410,8 @@ def build_api_credits_storefront_app(
     """Build the API-credit app from one frozen domain registration.
 
     ``seams`` defaults to production's Alkahest client construction and chain
-    transport.
+    transport. The time-setting route is mounted only when the process's
+    installed source is injected time.
     """
 
     registration = registry.resolve_mode("api_credits")
@@ -436,6 +457,7 @@ def build_api_credits_storefront_app(
                     admin_settle_router,
                     lifecycle_router,
                     trading_pause_router,
+                    *((time_router,) if StorefrontTimeRouteService().mounted else ()),
                 ),
                 middleware=(authenticate_response,),
             ),
@@ -443,6 +465,11 @@ def build_api_credits_storefront_app(
     )
 
 
+# The process's time source is installed here, before the application is built
+# and before anything reads the time: `[Time] source` decides whether the
+# time-setting route is mounted, and a value other than "wall" or "injected"
+# refuses startup naming it.
+install_time_source(configured_time_source())
 app = build_api_credits_storefront_app(
     registry=build_api_credits_storefront_registry(
         domain=get_market_domain_contract(),

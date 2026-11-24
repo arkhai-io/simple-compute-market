@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from market_contact_exchange.migrations import BASELINE
 from market_contact_exchange import (
-    CONTACT_EXCHANGE_MIGRATIONS,
     AuthorizedIntroductionRequest,
     ContactExchangeComposition,
     ContactSettlementConfig,
@@ -107,8 +107,7 @@ def db_path(tmp_path: Path) -> Path:
 def store(db_path: Path) -> SQLiteIntroductionStore:
     conn = sqlite3.connect(db_path)
     try:
-        for migration in CONTACT_EXCHANGE_MIGRATIONS:
-            migration.apply(conn)
+        BASELINE.apply(conn)
         conn.commit()
     finally:
         conn.close()

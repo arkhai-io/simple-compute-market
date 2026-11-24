@@ -163,6 +163,25 @@ specification.
   its own directory as `arkhai:frp-grant-admission`, which `make push-images`
   pushes.
 
+### `injected-time/`
+
+One source of the time of the world per process (distribution
+`arkhai-injected-time`, import `injected_time`): wall time, or an injected
+instant a test sets and moves only forward; the one rule reading a time value;
+the time file a process with no route of its own reads; and a framework-free
+route service each service binds behind its own administrator authentication.
+It depends on the standard library alone. Its [README](injected-time/README.md)
+is its interface, and its specification is
+[`injected-time`](../openspec/specs/injected-time/spec.md). Every published
+package reading the time of the world depends on it.
+
+- `make test` (in its directory) type-checks the package and runs its unit and
+  integration tests, the structure test holding its boundary among them.
+- `make build` builds its wheel into its own `dist/`, or into `DIST_DIR`.
+- From the repository root, `make test-injected-time` runs its `make test` and
+  is part of `make test` and the Tests workflow's matrix; `make
+  dist-injected-time`, part of `make dist`, builds its wheel into `.dist/`.
+
 ## Lane collaborators
 
 A lane collaborator is a stand-in for a service outside this repository, run by
@@ -170,23 +189,69 @@ the end-to-end lanes and the local Helm release so a scenario can reach the
 service's public interface without an external deployment. Unlike a standalone
 component it may import internal kits — it wraps their engines rather than
 restating them — and unlike a developer tool it is not invoked through
-`scripts/`. Nothing imports it, and it ships only as a development image.
+`scripts/`. Nothing imports it, and it ships only as a development image. A
+double takes its producer's decisions from rules a scenario installs, never from
+a copy of the producer's logic.
+
+The lane doubles' control contract is the one shared part: a library, not a
+collaborator, that both doubles and the end-to-end harness import, so a
+scenario drives a double through a typed client without installing the double.
+`make dist` builds its wheel for the doubles' images and the harness; the
+release wheelhouse, `make dist-release`, does not carry it
+([`published-packages.md`](../docs/guidance/repository/published-packages.md)).
+
+Each lane double's image has its own target in `tools/Makefile`, built with the
+repository root as its context so its Dockerfile can copy the wheelhouse. The
+root's `make build-tools` builds every lane double's image (the standalone
+components' images are `make build`'s); it is part of `make build-dev` and each
+lane's `build-e2e-*` target, and nothing pushes the images.
 
 ### `payments-lane-double/`
 
 An HTTPS double of the Arkhai Payments service, mirroring its API over the
-payments kit's engine, with committed public development fixtures and a lane
-CA. Its [README](payments-lane-double/README.md) says what it serves, what its
-results establish and what they do not.
+payments kit's engine, with committed public development fixtures, served under
+the lane CA `tools/lane-double-controls/tls/` generates. Its
+[README](payments-lane-double/README.md) says what it serves, what its results
+establish and what they do not.
 
-- `make test` (in its directory) runs its unit and library-integration suites
-  and `check-tls`, which regenerates the committed certificates and requires
-  them unchanged.
+- `make test` (in its directory) runs its unit and application-integration
+  suites.
 - From the repository root, `make test-payments-lane-double` runs its
   `make test` and is part of `make test` and the Tests workflow's matrix.
-- `make build-payments-lane-double`, part of `make build-dev` and each lane's
-  `build-e2e-*` target, builds `arkhai:payments-lane-double`; it is never
-  pushed.
+- `make build-payments-lane-double` in `tools/`, part of the root's
+  `make build-tools`, builds `arkhai:payments-lane-double`.
+
+### `mediation-lane-double/`
+
+An HTTPS double of an `arkhai.mediation.v1` dispute authority, reproducing its
+API mechanics against the mediation kit's vendored contract, extending holds at
+the payments double as the authority's account, and ruling a case only as a
+scenario's rule says. Its fixtures — the authority's identity at
+`https://mediation-double:8443`, the parties' tokens and the control token — are
+committed public development values, and it serves under the same lane CA. Its
+[README](mediation-lane-double/README.md) says what it serves, its deviation
+from its producer, and what its results establish.
+
+- `make test` (in its directory) runs its unit and application-integration
+  suites.
+- From the repository root, `make test-mediation-lane-double` runs its
+  `make test` and is part of `make test` and the Tests workflow's matrix.
+- `make build-mediation-lane-double` in `tools/`, part of the root's
+  `make build-tools`, builds `arkhai:mediation-lane-double`.
+
+### `lane-double-controls/`
+
+The doubles' control contract (import `lane_double_controls`), which the
+API-credit sample app serves too: the rule, fault, time, funding, rotation and
+ruling models, the control route declarations, the typed `ControlClient`, the
+transport-fault middleware, the time control over a party's injected time, and
+the lane CA generator and certificates for both doubles. Its
+[README](lane-double-controls/README.md) lists the controls and their refusals.
+
+- `make test` (in its directory) checks the committed certificates, type-checks
+  the package, and runs its unit and integration suites.
+- From the repository root, `make test-lane-double-controls` runs its
+  `make test` and is part of `make test` and the Tests workflow's matrix.
 
 ## Adding More Tools
 

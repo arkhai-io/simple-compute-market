@@ -9,7 +9,9 @@ log, and whether a round view is open, and prints one JSON object:
 - `{"step": <step>, "reason": …}` for a step to run: `design`, `plan`, `round`
   (with the `sections` of each session of the round, to be recorded with its `by`
   as it starts: the plan's next round, or sections a triage or the owner named out
-  of the plan's order), `implement` (with its `sections`), `round-view`,
+  of the plan's order; the plan's next round named while a round is still open
+  carries `continues`, that round's seq, and its `base`, since recording it
+  continues the open round), `implement` (with its `sections`), `round-view`,
   `validate` (with the `target` it is for), `review` (with its `kind`),
   `validate-and-review` (with the review's `kind` and the validation's `target`),
   `triage` (with the `kind` of review it triages), `merge`, `closeout`, or
@@ -34,7 +36,12 @@ log, and whether a round view is open, and prints one JSON object:
   the graph does not declare; for a waiting run, its `seq` — a question
   or a stop is resumed by it; for a guard on an exit no step can satisfy, the exit
   as `target`;
-- `{"step": "done", …}` for an archived change, or once archive cleanup names it;
+- `{"step": "done", …}` for an archived change while its route ends at archive
+  cleanup's exit to `done`, or while it has no log: a direction or exit logged
+  after that exit is followed, as to the merge after the archive, whose result
+  names the merge step (`graph.LATE_MERGE`). An archived change with a live clone
+  is named to its clone first, and `done` is answered before the branch checked
+  out is read;
 - `{"step": "unclassified", "reason": …, "read": …}` when no rule applies, with
   what it read, for the orchestrating session to work out.
 
@@ -80,7 +87,8 @@ lines rather than JSON.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-4rqr, CW-tel3, CW-m70n,
 CW-l866, CW-0wna, CW-8tdv, CW-nkys, CW-izj1, CW-tnp6, CW-4c3e, CW-zcx8, CW-sd34,
-CW-9fbu, CW-x7jd, CW-qj77, CW-v6nj, CW-p7xk, CW-4x66, CW-8npg, and CW-9tzd.
+CW-9fbu, CW-x7jd, CW-qj77, CW-v6nj, CW-p7xk, CW-4x66, CW-8npg, CW-9tzd, CW-m4qe,
+CW-5vkd, and CW-j7wp.
 """
 
 from __future__ import annotations
@@ -100,13 +108,15 @@ from .clone import RUNNING as BOOTSTRAP_RUNNING
 from .clone import Bootstrap, bootstrap_state, clone_of, default_branch, workspace_of
 from .common import FORMAT, ORCHESTRATOR, StepError, repository_root
 from .find import ChangeNotFound, change_directory, is_archived
-from .graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE, IMPLEMENTATION_REVIEW,
-                    IMPLEMENTATION_TRIAGE, MERGE, PHASES, ROUND, ROUND_JOIN, ROUND_VIEW, STEPS,
-                    VALIDATE, Join, Node, Standing, TargetError, entry_refusal, node_of)
+from .graph import (ARCHIVE_CLEANUP, CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,
+                    IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE, LATE_MERGE, MERGE, PHASES,
+                    ROUND, ROUND_JOIN, ROUND_VIEW, STEPS, VALIDATE, Join, Node, Standing,
+                    TargetError, entry_refusal, node_of)
 from .graph import owner as _owner
 from .index import INDEX, Row, index_rows
-from .log import (LOG, NewerFormat, branch_decisions, log_path, older, ran, read_log,
-                  refuse_newer, standing, undeclared)
+from .log import (CONTAINED, LOG, NewerFormat, after_cleanup, branch_decisions, log_path,
+                  older, open_round, ran, read_log, refuse_newer, standing, undeclared,
+                  unrouted_merge)
 from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, exempting, is_record,
                       latest_validation, validation_problem, validation_result)
 from .round_view import RoundError, View, open_view
@@ -117,12 +127,16 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # The change's task list, whose sections and checks say how far implementation got.
 TASKS_FILE = "tasks.md"
 _SECTION = re.compile(r"^## (?P<id>[0-9]+[A-Za-z]?)\. (?P<title>.+?)\s*$")
+# The title of the closeout section, the task list's last: closeout implements it,
+# and no round does.
+CLOSEOUT_TITLE = "Closeout"
 # A task is numbered for its section, `N.m`, when it is numbered at all.
 _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
                    r"(?P<number>(?P<section>[0-9]+[A-Za-z]?)\.[0-9]+\b)?")
 # Where a log line's step sits among the phases, for comparing with the status: the
 # earliest phase of the one node that runs it. A review or a triage runs in a node
-# of each kind, across phases, so it has no one phase and is never compared.
+# of each kind, across phases, and the merge in a node before closeout and one after
+# the archive, so each has no one phase and is never compared.
 _STEP_PHASE = {step: (runs[0].phases[0] if len(runs) == 1 else None)
                for step in STEPS
                for runs in ([d for d in graph.TABLE if d.runs == step],)}
@@ -204,8 +218,9 @@ class Section:
 
     @property
     def closeout(self) -> bool:
-        # Plans title it "Closeout", "Plan closeout", "Repository closeout", …
-        return "closeout" in self.title.lower()
+        # Known by its exact title alone: a section whose title merely mentions
+        # closeout, such as a pre-closeout review's preparation, is implemented.
+        return self.title == CLOSEOUT_TITLE
 
 
 @dataclass
@@ -342,6 +357,31 @@ def task_problems(text: str) -> list[str]:
     return problems
 
 
+def closeout_problems(text: str) -> list[str]:
+    """Why a task list's closeout section cannot be told apart: a list with
+    sections has none titled `Closeout`, has more than one, or has one followed by
+    another section. Routing leaves the closeout section out of every round, so a
+    list naming it otherwise would have it implemented by a round, or a section
+    after it skipped. A list with no `## N.` sections is unaffected."""
+    sections = [(number, match) for number, line in enumerate(text.splitlines(), start=1)
+                if (match := _SECTION.match(line))]
+    if not sections:
+        return []
+    closeouts = [(number, match) for number, match in sections
+                 if match["title"] == CLOSEOUT_TITLE]
+    if not closeouts:
+        return [f"line {sections[-1][0]}: no section is titled `{CLOSEOUT_TITLE}`; the "
+                f"task list ends with its closeout section, `## N. {CLOSEOUT_TITLE}`"]
+    problems = [f"line {number}: a second section is titled `{CLOSEOUT_TITLE}`"
+                for number, _ in closeouts[1:]]
+    first = closeouts[0][0]
+    problems += [f"line {number}: section {match['id']} follows the closeout section; "
+                 "the closeout section is the task list's last"
+                 for number, match in sections if number > first
+                 and match["title"] != CLOSEOUT_TITLE]
+    return problems
+
+
 def _git_head(root: Path) -> str | None:
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
                           text=True)
@@ -356,9 +396,10 @@ def _merging(root: Path) -> bool:
     return merge.returncode == 0
 
 
-def _inert_paths(root: Path) -> tuple[str, ...] | None:
-    """The repository's inert paths, from its workflow configuration."""
-    return config.load(root).inert_paths
+def _inert_paths(root: Path) -> tuple[str, ...]:
+    """The repository's inert paths, from its workflow configuration: the workflow's
+    default where it declares none."""
+    return config.load(root).repository_inert_paths()
 
 
 def _uncommitted(root: Path, path: Path) -> bool:
@@ -417,15 +458,18 @@ def _triage_phase(entry: Mapping[str, Any], before: Sequence[dict[str, Any]]) ->
     return None
 
 
-def _run_node(entry: Mapping[str, Any]) -> Node | None:
-    """The node a step's run is a run of: a review by its kind, a triage by the kind
-    of the latest review its outcome names; None for a run that names no kind."""
+def _run_node(entry: Mapping[str, Any], log: Sequence[Entry]) -> Node | None:
+    """The node a step's run, a line of `log`, is a run of: a review by its kind, a
+    triage by the kind of the latest review its outcome names, a merge by whether an
+    archive cleanup run is logged before it; None for a run that names no kind."""
     step = entry.get("step")
     if step == "review":
         node = Node(step, entry.get("kind"))
     elif step == "triage":
         reviews = _triaged_reviews(entry)
         node = Node(step, reviews[-1][1]) if reviews else Node(step)
+    elif step == MERGE.step:
+        node = LATE_MERGE if after_cleanup(dict(entry), log) else MERGE
     else:
         node = next((d.node for d in graph.TABLE if d.runs == step and not d.node.kind),
                     Node(str(step)))
@@ -510,7 +554,9 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
     remedied are checked again; one directed by the owner leads to its target once
     it passed. The conversion line names no exit, and routes nothing. Nor does the
     owner's direction to revisit a finished triage: the triage, resumed, ends again,
-    and that later outcome is the exit the change takes for the reviews it names.
+    and that later outcome is the exit the change takes for the reviews it names. Nor
+    does a merge run by hand on an archived change before the merge after the archive
+    was a node (`unrouted_merge`), so such a change stays at archive cleanup's exit.
     """
     route: Route | None = None
     for entry in log:
@@ -521,10 +567,10 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
             elif entry.get("by") == "owner" and isinstance(entry.get("next"), Mapping):
                 route = Route(DIRECTED, entry, entry["next"])
             continue
-        if step not in STEPS:
+        if step not in STEPS or unrouted_merge(entry, log):
             continue
         if route is not None and route.how == DIRECTED and route.node is not None \
-                and graph.NODES[route.node].runs and not ran(route.node, entry):
+                and graph.NODES[route.node].runs and not ran(route.node, entry, log):
             # A direction stands until a run of its node; a node no run is logged
             # for, as the round's reading, gives way to the next run of any step.
             continue
@@ -534,7 +580,7 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
             if entry.get("outcome") == "finished":
                 route = Route(NO_EXIT, entry)
             continue
-        source = _run_node(entry)
+        source = _run_node(entry, log)
         if source is None:
             route = Route(NO_EXIT, entry)
         elif source == VALIDATE:
@@ -548,30 +594,44 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
     return route
 
 
+def _unread(entry: Mapping[str, Any]) -> bool:
+    """Whether a run's line carries what the orchestrating session reads before the
+    change moves on: denials, or refusals, alike (CW-jqi7)."""
+    return bool(entry.get("denials") or entry.get("refusals"))
+
+
 def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
     """The owner result for a step whose last run waits on the owner, if it does.
 
-    A stopped run waits, its denials on the result, until a decision resolves it
-    or its resumed run supersedes it; its reading alone settles nothing, since
-    the resume is refused for a resolved run. Any other run whose denials are
-    not yet `read` waits for their reading first, whatever its outcome: a run
-    can be denied a call and still ask a question or propose a return, and the
-    reading answers neither, so the question or return waits after it as it
-    would without the denial.
+    A stopped run waits, its denials and refusals on the result, until a decision
+    resolves it or its resumed run supersedes it; its reading alone settles
+    nothing, since the resume is refused for a resolved run. Any other run whose
+    denials or refusals are not yet `read` waits for their reading first, whatever
+    its outcome: a run can be denied a call, or refused a write, and still ask a
+    question or propose a return, and the reading answers neither, so the question
+    or return waits after it as it would without them.
     """
     step, outcome = entry.get("step"), entry.get("outcome")
+    recorded = {"denials": entry.get("denials", []),
+                **({"refusals": entry["refusals"]} if entry.get("refusals") else {})}
     if outcome == "stopped":
-        return _owner(f"the {step} step stopped: {entry.get('reason', '')}",
-                      denials=entry.get("denials", []))
-    if (denials := entry.get("denials")) and not read:
+        return _owner(f"the {step} step stopped: {entry.get('reason', '')}", **recorded)
+    if _unread(entry) and not read:
         waits = {"question": "question", "returned": "return", "blocked": "block"}.get(outcome)
-        return _owner(f"the {step} step ended {outcome} but was denied {len(denials)} tool "
-                      "call(s): read them against its rules and record the reading"
+        counts = " and ".join(
+            f"{len(entry[key])} {noun}" for key, noun in (
+                ("denials", "denied tool call(s)"), ("refusals", "refusal(s)"))
+            if entry.get(key))
+        return _owner(f"the {step} step ended {outcome} with {counts}: read each as a "
+                      "finding or a gap and record the reading"
                       + (f"; its {waits} waits after that" if waits else ""),
-                      denials=denials, outcome=outcome)
+                      **recorded, outcome=outcome)
     if outcome == "question":
+        # A reviewer is never resumed, its final message being taken for another
+        # review, so a review's question is the owner's to settle by their direction.
         return _owner(f"the {step} step asks: {entry.get('message', '')}",
-                      awaiting=entry.get("awaiting"), resume=step)
+                      awaiting=entry.get("awaiting"),
+                      **({"resume": step} if step != "review" else {}))
     if outcome == "returned":
         target = _exit_of(entry)
         return _owner(f"the {step} step proposes returning to "
@@ -595,7 +655,7 @@ class Computation:
                  bootstrap: Callable[[Path], Bootstrap] = bootstrap_state,
                  merging: Callable[[Path], bool] = _merging,
                  join: Join = ROUND_JOIN,
-                 inert_paths: Callable[[Path], Sequence[str] | None] = _inert_paths) -> None:
+                 inert_paths: Callable[[Path], Sequence[str]] = _inert_paths) -> None:
         self.root = root
         self.state = State(change)
         # Read once, and checked whole as the configuration always is: a malformed
@@ -636,15 +696,24 @@ class Computation:
             refuse_newer(f"{state.change}'s workflow log", state.log)
         except StepError as exc:
             return self.unclassified(str(exc))
-        if is_archived(self.root, state.directory) and (
-                state.row is None or state.row.status == "archived"):
-            return {"step": "done", "reason": "archived" if state.row else
-                    "archived, and its index row pruned"}
         # Before a branch decision is read: no line is routed on past one this
         # engine cannot read.
         if unknown := self.undeclared():
             return unknown
-        if located := self.locate():
+        archived = is_archived(self.root, state.directory)
+        if archived:
+            # A change with a live clone is computed there, where its log is current
+            # and the owner's direction is written; otherwise `done` is answered from
+            # the route before the branch checked out is read, since an archived
+            # change without a clone has landed and its branch is rarely checked out.
+            if in_clone := self.locate_clone():
+                return in_clone
+            if done := self.archived_done():
+                return done
+            located = None if state.workspace is not None else self.locate_branch()
+        else:
+            located = self.locate()
+        if located:
             return located
         if state.view is not None:
             # While a view is open the branch sits at the round's base, so nothing
@@ -654,6 +723,10 @@ class Computation:
                 "the round as the next NN-implementation-owner.md, then run "
                 "`make round-done`", round_view=state.view.change)
         if state.row is None:
+            if archived:
+                return _owner(f"{state.change} is archived and its route names a step to run, "
+                              f"but {INDEX} has no row for it: the owner restores the row as "
+                              "archive cleanup left it, or settles the route")
             return self.unclassified(f"{INDEX} has no row for {state.change}")
         if unconverted := self.unconverted():
             return unconverted
@@ -762,6 +835,16 @@ class Computation:
         its clone. In a clone, the workspace's view of the change is read through
         the clone's `workspace` remote.
         """
+        if (found := self.locate_clone()) is not None or self.state.workspace is not None:
+            return found
+        return self.locate_branch()
+
+    def locate_clone(self) -> Result | None:
+        """`locate`'s reading of clones: the change's clone, when the change is
+        worked in one and this checkout is not it; the owner, in a clone of another
+        change. None otherwise — in the change's own clone, with `state.workspace`
+        set to the workspace it was made from, and in a checkout the change has no
+        clone of."""
         state = self.state
         view = state.view
         if view is not None and view.clone and view.change == state.change:
@@ -787,6 +870,15 @@ class Computation:
                 return self.clone_step(f"{clone} was left unfinished",
                                        {"CHANGE": state.change})
             return self.in_clone(clone, "it is worked in its own clone")
+        return None
+
+    def locate_branch(self) -> Result | None:
+        """`locate`'s reading of the branch checked out, in a checkout the change has
+        no clone of: None when it is the change's branch, or one the owner's decision
+        says it is worked on; otherwise the owner, for a change whose records are
+        here, or the clone to create."""
+        state = self.state
+        view = state.view
         branch = self._branch(self.root)
         if branch and (branch == default_branch(state.change)
                        or branch_decisions(state.log, branch, state.change)):
@@ -800,11 +892,34 @@ class Computation:
                 f"{state.change}'s branch is not checked out here, but its records are in "
                 "this workspace's reviews/, which a clone would start without: check out "
                 f"its branch here and go on in the workspace, or move it into a clone by "
-                "hand as docs/agents/change-workflow.md describes",
+                "hand as docs/change-workflow-handbook.md describes",
                 routes=["work it in the workspace", "move it into a clone by hand"])
         return self.clone_step(
             f"{state.change}'s branch is checked out neither here nor in a clone of its own",
             {"CHANGE": state.change, "BRANCH": default_branch(state.change)})
+
+    def archived_done(self) -> Result | None:
+        """`done` for an archived change while its route ends at archive cleanup's
+        exit to `done`, that exit's guard met, or while it has no log, as for a change
+        archived before the log existed; None when the route names a step to run, as
+        after the owner's direction to the merge after the archive, or archive
+        cleanup's first exit finding the landing branch moved. The row is not read: a
+        pruned row changes nothing while the change is done."""
+        state = self.state
+        done = {"step": DONE.step, "reason": "archived" if state.row else
+                "archived, and its index row pruned"}
+        if not state.log:
+            return done
+        route = route_of(state.log, self._join)
+        if route is None or route.how != EXIT or route.source != ARCHIVE_CLEANUP:
+            return None
+        try:
+            if node_of(route.target or {}) != DONE:
+                return None
+        except TargetError:
+            return None
+        (exit_,) = graph.exits(ARCHIVE_CLEANUP, target=DONE)
+        return None if self.guarded(exit_, route.target or {}, {"run": route.line}) else done
 
     def in_clone(self, clone: Path, why: str) -> Result:
         return {"step": "in-clone", "clone": str(clone),
@@ -852,13 +967,13 @@ class Computation:
     def route(self) -> Result:
         state = self.state
         status = state.row.status if state.row else ""
-        if status == "archived":
-            return {"step": "done", "reason": "archived"}
         if status == "deferred":
             return _owner(f"deferred: {state.notes}")
         if status.startswith("blocked in"):
             return _owner(f"{status}: {state.notes}")
-        phase = _phase(status)
+        # An archived change routed past `done` — the merge after the archive, its
+        # review, archive cleanup again — is in closeout's steps.
+        phase = "closeout" if status == "archived" else _phase(status)
         if phase is None:
             return self.unclassified(f"status {status!r} names no phase")
         if waiting := self.dependencies(phase):
@@ -1021,7 +1136,8 @@ class Computation:
         `line`: a session of it may be open, or may have ended without recording."""
         runs = graph.NODES[node].runs
         if runs is None or node == ROUND or any(
-                entry["seq"] > line["seq"] and ran(node, entry) for entry in self.state.log):
+                entry["seq"] > line["seq"] and ran(node, entry, self.state.log)
+                for entry in self.state.log):
             return ""
         return ("; no run of it is logged since: if no session of it is open, an interactive "
                 "one ended without recording — resume it, or record its outcome with "
@@ -1126,14 +1242,15 @@ class Computation:
     # The round.
 
     def sections_problem(self) -> Result | None:
-        """Why the task list cannot be routed on: it has no sections, or a task sits
-        under another section's heading. The skills check the task list before
+        """Why the task list cannot be routed on: it has no sections, a task sits
+        under another section's heading, or its closeout section is missing,
+        repeated, or not its last. The skills check the task list before
         acting on it; this is the backstop for routing on its sections, since a
         list missing a heading would have whole sections repeated or skipped."""
         state = self.state
         if not state.sections:
             return self.unclassified("the task list has no sections")
-        if problems := task_problems(state.tasks):
+        if problems := task_problems(state.tasks) + closeout_problems(state.tasks):
             return self.unclassified("the task list is malformed: " + "; ".join(problems))
         return None
 
@@ -1154,6 +1271,12 @@ class Computation:
         already complete. A round naming a section the task list lacks goes to the
         owner before anything is recorded: the mapping no longer describes the plan,
         and a round line naming it would leave the round unclassifiable.
+
+        While the latest round is still open — a plan amended mid-round, after a
+        return to design or planning — the round named is recorded as a
+        continuation of it (`log.note_round`), and the result says so: `continues`
+        names the open round's seq and `base` its commit, which the round's
+        reading, validation, and review start from.
         """
         open_ids = [s.id for s in self.state.sections if not s.closeout and not s.complete]
         if not open_ids:
@@ -1177,9 +1300,19 @@ class Computation:
                                       + ", ".join(unknown), round=open_ids)
                     sessions = [kept for session in round_
                                 if (kept := [s for s in session if str(s) in open_ids])]
+                    reason = (f"the plan's next round (seq {plan['seq']}): record it as it "
+                              "starts, then implement it")
+                    if (open_ := open_round(self.state.log)) is None:
+                        return {"step": "round", "sections": sessions, "by": "plan",
+                                "reason": reason}
+                    base = open_.get("commit")
+                    since = f"since {base[:12]}" if base else "since its base"
                     return {"step": "round", "sections": sessions, "by": "plan",
-                            "reason": f"the plan's next round (seq {plan['seq']}): record "
-                                      "it as it starts, then implement it"}
+                            "continues": open_["seq"], **({"base": base} if base else {}),
+                            "reason": f"{reason}; recorded while the round at seq "
+                                      f"{open_['seq']} is open, it continues that round, "
+                                      "whose reading, validation, and review cover "
+                                      f"everything committed {since}"}
         return _owner("agree the next implementation round: which sections, and how many "
                       "sessions; the plan maps none", round=open_ids)
 
@@ -1216,8 +1349,11 @@ class Computation:
         review are no evidence that the owner read the round.
         """
         state = self.state
-        mine = [r for r in state.records if r.number > current.get("after", 0)]
-        kinds = {r.review_kind or r.kind for r in mine}
+        own = [r for r in state.records if r.number > current.get("after", 0)]
+        # Notes the round carries are triaged with it but are not its reading.
+        carried = set(current.get("carries") or ())
+        mine = [r for r in state.records if r.number in carried and not r.triaged] + own
+        kinds = {r.review_kind or r.kind for r in own}
         in_clone = state.workspace is not None
         base = again.reviewed_commit if again and self.fixed_since(again) else None
         if again is None:
@@ -1280,7 +1416,11 @@ class Computation:
         if unknown := [s for s in round_sections if s not in by_id]:
             return self.unclassified(f"the agreed round names sections the task list lacks: "
                                      f"{', '.join(unknown)}")
-        if ROUND in members:
+        # A review awaiting its triage is triaged before the round's open sections
+        # are implemented: its findings may change what is left to do.
+        awaiting = any(r.review_kind == "implementation" and not r.triaged
+                       for r in state.records if r.number > current.get("after", 0))
+        if ROUND in members and not awaiting:
             for session in current["sections"]:
                 # The closeout section is closeout's, never a round's to implement.
                 if any(not by_id[str(s)].complete and not by_id[str(s)].closeout
@@ -1366,23 +1506,24 @@ class Computation:
 
         A question is answered by resuming its session; a returned, blocked, or
         stopped run is decided by the owner or the orchestrating session; none is
-        routed past by running the step afresh. A run that went on past a denial
-        waits first for the orchestrating session's reading of it, an
-        `orchestrator` line that `reads` the run, and then for its outcome's
-        answer or decision as any other. A decision line names the run it
-        resolves, and only that run stops waiting: a decision about one step's
-        run says nothing about another's, and a line that resolves a run counts
-        as having read it. A design that ended blocked on a prerequisite is the
-        prerequisite rules', not this one's, once its denials, if any, are read.
+        routed past by running the step afresh. A run that went on past a denial or
+        a refusal, which wait alike, waits first for the orchestrating session's
+        reading of it, an `orchestrator` line that `reads` the run, and then for
+        its outcome's answer or decision as any other. A decision line names the
+        run it resolves, and only that run stops waiting: a decision about one
+        step's run says nothing about another's, and a line that resolves a run
+        counts as having read it. A design that ended blocked on a prerequisite is
+        the prerequisite rules', not this one's, once its denials and refusals, if
+        any, are read.
 
-        A question, return, block, or stop without unread denials waits only in
-        `phases`, the phase it was raised in — the status's, or that of the step
-        the log routes to: a crashed design triage must not hold implementation.
-        Unread denials wait whatever the phase, since the step
-        that recorded them may be the one that moved the change on — a design
-        triage that advances sets the status to the next phase in the same run —
-        and the reading is owed before any step runs; a stopped run with
-        denials waits, in any phase, until a line resolves it or its resumed run
+        A question, return, block, or stop without unread denials or refusals waits
+        only in `phases`, the phase it was raised in — the status's, or that of the
+        step the log routes to: a crashed design triage must not hold
+        implementation. Unread denials and refusals wait whatever the phase, since
+        the step that recorded them may be the one that moved the change on — a
+        design triage that advances sets the status to the next phase in the same
+        run — and the reading is owed before any step runs; a stopped run with
+        either waits, in any phase, until a line resolves it or its resumed run
         supersedes it as its step's latest. The result names the waiting run's
         `seq`, which a resume must give.
         """
@@ -1406,7 +1547,7 @@ class Computation:
                 continue
             latest[name] = entry
         waiting = [(entry["seq"], result) for entry in latest_any.values()
-                   if entry.get("denials")
+                   if _unread(entry)
                    and entry["seq"] not in (resolved if entry.get("outcome") == "stopped"
                                             else read)
                    and (result := _waiting(entry, read=False))]
@@ -1428,6 +1569,19 @@ class Computation:
         return any(e.get("outcome") == ORCHESTRATOR and e.get("by") == "owner"
                    and e.get("resolves") == run.get("seq")
                    and isinstance(e.get("next"), Mapping) for e in self.state.log)
+
+    def landing_moved(self, run: Mapping[str, Any]) -> bool:
+        """Whether archive cleanup's `run` is the first of its runs to finish, and its
+        line records a landing commit the log's writer found its commit does not
+        contain. Only the line is read, never a ref: a later run's exit, a line with
+        no landing, and one written before the writer recorded containment all read
+        as checked. A run that stopped, as on a failed fetch, took no exit, so the
+        rerun that finishes is still the first."""
+        first = next((entry for entry in self.state.log
+                      if entry.get("step") == graph.ARCHIVE_CLEANUP.step
+                      and entry.get("outcome") == "finished"), None)
+        return (first is not None and first.get("seq") == run.get("seq")
+                and isinstance(run.get("landing"), Mapping) and run.get(CONTAINED) is False)
 
     def validated(self, why: str, exempt: str = graph.RECORDS,
                   failed: Node | None = None) -> Result | None:

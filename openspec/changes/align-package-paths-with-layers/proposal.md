@@ -1,8 +1,8 @@
 ## Why
 
-`docs/development/ARCHITECTURE.md` makes a package's place in the tree its
+`docs/guidance/repository/package-layers.md` makes a package's place in the tree its
 declaration of layer and scope. Most of the tree already conforms. Ten projects do
-not, and `ARCHITECTURE.md`'s "Where the current tree diverges" names them first
+not, and `package-layers.md`'s "Where the current tree diverges" names them first
 because they are the ones where the directory says something false:
 
 - `provisioning/compute` and its four distributions (`ansible`, `contracts`,
@@ -102,7 +102,7 @@ None.
   locks, and change documents. Most are the root `Makefile`, `core/Makefile`,
   `domains/Makefile`, `.github/workflows/tests.yml`, and
   `.github/workflows/publish-pypi.yml`, which each reference several.
-- `docs/agents/domain.md` and `CONTEXT.md` describe the platform context as
+- The domain docs and `CONTEXT.md` describe the platform context as
   `core/`, `kit/`, and `provisioning/`; the context's membership is unchanged but
   its directories are.
 - Wheels, locks, and images are unaffected in content; `make check-packaging`
@@ -123,8 +123,8 @@ None.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — the moved projects leave "Where the
-      current tree diverges"; the path conventions gain the roles directory name.
+- [x] `docs/guidance/repository/package-layers.md` — the moved projects leave "Where
+      the current tree diverges"; the path conventions gain the roles directory name.
 - [x] Existing subsystem specification — `deployment-state` for the image layout.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
@@ -132,6 +132,8 @@ None.
 ### Knowledge to promote
 
 - The directory conventions, including the roles directory and the vocabulary
-  placement decided here — `docs/development/ARCHITECTURE.md#package-and-dependency-layers`.
-- `docs/development/BUILD_AND_PACKAGING.md` and `docs/agents/domain.md` for the
-  new layout.
+  placement decided here — `docs/guidance/repository/package-layers.md`, and the
+  vocabulary package's description in `docs/development/ARCHITECTURE.md`'s "Package
+  and dependency layers".
+- `docs/guidance/repository/project-layout.md` and `images.md`, and the domain docs
+  (since removed), for the new layout.

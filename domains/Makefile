@@ -1,23 +1,28 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
+export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath ../build-constraints.txt)),$(error ../build-constraints.txt not found))
 
-.PHONY: test dist dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: test dist dist-release dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+# The domains' part of the release set: every domains-scoped wheel but the API-credit
+# sample app, the demo API the end-to-end harness drives, which no operator installs.
+dist-release: dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
-	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
-	dist-buyer ## Build every domains-scoped wheel
+	dist-apicredits-middleware dist-apicredits-buyer \
+	dist-buyer ## Build every domains-scoped wheel the release set carries
 
-test: test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-provisioning-adapter test-provisioning-iac
+dist: dist-release dist-apicredits-sample-app ## Build every domains-scoped wheel
+
+test: test-storefront test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-provisioning-adapter test-provisioning-iac
 
 # ---------------------------------------------------------------------------
 # Dist -- leaf wheel-build recipes for domains/-scoped packages, mirroring
@@ -25,8 +30,10 @@ test: test-storefront test-bare-metal test-compute test-vms-domain test-vms-buye
 # (e.g. kit/ wheels, provisioning/compute's wheel) are NOT expressed here --
 # this Makefile has no business knowing about siblings outside domains/;
 # they are declared on the root Makefile's `dist-domains` aggregate, which
-# builds them before invoking this directory's `dist` target. Only prerequisites between two
-# targets both defined in this file are expressed here.
+# builds them before invoking this directory's `dist-release` target; the root
+# `dist-apicredits-sample-app` invokes that leaf alone, as it needs no sibling's
+# wheel to build. Only prerequisites between two targets both defined in this
+# file are expressed here.
 # ---------------------------------------------------------------------------
 
 # The compute-family vocabulary every compute domain binds; built first so a
@@ -36,6 +43,13 @@ dist-compute: ## Build arkhai-compute wheel into .dist/
 	cd compute && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+# The compute family's delivery library: the delivery order behind domain ports.
+dist-compute-delivery: ## Build arkhai-compute-delivery wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd compute/delivery && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_delivery-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-delivery produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-vms: dist-compute ## Build arkhai-vms wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -133,7 +147,7 @@ dist-apicredits-buyer: dist-apicredits-domain ## Build arkhai-apicredits-buyer w
 	@ls $(DIST_DIR)/arkhai_apicredits_buyer-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-buyer produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-buyer: dist-vms-listings dist-vms-negotiation dist-vms-settlement ## Build arkhai-vms-buyer (the `market` CLI) wheel into .dist/
+dist-buyer: dist-vms-listings dist-vms-negotiation dist-vms-settlement ## Build arkhai-vms-buyer (the VM buyer domain of the `market` CLI) wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd vms/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_vms_buyer-*-none-any.whl > /dev/null 2>&1 || \
@@ -162,6 +176,9 @@ test-bare-metal: test-bare-metal-iac ## Bare-metal domain, storefront, buyer, an
 
 test-compute: ## Compute-family vocabulary package tests
 	cd compute && $(MAKE) test
+
+test-compute-delivery: ## Compute-family delivery library tests
+	cd compute/delivery && $(MAKE) test
 
 test-vms-domain: ## VM market-domain package tests
 	cd vms/domain && $(MAKE) test

@@ -7,6 +7,7 @@ executor hands the runner (the job's parameters and its registered host).
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,7 +32,7 @@ _HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={"ssh_host": "10.0.0.7", "ssh_port": 2201, "ssh_user": "ops", "key_path": "/k"},
     ),
 )
@@ -69,6 +70,7 @@ def _run(**parameters) -> JobRun:
         action=parameters.get("action", "grant"),
         host=_HOST,
         parameters={"action": "grant", "host_id": "node-1", **parameters},
+        report_starting=lambda: None,
         report_handle=lambda handle: None,
         report_logs=lambda logs: None,
     )
@@ -223,6 +225,24 @@ class TestGate:
 
 
 class TestExecutorIntegration:
+    async def test_a_mock_job_does_not_consult_the_registered_host_pin(self):
+        host = replace(
+            _HOST,
+            connection=ConnectionEnvelope(
+                "ssh", 3, public={**_HOST.connection.public, "host_keys": ["invalid stored pin"]},
+            ),
+        )
+        run = replace(_run(), host=host)
+        executor = AnsibleJobExecutor(
+            MockAnsibleRunner(default_output=_default), _EchoCodec(), Path("/p.yaml"),
+            timeout_seconds=5,
+        )
+
+        outcome = await executor.execute(run)
+
+        assert isinstance(outcome, JobSuccess)
+        assert outcome.result.value["stdout"] == "DEFAULT grant 10.0.0.7"
+
     def test_the_executor_reports_the_mocks_rules(self):
         runner = MockAnsibleRunner(default_output=_default)
         executor = AnsibleJobExecutor(runner, _EchoCodec(), Path("/p.yaml"), timeout_seconds=5)
@@ -256,6 +276,7 @@ class TestExecutorIntegration:
         run = JobRun(
             job_id="job-1", offering_mode="test", action="grant", host=_HOST,
             parameters={"action": "grant", "host_id": "node-1"},
+            report_starting=lambda: None,
             report_handle=handles.append, report_logs=lambda logs: None,
         )
 

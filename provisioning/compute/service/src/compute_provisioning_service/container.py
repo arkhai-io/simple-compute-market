@@ -13,6 +13,7 @@ from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning import JobExecutorTable
 from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.route_service import HostKeyProbe
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.submission import JobSubmissionService
@@ -24,11 +25,13 @@ from compute_provisioning_ansible import (
     ansible_readiness_component,
     probe_connectivity,
 )
+from compute_provisioning_ansible.probes import describe_host_pins, scan_host_key
 from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.relays import (
     DEFAULT_GRANT_EXPIRY_GRACE,
     DEFAULT_PORT_REUSE_MARGIN,
+    RelayDeliverableHosts,
     RelayExecutionResolver,
     RelayPortAllocator,
     RelayReconciliationSchedule,
@@ -63,7 +66,7 @@ from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
 from compute_provisioning.jobs.queue import AsyncJobQueue
-from compute_provisioning import ReleaseEffects, compose_adapter_bundles
+from compute_provisioning import ReleaseEffects, TeardownRerunPolicy, compose_adapter_bundles
 from compute_provisioning_service.services.deal_event_sink import (
     SqlAlchemyCapacityReleaseOutbox,
     StorefrontLifecycleEventSink,
@@ -217,6 +220,7 @@ def _make_host_authority(session_factory, codecs):
         codecs=codecs,
         pool_change_hooks=host_pool_change_hooks(codecs),
         connection_change_hooks=host_connection_change_hooks(codecs),
+        pin_fields={SshConnectionCodec.kind: "host_keys"},
     )
 
 
@@ -265,13 +269,23 @@ def _make_probe_runner(cfg):
     return AnsibleRunner(cfg)
 
 
-def _make_connectivity_probes(runner) -> Mapping[str, Any]:
+def _make_connectivity_probes(runner, host_authority) -> Mapping[str, Any]:
     """Each connection kind's probe; the Ansible implementation probes ``ssh``."""
 
     async def probe_ssh(host):
-        return await probe_connectivity(runner, host)
+        return await probe_connectivity(
+            runner, host, adopt_host_key=host_authority.adopt_host_key
+        )
 
     return MappingProxyType({SSH_CONNECTION_KIND: probe_ssh})
+
+
+def _make_host_key_probes(runner) -> Mapping[str, HostKeyProbe]:
+    if issubclass(type(runner), AnsibleRunner):
+        return MappingProxyType({
+            SSH_CONNECTION_KIND: HostKeyProbe(describe_pins=describe_host_pins, scan=scan_host_key)
+        })
+    return MappingProxyType({})
 
 
 def _make_job_engine(session_factory, job_executors, host_authority, cfg):
@@ -280,6 +294,20 @@ def _make_job_engine(session_factory, job_executors, host_authority, cfg):
         session_factory,
         executors=job_executors,
         host_lookup=host_authority.lookup,
+        retry_policy=retry_policy_from(cfg),
+    )
+
+
+def _make_teardown_rerun_policy(cfg) -> TeardownRerunPolicy:
+    """The one rerun policy both domains' providers dispatch by and the release
+    status reads, so whether a rerun is pending is judged alike by both.
+
+    Spaced by the job retry policy. A negative ``teardown_rerun_limit`` is
+    refused, naming the setting; startup composes the providers and the
+    release status, so the refusal stops the service.
+    """
+    return TeardownRerunPolicy(
+        teardown_rerun_limit=int(cfg.teardown_rerun_limit),
         retry_policy=retry_policy_from(cfg),
     )
 
@@ -435,20 +463,26 @@ class Container(containers.DeclarativeContainer):
 
     connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
 
-    # Declared ahead of the ledger and the scheduling unit of work: both read
-    # its report of the hosts taking new delivery, the same object, in the
-    # session that decides.
     host_authority = providers.Singleton(
         _make_host_authority,
         session_factory=session_factory,
         codecs=connection_codecs,
     )
 
+    # Declared ahead of the ledger and the scheduling unit of work: both read
+    # this report of the hosts taking new delivery, the same object, in the
+    # session that decides. It is the host authority's, less the hosts of every
+    # pool on a disabled relay, so a relay's drain keeps new deliveries off it.
+    deliverable_hosts = providers.Singleton(
+        RelayDeliverableHosts,
+        hosts=host_authority,
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
         host_requirement=host_requirement,
-        deliverable_hosts=host_authority,
+        deliverable_hosts=deliverable_hosts,
         # "gpu_count" is this domain's alias for the generic "units" claim
         # key and the dimension its legacy scalar mirrors — kept explicit here
         # rather than hardcoded in kit/site so the ledger stays domain-neutral.
@@ -472,8 +506,9 @@ class Container(containers.DeclarativeContainer):
     probe_runner = providers.Singleton(_make_probe_runner, cfg=config)
 
     connectivity_probes = providers.Singleton(
-        _make_connectivity_probes, runner=probe_runner
+        _make_connectivity_probes, runner=probe_runner, host_authority=host_authority
     )
+    host_key_probes = providers.Singleton(_make_host_key_probes, runner=probe_runner)
 
     job_engine = providers.Singleton(
         _make_job_engine,
@@ -482,6 +517,8 @@ class Container(containers.DeclarativeContainer):
         host_authority=host_authority,
         cfg=config,
     )
+
+    teardown_rerun_policy = providers.Singleton(_make_teardown_rerun_policy, cfg=config)
 
     # Every job, a fulfillment's or an operator's, is submitted through this.
     job_submission = providers.Singleton(
@@ -518,6 +555,7 @@ class Container(containers.DeclarativeContainer):
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
         connection_codecs=connection_codecs,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
 
     ansible_service = providers.Callable(
@@ -548,12 +586,15 @@ class Container(containers.DeclarativeContainer):
 
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
+        adopt_host_key=providers.Callable(_runtime_value, runtime=host_authority,
+                                         name=providers.Object("adopt_host_key")),
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
         connection_codecs=connection_codecs,
         job_engine=job_engine,
         job_submission=job_submission,
         config=config,
+        teardown_rerun_policy=teardown_rerun_policy,
     )
     bare_metal_mock_executor = providers.Callable(
         _runtime_value,
@@ -606,7 +647,7 @@ class Container(containers.DeclarativeContainer):
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
         repository=settlement_repository,
-        deliverable_hosts=host_authority,
+        deliverable_hosts=deliverable_hosts,
     )
 
     physical_settlement_scheduler = providers.Singleton(
@@ -655,6 +696,8 @@ class Container(containers.DeclarativeContainer):
         FulfillmentReleaseStatusPort,
         settlement_repository=settlement_repository,
         session_factory=session_factory,
+        rerun_policy=teardown_rerun_policy,
+        jobs=job_engine,
     )
 
     fulfillment_unit_of_work = providers.Singleton(
@@ -768,6 +811,7 @@ resolved_definition_documents: "tuple[Any, ...] | None" = None
 resolved_background_tasks: "tuple[Any, ...] | None" = None
 resolved_host_authority: "HostAuthority | None" = None
 resolved_connectivity_probes: Mapping[str, Any] | None = None
+resolved_host_key_probes: Mapping[str, HostKeyProbe] | None = None
 resolved_vm_operations_service: Any | None = None
 resolved_host_operations_service: Any | None = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None

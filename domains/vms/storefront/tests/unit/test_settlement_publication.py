@@ -145,6 +145,10 @@ def _composition(
             configuration_registry=registry,
             settlement_config=config,
             mechanism_resources={},
+            delivery_deadline_for_pool=lambda _site, _pool: None,
+            rate_preset_helpers={},
+            rate_servicing=SimpleNamespace(require_option=lambda _option: None),
+            default_penalty_periods=24,
             disputes=RegistryDisputePolicy.from_document({}),
             seller_stages=_STAGES,
         ),
@@ -337,6 +341,44 @@ async def test_builder_validation_error_fails_the_listing(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("pool_deadline", [900, None], ids=["pool", "none"])
+async def test_the_pool_port_s_deadline_for_the_candidate_reaches_the_option_builder(
+    monkeypatch, pool_deadline,
+) -> None:
+    """The composition looks the pool's deadline up for the candidate's site and
+    pool and hands it, or ``None``, to the option builder with the compute flag.
+    What a builder does with ``None`` is its mechanism's, tested there."""
+    composition, _calls = _composition(
+        priority=("example.payment.v1",), example_ready=True, alkahest_ready=False,
+        alkahest_enabled=False,
+    )
+    lookups: list[tuple[str, str | None]] = []
+
+    def deadline(site: str, pool: str | None) -> int | None:
+        lookups.append((site, pool))
+        return pool_deadline
+
+    composition.delivery_deadline_for_pool = deadline
+    built: list[dict] = []
+    monkeypatch.setattr(
+        composition.configuration_registry, "build_option",
+        lambda *_args, resources, **_kwargs: built.append(dict(resources)) or {},
+    )
+
+    await VmSettlementComposition.publication_artifacts(
+        composition,
+        {"origin": "site-a", "pool_id": "pool-1"},
+        clauses=[SettlementPublicationClause(
+            mechanism="example.payment.v1", asset="usd", rate="2", per="hour",
+        )],
+    )
+
+    assert lookups == [("site-a", "pool-1")]
+    (resources,) = built
+    assert (resources["compute"], resources["delivery_deadline_seconds"]) == (True, pool_deadline)
+
+
+@pytest.mark.asyncio
 async def test_clause_chain_is_available_during_alkahest_preflight() -> None:
     calls: list[str] = []
     registry = SettlementConfigurationRegistry(
@@ -359,6 +401,10 @@ async def test_clause_chain_is_available_during_alkahest_preflight() -> None:
         configuration_registry=registry,
         settlement_config=config,
         mechanism_resources={},
+        delivery_deadline_for_pool=lambda _site, _pool: None,
+        rate_preset_helpers={},
+        rate_servicing=SimpleNamespace(require_option=lambda _option: None),
+        default_penalty_periods=24,
         disputes=RegistryDisputePolicy.from_document({}),
         seller_stages=_STAGES,
     )

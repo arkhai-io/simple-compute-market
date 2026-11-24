@@ -32,6 +32,8 @@ from compute_provisioning_contracts import (
     HostCreate,
     HostDefinitionsImportRequest,
     HostDefinitionsImportResponse,
+    HostKeyCaptureRequest,
+    HostKeyCaptureResponse,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -59,6 +61,7 @@ from compute_provisioning_contracts import (
     RelayTokenRotate,
     RelayUpdate,
     SystemStatusResponse,
+    TimeSettingResponse,
     VersionResponse,
     WorkerPauseResponse,
 )
@@ -248,6 +251,15 @@ def _text(payload: Any) -> str:
     return payload
 
 
+def _capture_host_key(host_id: str, fingerprint: str, replace: bool) -> _Call:
+    return _Call(
+        "POST",
+        f"/api/v1/hosts/{host_id}/host-keys/capture",
+        HostKeyCaptureRequest(fingerprint=fingerprint, replace=replace),
+        parse=_model(HostKeyCaptureResponse),
+    )
+
+
 def _export_hosts() -> _Call:
     return _Call("GET", "/api/v1/hosts/definitions/export", parse=_text)
 
@@ -371,6 +383,15 @@ def _convergence_cycle(step: str) -> _Call:
 
 def _worker_pause(path: str) -> _Call:
     return _Call("POST", path, {}, parse=_model(WorkerPauseResponse))
+
+
+def _set_time(now: int) -> _Call:
+    # ``now`` is sent as given: the service alone judges the value, refusing
+    # anything but an integer instant (422 ``invalid_time``) and an instant
+    # earlier than its own (409 ``time_moves_forward``).
+    return _Call(
+        "POST", "/api/v1/system/time", {"now": now}, parse=_model(TimeSettingResponse)
+    )
 
 
 def _version() -> _Call:
@@ -688,6 +709,13 @@ class ComputeProvisioningClient(SigningBase):
         """Whether the host's connection is reachable; an unreachable host is a result, not an error."""
         return await self._run(_connectivity(host_id), request_id)
 
+    async def capture_host_key(
+        self, host_id: str, fingerprint: str, *, replace: bool = False,
+        request_id: str | None = None,
+    ) -> HostKeyCaptureResponse:
+        """Pin the verified fingerprint observed at the registered SSH endpoint."""
+        return await self._run(_capture_host_key(host_id, fingerprint, replace), request_id)
+
     async def export_hosts(self, *, request_id: str | None = None) -> str:
         """The registry as a host definitions document's YAML text, with no secret."""
         return await self._run(_export_hosts(), request_id)
@@ -801,6 +829,15 @@ class ComputeProvisioningClient(SigningBase):
 
     async def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
         return await self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
+
+    async def set_time(self, now: int, *, request_id: str | None = None) -> TimeSettingResponse:
+        """Set an injected service's time to ``now``, in Unix seconds.
+
+        Signed at this process's instant, which an injected service admits
+        outside the signing skew for this operation alone; a wall-time service
+        mounts no such route.
+        """
+        return await self._run(_set_time(now), request_id)
 
     async def rotate_trusted_principal(
         self, role: str, rotation: RotationRequest, *, request_id: str | None = None
@@ -1025,6 +1062,13 @@ class SyncComputeProvisioningClient(SigningBase):
         """See ``ComputeProvisioningClient.check_connectivity``."""
         return self._run(_connectivity(host_id), request_id)
 
+    def capture_host_key(
+        self, host_id: str, fingerprint: str, *, replace: bool = False,
+        request_id: str | None = None,
+    ) -> HostKeyCaptureResponse:
+        """See the asynchronous client's host-key capture method."""
+        return self._run(_capture_host_key(host_id, fingerprint, replace), request_id)
+
     def export_hosts(self, *, request_id: str | None = None) -> str:
         """See ``ComputeProvisioningClient.export_hosts``."""
         return self._run(_export_hosts(), request_id)
@@ -1136,6 +1180,10 @@ class SyncComputeProvisioningClient(SigningBase):
 
     def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
         return self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
+
+    def set_time(self, now: int, *, request_id: str | None = None) -> TimeSettingResponse:
+        """See ``ComputeProvisioningClient.set_time``."""
+        return self._run(_set_time(now), request_id)
 
     def rotate_trusted_principal(
         self, role: str, rotation: RotationRequest, *, request_id: str | None = None

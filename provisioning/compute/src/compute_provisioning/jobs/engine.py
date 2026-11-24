@@ -15,6 +15,13 @@ state, result, or credentials (its logs are still recorded, to show what the
 cancelled execution did), and a cancellation requested before the executor
 reported a handle is passed to the executor as soon as the handle arrives.
 
+The engine records two instants from the process's time source:
+``execution_started_at``, committed when the executor reports it is about to
+start, before it starts anything, and kept from a job's first start; and
+``finished_at``, stamped on the transition to any terminal status. A job that
+failed, was not cancelled, and records ``finished_at`` but neither a start nor
+a handle therefore never started an execution.
+
 The in-process ``AsyncJobQueue`` owns concurrency and dispatch; this engine's
 ``process_job`` is the handler it runs.
 """
@@ -25,10 +32,12 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import update
+import injected_time
+from sqlalchemy import DateTime, func, literal, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -52,6 +61,62 @@ logger = logging.getLogger(__name__)
 HostLookup = Callable[[str], ExecutionHost | None]
 
 _UNSET = object()
+
+
+def _utcnow() -> datetime:
+    """The process time source's instant as a job's retry time is stored: UTC
+    with no zone. A retry time is stored and compared later, so it is an
+    instant of the time of the world, not a duration of the engine's own."""
+    return injected_time.now_datetime().replace(tzinfo=None)
+
+
+def _first_start():
+    """A job's recorded start once set, else the process source's instant now.
+
+    Written inside the conditional ``UPDATE`` itself, so a retry's later start
+    never moves the instant its first start recorded.
+    """
+    return func.coalesce(
+        JobRecord.execution_started_at, literal(_utcnow(), DateTime(timezone=True))
+    )
+
+
+@dataclass(frozen=True)
+class BoundJob:
+    """One job bound to a reservation under a contract action, as the job
+    authority's own record answers for it. Not a wire view."""
+
+    job_id: str
+    status: str
+    #: The job failed, was not cancelled, and records ``finished_at`` but
+    #: neither a start nor a handle, so its execution never started. A job
+    #: with no ``finished_at`` is never so classified: no start was recorded
+    #: for it before it could act on its host.
+    never_started: bool
+    #: When it reached a terminal status, in UTC; ``None`` while it runs, and
+    #: for a job whose finish was never recorded.
+    finished_at: datetime | None
+
+
+def _never_started(job: JobRecord) -> bool:
+    return (
+        job.status == JobStatus.failed.value
+        and job.execution_started_at is None
+        and not job.execution_handle
+        and job.finished_at is not None
+    )
+
+
+def _utc(instant: datetime | None) -> datetime | None:
+    """A stored instant as an aware UTC datetime; SQLite returns it naive."""
+    if instant is None or instant.tzinfo is not None:
+        return instant
+    return instant.replace(tzinfo=timezone.utc)
+
+
+class JobNotRunningError(RuntimeError):
+    """A job's start was reported after it stopped running: it was cancelled
+    since the engine claimed it, so its executor must start nothing."""
 
 
 class JobIdentityConflictError(ValueError):
@@ -174,7 +239,7 @@ class JobEngine:
         clears ``next_retry_at`` (so the next sweep cannot claim the job again)
         and enqueues it. Returns the number re-enqueued.
         """
-        now = datetime.utcnow()
+        now = _utcnow()
         with self._session_factory() as db:
             due = (
                 db.query(JobRecord)
@@ -244,6 +309,42 @@ class JobEngine:
                 total=total,
                 offset=offset,
                 limit=limit,
+            )
+
+    def bound_jobs(
+        self, capacity_reservation_id: str, action_kind: str
+    ) -> tuple[BoundJob, ...]:
+        """Every job bound to a reservation under ``action_kind``, oldest first.
+
+        Unpaginated, unlike the listing, because a caller deciding from them
+        needs them all, and only a reservation's own jobs under one action are
+        read. Jobs are ordered by creation instant; two created in one instant
+        are ordered by their idempotency key, shorter first, so keys numbered
+        in sequence under a common prefix (``…:teardown``, ``…:teardown:rerun-1``,
+        ``…:teardown:rerun-10``) keep their order.
+        """
+        with self._session_factory() as db:
+            jobs = (
+                db.query(JobRecord)
+                .filter(
+                    JobRecord.capacity_reservation_id == capacity_reservation_id,
+                    JobRecord.action_kind == action_kind,
+                )
+                .order_by(
+                    JobRecord.created_at.asc(),
+                    func.length(JobRecord.idempotency_key).asc(),
+                    JobRecord.idempotency_key.asc(),
+                )
+                .all()
+            )
+            return tuple(
+                BoundJob(
+                    job_id=job.id,
+                    status=job.status,
+                    never_started=_never_started(job),
+                    finished_at=_utc(job.finished_at),
+                )
+                for job in jobs
             )
 
     def get_job(self, job_id: str) -> JobStatusResponse:
@@ -329,7 +430,11 @@ class JobEngine:
                         (JobStatus.queued.value, JobStatus.running.value)
                     ),
                 )
-                .values(status=JobStatus.cancelled.value, error="Job cancelled by user")
+                .values(
+                    status=JobStatus.cancelled.value,
+                    error="Job cancelled by user",
+                    finished_at=_utcnow(),
+                )
                 .execution_options(synchronize_session=False)
             ).rowcount
             db.commit()
@@ -374,7 +479,7 @@ class JobEngine:
             if job.status != JobStatus.queued.value:
                 # Cancelled (or otherwise finished) before it started.
                 return
-            if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
+            if job.next_retry_at and _utcnow() < job.next_retry_at:
                 # The retry scheduler re-enqueues it once the delay elapses.
                 return
             logger.info(
@@ -415,6 +520,25 @@ class JobEngine:
 
             loop = asyncio.get_running_loop()
 
+            def report_starting() -> None:
+                # Committed before the executor starts anything, and only while
+                # the job is still running: unlike a handle, which arrives once
+                # the execution already runs, a start reported for a job
+                # cancelled since its claim must stop the executor, so it
+                # raises. A failed write raises too. Either way nothing is
+                # started, and the attempt ends through the internal-error path
+                # below, which leaves a cancelled job cancelled.
+                if not self._transition(
+                    db,
+                    job,
+                    expected=(JobStatus.running.value,),
+                    status=JobStatus.running.value,
+                    execution_started_at=_first_start(),
+                ):
+                    raise JobNotRunningError(
+                        f"job {job_id} is {job.status}, so its execution is not started"
+                    )
+
             def report_handle(handle: Mapping[str, Any]) -> None:
                 stored = self._transition(
                     db,
@@ -435,6 +559,7 @@ class JobEngine:
                 action=str(job.executor_action),
                 host=host,
                 parameters=dict(job.params),
+                report_starting=report_starting,
                 report_handle=report_handle,
                 report_logs=self._log_writer(job_id),
             ))
@@ -460,7 +585,7 @@ class JobEngine:
 
             message = outcome.error.message
             if job.retry_count < job.max_retries and outcome.error.retryable:
-                next_retry_at = datetime.utcnow() + timedelta(
+                next_retry_at = _utcnow() + timedelta(
                     seconds=self._retry_policy.delay_seconds(job.retry_count)
                 )
                 if self._transition(
@@ -525,6 +650,7 @@ class JobEngine:
         error: object = _UNSET,
         logs: object = _UNSET,
         execution_handle: object = _UNSET,
+        execution_started_at: object = _UNSET,
         retry_count: object = _UNSET,
         next_retry_at: object = _UNSET,
         credentials: tuple[CredentialEnvelope, ...] = (),
@@ -535,7 +661,12 @@ class JobEngine:
         the job on (cancelled it, above all) the update matches no row, nothing
         is written, and ``False`` is returned. Credentials are written in the
         same transaction, so they land only with the transition that reports
-        them. ``job`` is reloaded either way.
+        them. A transition to a terminal status stamps ``finished_at`` from the
+        process's time source in the same statement; every terminal transition
+        expects ``queued`` or ``running``, so a job finishes, and is stamped,
+        once. ``updated_at`` takes the database's clock and moves on every
+        write, so it cannot say when a job finished. ``job`` is reloaded either
+        way.
         """
         values: dict[str, object] = {"status": status}
         for name, value in (
@@ -543,11 +674,14 @@ class JobEngine:
             ("error", error),
             ("logs", logs),
             ("execution_handle", execution_handle),
+            ("execution_started_at", execution_started_at),
             ("retry_count", retry_count),
             ("next_retry_at", next_retry_at),
         ):
             if value is not _UNSET:
                 values[name] = value
+        if status in TERMINAL_JOB_STATUSES:
+            values["finished_at"] = _utcnow()
         applied = db.execute(
             update(JobRecord)
             .where(JobRecord.id == job.id, JobRecord.status.in_(expected))
@@ -627,6 +761,8 @@ class JobEngine:
             max_retries=job.max_retries,
             next_retry_at=job.next_retry_at,
             capacity_reservation_id=job.capacity_reservation_id,
+            execution_started_at=job.execution_started_at,
+            finished_at=job.finished_at,
         )
 
 
@@ -639,4 +775,10 @@ def _repeat(existing: JobRecord, params: dict[str, Any], identity: str) -> JobSu
         )
     return JobSubmitResponse(job_id=existing.id, status=existing.status)
 
-__all__ = ["HostLookup", "JobEngine", "JobIdentityConflictError"]
+__all__ = [
+    "BoundJob",
+    "HostLookup",
+    "JobEngine",
+    "JobIdentityConflictError",
+    "JobNotRunningError",
+]

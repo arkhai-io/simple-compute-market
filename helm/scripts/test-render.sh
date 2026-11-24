@@ -157,7 +157,7 @@ DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/
 # its Deployment holds the signer Secret, the mounts and the resolver variables.
 DEFAULT_REGISTRY="$(extract_section "$DEFAULT_RENDERED" 'registry/templates/configmap\.yaml')"
 DEFAULT_PROVISIONING_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'provisioning/templates/configmap\.yaml')"
-DEFAULT_TEST_CONFIG="$(extract_section "$DEFAULT_RENDERED" 'templates/tests/test-config\.yaml')"
+DEFAULT_HELM_PROFILE="$(extract_section "$DEFAULT_RENDERED" 'templates/tests/helm-profile\.yaml')"
 TWO_REGISTRIES_COMPUTE="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/configmap\.yaml')"
 TWO_REGISTRIES_COMPUTE_DEPLOYMENT="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/deployment\.yaml')"
 TWO_REGISTRIES_CREDITS="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/api-credits-registry/templates/configmap\.yaml')"
@@ -217,9 +217,9 @@ expect_present "$PAYMENTS_REGISTRY" 'https://dispute.example' "registry retains 
 expect_present "$DEFAULT_REGISTRY" "^ +REGISTRY_FILTER_SPEC_PATH='/app/filter-spec\.yaml'$" "default registry selects the compute filter specification"
 expect_absent "$DEFAULT_RENDERED" 'api-credits-registry' "default render omits the API-credits registry"
 expect_present "$DEFAULT_PROVISIONING_CONFIGMAP" '"identifier": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"' "provisioning keeps EIP-191 identifiers as strings"
-expect_present "$DEFAULT_TEST_CONFIG" '"identifier": "0x90f79bf6eb2c4f870365e785982e1f101e93b906"' "smoke-test profile keeps EIP-191 identifiers as strings"
+expect_present "$DEFAULT_HELM_PROFILE" '"identifier": "0x90f79bf6eb2c4f870365e785982e1f101e93b906"' "helm profile keeps EIP-191 identifiers as strings"
 
-expect_present "$CHART_DIR/../core/registry/filter-spec.yaml" 'id: +compute\.market' "compute filter specification declares compute.market"
+expect_present "$CHART_DIR/../core/registry/src/core_registry/filter-spec.yaml" 'id: +compute\.market' "compute filter specification declares compute.market"
 expect_present "$CHART_DIR/../domains/apicredits/registry/filter-spec.yaml" 'id: +api_credits' "API-credits filter specification declares api_credits"
 expect_present "$TWO_REGISTRIES_COMPUTE_DEPLOYMENT" 'name: +'"$RELEASE"'-registries-registry' "dual render names the compute workload independently"
 expect_present "$TWO_REGISTRIES_COMPUTE" "^ +REGISTRY_FILTER_SPEC_PATH='/app/filter-spec\.yaml'$" "dual render selects the compute filter specification"
@@ -315,8 +315,30 @@ for refused in host_definitions_path relay_definitions_path inventory_path inven
         fail "$label"
     fi
 done
-# Each chart's own render tests (docs/development/TESTING.md, "Chart Render
-# Tests"), so this one target runs every render check. The storefront and
+# Mock provisioning, the default, names no SSH key Secret and mounts none. Real
+# provisioning mounts the Secret a release names, and the umbrella's own schema
+# refuses a release naming none, before the subchart's schema or template does.
+expect_absent "$(extract_section "$DEFAULT_RENDERED" 'provisioning/templates/deployment\.yaml')" \
+    'ssh-key|id_ed25519' "default mock provisioning mounts no SSH key"
+REAL_PROVISIONING="$(helm template "$RELEASE-real" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set provisioning.mockMode=false \
+    --set provisioning.sshKey.secretName=site-ssh 2>&1)" || true
+expect_present "$(extract_section <(printf '%s\n' "$REAL_PROVISIONING") 'provisioning/templates/deployment\.yaml')" \
+    'secretName: site-ssh' "real provisioning mounts the SSH key Secret its release names"
+label="real provisioning naming no SSH key Secret fails render in the umbrella's schema"
+if refusal="$(helm template "$RELEASE-invalid" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set provisioning.mockMode=false 2>&1 >/dev/null)"; then
+    fail "$label"
+elif grep -q '^arkhai-node-operator:' <<<"$refusal" \
+    && grep -q "at '/provisioning/sshKey/secretName'" <<<"$refusal"; then
+    pass "$label"
+else
+    fail "$label"
+fi
+# Each chart's own render tests (docs/guidance/repository/chart-render-tests.md,
+# "Where they live and how they run"), so this one target runs every render check. The storefront and
 # bare-metal storefront charts' tests also load a rendered document with that
 # storefront's own loader when its environment exists (make init-storefront;
 # make -C domains/bare_metal/storefront init); without it they say so and skip.
@@ -331,6 +353,11 @@ fi
 # The registry chart's rendered profile is read with the registry's own loader
 # when its environment exists (make init-arkhai-core-registry); without it the
 # check says so and skips.
+PROVISIONING_ENV_PYTHON="$CHART_DIR/../provisioning/compute/service/.venv/bin/python"
+if [[ -z "${PROVISIONING_PYTHON:-}" && -x "$PROVISIONING_ENV_PYTHON" ]]; then
+    export PROVISIONING_PYTHON="$PROVISIONING_ENV_PYTHON"
+fi
+
 REGISTRY_ENV_PYTHON="$CHART_DIR/../core/registry/.venv/bin/python"
 if [[ -z "${REGISTRY_PYTHON:-}" && -x "$REGISTRY_ENV_PYTHON" ]]; then
     export REGISTRY_PYTHON="$REGISTRY_ENV_PYTHON"

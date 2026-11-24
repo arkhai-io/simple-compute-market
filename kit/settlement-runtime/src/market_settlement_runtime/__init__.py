@@ -108,15 +108,7 @@ from .servicing import (
     SettlementServicingWorker,
     TerminalCallback,
 )
-from .sqlite_repository import (
-    SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID,
-    SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,
-    SETTLEMENT_MIGRATION_ID,
-    SETTLEMENT_PRINCIPAL_MIGRATION_ID,
-    SettlementMigration,
-    SettlementSQLiteRepository,
-    settlement_migrations,
-)
+from .sqlite_repository import SettlementSQLiteRepository
 
 __all__ = [
     "DeliveryStatusHook",
@@ -131,10 +123,6 @@ __all__ = [
     "SETTLEMENT_CONFIG_SCHEMA_VERSION",
     "AcceptedObligationArtifacts",
     "AcceptedObligationBuilder",
-    "SETTLEMENT_MIGRATION_ID",
-    "SETTLEMENT_AWAITING_DELIVERY_MIGRATION_ID",
-    "SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID",
-    "SETTLEMENT_PRINCIPAL_MIGRATION_ID",
     "CompiledSettlementClause",
     "ComparisonOperator",
     "BuyerCompatibilityHook",
@@ -181,7 +169,6 @@ __all__ = [
     "MANUAL_REASON_KEY",
     "SettlementManualRequired",
     "SettlementOperationConflict",
-    "SettlementMigration",
     "SettlementObligationRecord",
     "SettlementOperationOutcome",
     "SettlementOperationRecord",
@@ -200,7 +187,6 @@ __all__ = [
     "canonical_json",
     "derive_obligation_ref",
     "obligation_payload_hash",
-    "settlement_migrations",
     "settlement_operation_ref",
     "compile_settlement_publication_clause",
     "parse_settlement_publication_clause",

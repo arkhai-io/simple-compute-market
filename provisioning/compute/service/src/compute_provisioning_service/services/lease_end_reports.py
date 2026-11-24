@@ -1,9 +1,9 @@
 """Event-keyed signed report delivery, independent of proven capacity release."""
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 from typing import Literal
 
+import injected_time
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, sign_lease_end
 from market_identity import Signer, canonical_json
 from sqlalchemy.orm import Session
@@ -60,7 +60,7 @@ class LeaseEndReports:
             with self.session_factory() as db:
                 row = db.get(LeaseEndReportOutbox, event_id)
                 row.attempt_count += 1
-                row.last_attempted_at = datetime.now(timezone.utc)
+                row.last_attempted_at = injected_time.now_datetime()
                 row.last_error = None if result == "delivered" else result
                 if result == "delivered":
                     row.delivered_at = row.last_attempted_at

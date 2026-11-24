@@ -17,8 +17,9 @@ Two parts, neither tied to a domain:
 - **Per-observation outcome.** A qualification module makes several of the
   runbook's observations
   (``docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes``),
-  and a pytest run that passes with a skipped stage has not run every check an
-  observation requires. So a qualification module names its observations
+  a live verification module (``scenarios/vms/live/``) the one its lane twin's
+  input yields, and a pytest run that passes with a skipped stage has not run
+  every check an observation requires. So such a module names its observations
   (``OBSERVATIONS``, or ``CYCLE_OBSERVATIONS`` for a module run once per
   cycle), each of its stages requires them unless its class declares its own
   (``stage_observations``), and once the module's last stage has reported, the
@@ -257,6 +258,8 @@ class RegistrationSnapshot:
     quarantined: tuple[QuarantinedPort, ...] = ()
     #: The relay's ports with an unreleased owner.
     active_ports: tuple[int, ...] = ()
+    #: The target hosts' management SSH pins, compared without logging key material.
+    host_pins: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 def _utc(moment: datetime) -> datetime:
@@ -284,8 +287,9 @@ def registration_faults(
 ) -> list[str]:
     """How reapplying ``name``'s registration and a publication cycle changed it.
 
-    Nothing may be duplicated or dropped: one host row, one declaration, one
-    listing, each as it was, the listing's identity, state and pause intact.
+    Nothing may be duplicated or dropped: one host row, one declaration, and
+    all existing listings, including closed history, with each identity, state
+    and pause intact.
     Every port quarantined before stays quarantined until its grant expires,
     with no new owner, and its lease record unchanged: the same owner, grant
     expiry and release time. Matching the lease by identity alone would let
@@ -297,15 +301,23 @@ def registration_faults(
     claim that a live tenancy survives.
     """
     faults = []
-    for kind, rows in (("host", after.hosts), ("capacity declaration", after.declarations),
-                       ("listing", after.listings)):
-        if len(rows) != 1:
-            faults.append(f"{name}: {len(rows)} {kind}s after reapplying, where one was: {rows}")
+    for kind, rows, expected in (
+        ("host", after.hosts, 1), ("capacity declaration", after.declarations, 1),
+        ("listing", after.listings, max(1, len(before.listings))),
+    ):
+        if len(rows) != expected:
+            faults.append(
+                f"{name}: {len(rows)} {kind}s after reapplying, expected {expected}: {rows}"
+            )
     for kind, was, now_is in (("hosts", before.hosts, after.hosts),
                               ("capacity declarations", before.declarations, after.declarations),
                               ("listings", before.listings, after.listings)):
         if was != now_is:
             faults.append(f"{name}: {kind} changed from {was} to {now_is}")
+    if before.host_pins != after.host_pins:
+        faults.append(f"{name}: management SSH pins changed")
+    if any(not pins for _, pins in after.host_pins):
+        faults.append(f"{name}: management SSH host is unpinned after reapplying")
     kept = {port.lease_id: port for port in after.quarantined}
     for port in before.quarantined:
         if port.grant_expires_at <= now:
@@ -327,8 +339,9 @@ def registration_faults(
 # Per-observation outcome
 # ===========================================================================
 
-#: The class attribute a qualification stage declares the observations
-#: requiring it by: the runbook's observation numbers, as strings.
+#: The class attribute a stage declares the observations requiring it by: a
+#: qualification stage's are the runbook's observation numbers, as strings; a
+#: live verification stage's are named, as its module's ``OBSERVATIONS`` are.
 OBSERVATIONS_ATTRIBUTE = "observations"
 
 StageOutcome = Literal["passed", "failed", "skipped"]

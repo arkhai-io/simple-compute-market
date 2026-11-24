@@ -10,6 +10,12 @@ the runner's environment. The buyer reads its key from the variable its
 configuration's ``api_key_env`` names, so the harness hands the key to each
 buyer it runs under that name: to a ``market`` process in its environment, and
 to an in-process payments client as the environment it resolves the key from.
+
+A lane's payments double also holds a second payer, PAYMENTS.RATE_PAYER_ACCOUNT
+with its key PAYMENTS.RATE_PAYER_API_KEY, funded with nothing at start, so a
+scenario can give a payer exactly the balance it needs, as funds running out
+does; the shared buyer's balance is far larger than any deal spends. The key
+handed to a buyer is the one the run states for the payer it pays from.
 """
 
 import os
@@ -20,7 +26,10 @@ from typing import Any
 
 import httpx
 import pytest
-from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentsClient, payments_client_for_owner
+from market_arkhai_payments import (
+    ArkhaiPaymentsConfig, ArkhaiPaymentsConfigurationError, PaymentsClient,
+    payments_client_for_owner, resolve_payments_api_key,
+)
 from market_identity import Identity, IdentityScheme
 
 from e2e_harness.settings import settings
@@ -100,22 +109,26 @@ def target_ready(
     url: str,
     *,
     ca_bundle: str | None = None,
+    proxy: str | None = None,
     get: Callable[..., Any] = httpx.get,
 ) -> bool:
-    """Whether the payments service at `url` reports itself ready.
+    """Whether the service at `url`, a payments or mediation target, reports
+    itself ready.
 
-    Environment proxies are never used: the probe asks the target itself. A CA
-    bundle, such as a lane's CA for its payments double, is the only trust the
-    probe has, just as the payments client trusts it alone. A bundle that cannot
-    be loaded leaves the target not ready, as the payments client could not
-    reach it either.
+    Environment proxies are never used: the probe asks the target itself, or
+    through `proxy` alone when the run names one for the target. A CA
+    bundle, such as a lane's CA for its doubles, is the only trust the probe
+    has, just as the service's client trusts it alone. A bundle that cannot be
+    loaded leaves the target not ready, as the client could not reach it
+    either.
     """
     try:
         # ssl.SSLError, a malformed bundle, is an OSError like a missing one.
         verify: ssl.SSLContext | bool = (
             ssl.create_default_context(cafile=ca_bundle) if ca_bundle else True
         )
-        health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify)
+        through = {"proxy": proxy} if proxy else {}
+        health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify, **through)
         return health.status_code == 200 and health.json().get("status") == "ok"
     except (httpx.HTTPError, ValueError, OSError):
         return False
@@ -158,6 +171,11 @@ def configured_payments(
     )
     if not config.development_auth and not config.api_key_env:
         pytest.fail("PAYMENTS.API_KEY_ENV is required without DEVELOPMENT_AUTH")
+    if not config.development_auth:
+        try:
+            resolve_payments_api_key(config, environment=buyer_payments_environment(config))
+        except ArkhaiPaymentsConfigurationError:
+            pytest.fail("PAYMENTS.BUYER_API_KEY is missing or unusable", pytrace=False)
     if ready is None:
         ready = partial(target_ready, ca_bundle=config.ca_bundle_path)
     if not ready(url):
@@ -167,11 +185,38 @@ def configured_payments(
     return config
 
 
-def buyer_payments_environment(config: ArkhaiPaymentsConfig) -> dict[str, str]:
-    """The buyer's bearer key under the variable its configuration names, for
-    the buyer processes and clients the harness runs; empty when the run states
-    no key or the buyer uses development authentication."""
-    key = str(payment_setting("BUYER_API_KEY"))
+def live_payments(*, ready: Callable[[str], bool] | None = None) -> ArkhaiPaymentsConfig:
+    """The payments target of a live verification scenario, as
+    ``configured_payments`` gives it, unless it is a lane's own.
+
+    A lane-owned target (PAYMENTS.LANE_OWNED) is a payments double, which
+    yields no live evidence, so the scenario is a blocked skip naming it
+    before anything else is read.
+    """
+    if payment_flag("LANE_OWNED"):
+        target = payment_setting(_TARGET_KEY) or "(none named)"
+        pytest.skip(f"blocked: the payments target {target} is a lane's own double "
+                    "(PAYMENTS.LANE_OWNED), which yields no live evidence")
+    return configured_payments(ready=ready)
+
+
+def payer_api_key(payer: str | None) -> str:
+    """The bearer key the run states for ``payer``: the rate payer's for
+    PAYMENTS.RATE_PAYER_ACCOUNT, and the buyer's for any other payer or none."""
+    rate_payer = str(payment_setting("RATE_PAYER_ACCOUNT"))
+    if payer and rate_payer and payer == rate_payer:
+        return str(payment_setting("RATE_PAYER_API_KEY"))
+    return str(payment_setting("BUYER_API_KEY"))
+
+
+def buyer_payments_environment(
+    config: ArkhaiPaymentsConfig, payer: str | None = None,
+) -> dict[str, str]:
+    """The bearer key of ``payer`` (``payer_api_key``) under the variable the
+    buyer's configuration names, for the buyer processes and clients the
+    harness runs; empty when the run states no key or the buyer uses
+    development authentication."""
+    key = payer_api_key(payer)
     if config.development_auth or not config.api_key_env or not key:
         return {}
     return {config.api_key_env: key}
@@ -183,13 +228,13 @@ def buyer_payments_client(
     *,
     transport: httpx.BaseTransport | None = None,
 ) -> PaymentsClient:
-    """A payments client acting as the buyer account `owner`, its key resolved
+    """A payments client acting as the payer account `owner`, its key resolved
     from `buyer_payments_environment` over the runner's own environment, so a
     key the settings state needs no variable in the runner's process."""
     return payments_client_for_owner(
         config,
         owner,
-        environment={**os.environ, **buyer_payments_environment(config)},
+        environment={**os.environ, **buyer_payments_environment(config, owner)},
         transport=transport,
     )
 

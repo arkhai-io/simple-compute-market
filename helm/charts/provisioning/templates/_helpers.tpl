@@ -18,9 +18,6 @@
 {{- define "provisioning.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{ include "provisioning.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
@@ -37,9 +34,6 @@ labels but never that one: selecting a workload's pods by its selector, as
 */}}
 {{- define "provisioning.testLabels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: test
@@ -66,7 +60,8 @@ Supports an optional global.imageRepository passed down from the parent chart.
 {{- end }}
 
 {{/*
-Resolve the required pre-existing Secret name for the SSH private key.
+Resolve the pre-existing Secret name for the SSH private key, which real
+provisioning requires; the Deployment mounts the key only without mockMode.
 */}}
 {{- define "provisioning.sshKeySecretName" -}}
 {{- required "provisioning.sshKey.secretName must reference a pre-existing Secret" .Values.sshKey.secretName -}}
@@ -193,13 +188,13 @@ not expose root helper templates reliably inside dependency charts. */}}
 {{- $config := $smoke.config | default dict -}}
 {{- if $config.profileFiles -}}
 {{- range $profile := keys $config.profileFiles | sortAlpha }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $profile }}.yml
   subPath: config-{{ $profile }}.yml
   readOnly: true
 {{- end -}}
 {{- else if $config.profile }}
-- name: test-config
+- name: helm-profile
   mountPath: /app/config/config-{{ $config.profile }}.yml
   subPath: config-{{ $config.profile }}.yml
   readOnly: true

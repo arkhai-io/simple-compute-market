@@ -4,8 +4,8 @@ FROM ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION}
 
 USER root
 
-#Added curl for health checks
-RUN apt-get update && apt-get install -y curl
+# Health checks probe Anvil with the image's own `cast`, so the build installs
+# no packages and needs no package mirror.
 
 COPY ./state /state
 

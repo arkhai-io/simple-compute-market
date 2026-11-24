@@ -21,6 +21,7 @@ name collision with the published `apicredits_middleware`.
 from __future__ import annotations
 
 import pytest
+from arkhai_apicredits.settlement import credits_client as storefront_credits_client
 
 from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
 
@@ -117,6 +118,19 @@ def test_storefront_operations_exist_and_admit_the_seller_role(contracts):
         contract = contracts[operation]
         assert sf.STOREFRONT_ROLE in contract.allowed_roles, operation
         assert contract.path_resource == path_resource, operation
+
+
+def test_the_operator_s_status_and_time_admit_the_administrator_alone(contracts):
+    """The storefront client's status and time calls, signed as `admin`, the
+    one role their contracts admit; neither binds a resource."""
+    sf = storefront_credits_client
+    for operation in (sf.SYSTEM_STATUS_OPERATION, sf.SYSTEM_TIME_OPERATION):
+        assert operation in contracts, sorted(contracts)
+        contract = contracts[operation]
+        assert contract.permits(sf.ADMIN_ROLE), operation
+        assert not contract.permits(sf.STOREFRONT_ROLE), operation
+        assert not contract.permits("service"), operation
+        assert contract.path_resource is None and contract.body_resource is None
 
 
 def test_issuance_signs_the_optional_body_resource(contracts):

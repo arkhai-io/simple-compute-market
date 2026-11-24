@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from change_workflow import (cli, clone, cost_report, diagram, find, graph, history, hook, index,
-                             next_step, push, round_view, skills, tasks)
+                             next_step, propose, push, round_view, skills, tasks)
 from change_workflow.common import NotInRepository, repository_root
 
 PACKAGE = Path(__file__).resolve().parents[1] / "change_workflow"
@@ -87,6 +87,7 @@ def test_outside_any_repository_the_root_is_refused_naming_the_directory(
     lambda: cli.main(["log", "a-change"]),
     lambda: clone.main(["create", "a-change"]),
     lambda: history.main(["sync", "a-change"]),
+    lambda: propose.main(["a-change", "a-prerequisite"]),
     lambda: round_view.main(["check"]),
     lambda: cost_report.main(["a-change"]),
     lambda: index.main(),
@@ -112,14 +113,16 @@ def test_the_steps_and_kinds_are_those_the_graph_declares() -> None:
     assert graph.STEPS == tuple(dict.fromkeys(d.runs for d in graph.TABLE if d.runs))
     assert set(graph.STEPS) == {"design", "plan", "review", "triage", "implement", "validate",
                                 "merge", "closeout", "archive-cleanup"}
-    assert graph.KINDS == ("design", "implementation", "pre-closeout", "closeout")
+    assert graph.KINDS == ("design", "implementation", "pre-closeout", "closeout", "merge")
     assert set(graph.KINDS) == {node.kind for node in graph.NODES if node.step == "review"}
 
 
 def test_the_phase_a_step_is_compared_in_is_read_from_the_graph() -> None:
+    # The merge runs in two nodes, before closeout and after the archive, so like a
+    # review or a triage it has no one phase.
     assert next_step._STEP_PHASE == {
         "design": "design", "plan": "planning", "implement": "implementation",
-        "validate": "implementation", "merge": "implementation", "triage": None,
+        "validate": "implementation", "merge": None, "triage": None,
         "review": None, "closeout": "closeout", "archive-cleanup": "closeout"}
 
 

@@ -3,13 +3,13 @@
 ## Purpose
 
 Define how this repository runs the change workflow (`change-workflow`): how it
-provides each role the workflow asks of an adopting repository; the parts its
-validation has — local, Helm, the end-to-end pipeline, and CI — and what each
+provides each role the workflow asks of an adopting repository; the evidence kinds
+its validation has — local, Helm, the end-to-end pipeline, and CI — and what each
 builds and compares; the isolation of each change's Helm validation in a namespace
 of its own, under its change's image tag, and the memory those namespaces share;
 and its workflow values — its protected branches, the pre-push check its guarded
-push runs, the branch a change lands on, the models it forbids, and a clone's
-bootstrap.
+push runs, the branch a change lands on, the models it prefers for each step, and a
+clone's bootstrap.
 
 Requirements are organized by `index.md`; their order here carries no meaning.
 
@@ -20,13 +20,13 @@ Requirements are organized by `index.md`; their order here carries no meaning.
 This repository's configuration, `.agents/workflow.toml`, MUST declare the fields the
 workflow defines, and this repository MUST state how it provides each role the
 configuration does not hold: the make target, path, or document that fills it. Every
-make target and repository path the workflow's skills and step table name MUST appear
-in that statement or in the configuration.
+make target and repository path the workflow's make fragment names MUST appear in
+that statement or in the configuration; the workflow's skills name none.
 
 #### Scenario: The local validation role
 
 - **WHEN** a reader looks up how this repository validates a commit locally
-- **THEN** the configuration's `local` validation part names `make validate-local`
+- **THEN** the configuration's `local` evidence kind names `make validate-local`
 
 #### Scenario: The protected branches role
 
@@ -35,7 +35,7 @@ in that statement or in the configuration.
 
 ### Requirement: MCW-v3tf Validation builds the packages it tests from the commit
 
-Each part of this repository's validation that builds MUST build the internal
+Each evidence kind of this repository's validation that builds MUST build the internal
 packages it tests from the commit under validation, never from wheels another branch
 left in the shared wheelhouse.
 
@@ -87,8 +87,8 @@ the owner.
 
 - **WHEN** the run validation dispatched is cancelled by a newer dispatch on the same
   branch
-- **THEN** the part produced no evidence for an environmental reason, which goes to
-  the owner with its remedy, and the part is rerun on the owner's word
+- **THEN** the kind has no evidence for an environmental reason, which goes to the
+  owner with its remedy, and the kind is gathered again on the owner's word
 
 ### Requirement: MCW-7hr1 An owed job is judged from the commit's own run
 
@@ -174,15 +174,15 @@ Helm, never as passed.
 
 #### Scenario: A deploy fails on volumes left by an earlier install
 
-- **WHEN** the Helm part finds a release volume that survived the uninstall, or a
+- **WHEN** the Helm kind finds a release volume that survived the uninstall, or a
   deploy fails on persistent state another commit wrote
-- **THEN** validation tells the owner the evidence and the remedy, reruns the part
+- **THEN** validation tells the owner the evidence and the remedy, gathers the kind
   as a new attempt once the owner has acted or named the action, and the failure is
   not a triage finding
 
 ### Requirement: MCW-fnuh Each Helm validation deploys into its change's namespace under its change's tag
 
-Validation's Helm part MUST deploy into a namespace of its change's own, derived
+Validation's Helm kind MUST deploy into a namespace of its change's own, derived
 from the change's name, and MUST NOT install, upgrade, remove, or scale a release or
 volume in any other namespace. The images it deploys MUST carry a tag fixed per
 change, so that two changes' builds never write one tag; it MUST NOT tag them by
@@ -190,14 +190,14 @@ commit.
 
 #### Scenario: Two changes are validated at once
 
-- **WHEN** two changes' Helm parts run at the same time on one cluster
+- **WHEN** two changes' Helm kinds are gathered at the same time on one cluster
 - **THEN** each builds its own images under its own tags, deploys into its own
   namespace, and runs its scenarios against its own release, and neither removes,
   replaces, or reaches the other's
 
 ### Requirement: MCW-a0hu A Helm deployment starts from removed volumes and recreated Secrets
 
-Before deploying, the Helm part MUST remove every volume the change's previous
+Before deploying, the Helm kind MUST remove every volume the change's previous
 deployment wrote, including the volumes created for its tests out of band, and MUST
 create the namespace's out-of-band Secrets. It SHOULD upgrade the release in place
 from zero replicas, and MAY uninstall and install it when the upgrade is refused,
@@ -218,7 +218,7 @@ saying so.
 
 ### Requirement: MCW-notv The Helm scenarios run in the namespace, which is kept and scaled down
 
-The Helm part's scenarios MUST run inside the namespace and MUST NOT depend on a
+The Helm kind's scenarios MUST run inside the namespace and MUST NOT depend on a
 local port. After the scenarios it MUST keep every pod's log and the namespace's
 events with the attempt's evidence, and MUST scale the namespace's workloads to
 zero.
@@ -240,14 +240,14 @@ warn and go on.
 #### Scenario: Usage cannot be measured
 
 - **WHEN** the cluster has no metrics source
-- **THEN** the preflight warns that no memory figure will be recorded, and the part
+- **THEN** the preflight warns that no memory figure will be recorded, and the kind
   goes on
 
 #### Scenario: No memory figure is recorded yet
 
 - **WHEN** a validation's preflight runs before any archive cleanup has recorded
   the memory a release needs
-- **THEN** it warns that the check was skipped, and the part goes on
+- **THEN** it warns that the check was skipped, and the kind goes on
 
 ### Requirement: MCW-epkd A pod failing for memory is classified from the evidence
 
@@ -338,8 +338,17 @@ A change's closing checks MUST fail when a decision headed `D<n>` under its desi
 when a comment or docstring line its diff adds uses history wording on the check's
 list; when a package version differs from its version at the merge-base with the
 branch the change lands on by more than one SemVer step; when an import its diff adds
-inside a function has no comment giving its reason; or when a capability with a
-specification has no row in the capability index, or a row links no capability.
+inside a function has no comment giving its reason; when a capability with a
+specification has no row in the capability index, or a row links no capability; or
+when the guidance check, `make check-guidance`, fails. The guidance check MUST find
+every capability's guidance by its place, not its tags, and MUST fail, over every
+guidance file, on missing `tags`; on zero or several layer tags; on a tag
+in neither its layer's vocabulary table nor a lower one's; on a vocabulary row no file
+uses; on a malformed table; on an exception row citing no guidance file or naming an
+unknown kind; and on a link to a guidance file tagged with a higher layer. It MUST
+also fail when a citation of a guidance file — a Markdown link or a quoted path —
+carries an anchor that names no heading in that file, in any tracked Markdown file
+outside the archived changes and `docs/prompts/`.
 
 #### Scenario: A decision names no destination
 
@@ -374,6 +383,22 @@ specification has no row in the capability index, or a row links no capability.
 - **WHEN** `openspec/specs/<capability>/spec.md` exists and the capability index has
   no row linking it
 - **THEN** the closing checks fail, naming the capability
+
+#### Scenario: A guidance link's section moved
+
+- **WHEN** a skill links to a section of a guidance file by its anchor after that
+  section has moved to another guidance file
+- **THEN** the guidance check fails, naming the link and its missing anchor
+
+#### Scenario: An untagged capability guide
+
+- **WHEN** `openspec/specs/<capability>/testing.md` has no frontmatter
+- **THEN** the guidance check fails, naming the file
+
+#### Scenario: Engineering guidance links upward
+
+- **WHEN** a file tagged `engineering` links to a file tagged `repository`
+- **THEN** the guidance check fails, naming both files
 
 ### Requirement: MCW-s8gk The public-content checks refuse private keys and provider credentials
 
@@ -467,23 +492,38 @@ revision check fails on what it writes before it lands.
 
 ### Requirement: MCW-r4tx This repository's hooks and validation parts
 
-This repository's configuration MUST relock after a functional change; run its own
-closing checks, `make check-repository`, before every commit, while `make
-check-change` runs the workflow's whole `pre-commit` for the owner; before a
-functional commit, clear the wheelhouse, so that the packaging check builds every
-wheel from the commit and no suite tests a wheel another commit built, then check
-packaging and run every suite; check packaging and the
-change's architecture exceptions before the archive; and declare validation's
-pipeline, owed CI, local, and Helm parts, the Helm part after the local one, with a
-cleanup that records the capacity measured and removes the change's namespace and
-images.
+This repository's configuration MUST relock after a functional change; run `make
+check-repository` before every commit, while `make check-change` runs the workflow's
+whole `pre-commit` for the owner; before a functional commit, clear the wheelhouse,
+check packaging, and run every suite, leaving `local` evidence for the tree it
+tested; check packaging and the change's architecture exceptions before the archive;
+and declare the evidence kinds `local`, `helm` after it with a cleanup recording the
+capacity measured and removing the change's namespace and images, `pipeline`, and
+owed `ci`, each with its guide under `.agents/evidence/`; `local` and `helm` keep
+their evidence under `.snapshot/evidence/{tree}/`, and `pipeline` and `ci`, whose
+runs MCW-zk52 and MCW-7hr1 tie to the commit under validation and whose baseline
+MCW-2lzw chooses by its ancestry, under `.snapshot/evidence/{commit}/`, `ci`'s per
+owed workflow; each attempt is a directory named by its UTC start time.
 
-#### Scenario: Validation runs this repository's parts
+#### Scenario: Validation runs this repository's kinds
 
-- **WHEN** validation runs in this repository with no part waived and a complete
-  section owing `tests.yml`
-- **THEN** it starts the pipeline and the owed CI run, then runs the local part,
-  then the Helm part
+- **WHEN** validation of a commit runs in this repository with no kind waived, a
+  complete section owing `(ci tests.yml)`, and no evidence present for its tree or
+  commit
+- **THEN** the gathering starts the pipeline and the owed CI run, then runs the
+  local kind, then the Helm kind
+
+#### Scenario: Implementation's checks stand for the local kind
+
+- **WHEN** an implementation's functional checks pass for the tree it then commits
+- **THEN** validation of that commit finds the `local` kind present and gathers only
+  the others
+
+#### Scenario: A pipeline run for another commit with the same tree
+
+- **WHEN** a pipeline run's evidence exists for a commit whose message was since
+  amended, and the amended commit is validated
+- **THEN** the pipeline kind is missing for it and its own run is dispatched
 
 ### Requirement: MCW-k3vy The pre-push checks are one make target
 
@@ -497,14 +537,55 @@ public-content checks under Git's hook contract, and which both the configuratio
 - **THEN** the hook runs `make pre-push` with the remote, which runs both
   public-content checks the guarded push runs
 
+### Requirement: MCW-s4bx This repository's sandbox extensions
+
+This repository's configuration MUST give design and planning `docs/` beside their
+baseline scope, and every step the tool state its suites, builds, and deployments
+write outside the checkout, the review included, since none of it is a file the
+review reads: uv's Pythons and tools, the Kubernetes
+client's cache, the Google Cloud SDK's configuration, which refreshes its tokens,
+Docker's client configuration, and npm's cache, which the configured OpenSpec command
+writes. It MUST protect nothing beyond the engine's and the adapters' protected
+paths.
+
+#### Scenario: Design edits the roadmap
+
+- **WHEN** an unattended design run edits `docs/development/ROADMAP.md`
+- **THEN** the write succeeds, since the configuration gives design `docs/`
+
+#### Scenario: Implementation syncs an environment
+
+- **WHEN** an unattended implementation run's `uv sync` installs a Python under
+  `~/.local/share/uv`
+- **THEN** the write succeeds, since the configuration gives every writing step that
+  path
+
+#### Scenario: Design validates the change
+
+- **WHEN** an unattended design run runs `scripts/change-workflow openspec validate
+  <change> --strict`, whose `npx` writes npm's cache under `~/.npm`
+- **THEN** the write succeeds, since the configuration gives every writing step that
+  path
+
+#### Scenario: A review runs the repository's checks
+
+- **WHEN** an unattended review run runs `scripts/change-workflow run pre-commit
+  <change>` for evidence, whose OpenSpec check's `npx` writes npm's cache under
+  `~/.npm`
+- **THEN** the write succeeds, since the path lies outside the checkout and the
+  configuration gives it to every step
+
 ## Evidence
 
-- This repository's hooks, validation parts, protected branches, inert paths,
-  models, and documents to load: `.agents/workflow.toml`.
+- This repository's hooks, evidence kinds, protected branches, inert paths, models,
+  documents to load, and sandbox extensions: `.agents/workflow.toml`; each kind's guide:
+  `.agents/evidence/`.
 - How this repository provides each role the configuration does not hold, and meets
   each of the engine's own assumptions: `README.md`, held complete, with the
-  configuration's commands, for the targets and paths the skills, step table, and
-  make fragment name by `scripts/tests/test_change_workflow_assumptions.py`;
+  configuration's commands, for the targets and paths the make fragment names, by
+  `scripts/tests/test_change_workflow_assumptions.py`, which holds
+  the skills to naming none but the README's table of exemptions, each owned by an
+  open change (CW-n8tr);
   rationale and current limits: `README.md`; the requirements' organization:
   `index.md`.
 - Validation: `make validate-local`, `make validate-helm`, and `make validate-ci`
@@ -517,7 +598,7 @@ public-content checks under Git's hook contract, and which both the configuratio
   targets; manual access: `make -C helm forward` and `make -C helm resume`;
   teardown: `make -C helm teardown`; the memory one release needs:
   `helm/validation-capacity.toml`, written by `make record-capacity`; two clones'
-  Helm parts at once: `make validate-parallel` (`scripts/validate_parallel.py`).
+  Helm kinds at once: `make validate-parallel` (`scripts/validate_parallel.py`).
 - The pre-push checks: `make pre-push`, running `scripts/check_public_content.py
   --pre-push` and `scripts/check_secrets.py --pre-push`, which the configuration's
   `pre-push` and `scripts/hooks/pre-push` both run.

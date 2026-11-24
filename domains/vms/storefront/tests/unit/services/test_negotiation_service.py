@@ -55,7 +55,7 @@ def _thread(
     order_id: str = "ord-1",
     *,
     terminal_state: str | None = None,
-    agreed_price: float | None = None,
+    negotiated_scalar: float | None = None,
     requested_duration_seconds: int | None = None,
 ) -> dict:
     return {
@@ -64,7 +64,7 @@ def _thread(
         "buyer_principal": BUYER.model_dump(mode="json"),
         "seller_principal": SELLER.model_dump(mode="json"),
         "terminal_state": terminal_state,
-        "agreed_price": agreed_price,
+        "negotiated_scalar": negotiated_scalar,
         "requested_duration_seconds": requested_duration_seconds,
         "status": "active",
     }
@@ -221,7 +221,7 @@ class TestAdvance:
     async def test_raises_409_already_terminal(self):
         db = AsyncMock()
         db.load_negotiation_thread_row.return_value = _thread(
-            terminal_state="success", agreed_price=9000
+            terminal_state="success", negotiated_scalar=9000
         )
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:

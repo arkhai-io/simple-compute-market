@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 import pytest
 from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import ConnectionSubmission, HostCreate, HostUpdate
@@ -53,11 +53,12 @@ def bare_metal_executor_is_real(execution: Any) -> Any:
 
 def target_connection(target: BareMetalHost) -> ConnectionSubmission:
     """The operator's management connection, separate from the buyer relay."""
-    return ConnectionSubmission(kind="ssh", version=2, public={
+    return ConnectionSubmission(kind="ssh", version=3, public={
         "ssh_host": target.connection.ssh_host,
         "ssh_port": target.connection.ssh_port,
         "ssh_user": target.connection.ssh_user,
         "key_path": target.connection.ssh_key_path,
+        "host_keys": [target.ssh_host_public_key],
     })
 
 
@@ -74,6 +75,10 @@ class RealBareMetalComputeDealDriver(BareMetalDealDriverBase, RealComputeObserva
     pool_id: str = REAL_POOL_ID
     reserved_resource_id: str = REAL_RESOURCE_ID
     dispatch_bound: float = 60
+
+    def __post_init__(self) -> None:
+        self.pool_id = self.target.pool_id or self.pool_id
+        self.reserved_resource_id = self.target.resource_id or self.reserved_resource_id
 
     @property
     def physical_host_id(self) -> str:
@@ -231,8 +236,9 @@ class RealBareMetalComputeDealDriver(BareMetalDealDriverBase, RealComputeObserva
             if lease.status == "released":
                 self.assert_relay_released(fulfillment_id, state.delivered_access) if state.delivered_access else None
                 return
-            if lease.status == "active" and lease.lease_end_utc > datetime.now(timezone.utc):
-                end = datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+            now = injected_time.now_datetime()
+            if lease.status == "active" and lease.lease_end_utc > now:
+                end = now - E2E_LEASE_EXPIRY_BACKDATE
                 assert self.site_capacity.truncate_lease(reservation, end.isoformat().replace("+00:00", "Z")) is not None
             self.provisioning_client.check_leases()
             lease = self.provisioning_client.get_lease(reservation)

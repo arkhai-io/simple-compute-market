@@ -20,6 +20,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.lifecycle_steps import negotiation_watchdog_policy
 from tests._settings_overrides import settings_overrides
@@ -29,10 +30,10 @@ _SELLER_PRINCIPAL = create_signer("ed25519", b"\x32" * 32).identity
 
 
 def _init_threads_table(db_path: str):
-    """Create the minimal negotiation_threads schema and return its registry."""
+    """Migrate the storefront database and return its registry."""
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
-    SQLiteClient(db_path=db_path, registry=registry)
+    migrate_storefront_database(db_path)
     assert registry.resolve_mode("vm").contract is domain
     return registry
 

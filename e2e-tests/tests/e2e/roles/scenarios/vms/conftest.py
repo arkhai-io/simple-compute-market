@@ -37,8 +37,8 @@ from typing import Any, Optional
 import pytest
 
 import uuid
-from datetime import datetime, timezone
 
+import injected_time
 from market_identity import (
     Identity,
     RequestEnvelope,
@@ -106,6 +106,14 @@ class DealState(ComputeDealState):
     lease_status: Optional[str] = None
     # The second deal observes buyer surrender independently of natural expiry.
     lifecycle_purchase: Optional[Any] = None
+    # The deal whose Agreement starts later (`delivery_timing_deal.py`):
+    # agreed and committed at 13a, delivered at 13b, released at 13c, which the
+    # no-capacity deal after it requires.
+    forward_deal: Optional[Any] = None
+    forward_reservation_id: Optional[str] = None
+    _forward_events_since: Optional[int] = None
+    forward_fulfillment_id: Optional[str] = None
+    _forward_deal_released: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +152,7 @@ def signed_listing_read_headers(listing_id: str) -> dict[str, str]:
             operation="listing.get",
             resource=listing_id,
             request_id=uuid.uuid4().hex,
-            timestamp=int(datetime.now(timezone.utc).timestamp()),
+            timestamp=injected_time.now(),
             body_hash=canonical_body_hash({"query": []}),
         ),
     )
@@ -635,7 +643,7 @@ def _ensure_provisioning_host_registered(provisioning_client):
         host_id=host_name,
         connection=ConnectionSubmission(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "127.0.0.1", "ssh_user": "stub", "key_path": "/tmp/stub-e2e-key"},
         ),
         enabled=True,

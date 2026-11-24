@@ -11,9 +11,10 @@ assignment in one transaction. See
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Callable, Sequence
 
+import injected_time
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -211,6 +212,12 @@ class SettlementRepository:
         only -- there is no caller-supplied resource to compare, since
         ``begin_fulfillment`` loads the already-scheduled resource from this
         row rather than trusting one from the caller.
+
+        The row is judged as the lock returns it. Without
+        ``populate_existing`` the select hands back the object the session's
+        identity map already holds, unrefreshed, so a caller that read the row
+        before another acceptance of it committed would see a stale
+        ``fulfillment_id is None`` and accept again under a new identity.
         """
 
         _begin_sqlite_write_transaction(db)
@@ -218,6 +225,7 @@ class SettlementRepository:
             select(SettlementRecord)
             .where(SettlementRecord.capacity_reservation_id == capacity_reservation_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         record = db.execute(statement).scalar_one_or_none()
         if record is None:
@@ -448,7 +456,7 @@ class SettlementRepository:
         """
 
         begin_sqlite_write_transaction(db)
-        now = now or datetime.now(timezone.utc)
+        now = now or injected_time.now_datetime()
         candidates = (
             db.query(SettlementRecord)
             .filter(SettlementRecord.state.in_(list(states)))
@@ -553,7 +561,7 @@ class SettlementRepository:
             record.claimed_by = None
             record.claim_expires_at = None
         else:
-            now = now or datetime.now(timezone.utc)
+            now = now or injected_time.now_datetime()
             record.claim_expires_at = now + timedelta(seconds=lease_seconds)
         db.flush()
         return True
@@ -598,7 +606,7 @@ class SettlementRepository:
         active leases from expired claims eligible for reclamation.
         """
 
-        now = now or datetime.now(timezone.utc)
+        now = now or injected_time.now_datetime()
         state_values = [state.value for state in self._RECOVERY_STATES]
 
         active_claim = case(

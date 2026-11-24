@@ -47,9 +47,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
+import injected_time
 import pytest
 from compute_provisioning_client import SyncComputeProvisioningClient
 
@@ -260,6 +261,10 @@ def _registration(provisioning_client: Any, site_capacity: Any, target: VmHost |
                               for listing in listings)),
         quarantined=quarantined,
         active_ports=active,
+        host_pins=tuple(sorted(
+            (host.host_id, tuple(sorted(host.connection.public.get("host_keys") or ())))
+            for host in hosts if host.host_id == target.host_id
+        )),
     )
 
 
@@ -281,11 +286,11 @@ def _registrations(
     bare_metal_provisioning_client, bare_metal_site_reads, bare_metal_storefront_admin,
     real_bare_metal_target,
 ) -> dict[str, RegistrationSnapshot]:
-    now = datetime.now(timezone.utc)
+    now = injected_time.now_datetime()
     return {
         "vm": _registration(
             provisioning_client, site_capacity, real_vm_target,
-            listings_on_resource(storefront_admin_client, VM_RESOURCE_ID), now=now,
+            listings_on_resource(storefront_admin_client, real_vm_target.resource_id or VM_RESOURCE_ID), now=now,
         ),
         "bare_metal": _registration(
             bare_metal_provisioning_client, bare_metal_site_reads, real_bare_metal_target,
@@ -384,7 +389,8 @@ class TestStage01_RegistrationsBefore:
             bare_metal_provisioning_client, bare_metal_site_reads, bare_metal_storefront_admin,
             real_bare_metal_target,
         )
-        for domain, resource in (("vm", VM_RESOURCE_ID), ("bare_metal", BARE_METAL_RESOURCE_ID)):
+        bare_metal_resource = real_bare_metal_target.resource_id or BARE_METAL_RESOURCE_ID
+        for domain, resource in (("vm", real_vm_target.resource_id or VM_RESOURCE_ID), ("bare_metal", bare_metal_resource)):
             if not before[domain].listings:
                 pytest.skip(f"no listing on the {domain} target's resource {resource} yet; run "
                             "e2e_vm_qualification and e2e_bare_metal_qualification first")
@@ -416,8 +422,8 @@ class TestStage03_RegistrationsReapplied:
         bare_metal_driver.seed_supply()
         reapply_state._registrations_reapplied = True
         log.info("[03] Registrations reapplied: VM host %s (resource %s), bare-metal host %s "
-                 "(resource %s)", vm_driver.target.host_id, VM_RESOURCE_ID,
-                 bare_metal_driver.target.host_id, BARE_METAL_RESOURCE_ID)
+                 "(resource %s)", vm_driver.target.host_id, vm_driver.reserved_resource_id,
+                 bare_metal_driver.target.host_id, bare_metal_driver.reserved_resource_id)
 
 
 class TestStage04_PublicationCycleStepped:
@@ -447,7 +453,7 @@ class TestStage05_RegistrationsUnchanged:
             real_bare_metal_target,
         )
         reapply_state.after = after
-        now = datetime.now(timezone.utc)
+        now = injected_time.now_datetime()
         faults = [fault for domain in ("vm", "bare_metal")
                   for fault in registration_faults(domain, reapply_state.before[domain],
                                                    after[domain], now=now)]

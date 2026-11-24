@@ -11,11 +11,12 @@ package's `make reinit` and `make init`, all through `scripts/uv_project.py` —
 and validation, before it builds anything, run this first, refusing an older uv
 rather than letting it write or judge the locks. A plain `uv run` that relocks
 is not guarded; the revision check catches what it writes. The tests and
-pipeline workflows install the minimum; the release workflows build and publish
-without relocking. It stays a minimum, not an exact pin: a newer release writing
-another revision is caught by the revision check too.
+pipeline workflows install the minimum. It stays a minimum, not an exact pin: a
+newer release writing another revision is caught by the revision check too.
 
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Rules: docs/guidance/engineering/packaging-uv.md, "Locks are written by a stated
+minimum uv".
+Conventions: docs/guidance/repository/locks.md.
 """
 
 from __future__ import annotations

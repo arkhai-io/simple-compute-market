@@ -8,10 +8,15 @@ only: values are written as JSON, which is YAML.
 Agents are keyed by name, and a test states only what it changes in Bob's
 default agent from ``values.yaml``, as an operator's overlay does: Helm merges
 the overlay into the agent key by key and replaces lists, and the chart removes a
-key or an agent the overlay sets to ``None``.
+key or an agent the overlay sets to ``None``. The production example's tests
+render the storefront chart alone instead, over ``examples/production-values.yaml``,
+which states the globals that render reads, and read its own agent; the seller
+quickstart's on-demand and spot TOML is held to that example.
 
 Set ``STOREFRONT_PYTHON`` to the storefront environment's interpreter to also
-load rendered documents with the storefront's own configuration loader.
+load rendered documents with the storefront's own configuration loader, run its
+startup refusal over them, and publish the production example's clauses, and the
+quickstart's read beneath it, through its per-clause publication step.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tomllib
 from pathlib import Path
 
 CHART = Path(__file__).resolve().parents[1]
@@ -186,10 +192,34 @@ RENDERING_FIXTURES = tuple(
 )
 
 
+def _pod_containers(deployment: str) -> tuple[str, str]:
+    """The Deployment's rendered init containers and containers, each block whole."""
+    init = re.search(r"\n      initContainers:\n(.*?)\n      containers:\n", deployment, re.S)
+    assert init, "no initContainers precede the containers"
+    main = re.search(r"\n      containers:\n(.*?)\n      volumes:\n", deployment, re.S)
+    assert main, "no containers"
+    return init.group(1), main.group(1)
+
+
+def _container_field(container: str, key: str) -> list[str]:
+    """The lines of one of a container's fields, its key line and everything under it."""
+    lines = container.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"          {key}:"))
+    end = next(
+        (i for i in range(start + 1, len(lines)) if not lines[i].startswith("           ")),
+        len(lines),
+    )
+    return lines[start:end]
+
+
 def test_no_release_waits_on_a_dependency_and_every_agent_has_a_startup_probe() -> None:
-    """The storefront starts while its registry, chain, or site is unreachable
-    and reports them degraded, so no init container waits on one; the startup
-    probe holds the liveness and readiness probes off a slow start instead."""
+    """Spec scenario "A storefront chart renders". The storefront starts while
+    its registry, chain, or site is unreachable and reports them degraded, so no
+    init container waits on one; its one init container is its own migration,
+    from the application's image, without the ZeroTier entrypoint, with the
+    application's environment, configuration mounts and data volume, ahead of
+    the application. The startup probe holds the liveness and readiness probes
+    off a slow start."""
     manifests = {"defaults": _ok(_render()), "local release": _ok(_render_local())}
     for fixture in RENDERING_FIXTURES:
         manifests[fixture] = _ok(_render(files=(fixture,), release=LOCAL_RELEASE))
@@ -198,9 +228,24 @@ def test_no_release_waits_on_a_dependency_and_every_agent_has_a_startup_probe() 
         deployments = _documents(manifest, "deployment.yaml")
         assert deployments, label
         for deployment in deployments:
-            assert "initContainers" not in deployment, label
             assert "wait-for-" not in deployment, label
-            probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", deployment)
+            init, main = _pod_containers(deployment)
+            assert len(re.findall(r"^        - name: ", init, re.M)) == 1, label
+            assert "        - name: migrate" in init, label
+            assert _container_field(init, "command") == [
+                "          command:",
+                "            - market-storefront-migrate",
+            ], label
+            assert "entrypoint.sh" not in init, label
+            assert "tun-device" not in init and "capabilities" not in init, label
+            assert _container_field(init, "image") == _container_field(main, "image"), label
+            assert _container_field(init, "env") == _container_field(main, "env"), label
+            mounts = _container_field(init, "volumeMounts")
+            assert set(mounts) <= set(_container_field(main, "volumeMounts")), label
+            assert "            - name: arkhai-data" in mounts, label
+            assert '              mountPath: "/var/lib/arkhai"' in mounts, label
+            assert any("storefront.json" in line for line in mounts), label
+            probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", main)
             assert probe, f"{label}: no startupProbe on /health"
             assert "initialDelaySeconds" not in deployment, label
 
@@ -1114,6 +1159,17 @@ def test_a_payments_key_named_by_variable_is_refused() -> None:
         assert _names_path(rendered.stderr, dotted), rendered.stderr
 
 
+def test_the_time_source_is_admitted_as_wall_or_injected_and_refused_otherwise() -> None:
+    """An agent's `[Time] source` is one of the storefront's two sources; the
+    generated definition refuses any other, naming the key."""
+    for source in ("wall", "injected"):
+        rendered = _render(agent=_with_config(Time={"source": source}))
+        assert rendered.returncode == 0, rendered.stderr
+    refused = _render(agent=_with_config(Time={"source": "injectd"}))
+    assert refused.returncode != 0
+    assert _names_path(refused.stderr, "agents.bob.config.Time.source"), refused.stderr
+
+
 def test_a_dispute_credential_is_refused_in_public_configuration() -> None:
     """The deployment-state scenario "The public configuration states a dispute
     credential": the whole entry belongs in the Secret overlay, so `config`
@@ -1186,13 +1242,16 @@ else:
 """
 
 
-def _startup_refusal(config: dict, python: str) -> str | None:
+def _startup_refusal(config: dict, python: str, *, operator_toml: str | None = None) -> str | None:
     """What the storefront's own startup refusal reports for one rendered
-    document, or None when it would start."""
+    document, or None when it would start. ``operator_toml`` is an operator's own
+    ``storefront.toml``, which the loader merges beneath the rendered document."""
     with tempfile.TemporaryDirectory() as home:
         directory = Path(home) / "arkhai"
         directory.mkdir()
         (directory / "storefront.json").write_text(json.dumps(config))
+        if operator_toml is not None:
+            (directory / "storefront.toml").write_text(operator_toml)
         loaded = subprocess.run(
             [python, "-c", _REFUSAL_PROBE],
             env={**os.environ, "XDG_CONFIG_HOME": home},
@@ -1209,10 +1268,12 @@ def _payments_check_pods(manifest: str) -> list[str]:
 
 def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_access() -> None:
     """The pod's environment, configuration mounts, and their volumes are the
-    Deployment's, less the data volume and the ZeroTier device; it runs the CLI
-    directly, with no probes or capabilities, and carries no workload selector."""
+    Deployment's application container's, less the data volume and the ZeroTier
+    device; it runs the CLI directly, with no probes or capabilities, and
+    carries no workload selector."""
     manifest = _ok(_render_local())
     deployment = _source(manifest, "deployment.yaml")
+    application = _pod_containers(deployment)[1]
     (pod,) = _payments_check_pods(manifest)
     lines = {line.strip() for line in pod.splitlines()}
 
@@ -1221,11 +1282,11 @@ def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_a
         "- market-storefront", "- check-payments", "- --account", '- "00000000-0000-4000-8000-0000000000b2"'
     ]
     assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
-        r"^ +image: (\S+)$", deployment, re.MULTILINE
+        r"^ +image: (\S+)$", application, re.MULTILINE
     ).group(1)
-    assert _yaml_block(pod, "env") == _yaml_block(deployment, "env")
+    assert _yaml_block(pod, "env") == _yaml_block(application, "env")
     unshared = {"tun-device", "arkhai-data"}
-    deployment_mounts = _items(_yaml_block(deployment, "volumeMounts"))
+    deployment_mounts = _items(_yaml_block(application, "volumeMounts"))
     deployment_volumes = _items(_yaml_block(deployment, "volumes"))
     assert unshared <= set(deployment_mounts) and unshared <= set(deployment_volumes)
     assert _items(_yaml_block(pod, "volumeMounts")) == {
@@ -1260,6 +1321,64 @@ def test_the_payments_check_pod_renders_only_with_payments_and_an_account() -> N
     assert '- "acct"' in pod
     removed = _render_layers(_bob(tests={"paymentsAccount": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
     assert not _payments_check_pods(_ok(removed))
+
+
+def _mediation_check_pods(manifest: str) -> list[str]:
+    return _documents(manifest, "tests/mediation-check-test.yaml")
+
+
+def test_the_mediation_check_pod_runs_the_command_with_the_deployments_mediation_access() -> None:
+    """The pod's environment, configuration mounts, and their volumes are the
+    Deployment's application container's, less the data volume and the ZeroTier
+    device; it runs the CLI directly with the local release's origin, with no
+    probes or capabilities, and carries no workload selector. That the origin is
+    the mediation double's Service is the umbrella's topology test."""
+    manifest = _ok(_render_local())
+    deployment = _source(manifest, "deployment.yaml")
+    application = _pod_containers(deployment)[1]
+    (pod,) = _mediation_check_pods(manifest)
+    lines = {line.strip() for line in pod.splitlines()}
+
+    assert f"name: {LOCAL_RELEASE}-storefront-bob-mediation-check" in lines
+    assert _yaml_block(pod, "command").splitlines() == [
+        "- market-storefront", "- check-mediation", "- --origin", '- "https://mediation-double:8443"'
+    ]
+    assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
+        r"^ +image: (\S+)$", application, re.MULTILINE
+    ).group(1)
+    assert _yaml_block(pod, "env") == _yaml_block(application, "env")
+    unshared = {"tun-device", "arkhai-data"}
+    deployment_mounts = _items(_yaml_block(application, "volumeMounts"))
+    deployment_volumes = _items(_yaml_block(deployment, "volumes"))
+    assert unshared <= set(deployment_mounts) and unshared <= set(deployment_volumes)
+    assert _items(_yaml_block(pod, "volumeMounts")) == {
+        name: item for name, item in deployment_mounts.items() if name not in unshared
+    }
+    assert _items(_yaml_block(pod, "volumes")) == {
+        name: item for name, item in deployment_volumes.items() if name not in unshared
+    }
+    assert "persistentVolumeClaim" in deployment and "persistentVolumeClaim" not in pod
+    assert "/var/lib/arkhai" not in pod
+    for absent in ("Probe", "NET_ADMIN", "SYS_MODULE", "/dev/net/tun", "entrypoint.sh", "securityContext"):
+        assert absent not in pod, absent
+    assert {'"helm.sh/hook": test', "app.kubernetes.io/component: test", "enableServiceLinks: false"} <= lines
+    assert not any(line.startswith("app.kubernetes.io/name:") for line in lines)
+    # Every piece the check reads is present, so the comparison above is not
+    # between two empty lists: the CA bundle mount at the chart's CA file, which
+    # topology-secrets writes as the copied dispute credential's ca_bundle_path,
+    # the Secret overlay holding that credential, and the configuration.
+    assert _ca_bundle(pod, _config(manifest)) == ("configMap", "payments-ca-bundle", "ca-bundle.pem")
+    assert {"arkhai-config", "arkhai-secrets"} <= set(_items(_yaml_block(pod, "volumes")))
+
+
+def test_the_mediation_check_pod_renders_only_with_an_origin() -> None:
+    assert not _mediation_check_pods(_ok(_render()))
+    (pod,) = _mediation_check_pods(
+        _ok(_render(agent=_agent(tests={"mediationOrigin": "https://mediation.example"})))
+    )
+    assert '- "https://mediation.example"' in pod
+    removed = _render_layers(_bob(tests={"mediationOrigin": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+    assert not _mediation_check_pods(_ok(removed))
 
 
 _PROBE = """
@@ -1375,6 +1494,280 @@ def test_rendered_document_loads_with_the_storefront_loader() -> None:
     assert identifier == config["Identity"]["principal"]["identifier"]
     assert wallet == config["Wallet"]["address"]
     assert registries == config["registry"]["urls"]
+
+
+# --- the production example ----------------------------------------------
+
+
+EXAMPLE = CHART / "examples" / "production-values.yaml"
+#: The agent the production example declares.
+EXAMPLE_AGENT = "seller"
+#: The minimum filing window a representative dispute authority advertises: the
+#: fourteen days of the Arkhai mediation contract's default authority description.
+AUTHORITY_MINIMUM_WINDOW = 14 * 86400
+
+
+def _render_example(*layers: dict) -> subprocess.CompletedProcess[str]:
+    """Render the storefront chart alone with its production example, which
+    states the globals the chart reads, then each of ``layers`` in order."""
+    with tempfile.TemporaryDirectory() as directory:
+        command = ["helm", "template", RELEASE, str(CHART), "--values", str(EXAMPLE)]
+        for index, layer in enumerate(layers):
+            path = Path(directory) / f"layer-{index}.json"
+            path.write_text(json.dumps(layer))
+            command += ["--values", str(path)]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+def _example_config(manifest: str) -> dict:
+    """The example agent's storefront.json, from the chart rendered alone."""
+    marker = "# Source: storefront/templates/configmap.yaml"
+    (document,) = [item for item in manifest.split("\n---\n") if marker in item]
+    return json.loads(_block(document, "storefront.json"))
+
+
+def _without_rate_servicing() -> dict:
+    """An overlay removing the example agent's rate servicing declaration."""
+    return {"agents": {EXAMPLE_AGENT: {"config": {"Settlement": {"rate_servicing": None}}}}}
+
+
+def test_the_production_example_offers_on_demand_and_spot_through_live_payments() -> None:
+    """The example renders one agent settling in arkhai.payments.v1 alone, in live
+    mode, declaring rate servicing for `charged` and `returned` with no setup
+    charge, and publishing two recurring clauses — on-demand, and spot with the
+    seller's notice — whose payments clause sets a delivery deadline and a
+    dispute window covering it plus a fourteen-day minimum filing window. It
+    sets no time source, so the release runs on wall time; the chart derives the
+    release's provisioning URL and default site, and states no secret."""
+    manifest = _ok(_render_example())
+    config = _example_config(manifest)
+
+    settlement = config["Settlement"]
+    assert settlement["priority"] == ["arkhai.payments.v1"]
+    assert settlement["arkhai_payments"]["enabled"] is True
+    assert settlement["arkhai_payments"]["livemode"] is True
+    assert settlement["rate_servicing"] == {
+        "arkhai_payments": {"treatments": ["charged", "returned"], "setup": False}
+    }
+    clauses = config["pricing"]["settlements"]
+    assert [clause["recurring"].get("payee_notice_seconds") for clause in clauses] == [None, 120]
+    for clause in clauses:
+        assert clause["mechanism"] == "arkhai.payments.v1"
+        terms = clause["mechanism_input"]
+        assert terms["dispute_window_seconds"] >= (
+            terms["delivery_deadline_seconds"] + AUTHORITY_MINIMUM_WINDOW
+        ), terms
+    assert not any(key.lower() == "time" for key in config), sorted(config)
+    assert config["provisioning"]["service_url"] == "http://vm-provisioning:8081"
+    assert config["capacity"]["sites"] == {"default": "http://vm-provisioning:8081"}
+    assert "api_key" not in json.dumps(config) and "DisputeCredential" not in json.dumps(config)
+
+
+def test_the_production_example_passes_the_storefront_startup_check() -> None:
+    """`deployment-state`'s "The production example is rendered": the rendered
+    document loads with the storefront's own loader, and its startup refusal
+    finds nothing, which shows it publishable, not that the storefront starts on
+    it, since the runtime also needs the credential and the overlay's keys."""
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront startup check did not run")
+        return
+    config = _example_config(_ok(_render_example()))
+
+    refusal = _startup_refusal(config, python)
+    assert refusal is None, refusal
+    with tempfile.TemporaryDirectory() as home:
+        directory = Path(home) / "arkhai"
+        directory.mkdir()
+        (directory / "storefront.json").write_text(json.dumps(config))
+        probe = (
+            "import json, warnings; warnings.simplefilter('ignore')\n"
+            "from market_storefront.utils import config as c\n"
+            "print(json.dumps([c.settings.port, c.settings.get('identity.principal.identifier'),"
+            " sorted(c.get_registry_authorities())]))"
+        )
+        loaded = subprocess.run(
+            [python, "-c", probe],
+            env={**os.environ, "XDG_CONFIG_HOME": home},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    port, identifier, registries = json.loads(loaded.stdout.strip().splitlines()[-1])
+    assert port == config["port"]
+    assert identifier == config["Identity"]["principal"]["identifier"]
+    assert registries == config["registry"]["urls"]
+    # The loader reads every setting as stated: it reports one it would read
+    # another way, such as a base_url with no port, and keeps the raw value.
+    assert "[CONFIG]" not in loaded.stderr, loaded.stderr[-2000:]
+
+
+# Publishes the loaded configuration's clauses through the per-clause step the
+# storefront's publication composes, wired as its composition wires it, against a
+# representative dispute authority advertising a fourteen-day minimum filing
+# window, the configuration's own default listing bounds — the horizon a pool
+# with no override of its own publishes under — and no pool deadline, as the VM
+# composition supplies none, so each clause's own deadline publishes; at a fixed
+# instant. Prints each option's terms and every refusal.
+_PUBLICATION_PROBE = """
+import json, warnings; warnings.simplefilter('ignore')
+from datetime import datetime, timezone
+from market_arkhai_payments.presets import payments_rate_wiring
+from market_core.schemas import SettlementOption
+from market_deal_lifecycle.configuration import DisputeEntry
+from market_settlement_runtime import MechanismReadiness
+from market_settlement_runtime.rate_publication import ClausePublication
+from market_settlement_runtime.rate_servicing import option_treatments
+from market_storefront.settlement_registry import build_storefront_settlement_registry
+from market_storefront.utils.config import (
+    default_premature_stop_penalty_periods, settings, settlement_config_mapping,
+    settlement_publication_defaults,
+)
+authority = DisputeEntry.model_validate({
+    "interface": "arkhai.mediation.v1", "origin": "https://mediation.example.com",
+    "account": "00000000-0000-4000-8000-0000000000dd",
+    "record_key": "ed25519:" + "R" * 42 + "A", "params": {},
+    "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                      "minimum_dispute_window_seconds": MINIMUM_WINDOW,
+                      "minimum_case_hold_seconds": None},
+})
+registry = build_storefront_settlement_registry()
+config = registry.resolve(settlement_config_mapping(settings), role="seller")
+helpers, _ = payments_rate_wiring(lambda: (authority,))
+step = ClausePublication(
+    registry=registry, config=config, servicing=config.rate_servicing, helpers=helpers,
+    authorities=(authority,), dispute_interfaces=frozenset({"arkhai.mediation.v1"}),
+    compute=True, default_penalty_periods=default_premature_stop_penalty_periods(),
+    clock=lambda: datetime(2027, 1, 1, tzinfo=timezone.utc),
+)
+ready = MechanismReadiness(mechanism="arkhai.payments.v1", configured=True, enabled=True, ready=True)
+pricing = getattr(settings, "pricing", None)
+refusals, options = [], []
+for clause in settlement_publication_defaults():
+    artifacts = step.publish(
+        ready, clause, resources={}, delivery_deadline=lambda: None,
+        max_duration_seconds=getattr(pricing, "default_max_duration_seconds", None),
+        available_until_utc=getattr(pricing, "default_available_until_utc", None),
+        diagnose=refusals.append,
+    )
+    for item in artifacts.settlement_options:
+        option = SettlementOption.model_validate(item)
+        lifecycle = option.lifecycle
+        options.append({
+            "entitlements": sorted(lifecycle["early_termination"]["entitlements"]),
+            "delivery_deadline_seconds": lifecycle.get("delivery_deadline_seconds"),
+            "dispute_window_seconds": lifecycle["adjudication"]["dispute_window_seconds"],
+            "treatments": sorted(option_treatments(option)),
+        })
+print(json.dumps({"options": options, "refusals": refusals}))
+""".replace("MINIMUM_WINDOW", str(AUTHORITY_MINIMUM_WINDOW))
+
+
+def _published(config: dict, python: str, *, operator_toml: str | None = None) -> dict:
+    """The options and refusals ``_PUBLICATION_PROBE`` reports for one rendered
+    document, read with the storefront's own loader, beneath which it merges
+    ``operator_toml`` as an operator's own ``storefront.toml``."""
+    with tempfile.TemporaryDirectory() as home:
+        directory = Path(home) / "arkhai"
+        directory.mkdir()
+        (directory / "storefront.json").write_text(json.dumps(config))
+        if operator_toml is not None:
+            (directory / "storefront.toml").write_text(operator_toml)
+        loaded = subprocess.run(
+            [python, "-c", _PUBLICATION_PROBE],
+            env={**os.environ, "XDG_CONFIG_HOME": home},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    assert loaded.returncode == 0, loaded.stderr[-3000:]
+    return json.loads(loaded.stdout.strip().splitlines()[-1])
+
+
+def test_the_production_example_publishes_both_recurring_options() -> None:
+    """`deployment-state`'s "The production example publishes both recurring
+    options": an on-demand option, entitling the payer alone, and a spot one,
+    entitling the seller too, each promising the clause's delivery deadline,
+    covering it plus the authority's minimum filing window for disputes, and
+    naming only the `charged` and `returned` treatments, with nothing refused —
+    the default buyer's refusals included. With the example's rate servicing
+    removed, "… withdraws rate servicing": no recurring option publishes, each
+    clause refused for want of the declaration. That deals already held stay
+    serviced is "Rate servicing is a composition capability"'s own scenario."""
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront publication check did not run")
+        return
+    config = _example_config(_ok(_render_example()))
+    published = _published(config, python)
+
+    assert published["refusals"] == [], published["refusals"]
+    deadline = config["pricing"]["settlements"][0]["mechanism_input"]["delivery_deadline_seconds"]
+    assert published["options"] == [
+        {"entitlements": entitlements, "delivery_deadline_seconds": deadline,
+         "dispute_window_seconds": 1296000, "treatments": ["charged", "returned"]}
+        for entitlements in (["payer"], ["payee", "payer"])
+    ], published["options"]
+    assert 1296000 >= deadline + AUTHORITY_MINIMUM_WINDOW
+
+    withdrawn = _published(_example_config(_ok(_render_example(_without_rate_servicing()))), python)
+    assert withdrawn["options"] == [], withdrawn["options"]
+    assert [refusal["code"] for refusal in withdrawn["refusals"]] == [
+        "rate_servicing_undeclared", "rate_servicing_undeclared",
+    ], withdrawn["refusals"]
+
+
+#: The seller quickstart, whose "Offering on-demand and spot" shows a seller the
+#: declaration and clauses the production example deploys, as TOML.
+SELLER_QUICKSTART = REPO / "docs" / "seller-quickstart.md"
+QUICKSTART_SECTION = "## Offering on-demand and spot"
+QUICKSTART_PAYEE_PLACEHOLDER = "<YOUR_PAYEE_ACCOUNT>"
+
+
+def _quickstart_rate_servicing_toml(payee_account: str) -> str:
+    """The one TOML block of the quickstart's "Offering on-demand and spot", its
+    payee account placeholder given ``payee_account``."""
+    text = SELLER_QUICKSTART.read_text()
+    section = text.split(f"\n{QUICKSTART_SECTION}\n", 1)[1].split("\n## ", 1)[0]
+    (block,) = re.findall(r"```toml\n(.*?)```", section, flags=re.DOTALL)
+    assert QUICKSTART_PAYEE_PLACEHOLDER in block, block
+    return block.replace(QUICKSTART_PAYEE_PLACEHOLDER, payee_account)
+
+
+def test_the_seller_quickstart_shows_the_production_examples_rate_servicing() -> None:
+    """The TOML the seller quickstart shows for offering on-demand and spot, its
+    payee account given the example's, is the example's declaration and its whole
+    `pricing` — the default horizon and both clauses — so the two cannot drift
+    apart. The storefront's own loader reads it as an operator's
+    `storefront.toml`, beneath the rendered example stripped of those tables: its
+    startup refusal finds nothing, and its publication step publishes an
+    on-demand and a spot option, with nothing refused, under the horizon the
+    TOML states."""
+    config = _example_config(_ok(_render_example()))
+    payee_account = config["pricing"]["settlements"][0]["mechanism_input"]["payee_account"]
+    operator_toml = _quickstart_rate_servicing_toml(payee_account)
+    shown = tomllib.loads(operator_toml)
+
+    assert sorted(shown) == ["Settlement", "pricing"], sorted(shown)
+    assert shown["Settlement"] == {"rate_servicing": config["Settlement"]["rate_servicing"]}, shown
+    assert shown["pricing"] == config["pricing"], shown
+
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the quickstart's storefront checks did not run")
+        return
+    settlement = {key: value for key, value in config["Settlement"].items() if key != "rate_servicing"}
+    rendered = {**{key: value for key, value in config.items() if key != "pricing"}, "Settlement": settlement}
+    refusal = _startup_refusal(rendered, python, operator_toml=operator_toml)
+    assert refusal is None, refusal
+    published = _published(rendered, python, operator_toml=operator_toml)
+    assert published["refusals"] == [], published["refusals"]
+    assert [option["entitlements"] for option in published["options"]] == [
+        ["payer"], ["payee", "payer"],
+    ], published["options"]
+    # Without the TOML, the stripped document declares no rate servicing and
+    # states no clause of its own, so the options above are the TOML's.
+    assert _published(rendered, python)["options"] == []
 
 
 def main() -> int:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from base64 import b64encode
 from pathlib import Path
 
 import pytest
@@ -33,10 +34,16 @@ def _host(
     embedded: bool = False,
     protected_under: str = _KEY,
     ciphertext: str | None = None,
-    version: int = 2,
+    version: int = 3,
+    pinned: bool = True,
+    pending: bool = False,
 ) -> ExecutionHost:
     """An enabled host as the host authority's internal read returns it."""
     public = {"ssh_host": "10.0.0.1", "ssh_port": 22, "ssh_user": "ops", "key_path": key_path}
+    if pinned:
+        # Deterministic test-only wire value, never a public-network identity.
+        blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"p" * 32
+        public["host_keys"] = ["ssh-ed25519 " + b64encode(blob).decode("ascii")]
     protected = {}
     if embedded:
         if ciphertext is None:
@@ -48,7 +55,9 @@ def _host(
             )
         protected["private_key"] = ProtectedValue("fernet-v1", ciphertext)
     return ExecutionHost(
-        host_id, "default", ConnectionEnvelope(kind="ssh", version=version, public=public, protected=protected)
+        host_id, "default",
+        ConnectionEnvelope(kind="ssh", version=version, public=public, protected=protected),
+        host_key_adoption_pending=pending,
     )
 
 
@@ -96,7 +105,7 @@ def no_ansible() -> None:
 
 def _detail(component) -> AnsibleReadinessDetail:
     assert component.name == ANSIBLE_COMPONENT
-    assert (component.detail.kind, component.detail.schema_version) == (ANSIBLE_READINESS_KIND, 2)
+    assert (component.detail.kind, component.detail.schema_version) == (ANSIBLE_READINESS_KIND, 3)
     return AnsibleReadinessDetail.model_validate(component.detail.payload)
 
 
@@ -335,7 +344,7 @@ def test_a_host_stored_at_version_1_is_refused_as_execution_refuses_it(tmp_path)
     assert component.ready is False
     (reason,) = detail.not_ready_reasons
     assert reason.startswith("host 'legacy' cannot be executed against: ")
-    assert "'ssh' at 1" in reason and "re-register the host at version 2" in reason
+    assert "'ssh' at 1" in reason and "re-register the host at version 3" in reason
     assert [(key.raw_path, key.referenced_by, key.exists) for key in detail.ssh_keys] == [
         (str(key_file), ["current"], True)
     ]
@@ -393,3 +402,23 @@ def test_with_mocked_executors_only_a_key_that_will_not_decrypt_is_reported_not_
     assert component.ready is True
     assert detail.not_ready_reasons == []
     assert [(key.referenced_by, key.exists) for key in detail.ssh_keys] == [(["bad"], False)]
+
+def test_only_an_unpinned_host_without_pending_adoption_makes_a_real_executor_unready(tmp_path):
+    key_path = tmp_path / "id_fixture"
+    key_path.write_text("fixture")
+    hosts = [
+        _host("pinned", key_path=str(key_path)),
+        _host("pending", key_path=str(key_path), pinned=False, pending=True),
+        _host("unpinned", key_path=str(key_path), pinned=False),
+    ]
+    ready = _component(_real(tmp_path), hosts[:2])
+    assert ready.ready
+    assert _detail(ready).hosts_pending_key_adoption == ["pending"]
+
+    unready = _component(_real(tmp_path), hosts)
+    assert not unready.ready
+    detail = _detail(unready)
+    assert detail.hosts_pending_key_adoption == ["pending"]
+    (reason,) = detail.not_ready_reasons
+    assert "host 'unpinned'" in reason
+    assert "[10.0.0.1]:22" in reason

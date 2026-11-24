@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Sequence
 
 from .common import CHANGES
@@ -40,17 +40,37 @@ def is_record(path: str) -> bool:
     return bool(RECORD_PATH.match(path))
 
 
-def inert(path: str, inert_paths: Sequence[str] | None) -> bool:
-    """Whether `path`, relative to the root, lies under one of the inert paths: an
-    entry names a directory or a file, matched whole, so `docs/` covers `docs/a.md`
-    and not `docsite/a.md`. With none declared, no path is inert."""
-    return any(path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
-               for entry in inert_paths or ())
+def inert(path: str, inert_paths: Sequence[str]) -> bool:
+    """Whether `path`, relative to the root, lies under one of the inert paths, as the
+    configuration resolves them (`Configuration.repository_inert_paths`: its
+    declaration, or the workflow's default where it declares none). An entry without
+    a glob character names a directory or a file, matched whole, so `docs/` covers
+    `docs/a.md` and not `docsite/a.md`. An entry with one is a glob pattern matched
+    against the whole path, where `**` spans any number of directories, so
+    `**/README.md` covers every README, the root's included. Given no entry, as
+    under an empty declaration, no path is inert."""
+    return any(_matches(path, entry) for entry in inert_paths)
 
 
-def exempting(inert_paths: Sequence[str] | None) -> Callable[[str], bool]:
+_GLOB = re.compile(r"[*?\[]")
+
+
+def is_pattern(entry: str) -> bool:
+    """Whether a path entry is a glob pattern, holding a glob character, rather than a
+    directory or a file named whole."""
+    return bool(_GLOB.search(entry))
+
+
+def _matches(path: str, entry: str) -> bool:
+    if is_pattern(entry):
+        return PurePosixPath(path).full_match(entry)
+    return path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
+
+
+def exempting(inert_paths: Sequence[str]) -> Callable[[str], bool]:
     """Whether a path is a change's record or lies under the repository's inert
-    paths. A commit after a pre-closeout review, or a closeout correction, may change
+    paths, as `inert` reads them; a change's records are exempt even when no path is
+    inert. A commit after a pre-closeout review, or a closeout correction, may change
     only these without a validation, since closeout's own checks read them again
     before the archive; before then only changes' records are exempt, since an inert
     path the packaging checks read is checked by nothing but the next validation."""
@@ -92,6 +112,26 @@ def git_head(root: Path) -> str | None:
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
                           text=True)
     return head.stdout.strip() if head.returncode == 0 else None
+
+
+def git_remotes(root: Path) -> frozenset[str]:
+    """The remotes the checkout at `root` names; none where Git cannot list them."""
+    listed = subprocess.run(["git", "remote"], cwd=root, capture_output=True, text=True)
+    return frozenset(listed.stdout.split()) if listed.returncode == 0 else frozenset()
+
+
+def git_resolve(root: Path, ref: str) -> str | None:
+    """The commit `ref` names in the checkout at `root`; None where it names none."""
+    resolved = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                              cwd=root, capture_output=True, text=True)
+    return resolved.stdout.strip() if resolved.returncode == 0 else None
+
+
+def git_contains(root: Path, commit: str, ancestor: str) -> bool:
+    """Whether `commit` contains `ancestor`, in the checkout at `root`: false too when
+    either is no commit the checkout holds, since nothing then shows it does."""
+    return subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, commit], cwd=root,
+                          capture_output=True).returncode == 0
 
 
 def changed_since(root: Path, commit: str, head: str) -> list[str] | None:

@@ -24,6 +24,7 @@ from market_identity import (
 from market_settlement_runtime import SettlementPublicationClause, derive_obligation_ref
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -66,10 +67,8 @@ def _contact_option() -> dict[str, Any]:
     }
     return {
         "option_id": derive_settlement_option_id(
-            price={"asset": "introduction", "rates": []},
             settlement={"schema": CONTACT_MECHANISM, **(params or {})},
         ),
-        "price": {"asset": "introduction", "rates": []},
         "settlement": {"schema": CONTACT_MECHANISM, **(params or {})},
     }
 
@@ -82,6 +81,7 @@ def _runtime(
     contact_enabled: bool = True,
 ) -> BareMetalStorefrontRuntime:
     domain = get_market_domain_contract()
+    migrate_storefront_database(path)
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(path, domain=domain),
         domain=domain,

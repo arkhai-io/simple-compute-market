@@ -1,11 +1,10 @@
 """A VM resource's one listing, offering every mechanism a deal on it settles by.
 
-A listing's binding to its capacity source outlives the listing, so a resource
-has one listing for good, open or closed. Every module that deals on one
-resource shares that listing, whatever mechanism it settles by: whichever runs
-first creates it, and every later one adopts it. A real-provisioning target's
-resource is one such: its modules settle through Alkahest or through Arkhai
-payments.
+A listing's binding to its capacity source outlives the listing. Modules on a
+resource share its sole open listing, retaining closed bindings as history.
+Closed history alone does not allow replacement creation, and multiple open
+listings are ambiguous. A real-provisioning target's modules settle through
+Alkahest or through Arkhai payments.
 
 So creation states one settlement for each deal mechanism the storefront
 reports ready — Alkahest and Arkhai payments, the mechanisms a buyer pays for
@@ -26,6 +25,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from market_alkahest.plans import ALKAHEST_MECHANISM
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 
@@ -42,9 +42,21 @@ DEAL_MECHANISMS = (ALKAHEST_MECHANISM, ARKHAI_PAYMENTS_MECHANISM)
 #: The most listings one read of the storefront's listings asks for: the
 #: largest page the storefront serves, which refuses a larger limit.
 _LISTING_PAGE = 200
-#: The delivery latency the seller allows for, which the dispute coverage
-#: (``dispute_window_seconds``) covers.
+#: The default delivery latency, covered by the run's dispute coverage.
 DELIVERY_DEADLINE_SECONDS = 300
+
+
+def delivery_deadline_seconds() -> int:
+    """The VM run's declared delivery allowance, a positive whole-second input."""
+    value = payment_setting("VM_DELIVERY_DEADLINE_SECONDS", DELIVERY_DEADLINE_SECONDS)
+    if type(value) is int and value > 0:
+        return value
+    if isinstance(value, str) and value.strip().isdecimal() and int(value.strip()) > 0:
+        return int(value.strip())
+    pytest.fail(
+        "PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS must be a positive integer number "
+        f"of seconds, not {value!r}"
+    )
 
 
 def payments_settlement(
@@ -53,14 +65,15 @@ def payments_settlement(
     """A VM listing's Arkhai payments settlement: ``hourly_rate`` USD an hour,
     paid to ``seller_account``, under the seller's dispute window, with the
     run's dispute coverage."""
+    deadline = delivery_deadline_seconds()
     return {
         "mechanism": ARKHAI_PAYMENTS_MECHANISM, "asset": "USD/6", "rate": hourly_rate,
         "per": "hour",
         "mechanism_input": {
             "payee_account": seller_account, "asset": "USD/6", "window": dispute_window,
-            "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
+            "delivery_deadline_seconds": deadline,
             "dispute_window_seconds": dispute_window_seconds(
-                delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+                delivery_deadline_seconds=deadline,
             ),
         },
     }
@@ -104,7 +117,7 @@ def real_target_resource(target: VmHost) -> dict[str, Any]:
     return {
         "offering_mode": "vm",
         "interruptible": True,
-        "resource_id": REAL_RESOURCE_ID,
+        "resource_id": target.resource_id or REAL_RESOURCE_ID,
         **target.listing_shape.model_dump(),
         "sla": 90.0,
         "region": REAL_REGION,
@@ -143,10 +156,11 @@ def create_or_adopt_listing(
 ) -> tuple[Any, bool]:
     """The listing on ``resource``, paused, and whether it was adopted.
 
-    An existing listing is adopted when it is the only one on the resource,
-    open, of ``shape``, and offers the module's own ``mechanism``; it is paused
-    unless it is already. Any other listing fails naming the listings, their
-    shapes and their options, and changes nothing.
+    An existing listing is adopted when it is the only open one on the resource,
+    of ``shape``, and offers the module's own ``mechanism``; it is paused unless
+    it is already. Closed history is retained. No open listing, multiple open
+    listings, an unknown status or incompatible terms fail naming the listings,
+    their shapes and their options, and change nothing.
 
     With none, the listing is created paused, stating the settlement
     ``settlements`` gives for each deal mechanism the storefront reports ready.
@@ -197,8 +211,12 @@ def _adopted(
          listing_mechanisms(listing))
         for listing in listings
     ]
-    (listing, listing_shape, offered), *others = stated
-    assert not others and listing.status == "open" and listing_shape == dict(shape), (
+    open_listings = [entry for entry in stated if entry[0].status == "open"]
+    assert (
+        len(open_listings) == 1
+        and all(each.status in ("open", "closed") for each in listings)
+        and open_listings[0][1] == dict(shape)
+    ), (
         "the storefront holds listings on this resource the run cannot adopt, where "
         f"one open listing of the listing shape {dict(shape)} can be: "
         + "; ".join(
@@ -209,6 +227,7 @@ def _adopted(
         + ". Closing a listing does not free its source: rerun with the target the "
         "listing was made for, or against a fresh stack"
     )
+    listing, _, offered = open_listings[0]
     assert mechanism in offered, (
         f"listing {listing.listing_id} on this resource offers no {mechanism} option, "
         f"so this module cannot deal on it; its options: "

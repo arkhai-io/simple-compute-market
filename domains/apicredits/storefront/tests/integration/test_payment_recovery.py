@@ -24,6 +24,7 @@ from apicredits_storefront.services.payment_settlement_service import (
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from apicredits_storefront.settlement_stages import SettlementRefusal
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from arkhai_apicredits.settlement.credits_client import CreditIssuanceResult
@@ -60,7 +61,9 @@ class IssuanceBoundary:
 
 @pytest.fixture
 async def payment_context(tmp_path):
-    db = SQLiteClient(str(tmp_path / "storefront.db"))
+    db_path = tmp_path / "storefront.db"
+    migrate_storefront_database(db_path)
+    db = SQLiteClient(str(db_path))
     payments = FakePaymentsClient(signer=SERVICE)
     kit_stage = servicing_stage(
         ArkhaiPaymentsConfig(
@@ -116,7 +119,7 @@ async def payment_context(tmp_path):
         provision_terms=terms.model_dump(mode="json"),
     )
     await db.commit_agreed_terms(
-        negotiation_id=agreement.negotiation_id, agreed_price=100, agreed_duration_seconds=0,
+        negotiation_id=agreement.negotiation_id, negotiated_scalar=100, agreed_duration_seconds=0,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         accepted_at=now, agreed_start_utc=now,
         settlement_data=stage.agreement_artifacts(wire, composition),
