@@ -742,6 +742,7 @@ Most of this goal's end state lives outside this repository. This section tracks
 | Item | Origin |
 |---|---|
 | The engine reads Markdown's fenced blocks three ways: the decision destinations check follows CommonMark's fence rules, while the specification index check and the section-name resolver toggle on any fence line, so a fence holding a shorter fence of another length reads differently to each. One parser shared by the three would settle it | `extract-change-workflow-repository`, moving the two checks into the engine |
+| `change-workflow`'s specification names the engine's command as `scripts/change-workflow` in the scenarios of requirements its delta here did not modify — those of `check tasks`, `find --next-record`, `next`, `convert`, `check graph`, `start orchestrate`, the merge's make target, and the hooks among them — while CW-r3ka makes the command `change-workflow` on the path; a delta modifying them would make the release's scenarios name the installed command | `extract-change-workflow-repository`, applying its delta to the permanent specification |
 
 ## Independent active changes
 

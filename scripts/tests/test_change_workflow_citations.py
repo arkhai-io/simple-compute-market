@@ -1,7 +1,8 @@
 """The distribution's skills cite the workflow's own guidance only by sections it
 heads: a skill citing a section the shipped guidance lost fails here, naming the
-skill and the section (CW-lm42). The distribution's documents link only within their
-own set, so the set is lifted whole and reads whole wherever it is kept.
+skill and the section, as does one citing a requirement id its specification does
+not hold (CW-lm42). The distribution's documents link only within their own set, so
+the set is lifted whole and reads whole wherever it is kept.
 
 Unit tests over the distribution's document set, as `documents` finds it: the tree's
 when run from it, the package's when installed. A relative link is written for the
@@ -22,6 +23,9 @@ _LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)")
 _SPAN = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)", re.S)
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*:")
+# A requirement id of the workflow's specification, and the heading that defines one.
+_ID = re.compile(r"(?<![\w-])CW-[a-z0-9]{4}(?![\w-])")
+_REQUIREMENT = re.compile(r"^### Requirement: (CW-[a-z0-9]{4})\b", re.M)
 
 
 def unresolved_citations(skills: Mapping[str, str], guidance: Path) -> list[str]:
@@ -136,3 +140,33 @@ def test_a_skill_cites_a_section_the_guidance_lost(tmp_path: Path) -> None:
     assert unresolved_citations(skills, tmp_path) == [
         'change-plan cites the workflow guidance\'s section "One change per branch", which no '
         "file of the shipped guidance heads"]
+
+
+def unheld_ids(texts: Mapping[str, str], specification: str) -> list[str]:
+    """Each requirement id a text, by name, cites that no requirement of
+    `specification` carries, naming the text."""
+    held = set(_REQUIREMENT.findall(specification))
+    return [f"{name} cites {cited}, which the shipped specification does not hold"
+            for name, text in sorted(texts.items())
+            for cited in sorted(set(_ID.findall(text)) - held)]
+
+
+def test_every_requirement_id_a_skill_or_the_guidance_cites_is_shipped() -> None:
+    shipped = documents.RUNNING
+    guidance = shipped.path(documents.GUIDANCE)
+    texts = {**_skills(shipped),
+             **{f"the workflow guidance's {path.relative_to(guidance).as_posix()}":
+                path.read_text("utf-8") for path in sorted(guidance.rglob("*.md"))}}
+
+    assert any(_ID.search(text) for text in texts.values()), "nothing cites a requirement"
+    assert unheld_ids(texts, shipped.path(documents.SPECIFICATION).read_text("utf-8")) == []
+
+
+def test_a_skill_cites_a_requirement_the_specification_lacks() -> None:
+    """CW-lm42: a cited id the specification does not hold fails, naming the skill and
+    the id; one inside a longer word is no citation."""
+    specification = "### Requirement: CW-r6kd No step writes the protected paths\n"
+    texts = {"change-implement": "as CW-r6kd and CW-zz99 say, not XCW-ab12 or CW-ab12x"}
+
+    assert unheld_ids(texts, specification) == [
+        "change-implement cites CW-zz99, which the shipped specification does not hold"]

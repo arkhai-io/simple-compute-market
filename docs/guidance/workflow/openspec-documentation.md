@@ -107,20 +107,20 @@ requirements in `spec.md` carries no meaning, since an archive appends a change'
 added requirements at the end; `index.md` holds the organization.
 
 - **Ids.** An id is the capability's prefix, in upper-case letters, a hyphen, and
-  four characters from `[a-z0-9]` chosen at random (`CW-a8tf`), so that changes on
-  different branches are unlikely to choose the same one, and the repository's index
-  check catches it when they do. It encodes nothing of the organization, so a
-  requirement keeps its id when the index moves it between groups. An id is never
-  reused.
+  four characters from `[a-z0-9]` chosen at random (`EX-a8tf`, of a capability whose
+  prefix is `EX`), so that changes on different branches are unlikely to choose the
+  same one, and the specification index check catches it when they do. It encodes
+  nothing of the organization, so a requirement keeps its id when the index moves it
+  between groups. An id is never reused.
 - **The index's shape.** `index.md` declares the prefix on a line of its own,
-  `` Prefix: `CW` ``. Each requirement is a list item, or a table row, whose first
+  `` Prefix: `EX` ``. Each requirement is a list item, or a table row, whose first
   cell is a link from its id to its heading in `spec.md`
-  (`[CW-a8tf](spec.md#requirement-cw-a8tf-…)`), followed by its summary line, under
+  (`[EX-a8tf](spec.md#requirement-ex-a8tf-…)`), followed by its summary line, under
   the part and group it belongs to.
 - **Retired ids.** When a change removes a requirement, its id moves to the items
   under `## Retired ids`, each beginning with the id and saying where its rule went.
 - **Citing by id.** A requirement of an indexed capability may be cited by its id,
-  such as `CW-a8tf`, so that the citation survives the requirement's renaming.
+  such as `EX-a8tf`, so that the citation survives the requirement's renaming.
 
 A change that adds a requirement to an indexed capability gives it a new id in its
 delta's heading; closeout's promotion writes its index entry

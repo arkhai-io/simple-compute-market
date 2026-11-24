@@ -1174,20 +1174,33 @@ documents (D20, D23; every requirement of the `change-workflow` delta; CW-lm42).
 Touches `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`,
 `diagrams/`), and `test_change_workflow_citations.py`.
 
-- [ ] 8.1 Apply the `change-workflow` delta to `openspec/specs/change-workflow/spec.md`
+- [x] 8.1 Apply the `change-workflow` delta to `openspec/specs/change-workflow/spec.md`
   by hand: the twelve added requirements (CW-5kl9, CW-lm42, CW-f8yy, CW-1rhd, CW-sv3u,
   CW-4pm4, CW-hu0z, CW-7x0z, CW-d867, CW-dvz5, CW-ora1, CW-368t) and the eight modified
   (CW-r3ka, CW-d8de, CW-f3qk, CW-c8lw, CW-l7hn, CW-d2rw, CW-n8tr, CW-r6kd), each as the
   delta words it (D23). Verify: `make check-spec-index` and a diff of each requirement
   against its delta in the handoff.
-- [ ] 8.2 Write `index.md`'s entries as promotion would: under 4, "The command"
+  Done: each requirement's block replaced, or appended before "Evidence" in the
+  delta's order, as the archive appends; a comparison of each of the twenty with its
+  delta, block for block: identical, every one. `scripts/change-workflow openspec
+  validate --specs --strict`: 28 passed. `check spec-index` with the change named:
+  `change-workflow` agrees with its index once 8.2's entries are written; the two
+  `market-change-workflow` ids 10.2 indexes alone fail, so the verify's index check
+  passes whole only once 10.2 writes them. The delta's normative text only: other
+  requirements' scenarios still name `scripts/change-workflow` (handoff).
+- [x] 8.2 Write `index.md`'s entries as promotion would: under 4, "The command"
   CW-dvz5, "Hooks" CW-368t, "The log and its format" CW-d867, "Skills from one source"
   CW-1rhd; under 5, "The engine's interfaces" CW-5kl9 and CW-lm42, "Compatibility"
   CW-f8yy, "A repository's configuration" CW-sv3u and CW-4pm4, "The repository's
   guidance" CW-hu0z and CW-7x0z, "What an adopting repository provides" CW-ora1; each
   modified requirement's summary revised where it no longer holds; no id retired (D23).
   Verify: `make check-spec-index CHANGE=extract-change-workflow-repository`.
-- [ ] 8.3 Promote to the companion, `openspec/specs/change-workflow/README.md`, each
+  Done: the twelve entries under the groups named, each linked to its requirement's
+  heading; the summaries of all eight modified requirements revised, CW-r6kd's
+  among them; no id retired. `make check-spec-index
+  CHANGE=extract-change-workflow-repository`, through the tree's engine: fails only
+  on MCW-9k0c and MCW-iqh1, which 10.2 indexes; `change-workflow`'s entries pass.
+- [x] 8.3 Promote to the companion, `openspec/specs/change-workflow/README.md`, each
   destination the proposal's knowledge to promote names there, before the release is
   cut (D23): "The public surface" (D1, D7), "The repository's guidance is layered"
   (D3, D4, and the principles that the workflow relies on sections and that users
@@ -1200,20 +1213,128 @@ Touches `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`,
   and the sentence of "The log, its format, and the conversion" on each branch running
   its own tooling withdrawn (D7). Verify: `make check-doc-citations
   CHANGE=extract-change-workflow-repository` and `make check-guidance`.
-- [ ] 8.4 Redraw `change-workflow-engine-parts.drawio` and the step run's diagram, and
+  Done: "The public surface" opens with the distribution, one installed version per
+  machine against each repository's range, and versions side by side rejected (D1,
+  D7); its tier table gains `check spec-index` with `--json`, `check decisions`,
+  `install`, `fragment`, `--version`, `config --json`'s fields, the local file, and
+  the cited section names as provisional (D4). "The repository's guidance is
+  layered" gains the pointer and citation by section, and the two principles (D3,
+  D4). "A repository's configuration" gains the committed and local split with its
+  principle, the documents shipped beside the engine, the `[workflow]` and
+  `[guidance]` tables, the range's form, the pointer's form, and the required local
+  fields reported `missing` (D4, D5, D6, D11); "The hooks" the six default checks
+  and why the two moved and the other two did not (D10). "Leaf skills from one
+  source" gains citations by section and id and the installed skills with the two
+  halves of `check skills` (D6, D21). "The command and its tiers" gains the wheel,
+  its names and licence, `install`, `fragment`, and the command listing as
+  `change-workflow` (D8, D9, D15). "Its parts" gains `documents`, `install`,
+  `sections`, `spec_index`, and `decisions`. "A change's records carry one format
+  version" gains `workflow` on every line (D12). "Restrictions bind unattended runs
+  only" gains what is installed protected, and "Current limits" the narrowed
+  `~/.claude` limit and the installed engine's limit section 3 recorded (D13). "What
+  an adopting repository provides" was written in 6.4, and its engine's assumptions
+  table now names the command, both configuration files, the documents, the
+  installed skills, and the clone's links (D14). "The log, its format, and the
+  conversion" no longer says a change runs its own branch's tooling (D7). Beyond the
+  list, as section 7's handoff left them: the companion's remaining
+  `scripts/change-workflow` names became `change-workflow`, the routing paragraph
+  names the `graph` module, the model passage no longer speaks of this repository,
+  and the stale-diagrams limit went with 8.4; `spec.md`'s Purpose and Evidence name
+  no document of this repository's. `make check-doc-citations
+  CHANGE=extract-change-workflow-repository` and `make check-guidance`: passed.
+- [x] 8.4 Redraw `change-workflow-engine-parts.drawio` and the step run's diagram, and
   export both SVGs: the evidence modules, the actions and hooks around a step, the
   configuration's validation entries as entries, not parts, and the parts this change
   adds (D20). Verify: `change-workflow check graph` and the SVGs open in the
   companion.
-- [ ] 8.5 The distribution's test fails on a `CW-` id a skill or the workflow's
+  Done: both drawn anew, each `.drawio` source and its SVG emitted from one layout
+  by a throwaway script, so their geometry and text agree, and the SVG rendered to
+  an image and read for overlaps before it was kept; the source's edges carry fixed
+  points rather than connections to their boxes, so an edit in draw.io moves a box
+  without its edges, and the companion says the SVG is drawn from the same layout
+  rather than exported. The engine's parts: the command, the
+  installed fragment, and `cli`, then six columns of every module the package
+  holds — running a step with `around`; the sandbox and its checks; the records and
+  cost; routing with `spec_index` and `decisions`; the configuration and evidence,
+  `config`, `sections`, `hooks`, `evidence`, `gather`; the distribution and a
+  change's places, `documents` and `install` among them — and what each reads and
+  writes, the committed configuration holding validation's evidence kinds as its
+  entries, the local configuration, and the installed skills. The step run: `start`
+  checking the range and skills, the engine's action and `before-<step>` into the
+  run's inputs, the wrapper launching the session in its sandbox, the checks after
+  it, `after-<step>` resuming once on failure, the log line; the answer resuming
+  the session; and the interactive run running its own actions and hooks before
+  `record`. `change-workflow check graph`, the tree's: the graph's diagram draws the
+  table; both SVGs are the images the companion and the handbook embed.
+- [x] 8.5 The distribution's test fails on a `CW-` id a skill or the workflow's
   guidance cites that `workflow.specification` does not hold (CW-lm42). Verify:
   `test_change_workflow_citations.py`.
-- [ ] 8.6 Verify the first half whole: `make test-release-tooling`, `make
+  Done: `test_change_workflow_citations.py` reads every `CW-` id the shipped skills
+  and the workflow's guidance cite and fails, naming the text and the id, on one no
+  requirement of `workflow.specification` carries; a unit case shows an unknown id
+  named and an id inside a longer word ignored. It found the guidance's example of
+  the id format, `CW-a8tf`, which no requirement carries: the example is now of a
+  capability prefixed `EX`. Unit: passed.
+- [x] 8.6 Verify the first half whole: `make test-release-tooling`, `make
   check-change CHANGE=extract-change-workflow-repository`, the wheel rebuilt and
   installed from the tree with `make install-workflow` and `change-workflow config
   --json` naming every document, and the handoff stating that the first half is
   complete on its own for the preliminary pull request (D1).
   End-to-end: none exercises the workflow's tooling; none owed.
+  Done: `scripts/change-workflow run pre-commit`, what `make check-change` runs, on the
+  staged section: `make lock` passed; `make validate-local` passed — packaging, and
+  every suite, `make test-release-tooling`'s scripts' 3,737 among them, its tree
+  guard holding; the default checks passed but `spec-index`, failing on MCW-9k0c and
+  MCW-iqh1 alone; `make check-repository` passed. A run before the fresh-context
+  check's fixes failed one storefront integration test,
+  `test_delivery_recovery_loop.py`'s `test_a_deal_another_worker_holds_is_skipped`
+  (a 409, a start time preceding acceptance), which no file of this change touches
+  and which passed in every other run. `make install-workflow` run with
+  `UV_TOOL_DIR`, `UV_TOOL_BIN_DIR`, and `HOME` in a temporary directory, its bin first
+  on `PATH`, since the real user skill directories are outside this step: it built
+  and installed `arkhai-change-workflow==0.1.0` from the tree and wrote 11 skills of
+  0.1.0 into each user skill directory; the installed `--version` printed `0.1.0`;
+  its `config --json`, in a fresh repository, named the version and all eight
+  documents, each existing inside the tool directory, the specification holding
+  CW-ora1 and CW-368t; its `check spec-index --json` named the same two ids.
+  The first half is complete on its own for the preliminary pull request, but for
+  one check: the specification index check with this change named fails on the two
+  ids of the `market-change-workflow` delta, which section 10 applies with that
+  capability, the gap `pass-checks-at-every-commit` owns; unnamed, as a branch
+  without the change's directory runs it, it passes.
+
+Section 8 notes (handoff):
+
+- For the round's triage: the delta reached `spec.md` as it is worded, so the
+  judgments sections 3 and 4 recorded — CW-1rhd and CW-d8de of an installed engine,
+  CW-4pm4's step naming its models only when unattended, CW-sv3u's empty local file —
+  are in the permanent specification as the delta words them; a triage amending one
+  amends the delta and `spec.md` together. Requirements the delta does not touch
+  still name `scripts/change-workflow` in their scenarios (CW-r3ka's own are
+  amended; others, such as those of `check tasks`, `find --next-record`, `next`,
+  `convert`, `check graph`, `start orchestrate`, and the hooks, are not): normative
+  text this change did not plan to modify, left as written, which (iii)'s removal of
+  the tree's command makes stale.
+- The orchestrator reinstalls before the round's validation and review run the
+  workflow (`make install-workflow` in this clone, and in the workspace when it runs
+  the workflow): sections 6–8 changed the engine, two skills, the guidance, the
+  specification, and the handbook at version 0.1.0, which the stamps do not tell
+  apart.
+- The two diagrams were emitted, source and export, by a script kept outside the
+  repository; a later redraw edits the `.drawio` source in draw.io and exports its
+  SVG, as the repository's diagrams are drawn.
+- The fresh-context check's findings fixed: two sentences of the companion
+  describing a plan, the guidance pointer's later source and the two repository
+  checks' later move; a sentence claiming interactive sessions never pass through
+  `start`; the Terms the new requirements rely on, now in `spec.md`'s "Terms" (a
+  hand edit outside the delta, as Terms are the specification's prose); the
+  engine-parts legend against its dashed boxes; the step run drawing the log line
+  from the after-hook rather than the wrapper, and a failed check's stop; the
+  CW-f8yy and CW-4pm4 summaries; the id test's keying of guidance by path; the scenarios naming
+  the tree's command, now an unowned row of the change index this change owns;
+  rewrapping. Declined: amending CW-sv3u against the empty local file, section 3's
+  judgment for the triage; connecting the diagrams' edges to their boxes in draw.io,
+  which this sandbox has no draw.io to do, recorded in 8.4's note instead.
 
 ## 9. The gate, and the switch to the released workflow
 
