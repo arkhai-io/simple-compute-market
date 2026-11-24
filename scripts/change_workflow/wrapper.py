@@ -76,7 +76,7 @@ and `invariants` on the line; nothing after the session runs, and nothing is rep
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
 CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, CW-q5fy, CW-5ldi,
 CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl, CW-a4fl, CW-i9np, CW-59c7, CW-q7ub, CW-f9le,
-CW-x3pf, CW-m8wq, CW-v5ny, CW-w3oa, CW-j4cs, and CW-drf6.
+CW-x3pf, CW-m8wq, CW-v5ny, CW-w3oa, CW-j4cs, CW-drf6, and CW-d8de.
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ from .running import (drop_invocations, invocations_directory, kept_invocations,
                       termination_ends_the_run)
 from .sandbox import BUBBLEWRAP, Confined, Confinement, confine, missing
 from .scope import grant_paths
-from .stream import Stream
+from .stream import SkillsNotLoaded, Stream
 from .subagents import subagent_denials
 
 
@@ -262,6 +262,8 @@ class Wrapper:
 
     root: Path = field(default_factory=repository_root)
     runner: Runner = claude_code.run
+    # The skills a run's harness must load, which its stream holds to its `init` event.
+    skills: Callable[[], frozenset[str]] = claude_code.shipped_skills
     head: Callable[[Path], str | None] = git_head
     clock: Clock = utc_now
     # Progress goes to stderr: stdout carries only the outcome line a caller parses.
@@ -643,12 +645,14 @@ class Wrapper:
         status: int | None = None
         stream = Stream(transcript, progress, self.clock, self.echo)
         model = models[0]
+        skills = self.skills()
         for model in models:
             for attempt in range(NETWORK_RETRIES + 1):
                 # Each attempt is read alone; the transcript keeps them all.
-                stream = Stream(transcript, progress, self.clock, self.echo)
+                stream = Stream(transcript, progress, self.clock, self.echo, skills)
                 attempts.append(stream)
-                command = claude_code.command(prompt, schema, model, session=session)
+                command = claude_code.command(prompt, schema, model, session=session,
+                                              home=self.home)
                 failure, status, reached = None, None, None
                 try:
                     with termination_ends_the_run(), \
@@ -665,6 +669,10 @@ class Wrapper:
                         reached = ("unavailable", f"{command[0]} is not installed")
                     else:
                         failure = exc
+                except SkillsNotLoaded as exc:
+                    # Stopped at its `init` event: the model cannot run the step with
+                    # its skill.
+                    reached = ("unavailable", str(exc))
                 except BaseException as exc:
                     # A run that could not start, or was interrupted, still ends
                     # with a line, so the log never shows its previous outcome as

@@ -22,7 +22,8 @@ from change_workflow import clone as clones
 from change_workflow import push as guard
 from change_workflow.common import SESSION_ID, UNATTENDED_RUN
 from change_workflow.running import ATTEMPTED_PUSH, invocations_directory, kept_invocations
-from change_workflow_fixtures import (CHANGE, SESSION, VALID, FakeClaude, configured, event_lines,
+from change_workflow_fixtures import (CHANGE, POINTER, SESSION, VALID, FakeClaude, configured,
+                                      event_lines,
                                       make_wrapper)
 
 # Two pre-push checks a test provides, each a script the configuration's `pre-push`
@@ -334,8 +335,9 @@ def test_a_steps_push_refused_by_the_pre_push_hook_is_on_the_runs_line(repo: Pat
     with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
         exclude.write("/openspec/changes/*/reviews/\n")
     # The validation run's own model, beside the guarded push's configuration.
-    configured(repo, (repo / ".agents/workflow.toml").read_text("utf-8")
-               + '\n[models]\nvalidate = [{ harness = "claude", model = "claude-sonnet-5-5" }]\n')
+    configured(repo, (repo / ".agents/workflow.toml").read_text("utf-8"),
+               local=POINTER + '[models]\nvalidate = [{ harness = "claude", '
+                               'model = "claude-sonnet-5-5" }]\n')
     pushed: list[int] = []
 
     class Pushing(FakeClaude):
@@ -432,8 +434,9 @@ class _Pushing(FakeClaude):
 def _designing(repo: Path) -> None:
     with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
         exclude.write("/openspec/changes/*/reviews/\n")
-    configured(repo, (repo / ".agents/workflow.toml").read_text("utf-8")
-               + '\n[models]\ndesign = [{ harness = "claude", model = "claude-opus-5-5" }]\n')
+    configured(repo, (repo / ".agents/workflow.toml").read_text("utf-8"),
+               local=POINTER + '[models]\ndesign = [{ harness = "claude", '
+                               'model = "claude-opus-5-5" }]\n')
 
 
 def test_after_an_unattended_run_the_engine_sets_the_upstream_its_push_left_unset(

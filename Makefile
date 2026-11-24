@@ -33,7 +33,7 @@ DIST_DIR := ${CURDIR}/.dist
 .PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-time-reads check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-workflow install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-time-reads check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -688,8 +688,8 @@ check-doc-citations: ## Fail if a document cites a path that is absent or tombst
 # (openspec/README.md#the-index-check). With CHANGE=<name> that
 # change's deltas count as its archive will leave them, since closeout writes the
 # index before the archive merges them.
-check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids (CHANGE=<name> counts its deltas)
-	@python3 scripts/check_spec_index.py "$(CHANGE)"
+check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids, the change workflow's default check (CHANGE=<name> counts its deltas)
+	@$(CHANGE_WORKFLOW) check spec-index $(if $(strip $(CHANGE)),"$(CHANGE)")
 
 # Each storefront chart's values schema carries one definition generated from
 # that storefront's typed configuration models; it keeps secret-marked fields
@@ -825,25 +825,34 @@ review-locks: ## Refresh selected project lockfiles against current repository w
 
 # The change workflow's targets — each step, the review, the round view, the
 # workflow's checks, and the guarded push — are the engine's make fragment, which
-# reads the branch a change lands on from the change's clone. A value of the
-# owner's machine, such as HELM_ALL_SCENARIOS or HELM_CONTEXT given to `make
-# validate`, reaches the Helm part's command through the environment: make exports
-# a variable set on its command line to every command it runs, the validation
-# session included, and the part's own make reads it there.
+# reads the branch a change lands on from the change's clone. Each calls the
+# installed `change-workflow`, which `install-workflow` builds from this tree. A
+# value of the owner's machine, such as HELM_ALL_SCENARIOS or HELM_CONTEXT given to
+# `make validate`, reaches the Helm part's command through the environment: make
+# exports a variable set on its command line to every command it runs, the
+# validation session included, and the part's own make reads it there.
 include scripts/change_workflow/workflow.mk
+
+# The workflow is installed once per machine, as a tool: the command on the path,
+# and its skills in each harness's user skill directory, where every session loads
+# them. `--reinstall` rebuilds the wheel from the tree as it is, since an edit of the
+# engine or a skill keeps the version it is built at.
+install-workflow: ## Install the change workflow built from this tree as the `change-workflow` command, then write its skills into each harness's user skill directory and, where this checkout has none, its local configuration from the committed template; run again after editing the engine or a skill
+	uv tool install --force --reinstall scripts/change-workflow-wheel
+	change-workflow install
 
 # The owner's complete closing check is the workflow's whole `pre-commit`: its
 # default checks, then this repository's `check-repository`, each once. Run as the
 # engine runs it before a commit, a worktree changing a path outside the inert
 # paths runs the functional hooks first.
-check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
-	@scripts/change-workflow run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the specification indexes, decision destinations, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+	@$(CHANGE_WORKFLOW) run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
-check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, the indexed capabilities' specifications, decision destinations, history wording, version bumps, local imports, the capability index, and the guidance's layering — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, history wording, version bumps, local imports, the capability index, and the guidance's layering — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
-check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
-	@python3 scripts/check_decision_destinations.py "$(CHANGE)"
+check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote", the change workflow's default check (CHANGE=<change>)
+	@$(CHANGE_WORKFLOW) check decisions "$(CHANGE)"
 
 check-history-wording: ## Fail if a comment or docstring line added since the merge-base with the branch the change lands on describes history ([CHANGE_BASE=dev])
 	@python3 scripts/check_history_wording.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")

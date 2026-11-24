@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import cli, diagram, graph
+from change_workflow import cli, diagram, documents, graph
 from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
 from change_workflow.graph import (AFTER, ARCHIVE_CLEANUP, BEFORE, CLOSEOUT_TRIAGE, DESIGN,
                                    HISTORY, HOOK_STEPS, NODES, OWNER, STEP_ACTIONS, STEPS,
@@ -22,7 +22,9 @@ from change_workflow.graph import (AFTER, ARCHIVE_CLEANUP, BEFORE, CLOSEOUT_TRIA
 from change_workflow.running import INVOCATIONS
 
 ROOT = Path(__file__).resolve().parents[2]
-ARCHITECTURE = Path("openspec/specs/change-workflow/README.md")
+ARCHITECTURE = documents.path(documents.COMPANION)
+# The diagram as `check graph` names it, run in this checkout, which holds it.
+SHOWN = SOURCE.relative_to(ROOT)
 
 EXITS = [(declaration.node, exit_) for declaration in TABLE for exit_ in declaration.exits]
 
@@ -325,21 +327,21 @@ def test_the_drawing_has_a_box_for_every_node_and_join_and_an_edge_for_every_exi
 
 
 def test_the_documented_diagram_draws_the_table() -> None:
-    problem = drift((ROOT / SOURCE).read_text("utf-8"))
+    problem = drift(SOURCE.read_text("utf-8"))
 
     assert problem is None, problem
 
 
 def test_the_export_embeds_the_diagram_it_draws() -> None:
     # A draw.io export carries its source, so it opens in draw.io too.
-    exported = ET.parse(ROOT / EXPORT).getroot().get("content")
+    exported = ET.parse(EXPORT).getroot().get("content")
 
     assert exported is not None
-    assert drawn(exported) == drawn((ROOT / SOURCE).read_text("utf-8"))
+    assert drawn(exported) == drawn(SOURCE.read_text("utf-8"))
 
 
 def test_the_architecture_shows_the_export_and_names_its_source() -> None:
-    document = (ROOT / ARCHITECTURE).read_text("utf-8")
+    document = ARCHITECTURE.read_text("utf-8")
     # The diagram lives in its capability, beside the document that shows it.
     to_diagrams = DIAGRAMS.relative_to(ARCHITECTURE.parent).as_posix()
 
@@ -352,7 +354,7 @@ def test_a_table_with_an_added_exit_no_longer_matches_the_diagram() -> None:
     table = [dataclasses.replace(d, exits=d.exits + (graph.Exit(DESIGN, when=graph.RETURN),))
              if d.node == CLOSEOUT_TRIAGE else d for d in TABLE]
 
-    problem = drift((ROOT / SOURCE).read_text("utf-8"), table)
+    problem = drift(SOURCE.read_text("utf-8"), table)
 
     assert problem is not None
     assert "no edge draws ('triage_closeout', 'design', ('a return',))" in problem
@@ -379,13 +381,13 @@ def test_the_report_lists_each_departure_and_fails(capsys) -> None:
     table = [dataclasses.replace(d, exits=d.exits + (graph.Exit(DESIGN, when=graph.RETURN),))
              if d.node in (CLOSEOUT_TRIAGE, ARCHIVE_CLEANUP) else d for d in TABLE]
 
-    status = diagram.main(ROOT / SOURCE, table)
+    status = diagram.main(SOURCE, table)
 
     assert status == 1
     out, err = capsys.readouterr()
     assert out == ""
     assert err == (
-        f"{SOURCE} departs from the table; redraw it, and export its SVG from it with the "
+        f"{SHOWN} departs from the table; redraw it, and export its SVG from it with the "
         "source embedded:\n"
         "- no edge draws ('triage_closeout', 'design', ('a return',))\n"
         "- no edge draws ('archive_cleanup', 'design', ('a return',))\n")
@@ -452,10 +454,14 @@ def test_each_writing_step_writes_its_baseline_and_the_cache() -> None:
 
 def test_make_change_graph_reports_that_the_diagram_draws_the_table() -> None:
     # A make that runs these tests passes its flags down through MAKEFLAGS; none
-    # may reach the target run here.
+    # may reach the target run here. The make fragment's target is given the tree's
+    # engine, so it checks the tree's diagram rather than whichever engine the
+    # machine has installed.
     environment = {key: value for key, value in os.environ.items()
                    if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
-    printed = subprocess.run(["make", "-s", "--no-print-directory", "change-graph"], cwd=ROOT,
+    printed = subprocess.run(["make", "-s", "--no-print-directory", "-f",
+                              "scripts/change_workflow/workflow.mk", "change-graph",
+                              "CHANGE_WORKFLOW=scripts/change-workflow"], cwd=ROOT,
                              env=environment, capture_output=True, text=True, check=True)
 
-    assert printed.stdout == f"{SOURCE} draws the table.\n"
+    assert printed.stdout == f"{SHOWN} draws the table.\n"

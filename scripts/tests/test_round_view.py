@@ -139,7 +139,7 @@ TRIAGE_RUN = {UNATTENDED_RUN: "triage"}
 
 
 def test_a_step_opens_no_round_view(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """CW-p3vz's "A step opens a round view": `scripts/change-workflow round-view
+    """CW-p3vz's "A step opens a round view": `change-workflow round-view
     <change>` under an unattended triage's marker refuses, naming the triage step, and
     moves nothing; the guard every step reads still runs under it."""
     base, head = _round(repo)
@@ -747,7 +747,8 @@ def cloned(tmp_path: Path) -> tuple[Path, Path, str, str]:
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(origin))
     work = tmp_path / "work"
     _git(tmp_path, "init", "-q", "-b", "dev", str(work))
-    (work / ".gitignore").write_text("reviews/\n.claude/settings.local.json\n", "utf-8")
+    (work / ".gitignore").write_text(
+        "reviews/\n.claude/settings.local.json\n.agents/workflow.local.toml\n", "utf-8")
     base = _write(work, BASE_FILES)
     _git(work, "remote", "add", "origin", str(origin))
     _git(work, "push", "-q", "origin", "dev")

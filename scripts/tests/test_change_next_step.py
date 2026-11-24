@@ -334,7 +334,7 @@ def test_an_interactive_session_that_ended_without_recording_is_in_progress(
     assert (result["step"], result["kind"]) == ("triage", "design")
     assert "if no session of it is open, an interactive one ended without recording" in (
         result["reason"])
-    assert f"scripts/change-workflow record {CHANGE} triage" in result["reason"]
+    assert f"change-workflow record {CHANGE} triage" in result["reason"]
 
 
 def test_an_interactive_plan_that_set_its_status_and_recorded_nothing(
@@ -348,7 +348,7 @@ def test_an_interactive_plan_that_set_its_status_and_recorded_nothing(
     # Planning, and no round: the plan's outcome carries its exit and its rounds.
     assert result["step"] == "plan"
     assert "no plan outcome is recorded" in result["disagreement"]
-    assert f"scripts/change-workflow record {CHANGE} plan" in result["disagreement"]
+    assert f"change-workflow record {CHANGE} plan" in result["disagreement"]
 
 
 # Implementation rounds.
@@ -1732,7 +1732,7 @@ def test_a_log_not_yet_converted_goes_to_the_owner_with_the_command(tmp_path: Pa
 
     result = _next(root)
 
-    command = f"scripts/change-workflow convert {CHANGE}"
+    command = f"change-workflow convert {CHANGE}"
     assert (result["step"], result["convert"]) == ("owner", command)
     assert "seq 2" in result["reason"] and command in result["reason"]
 
@@ -3130,7 +3130,8 @@ def test_a_clone_and_the_workspaces_view_are_read_from_git(
         monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.invalid")
     work = _repository(tmp_path / "work", "in implementation")
     shutil.rmtree(_reviews(work))
-    (work / ".gitignore").write_text("reviews/\n.claude/settings.local.json\n", "utf-8")
+    (work / ".gitignore").write_text(
+        "reviews/\n.claude/settings.local.json\n.agents/workflow.local.toml\n", "utf-8")
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(tmp_path / "origin.git"))
     _git(work, "init", "-q", "-b", "dev")
     _commit_all(work, "the change's proposal and plan")

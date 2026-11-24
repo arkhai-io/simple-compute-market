@@ -9,8 +9,10 @@ unattended launch inside the step's sandbox with the harness's own prompts off, 
 state its harness writes — directories, and files it writes alone, whose directory
 is the home directory no step writes whole — the settings files its harness loads,
 which the sandbox keeps read-only whether or not they exist (CW-r6kd), how it reads
-the run's refusals and denials from its events, the steps it can run, and any
-command rules of its harness refusing work beside the sandbox. `adapters` holds them
+the run's refusals and denials from its events, the steps it can run, any
+command rules of its harness refusing work beside the sandbox, and its harness's
+user skill directory, where the workflow's installer writes its skills and which
+the adapter protects with the installer's manifest in it. `adapters` holds them
 by harness.
 
 A harness that is missing, not signed in, or at its usage limit cannot serve its
@@ -53,16 +55,18 @@ class Model:
 class Adapter:
     """What the engine needs of one harness beside its commands, which its module
     gives: the steps it can run; the state its harness writes, as directories and as
-    files it writes alone; the settings files its harness loads, which no step
-    writes; and any command rules of its harness refusing work beside the sandbox.
-    Paths are `[sandbox]` entries: from the checkout's root, or from the home
-    directory where they begin with `~`."""
+    files it writes alone; the settings files its harness loads and its user skill
+    directory, which no step writes; any command rules of its harness refusing work
+    beside the sandbox; and the user skill directory itself, where the workflow's
+    installer writes. Paths are `[sandbox]` entries: from the checkout's root, or
+    from the home directory where they begin with `~`; a directory's ends in `/`."""
 
     harness: str
     steps: frozenset[str]
     state: tuple[str, ...]
     state_files: tuple[str, ...]
     protected: tuple[str, ...]
+    skills: str
     rules: tuple[str, ...] = ()
 
     def runs(self, step: str) -> bool:
@@ -90,7 +94,7 @@ Reached = tuple[str, str] | None
 # can answer it, that it runs in a sandbox scoped to its step, how it treats a write
 # the sandbox refuses, how it waits, and how it ends a turn (CW-4yhk, CW-b5cf).
 UNATTENDED = (
-    "This step runs unattended through scripts/change-workflow: nobody can answer a "
+    "This step runs unattended through change-workflow: nobody can answer a "
     "question in this session. Follow your skill's instructions for running unattended. "
     "The step runs in a sandbox scoped to it, which lets it write only the paths its step "
     "may change: a write that fails as a read-only file system, or as a device or resource "
@@ -98,7 +102,7 @@ UNATTENDED = (
     "`stopped` outcome whose `reason` names the path; otherwise go on within the scope, and "
     "say in your message what you did instead. The write is recorded on the run's line "
     "whatever you say, as is any call the harness denies. Never ask about either as a "
-    "question. Wait on a background command with `scripts/change-workflow wait`, never by "
+    "question. Wait on a background command with `change-workflow wait`, never by "
     "following its output, and never end your turn, schedule a wake-up, or start a monitor "
     "to wait for a background command or subagent: run a subagent in the foreground. End "
     "every turn with an outcome matching the JSON schema you were given; where your skill "

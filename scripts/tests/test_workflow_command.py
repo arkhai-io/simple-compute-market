@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from workflow_command import WorkflowRefused, clone_where, found_change
+from workflow_command import WorkflowRefused, clone_where, created_specifications, found_change
 
 
 @pytest.fixture
@@ -45,6 +45,30 @@ def test_a_refusal_carries_the_commands_reason(checkout: Path) -> None:
         found_change(checkout, "other")
     with pytest.raises(WorkflowRefused, match=r"^no change 'other' under"):
         clone_where(checkout, "other")
+    with pytest.raises(WorkflowRefused, match=r"^no change 'other' under"):
+        created_specifications(checkout, "other")
+
+
+def test_the_specifications_a_change_creates_are_read_whatever_the_index_check_found(
+        checkout: Path) -> None:
+    """`check spec-index --json` exits 1 when the index check fails, and still names
+    what the deltas create; the caller reads only that."""
+    delta = checkout / "openspec/changes/shape-bounds/specs/new-flow/spec.md"
+    delta.parent.mkdir(parents=True)
+    delta.write_text("## ADDED Requirements\n\n### Requirement: NF-a1b2 It starts\n", "utf-8")
+    capability = checkout / "openspec/specs/indexed"
+    capability.mkdir(parents=True)
+    (capability / "spec.md").write_text("### Requirement: IX-a1b2 Unlisted\n", "utf-8")
+    (capability / "index.md").write_text("Prefix: `IX`\n", "utf-8")
+
+    assert created_specifications(checkout, "shape-bounds") == {
+        "openspec/specs/new-flow/spec.md"}
+
+
+def test_a_report_with_no_created_list_is_refused(tmp_path: Path) -> None:
+    command = _stand_in(tmp_path, """echo '{"result": "passed"}'""")
+    with pytest.raises(WorkflowRefused, match="printed no `created` list"):
+        created_specifications(tmp_path, "x", command)
 
 
 def test_no_clone_directory_is_a_change_worked_in_place(checkout: Path) -> None:

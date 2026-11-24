@@ -106,6 +106,7 @@ def test_designs_scope_is_openspec_and_git_with_the_repositorys_documents(
                                 TMP: ENGINE, home / ".cache": ENGINE,
                                 checkout / "docs": REPOSITORY}
     assert _protected(found) == {checkout / ".agents/workflow.toml": ENGINE,
+                                 checkout / ".agents/workflow.local.toml": ENGINE,
                                  checkout / ".git/config": ENGINE,
                                  Path("/usr/bin/git"): ENGINE,
                                  Path("/usr/lib/git-core/git"): ENGINE}
@@ -316,3 +317,28 @@ def test_a_granted_file_mounts_its_directory_and_an_absent_path_is_created(
     assert set(granted) == {checkout / "src", checkout / "kit/site/.venv/cache"}
     assert not granted[checkout / "src"].create
     assert granted[checkout / "kit/site/.venv/cache"].create
+
+
+def test_each_harnesss_user_skill_directory_and_the_installed_engine_are_protected(
+        checkout: Path) -> None:
+    """CW-r6kd: the adapter's user skill directory is protected though absent, which
+    the sandbox creates before launch; the engine's installed package and metadata,
+    given to the resolution, are protected as the engine's."""
+    home = checkout.parent / "home"
+    installed = (str(home / "tools/site/change_workflow"),
+                 str(home / "tools/site/arkhai_change_workflow-0.1.0.dist-info"))
+
+    found = _resolve("implement", checkout, adapter_writable=("~/.claude",),
+                     adapter_protected=("~/.claude/skills/",), installed=installed)
+
+    protected = {path.path: path for path in found.protected}
+    assert protected[home / ".claude/skills"].source == ADAPTER
+    assert protected[home / ".claude/skills"].entry == "~/.claude/skills/"
+    assert not (home / ".claude/skills").exists()
+    assert {protected[Path(path)].source for path in installed} == {ENGINE}
+
+
+def test_the_source_trees_engine_protects_no_installed_distribution() -> None:
+    # Run from its tree, the engine is what a step edits; `documents` finds an
+    # installed one's paths (`test_change_workflow_documents.py`).
+    assert scope.INSTALLED == ()

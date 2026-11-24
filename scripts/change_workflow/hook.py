@@ -3,11 +3,13 @@
 Run by the project's `SessionStart` hook for the `compact` source; Claude Code adds
 the hook's standard output to the session's context. Compaction keeps a summary
 of the task but drops the documents every step's skill reads as it starts, and
-guidance compliance falls sharply once they are gone. Those documents are the
-workflow configuration's `load.common`: the hook cannot tell the session's step, so
-it names the documents common to every step, and the skill being followed names
-its own. The documents themselves are far larger than the 10,000 characters a hook
-may inject, and a digest of their rules would be a second copy that drifts, so this
+guidance compliance falls sharply once they are gone. Those documents are what
+`config load common` prints — the engineering guidance beneath the local
+configuration's pointer, the workflow's own guidance, and the configuration's
+`load.common` — since the hook cannot tell the session's step: it names the
+documents common to every step, and the skill being followed names its own. The
+documents themselves are far larger than the 10,000 characters a hook may inject,
+and a digest of their rules would be a second copy that drifts, so this
 names what to re-read rather than restating it, together with the branch and the
 changes being worked to orient the session.
 
@@ -51,18 +53,18 @@ def _branch(root: Path) -> str:
 
 
 def _documents(root: Path) -> list[str]:
-    """What to re-read: the configuration's `load.common`, each directory entry as the
+    """What to re-read: what `config load common` prints, each directory entry as the
     files it stands for, or, when the configuration cannot be read or an entry names
     nothing to read, what to do about that, so the session is still told."""
     try:
         documents = config.load(root).documents(config.COMMON_DOCUMENTS, root)
     except StepError as exc:
-        return [f"The documents to re-read are unknown, as the workflow configuration "
-                f"cannot be read or its load.common resolved: {exc}",
+        return [f"The documents to re-read are unknown, as the workflow configuration or "
+                f"the checkout's local one cannot be read, or what they name resolved: "
+                f"{exc}",
                 "Re-read the repository's guidance your skill names before continuing."]
-    if not documents:
-        return ["The workflow configuration lists no documents every step reads "
-                "(load.common); re-read those your skill names before continuing."]
+    # Never empty: the workflow's own guidance is among them, whatever the
+    # configuration's `load` declares.
     return ["Before continuing, re-read these in full with your file tools:",
             *(f"- {path}" for path in documents)]
 
@@ -76,7 +78,7 @@ def context(root: Path) -> str:
         *_documents(root),
         "If you are working an OpenSpec change, also re-read its design, the section of",
         "its task list you are on with that section's notes, and the skill you are",
-        "following (.agents/skills/<skill>/SKILL.md).",
+        "following.",
         "",
         f"Checked-out branch: {_branch(root)}",
     ]

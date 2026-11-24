@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import adapters, claude_code, codex
+from change_workflow import adapters, claude_code, codex, documents
 from change_workflow.common import UNATTENDED_RUN
 from change_workflow.graph import STEPS
 from change_workflow.harness import UNATTENDED, Model, refused
@@ -108,12 +108,39 @@ def test_claude_codes_command_for_a_fresh_run_allows_every_tool_but_its_rule() -
     assert "--resume" not in command
     assert option(command, "--permission-mode") == "dontAsk"
     assert option(command, "--setting-sources") == "project"
+    # The user skill directory's skills, loaded as the home directory's without the
+    # user's settings (CW-d8de).
+    assert option(command, "--add-dir") == str(Path.home())
     assert json.loads(option(command, "--settings")) == {"sandbox": {"enabled": False}}
     assert option(command, "--append-system-prompt") == UNATTENDED
     assert json.loads(option(command, "--json-schema"))["type"] == "object"
     assert option_rules(command, "--allowedTools") == list(claude_code.TOOLS)
     assert {"Bash", "Edit", "Write", "Read", "Agent"} <= set(claude_code.TOOLS)
     assert option_rules(command, "--disallowedTools") == ["Bash(git push*)"]
+
+
+def test_claude_codes_command_loads_the_skills_of_the_home_it_is_given(tmp_path: Path) -> None:
+    command = claude_code.command("go", None, OPUS, home=tmp_path)
+
+    assert option(command, "--add-dir") == str(tmp_path)
+
+
+def test_an_installed_engines_run_must_load_every_skill_it_ships(tmp_path: Path) -> None:
+    """An installed distribution's skills are the ones a run's harness must load; the
+    engine run from its source tree, which nothing installs, asks none."""
+    package = tmp_path / "site-packages/change_workflow"
+    for name in ("change-design", "guidance-review"):
+        (package / "data/skills" / name).mkdir(parents=True)
+        (package / "data/skills" / name / "SKILL.md").write_text("x", "utf-8")
+    tree = tmp_path / "tree/scripts/change_workflow"
+    tree.mkdir(parents=True)
+    (tmp_path / "tree/.agents/skills/change-design").mkdir(parents=True)
+    (tmp_path / "tree/.agents/skills/change-design/SKILL.md").write_text("x", "utf-8")
+
+    assert claude_code.shipped_skills(documents.Distribution(package)) == {
+        "change-design", "guidance-review"}
+    assert documents.Distribution(tree).skills()
+    assert claude_code.shipped_skills(documents.Distribution(tree)) == frozenset()
 
 
 def test_claude_codes_command_for_a_resumed_run_names_no_session_of_its_own() -> None:
@@ -132,7 +159,8 @@ def test_claude_codes_adapter_declares_its_state_settings_and_steps() -> None:
 
     assert (adapter.state, adapter.state_files) == (("~/.claude",), ("~/.claude.json",))
     assert adapter.protected == (".claude/settings.json", ".claude/settings.local.json",
-                                 "~/.claude/settings.json")
+                                 "~/.claude/settings.json", "~/.claude/skills/")
+    assert adapter.skills == "~/.claude/skills/"
     assert all(adapter.runs(step) for step in STEPS)
     assert adapter.rules == ("Bash(git push*)",)
 
@@ -161,7 +189,8 @@ def test_codexs_adapter_declares_its_state_settings_and_the_review_alone() -> No
     adapter = adapters.ADAPTERS["codex"]
 
     assert (adapter.state, adapter.state_files) == (("~/.codex",), ())
-    assert adapter.protected == ("~/.codex/config.toml",)
+    assert adapter.protected == ("~/.codex/config.toml", "~/.codex/skills/")
+    assert adapter.skills == "~/.codex/skills/"
     assert [step for step in STEPS if adapter.runs(step)] == ["review"]
     assert adapter.rules == ()
 
@@ -169,7 +198,8 @@ def test_codexs_adapter_declares_its_state_settings_and_the_review_alone() -> No
 def test_every_adapters_settings_are_protected_whichever_harness_runs() -> None:
     assert adapters.HARNESSES == ("claude", "codex")
     assert set(adapters.PROTECTED) == {".claude/settings.json", ".claude/settings.local.json",
-                                       "~/.claude/settings.json", "~/.codex/config.toml"}
+                                       "~/.claude/settings.json", "~/.claude/skills/",
+                                       "~/.codex/config.toml", "~/.codex/skills/"}
 
 
 def test_the_unattended_prompt_is_one_harness_neutral_paragraph() -> None:
@@ -182,7 +212,7 @@ def test_the_unattended_prompt_is_one_harness_neutral_paragraph() -> None:
         assert absent not in lowered, absent
     assert not re.search(r"-c\b", lowered)
     for present in ("sandbox scoped to it", "read-only file system", "resource busy",
-                    "`stopped`", "names the path", "scripts/change-workflow wait"):
+                    "`stopped`", "names the path", "change-workflow wait"):
         assert present in UNATTENDED, present
     assert "\n" not in UNATTENDED
 

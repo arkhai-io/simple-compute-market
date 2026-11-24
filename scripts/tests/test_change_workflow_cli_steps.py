@@ -830,15 +830,15 @@ def test_stopping_the_review_leaves_the_validation_running(tmp_path: Path) -> No
             os.kill(agent, signal.SIGKILL)
 
 
-# This repository's Makefile: the engine's fragment included, set to this
-# repository's branches, beside the repository's own targets.
+# The make fragment's targets, dry-run with the fragment as the makefile.
 
-COMMAND = "scripts/change-workflow"
+COMMAND = "change-workflow"
+FRAGMENT = Path(__file__).resolve().parents[1] / "change_workflow/workflow.mk"
 
 
 def _make_n(*arguments: str) -> list[str]:
-    """`make -n` of a target of the root Makefile, with no step variable inherited
-    from the caller.
+    """`make -n` of a target of the make fragment, read as the makefile, with no step
+    variable inherited from the caller.
 
     A make that ran these tests passes its own command-line variables down through
     MAKEFLAGS, so those are dropped too.
@@ -849,8 +849,8 @@ def _make_n(*arguments: str) -> list[str]:
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
                           "CHANGE_WORKFLOW", "CHANGE_BASE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
-    output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
-                            cwd=Path(__file__).resolve().parents[2], capture_output=True,
+    output = subprocess.run(["make", "-n", "--no-print-directory", "-f", str(FRAGMENT),
+                             *arguments], cwd=FRAGMENT.parent, capture_output=True,
                             text=True, check=True, env=env).stdout
     return output.splitlines()
 
@@ -880,16 +880,8 @@ def _make_n(*arguments: str) -> list[str]:
     ("check-push-ready", [], [f"{COMMAND} check round-view", f"{COMMAND} check push"]),
     ("push-branch", [], [f"{COMMAND} push"]),
     ("change-graph", [], [f"{COMMAND} check graph"]),
-    # The owner's complete closing check is the workflow's whole pre-commit, whose
-    # hook is this repository's check-repository; each reads the branch the change
-    # lands on, which the clone recorded, unless CHANGE_BASE names another.
-    ("check-change", [], [f'{COMMAND} run pre-commit "X"']),
-    ("check-change", ["CHANGE_BASE=release"], [f'{COMMAND} run pre-commit "X" --base "release"']),
-    ("check-repository", [], ['python3 scripts/check_change.py "X"']),
-    ("check-repository", ["CHANGE_BASE=release"],
-     ['python3 scripts/check_change.py "X" --base "release"']),
 ])
-def test_the_root_makefile_runs_the_command_through_the_fragment(
+def test_the_fragments_targets_run_the_command(
         target: str, variables: list[str], commands: list[str]) -> None:
     assert _make_n(target, "CHANGE=X", *variables) == commands
 
@@ -909,30 +901,6 @@ def test_an_interactive_design_opens_the_owners_harness_unconfined(tmp_path: Pat
     assert printed == [f'{COMMAND} start design "X"']
     assert not any("bwrap" in line for line in printed)
     assert opened == [["claude", f"/change-design {CHANGE}"]]
-
-
-@pytest.mark.parametrize("target,variables,commands", [
-    ("run-e2e", [], [f"{COMMAND} check round-view", "python3 scripts/ci_evidence.py pipeline"]),
-    ("run-ci", ["WORKFLOW=tests.yml"],
-     [f"{COMMAND} check round-view", 'python3 scripts/ci_evidence.py dispatch "tests.yml"']),
-    ("pre-push", ["REMOTE=origin"], []),
-])
-def test_validations_dispatches_and_the_pre_push_checks_run_the_repositorys_scripts(
-        target: str, variables: list[str], commands: list[str]) -> None:
-    printed = _make_n(target, *variables)
-
-    if commands:
-        assert printed == commands
-    else:
-        assert any("check_public_content.py --pre-push \"origin\"" in line for line in printed)
-        assert any("check_secrets.py --pre-push \"origin\"" in line for line in printed)
-
-
-@pytest.mark.parametrize("target", ["run-e2e", "validate-local", "run-ci"])
-def test_a_repository_target_refuses_while_a_round_view_is_open(target: str) -> None:
-    # The repository's own targets that read or publish HEAD keep the fragment's
-    # round-view check as their first prerequisite.
-    assert _make_n(target, "WORKFLOW=tests.yml")[0] == f"{COMMAND} check round-view"
 
 
 def test_a_granted_path_and_arguments_reach_the_command_as_written(tmp_path: Path) -> None:
@@ -959,3 +927,28 @@ def test_the_step_targets_help_names_write_and_not_allow() -> None:
 
     assert helps and all("[WRITE='<path>;<path>']" in line for line in helps)
     assert "ALLOW" not in fragment
+
+
+# The local configuration a step needs.
+
+def test_a_step_starts_with_no_local_configuration(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-4pm4's "A step starts with no local configuration": an unattended run is
+    refused, naming the missing pointer and models and `change-workflow install`, and
+    an interactive session the pointer; nothing is launched or logged."""
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    root = _checkout(tmp_path)
+    wrapper = make_wrapper(root, claude)
+    (root / ".agents/workflow.local.toml").unlink()
+    launched: list[list[str]] = []
+
+    assert main(["start", "design", CHANGE, "--unattended"], root=root, wrapper=wrapper) == 1
+    assert ("design needs guidance.engineering, models.design, which "
+            ".agents/workflow.local.toml does not declare (there is no such file): run "
+            "`change-workflow install`") in capsys.readouterr().err
+    assert main(["start", "design", CHANGE], root=root, wrapper=wrapper,
+                launch=lambda command, _: launched.append(list(command)) or 0) == 1
+    assert ("design needs guidance.engineering, which .agents/workflow.local.toml does not "
+            "declare") in capsys.readouterr().err
+    assert claude.commands == [] and launched == []
+    assert not log_path(root, CHANGE).exists()

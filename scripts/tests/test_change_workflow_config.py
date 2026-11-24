@@ -5,27 +5,36 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from change_workflow import config
+from change_workflow import config, documents
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.config import ConfigError
-from change_workflow.harness import Model
-from change_workflow.scope import REPOSITORY as REPOSITORY_SOURCE
 from change_workflow.scope import Scope, within
-from change_workflow_fixtures import (CHANGE, CONFIGURED, MODELS, OPUS, SONNET, VALID,
-                                      FakeClaude, configured, event_lines, evidence_kind,
-                                      make_wrapper)
+from change_workflow_fixtures import (ACCEPTED, CHANGE, CONFIGURED, LOCAL_CONFIGURED, MODELS,
+                                      VALID, FakeClaude, configuration_checked, configured,
+                                      event_lines, evidence_kind, make_wrapper)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+# The workflow's own guidance, which `config load` prints after the engineering
+# guidance and before the repository's documents, whole outside this checkout.
+WORKFLOW_GUIDANCE = [str(path) for path in
+                     sorted(documents.path(documents.GUIDANCE).rglob("*.md"))]
 
 
 def _checked(text: str) -> config.Configuration:
-    return config.check(text, Path("workflow.toml"))
+    return configuration_checked(text, Path("workflow.toml"))
+
+
+def _models_checked(models: str) -> config.Configuration:
+    """`models`, a local configuration's tables, checked beside the least committed
+    configuration."""
+    return config.check(ACCEPTED, Path("workflow.toml"), local=models)
 
 
 def _every_directory_ignored(root: Path, directories: list[str]) -> list[str]:
@@ -38,7 +47,7 @@ def _kinds_checked(root: Path, text: str,
     """`text` checked as the configuration of a repository at `root` holding every
     test kind's guide, Git's ignoring doubled by `unignored`."""
     configured(root, text)
-    return config.check(text, root / config.CONFIGURATION, unignored=unignored)
+    return configuration_checked(text, root / config.CONFIGURATION, unignored=unignored)
 
 
 # This repository's four kinds, in the shape its configuration declares them.
@@ -66,11 +75,11 @@ FOUR_KINDS = ("[validation]\npreflight = \"make check-uv-version\"\n\n"
     ("[load]\ncommon = 'AGENTS.md'\n", "load.common must be a list"),
     ("[load]\ndeploy = ['x.md']\n", "load.deploy is no field"),
     ("[openspec]\ncommand = ['openspec']\n", "openspec.command must be a non-empty string"),
-    ("[models]\nimplement = { model = 'm' }\n", "models.implement must be a list"),
-    ("[models]\nimplement = [{ harness = 'gemini', model = 'm' }]\n",
-     "models.implement[0].harness must be one of"),
-    ("[models]\norchestrator = { model = 'm', harness = 'claude' }\n",
-     "models.orchestrator.harness is no field"),
+    # Models and the pointer are the local configuration's.
+    ("[models]\nimplement = [{ harness = 'claude', model = 'm' }]\n",
+     ".agents/workflow.toml declares [models], which belongs in .agents/workflow.local.toml"),
+    ("[guidance]\nengineering = { none = 'x' }\n",
+     ".agents/workflow.toml declares [guidance], which belongs in .agents/workflow.local.toml"),
     # Validation's kinds are under `evidence`; `parts` is no field the workflow defines.
     ("[validation.parts.local]\nrun = 'a'\n", "validation.parts is no field the workflow "
                                               "defines; validation takes preflight, evidence"),
@@ -252,7 +261,8 @@ def test_a_kind_naming_an_empty_guide_is_refused(tmp_path: Path) -> None:
     (tmp_path / ".agents/evidence/local.md").write_text(" \n\n", "utf-8")
 
     with pytest.raises(ConfigError) as refused:
-        config.check(text, tmp_path / config.CONFIGURATION, unignored=_every_directory_ignored)
+        configuration_checked(text, tmp_path / config.CONFIGURATION,
+                              unignored=_every_directory_ignored)
 
     assert ("validation.evidence.local.guide names .agents/evidence/local.md, which is empty"
             in str(refused.value))
@@ -437,17 +447,22 @@ def test_a_repository_declares_no_functional_checks_on_purpose(tmp_path: Path) -
     assert len(claude.commands) == 1
 
 
-def test_with_no_file_every_step_is_refused_its_protected_branches_and_models(
+def test_with_no_files_every_step_is_refused_its_protected_branches_pointer_and_models(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Each missing field is named with the file it belongs in, a local one with
+    `change-workflow install`."""
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
     wrapper = make_wrapper(tmp_path, claude)
     (tmp_path / ".agents/workflow.toml").unlink()
+    (tmp_path / config.LOCAL).unlink()
 
     assert main(["start", "design", CHANGE, "--unattended"], root=tmp_path,
                 wrapper=wrapper) == 1
 
-    assert ("design needs repository.protected-branches, models.design, which "
-            ".agents/workflow.toml does not declare (there is no such file)"
+    assert ("design needs repository.protected-branches, which .agents/workflow.toml does not "
+            "declare (there is no such file); an empty value declares it deliberately; and "
+            "guidance.engineering, models.design, which .agents/workflow.local.toml does not "
+            "declare (there is no such file): run `change-workflow install`"
             in capsys.readouterr().err)
     assert claude.commands == []
 
@@ -462,7 +477,8 @@ def test_validation_needs_one_kind_however_empty_its_table(tmp_path: Path) -> No
 def test_an_interactive_step_needs_no_models(tmp_path: Path) -> None:
     """Only an unattended run runs on the configured models; the owner's interactive
     session runs on their own."""
-    checked = _checked(CONFIGURED.replace(MODELS, ""))
+    checked = config.load(configured(
+        tmp_path, local='[guidance]\nengineering = { none = "none here" }\n'))
 
     config.require_for_step(checked, "implement")
     with pytest.raises(ConfigError, match="models.implement"):
@@ -473,9 +489,9 @@ def test_an_interactive_step_needs_no_models(tmp_path: Path) -> None:
 
 def test_a_fable_model_is_accepted() -> None:
     """A repository that never wants a model does not list it; none is forbidden."""
-    checked = _checked('[models]\nimplement = [{ harness = "claude", '
-                       'model = "claude-fable-5-1", effort = "high" }]\n'
-                       'orchestrator = { model = "claude-fable-5-1" }\n')
+    checked = _models_checked('[models]\nimplement = [{ harness = "claude", '
+                              'model = "claude-fable-5-1", effort = "high" }]\n'
+                              'orchestrator = { model = "claude-fable-5-1" }\n')
 
     assert checked.step_models("implement")[0].model == "claude-fable-5-1"
     assert checked.orchestrator_model().model == "claude-fable-5-1"
@@ -508,7 +524,8 @@ pre-commit-functional = "make test"
 [defaults]
 disable = [{ check = "skills", reason = "this repository keeps no agent skills" }]
 
-""" + evidence_kind("helm", run="make validate-helm CHANGE={change}", cleanup=["make teardown"]))
+""" + evidence_kind("helm", run="make validate-helm CHANGE={change}", cleanup=["make teardown"]),
+               local=None)
 
     assert main(["config", "--json"], root=tmp_path) == 0
 
@@ -525,15 +542,32 @@ disable = [{ check = "skills", reason = "this repository keeps no agent skills" 
                                          "reason": "this repository keeps no agent skills"}
     assert fields["defaults.openspec"]["status"] == "default"
     assert fields["defaults.openspec"]["value"].startswith("openspec validate <change> --strict")
-    assert fields["defaults.tasks"]["value"] == "scripts/change-workflow check tasks <change>"
+    assert fields["defaults.tasks"]["value"] == "change-workflow check tasks <change>"
     assert fields["openspec.command"] == {"field": "openspec.command", "status": "default",
                                           "value": "openspec"}
     assert fields["validation.evidence.helm.cleanup"]["value"] == ["make teardown"]
     assert fields["validation.evidence.helm.after"]["status"] == "absent"
     assert fields["validation.evidence.helm.required"]["value"] == "always"
-    assert fields["models.implement"]["status"] == "absent"
+    assert fields["models.implement"]["status"] == "missing"
     assert fields["review.format-retries"] == {"field": "review.format-retries",
                                                "status": "default", "value": 1}
+
+
+def test_config_as_json_names_the_workflows_version_and_each_document_by_role(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-lm42: `config --json` names each of the distribution's documents by role,
+    whatever repository it runs in, with its version; run from this tree, each is the
+    tree's own file."""
+    _checkout(tmp_path)
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    workflow = json.loads(capsys.readouterr().out)["workflow"]
+    assert workflow == documents.RUNNING.described()
+    assert list(workflow) == ["version", *documents.ROLES]
+    assert workflow["diagrams"].endswith("/diagrams/")
+    assert all(Path(path).is_relative_to(REPOSITORY) and Path(path).exists()
+               for role, path in workflow.items() if role != "version")
 
 
 def test_config_as_json_names_every_kinds_guide_and_each_step_hook(
@@ -610,9 +644,10 @@ design = ["docs/development/ROADMAP.md", "AGENTS.md"]
 
     assert main(["config", "load", "design"], root=tmp_path) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "AGENTS.md", "openspec/README.md", "docs/development/ROADMAP.md"]
+        *WORKFLOW_GUIDANCE, "AGENTS.md", "openspec/README.md", "docs/development/ROADMAP.md"]
     assert main(["config", "load", "plan"], root=tmp_path) == 0
-    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "openspec/README.md"]
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md",
+                                                    "openspec/README.md"]
 
 
 def test_config_load_takes_a_step(tmp_path: Path) -> None:
@@ -623,7 +658,8 @@ def test_config_load_takes_a_step(tmp_path: Path) -> None:
 def test_a_session_that_is_no_step_loads_the_common_documents(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The orchestrating session and a guidance review run no step of the graph, so
-    `config load common` prints `load.common` alone for them."""
+    `config load common` prints the workflow's guidance and `load.common` alone for
+    them."""
     configured(tmp_path, """
 [load]
 common = ["AGENTS.md", "openspec/README.md"]
@@ -631,7 +667,8 @@ design = ["docs/development/ROADMAP.md"]
 """)
 
     assert main(["config", "load", "common"], root=tmp_path) == 0
-    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "openspec/README.md"]
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md",
+                                                    "openspec/README.md"]
 
 
 def _guidance(root: Path, *paths: str) -> None:
@@ -657,6 +694,7 @@ design = ["docs/guidance/workflow/closeout.md", "docs/ROADMAP.md"]
     assert main(["config", "load", "design"], root=tmp_path) == 0
 
     assert capsys.readouterr().out.splitlines() == [
+        *WORKFLOW_GUIDANCE,
         "AGENTS.md", "docs/guidance/README.md", "docs/guidance/engineering/a/deep.md",
         "docs/guidance/engineering/comments.md", "docs/guidance/workflow/closeout.md",
         "openspec/README.md", "docs/ROADMAP.md"]
@@ -706,12 +744,32 @@ def test_a_literal_entry_naming_no_file_is_still_printed(
 
     assert main(["config", "load", "common"], root=tmp_path) == 0
 
-    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "docs/missing.md"]
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md",
+                                                    "docs/missing.md"]
 
 
-def test_an_absent_or_empty_list_loads_nothing(tmp_path: Path) -> None:
-    assert config.load(tmp_path).documents("design", tmp_path) == []
-    assert _checked("[load]\ncommon = []\n").documents("design", tmp_path) == []
+def test_an_absent_or_empty_list_loads_the_workflows_guidance_alone(tmp_path: Path) -> None:
+    applying_none = '[guidance]\nengineering = { none = "none here" }\n'
+
+    for text in (ACCEPTED, ACCEPTED + "[load]\ncommon = []\n"):
+        checked = config.check(text, Path("workflow.toml"), local=applying_none)
+        assert checked.documents("design", tmp_path) == WORKFLOW_GUIDANCE
+
+
+def test_with_no_pointer_the_documents_are_refused(tmp_path: Path,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-hu0z's pointer is required: with none, a session would read no engineering
+    guidance, so `config load` refuses, naming it and `change-workflow install`, as
+    every session reads the list, interactive ones too."""
+    _checkout(tmp_path)
+    configured(tmp_path, CONFIGURED, local=None)
+
+    assert main(["config", "load", "plan"], root=tmp_path) == 1
+    assert capsys.readouterr().err == (
+        "ERROR: the documents a session reads needs guidance.engineering, which "
+        ".agents/workflow.local.toml does not declare (there is no such file): run "
+        "`change-workflow install` to write it where the checkout has none, or declare "
+        "them there\n")
 
 
 # `[sandbox]`: what a repository adds to a step's scope.
@@ -874,15 +932,16 @@ def test_a_writable_path_linked_into_a_protected_directory_is_refused(tmp_path: 
     (root / "alias").symlink_to(root / "data/subdir")
     with pytest.raises(ConfigError, match="sandbox.writable.design names alias, which is or "
                                           "lies under the protected path data/"):
-        config.check("[sandbox]\nwritable.design = ['alias']\nprotected = ['data/']\n",
-                     root / config.CONFIGURATION, home=tmp_path / "home")
+        configuration_checked("[sandbox]\nwritable.design = ['alias']\nprotected = ['data/']\n",
+                              root / config.CONFIGURATION, home=tmp_path / "home")
 
 
 def test_a_writable_path_under_a_protected_home_path_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="sandbox.writable.common names ~/.ssh/keys, which "
                                           "is or lies under the protected path ~/.ssh/"):
-        config.check("[sandbox]\nwritable.common = ['~/.ssh/keys']\nprotected = ['~/.ssh/']\n",
-                     tmp_path / config.CONFIGURATION, home=tmp_path / "home")
+        configuration_checked("[sandbox]\nwritable.common = ['~/.ssh/keys']\n"
+                              "protected = ['~/.ssh/']\n",
+                              tmp_path / config.CONFIGURATION, home=tmp_path / "home")
 
 
 def test_a_repository_opens_a_directory_holding_a_protected_path(tmp_path: Path) -> None:
@@ -931,11 +990,13 @@ def test_config_lists_each_steps_scope_with_each_paths_source(
                 "private": True} in found["writable"], step
     protected = {(entry["entry"], entry["source"])
                  for entry in shown["scopes"]["plan"]["protected"]}
-    assert protected == {(".agents/workflow.toml", "engine"), (".git/config", "engine"),
+    assert protected == {(".agents/workflow.toml", "engine"),
+                         (".agents/workflow.local.toml", "engine"), (".git/config", "engine"),
                          ("/usr/bin/git", "engine"), ("/usr/lib/git-core/git", "engine"),
                          (".claude/settings.json", "adapter"),
                          (".claude/settings.local.json", "adapter"),
-                         ("~/.claude/settings.json", "adapter")}
+                         ("~/.claude/settings.json", "adapter"),
+                         ("~/.claude/skills/", "adapter")}
     # The review's first model is Codex's, so its scope holds Codex's state.
     review = {(entry["entry"], entry["source"])
               for entry in shown["scopes"]["review"]["writable"]}
@@ -972,7 +1033,7 @@ def test_models_the_policy_forbids_are_refused_naming_the_step(models: str,
                                                                 problem: str) -> None:
     """CW-zq4h: the configuration's models are held to the policy as it is read."""
     with pytest.raises(StepError, match=problem) as refused:
-        config.check(f"[models]\ntriage = {models}\n", Path("workflow.toml"))
+        _models_checked(f"[models]\ntriage = {models}\n")
 
     assert "models.triage" in str(refused.value)
 
@@ -980,9 +1041,8 @@ def test_models_the_policy_forbids_are_refused_naming_the_step(models: str,
 def test_a_row_names_two_models_of_one_vendor() -> None:
     """CW-zq4h's "A row names two models of one vendor": refused, naming the step."""
     with pytest.raises(StepError, match="for the design step"):
-        config.check('[models]\ndesign = [{ harness = "claude", model = "claude-opus-5-5" }, '
-                     '{ harness = "claude", model = "claude-sonnet-5-5" }]\n',
-                     Path("workflow.toml"))
+        _models_checked('[models]\ndesign = [{ harness = "claude", model = "claude-opus-5-5" }, '
+                        '{ harness = "claude", model = "claude-sonnet-5-5" }]\n')
 
 
 def test_a_harness_whose_adapter_runs_only_reviews() -> None:
@@ -991,11 +1051,9 @@ def test_a_harness_whose_adapter_runs_only_reviews() -> None:
     with pytest.raises(StepError, match="models.implement names a codex model for the "
                                         "implement step, which the codex adapter cannot "
                                         "run; it runs only: review"):
-        config.check('[models]\nimplement = [{ harness = "codex", model = "gpt-6-sol" }]\n',
-                     Path("workflow.toml"))
+        _models_checked('[models]\nimplement = [{ harness = "codex", model = "gpt-6-sol" }]\n')
 
-    read = config.check('[models]\nreview = [{ harness = "codex", model = "gpt-6-sol" }]\n',
-                        Path("workflow.toml"))
+    read = _models_checked('[models]\nreview = [{ harness = "codex", model = "gpt-6-sol" }]\n')
     assert read.step_models("review")[0].harness == "codex"
 
 
@@ -1005,8 +1063,8 @@ def test_a_repository_cannot_open_an_adapters_settings(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="sandbox.writable.design names "
                                           ".claude/settings.json, which is or lies under "
                                           "the protected path .claude/settings.json"):
-        config.check("[sandbox]\nwritable.design = ['.claude/settings.json']\n",
-                     tmp_path / config.CONFIGURATION, home=tmp_path / "home")
+        configuration_checked("[sandbox]\nwritable.design = ['.claude/settings.json']\n",
+                              tmp_path / config.CONFIGURATION, home=tmp_path / "home")
 
 
 # A waiver names the kinds the configuration declares.
@@ -1021,34 +1079,6 @@ def test_a_waiver_names_declared_kinds(tmp_path: Path,
     assert "does not declare: smoke" in capsys.readouterr().err
 
 
-def test_the_repositorys_own_configuration_passes_its_check(
-        capsys: pytest.CaptureFixture[str]) -> None:
-    loaded = config.load(REPOSITORY)
-
-    assert loaded.exists
-    assert config.missing(loaded, config.PRE_COMMIT_FUNCTIONAL, config.EVIDENCE,
-                          config.PROTECTED_BRANCHES, f"models.{config.ORCHESTRATOR}",
-                          *(f"models.{step}" for step in config.STEPS)) == []
-    assert main(["check", "config"], root=REPOSITORY) == 0
-    assert "passes its check" in capsys.readouterr().out
-
-
-def test_each_step_runs_on_the_models_its_work_needs() -> None:
-    """This repository's configuration: design, triage, implementation, the merge, and
-    closeout on Opus at high effort; validation and archive cleanup on Sonnet at
-    medium; the review on Codex, then Claude."""
-    loaded = config.load(REPOSITORY)
-
-    assert {name: loaded.step_models(name) for name in config.STEPS} == {
-        "design": (OPUS,), "plan": (OPUS,), "triage": (OPUS,), "implement": (OPUS,),
-        "merge": (OPUS,), "closeout": (OPUS,), "validate": (SONNET,),
-        "archive-cleanup": (SONNET,), "review": (Model("codex", "gpt-6-sol", "high"), OPUS)}
-
-
-def _repository_scope(step: str, home: Path) -> Scope:
-    return config.load(REPOSITORY).scope(step, REPOSITORY, home=home)
-
-
 def _writes(found: Scope, path: Path) -> bool:
     """Whether a step of scope `found` writes the host's `path`: the private `/tmp` is
     the sandbox's own, writing no host path, though the test's home lies under the
@@ -1057,100 +1087,517 @@ def _writes(found: Scope, path: Path) -> bool:
             and not any(within(path, guarded.path) for guarded in found.protected))
 
 
-def test_design_and_planning_write_the_repositorys_documents(tmp_path: Path) -> None:
-    """MCW-s4bx's "Design edits the roadmap": the configuration gives design `docs/`,
-    and planning too, beside their baseline."""
-    roadmap = REPOSITORY / "docs/development/ROADMAP.md"
-
-    for step in ("design", "plan"):
-        found = _repository_scope(step, tmp_path / "home")
-        assert _writes(found, roadmap), step
-        assert [path.source for path in found.writable
-                if path.path == REPOSITORY / "docs"] == [REPOSITORY_SOURCE], step
-    assert not _writes(_repository_scope("archive-cleanup", tmp_path / "home"), roadmap)
-
-
-def test_every_step_writes_the_tool_state_its_suites_and_deployments_need(
-        tmp_path: Path) -> None:
-    """MCW-s4bx's "Implementation syncs an environment", "Design validates the change"
-    and "A review runs the repository's checks": uv's Pythons, and the cluster client's
-    cache, the cloud CLI's configuration, Docker's client configuration, and npm's
-    cache, which the configured OpenSpec command's `npx` writes, for every step, the
-    review included, since each lies outside the checkout; and nothing protected
-    beyond the engine's and the adapters'."""
-    home = tmp_path / "home"
-    tools = [home / ".local/share/uv/python", home / ".kube/cache", home / ".config/gcloud",
-             home / ".docker", home / ".npm/_cacache", home / ".cache/uv"]
-
-    for step in config.STEPS:
-        found = _repository_scope(step, home)
-        writes = [_writes(found, tool) for tool in tools]
-        assert writes == [True] * len(tools), step
-        assert not any(path.source == REPOSITORY_SOURCE for path in found.protected), step
-    assert config.load(REPOSITORY).sandbox_protected == ()
-
-
 def test_no_step_writes_the_configuration_or_the_harnesss_settings(tmp_path: Path) -> None:
-    """CW-z5me: no step changes what its own hooks run or what its harness loads. The
-    configuration and each adapter's settings files are read-only in every step's
-    scope, whichever harness runs it, while a step that writes the checkout writes the
-    skills beside the configuration."""
+    """CW-z5me: no step changes what its own hooks run or what its harness loads. Both
+    configuration files and each adapter's settings files are read-only in every
+    step's scope, whichever harness of its models runs it, while a step that writes
+    the checkout writes the skills beside the configuration."""
+    root = configured(tmp_path / "checkout")
     home = tmp_path / "home"
-    settings = [REPOSITORY / ".agents/workflow.toml", REPOSITORY / ".claude/settings.json",
-                REPOSITORY / ".claude/settings.local.json", home / ".claude/settings.json",
-                home / ".codex/config.toml"]
-    loaded = config.load(REPOSITORY)
+    settings = [root / ".agents/workflow.toml", root / ".agents/workflow.local.toml",
+                root / ".claude/settings.json", root / ".claude/settings.local.json",
+                home / ".claude/settings.json", home / ".codex/config.toml"]
+    loaded = config.load(root)
 
-    for step in config.STEPS:
-        for harness in (model["harness"] for model in loaded.models[step]):
-            found = loaded.scope(step, REPOSITORY, harness, home=home)
-            assert not any(_writes(found, path) for path in settings), (step, harness)
-    assert _writes(_repository_scope("implement", home),
-                   REPOSITORY / ".agents/skills/change-plan/SKILL.md")
-
-
-def test_the_repository_declares_every_hook() -> None:
-    """MCW-r4tx: this repository relocks after a functional change, runs its own
-    closing checks before every commit, clears the wheelhouse, checks packaging and
-    runs every suite before a functional commit — the local kind's own run, so it
-    leaves `local` evidence for the tree it tested — checks packaging and the
-    change's architecture rows before the archive, and runs its pre-push checks as
-    one target."""
-    loaded = config.load(REPOSITORY)
-
-    assert loaded.hook("after-functional-change") == ("make lock",)
-    assert loaded.hook("pre-commit") == (
-        "make check-repository CHANGE={change} CHANGE_BASE={base}",)
-    assert loaded.hook("pre-commit-functional") == ("make validate-local TREE={tree}",)
-    assert loaded.hook("pre-commit-functional") == loaded.kind("local").run
-    assert loaded.hook("pre-archive") == ("make check-packaging",
-                                          "make check-architecture-change CHANGE={change}")
-    assert loaded.hook("pre-push") == ("make pre-push REMOTE={remote}",)
-    assert loaded.hook("post-clone") == ("make init",)
+    harnesses = {(step, model["harness"]) for step in config.STEPS
+                 for model in loaded.models[step]}
+    assert {harness for _, harness in harnesses} == {"claude", "codex"}
+    for step, harness in sorted(harnesses):
+        found = loaded.scope(step, root, harness, home=home)
+        assert not any(_writes(found, path) for path in settings), (step, harness)
+    assert _writes(loaded.scope("implement", root, home=home),
+                   root / ".agents/skills/change-plan/SKILL.md")
 
 
-def test_every_table_of_the_repositorys_file_says_who_uses_it() -> None:
-    """Each table of this repository's file has a comment beside it naming the engine
-    operation or the skill that uses its fields; each evidence kind has one saying
-    what it is, under the comment naming who runs the kinds."""
-    text = (REPOSITORY / config.CONFIGURATION).read_text("utf-8")
-    lines = text.splitlines()
-    users = ("Engine", "engine", "change-")
-    assert "for change-validate: validation's evidence kinds" in text
-    for index, line in enumerate(lines):
-        if not line.startswith("["):
-            continue
-        above = []
-        for earlier in reversed(lines[:index]):
-            if not earlier.startswith("#"):
-                break
-            above.append(earlier)
-        below = []
-        for later in lines[index + 1:]:
-            if not later.startswith("#"):
-                break
-            below.append(later)
-        if line.startswith("[validation.evidence."):
-            assert below, line
-        else:
-            assert any(user in comment for comment in above + below for user in users), line
+# `[workflow] version`: the range of workflow versions the repository accepts.
+
+@pytest.mark.parametrize("text,specifiers", [
+    (">=0.1, <0.2", [(">=", (0, 1)), ("<", (0, 2))]),
+    ("==0.1.0", [("==", (0, 1, 0))]),
+    ("~=0.4.1,!=0.4.3", [("~=", (0, 4, 1)), ("!=", (0, 4, 3))]),
+    (" <= 2 , > 1.9 ", [("<=", (2,)), (">", (1, 9))]),
+])
+def test_a_range_is_read_as_its_specifiers(text: str, specifiers: list) -> None:
+    assert config.version_range("workflow.version", text) == specifiers
+
+
+@pytest.mark.parametrize("text,named", [
+    ("0.1", "got '0.1'"),
+    (">=0.1, <0.2.*", "got '<0.2.*'"),
+    (">=0.1rc1", "got '>=0.1rc1'"),
+    ("=>0.1", "got '=>0.1'"),
+    (">=0.1,", "got ''"),
+    ("~=1", "~= compares with two release numbers or more"),
+    ("", "must be a non-empty string"),
+])
+def test_a_malformed_range_is_refused_naming_the_field(text: str, named: str) -> None:
+    with pytest.raises(ConfigError, match="workflow.version") as refused:
+        config.version_range("workflow.version", text)
+    assert named in str(refused.value)
+
+
+@pytest.mark.parametrize("version,admitted", [
+    ("0.1.0", True), ("0.1.7", True), ("0.1", True), ("0.2.0", False), ("0.0.9", False),
+    ("0.1.3", False), ("0.1.0.dev1", False), ("0.1.1rc1", True), ("unknown", False),
+])
+def test_a_range_admits_a_version_by_its_release_numbers_a_pre_release_first(
+        version: str, admitted: bool) -> None:
+    specifiers = config.version_range("workflow.version", ">=0.1, <0.2, !=0.1.3")
+
+    assert config.admits(specifiers, version) is admitted
+
+
+@pytest.mark.parametrize("version,admitted", [
+    ("0.4.1", True), ("0.4.9", True), ("0.5.0", False), ("0.4.0", False), ("0.4", False)])
+def test_a_compatible_release_stays_within_its_series(version: str, admitted: bool) -> None:
+    assert config.admits(config.version_range("v", "~=0.4.1"), version) is admitted
+
+
+def test_an_engine_outside_the_range_refuses_before_reading_a_later_versions_table() -> None:
+    text = '[workflow]\nversion = ">=0.5, <0.6"\n\n[release]\nchannel = "stable"\n'
+
+    with pytest.raises(ConfigError) as refused:
+        config.check(text, Path("workflow.toml"), installed=lambda: "0.4.2")
+
+    message = str(refused.value)
+    assert "the installed workflow is 0.4.2, outside the range >=0.5, <0.6" in message
+    assert "install a version the range admits" in message
+    assert "release" not in message
+    assert config.check('[workflow]\nversion = ">=0.4, <0.5"\n', Path("workflow.toml"),
+                        installed=lambda: "0.4.2").version_range == ">=0.4, <0.5"
+
+
+def test_the_installed_version_is_too_old(tmp_path: Path,
+                                          capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-f8yy's scenario: `config load design` refuses, naming the engine's version,
+    the range, and the fix, and does not report the table only the later version
+    defines as unknown."""
+    configured(tmp_path, '[workflow]\nversion = ">=0.5, <0.6"\n\n[release]\nchannel = "x"\n')
+
+    assert main(["config", "load", "design"], root=tmp_path) == 1
+
+    err = capsys.readouterr().err
+    assert (f"the installed workflow is {documents.version()}, outside the range >=0.5, <0.6 "
+            "that .agents/workflow.toml accepts") in err
+    assert "run `change-workflow install`" in err
+    assert "no table the workflow defines" not in err
+
+
+def test_an_engine_within_the_range_reads_the_rest(tmp_path: Path,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    configured(tmp_path, CONFIGURED.replace(
+        ACCEPTED, f'[workflow]\nversion = "=={documents.version()}"\n'))
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    fields = {entry["field"]: entry for entry in json.loads(capsys.readouterr().out)["fields"]}
+    assert fields["workflow.version"] == {"field": "workflow.version", "status": "declared",
+                                          "value": f"=={documents.version()}"}
+
+
+# The local configuration, `.agents/workflow.local.toml`.
+
+def _local(root: Path, text: str) -> None:
+    (root / config.LOCAL).parent.mkdir(parents=True, exist_ok=True)
+    (root / config.LOCAL).write_text(text, "utf-8")
+
+
+def _engineering(root: Path, directory: str = "guides/engineering") -> Path:
+    for name in ("tests.md", "imports/at-module-level.md"):
+        (root / directory / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / directory / name).write_text(f"# {name}\n", "utf-8")
+    return root / directory
+
+
+COMMITTED = """
+[repository]
+protected-branches = ["main"]
+
+[sandbox]
+writable.common = ["~/.cache/shared"]
+"""
+
+
+def test_config_as_json_reports_a_missing_local_configuration(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-4pm4's "CI reads the workflow's roles": with no local file, `config --json`
+    exits 0, reports the local file absent, each required local field as missing,
+    `guidance.engineering` as null, and the committed fields and the distribution's
+    in full."""
+    _checkout(tmp_path)
+    configured(tmp_path, COMMITTED, local=None)
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    fields = {entry["field"]: entry for entry in shown["fields"]}
+    assert shown["local"] == {"file": ".agents/workflow.local.toml", "exists": False}
+    assert shown["guidance"] == {"engineering": None}
+    assert fields["guidance.engineering"] == {"field": "guidance.engineering",
+                                              "status": "missing"}
+    assert {fields[f"models.{step}"]["status"] for step in (*config.STEPS, "orchestrator")} == {
+        "missing"}
+    committed = {field: entry for field, entry in fields.items()
+                 if not field.startswith(("models.", "guidance."))}
+    assert committed == {entry["field"]: entry
+                         for entry in config.resolution(config.load(tmp_path))
+                         if not entry["field"].startswith(("models.", "guidance."))}
+    assert fields["repository.protected-branches"]["value"] == ["main"]
+    assert fields["sandbox.writable.common"]["value"] == ["~/.cache/shared"]
+    assert shown["workflow"] == documents.RUNNING.described()
+    assert shown["roles"] == [role.shown() for role in config.ROLES]
+    assert main(["config"], root=tmp_path) == 0
+    assert capsys.readouterr().out.splitlines()[1] == (
+        ".agents/workflow.local.toml: no such file; every local field is missing")
+
+
+# The configuration's tables, committed and local, each with its keys.
+TABLES = {table: {*config._TABLES.get(table, ()), *config._LOCAL_TABLES.get(table, ())}
+          for table in {*config._TABLES, *config._LOCAL_TABLES}}
+_FIELD = re.compile(rf"^(?:{'|'.join(TABLES)})\.[a-z<][\w.<>-]*$")
+_CODE = re.compile(r"`([^`]+)`")
+
+
+def _companion_roles(markdown: str) -> list[tuple[str, set[str]]]:
+    """The companion's table of roles: each row's role and the configuration fields its
+    "Provided through" cell names in code."""
+    section = markdown.split("### What an adopting repository provides\n", 1)[1]
+    section = re.split(r"^#{2,4} ", section, maxsplit=1, flags=re.M)[0]
+    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in section.splitlines()
+            if line.startswith("| ") and not line.startswith(("| Role |", "|---"))]
+    return [(cells[0], {code for code in _CODE.findall(cells[-1]) if _FIELD.match(code)})
+            for cells in rows]
+
+
+def test_the_companions_table_of_roles_is_the_roles_config_lists() -> None:
+    """CW-ora1: the distribution's companion states each role `roles` lists, in its
+    order, by the same name, its provisions naming exactly the fields `roles` gives
+    it. Content check over the distribution's own companion."""
+    stated = _companion_roles(documents.path(documents.COMPANION).read_text("utf-8"))
+
+    assert stated == [(role.name, set(role.fields)) for role in config.ROLES]
+
+
+def test_a_roles_fields_are_the_configurations() -> None:
+    """Each field a role names is a key of a table the configuration defines, a
+    `<step>` key every step's, so a role never names a field no repository can
+    declare."""
+    def defined(field: str) -> bool:
+        table, _, rest = field.partition(".")
+        key = rest.split(".")[0]
+        keys = TABLES.get(table, set())
+        return set(config.STEPS) <= keys if key == "<step>" else key in keys
+
+    assert [field for role in config.ROLES for field in role.fields if not defined(field)] == []
+
+
+def test_the_table_of_roles_is_read_under_its_heading_alone() -> None:
+    """Only the roles table's rows are read, each provision's configuration fields
+    and none of its other code, so a role the two state differently is compared."""
+    stated = _companion_roles("### What an adopting repository provides\n\n"
+                              "| Role | Used by | Provided through |\n|---|---|---|\n"
+                              "| A new role | every step | `hooks.pre-commit` and `run` |\n"
+                              "\n#### The engine's own assumptions\n\n| Not | a | role |\n")
+
+    assert stated == [("A new role", {"hooks.pre-commit"})]
+
+
+def test_an_empty_local_configuration_reads_as_none(tmp_path: Path) -> None:
+    configured(tmp_path, COMMITTED)
+    _local(tmp_path, "")
+
+    loaded = config.load(tmp_path)
+
+    assert not loaded.local_exists
+    assert config.missing(loaded, config.GUIDANCE_ENGINEERING) == [config.GUIDANCE_ENGINEERING]
+
+
+def test_the_local_configuration_gives_the_models_the_pointer_and_more_writable_paths(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _checkout(tmp_path)
+    configured(tmp_path, COMMITTED)
+    _engineering(tmp_path)
+    _local(tmp_path, '[guidance]\nengineering = { path = "guides/engineering/" }\n'
+           + MODELS + '\n[sandbox]\nwritable.common = ["~/.cache/mine"]\n'
+           'writable.implement = ["build/"]\n')
+
+    assert main(["config", "--json"], root=tmp_path) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    fields = {entry["field"]: entry for entry in shown["fields"]}
+    assert shown["local"] == {"file": ".agents/workflow.local.toml", "exists": True}
+    assert fields["models.design"]["status"] == "declared"
+    assert fields["sandbox.writable.common"]["value"] == ["~/.cache/shared", "~/.cache/mine"]
+    assert fields["sandbox.writable.implement"]["value"] == ["build/"]
+    assert shown["guidance"] == {"engineering": {
+        "path": str(tmp_path / "guides/engineering")}}
+    assert fields["guidance.engineering"]["value"] == shown["guidance"]["engineering"]
+
+
+@pytest.mark.parametrize("text,named", [
+    ("[repository]\nprotected-branches = []\n",
+     ".agents/workflow.local.toml declares [repository], which belongs in "
+     ".agents/workflow.toml"),
+    ("[sandbox]\nprotected = ['x/']\n",
+     "declares sandbox.protected, which belongs in .agents/workflow.toml"),
+    ("[guidance]\nworkflow = { path = 'x/' }\n",
+     "guidance.workflow is no field the workflow defines"),
+    ("[colour]\n", "colour is no table the workflow defines"),
+    ("[models\n", ".agents/workflow.local.toml is not TOML"),
+    ("[sandbox]\nwritable.common = ['.agents/workflow.toml']\n",
+     "is or lies under the protected path .agents/workflow.toml"),
+    ("[models]\nimplement = { model = 'm' }\n", "models.implement must be a list"),
+    ("[models]\nimplement = [{ harness = 'gemini', model = 'm' }]\n",
+     "models.implement[0].harness must be one of"),
+    ("[models]\norchestrator = { model = 'm', harness = 'claude' }\n",
+     "models.orchestrator.harness is no field"),
+])
+def test_a_malformed_local_configuration_is_refused_naming_the_field(
+        tmp_path: Path, text: str, named: str) -> None:
+    configured(tmp_path, COMMITTED, local=None)
+    _local(tmp_path, text)
+
+    with pytest.raises(ConfigError) as refused:
+        config.load(tmp_path)
+    assert named in str(refused.value)
+
+
+def test_a_local_writable_path_under_a_committed_protected_path_is_refused(
+        tmp_path: Path) -> None:
+    configured(tmp_path, '[sandbox]\nprotected = ["secrets/"]\n')
+    _local(tmp_path, '[sandbox]\nwritable.common = ["secrets/cache/"]\n')
+
+    with pytest.raises(ConfigError, match="lies under the protected path secrets/"):
+        config.load(tmp_path)
+
+
+# The engineering-guidance pointer.
+
+def test_a_developer_points_at_the_repositorys_engineering_guidance(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-hu0z's first scenario: `config load plan` prints the pointer's Markdown
+    files first, then the workflow's guidance, then the repository's; `config
+    --json` gives the pointer's absolute directory."""
+    _checkout(tmp_path)
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md"]\nplan = ["PLAN.md"]\n')
+    _engineering(tmp_path, "docs/guidance/engineering")
+    _local(tmp_path, '[guidance]\nengineering = { path = "docs/guidance/engineering/" }\n')
+
+    assert main(["config", "load", "plan"], root=tmp_path) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "docs/guidance/engineering/imports/at-module-level.md",
+        "docs/guidance/engineering/tests.md", *WORKFLOW_GUIDANCE, "AGENTS.md", "PLAN.md"]
+    assert main(["config", "--json"], root=tmp_path) == 0
+    assert json.loads(capsys.readouterr().out)["guidance"]["engineering"] == {
+        "path": str(tmp_path / "docs/guidance/engineering")}
+
+
+def test_a_pointer_from_home_is_printed_whole(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _engineering(home, ".guidance")
+    checked = configuration_checked("", tmp_path / "repo/.agents/workflow.toml",
+                                    root=tmp_path / "repo", home=home,
+                                    local='[guidance]\nengineering = { path = "~/.guidance/" }\n')
+
+    assert checked.engineering == config.Engineering(entry="~/.guidance/",
+                                                     path=home / ".guidance")
+    assert checked.documents("plan", tmp_path / "repo")[:2] == [
+        str(home / ".guidance/imports/at-module-level.md"), str(home / ".guidance/tests.md")]
+
+
+def test_a_repository_applies_no_engineering_guidance(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-hu0z's second scenario."""
+    _checkout(tmp_path)
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md"]\n')
+    _local(tmp_path, "[guidance]\nengineering = { none = \"the workflow's own repository "
+           "applies only its guidance\" }\n")
+
+    assert main(["config", "load", "plan"], root=tmp_path) == 0
+    assert capsys.readouterr().out.splitlines() == [*WORKFLOW_GUIDANCE, "AGENTS.md"]
+    assert main(["config", "--json"], root=tmp_path) == 0
+    assert json.loads(capsys.readouterr().out)["guidance"]["engineering"] == {
+        "none": "the workflow's own repository applies only its guidance"}
+
+
+@pytest.mark.parametrize("pointer,named", [
+    ('{ path = "guides/missing/" }', "guidance.engineering names guides/missing/, which "
+                                     "does not exist"),
+    ('{ path = "guides/file.md" }', "guidance.engineering names guides/file.md, which is a "
+                                    "file"),
+    ('{ path = "guides/empty/" }', "guidance.engineering names guides/empty/, which holds no "
+                                   "Markdown file"),
+    ('{ none = " " }', "guidance.engineering declares none without a reason"),
+    ('{ path = "guides/engineering/", none = "x" }',
+     "guidance.engineering must be a table holding exactly one of path"),
+    ('{ distribution = "arkhai-engineering-guidance" }',
+     "guidance.engineering must be a table holding exactly one of path"),
+    ('"guides/engineering/"', "guidance.engineering must be a table holding exactly one"),
+    ('{ path = "/etc/guidance/" }', "guidance.engineering.path must be a directory from the "
+                                    "checkout's root or from `~`"),
+])
+def test_a_pointer_that_names_no_guidance_is_refused(tmp_path: Path, pointer: str,
+                                                     named: str) -> None:
+    _engineering(tmp_path)
+    (tmp_path / "guides/file.md").write_text("# x\n", "utf-8")
+    (tmp_path / "guides/empty").mkdir()
+    (tmp_path / "guides/empty/notes.txt").write_text("x\n", "utf-8")
+    _local(tmp_path, f"[guidance]\nengineering = {pointer}\n")
+
+    with pytest.raises(ConfigError) as refused:
+        config.load(tmp_path)
+    assert named in str(refused.value)
+
+
+@pytest.mark.parametrize("entry", ["docs/guidance/", "docs/guidance/engineering/",
+                                   "docs/guidance/engineering/tests.md",
+                                   "docs/guidance/engineering/imports/"])
+def test_a_load_entry_repeats_the_pointer(tmp_path: Path, entry: str) -> None:
+    """CW-hu0z's third scenario, and the entries that are the pointer's directory or
+    lie beneath it: the check refuses, naming the entry and the pointer."""
+    configured(tmp_path, f'[load]\ncommon = ["AGENTS.md", "{entry}"]\n')
+    _engineering(tmp_path, "docs/guidance/engineering")
+    _local(tmp_path, '[guidance]\nengineering = { path = "docs/guidance/engineering/" }\n')
+
+    with pytest.raises(ConfigError) as refused:
+        config.load(tmp_path)
+    assert (f"load.common names {entry}, which overlaps the directory "
+            "docs/guidance/engineering/ that guidance.engineering points at") in str(refused.value)
+
+
+def test_a_load_entry_beside_the_pointer_is_admitted(tmp_path: Path) -> None:
+    configured(tmp_path, '[load]\ncommon = ["docs/guidance/repository/", "docs/guidance.md"]\n')
+    _engineering(tmp_path, "docs/guidance/engineering")
+    _engineering(tmp_path, "docs/guidance/repository")
+    _local(tmp_path, '[guidance]\nengineering = { path = "docs/guidance/engineering/" }\n')
+
+    assert config.load(tmp_path).engineering is not None
+
+
+# The shape enforced: each key in its one file, the range and the pointer required.
+
+def test_models_are_committed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-4pm4's "Models are committed": every subcommand reading the configuration
+    refuses, naming the local file as where `[models]` belongs."""
+    _checkout(tmp_path)
+    configured(tmp_path, CONFIGURED + MODELS)
+
+    for command in (["config", "--json"], ["check", "config"], ["config", "load", "design"]):
+        assert main(command, root=tmp_path) == 1
+        assert (".agents/workflow.toml declares [models], which belongs in "
+                ".agents/workflow.local.toml") in capsys.readouterr().err
+
+
+def test_no_range_is_declared(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-f8yy's "No range is declared": every subcommand reading the configuration
+    refuses, naming the field."""
+    _checkout(tmp_path)
+    configured(tmp_path, CONFIGURED)
+    (tmp_path / config.CONFIGURATION).write_text(
+        CONFIGURED.replace(ACCEPTED, ""), "utf-8")
+
+    for command in (["config", "--json"], ["check", "config"], ["config", "load", "plan"]):
+        assert main(command, root=tmp_path) == 1
+        assert ".agents/workflow.toml declares no workflow.version" in capsys.readouterr().err
+
+
+def test_with_no_committed_file_no_range_is_asked_for(tmp_path: Path) -> None:
+    """A checkout with no committed configuration declares nothing, the range among
+    every other committed field, and is not refused for it, a local file beside it or
+    not."""
+    assert config.load(tmp_path).version_range is None
+    _local(tmp_path, LOCAL_CONFIGURED)
+
+    loaded = config.load(tmp_path)
+
+    assert (loaded.exists, loaded.local_exists, loaded.version_range) == (False, True, None)
+    assert "design" in loaded.models
+
+
+def test_ci_checks_the_configuration(tmp_path: Path,
+                                     capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-4pm4's "CI checks the configuration": with no local file, `check config`
+    checks every committed field, reports the local fields as missing, and exits 0."""
+    _checkout(tmp_path)
+    configured(tmp_path, CONFIGURED, local=None)
+
+    assert main(["check", "config"], root=tmp_path) == 0
+
+    ok, missing = capsys.readouterr().out.splitlines()
+    assert ok == "OK: .agents/workflow.toml passes its check."
+    assert missing.startswith("MISSING: .agents/workflow.local.toml does not exist, so lacks "
+                              "guidance.engineering, models.orchestrator, models.design")
+    assert missing.endswith("; a step needing one refuses until `change-workflow install` "
+                            "writes the file or they are declared there.")
+    (tmp_path / config.CONFIGURATION).write_text(CONFIGURED + "[colour]\n", "utf-8")
+    assert main(["check", "config"], root=tmp_path) == 1
+
+
+def test_a_complete_local_configuration_is_reported_whole(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _checkout(tmp_path)
+    configured(tmp_path, CONFIGURED)
+
+    assert main(["check", "config"], root=tmp_path) == 0
+    assert capsys.readouterr().out == "OK: .agents/workflow.toml passes its check.\n"
+
+
+# The engineering sections the shipped skills cite, reported against the pointer.
+
+def _guided(root: Path, files: dict[str, str]) -> Path:
+    """`root`, a Git checkout configured, its local pointer naming `guides/`, which
+    holds `files`, each path's text."""
+    _checkout(root)
+    configured(root, CONFIGURED, local='[guidance]\nengineering = { path = "guides/" }\n'
+                                       + MODELS)
+    for name, text in files.items():
+        (root / "guides" / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / "guides" / name).write_text(text, "utf-8")
+    return root
+
+
+def test_a_users_guidance_lacks_a_cited_section(tmp_path: Path,
+                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-7x0z's scenario: a section a skill cites that no file beneath the pointer
+    heads is reported, naming the skills citing it, and `check config` exits 0."""
+    _guided(tmp_path, {"rules.md": "# Our rules\n\n## Citations resolve\n"})
+
+    assert main(["check", "config"], root=tmp_path) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "OK: .agents/workflow.toml passes its check."
+    (imports,) = [line for line in lines if '"Imports go at module level"' in line]
+    assert imports.startswith('UNRESOLVED: the engineering guidance\'s section "Imports go at '
+                              'module level", which ')
+    assert "change-implement" in imports
+    assert imports.endswith(" cites, heads no file beneath guides/")
+    assert not any('"Citations resolve"' in line for line in lines)
+
+
+def test_a_cited_section_name_repeats(tmp_path: Path,
+                                      capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-7x0z's scenario: a cited name two files beneath the pointer each head does
+    not resolve, and is reported naming both files; `check config` exits 0."""
+    _guided(tmp_path, {"testing.md": "# Testing\n\n## Test levels\n",
+                       "levels/test-levels.md": "# Test levels\n"})
+
+    assert main(["check", "config"], root=tmp_path) == 0
+
+    (levels,) = [line for line in capsys.readouterr().out.splitlines()
+                 if '"Test levels"' in line]
+    assert levels.startswith('AMBIGUOUS: the engineering guidance\'s section "Test levels", '
+                             "which ")
+    assert "change-implement" in levels
+    assert levels.endswith(" cites, heads a section in each of guides/levels/test-levels.md, "
+                           "guides/testing.md, so the citation names none of them")
+
+
+def test_a_pointer_applying_none_reports_no_cited_section(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _checkout(tmp_path)
+    configured(tmp_path, CONFIGURED)
+
+    assert main(["check", "config"], root=tmp_path) == 0
+    shown = capsys.readouterr().out
+    assert "UNRESOLVED" not in shown and "AMBIGUOUS" not in shown

@@ -1,4 +1,4 @@
-"""`scripts/change-workflow wait`: block until a file holds a line matching a pattern.
+"""`change-workflow wait`: block until a file holds a line matching a pattern.
 
 An unattended step runs a long command in the background and must wait for it inside
 one call, since under the wrapper a turn's end is the run's outcome. Following the

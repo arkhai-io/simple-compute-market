@@ -97,7 +97,25 @@ def test_a_cited_agents_path_must_resolve(tmp_path: Path) -> None:
         ".agents/gone.json"]
 
 
-def test_an_active_change_citing_a_spec_its_delta_creates_resolves(tmp_path: Path) -> None:
+def test_a_checkouts_local_configuration_need_not_exist(tmp_path: Path) -> None:
+    # A checkout's local configuration is on no branch, so a citation of it does
+    # not resolve to a file, while any other absent path still fails, ignored or not.
+    change = tmp_path / "openspec/changes/shape-bounds"
+    change.mkdir(parents=True)
+    (tmp_path / ".gitignore").write_text("*.local.toml\n", "utf-8")
+    (change / "why.md").write_text(
+        "`.agents/workflow.local.toml`, written from `.agents/workflow.local.template.toml`, "
+        "not `.agents/other.local.toml`\n", "utf-8")
+
+    assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
+        ".agents/other.local.toml", ".agents/workflow.local.template.toml"]
+
+
+def test_a_citation_check_meets_a_specification_the_change_creates(tmp_path: Path) -> None:
+    """CW-368t's scenario: the workflow's `check spec-index --json` lists the
+    specification the change's delta creates, and the citation check, reading it
+    through the command, accepts the citation. Library integration: the engine's
+    command as a process over a temporary repository."""
     change = tmp_path / "openspec/changes/shape-bounds"
     (change / "specs/new-flow").mkdir(parents=True)
     # An added requirement writes the file, whatever else the delta does.

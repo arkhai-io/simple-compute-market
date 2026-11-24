@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import config, find, hooks, records
+from change_workflow import config, decisions, find, hooks, records
 from change_workflow.cli import main
 from change_workflow.common import SESSION_ID, StepError
 from change_workflow.graph import HOOK_STEPS, STEPS
@@ -24,9 +24,10 @@ from change_workflow.log import read_log
 from change_workflow.review import review_and_log, run_review
 from change_workflow.running import (drop_invocations, invocations_directory, keep_invocations,
                                      kept_invocations)
-from change_workflow_fixtures import (CHANGE, MODELS, NETWORK, SESSION, VALID, FakeClaude,
-                                      claude_review, codex_missing, configured, event_lines,
-                                      evidence_kind, make_wrapper, review_text)
+from change_workflow_fixtures import (CHANGE, NETWORK, SESSION, VALID, FakeClaude,
+                                      claude_review, codex_missing, configuration_checked,
+                                      configured, event_lines, evidence_kind, make_wrapper,
+                                      review_text)
 from change_workflow_fixtures import repository as repository_with_records
 
 AT = datetime(2026, 11, 6, 9, 0, 0, tzinfo=timezone.utc)
@@ -64,11 +65,11 @@ def _change(root: Path) -> Path:
 
 
 def _hooks(root: Path, text: str, environ: dict[str, str] | None = None,
-           shell: Shell | None = None, in_process: InProcess | None = None,
+           shell: Shell | None = None, in_process: hooks.InProcess | None = None,
            echoed: list[str] | None = None) -> Hooks:
     _change(root)
     configured(root, text)
-    checked = config.check(text, root / ".agents/workflow.toml", unignored=lambda *_: [])
+    checked = configuration_checked(text, root / ".agents/workflow.toml", unignored=lambda *_: [])
     return Hooks(root, checked, environ or {},
                  shell=shell or Shell(), in_process=in_process or InProcess(),
                  clock=lambda: AT, timer=lambda: 0.0, head=lambda _: "c0ffee",
@@ -98,7 +99,7 @@ def test_two_checks_fail(tmp_path: Path) -> None:
 def test_a_value_with_spaces_and_quotes_reaches_the_command_as_one_word(
         tmp_path: Path) -> None:
     """Library integration: a real `sh -c` receives the filled command."""
-    runner = Hooks(_change(tmp_path), config.check(
+    runner = Hooks(_change(tmp_path), configuration_checked(
         "[hooks]\npre-archive = \"printf '[%s]' {base} > seen.txt\"\n", tmp_path), {},
         echo=lambda _: None)
 
@@ -256,17 +257,17 @@ def test_a_review_on_claude_is_marked_as_the_review(tmp_path: Path) -> None:
 # pre-commit's default checks, `check change`, and `openspec`.
 
 def test_a_repository_declares_its_own_pre_commit(tmp_path: Path) -> None:
-    """CW-c8lw: the four default checks, and then `make lint`."""
+    """CW-c8lw: the six default checks, and then `make lint`."""
     shell, in_process = Shell(), InProcess()
     runner = _hooks(tmp_path, "[hooks]\npre-commit = 'make lint'\n", shell=shell,
                     in_process=in_process)
 
     assert runner.named("pre-commit", CHANGE, None, lambda: [])
 
-    assert in_process.checks == ["index", "tasks", "skills"]
+    assert in_process.checks == ["index", "tasks", "skills", "spec-index", "decisions"]
     assert shell.commands == [f"openspec validate {CHANGE} --strict", "make lint"]
     assert [i.check or i.command for i in runner.invoked] == [
-        "index", "tasks", "skills", "openspec", "make lint"]
+        "index", "tasks", "skills", "spec-index", "decisions", "openspec", "make lint"]
 
 
 def test_a_default_check_is_turned_off(tmp_path: Path) -> None:
@@ -278,7 +279,7 @@ def test_a_default_check_is_turned_off(tmp_path: Path) -> None:
 
     assert runner.named("pre-commit", CHANGE, None, lambda: [])
 
-    assert in_process.checks == ["index", "tasks"]
+    assert in_process.checks == ["index", "tasks", "spec-index", "decisions"]
     assert "[change-workflow] default check skills: disabled — no skills here" in echoed
 
 
@@ -293,11 +294,30 @@ def test_a_failing_default_check_fails_pre_commit_and_the_rest_still_run(
     assert shell.commands[-1] == "make lint"
 
 
+def test_a_decision_names_no_destination(tmp_path: Path,
+                                         capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-c8lw's scenario: the design records `### D7`, the proposal promotes no
+    `D7`, and `run pre-commit` fails on the decisions default check, naming D7. The
+    engine's own decisions check runs; the other default checks stand in."""
+    def in_process(check: str, change: str, root: Path) -> int:
+        return hooks._in_process(check, change, root) if check == "decisions" else 0
+
+    runner = _hooks(tmp_path, "", in_process=in_process)
+    directory = tmp_path / "openspec/changes" / CHANGE
+    (directory / decisions.DESIGN_FILE).write_text("# Design\n\n## Decisions\n\n### D7 — A rule\n")
+    (directory / decisions.PROPOSAL_FILE).write_text("## Why\n\n### Knowledge to promote\n\n- D1: here\n")
+
+    assert not runner.named("pre-commit", CHANGE, None, lambda: [])
+
+    assert "D7 has no bullet starting `D7`" in capsys.readouterr().out
+    assert [i.check for i in runner.invoked if i.failed] == ["decisions"]
+
+
 def test_an_archived_change_validates_every_specification(tmp_path: Path) -> None:
     shell = Shell()
     archived = tmp_path / "openspec/changes/archive" / f"2026-11-01-{CHANGE}"
     archived.mkdir(parents=True)
-    runner = Hooks(tmp_path, config.check("", tmp_path), {}, shell=shell,
+    runner = Hooks(tmp_path, configuration_checked("", tmp_path), {}, shell=shell,
                    in_process=InProcess(), echo=lambda _: None)
 
     assert runner.check_change(CHANGE)
@@ -363,7 +383,7 @@ def test_check_change_runs_the_defaults_alone(tmp_path: Path) -> None:
 
     assert runner.check_change(CHANGE)
 
-    assert in_process.checks == ["index", "tasks", "skills"]
+    assert in_process.checks == ["index", "tasks", "skills", "spec-index", "decisions"]
     assert shell.commands == [f"openspec validate {CHANGE} --strict"]
 
 
@@ -402,7 +422,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _pre_commit(root: Path, text: str = TIERED, step: str | None = None) -> tuple[bool, Shell]:
     shell = Shell()
-    runner = Hooks(root, config.check(text, root), {UNATTENDED: step} if step else {},
+    runner = Hooks(root, configuration_checked(text, root), {UNATTENDED: step} if step else {},
                    shell=shell, in_process=InProcess(), echo=lambda _: None)
     return runner.named("pre-commit", CHANGE, None, lambda: hooks.worktree_changes(root)), shell
 
@@ -713,7 +733,7 @@ def test_validations_helm_kind_fails(repository: Path) -> None:
     """CW-q5fy: library integration, a real `sh` and Git directory; the run's line
     lists the kind its gathering before the session ran, with its resolved command
     and exit status 2."""
-    configured(_ignoring_records(repository), evidence_kind("helm", run="exit 2") + MODELS)
+    configured(_ignoring_records(repository), evidence_kind("helm", run="exit 2"))
     # The gathering describes HEAD, so the configuration is committed.
     for command in (["add", "--all"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
                                        "commit", "-q", "-m", "configure"]):

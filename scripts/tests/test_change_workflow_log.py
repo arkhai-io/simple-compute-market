@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import graph
+from change_workflow import documents, graph
 from change_workflow.cli import main
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import (Checkout, LogError, NewerFormat, append_entry,
@@ -24,6 +24,9 @@ from change_workflow.log import (Checkout, LogError, NewerFormat, append_entry,
 from change_workflow.outcome import triaged_problems
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, clock, descriptors_of,
                                       log_file)
+
+# The running engine's version, which every line a writer appends records.
+VERSION = documents.version()
 
 
 def test_the_owners_branch_decision_is_recorded_and_found(
@@ -59,7 +62,8 @@ def test_an_outcome_is_logged_with_its_run(tmp_path: Path) -> None:
     line = record_outcome(log, "validate", VALID["question"], session="51aa",
                           commit=COMMIT, clock=clock)
 
-    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2, "step": "validate",
+    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2,
+                    "workflow": VERSION, "step": "validate",
                     "session": "51aa", "commit": COMMIT, **VALID["question"]}
     assert [json.loads(text) for text in log.read_text("utf-8").splitlines()] == [line]
 
@@ -80,6 +84,28 @@ def test_an_unknown_step_is_not_logged(tmp_path: Path) -> None:
                        commit=COMMIT)
 
 
+def test_each_line_records_the_version_of_the_engine_that_wrote_it(tmp_path: Path) -> None:
+    """CW-d867's scenario: a change crosses an upgrade, each line naming the version
+    that wrote it and both the one format, which nothing reads the version to
+    decide."""
+    log = log_file(tmp_path)
+
+    design = append_entry(log, {"step": "design", "outcome": "finished"}, clock,
+                          version=lambda: "0.4.1")
+    plan = append_entry(log, {"step": "plan", "outcome": "finished"}, clock,
+                        version=lambda: "0.4.2")
+
+    assert [(line["workflow"], line["format"]) for line in (design, plan)] == [
+        ("0.4.1", FORMAT), ("0.4.2", FORMAT)]
+    assert read_log(log) == [design, plan]
+    assert (older(read_log(log)), newer(read_log(log))) == (None, None)
+
+
+def test_no_writer_sets_the_version_a_line_records(tmp_path: Path) -> None:
+    with pytest.raises(StepError, match="may not set workflow"):
+        append_entry(log_file(tmp_path), {"step": "x", "workflow": "9.9.9"}, clock)
+
+
 def test_seq_increases_across_outcomes_and_notes(tmp_path: Path) -> None:
     log = log_file(tmp_path)
 
@@ -91,7 +117,8 @@ def test_seq_increases_across_outcomes_and_notes(tmp_path: Path) -> None:
     entries = read_log(log)
     assert [entry["seq"] for entry in entries] == [1, 2, 3]
     assert entries[0] == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2,
-                          "step": "orchestrator", "outcome": "round", "sections": [[1, 2], [3]], "by": "owner",
+                          "workflow": VERSION, "step": "orchestrator", "outcome": "round",
+                          "sections": [[1, 2], [3]], "by": "owner",
                           "after": 0}
     assert entries[1]["sections"] == [1, 2]
     assert entries[2]["decision"] == "rerun validate"
@@ -175,7 +202,8 @@ def test_a_decision_names_who_decided_the_run_it_resolves_and_the_next_step(
                                next_step="review", kind="pre-closeout", clock=clock)
 
     assert line == {"seq": 2, "at": "2026-10-21T09:15:40Z", "format": 2,
-                    "step": "orchestrator", "outcome": "orchestrator", "by": "owner",
+                    "workflow": VERSION, "step": "orchestrator", "outcome": "orchestrator",
+                    "by": "owner",
                     "decision": "return to design confirmed", "reason": "the owner's word",
                     "resolves": 1, "next": {"step": "design"}}
     # The repeat review names no run, since no run waits on it.
@@ -731,7 +759,7 @@ def test_a_replaced_log_holds_the_new_lines_with_the_old_ones_permissions(
     lines = replace_log(log, lambda entries: [*entries, numbered(entries, {"step": "x"}, clock)])
 
     assert read_log(log) == lines == [first, {"seq": 2, "at": first["at"], "format": 2,
-                                              "step": "x"}]
+                                              "workflow": VERSION, "step": "x"}]
     assert log.stat().st_mode & 0o777 == 0o640
     assert sorted(path.name for path in log.parent.iterdir()) == [log.name]
 
@@ -891,8 +919,8 @@ def test_the_log_is_opened_with_the_format_before_a_step(tmp_path: Path) -> None
     second = open_log(log, CHANGE, "review", interactive=False, clock=clock)
 
     assert first == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": FORMAT,
-                     "step": "start", "outcome": "opened", "starts": "design",
-                     "interactive": True}
+                     "workflow": VERSION, "step": "start", "outcome": "opened",
+                     "starts": "design", "interactive": True}
     assert (second["seq"], second["interactive"]) == (2, False)
 
 
@@ -920,7 +948,7 @@ def test_records_of_an_older_format_are_not_opened(tmp_path: Path, prepare,
     with pytest.raises(StepError, match=why) as refused:
         open_log(log, CHANGE, "design", interactive=True, clock=clock)
 
-    assert f"scripts/change-workflow convert {CHANGE}" in str(refused.value)
+    assert f"change-workflow convert {CHANGE}" in str(refused.value)
     assert sorted(path.name for path in log.parent.iterdir()) == before
 
 

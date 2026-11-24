@@ -30,7 +30,6 @@ from change_workflow.running import invocations_directory, kept_invocations
 from change_workflow_fixtures import CHANGE, configured, evidence_kind
 
 UNATTENDED = "CHANGE_WORKFLOW_UNATTENDED"
-REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def _writes(kind: str, attempt: str = "20261117T1003Z", owed: bool = False,
@@ -609,33 +608,4 @@ def test_the_command_gathers_and_keeps_what_it_ran(repository: Path,
     assert [(entry["hook"], entry.get("kind"), entry.get("phase")) for entry in kept] == [
         ("gather", None, "preflight"), ("gather", "local", "run")]
 
-
-def test_validation_gathers_this_repositorys_kinds(tmp_path: Path) -> None:
-    """MCW-r4tx: with a complete section owing `tests.yml` and nothing present, this
-    repository's own configuration starts the pipeline and the owed CI run, then runs
-    the local kind, then the Helm kind after it, then collects."""
-    root = tmp_path / "repository"
-    root.mkdir()
-    _git(root, "init", "-q", "-b", "feat/x")
-    configured(root, (REPOSITORY / config.CONFIGURATION).read_text("utf-8"))
-    (root / f"openspec/changes/{CHANGE}").mkdir(parents=True)
-    (root / f"openspec/changes/{CHANGE}/{TASKS_FILE}").write_text(
-        "## 1. A section\n\n- [x] 1.1 Done.\n  - Owed by validation (ci tests.yml): job `py`, "
-        "its suite passing.\n", "utf-8")
-    _git(root, "add", "--all")
-    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
-         "-m", "start")
-    ran: list[str] = []
-    configuration = config.load(root)
-    hooks = Hooks(root, configuration, {UNATTENDED: "validate"}, echo=lambda _: None,
-                  shell=lambda command, _: ran.append(command) or 0,
-                  capture=lambda command, _: (ran.append(command) or 0, "1"))
-    gathering = Gathering(hooks, CHANGE, None, push=lambda: 0,
-                          report=lambda: evidence.change_report(root, CHANGE, configuration))
-
-    assert gathering.missing()
-
-    assert [command.split()[1] for command in ran] == [
-        "check-uv-version", "run-e2e", "run-ci", "validate-local", "validate-helm",
-        "fetch-e2e-logs", "validate-ci"]
 

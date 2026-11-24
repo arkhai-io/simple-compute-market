@@ -1,14 +1,15 @@
 """Each `### D<n>` decision of a change's design names its permanent destination in
-its proposal's "Knowledge to promote"."""
+its proposal's "Knowledge to promote": the engine's default check,
+`change_workflow.decisions`, and `check decisions` through the command."""
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
-import check_decision_destinations as checker
+from change_workflow import decisions as checker
+from change_workflow.cli import main
 
 CHANGE = "shape-bounds"
 DESIGN = """# Design
@@ -48,8 +49,7 @@ DESIGN = """# Design
 
 
 def _change(tmp_path: Path, design: str, proposal: str) -> Path:
-    """A change in a Git repository, where the workflow's command finds it."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    """A checkout holding the change, which the check finds by name."""
     directory = tmp_path / "openspec/changes" / CHANGE
     directory.mkdir(parents=True)
     (directory / checker.DESIGN_FILE).write_text(design)
@@ -72,14 +72,14 @@ def test_every_decision_named_passes(tmp_path: Path, capsys: pytest.CaptureFixtu
         "D1, published bounds: `openspec/specs/storefront-publication/spec.md`",
         "D2: no permanent destination — a decision not to add a rule"))
 
-    assert checker.main([CHANGE], root=root) == 0
+    assert main(["check", "decisions", CHANGE], root=root) == 0
     assert "2 decisions" in capsys.readouterr().out
 
 
 def test_a_missing_bullet_is_named(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _change(tmp_path, DESIGN, _proposal("D1: `docs/development/ARCHITECTURE.md`"))
 
-    assert checker.main([CHANGE], root=root) == 1
+    assert main(["check", "decisions", CHANGE], root=root) == 1
     out = capsys.readouterr().out
     assert "D2 has no bullet starting `D2`" in out
     assert "D1 has" not in out
@@ -89,7 +89,7 @@ def test_a_bullet_must_start_with_the_decision(tmp_path: Path) -> None:
     root = _change(tmp_path, DESIGN, _proposal(
         "D1: here", "Published bounds, per D2: here", "D20: a longer number is not D2"))
 
-    assert checker.main([CHANGE], root=root) == 1
+    assert main(["check", "decisions", CHANGE], root=root) == 1
 
 
 def test_a_design_without_decision_headings_is_not_checked(
@@ -97,5 +97,25 @@ def test_a_design_without_decision_headings_is_not_checked(
     root = _change(tmp_path, "# Design\n\n## Decisions\n\n- **Bounds are published.**\n",
                    "## Why\n")
 
-    assert checker.main([CHANGE], root=root) == 0
+    assert main(["check", "decisions", CHANGE], root=root) == 0
     assert "not checked" in capsys.readouterr().out
+
+
+def test_an_archived_changes_design_is_read_where_the_archive_moved_it(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _change(tmp_path, DESIGN, _proposal("D1: here"))
+    archived = root / "openspec/changes/archive" / f"2026-11-01-{CHANGE}"
+    archived.parent.mkdir(parents=True)
+    (root / "openspec/changes" / CHANGE).rename(archived)
+
+    assert main(["check", "decisions", CHANGE], root=root) == 1
+    assert (f"openspec/changes/archive/2026-11-01-{CHANGE}/{checker.PROPOSAL_FILE}: D2 has no "
+            "bullet" in capsys.readouterr().out)
+
+
+def test_a_change_the_command_does_not_find_is_refused(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _change(tmp_path, DESIGN, _proposal())
+
+    assert main(["check", "decisions", "no-such-change"], root=root) == 1
+    assert "no change 'no-such-change'" in capsys.readouterr().err

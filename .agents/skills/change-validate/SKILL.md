@@ -33,7 +33,7 @@ while you run.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/change-workflow start --unattended` —
+When this skill runs through `change-workflow start --unattended` —
 `make validate UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -50,7 +50,7 @@ the session, and every turn ends with an outcome matching
   A call the harness denies is the same. The wrapper records every refusal and
   denial on the run's line whatever you say, and the orchestrating session reads
   them before the change moves on; never ask about either as a question. Wait on a
-  background command with `scripts/change-workflow wait`, never by following its
+  background command with `change-workflow wait`, never by following its
   output. Validation's sandbox writes the checkout, so a new attempt can build the
   environments it needs, but validation changes nothing it validates: a run that
   leaves a tracked file changed, or a commit made, is stopped by the checks after
@@ -83,7 +83,7 @@ it would end with unattended, as "Running unattended" gives it, its `next` the
 target step 1 read:
 
 ```text
-scripts/change-workflow record <change> validate --outcome '<the outcome, as JSON>'
+change-workflow record <change> validate --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -110,11 +110,11 @@ log, and every other top-level Markdown file there, each a message from the
 repository's hook, in full. Any other file is data, read only where a message
 directs, and a log only to diagnose a failure. A failing gathering or hook prevented
 nothing: what it found is what the steps below assess. Interactively, with no
-wrapper, run `scripts/change-workflow run before validate <change>` once step 1's
+wrapper, run `change-workflow run before validate <change>` once step 1's
 round-view, Branch, Worktree, Commit, and Target checks hold — it pushes and
 gathers, so those come first — in the background and waited for as step 2 says; its
 last line names the directory, which you read as above before step 1's other
-checks. Once the record is written, run `scripts/change-workflow run after
+checks. Once the record is written, run `change-workflow run after
 validate <change>` before `record`, and, when it fails, explain its failure to the
 owner, who settles it.
 
@@ -129,7 +129,7 @@ A round view open in this checkout (`make round-view` of a change worked in the
 owner's workspace) points the branch at the round's base, not its commit. An
 unattended run has already been started by the wrapper, which ran `start validate`
 and its round-view check before your session began: never run `start validate`
-yourself. A session started some other way runs `scripts/change-workflow check
+yourself. A session started some other way runs `change-workflow check
 round-view`; when it fails, stop and ask the owner to run `make round-done`.
 A view the owner opens in their workspace for a change worked in its own clone
 moves nothing here, and validation runs beside it.
@@ -145,7 +145,7 @@ moves nothing here, and validation runs beside it.
   branch belongs to another change, stop and ask the owner — unless the change's
   log holds the owner's decision that it runs on this branch: run
   `git branch --show-current`, then
-  `scripts/change-workflow log <change> --branch <that branch>`; a line
+  `change-workflow log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
 - **Worktree.** `git status --porcelain --untracked-files=all` is empty. Ignored
   files do not count. The gathering refuses a worktree whose tree is not `HEAD`'s.
@@ -159,15 +159,15 @@ moves nothing here, and validation runs beside it.
   after a failed or inconclusive validation of it; or the target the owner's
   direction to validation names. Unattended, the wrapper computed it before your
   session started and gives it in your prompt, labelled `Target`, as JSON, and
-  again on a resume: record it, and never run `scripts/change-workflow next` for
+  again on a resume: record it, and never run `change-workflow next` for
   it, since once your own run is logged the computation reads that run and names
-  the owner. Interactively, with no wrapper, run `scripts/change-workflow next
+  the owner. Interactively, with no wrapper, run `change-workflow next
   <change>` now, before the run waits on anything, and record the `target` its
   result carries. When neither gives a target — a validation started by hand
   outside the route — record that, and name the round's triage: in a round's join
   that is the target the computation gives, and anywhere else the computation
   brings it to the owner as a target it did not give.
-- **Evidence.** `scripts/change-workflow evidence <change>` lists, for `HEAD`'s tree
+- **Evidence.** `change-workflow evidence <change>` lists, for `HEAD`'s tree
   and commit, each evidence kind the repository's configuration declares, in its
   order: its requirement — `always`; an owed kind once for each argument a complete
   section's `Owed by validation:` line owes it, named by the kind and the argument
@@ -180,7 +180,7 @@ moves nothing here, and validation runs beside it.
   never read from the configuration's file. Evidence is present whoever wrote it —
   the functional checks before a commit may leave a kind's evidence for the tree
   they tested — and is never gathered again only because another step wrote it or
-  it is old. For each kind, read its guide, which `scripts/change-workflow config`
+  it is old. For each kind, read its guide, which `change-workflow config`
   names: how its evidence reads, how its failures are told apart, and what its
   section of the record holds. A value of the owner's machine reaches a kind's
   command through the environment, as its guide says; never pass one yourself.
@@ -209,7 +209,7 @@ moves nothing here, and validation runs beside it.
   names the decision's `seq`, its condition, and what you checked. A lapsed waiver
   is written in the kind's section too, naming the decision's `seq` and why it
   lapsed — the merge, or how the condition broke — and a kind the gathering
-  skipped is gathered with `scripts/change-workflow gather <change> --kind <kind>
+  skipped is gathered with `change-workflow gather <change> --kind <kind>
   --lapsed`, run as step 2 says: the engine refuses to gather a kind the log waives
   without it. A waived kind is an omission of evidence, neither passed, failed, nor
   inconclusive, and the result is judged on the kinds assessed. When every kind is
@@ -250,18 +250,18 @@ it and which match is current; a gathering refused before it ran anything leaves
 `ERROR:` line instead. A failed kind may still have left evidence, an attempt saying
 why it failed: the evidence, never the closing line alone, is what you assess.
 
-Then run `scripts/change-workflow evidence <change>` again, which names every kind's
+Then run `change-workflow evidence <change>` again, which names every kind's
 current evidence, whoever wrote it.
 
 **Gathering again.** You gather only a new attempt of one kind, and only for a
 reason this skill gives: evidence that cannot be read, a waiver lapsed (step 1), or
 an environmental failure the owner has remedied or allowed a new attempt of
-(section 5). Run `scripts/change-workflow gather <change> --kind <kind>`, with
+(section 5). Run `change-workflow gather <change> --kind <kind>`, with
 `--owed <argument>` for one owed argument, as written, in the background, with the
 harness's longest `timeout`, 7200000 ms — a dispatched run can take longer than the
 default ten minutes — and with no shell redirect of its output: the harness keeps a
 background command's output in a file, which is what the wait reads. Wait inside one Bash call, with
-`scripts/change-workflow wait <output-file> '^\[exited with code '`, the line the
+`change-workflow wait <output-file> '^\[exited with code '`, the line the
 harness ends the file with — a regular expression, so its bracket is escaped —
 never by ending the turn: under the wrapper a turn's end is an outcome, so a turn
 ended with the gathering in flight is logged as a stop. The wait returns that line
@@ -356,7 +356,7 @@ to know that a green end-to-end run is not evidence for this change.
 
 ## 7. Write the validation record
 
-Write the validation record at the path `scripts/change-workflow find
+Write the validation record at the path `change-workflow find
 --next-record validation <change>` prints, run at the moment you write it:
 `reviews/NN-validation.md` in the change's directory, under the archive once
 closeout has archived the change, numbered after every record and transcript as

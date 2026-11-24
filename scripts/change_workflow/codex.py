@@ -8,9 +8,11 @@ of a reviewer inside both would fail. The review's scope keeps every file it rev
 read-only there. A review the engine cannot confine runs in Codex's own read-only
 sandbox (`--sandbox read-only`), its only guard: the reviewer must never change what
 it reviews. Its plain output is condensed into progress. Codex writes its sessions
-and state under `~/.codex`, and loads `~/.codex/config.toml`, which no step writes
-(CW-r6kd). It runs only the review: a writing step needs the denial record Claude
-Code keeps, and Codex keeps none. It has no command rules.
+and state under `~/.codex`, and loads `~/.codex/config.toml` and the skills in
+its user skill directory, `~/.codex/skills/`, where the workflow's installer
+writes, neither of which any step writes (CW-r6kd). It runs only the review: a
+writing step needs the denial record Claude Code keeps, and Codex keeps none. It has
+no command rules.
 
 Codex records no denials. A write the engine's sandbox refused shows in the output of
 the command that made it, which `refusals` reads (CW-w3oa).
@@ -36,7 +38,8 @@ ADAPTER = Adapter(
     steps=frozenset({"review"}),
     state=("~/.codex",),
     state_files=(),
-    protected=("~/.codex/config.toml",),
+    protected=("~/.codex/config.toml", "~/.codex/skills/"),
+    skills="~/.codex/skills/",
 )
 # What starts a command in Codex's output, and what ends its line.
 _EXEC = "/bin/bash -lc "
