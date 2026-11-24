@@ -16,6 +16,10 @@ leaving the machine's selected context alone, so a production context selected t
 is never deployed to. With `HELM_ALL_SCENARIOS=1` in the owner's environment it runs
 every pipeline scenario, not only the served list. Both are values of the owner's
 machine and reach the kind through the environment; validation never passes one.
+Where Docker Desktop is absent, as on Linux with Podman, a kind cluster stands in:
+`KIND_EXPERIMENTAL_PROVIDER=podman systemd-run --user --scope -p Delegate=yes kind
+create cluster --name <cluster>` once, then `HELM_CONTEXT=kind-<cluster>` and
+`KIND_EXPERIMENTAL_PROVIDER=podman` in the owner's environment.
 
 1. **Preflights**, before anything slow: the kube context; the VM and bare-metal
    storefront environments the chart-to-loader checks run in, which the checkout's
@@ -29,8 +33,10 @@ machine and reach the kind through the environment; validation never passes one.
    plus this one, times the figure, against the node's allocatable memory.
 2. **The images**: the wheelhouse cleared (`dist-clean`), so every wheel built is the
    tree's own rather than one another branch left in `.dist`; the images built under
-   the change's own tags; and both storefront environments reinstalled from the
-   wheelhouse.
+   the change's own tags; on a kind cluster, a context named `kind-<cluster>`, those
+   images loaded into its node (`kind-load`, `scripts/kind_load.py`), since a kind
+   node does not share the daemon that built them as Docker Desktop's cluster does;
+   and both storefront environments reinstalled from the wheelhouse.
 3. **The render checks**, with the chart-to-loader checks running this tree's code; a
    skipped check fails the kind.
 4. **The release replaced**: workloads an earlier run left up scaled to zero, its

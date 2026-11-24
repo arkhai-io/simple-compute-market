@@ -3,8 +3,10 @@
 Before a step's session the engine runs its own actions for that moment
 (`graph.STEP_ACTIONS`) — the gathering before validation, every kind's cleanup
 before archive cleanup — and then the repository's `before-<step>` hook; after a
-session that finished, its actions and then `after-<step>`. A review's and a
-triage's hooks are given `{kind}`, the kind of review the run is or triages.
+session that finished, its actions — the history copy after archive cleanup, which
+writes the owner's workspace, outside every step's sandbox (CW-hak6) — and then
+`after-<step>`. A review's and a triage's hooks are given `{kind}`, the kind of
+review the run is or triages.
 
 Each run has an inputs directory under its change's records,
 `reviews/runs/<run>/`, named on its log line (`claim_inputs`), with `before/` and
@@ -34,13 +36,14 @@ A step the owner holds interactively runs them itself, `run before|after <step>
 names on the line it writes.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-g6th, CW-ikmm, CW-h3ks, CW-b7fl,
-CW-a4fl, CW-i9np, CW-b2xr, and CW-q5fy.
+CW-a4fl, CW-i9np, CW-b2xr, CW-q5fy, and CW-hak6.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
@@ -48,11 +51,12 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
-from . import gather, hooks
+from . import gather, history, hooks
 from .common import SESSION_ID, UNATTENDED_RUN, Clock, Entry, StepError, utc_now
 from .config import Configuration
-from .graph import AFTER, BEFORE, step_actions
-from .hooks import PREFIX, Hooks
+from .find import workspace_of
+from .graph import AFTER, BEFORE, HISTORY, step_actions
+from .hooks import PREFIX, Hooks, Invoked
 from .running import drop_invocations, invocations_directory, keep_invocations, kept_invocations
 
 # Where a change's runs keep their inputs, under its records.
@@ -223,6 +227,8 @@ class Around:
     environ: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     # Where what an action ran is kept until the run's line takes it.
     invocations: Callable[[Path], Path | None] = invocations_directory
+    # The time an action the engine runs itself records it started.
+    clock: Clock = utc_now
 
     def environment(self, session: str) -> dict[str, str]:
         """What an action or hook runs with: the caller's environment, marked as the
@@ -264,8 +270,30 @@ class Around:
         drop_invocations(kept, session, invoked)
         return Ran(name, status, log=log, lines=_engine_lines(log), invoked=invoked)
 
+    def _history(self, environ: Mapping[str, str]) -> int:
+        """Copy the change's history into the owner's workspace, outside the sandbox
+        no step writes the workspace from, and keep the copy for the run's line. A
+        change worked in place has no clone to copy from, so nothing is copied."""
+        started, began = self.clock().astimezone(timezone.utc), time.monotonic()
+        if workspace_of(self.root) is None:
+            print(f"{self.root} is no change's clone: its history is already the workspace's")
+            status = 0
+        else:
+            status = history.main(["sync", self.change], root=self.root)
+        try:
+            keep_invocations(self.invocations(self.root), environ.get(SESSION_ID), [
+                {"change": self.change, **Invoked(
+                    HISTORY, f"history sync {self.change}", status,
+                    started.strftime("%Y-%m-%dT%H:%M:%SZ"), time.monotonic() - began).entry()}])
+        except (OSError, StepError) as exc:
+            print(f"WARNING: the history copy could not be kept for the run's line: {exc}",
+                  file=sys.stderr)
+        return status
+
     def _action(self, name: str, directory: Path) -> Ran:
         def call(environ: Mapping[str, str]) -> int:
+            if name == HISTORY:
+                return self._history(environ)
             if name == gather.GATHER:
                 return gather.main(self.change, root=self.root,
                                    configuration=self.configuration, environ=environ,
@@ -329,7 +357,7 @@ def interactive(when: str, step: str, change: str, *, root: Path, reviews: Path,
     else:
         run = claim_inputs(reviews, step, clock)
     around = Around(root, configuration, change, step, kind=kind, base=base,
-                    environ=environ, invocations=invocations)
+                    environ=environ, invocations=invocations, clock=clock)
     ran = around.before(run / BEFORE) if when == BEFORE else around.after(run / AFTER)
     keep_invocations(invocations(root), session,
                      [entry for one in ran for entry in one.invoked])

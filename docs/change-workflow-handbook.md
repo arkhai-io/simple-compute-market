@@ -112,8 +112,8 @@ at these moments, and follows every other transition without asking:
    changes", below).
 
 Between these, it stops for anything no rule can settle: a validation that failed or
-was inconclusive, an environmental remedy validation proposes, a denial that needs a
-rule, a proposed return to design, planning, or, from closeout, implementation, a
+was inconclusive, an environmental remedy validation proposes, a refused write or a
+denial that needs a path or a ruling, a step that ran unconfined, a proposed return to design, planning, or, from closeout, implementation, a
 stopped step, or a prerequisite to release. A step that asks ends its turn
 with a question; your answer, relayed by the orchestrating session, resumes the same
 session. A session can take another turn after it reported; the orchestrating session
@@ -210,8 +210,8 @@ scripts/change-workflow note <change> orchestrator --by owner --waives deploymen
 `--waives` names the kinds, which `scripts/change-workflow evidence` then reports as
 waived and the engine's gathering skips. A waived kind is gathered anyway, the record
 saying the waiver lapsed, when the commits since the last validation that ran it
-include a merge, which the gathering notices itself, or when validation judges the
-condition no longer holds; the engine refuses a new attempt of a waived kind unless
+include a merge made after you waived it, which `evidence` and the gathering notice
+themselves, or when validation judges the condition no longer holds; the engine refuses a new attempt of a waived kind unless
 validation says the waiver lapsed.
 
 **Directing a change.** You can send a change to any step outside the exits its
@@ -279,25 +279,56 @@ The direction takes no `--next`, since the resumed triage names the exit, and on
 resume spends it. Once archive cleanup has reached `done`, a revisit belongs on the
 pull request.
 
-**Granting a rule for one run.** A step that was denied a call it needed stops, and
-the orchestrating session reads the run's denials (`scripts/change-workflow denials
-<change> <seq>`) and proposes the narrowest rule for the gap. A rule you grant reaches
-one run and is never added to the step table. A fresh run takes it through its
-target, several rules separated by `;`:
+**A refused write.** Every unattended step runs inside a sandbox that lets it write
+only its step's scope; `scripts/change-workflow config` shows each step's scope and
+where each path came from. A write outside it fails as a
+read-only file system, or as busy for a protected file, and the run's line records
+it among its `refusals`, as it records a push the engine's `git` refused. A step that
+cannot go on without the write stops naming the path; one that can goes on and says
+what it did instead. The orchestrating session reads each refusal and denial from the
+run's record and brings it to you as one of two things: a finding, the step reaching
+beyond its job, which it also checks the run's later calls for a workaround of; or a
+gap, its scope too narrow for the work, with the narrowest path that would answer
+it.
+
+**Granting a path for one run.** A path you grant reaches one run and is never kept.
+A fresh run takes it through its target, several paths separated by `;`:
 
 ```text
-make validate CHANGE=<change> UNATTENDED=1 ALLOW='Bash(gh run download *);Bash(gh run view *)'
+make validate CHANGE=<change> UNATTENDED=1 WRITE='kit/site/.venv;~/.cache/some-tool'
 ```
 
-A resumed run takes it as `--allow` on `scripts/change-workflow resume`. A grant
-commits nothing, so it recovers a stop met between a round's sections being committed
-and its triage, when no table edit may be committed. A deny rule is never granted.
+A resumed run takes it as `--write` on `scripts/change-workflow resume`. A relative
+path is from the checkout's root, and `~` is your home directory; a path absent at
+launch is created as a directory, and a file grants its directory. The engine
+refuses, before launching anything, a pattern, a protected path or one under it —
+the workflow's configuration, `.git/config`, the harness's settings — and `/tmp`
+itself, since every step has a private `/tmp` already. A grant commits nothing, so
+it recovers a stop met between a round's sections being committed and its triage,
+when no configuration edit may be committed. A gap every run of a step meets belongs
+in the configuration's `[sandbox]` instead, which the orchestrating session edits and
+commits on your word.
+
+**A step that ran unconfined.** Where the sandbox cannot run — `bwrap` missing, or
+unprivileged user namespaces refused, as AppArmor may on native Ubuntu 24.04 and
+later — a step runs unconfined, with a warning and `unconfined: true` on its line,
+and the orchestrating session tells you. Only the checks after the run hold it then:
+no path is bound and no push is refused. Install `bubblewrap`, or allow its user
+namespaces, to confine the next run.
+
+**A prerequisite's proposal.** A design that needs another change first asks you
+about the prerequisite. On your word the orchestrating session makes its worktree,
+`scripts/change-workflow propose <change> <prerequisite>`, which puts
+`../<prerequisite>-proposal` on a new branch `propose-<prerequisite>` from the landing
+branch, and resumes the design, which writes the prerequisite's proposal there and
+ends blocked. Committing and merging the proposal, and starting its workflow, are
+yours.
 
 **Merging the landing branch at other times.** On your word, the orchestrating
 session merges the landing branch into the change's branch between steps — never
 while a round view is open, nor between a round's sections being committed and that
-round's triage. It resolves conflicts in the change index, change documents, the step
-table, and skills itself, and brings a conflict in code to you. One you leave to
+round's triage. It resolves conflicts in the change index, change documents, the
+configuration, and skills itself, and brings a conflict in code to you. One you leave to
 implementation goes, once your decision is recorded, to an implementation run with no
 sections:
 
@@ -702,12 +733,20 @@ The engine's parts, by what they do:
   hooks before and after each step ("Customization", below).
 - **Evidence**: which evidence a commit has for each of validation's evidence kinds,
   and the gathering of what is missing before validation's session.
-- **Starting a step**: the wrapper runs an unattended step. It reads the step table
-  for the step's skill and permissions, chooses the first available of the step's
-  models, starts the harness — Claude Code or Codex — headless, reads its event stream
-  into a transcript, a progress file, and the run's denials, checks the outcome the run
-  ends with, and measures what it cost. The review runs read-only and publishes its
-  answer as the change's next record.
+- **Starting a step**: the wrapper runs an unattended step. It takes the step's
+  skill and scope from the engine's own definition of each step, chooses the first
+  available of the step's models, starts the harness — Claude Code or Codex — headless
+  through its adapter inside the step's sandbox, reads its event stream into a
+  transcript, a progress file, and the run's denials and refusals, checks the outcome
+  the run ends with, and measures what it cost. The review writes nothing it reviews
+  and publishes its answer as the change's next record.
+- **The sandbox**: each step's scope, resolved from the engine's baseline, the
+  harness's state, the configuration's `[sandbox]`, and your grants; the bubblewrap
+  sandbox it runs in, its probe, and the unconfined fallback; the engine's `git`,
+  which refuses every push but the guarded push's; and the seven checks after every
+  run, which stop a run that rewrote history, changed what validation or a review
+  read, rewrote records, stashed, pushed otherwise, or, in closeout, changed what
+  closeout may not.
 - **The log** module is the workflow log's only writer.
 - **Reading a change** finds a change by name, active or archived, and reads its
   numbered records, the change index, and its task list.
@@ -716,7 +755,8 @@ The engine's parts, by what they do:
   code, it is the same each time, and `make change-next` shows you exactly what the
   orchestrating session will run.
 - **A change's places**: creating, reading, and removing a change's clone, copying its
-  history into your workspace, and the round view.
+  history into your workspace, a prerequisite's proposal worktree, and the round
+  view.
 - **Guards and support**: the guarded push, which pushes only the change's own branch,
   and never a protected one; `wait`, which lets an unattended step wait for a
   background command; the check that every skill loads from its one source; the
@@ -728,8 +768,10 @@ session's relay beside it:
 ![One step's run, from its start to its logged outcome](../openspec/specs/change-workflow/diagrams/change-workflow-step-run.svg)
 
 A step starts through `scripts/change-workflow start`, which checks the change and
-opens its log. Unattended, the wrapper starts the harness and, when the run ends,
-appends one line to the log with the run's session, model, cost, and denials. A run
+opens its log. Unattended, the wrapper starts the harness in the step's sandbox and,
+when the run ends, checks what the run changed against what it started from and
+appends one line to the log with the run's session, model, cost, denials, refusals,
+and any check it broke, which stops the run. A run
 that ends with a question waits; your answer resumes the same session through
 `scripts/change-workflow resume`. The command's subcommands, and which another party
 may rely on, are the companion's
@@ -750,11 +792,11 @@ A repository adopts and tunes the workflow in a few files:
   is found at, its commands, its cleanup, and its guide; the documents every step and
   each step reads as it starts; the models each step and the
   orchestrating session run on, each an ordered list of a harness, a model, and an
-  effort; and how often a review whose draft fails the format check is sent back. A
+  effort; what each step's sandbox writes beyond its baseline, for every step or one,
+  and what it protects beyond the engine's own; and how often a review whose draft
+  fails the format check is sent back. A
   default check is turned off only by naming it with a reason. The engine refuses a
   step's models naming two of one vendor.
-- **`.claude/change-steps.toml`**, the step table: each step's skill and its allow and
-  deny rules. A rule you grant for one run ("Interventions", above) never enters it.
 - **`.agents/skills/`**: each step's skill, one source every harness loads. The skills
   name no target or path of one repository's; what they need of it comes from the
   configuration, the guides, and the guidance.
@@ -776,8 +818,10 @@ failure in front of it and says what it means for its work. A failing `after-` h
 resumes the session once to fix what it found; a second failure comes to you as a
 question naming the hook, as does a failing `after-review` at once.
 
-No step edits the configuration or the step table: each changes as a tracked edit you
-commit, or the orchestrating session commits on your word in the change's clone. The
+No step edits the configuration, which every step's sandbox mounts read-only, nor
+the harness's settings: each changes as a tracked edit you commit, or the
+orchestrating session commits on your word in the change's clone. Each step's skill
+and baseline scope are the engine's, and a repository only adds to a scope. The
 skills and the guidance change like any other file, through a change.
 
 The configuration's fields, and why each is one, are the companion's

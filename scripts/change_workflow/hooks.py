@@ -14,7 +14,8 @@ Which steps may run each hook is the engine's hook table (`graph.HOOK_STEPS`). A
 unattended run's marker names its step (`common.UNATTENDED_RUN`), and `run`
 refuses a hook its step is not listed for, naming both, before anything runs; with
 no marker, as in a session the owner holds, nothing is restricted. A forged marker
-is a step breaking its skill, which its deny rules and skill govern.
+is a step working around its skill, outside what the table guards against; the
+checks after a run hold what matters, such as validation's tree.
 
 `run pre-commit` reads its tier from the paths the commit would change, the
 worktree's changes against `HEAD` — staged, unstaged, and untracked. When any lies

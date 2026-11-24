@@ -58,6 +58,23 @@ QUALIFICATION_GATES = {
     ),
 }
 
+#: The live verification modules, and the prerequisites each checks before any
+#: hold: the payments target, for a module filing a case the mediation target,
+#: the provenance, mock provisioning and the payer its deal pays from.
+LIVE = SCENARIOS / "vms" / "live"
+_LIVE_PREREQUISITES = ("payments_config", "live_provenance", "mock_provisioning")
+_LIVE_DISPUTE_PREREQUISITES = (
+    "payments_config", "mediation_target", "live_provenance", "mock_provisioning",
+)
+LIVE_GATES = {
+    LIVE / "test_buyer_stop.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_funds_exhausted.py": (*_LIVE_PREREQUISITES, "funded_rate_payer"),
+    LIVE / "test_preemption.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_term_end.py": (*_LIVE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_seller_filing.py": (*_LIVE_DISPUTE_PREREQUISITES, "funded_buyer"),
+    LIVE / "test_buyer_contested_case.py": (*_LIVE_DISPUTE_PREREQUISITES, "funded_buyer"),
+}
+
 _FIXTURE_LINE = re.compile(r"^\s+(SETUP|TEARDOWN)\s+M (\S+)(?: \(fixtures used: (.*)\))?$")
 _TEST_LINE = re.compile(r"^\s{8}(\S+\.py)::")
 
@@ -221,6 +238,23 @@ def test_a_qualification_module_checks_both_targets_before_any_hold(path, plans)
     holds = [order.index(name) for name in order if name in HOLD_FIXTURE_NAMES]
     assert holds, order
     gates = [order.index(name) for name in QUALIFICATION_GATES[path]]
+    assert gates == sorted(gates) and max(gates) < min(holds), order
+
+
+def test_every_live_module_is_held_to_the_gate_check() -> None:
+    assert set(LIVE_GATES) == set(LIVE.glob("test_*.py"))
+
+
+@pytest.mark.parametrize("path", sorted(LIVE_GATES), ids=lambda path: path.name)
+def test_a_live_module_checks_its_prerequisites_before_any_hold(path, plans):
+    """A hold pauses a shared service when it is set up, and the module buys
+    only after its holds, so a topology that misses a requirement leaves the
+    observation unproven, with nothing bought at the live target, only if every
+    prerequisite is checked first."""
+    order = [name for name, _ in plans[str(path.relative_to(PROJECT))]["setup"]]
+    holds = [order.index(name) for name in order if name in HOLD_FIXTURE_NAMES]
+    assert holds, order
+    gates = [order.index(name) for name in LIVE_GATES[path]]
     assert gates == sorted(gates) and max(gates) < min(holds), order
 
 

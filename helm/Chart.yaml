@@ -19,7 +19,7 @@ dependencies:
     repository: "file://charts/registry"
     condition: api-credits-registry.enabled
   - name: storefront
-    version: "0.5.0"
+    version: "0.5.1"
     repository: "file://charts/storefront"
     condition: storefront.enabled
   - name: bare-metal-storefront

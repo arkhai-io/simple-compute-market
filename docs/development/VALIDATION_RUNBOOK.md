@@ -979,7 +979,12 @@ which the umbrella chart's values set to `true`. The stack must also:
 
 - give the provisioning service the private key whose public half section 22
   authorized, at a path in the service's filesystem; that path is the target's
-  `ssh_key_path`;
+  `ssh_key_path`. On a Helm release it is the `id_ed25519` key of the Secret
+  `provisioning.sshKey.secretName` names, mounted at
+  `/home/appuser/.ssh/id_ed25519` once `mockMode` is false. The umbrella chart's
+  values name no such Secret and a release that names none fails to render;
+  `make -C helm topology-secrets` creates none, since mock provisioning mounts
+  no key;
 - let the provisioning service reach the host's SSH;
 - run the controlled Anvil settlement chain and trust the selected fixture
   marketplace principals. External profiles may use Ed25519 marketplace signing

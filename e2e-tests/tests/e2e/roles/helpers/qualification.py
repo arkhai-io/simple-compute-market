@@ -17,8 +17,9 @@ Two parts, neither tied to a domain:
 - **Per-observation outcome.** A qualification module makes several of the
   runbook's observations
   (``docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes``),
-  and a pytest run that passes with a skipped stage has not run every check an
-  observation requires. So a qualification module names its observations
+  a live verification module (``scenarios/vms/live/``) the one its lane twin's
+  input yields, and a pytest run that passes with a skipped stage has not run
+  every check an observation requires. So such a module names its observations
   (``OBSERVATIONS``, or ``CYCLE_OBSERVATIONS`` for a module run once per
   cycle), each of its stages requires them unless its class declares its own
   (``stage_observations``), and once the module's last stage has reported, the
@@ -338,8 +339,9 @@ def registration_faults(
 # Per-observation outcome
 # ===========================================================================
 
-#: The class attribute a qualification stage declares the observations
-#: requiring it by: the runbook's observation numbers, as strings.
+#: The class attribute a stage declares the observations requiring it by: a
+#: qualification stage's are the runbook's observation numbers, as strings; a
+#: live verification stage's are named, as its module's ``OBSERVATIONS`` are.
 OBSERVATIONS_ATTRIBUTE = "observations"
 
 StageOutcome = Literal["passed", "failed", "skipped"]

@@ -175,7 +175,7 @@ def test_the_lane_profile_recommends_the_mediation_double() -> None:
 
 
 def test_the_mediation_double_acts_at_the_payments_double_as_the_authority_account() -> None:
-    """The mediation double extends, reverses and lifts with the token the
+    """The mediation double extends, stops, reverses and lifts with the token the
     payments double gives the authority's account."""
     authority = _toml(MEDIATION_AUTHORITY)
     at_payments = _toml(DOUBLE_FIXTURES / "accounts.toml")["accounts"]["dispute_authority"]

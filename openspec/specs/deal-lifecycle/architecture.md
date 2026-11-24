@@ -436,12 +436,17 @@ the period ends or the part stops. Exhaustion stops every co-funded part at
 `fundedThrough`, and a part's `end` stops it, each with cause `terms`, even if no party
 acts. A stop's `settled` figures are not restated after a later reversal, so
 reconciliation reads the recorded reversals, and approval answers
-`409 insufficient_funds` when the payer cannot cover the first reservation. The
-producer's own qualification is closed at switch-on, never by a double: its
-independent HTTP run covered fixed payer and payee treatment only, not `chosen`, term
-ends or reverse; its stop-retry vectors are fixed-clock fixtures; and declaring any
-rate treatment presupposes that the payment authority executes the dispute entry's
-`chosen` stop, which hosted execution has not yet shown.
+`409 insufficient_funds` when the payer cannot cover the first reservation. Declaring
+any rate treatment presupposes that the payment authority executes the dispute
+entry's `chosen` stop, which no double can establish. SCM's VM live verification
+compared the hosted authorities' outputs with the lane doubles': a payer's stop under
+`charged`, exhaustion at `fundedThrough`, a payee's stop with notice and a part's end
+under `returned`, and the mechanical ruling of a payee's `delivery_end` filing, whose
+authority stop through the `chosen` entry returned its period beside the capped
+penalty; an operator's ruling of a contested case is unproven live, since no
+topology applied a ruling policy
+([live verification summary](../../../docs/attachments/switch-on-hosted-per-period-vm/live-verification.md)).
+The producer's stop-retry vectors are fixed-clock fixtures.
 
 Mediation verifies the case-carried Agreement against mandate.deal. Its one claim
 is delivery_end {ended_at, delivered, cause=payee|payer}. Signed concurrence binds
@@ -476,9 +481,15 @@ not a payments response passed through. No SCM computed remedy substitutes.
 
 - The Agreement pins dispute origin and record key for deal/case life, potentially
   unbounded. No mid-deal address/key rotation is followed: a new origin is not
-  redirected to and a new signer fails verification. A payments receipt key change
-  is a drained cutover and addresses neither dispute identity history nor a signed
-  successor hand-off.
+  redirected to and a new signer fails verification. SCM assumes each environment's
+  payments receipt key stays stable for a deal's life, since the payments service
+  publishes no retention commitment or rotation announcement; a key change is a
+  drained cutover, run from the operator handbook, and addresses neither dispute
+  identity history nor a signed successor hand-off.
+- How the dispute authority dismisses and rules cases, its advisory time to rule and
+  its continuity are its own published policy and procedures; SCM's operator
+  handbook states what SCM relies on and points to that policy rather than
+  restating it.
 - An unresolvable unanswered counterparty case holds that deal's dispute cursor;
   respondent discovery at its authority continues and repair rows rotate, but later
   per-deal events wait for its answer journal or confirmed closure.
@@ -488,14 +499,17 @@ not a payments response passed through. No SCM computed remedy substitutes.
   ([One end instant, transactional admission](#one-end-instant-transactional-admission)).
 - Storefront retention has no production prune trigger. No real bare-metal host
   access/revocation qualification is established by mock/in-process passes.
-- Hosted development mediation is on an older revision than the vendored contract.
-  Isolated local real-authority runs do not upgrade or qualify that hosted target.
+- Which hosted targets run a mediation authority, and at which revision, is the
+  deployment's and the authority's maintainers', outside this repository. Isolated
+  local real-authority runs do not upgrade or qualify a hosted target.
 - A storefront runs no funding timer: a running rate deal's funding stop reaches end
-  service only as the payment authority's recorded stop. Revised-remedy execution and
-  consolidated rate/ruling execution qualification are later Goal 8 work. Rate deals'
-  delivery and servicing, rate commands, the rate buyer end and seller notice are
-  proven against in-process authorities and the lane doubles, never against a
-  deployed authority.
+  service only as the payment authority's recorded stop. Rate deals' delivery and
+  servicing, rate commands, the rate buyer end and seller notice are proven against
+  in-process authorities and the lane doubles; against deployed authorities only
+  VM's payment outputs and dispute filings are compared live, in mock provisioning,
+  each a boundary comparison testing nothing downstream of the authority's output.
+  Revised-remedy execution, bare metal and the consolidated rate and ruling matrix
+  are not qualified against a deployed authority.
 - API-credit options carry authorities/holds and validate authority identity, but
   their roles compose no lifecycle evidence/watch/respondent or buyer filing path.
   Reversal consequences for already-issued credits are unspecified.

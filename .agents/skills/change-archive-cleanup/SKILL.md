@@ -1,6 +1,6 @@
 ---
 name: change-archive-cleanup
-description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — fetch and record the branch it lands on, release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, commit any tracked file the evidence kinds' cleanup wrote before the session, push, and copy its history into the owner's workspace. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, or, run again after a merge after the archive or a merge review's triage, `archived`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
+description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — fetch and record the branch it lands on, release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, commit any tracked file the evidence kinds' cleanup wrote before the session, and push, the engine copying its history into the owner's workspace after the session. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, or, run again after a merge after the archive or a merge review's triage, `archived`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
 ---
 
 # Cleaning up an archived change
@@ -15,8 +15,8 @@ Archive cleanup changes the campaign index, the change's ledger when the owner
 waives its validation check (step 1), and any tracked file an evidence kind's
 cleanup wrote (steps 7 and 8). The engine ran every kind's cleanup before your
 session, removing what the change's validation left; for a change worked in its own
-clone, archive cleanup copies the change's history into the owner's workspace as its
-last act. The archived change, its specs, and the permanent
+clone, the engine copies the change's history into the owner's workspace once your
+session finishes. The archived change, its specs, and the permanent
 documents are as the closeout review read them, or, run again after a merge after
 the archive, as that merge and any merge review's triage left them; a defect found
 now in any of them is not this skill's to fix — stop and tell the owner.
@@ -35,41 +35,27 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed, so
-  if a chained command is denied, run its commands one call at a time. If a single
-  command or any other tool call is denied, finish every part of the work that does
-  not depend on it. If the step cannot complete without that call, end with
-  `stopped`, `reason` naming that exact call and why the step needed it, and
-  `denials` listing the calls as you saw them; the wrapper replaces them with the
-  run's own record. Otherwise go on and end as the step ends: the wrapper records
-  the denial on the outcome whatever it is, and the orchestrating session reads it
-  before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it, except where the rule exists only to keep file writes on the Edit and
-  Write tools — the step table's comments name those rules: sed's in-place forms,
-  find's deleting, running, and writing actions, and the diff family's
-  output-to-file forms — whose refused shell write may be made with the Edit or
-  Write tool this step's rules allow. A call denied because no rule allows it —
-  the harness reports it as don't ask mode — may be done instead by a tool this
-  step's rules allow for the same work, such as the Edit tool for a shell write or
-  Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question. Wait on a
+  background command with `scripts/change-workflow wait`, never by following its
+  output. The owner's workspace is outside the scope: the engine copies the
+  change's history there once your session finishes (step 10).
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
-  the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`.
 - **The end is an outcome.** When the index edit and any file the cleanup wrote are
-  committed and pushed, the pull request drafted, and the history copied (step
-  10), end with `finished`, `next` the terminal node, `{"step": "done"}`,
-  `landing` what step 1's Landing branch check fetched, and the message naming the
-  pull request's opening from the drafts, which the orchestrating session does at
-  `done`; you never create it. A failed cleanup and a history copy that refused a
-  file end `finished` too, with what failed and how to rerun it in the message. A
-  row already `archived` (step 1) ends `finished` once steps 7 to 10 have run
+  committed and pushed, and the pull request drafted, end with `finished`, `next`
+  the terminal node, `{"step": "done"}`, `landing` what step 1's Landing branch
+  check fetched, and the message naming the pull request's opening from the drafts,
+  which the orchestrating session does at `done`; you never create it. A failed
+  cleanup ends `finished` too, with what failed and how to rerun it in the message.
+  A row already `archived` (step 1) ends `finished` once steps 7 to 9 have run
   again, saying the rest of cleanup had run. A fetch of the landing branch that
   failed ends `stopped`, never `finished`, its `reason` naming the fetch: the
   log's writer refuses a finished line without `landing` whenever there is a branch
@@ -95,8 +81,9 @@ and `--session <id>` gives the id. Record the outcome the session ends with —
 `finished`, with its `landing` unless step 1 found no branch to fetch — never a
 question or a stop, which the owner, present, settles in the session: a recorded
 stop would wait for a resume only the wrapper makes. When `record` refuses, correct
-what it names and run it again. Run after the history copy (step 10), the record
-reaches the owner's workspace with the next copy. A session closed without
+what it names and run it again. Run after `run after archive-cleanup`, which makes
+the history copy (step 10), the record reaches the owner's workspace with the next
+copy. A session closed without
 recording leaves archive cleanup in progress whatever the row says, since the
 computation answers `done` only from a finished archive cleanup line: it names
 archive cleanup again, to be resumed, or its outcome recorded with the command
@@ -139,7 +126,7 @@ and follow this skill.
 - **Status.** The change's row in `openspec/changes/README.md` is `in closeout`. A
   row already `archived` means steps 3 to 6 ran, after the checks below held: say
   so, and run again only what is safe to repeat — the Route, Worktree, and Landing
-  branch checks, then steps 7 to 10 — never releasing dependents, editing the row, or
+  branch checks, then steps 7 to 9 — never releasing dependents, editing the row, or
   redrafting the pull request. The Validated check, which measures from the first
   closeout review, is not run there: the guard on the exit that named archive
   cleanup — the merge after the archive's, or a merge review's triage's — owes its
@@ -165,7 +152,7 @@ and follow this skill.
   computation's reason says what comes first.
 - **Validated.** When `git diff --name-only <commit> HEAD`, from the commit the
   first closeout review read (its `reviewed-commit` marker), names a path outside
-  the repository's inert paths — a correction to code, a skill, or the step table — the
+  the repository's inert paths — a correction to code, a skill, or the configuration — the
   latest validation record is `passed` and names `HEAD`, or an ancestor `HEAD`
   differs from only in changes' ledgers and reviews and in tracked files an evidence
   kind's cleanup wrote, each committed alone (step 8). Otherwise the owner has waived
@@ -282,8 +269,8 @@ followed by anything still owned elsewhere that the old notes named. Mark the ch
 
 Leave the change's `reviews/` where it is, transcripts included: it is untracked, so
 it costs the repository nothing, and it is the review history until an export flow
-exists. For a change worked in its own clone, step 10 copies it into the owner's
-workspace.
+exists. For a change worked in its own clone, the engine copies it into the owner's
+workspace once this session finishes (step 10).
 
 Run `scripts/change-workflow run pre-commit <change>`; it must report nothing
 failing. Among the workflow's default checks, the change index check is the one
@@ -360,20 +347,24 @@ When a file a cleanup wrote was committed (step 8) and step 5 has not pushed it 
 `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses,
 stop and report its reasons.
 
-## 10. Copy the history, last
+## 10. The history copy, the engine's
 
 A change worked in its own clone — its `.git/config` names a `[remote "workspace"]`
-— keeps its records and evidence only there, untracked. As the last act, after
-everything above, run `scripts/change-workflow history <change>`: it copies the archived
-change's `reviews/` and the validation evidence its records name into the owner's
-workspace, at the same paths, where sessions working other changes find them. It is
-safe to repeat: files already there are left, files that grew are extended, and a
-file that differs otherwise is refused, named, and never overwritten. Report each
-refused file: the owner reconciles it, and removing the clone refuses until they
-do. What the workflow writes after this — the outcome of this run, a later round on
-the pull request — reaches the workspace with the next copy, which removing the
-clone (`make change-clone-remove`, the owner's) makes first. A change worked in the
-owner's workspace has its history there already: skip this step.
+— keeps its records and evidence only there, untracked. The owner's workspace lies
+outside this step's scope, so you never run `history`: once your session finishes,
+before its outcome is logged, the engine copies the archived change's `reviews/` and
+the validation evidence its records name into the owner's workspace, at the same
+paths, where sessions working other changes find them, and the run's line names the
+copy among what it invoked (`history`). Run interactively, `scripts/change-workflow
+run after archive-cleanup <change>` runs it before `record`. It is safe to repeat:
+files already there are left, files that grew are extended, and a file that differs
+otherwise is refused, named, and never overwritten; the owner reconciles it, and
+removing the clone refuses until they do. What the workflow writes after the copy —
+the outcome of this run, a later round on the pull request — reaches the workspace
+with the next copy, which the orchestrating session makes once the outcome is
+logged, and removing the clone (`make change-clone-remove`, the owner's) makes
+first. A change worked in the owner's workspace has its history there already: the
+copy says so and copies nothing.
 
 ## 11. Report
 
@@ -384,5 +375,8 @@ Tell the owner:
 - the commits, and the pre-commit checks' result;
 - the cleanup's result, each failed command named with how to rerun it, and the
   tracked file it wrote, or that it wrote none, and why;
-- the history copy's result, each refused file named;
+- the history copy: run interactively, what `run after archive-cleanup` reported,
+  each refused file named; unattended, that the engine copies once this session
+  ends, its exit status on the run's line among what it invoked and its report in
+  the run's `after/` directory, which the orchestrating session relays;
 - the two drafts, and anything on the branch that the pull request would also carry.

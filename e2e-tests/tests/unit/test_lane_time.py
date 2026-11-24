@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -47,6 +47,7 @@ from storefront_client.client import ADMIN_TIME_OPERATION, ADMIN_TIME_RESOURCE
 
 from tests.e2e.roles.buyer_cli import _time_section
 from tests.e2e.roles.helpers.compute_deal_stages import reach_agreement_instant
+from tests.e2e.roles.helpers.recurring_purchase_stages import reach_lane_instant
 from tests.e2e.roles.helpers.lane_time import (
     BuyerFileParty,
     ChainParty,
@@ -57,6 +58,8 @@ from tests.e2e.roles.helpers.lane_time import (
     buyer_time_file,
     lane_time_of,
     parties_from,
+    poll_until,
+    wait_until,
 )
 
 T = 1_794_821_400
@@ -419,6 +422,24 @@ def test_an_agreement_instant_is_set_in_an_injected_run() -> None:
     assert party.now == T + 3
 
 
+def test_a_run_with_no_lane_time_skips_an_instant_no_authority_recorded() -> None:
+    with pytest.raises(pytest.skip.Exception, match="needs lane time, and the run has none"):
+        reach_lane_instant(None, T, fixed_by_agreement=False)
+
+
+def test_a_run_with_no_lane_time_refuses_a_recorded_instant_past_its_bound() -> None:
+    far = int(datetime.now(timezone.utc).timestamp()) + 86400
+    with pytest.raises(AssertionError, match="refusing to wait .*the bound is 0:01:00"):
+        reach_lane_instant(None, far, fixed_by_agreement=False, recorded_by_authority=True,
+                           bound=timedelta(minutes=1))
+
+
+def test_a_run_with_no_lane_time_reaches_a_recorded_instant_already_passed() -> None:
+    passed = int(datetime.now(timezone.utc).timestamp()) - 60
+    assert reach_lane_instant(None, passed, fixed_by_agreement=False,
+                              recorded_by_authority=True, bound=timedelta(minutes=1)) > passed
+
+
 def test_the_generated_buyer_configuration_names_the_lane_time_file_only_when_injected() -> None:
     assert _time_section("/tmp/arkhai-lane-time/now.json") == [
         "[time]", 'source = "injected"', 'file = "/tmp/arkhai-lane-time/now.json"', ""]
@@ -464,6 +485,104 @@ def test_a_wall_run_needing_any_other_instant_is_a_blocked_skip_naming_its_targe
     with pytest.raises(pytest.skip.Exception,
                        match="blocked: .* on wall time against hosted authorities"):
         lane.reach(T, fixed_by_agreement=False)
+
+
+def test_a_wall_run_waits_for_an_instant_an_authority_recorded_within_its_bound() -> None:
+    waited: list[tuple[datetime, timedelta | None]] = []
+
+    def wait(instant: datetime, *, bound: timedelta | None = None) -> datetime:
+        waited.append((instant, bound))
+        return instant
+
+    lane = LaneTime("wall", [], wait=wait, target="hosted authorities")
+
+    assert lane.reach(T, fixed_by_agreement=False, recorded_by_authority=True,
+                      bound=timedelta(minutes=45)) == T
+    assert waited == [(datetime.fromtimestamp(T, timezone.utc), timedelta(minutes=45))]
+
+
+def test_a_recorded_instant_past_its_bound_fails_before_any_wait() -> None:
+    slept: list[float] = []
+    now = datetime.fromtimestamp(T, timezone.utc)
+
+    def wait(instant: datetime, *, bound: timedelta) -> datetime:
+        return wait_until(instant, bound=bound, now=lambda: now, sleep=slept.append)
+
+    lane = LaneTime("wall", [], wait=wait)
+
+    with pytest.raises(AssertionError, match="refusing to wait 0:10:01 .* the bound is 0:10:00"):
+        lane.reach(T + 601, fixed_by_agreement=False, recorded_by_authority=True,
+                   bound=timedelta(minutes=10))
+    assert slept == []
+
+
+def test_a_wall_wait_sleeps_until_the_instant_passes() -> None:
+    clock = [datetime.fromtimestamp(T, timezone.utc)]
+
+    def sleep(seconds: float) -> None:
+        # A sleep that returns a little early, as a real one may.
+        clock[0] += timedelta(seconds=seconds - 0.5 if seconds > 1 else seconds)
+
+    reached = wait_until(datetime.fromtimestamp(T + 300, timezone.utc),
+                         bound=timedelta(minutes=10), now=lambda: clock[0], sleep=sleep)
+
+    assert reached >= datetime.fromtimestamp(T + 300, timezone.utc)
+
+
+def test_an_unrecorded_instant_on_wall_time_is_still_a_blocked_skip() -> None:
+    lane = LaneTime("wall", [], wait=lambda instant, **_: instant, target="hosted authorities")
+
+    with pytest.raises(pytest.skip.Exception, match="blocked: .* against hosted authorities"):
+        lane.reach(T, fixed_by_agreement=False, bound=timedelta(minutes=10))
+
+
+def test_an_injected_run_sets_a_recorded_instant_as_any_other() -> None:
+    party = FakeParty("bob-storefront", "storefront", [])
+    lane = _lane(party, start=T)
+
+    assert lane.reach(T + 120, fixed_by_agreement=False, recorded_by_authority=True,
+                      bound=timedelta(seconds=1)) == T + 120
+    assert party.now == T + 120
+
+
+class _Clock:
+    """A monotonic clock its sleeps advance."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def test_a_poll_returns_the_first_read_carrying_the_output() -> None:
+    reads = iter([{"stop": None}, {"stop": None}, {"stop": "payer"}, {"stop": "late"}])
+    clock = _Clock()
+
+    found = poll_until(lambda: next(reads), lambda read: read["stop"] is not None,
+                       bound=timedelta(seconds=30), interval=timedelta(seconds=2),
+                       what="the stop", clock=clock, sleep=clock.sleep)
+
+    assert found == {"stop": "payer"}
+    assert clock.slept == [2.0, 2.0]
+
+
+def test_a_poll_fails_at_its_bound_naming_what_it_waited_for_and_the_last_read() -> None:
+    clock = _Clock()
+
+    with pytest.raises(AssertionError,
+                       match=r"the stop did not appear within 0:00:05; the last read was "
+                             r"\{'stop': None\}"):
+        poll_until(lambda: {"stop": None}, lambda read: read["stop"] is not None,
+                   bound=timedelta(seconds=5), interval=timedelta(seconds=2),
+                   what="the stop", clock=clock, sleep=clock.sleep)
+    # The last sleep is cut to the bound, so the read at the bound is made.
+    assert clock.slept == [2.0, 2.0, 1.0]
 
 
 def test_a_wall_run_sets_no_time() -> None:

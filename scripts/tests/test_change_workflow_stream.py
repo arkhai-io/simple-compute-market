@@ -1,12 +1,12 @@
 """A run's event stream is kept as its transcript, with its progress, and read for
-its denials."""
+its denials and its refusals."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from change_workflow.stream import Stream, transcript_denials
+from change_workflow.stream import Stream, transcript_denials, transcript_refusals
 from change_workflow_fixtures import (CHANGE, DENIED, SESSION, VALID, FakeClaude, clock,
                                       event_lines, make_wrapper, two_turn_lines)
 
@@ -105,6 +105,84 @@ def test_a_run_ended_without_a_result_keeps_the_denials_its_events_name(tmp_path
         {"tool_name": "?", "tool_use_id": "t10", "tool_input": {}, "reason": "mode"},
         {"tool_name": "Edit", "tool_use_id": "t11", "tool_input": {}},
     ]
+
+
+def _call(tool_id: str, tool: str, given: dict) -> dict:
+    return {"type": "assistant", "session_id": SESSION,
+            "message": {"content": [{"type": "tool_use", "id": tool_id, "name": tool,
+                                     "input": given}]}}
+
+
+def _result(tool_id: str, content, *, is_error: bool = True) -> dict:
+    return {"type": "user", "session_id": SESSION,
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id,
+                                     "content": content, "is_error": is_error}]}}
+
+
+def _read(tmp_path: Path, events: list[dict]) -> Stream:
+    stream = Stream(tmp_path / "01-design.jsonl", tmp_path / "01-design.progress", clock)
+    for event in events:
+        stream.feed(json.dumps(event))
+    stream.close()
+    return stream
+
+
+def test_a_check_refused_a_cache_is_a_refusal_with_its_command(tmp_path: Path) -> None:
+    # CW-w3oa's scenario: a design's check fails creating a directory under a
+    # package, and the design goes on; its later turns say nothing of it.
+    command = "make -C kit/site check"
+    error = "mkdir: cannot create directory 'kit/site/.cache': Read-only file system"
+    stream = _read(tmp_path, [_call("t1", "Bash", {"command": command}),
+                              _result("t1", f"make: Entering directory\n{error}\nError 1"),
+                              _call("t2", "Read", {"file_path": "docs/x.md"}),
+                              _result("t2", "x", is_error=False)])
+
+    assert stream.refusals == [{"tool": "Bash", "command": command, "error": error}]
+
+
+def test_a_busy_protected_file_is_a_refusal_with_its_path(tmp_path: Path) -> None:
+    # A file tool's result arrives as a list of parts, and says busy as Node.js does;
+    # the call's result, repeated, is one refusal.
+    error = ("EBUSY: resource busy or locked, rename '/repo/.agents/workflow.toml.tmp' -> "
+             "'/repo/.agents/workflow.toml'")
+    result = _result("t1", [{"type": "text", "text": error}])
+    stream = _read(tmp_path, [
+        _call("t1", "Edit", {"file_path": "/repo/.agents/workflow.toml"}), result, result])
+
+    assert stream.refusals == [{"tool": "Edit", "path": "/repo/.agents/workflow.toml",
+                                "error": error}]
+
+
+def test_a_denial_is_no_refusal_and_stays_a_denial(tmp_path: Path) -> None:
+    stream = Stream(tmp_path / "01-validate.jsonl", tmp_path / "01-validate.progress", clock)
+
+    for line in two_turn_lines(VALID["stopped"], VALID["finished"]):
+        stream.feed(line)
+    stream.close()
+
+    assert (stream.refusals, stream.denials) == ([], [{**DENIED, "reason": "mode"}])
+
+
+def test_a_result_with_neither_error_is_no_refusal(tmp_path: Path) -> None:
+    # A failed command saying something else, and a search that succeeded quoting
+    # the error, met no refusal.
+    stream = _read(tmp_path, [
+        _call("t1", "Bash", {"command": "make test"}), _result("t1", "1 failed"),
+        _call("t2", "Bash", {"command": "grep -rn Read-only scripts"}),
+        _result("t2", "harness.py: read-only file system", is_error=False)])
+
+    assert stream.refusals == []
+
+
+def test_a_transcript_is_read_back_for_its_refusals(tmp_path: Path) -> None:
+    transcript = tmp_path / "01-implement.jsonl"
+    events = [_call("t1", "Write", {"file_path": "/repo/.claude/settings.local.json"}),
+              _result("t1", "EROFS: read-only file system, open")]
+    transcript.write_text("".join(json.dumps(e) + "\n" for e in events), "utf-8")
+
+    assert transcript_refusals(transcript) == [
+        {"tool": "Write", "path": "/repo/.claude/settings.local.json",
+         "error": "EROFS: read-only file system, open"}]
 
 
 def test_a_denial_a_result_lists_is_listed_once(tmp_path: Path) -> None:

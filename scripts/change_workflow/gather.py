@@ -12,16 +12,18 @@ since evidence gathered in an environment the preflight refused would count as
 present.
 
 A kind the owner waived is skipped, saying so, unless a merge lapses the waiver,
-which is mechanical (`merge_lapse`): a merge among the commits since the kind last
-ran, read from the latest validation whose run invoked it, or the latest validation
-when none did. Its closing line says the waiver lapsed and why. Whether a waiver's
-condition still holds is the skill's to judge, and it gathers a lapsed kind with
-`--kind <kind> --lapsed`.
+which is mechanical and read by `evidence` (`evidence.merge_lapse`): a merge among
+the commits since the kind last ran, read from the latest validation whose run
+invoked it, or the latest validation when none did, that the waiver was not recorded
+after. `evidence` then reports the kind present or missing as if unwaived, and the
+gathering gathers it when missing, its closing line saying the waiver lapsed and
+why. Whether a waiver's condition still holds is the skill's to judge, and it
+gathers a kind whose waiver it judges lapsed with `--kind <kind> --lapsed`.
 
 `gather <change> --kind <kind> [--owed <argument>]` gathers a new attempt of that
 kind whatever is present — of the one owed argument `--owed` names, or of each
 argument a complete section owes the kind — which becomes current by path order. A
-waived kind is refused without `--lapsed`. Why a new attempt was made is the
+kind `evidence` reports waived is refused without `--lapsed`. Why a new attempt was made is the
 skill's to write in the record beside its path; the engine does not police it.
 
 The gathering describes `HEAD`: it refuses a worktree whose tree is not `HEAD`'s,
@@ -43,7 +45,6 @@ CW-p4rs, and CW-q5fy.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,36 +56,10 @@ from .config import COMMIT, OWED, TREE, Configuration, Kind, matches
 from .evidence import MISSING, PRESENT, REFUSED, WAIVED, Report
 from .find import ChangeNotFound, change_directory
 from .hooks import PREFIX, HookError, Hooks, Invoked, marker_key, result
-from .log import log_path, read_log
 from .running import invocations_directory
 
 GATHER = "gather"
 PREFLIGHT = "preflight"
-
-
-def merge_lapse(root: Path, change: str, kind: str) -> str | None:
-    """Why the owner's waiver of `kind` lapses: a merge among the commits since the
-    kind last ran — the commit of the latest validation of `change` whose run invoked
-    it, or of the latest validation when none did. None when no validation ran, or
-    when none of the commits since is a merge. A commit that cannot be read lapses
-    the waiver, since what it would show is unknown."""
-    path = log_path(root, change)
-    runs = [entry for entry in read_log(path) if entry.get("step") == "validate"
-            and entry.get("commit")] if path.exists() else []
-    if not runs:
-        return None
-    ran = [entry for entry in runs
-           if any(isinstance(invoked, dict) and invoked.get("kind") == kind
-                  for invoked in entry.get("invoked") or ())]
-    last = (ran or runs)[-1]["commit"]
-    merges = subprocess.run(["git", "rev-list", "--merges", f"{last}..HEAD"], cwd=root,
-                            capture_output=True, text=True)
-    if merges.returncode != 0:
-        return f"the commit {kind} last ran at, {last[:12]}, cannot be read"
-    if not merges.stdout.strip():
-        return None
-    merge = merges.stdout.split()[0]
-    return f"the merge {merge[:12]} since {kind} last ran, at {last[:12]}"
 
 
 @dataclass
@@ -119,18 +94,16 @@ class Attempt:
 
 @dataclass
 class Gathering:
-    """Gathers a change's evidence through the hook runner, its push, its report of
-    what is present, and its reading of a lapse each injected."""
+    """Gathers a change's evidence through the hook runner, its push, and its report
+    of what is present, each injected."""
 
     hooks: Hooks
     change: str
     base: str | None
     # The guarded push of `HEAD`, and its exit status.
     push: Callable[[], int]
-    # What `evidence` reports for `HEAD`.
+    # What `evidence` reports for `HEAD`, a lapsed waiver read.
     report: Callable[[], Report]
-    # Why the owner's waiver of a kind lapses, or None.
-    lapse: Callable[[str], str | None]
 
     @property
     def configuration(self) -> Configuration:
@@ -151,29 +124,27 @@ class Gathering:
                 self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: refused, "
                                 f"{entry['refusal']}")
                 passed = False
+            elif entry["status"] == PRESENT and (lapsed := entry.get("lapsed")):
+                self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: skipped, "
+                                f"present; the owner's waiver at seq {lapsed['seq']} "
+                                f"lapsed: {lapsed['why']}")
             elif entry["status"] == PRESENT:
                 self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: skipped, "
                                 f"present; evidence {entry['current']}")
             elif entry["status"] == MISSING:
-                attempts.append(Attempt(kinds[entry["kind"]], entry["owed"]))
+                lapsed = entry.get("lapsed")
+                attempts.append(Attempt(kinds[entry["kind"]], entry["owed"],
+                                        lapsed["why"] if lapsed else None))
             elif entry["status"] == WAIVED:
-                waiver = entry["waived"]
-                lapse = self.lapse(entry["kind"])
-                if lapse is None:
-                    self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: skipped, "
-                                    f"waived by the owner at seq {waiver['seq']}")
-                elif entry["matches"]:
-                    self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: skipped, "
-                                    f"present; the owner's waiver at seq {waiver['seq']} "
-                                    f"lapsed: {lapse}")
-                else:
-                    attempts.append(Attempt(kinds[entry["kind"]], entry["owed"], lapse))
+                self.hooks.echo(f"{PREFIX} {GATHER} {evidence.label(entry)}: skipped, "
+                                f"waived by the owner at seq {entry['waived']['seq']}")
         return self._gather(attempts, shown) and passed
 
     def again(self, name: str, owed: str | None = None, lapsed: bool = False) -> bool:
         """`gather <change> --kind <kind> [--owed <argument>] [--lapsed]`: a new attempt
         of the kind whatever is present, of the argument given or each owed; whether
-        everything it ran passed. A waived kind is refused without `lapsed`."""
+        everything it ran passed. A kind `evidence` reports waived is refused without
+        `lapsed`; `lapsed` gathers a kind some decision waives, lapsed or not."""
         self.hooks.allow(GATHER)
         kind = self.configuration.kind(name)
         shown = self._head()
@@ -184,7 +155,7 @@ class Gathering:
             raise HookError(f"{name} is waived by the owner's decision at seq {waived['seq']}: "
                             f"{waived['decision']}; gather it with --lapsed once its "
                             "waiver has lapsed")
-        if lapsed and waived is None:
+        if lapsed and waived is None and not any(entry.get("lapsed") for entry in entries):
             raise HookError(f"--lapsed gathers a waived kind, and no owner's decision waives "
                             f"{name}")
         if not kind.owed:
@@ -321,8 +292,7 @@ def main(change: str, *, root: Path, configuration: Configuration,
     runner = gathering or Gathering(
         Hooks(root, configuration, environ, invocations=invocations), change, base,
         push=lambda: push.main(["push"], root=root, environ=environ),
-        report=lambda: evidence.change_report(root, change, configuration),
-        lapse=lambda kind: merge_lapse(root, change, kind))
+        report=lambda: evidence.change_report(root, change, configuration))
     try:
         change_directory(root, change)
         passed = (runner.again(kind, owed, lapsed) if kind is not None

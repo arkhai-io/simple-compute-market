@@ -30,6 +30,20 @@ control when it needs it to happen. The double stays externally programmable and
 gains no internal behaviour, such as a scheduler of its own, that a scenario could
 program instead.
 
+A producer's later decision reaches a consumer in one of two ways, and a scenario
+reproduces each as the consumer receives it. A decision the consumer observes by
+polling is programmed at the double, and the scenario steps the consumer's poller to
+read it. A decision the producer delivers by an inbound call — a webhook, a
+callback — is spoofed through the consumer's real inbound interface, signed as the
+producer signs it, or made by a double control calling that interface as the
+producer would.
+
+A double's surface ends where the producer's public client ends. A consumer depends
+on no endpoint that client lacks — a producer's private operator interface, say — so
+neither its code nor its tests drive one. What lies past the public client, such as
+how an operator's decision reaches a payment provider, is qualified by the
+producer's own live tests.
+
 ## A double answers as its producer would
 
 A double's default output is what the real producer emits for the request: a

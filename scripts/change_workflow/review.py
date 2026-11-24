@@ -2,9 +2,14 @@
 workflow configuration names (`models.review`), and published as the change's next
 numbered record.
 
-A review runs the `change-review` skill in Codex's read-only sandbox first, and
-when Codex is unavailable, on Claude with no rule that edits; either way the
-reviewer cannot change what it reviews. Its final message is the review, from its
+A review runs the `change-review` skill inside the review's sandbox, whose scope keeps
+every file it reviews read-only (CW-m8wq): in Codex first, without Codex's own
+sandbox, which would hide the system's Git the engine's `git` runs (`codex`), and
+when Codex is unavailable, on Claude; either way the reviewer cannot change what it
+reviews. Where the sandbox cannot run, the reviewer runs unconfined, Codex in its own
+read-only sandbox, and the line records `unconfined: true` (CW-v5ny). The line's
+`refusals` are the writes the sandbox refused the reviewer, read from its
+transcript, and the pushes its `git` refused. Its final message is the review, from its
 first line that is the review's title: any narration before that line is dropped,
 and the transcript keeps it. The rest is checked for the review format before it
 is published as the change's next numbered
@@ -47,8 +52,15 @@ review and who can fix nothing: the run ends as a question to the owner naming t
 hook, the published record standing, never published again. A review run
 interactively is no run, so it runs no hooks.
 
+The runner holds the reviewer to the run's invariants as the wrapper holds a step's
+session (`invariants`): the state is recorded once `before-review` has run, and
+checked once the reviewer has ended, before anything is published. A violation — a
+tracked file changed, say — publishes nothing and logs the run `stopped`, its reason
+naming each, with `invariants` on its line; `after-review` does not run.
+
 Contract: openspec/specs/change-workflow/spec.md, CW-p2b2, CW-2nb2, CW-5e24, CW-r9d2,
-CW-r8fb, CW-clhl, CW-d1sm, CW-gqav, CW-h3ks, CW-a4fl, and CW-i9np.
+CW-r8fb, CW-clhl, CW-d1sm, CW-gqav, CW-h3ks, CW-a4fl, CW-i9np, CW-q7ub, CW-f9le,
+CW-m8wq, CW-v5ny, CW-w3oa, and CW-t6mb.
 """
 
 from __future__ import annotations
@@ -56,8 +68,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -71,16 +85,19 @@ from .common import Clock, Entry, StepError, repository_root, utc_now
 from .cost import review_cost
 from .find import ChangeNotFound, change_directory, is_archived, landing_branch
 from .graph import AFTER, ARCHIVED, BEFORE, KINDS, NODES, Node
-from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_command,
-                      codex_command, missing_program, resume_command, run_claude, run_codex,
+from . import claude_code, codex
+from .adapters import HARNESSES
+from .harness import (NETWORK_RETRIES, CodexRunner, Model, Reached, Runner, missing_program,
                       unreachable)
+from .invariants import Invariants, Violation, broken
 from .log import LOG, log_path, read_log, record_outcome, unused_direction
 from .records import (TRANSCRIPTS, ChangedSince, changed_since, exempting, is_record,
                       next_number, validation_problem)
 from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
-                      runs_directory, termination_deferred, termination_ends_the_run)
-from .steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
-from .stream import Stream, transcript_denials
+                      refused_pushes, runs_directory, termination_deferred,
+                      termination_ends_the_run)
+from .sandbox import BUBBLEWRAP, Confined, Confinement, confine, missing
+from .stream import Stream, transcript_denials, transcript_refusals
 
 SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
 # Each finding's fields, and the values each admits; None admits any non-empty
@@ -111,10 +128,10 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # final message is the review, which the wrapper checks and publishes.
 REVIEW_UNATTENDED = (
     "This review runs unattended through scripts/change-workflow: nobody can answer a "
-    "permission prompt or a question in this session. Follow the change-review skill's "
-    "instructions for running unattended. Your final message is the review, in the skill's "
-    "format, and nothing else; the wrapper checks it and publishes it. Run one command per "
-    "Bash call.")
+    "question in this session. Follow the change-review skill's instructions for running "
+    "unattended. It runs in a sandbox scoped to it, which keeps every file it reviews "
+    "read-only. Your final message is the review, in the skill's format, and nothing else; "
+    "the wrapper checks it and publishes it.")
 
 
 class ReviewError(StepError):
@@ -361,21 +378,46 @@ def review_models(models: Sequence[Model], model: str | None = None,
     return tuple(models)
 
 
+def review_confined(root: Path, configuration: config.Configuration,
+                    reviewers: Sequence[Model], confinement: Confinement,
+                    home: Path | None) -> Confined:
+    """How a review run on `reviewers` is confined: the review's scope for the
+    harness of each, its adapter's paths in it, and the sandbox probed once."""
+    return confine(confinement, [reviewer.harness for reviewer in reviewers],
+                   lambda harness: configuration.scope("review", root, harness=harness,
+                                                       home=home),
+                   "review")
+
+
 def _codex_attempt(model: Model, prompt: str, continuing: str | None, draft: Path, log: Path,
-                   root: Path, runner: CodexRunner) -> tuple[int | None, Reached, str | None]:
-    """One run of the review in Codex: its exit status, whether its model could not
-    be reached, and its session."""
-    command = (resume_command(continuing, prompt, draft, model.model, model.effort) if continuing
-               else codex_command(prompt, draft, root, model.model, model.effort))
+                   root: Path, runner: CodexRunner, confined: Confined,
+                   confinement: Confinement,
+                   run_keys: list[str] | None) -> tuple[int | None, Reached, str | None]:
+    """One run of the review in Codex, inside the review's sandbox, without Codex's own
+    where the engine's confines it: its exit status, whether its model could not be
+    reached, and its session. Given `run_keys`, the attempt's commands keep what they
+    invoke under a key of its own, the engine's, added to them."""
+    key = None
+    if run_keys is not None:
+        key = f"review-codex-{uuid.uuid4().hex}"
+        run_keys.append(key)
+    inside = confined.unconfined is None
+    command = (codex.resume_command(continuing, prompt, draft, model.model, model.effort,
+                                    confined=inside)
+               if continuing else codex.command(prompt, draft, root, model.model, model.effort,
+                                                confined=inside))
     start = log.stat().st_size if log.is_file() else 0
     try:
-        with termination_ends_the_run():
-            status = runner(command, log)
+        with termination_ends_the_run(), \
+                confined.launch(confinement, model.harness, command) as launched:
+            status = runner(list(launched.command), log, key)
     except FileNotFoundError as exc:
         if not missing_program(exc, command):
             raise
         return None, ("unavailable", f"{command[0]} is not installed"), None
     said = log.read_bytes()[start:].decode("utf-8", "replace") if log.is_file() else ""
+    if status and launched.unconfined is None and missing(said, command):
+        return status, ("unavailable", f"{command[0]} is not installed"), None
     session = _SESSION_LINE.search(said)
     # Only Codex's own error lines say why it could not run: the rest of its output
     # includes the files the reviewer read, which may mention a usage limit.
@@ -386,26 +428,31 @@ def _codex_attempt(model: Model, prompt: str, continuing: str | None, draft: Pat
 
 
 def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Path, log: Path,
-                    root: Path, rules: StepRules, runner: Runner, clock: Clock,
-                    echo: Callable[[str], None] | None) -> tuple[int | None, Reached, str | None]:
-    """One run of the review on Claude, its final message written to `draft`, as
-    Codex writes its own."""
+                    root: Path, runner: Runner, clock: Clock,
+                    echo: Callable[[str], None] | None, confined: Confined,
+                    confinement: Confinement) -> tuple[int | None, Reached, str | None]:
+    """One run of the review on Claude, inside the review's sandbox, its final
+    message written to `draft`, as Codex writes its own."""
     stream = Stream(log, log.with_suffix(".progress"), clock, echo)
-    command = claude_command(prompt, rules, None, model, root=root, session=continuing,
-                             system=REVIEW_UNATTENDED)
+    command = claude_code.command(prompt, None, model, session=continuing,
+                                  system=REVIEW_UNATTENDED)
     try:
-        with termination_ends_the_run():
-            status = runner(command, root, stream.feed, "review")
+        with termination_ends_the_run(), \
+                confined.launch(confinement, model.harness, command) as launched:
+            status = runner(list(launched.command), root, stream.feed, "review")
     except FileNotFoundError as exc:
         if not missing_program(exc, command):
             raise
         return None, ("unavailable", f"{command[0]} is not installed"), None
     finally:
         stream.close()
+    said = stream.failure_text(status)
+    if status and launched.unconfined is None and missing(said, command):
+        return status, ("unavailable", f"{command[0]} is not installed"), None
     final = (stream.result or {}).get("result")
-    if not stream.failure_text(status) and isinstance(final, str):
+    if not said and isinstance(final, str):
         draft.write_text(final, "utf-8")
-    return status, unreachable(stream.failure_text(status)), stream.session
+    return status, unreachable(said), stream.session
 
 
 def _transcript_session(log: Path, harness: str, start: int) -> str | None:
@@ -426,11 +473,21 @@ def _transcript_session(log: Path, harness: str, start: int) -> str | None:
     return session
 
 
+def transcript_refusals_of_either(log: Path) -> list[Entry]:
+    """The writes the sandbox refused a review's reviewers, read from its transcript,
+    which holds Codex's plain output and Claude Code's events alike, each harness's
+    read as its adapter reads it."""
+    text = log.read_text("utf-8", "replace") if log.is_file() else ""
+    return [*codex.refusals(text), *transcript_refusals(log)]
+
+
 def _unpublished_record(log: Path, reviews: Path, ran: Model | None, session: str | None,
                         passed_over: list[Entry], claude_ran: bool, spent: bool,
                         started: datetime) -> Entry:
     """What the line of a run that published nothing records beside its reason."""
     record: Entry = {"unavailable": passed_over} if passed_over else {}
+    if refusals := transcript_refusals_of_either(log):
+        record["refusals"] = refusals
     if claude_ran and log.is_file():
         record["transcript"] = log.relative_to(reviews).as_posix()
         record["denials"] = transcript_denials(log)
@@ -450,21 +507,44 @@ def _marker_text(text: str) -> str:
 
 def run_review(change: str, kind: str, *, base: str | None = None, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path | None = None,
-               runner: CodexRunner = run_codex, claude: Runner = run_claude,
+               runner: CodexRunner = codex.run, claude: Runner = claude_code.run,
                unvalidated: bool = False, direction: str | None = None,
                head: Callable[[Path], str] = _reviewed_head,
-               changed_since: ChangedSince = changed_since, steps_path: Path | None = None,
+               changed_since: ChangedSince = changed_since,
                clock: Clock = utc_now,
                echo: Callable[[str], None] | None = lambda shown: print(
                    shown, file=sys.stderr, flush=True),
                interrupted: Callable[[Entry], None] = lambda _: None,
                sent_back: Callable[[list[str]], None] = lambda _: None,
-               hooks: ReviewHooks | None = None) -> Path:
+               hooks: ReviewHooks | None = None,
+               invariants: Invariants | None = None,
+               confinement: Confinement = BUBBLEWRAP, home: Path | None = None,
+               temporary: Path | None = None, confined: Confined | None = None,
+               run_keys: list[str] | None = None) -> Path:
     """Run the review on the first available of its models, and publish it.
+
+    Each reviewer runs inside the review's sandbox, launched through its harness's
+    adapter, `confined` as the caller found it, or as found here: its scope, for
+    the harness of each model, its `~` paths from `home` — the user's by default —
+    resolved before anything runs, and the sandbox probed once (`sandbox.confine`).
+    The review's scope keeps every file it reviews read-only, so a Codex reviewer's
+    final message is written outside the checkout, to a directory of the run's own in
+    the temporary directory `temporary`, the system's by default, which the engine
+    adds to the review's scope, and moved into the transcripts once the reviewer has
+    ended. Under the host's `/tmp` it is mounted at its own path inside the
+    reviewer's private `/tmp`, so the reviewer writes the file the engine moves.
+    Codex names no session in its commands' environment, so, given `run_keys`, each
+    Codex attempt's commands keep what they invoke under a key the engine makes for
+    the attempt, added to `run_keys`.
 
     Given the run's `hooks`, the engine's actions and `before-review` run once every
     guard has passed and before the reviewer starts, and the reviewer's first prompt
     names their directory, which a read-only reviewer may read.
+
+    Given the run's `invariants`, the state the reviewer starts from is recorded once
+    those have run, and checked once the reviewer has ended, however it ended: a
+    violation publishes nothing, ending the run with a `ReviewError` whose record
+    names each in `invariants`, and an interrupted reviewer's record names any.
 
     A review continues the previous reviewer's session only on the same harness,
     since a session cannot move between harnesses; on another it starts fresh. A
@@ -475,8 +555,8 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     problems each time; only a reviewer that finished and wrote a draft is sent
     back, never one that was unavailable, unreachable, or exited non-zero. The
     record names the reviewer's harness and model, and each model passed over. The
-    change and the step table are the repository's the command runs in, unless
-    `root` and `steps_path` name others. A reviewer interrupted, or whose runner
+    change is the repository's the command runs in, unless `root` names another. A
+    reviewer interrupted, or whose runner
     failed, is passed on as it was raised, once `interrupted` is given what its log
     line records beside its reason. The owner's `direction`, when given, rides on
     the prompt that starts or continues the reviewer, never on a correction of its
@@ -484,7 +564,6 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     """
     started = clock()
     root = repository_root() if root is None else root
-    steps_path = repository_root() / STEP_TABLE if steps_path is None else steps_path
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
     try:
@@ -528,21 +607,29 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
                               f"{problem}; validate first, or override it: UNVALIDATED=1, or "
                               "the owner's direction to this review in the workflow log")
-    steps = load_steps(steps_path)
-    if "review" not in steps:
-        raise ReviewError(f"{steps_path} has no review row naming the review's skill and "
-                          "rules")
+    reviewers = review_models(models, model, effort)
+    if confined is None:
+        confined = review_confined(root, configuration, reviewers, confinement, home)
     note = None
     if hooks is not None:
         hooks.run_before()
         note = inputs_note(hooks.inputs / BEFORE, reviews)
+    # What the sandbox mounts is created before the state the reviewer starts from is
+    # recorded, so it is not taken for the reviewer's.
+    confined.prepare(confinement)
+    if invariants is not None:
+        invariants.begin()
     transcripts = reviews / TRANSCRIPTS
     transcripts.mkdir(parents=True, exist_ok=True)
     provisional = f"pending-{kind}-{uuid.uuid4().hex[:12]}"
     log = transcripts / f"{provisional}.log"
-    draft = transcripts / f"{provisional}.rejected.md"
     prior = None if fresh else prior_session(reviews, kind)
     refused = None if fresh else refused_session(reviews, kind)
+    # Made last before the reviewer runs, so nothing raising before the `finally`
+    # that removes it leaves it behind.
+    drafts = Path(tempfile.mkdtemp(prefix="change-workflow-review-", dir=temporary))
+    confined = confined.writing(drafts)
+    draft = drafts / f"{provisional}.rejected.md"
     status: int | None = None
     reached: Reached = None
     session: str | None = None
@@ -564,11 +651,12 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
             draft.unlink(missing_ok=True)
             attempt_start = log.stat().st_size if log.is_file() else 0
             if model.harness == "codex":
-                result = _codex_attempt(model, prompt, continuing, draft, log, root, runner)
+                result = _codex_attempt(model, prompt, continuing, draft, log, root, runner,
+                                        confined, confinement, run_keys)
             else:
                 claude_ran = True
                 result = _claude_attempt(model, prompt, continuing, draft, log, root,
-                                         steps["review"], claude, clock, echo)
+                                         claude, clock, echo, confined, confinement)
             if result[1] is None or result[1][0] != "network":
                 break
         return result
@@ -577,7 +665,7 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
         # A stop's SIGTERM ends the review as an interrupt does while a reviewer
         # runs (each attempt's runner call): the reviewer's process is ended, and
         # nothing is published.
-        for ran in review_models(models, model, effort):
+        for ran in reviewers:
             if refused and refused[0] == ran.harness:
                 continuing: str | None = refused[1]
                 prompt = refusal_prompt(kind, change, base, refused[2])
@@ -617,22 +705,34 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
             log.with_suffix(".progress").rename(transcripts / output.with_suffix(".progress").name)
         if log.is_file():
             log = log.rename(transcripts / output.with_suffix(".log").name)
+        # Moved, not renamed: the draft was written outside the checkout.
         if draft.is_file():
-            draft = draft.rename(transcripts / output.with_suffix(".rejected.md").name)
+            draft = Path(shutil.move(draft, transcripts / output.with_suffix(".rejected.md").name))
+        else:
+            draft = transcripts / output.with_suffix(".rejected.md").name
+        shutil.rmtree(drafts, ignore_errors=True)
         if not finished:
             output.unlink()
+    violations = invariants.violations() if invariants is not None else []
+    found = {"invariants": [violation.entry() for violation in violations]} if violations else {}
     if interruption is not None:
         # The reviewer never returned its session, so it is read back from what
         # its attempt had written to the transcript. Whatever reading the record
         # meets, the interruption is passed on.
         try:
-            interrupted(_unpublished_record(
+            interrupted({**_unpublished_record(
                 log, reviews, ran,
                 _transcript_session(log, ran.harness, attempt_start) if ran else None,
-                passed_over, claude_ran, ran is not None, started))
+                passed_over, claude_ran, ran is not None, started), **found})
         except Exception:
-            interrupted({})
+            interrupted(found)
         raise interruption
+    if violations:
+        output.unlink()
+        raise ReviewError(broken(violations) + "; nothing was published"
+                          + (f"; see {log.relative_to(root)}" if log.is_file() else ""),
+                          {**_unpublished_record(log, reviews, ran, session, passed_over,
+                                                 claude_ran, ran is not None, started), **found})
     text = draft.read_text("utf-8") if draft.is_file() else ""
     format_refused = False
     if reached is not None and reached[0] == "unavailable" and sent:
@@ -691,7 +791,8 @@ def review_outcome(path: Path, kind: str) -> tuple[Entry, str | None, str | None
 
     Each is read back from the markers the record ends with, so the line names what
     this run published and nothing an earlier record says. A review on Claude also
-    carries the run's own record of its denials, read from its transcript.
+    carries the run's own record of its denials, read from its transcript, and a
+    review on either the writes the sandbox refused its reviewer.
     """
     text = path.read_text("utf-8")
     # The last of each, since a review may quote an earlier record's markers; the
@@ -716,10 +817,12 @@ def review_outcome(path: Path, kind: str) -> tuple[Entry, str | None, str | None
                               + "; ".join(f"{e['harness']} {e['model']} being unavailable"
                                           for e in passed_over)
                               + "; triage is next")
+    transcript = path.parent / TRANSCRIPTS / path.with_suffix(".log").name
     if extra.get("harness") == "claude":
-        transcript = path.parent / TRANSCRIPTS / path.with_suffix(".log").name
         extra["transcript"] = transcript.relative_to(path.parent).as_posix()
         outcome["denials"] = transcript_denials(transcript)
+    if refusals := transcript_refusals_of_either(transcript):
+        extra["refusals"] = refusals
     session = "{}:{}".format(*tagged_session(sessions[-1])) if sessions else None
     return outcome, session, commits[-1] if commits else None, extra
 
@@ -765,20 +868,44 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     environ = options.pop("environ", None)
     hooks = review_hooks(root, change, kind, inputs, options.get("base"),
                          os.environ if environ is None else environ, invocations)
+    confinement = options.pop("confinement", BUBBLEWRAP)
+    try:
+        configuration = config.load(root)
+        watched = Invariants.of(configuration, root, "review", change, invocations)
+        confined = review_confined(root, configuration, review_models(
+            configuration.step_models("review"), options.get("model"), options.get("effort")),
+            confinement, options.get("home"))
+    except StepError:
+        # The runner refuses such a configuration before any reviewer starts, and the
+        # line says why: there is no session to check, or to confine.
+        watched, confined = None, None
+    if confined is not None and confined.unconfined is not None:
+        marks["unconfined"] = True
+    # The keys each Codex attempt's commands keep what they invoke under, one for each
+    # attempt: Codex names no session in their environment, and the starting
+    # session's is no part of the review's line.
+    run_keys: list[str] = []
 
     def logged(outcome: Entry, session: str | None, commit: str | None, extra: Entry) -> Entry:
-        """The line, with what ran before the reviewer, what a reviewer on Claude
-        invoked through `run` — a Codex reviewer's commands see no session of their
-        own, so keep nothing — and what ran after its record."""
+        """The line, with what ran before the reviewer, what the reviewer invoked
+        through `run` and the guarded push, and the pushes the engine's `git` refused
+        it — a reviewer on Claude under its session, one on Codex under each of its
+        attempts' keys — and what ran after its record."""
         ran = session.removeprefix("claude:") if session and session.startswith(
             "claude:") else None
         directory = invocations(root)
-        kept = kept_invocations(directory, ran, change)
+        taken = {key: kept_invocations(directory, key, change) for key in (ran, *run_keys)}
+        kept = [entry for entries in taken.values() for entry in entries]
         invoked = hooks.invoked(kept) if hooks is not None else kept
+        # The writes the sandbox refused the reviewer, then the pushes its `git`
+        # refused, from the engine's own record of them.
+        refusals = [*extra.pop("refusals", []), *refused_pushes(kept)]
         line = record_outcome(log, "review", outcome, session=session, commit=commit,
-                              extra={**extra, **({"invoked": invoked} if invoked else {})},
+                              extra={**extra, **({"invoked": invoked} if invoked else {}),
+                                     **({"refusals": refusals} if refusals else {})},
                               clock=clock)
-        drop_invocations(directory, ran, kept)
+        for key, entries in taken.items():
+            drop_invocations(directory, key, entries)
         return line
 
     def stopped(reason: str, record: Entry | None = None) -> Entry:
@@ -799,17 +926,21 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     try:
         path = run_review(change, kind, root=root, clock=clock,
                           interrupted=interrupted.append, sent_back=sent.append,
-                          hooks=hooks, **options)
+                          hooks=hooks, invariants=watched, confinement=confinement,
+                          confined=confined, run_keys=run_keys, **options)
     except ReviewError as exc:
         return stopped(str(exc), {**exc.record, **({"sent_back": sent} if sent else {})})
     except BaseException as exc:
         # A reviewer that could not start, or was interrupted, still ends with a
-        # line, recording what the reviewer had reported; an interrupt is passed
-        # on once it is written.
-        line = stopped(f"the review did not finish: {type(exc).__name__}"
-                       + (f": {exc}" if str(exc) else ""),
-                       {**(interrupted[0] if interrupted else {}),
-                        **({"sent_back": sent} if sent else {})})
+        # line, recording what the reviewer had reported and any invariant it broke;
+        # an interrupt is passed on once it is written.
+        record = {**(interrupted[0] if interrupted else {}),
+                  **({"sent_back": sent} if sent else {})}
+        reason = f"the review did not finish: {type(exc).__name__}" + (f": {exc}" if str(exc)
+                                                                      else "")
+        if found := record.get("invariants"):
+            reason += "; " + broken([Violation(**entry) for entry in found])
+        line = stopped(reason, record)
         if not isinstance(exc, Exception):
             raise
         return line

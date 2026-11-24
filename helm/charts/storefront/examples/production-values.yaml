@@ -1,0 +1,150 @@
+# A production-shaped release of the VM storefront chart: one seller agent
+# offering on-demand and spot VMs paid by the period through Arkhai payments in
+# live mode. Every principal, account, address, URL, and host, Secret and storage
+# class name below is a placeholder that names nothing real; replace each with
+# the operator's own before deploying. No secret is a value here: the agent's runtime Secret (`secret`)
+# holds, in its storefront.secrets.toml, the payments key as
+# [Settlement.arkhai_payments] api_key and the [[DisputeCredential]] for the
+# dispute authority the agent's registry recommends, which the values schema
+# refuses in `config`. The release runs on wall time, as every release outside
+# the end-to-end lanes does, so `config` sets no [Time] source.
+global:
+  # The release's own provisioning service, from which the chart derives the
+  # agent's provisioning URL and its `default` capacity site, and the principal
+  # the agent's service peer for that site must include.
+  provisioning:
+    host: vm-provisioning
+    port: 8081
+  provisioningIdentity:
+    scheme: ed25519
+    identifier: IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
+
+image:
+  repository: registry.example.com/arkhai
+  name: arkhai
+  tag: storefront
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  pullPolicy: IfNotPresent
+
+agents:
+  seller:
+    port: 8001
+    component: seller
+    identity:
+      credentialSecret:
+        name: vm-storefront-identity
+        key: credential
+    secret:
+      secretName: vm-storefront-runtime
+      configKey: storefront.secrets.toml
+    # The seller's payee account, whose balance the agent's payments check test
+    # pod reads.
+    tests:
+      paymentsAccount: "00000000-0000-4000-8000-0000000000aa"
+    config:
+      # The agent's public origin, which buyers reach it at; the VM storefront
+      # reads it with its port stated.
+      base_url: https://vm.example.com:443
+      Identity:
+        principal:
+          scheme: ed25519
+          identifier: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        administrators:
+          operator:
+            principals:
+              - scheme: ed25519
+                identifier: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+        # The `default` site is the release's provisioning service, trusted
+        # through this one service peer, which names its principal.
+        service_peers:
+          provisioning_default:
+            role: service
+            site_id: default
+            principals:
+              - scheme: ed25519
+                identifier: IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
+      registry:
+        urls:
+          - https://registry.example.com
+        authorities:
+          https://registry.example.com:
+            authority: registry
+            principals:
+              - scheme: ed25519
+                identifier: MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
+      Settlement:
+        schema_version: 1
+        priority:
+          - arkhai.payments.v1
+        # The payments service in live mode: its origin, the identity its
+        # receipts are signed by, and the fee it publishes, in basis points.
+        arkhai_payments:
+          enabled: true
+          service_url: https://payments.example.com
+          service_identity:
+            scheme: ed25519
+            identifier: QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+          fee_bps: 250
+          livemode: true
+        # The partial-period treatments the agent services rate deals with:
+        # the payer's stop charges its started period, and a spot seller's stop
+        # and the term end return the period in progress. No setup charge.
+        # Removing this table withdraws the recurring options: new ones stop
+        # publishing, and the deals already accepted are still serviced.
+        rate_servicing:
+          arkhai_payments:
+            treatments:
+              - charged
+              - returned
+            setup: false
+      pricing:
+        # The longest deal, a day: a recurring option publishes only under a
+        # finite term, which leaves room for approval, the delivery deadline and
+        # a whole period.
+        default_max_duration_seconds: 86400
+        # An on-demand and a spot option, each USD 1.00 an hour paid by the
+        # hour to the seller's account, with ten minutes to approve. Each
+        # promises delivery within half an hour, a deadline the storefront
+        # enforces, and covers it for disputes with a fifteen-day window: the
+        # authority's fourteen-day minimum filing window, and a day beside it.
+        settlements:
+          - mechanism: arkhai.payments.v1
+            asset: USD/6
+            rate: "1.00"
+            per: hour
+            recurring:
+              period: PT1H
+              reserve_ahead_seconds: 3600
+            mechanism_input:
+              payee_account: "00000000-0000-4000-8000-0000000000aa"
+              asset: USD/6
+              approval_window: PT10M
+              delivery_deadline_seconds: 1800
+              dispute_window_seconds: 1296000
+          # The spot option: the seller may also stop, two minutes after its
+          # notice.
+          - mechanism: arkhai.payments.v1
+            asset: USD/6
+            rate: "1.00"
+            per: hour
+            recurring:
+              period: PT1H
+              reserve_ahead_seconds: 3600
+              payee_notice_seconds: 120
+            mechanism_input:
+              payee_account: "00000000-0000-4000-8000-0000000000aa"
+              asset: USD/6
+              approval_window: PT10M
+              delivery_deadline_seconds: 1800
+              dispute_window_seconds: 1296000
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: encrypted-rwo
+  size: 10Gi
+  accessMode: ReadWriteOnce
+  mountPath: /var/lib/arkhai
+
+# The agent is reached through its Service, not a ZeroTier overlay.
+zerotierEnabled: false

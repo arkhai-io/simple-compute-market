@@ -19,17 +19,17 @@ import re
 import threading
 from dataclasses import dataclass, field
 
-from lane_double_controls.models import ControlError, Rule, RuleList, RuleView
+from lane_double_controls.models import ControlError, Rule, RuleList, RuleView, Ruling
 from market_arkhai_mediation.contract import schema
 
 # The refusal codes the authority publishes, which a refusal rule answers with.
 _PUBLISHED_CODES = frozenset(schema()["$defs"]["MediationFailure"]["properties"]["code"]["enum"])
-# The effects the double applies, each to one part as one payment event. A stop and
-# a penalty act on rate parts (a stop's partial period and time against payments'
-# own now; a penalty's reverse of earned amounts still held, across parts in
-# mandate order), which no lane running the double has, so each is refused rather
-# than applied untested; the contract makes an award unexecutable on payments v1.
-_APPLIED_EFFECTS = frozenset({"reverse"})
+# The effects the double applies at payments: a reverse and a stop each as one
+# payment event, a penalty as reversals of what is held (``service``). The
+# contract reserves an award for bond support and makes it unexecutable on
+# payments v1, so a ruling carrying one is refused before anything is installed
+# or ruled, rather than recorded and left forever applying.
+_APPLIED_EFFECTS = frozenset({"reverse", "stop", "penalty"})
 # What each match property may equal; any other value could never match.
 _MATCH_VALUES = {
     "filer": frozenset({"payer", "payee"}),
@@ -75,12 +75,7 @@ class RuleBook:
             raise ControlError(422, "invalid_request",
                                f"{rule.refusal.code} is not a published mediation error code")
         if rule.ruling is not None:
-            unapplied = sorted({effect["kind"] for effect in rule.ruling.effects}
-                               - _APPLIED_EFFECTS)
-            if unapplied:
-                raise ControlError(422, "invalid_request",
-                                   f"the mediation double applies reverse effects, "
-                                   f"not {', '.join(unapplied)}")
+            check_ruling(rule.ruling)
         with self._lock:
             if rule.rule_id in self._entries:
                 raise ControlError(409, "rule_exists", f"rule {rule.rule_id} is installed")
@@ -152,6 +147,16 @@ class RuleBook:
         if entry is None:
             raise ControlError(404, "rule_not_found", f"no rule {rule_id} is installed")
         return entry
+
+
+def check_ruling(ruling: Ruling) -> None:
+    """Refuse a ruling, a rule's or an operator's decision, with an effect the double cannot apply."""
+
+    unapplied = sorted({effect["kind"] for effect in ruling.effects} - _APPLIED_EFFECTS)
+    if unapplied:
+        raise ControlError(422, "invalid_request",
+                           f"the mediation double applies {', '.join(sorted(_APPLIED_EFFECTS))} "
+                           f"effects, not {', '.join(unapplied)}")
 
 
 def _check_acts(rule: Rule) -> None:

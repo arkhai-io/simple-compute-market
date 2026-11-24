@@ -53,6 +53,15 @@ the current branch is not working that change: the edit lands with the current
 change. A prerequisite — a change this one must wait for — is proposed apart, since
 it must land first (`change-workflow`'s CW-dtpz).
 
+## A change cuts no release
+
+Creating a release is independent of any change. A change neither cuts nor names a
+release, and declares nothing in production: production is what the repository's
+latest release carries. A change's documents describe the system as it stands, and
+what it ships is in production once a release carries it. A change whose acceptance
+seems to need a release, such as a validated release candidate, states what it ships
+instead and leaves the release to whoever creates releases.
+
 ## Open questions and prescribed tasks
 
 An item may not appear under a change's `## Open questions` while a non-decision

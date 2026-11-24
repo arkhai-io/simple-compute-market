@@ -42,37 +42,22 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied call stops the step only when it cannot go on.** Run one command per
-  Bash call: a chained command runs only when every command in it is allowed, so
-  if a chained command is denied, run its commands one call at a time. If a single
-  command or any other tool call is denied, finish every part of the work that does
-  not depend on it. If the step cannot complete without that call, end with
-  `stopped`, `reason` naming that exact call and why the step needed it, and
-  `denials` listing the calls as you saw them; the wrapper replaces them with the
-  run's own record. Otherwise go on and end as the step ends: the wrapper records
-  the denial on the outcome whatever it is, and the orchestrating session reads it
-  before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it, except where the rule exists only to keep file writes on the Edit and
-  Write tools — the step table's comments name those rules: sed's in-place forms,
-  find's deleting, running, and writing actions, and the diff family's
-  output-to-file forms — whose refused shell write may be made with the Edit or
-  Write tool this step's rules allow. A call denied because no rule allows it —
-  the harness reports it as don't ask mode — may be done instead by a tool this
-  step's rules allow for the same work, such as the Edit tool for a shell write or
-  Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question. One refused call is not a reason to
-  stop when the step's next commands are allowed: carry on with them, and name
-  the denial in your message.
+- **The step runs in a sandbox scoped to it.** It writes only the paths this step
+  may change: a write that fails as a read-only file system, or as a device or
+  resource busy, is outside its scope. If the step cannot go on without that write,
+  end with `stopped`, `reason` naming the path and why the step needed it;
+  otherwise go on within the scope, and say in your message what you did instead.
+  A call the harness denies is the same. The wrapper records every refusal and
+  denial on the run's line whatever you say, and the orchestrating session reads
+  them before the change moves on; never ask about either as a question. Wait on a
+  background command with `scripts/change-workflow wait`, never by following its
+  output. Validation's sandbox writes the checkout, so a new attempt can build the
+  environments it needs, but validation changes nothing it validates: a run that
+  leaves a tracked file changed, or a commit made, is stopped by the checks after
+  it.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
-  the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
-  <a checkout>`: `-C` names only a subdirectory a skill names. Read a summary's
-  JSON with Read or Grep, never with an inline interpreter (`python3 -c`), which
-  no rule admits since it admits any program.
 - **The end is an outcome.** An environmental failure (section 5) is a
   `question` naming the evidence and the remedy, awaiting the owner's word; once
   answered, take only the action the answer names, and gather the kind again. When
@@ -187,7 +172,8 @@ moves nothing here, and validation runs beside it.
   order: its requirement — `always`; an owed kind once for each argument a complete
   section's `Owed by validation:` line owes it, named by the kind and the argument
   with the sections owing it, or once as `not required`; or `waived`, naming the
-  owner's decision's `seq` — the tree or commit its evidence describes, its pattern
+  owner's decision's `seq`, unless a merge lapsed the waiver, when the kind is
+  present or missing as if unwaived, naming the lapsed decision and why — the tree or commit its evidence describes, its pattern
   filled, every path matching it in path order, the last `current`, and whether it
   is present or missing; an owed line the reader refuses is listed in place of a
   status. `--json` gives the same, structured. Record it: the kinds below are its,
@@ -203,7 +189,9 @@ moves nothing here, and validation runs beside it.
   kinds it waives (`waives`) and the condition they are waived on, such as "nothing
   the change touches affects the services the end-to-end tests validate"; an
   instruction in the invocation is not a waiver. `evidence` marks each waived kind
-  with the decision's `seq` and words, so read them there. An older decision
+  with the decision's `seq` and words, so read them there; a kind whose waiver a
+  merge lapsed it lists present or missing instead, naming the decision and the
+  merge. An older decision
   recorded before waivers named their kinds is free text in `workflow.jsonl`:
   read the log's owner decisions for one too. For each kind such a decision
   waives, find the last validation record of the change whose `Evidence:` line —
@@ -212,11 +200,12 @@ moves nothing here, and validation runs beside it.
   what the commits since then change (`git diff --stat <that commit> HEAD`); with no
   such record, judge the condition over the change's own diff. It lapses too when
   the commits since the last validation that ran the kind — whose logged `invoked`
-  names it — or since the latest validation, when none ran it, include a merge
-  (`git log --merges <that commit>..HEAD`), since a merge brings in code the change
-  did not write. The gathering lapses a waiver on a merge itself, its
-  closing line for the kind saying so; whether the condition still holds is yours
-  to judge. Otherwise the kind is `waived`: it is not gathered, and the record
+  names it — or since the latest validation, when none ran it, include a merge the
+  waiver was not recorded after, since a merge brings in code the change did not
+  write; a merge the owner waived after was theirs to weigh. The engine reads that
+  lapse itself — `evidence` names it, and the gathering's closing line for the kind
+  says so — so never derive it again by hand; whether the condition still holds is
+  yours to judge. Otherwise the kind is `waived`: it is not gathered, and the record
   names the decision's `seq`, its condition, and what you checked. A lapsed waiver
   is written in the kind's section too, naming the decision's `seq` and why it
   lapsed — the merge, or how the condition broke — and a kind the gathering
@@ -248,7 +237,8 @@ everything else does; then every missing kind that runs here, one after another 
 the configuration's order, never one beside another; then each started kind's
 collect, which waits for the run of `HEAD` newer than the marker its start printed
 — a commit validated before never collects its earlier run — and for it to finish.
-A waived kind was skipped, saying so, unless a merge lapsed its waiver (step 1). A
+A waived kind was skipped, saying so, unless a merge lapsed its waiver, when it was
+gathered if missing (step 1). A
 failing kind failed the gathering, and every other kind still ran; a refused push
 dispatched nothing and still ran the kinds that run here.
 
@@ -269,9 +259,8 @@ an environmental failure the owner has remedied or allowed a new attempt of
 (section 5). Run `scripts/change-workflow gather <change> --kind <kind>`, with
 `--owed <argument>` for one owed argument, as written, in the background, with the
 harness's longest `timeout`, 7200000 ms — a dispatched run can take longer than the
-default ten minutes — and with no shell redirect of its output: a redirect is a
-write no rule admits unattended, and the harness keeps a background command's
-output in a file, which is what the wait reads. Wait inside one Bash call, with
+default ten minutes — and with no shell redirect of its output: the harness keeps a
+background command's output in a file, which is what the wait reads. Wait inside one Bash call, with
 `scripts/change-workflow wait <output-file> '^\[exited with code '`, the line the
 harness ends the file with — a regular expression, so its bracket is escaped —
 never by ending the turn: under the wrapper a turn's end is an outcome, so a turn
@@ -280,9 +269,8 @@ as soon as it is in the file, even if it was written before the wait began, and
 gives up after nine minutes, inside one call's ten-minute limit, so give its call
 that limit; the gathering can take longer, so when the wait gives up, run it again,
 still without ending the turn. Then read the output whole. No step follows a file
-with `tail -f`: it hangs when the line waited for is the last one written, and no
-rule allows it. Never a shell loop: `bash -c` has no allow rule unattended and will
-not get one, since no rule admits a loop without admitting any command. The new
+with `tail -f`, or waits in a shell loop: `tail -f` hangs when the line waited for
+is the last one written, and `wait` is the one bounded wait. The new
 attempt is current by path order; the earlier one stays as evidence, and the record
 reports both, the new attempt's path beside its reason. Never gather again for a
 pass.

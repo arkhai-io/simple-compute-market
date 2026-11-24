@@ -46,6 +46,8 @@ from tests.e2e.roles.helpers.payments import (
 )
 from tests.e2e.roles.helpers.rate_watchdog_stages import WATCHDOG_OPT_IN
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
+    LANE_RATE_TERMS,
+    RateTerms,
     check_recurring_option,
     recurring_settlement,
 )
@@ -327,6 +329,8 @@ class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
     servicing_loop = "deal-servicing"
     #: The seller's notice a spot option states; none for on-demand.
     payee_notice_seconds: int | None = None
+    #: The option's per-period terms, the lanes'.
+    rate_terms: RateTerms = LANE_RATE_TERMS
 
     def pool_settlement(self) -> dict[str, Any]:
         """The pool override's one settlement: a recurring option, on-demand or

@@ -472,7 +472,7 @@ requires-dist = [
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.11.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.9.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.3.0" },
     { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.2.0" },

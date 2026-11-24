@@ -110,8 +110,8 @@ class ArkhaiPaymentsConfig(BaseModel):
     # process's trust store, and every other client's, is left as it is.
     ca_bundle_path: str | None = None
     development_auth: bool = False
-    # The service mode whose receipts this role accepts. Live payments services
-    # sign livemode=true; test and development services sign false.
+    # The service mode whose receipts this role accepts. A live payments service
+    # signs livemode=true; any other signs false.
     livemode: bool = False
     # Seller role: how far, in seconds, a verified snapshot's observedAt may lag
     # the storefront's clock and still decide a rate delivery phase. The two

@@ -561,6 +561,150 @@ issuance afterwards (`settlement-configuration`'s
    receipt identity.
 3. Rerun the storefront's `check-payments` against the new service.
 
+## Serving rate deals
+
+A VM storefront declaring `[Settlement.rate_servicing.arkhai_payments]` sells
+on-demand and spot deals paid period by period
+([seller quickstart, "Offering on-demand and spot"](seller-quickstart.md#offering-on-demand-and-spot)).
+Such a deal runs until a stop at the payment authority — the buyer's, a spot seller's,
+its funds running out, its term end, or the dispute authority's — and its storefront
+services it for as long as it runs. The storefront's administrator reads its deals
+through the signed seller lifecycle routes, each request signed by a principal of
+the storefront's `Identity.administrators`:
+
+- `GET /api/v1/admin/lifecycle` lists them a page at a time (`limit`,
+  `continuation`), each with its `state`, its `ending` codes, its payment `parts`, its
+  `open_cases` and `has_open_extension`;
+- `GET /api/v1/admin/lifecycle/{negotiation_id}` reads one: the payment and dispute
+  authorities' views (`authority`), the recorded end and physical progress
+  (`delivery`), and the filings the storefront sent (`filings`).
+
+### Leases the storefront has not delivered
+
+A deal's delivery deadline is the one its payments clause publishes, and the
+storefront enforces it: once a payment read made after the deadline shows no lawful
+end before it, the storefront records the deal's non-delivery, files it with the
+deal's dispute authority as the payee, and ends its lease at the site. The site does
+not enforce the deadline. A committed lease the storefront never delivers therefore
+keeps its capacity, as long as the deal's term, whenever the storefront stops
+servicing that deal: the storefront is down, its loops are held, its database is
+lost, or the payment authority is out of its reach, which leaves the deal waiting
+for a payment read made after the deadline (`deal-lifecycle`'s
+["One end instant, transactional admission"](../openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission)
+describes that barrier).
+
+**Watch for them at the site.** As the provisioning service's administrator, list
+the VM leases still active:
+
+```text
+GET /api/v1/contract/leases?status=active&offering_mode=vm
+```
+
+A lease with no `activated_at_utc` has no activation recorded, and the storefront
+activates every lease it delivers before the deal is available. It is overdue once
+its `lease_start_utc` plus the clause's `delivery_deadline_seconds` has passed — for
+a deal committed after its agreed start, the commitment plus the deadline, at most
+the clause's approval window later — or its `lease_end_utc`, if that comes first.
+Its `deal_ref.negotiation_id` names the storefront's deal.
+
+**Read the deal at its storefront**, with `GET /api/v1/admin/lifecycle/{negotiation_id}`:
+
+- A `delivery.recorded_end` with progress `end_recorded` or `tearing_down` is a deal
+  the storefront is ending; the lease ends when its teardown completes.
+- No recorded end: run a servicing cycle,
+  `POST /api/v1/admin/lifecycle/deal-servicing/run-cycle`, and read again; each cycle
+  services one page of deals, so a storefront holding many may need several. The
+  cycle that services the deal with a successful payment read records the
+  non-delivery. While the payment authority
+  is out of reach no cycle does: prove the storefront's access with
+  `market-storefront check-payments` ("Payments access" above). A storefront whose
+  loops are held resumes them with `POST /api/v1/admin/lifecycle/resume`.
+- To end the deal at once, `POST /api/v1/admin/deals/{negotiation_id}/interrupt`
+  with `{"interruption_kind": "failure", "reason": "<why>"}` records the operator's
+  end, files `delivery_end` as the payee, undelivered, and ends the lease.
+
+**End a lease its storefront cannot service.** When the storefront is gone or has
+lost the deal, end the lease at the site, as the provisioning service's
+administrator:
+
+```text
+POST /api/v1/contract/leases/{capacity_reservation_id}/terminate
+{"reason": "<why>"}
+```
+
+Termination ends the lease now and tears down whatever its fulfillment created;
+the capacity returns once the teardown is proven, and a lease left `release_failed`
+waits for an operator's `retry-release` or `force-release`. A storefront that later
+learns of the termination from the site's report classifies it as the seller's own
+withdrawal and files the payee's `delivery_end`, as its deadline would have.
+
+### Draining payment deals before a receipt key change
+
+Each environment's payments receipt identity is assumed stable for a deal's life. A
+deal approved under an identity stops verifying once that identity leaves the
+storefront's configuration — its snapshot reads, its admission, its stored receipt's
+revalidation and its refund are each refused — and nothing re-anchors it to a new
+key (`settlement-configuration`'s
+["Settlement consumer configuration and cutover"](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)).
+A rate deal runs until a stop, up to its term, so drain the storefront before the
+change:
+
+1. Stop new deals: `POST /api/v1/admin/pause` refuses every new negotiation while
+   the storefront goes on servicing its deals. A negotiation already open may still
+   become a deal, which step 3 waits for too.
+2. Let the running deals end. An on-demand deal ends at its buyer's stop, when its
+   funds run out, or at its term end at the latest. A spot deal ends sooner with
+   `market-storefront deals preempt <negotiation-id> --operation-key <key>` once its
+   notice has run. Let each open once-only payment deal reach delivery or issuance,
+   or refund it, as "Changing the payments service mode" says.
+3. Wait until `GET /api/v1/admin/lifecycle` lists every payment deal `ended`. A case
+   can still be filed on an ended deal while its dispute window runs; after the
+   change the storefront cannot verify that deal's payments, and the case is followed
+   at the dispute authority.
+4. Change the identity. For the moment of the switch, `receipt_identities` in
+   `[Settlement.arkhai_payments]` may list the new identity, as `service_identity`
+   names it, beside the old one marked `retiring = true`. A retiring entry must state
+   `valid_until`, the Unix second from which it verifies no receipt approved at or
+   after it. Removing the retiring entry ends the cutover. Buyers update their receipt
+   identity before approving again.
+5. Rerun `check-payments`, then resume trading with `POST /api/v1/admin/resume`.
+
+### What each dispute outcome shows
+
+The storefront learns of every decision by reading the payment and dispute
+authorities each servicing cycle; neither calls it. A deal with a recorded end is
+listed `ended` only once its resource is released, every payment part has stopped
+or reached its end, and the dispute authority's saved view shows no open case
+(`deal-lifecycle`'s
+["One end instant, transactional admission"](../openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission),
+"When a deal is ended"). Until then it is `ending`, and `ending` names what is
+outstanding:
+
+| Code | What is outstanding | What the operator does |
+|---|---|---|
+| `release_pending` | The resource is not yet proven released | Follow the lease at the site |
+| `payment_running` | A payment part has no verified stop or end at the payment authority | See the ruled end with no stop below; otherwise wait for the stop the deal's terms give |
+| `case_open` | A case is open at the dispute authority | Nothing: the authority rules or dismisses it |
+| `case_unobserved` | The dispute authority has not yet been read | Wait for the next servicing cycle; if it persists, prove the storefront's reach of the authority with `check-mediation` ("Payments access" above) |
+
+What the read and the list show for each outcome:
+
+| Outcome | What the operator sees |
+|---|---|
+| No case | `ended` once released and every part stopped |
+| A case filed by either party | `ending` with `case_open`, the case in `open_cases`, and `has_open_extension` while the authority holds the money it protects. A case filed after the deal is listed `ended` returns it to `ending` at the next read. The storefront answers a buyer's case itself, appending the seller's concurrence or contesting evidence |
+| The storefront's own filing — a missed deadline, an operator's failure end, a lease the site ended without it | The recorded end is the failure's, and `filings` lists the filing with its outcome. A payee's `delivery_end` is the claim the authority may rule without a person |
+| A ruling that ends delivery and stops the rate parts | `delivery.recorded_end` with cause `ruling` at the ruled instant, each part's `final_stop` with cause `authority`, and the teardown; `ended` once released and the case closed. No filing follows a ruled end |
+| A ruling that ends delivery with no stop | The recorded end with cause `ruling` and the teardown, but a part still billing: the deal stays `ending` with `payment_running`. The storefront sends no money operation of its own, so the correction is the dispute authority's: raise it with the authority |
+| A ruling of reversals only | Delivery goes on; the reversals show in the payment authority's view (`authority.events`) |
+| No usable credential for the deal's dispute authority | `repair_required`: supply its `[[DisputeCredential]]` in the runtime Secret's overlay and prove it with `check-mediation` |
+
+How a dispute authority dismisses and rules cases, any advisory time to rule it
+publishes, and its continuity are its own published policy and procedures; read them
+where the authority publishes them. An `arkhai.mediation.v1` authority's description
+names the `contact` where its people are reached. This handbook restates none of
+them.
+
 ## Registry secret profile
 
 The registry chart takes the registry's secret settings — the bootstrap key

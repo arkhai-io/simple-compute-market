@@ -9,6 +9,17 @@ branch with no upstream is pushed to the same name on the remote given and the
 upstream set, and refused with none given. A change's clone gives its new branch
 its upstream as it is made, so its first push needs no argument.
 
+Under an unattended run the push differs in three ways. Its `git push` carries the
+guarded push's marker (`GUARDED_PUSH`), so the engine's `git`, which the sandbox
+mounts over the system's, lets it through while refusing every other push. It sets
+no upstream, since the sandbox keeps `.git/config` read-only: once the session ends,
+the engine sets a missing upstream outside the sandbox (`set_upstreams`), to the
+remote of the run's last successful push of that branch. And each push it attempts is
+kept for the session's line once Git returns (`ATTEMPTED_PUSH`): its branch, its
+remote, the commit sent, and Git's exit status, which is what the engine reads
+to set the upstream and the check after the run reads to tell the guarded push's
+moves of the remote from any other.
+
 The check reports and never repairs: each refused state means something
 unexpected happened, and fixing it automatically would hide that. The push sends
 exactly HEAD and is never forced, so a remote branch that has moved on rejects it.
@@ -24,7 +35,7 @@ command runs whatever another reports, so one refusal names every reason. With n
 run is kept, as `pre-push`, for the line of the session pushing, with the command
 it resolved to and its exit status.
 
-Contract: openspec/specs/change-workflow/spec.md, CW-59c7, CW-p7kq, CW-q5fy;
+Contract: openspec/specs/change-workflow/spec.md, CW-59c7, CW-p7kq, CW-q5fy, CW-j4cs;
 openspec/specs/market-change-workflow/spec.md, MCW-farr, MCW-q8vd.
 """
 
@@ -34,15 +45,17 @@ import argparse
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from . import config
-from .common import SESSION_ID, StepError, repository_root
+from .common import (GUARDED_PUSH, SESSION_ID, UNATTENDED_RUN, Clock, StepError,
+                     repository_root, utc_now)
 from .find import WORKSPACE_REMOTE
 from .hooks import Hooks, Invoked, command_environment
-from .running import invocations_directory, keep_invocations
+from .running import ATTEMPTED_PUSH, invocations_directory, keep_invocations
 
 PRE_PUSH = "pre-push"
 _NO_OBJECT = "0" * 40
@@ -136,8 +149,47 @@ def pre_push(root: Path, configuration: config.Configuration, target: PushTarget
     return passed, hooks.invoked
 
 
+def _upstream(root: Path, branch: str) -> tuple[str, str]:
+    """The remote and the merge ref `branch`'s upstream names, each empty where unset."""
+    return (_git(root, "config", f"branch.{branch}.remote").stdout.strip(),
+            _git(root, "config", f"branch.{branch}.merge").stdout.strip())
+
+
+def set_upstreams(root: Path, invoked: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Give each branch the guarded push pushed with no upstream, as the session's
+    `invoked` record it, the upstream of its own name on the remote of its last
+    successful push, and none where no push of it succeeded; what was set, each as
+    `<branch> -> <remote>/<branch>`. Run once the session has ended, outside the
+    sandbox, which keeps `.git/config` read-only for the session (CW-59c7)."""
+    remotes: dict[str, str] = {}
+    for entry in invoked:
+        if entry.get("hook") == ATTEMPTED_PUSH and entry.get("exit_status") == 0:
+            remotes[str(entry["branch"])] = str(entry["remote"])
+    done = []
+    for branch, remote in remotes.items():
+        if _upstream(root, branch) != ("", ""):
+            continue
+        for key, value in (("remote", remote), ("merge", f"refs/heads/{branch}")):
+            if (found := _git(root, "config", f"branch.{branch}.{key}", value)).returncode:
+                raise StepError(f"the upstream of {branch} could not be set to "
+                                f"{remote}/{branch}: {found.stderr.strip()}")
+        done.append(f"{branch} -> {remote}/{branch}")
+    return done
+
+
+def _keep(root: Path, environ: Mapping[str, str], entries: list[dict[str, Any]],
+          what: str) -> None:
+    """Keep `entries` for the line of the session pushing; a failure to keep them is the
+    record's, and refuses no push."""
+    try:
+        keep_invocations(invocations_directory(root), environ.get(SESSION_ID), entries)
+    except (OSError, StepError) as exc:
+        print(f"WARNING: {what} could not be kept for the session's line: {exc}",
+              file=sys.stderr)
+
+
 def main(argv: Sequence[str] | None = None, root: Path | None = None,
-         environ: Mapping[str, str] = os.environ) -> int:
+         environ: Mapping[str, str] = os.environ, clock: Clock = utc_now) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("check", "push"))
     parser.add_argument("--remote", default=None,
@@ -158,27 +210,35 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
               file=sys.stderr)
         return 1
     assert target is not None
+    unattended = bool(environ.get(UNATTENDED_RUN))
+    untracked = target.set_upstream
+    if unattended:
+        target = replace(target, set_upstream=False)
     passed, invoked = pre_push(root, configuration, target, environ)
-    # Kept for the line of the session pushing, whatever the hook found; a failure to
-    # keep it is the record's, and refuses no push.
-    try:
-        keep_invocations(invocations_directory(root), environ.get(SESSION_ID),
-                         [entry.entry() for entry in invoked])
-    except (OSError, StepError) as exc:
-        print(f"WARNING: the pre-push hook's commands could not be kept for the session's "
-              f"line: {exc}", file=sys.stderr)
+    # Kept whatever the hook found.
+    _keep(root, environ, [entry.entry() for entry in invoked], "the pre-push hook's commands")
     if not passed:
         print("REFUSED: the repository's pre-push hook refused the push; nothing was pushed.",
               file=sys.stderr)
         return 1
     if args.action == "check":
-        upstream = "no upstream yet; the push sets it" if target.set_upstream else "upstream matches"
+        upstream = ("upstream matches" if not untracked
+                    else "no upstream yet; the engine sets it once the session ends" if unattended
+                    else "no upstream yet; the push sets it")
         print(f"Ready to push {target.branch} to {target.remote} ({upstream}).")
         return 0
-    print("+ " + " ".join(target.command()), flush=True)
+    command = target.command()
+    print("+ " + " ".join(command), flush=True)
+    head = _git(root, "rev-parse", "--verify", "HEAD").stdout.strip()
+    started, begun = clock().strftime("%Y-%m-%dT%H:%M:%SZ"), time.monotonic()
+    status = subprocess.run(command, cwd=root, env={**os.environ, GUARDED_PUSH: "1"}).returncode
+    if unattended:
+        _keep(root, environ, [{"hook": ATTEMPTED_PUSH, "command": " ".join(command),
+                               "branch": target.branch, "remote": target.remote,
+                               "commit": head, "exit_status": status, "started": started,
+                               "seconds": round(time.monotonic() - begun, 3)}], "the push")
     # Git's own status, which may be any number, becomes a failed push's 1, named on
     # standard error, since Git or a hook may fail without saying why.
-    status = subprocess.run(target.command(), cwd=root).returncode
     if status == 0:
         return 0
     print(f"ERROR: git push exited with status {status}", file=sys.stderr)

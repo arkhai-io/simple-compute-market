@@ -1249,6 +1249,36 @@ def test_an_amended_plan_governs_the_rounds_it_maps(tmp_path: Path) -> None:
     assert (result["step"], result["sections"]) == ("round", [[2], [3]])
 
 
+def test_a_plan_amended_while_a_round_is_open_names_the_round_it_continues(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _planned(root, [[[2]]])
+    note_round(log_path(root, CHANGE), [[2]], "plan", commit="b" * 40)
+    opened = read_log(log_path(root, CHANGE))[-1]
+    _check(root, SECOND_DONE)
+    _planned(root, [[[3]]])
+
+    named = _next(root)
+    _round(root, named["sections"])
+    recorded = read_log(log_path(root, CHANGE))[-1]
+
+    # The third section joins the open round: its reading and review start from
+    # the open round's base, so the second is still read and reviewed with it.
+    assert (named["step"], named["sections"]) == ("round", [[3]])
+    assert (named["continues"], named["base"]) == (opened["seq"], "b" * 40)
+    assert f"seq {opened['seq']} is open" in named["reason"]
+    assert (recorded["continues"], recorded["commit"]) == (opened["seq"], "b" * 40)
+
+
+def test_the_plans_next_round_with_no_round_open_continues_none(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _planned(root)
+
+    result = _next(root)
+
+    assert "continues" not in result and "base" not in result
+
+
 @pytest.mark.parametrize("mapping", [None, [[[3]]]])
 def test_a_first_open_section_no_planned_round_names_goes_to_the_owner(
         tmp_path: Path, mapping) -> None:
@@ -2274,7 +2304,7 @@ def test_a_run_that_went_on_past_a_denial_waits_for_its_reading(tmp_path: Path) 
     _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
     read = _next(root)
 
-    assert unread["step"] == "owner" and "denied 1 tool call" in unread["reason"]
+    assert unread["step"] == "owner" and "1 denied tool call(s)" in unread["reason"]
     assert unread["denials"] == [{"tool_name": "Bash"}]
     assert read["step"] == "implement"
 
@@ -2312,6 +2342,43 @@ def test_a_question_with_denials_waits_for_its_reading_then_its_answer(tmp_path:
     assert (read["step"], read["resume"], read["awaiting"]) == (
         "owner", "validate", "environmental remedy")
     assert (answered["step"], answered["kind"]) == ("review", "implementation")
+
+
+REFUSED = [{"tool": "Bash", "command": "make check", "error": "Read-only file system"}]
+
+
+def test_a_question_with_refusals_waits_for_their_reading_then_its_answer(
+        tmp_path: Path) -> None:
+    """CW-jqi7's "A question carries refusals": a line carrying refusals is read as one
+    carrying denials, and the question waits for its answer after the reading."""
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "01-implementation-owner.md")
+    run = _log(root, "validate", {**QUESTION, "awaiting": "environmental remedy",
+                                  "denials": []}, refusals=REFUSED)
+
+    unread = _next(root)
+    _decide(root, "gap: proposed --write kit/site/.venv", reads=run["seq"])
+    read = _next(root)
+
+    assert unread["step"] == "owner" and "its question waits after that" in unread["reason"]
+    assert "1 refusal(s)" in unread["reason"]
+    assert (unread["refusals"], unread["outcome"], unread["seq"]) == (
+        REFUSED, "question", run["seq"])
+    assert (read["step"], read["resume"], read["awaiting"]) == (
+        "owner", "validate", "environmental remedy")
+
+
+def test_a_finished_run_with_refusals_waits_for_their_reading(tmp_path: Path) -> None:
+    """A run that went on past a refused write and finished is read before the change
+    moves on, as one that went on past a denial is."""
+    root = _repository(tmp_path, "in implementation")
+    run = _log(root, "implement", _done(ROUND_TRIAGE), refusals=REFUSED)
+
+    unread = _next(root)
+    _decide(root, "finding: the step wrote outside its job", reads=run["seq"])
+
+    assert (unread["step"], unread["seq"], unread["refusals"]) == ("owner", run["seq"], REFUSED)
+    assert _next(root)["step"] != "owner"
 
 
 def test_a_return_with_denials_waits_for_its_reading_then_its_confirmation(
@@ -2370,9 +2437,9 @@ def test_a_read_stop_waits_until_its_resumed_run_supersedes_it(tmp_path: Path) -
     _committed_round(root, "01-implementation-owner.md")
     run = _log(root, "validate", STOPPED)
 
-    _decide(root, "gap: proposed Bash(make lock) as a one-run grant", reads=run["seq"])
+    _decide(root, "gap: proposed kit/site/.venv as a one-run grant", reads=run["seq"])
     read = _next(root)
-    _log(root, "validate", _done(ROUND_TRIAGE), granted=["Bash(make lock)"])
+    _log(root, "validate", _done(ROUND_TRIAGE), writes_granted=["kit/site/.venv"])
     resumed = _next(root)
 
     assert (read["step"], read["seq"]) == ("owner", run["seq"]) and "stopped" in read["reason"]
@@ -2471,7 +2538,7 @@ def test_a_design_triages_denials_are_read_before_planning_starts(tmp_path: Path
 
     assert (unread["step"], unread["seq"], unread["denials"]) == (
         "owner", run["seq"], [{"tool_name": "Bash"}])
-    assert "denied 1 tool call" in unread["reason"]
+    assert "1 denied tool call(s)" in unread["reason"]
     assert read["step"] == "plan"
 
 
@@ -2517,7 +2584,7 @@ def test_a_plans_denials_are_read_before_implementation_starts(tmp_path: Path) -
     read = _next(root)
 
     assert (unread["step"], unread["seq"]) == ("owner", run["seq"])
-    assert "denied 1 tool call" in unread["reason"]
+    assert "1 denied tool call(s)" in unread["reason"]
     assert read["step"] == "owner" and "agree the next implementation round" in read["reason"]
 
 
