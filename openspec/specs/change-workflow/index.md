@@ -303,10 +303,10 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Skills from one source
 
-- [CW-d8de](spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness) — the workflow's skills are the installed distribution's, loaded from each harness's user skill directory with no project entry of their names; a repository's own skill has one source every harness loads, and `check skills` holds both.
+- [CW-d8de](spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness) — the workflow's skills are the installed distribution's, loaded from each harness's user skill directory with no project entry of their names, an unattended Claude Code run whose harness did not load one stopped before its first turn; a repository's own skill has one source every harness loads, and `check skills` holds both.
 - [CW-s7rq](spec.md#requirement-cw-s7rq-a-skill-restates-guidance-no-stricter-than-its-source) — a skill restates guidance briefly where its step applies it, citing it and never stricter; a stricter need amends the guidance.
 - [CW-n8tr](spec.md#requirement-cw-n8tr-the-workflows-skills-name-no-repositorys-targets-or-paths) — a target or path a workflow skill names is the workflow's own or an owned exemption, or a test fails naming the skill; a skill cites guidance by section name and the specification by id.
-- [CW-1rhd](spec.md#requirement-cw-1rhd-installed-skills-carry-the-engines-version) — `install` writes each harness's user skills stamped with the version and a manifest of what it wrote; every other subcommand refuses stale or missing skills, naming `install`.
+- [CW-1rhd](spec.md#requirement-cw-1rhd-installed-skills-carry-the-engines-version) — `install` writes each harness's user skills stamped with the version and a manifest of what it wrote; every other subcommand of an installed engine refuses stale or missing skills, naming `install`.
 
 ## 5. The public surface
 
@@ -338,7 +338,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-g2rs](spec.md#requirement-cw-g2rs-a-guide-restates-nothing-the-configuration-holds) — an evidence kind's guide restates none of its configuration entry, held by review.
 - [CW-k7gd](spec.md#requirement-cw-k7gd-an-evidence-kind-has-a-guide-the-steps-read) — each kind names a non-empty guide the steps handling it read; a kind without one is refused by every reader.
 - [CW-c5nt](spec.md#requirement-cw-c5nt-a-skill-names-a-contradiction-it-notices-and-follows-its-own-text) — a guide or message may add to or narrow a skill; a skill names a contradiction it notices and follows its own text.
-- [CW-sv3u](spec.md#requirement-cw-sv3u-the-installer-writes-a-checkouts-local-configuration) — run in a checkout with none, `install` writes the local configuration from the repository's template, or a skeleton naming each required field; it never overwrites one.
+- [CW-sv3u](spec.md#requirement-cw-sv3u-the-installer-writes-a-checkouts-local-configuration) — run in a checkout with none, `install` writes the local configuration from the repository's template, or a skeleton naming each required field; it never overwrites one, an empty file counting as none.
 - [CW-4pm4](spec.md#requirement-cw-4pm4-settings-developers-may-vary-live-in-the-local-configuration) — the engineering pointer, the models, and added writable paths live in the gitignored local file, each key in one file but added writable paths; with none, a step refuses while `check config` and `config --json` report and succeed.
 
 ### The repository's guidance

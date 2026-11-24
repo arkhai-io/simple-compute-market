@@ -129,14 +129,23 @@ Section 1 notes (handoff):
 - The wheel's file list, as `uv build --wheel scripts/change-workflow-wheel` builds
   it: `change_workflow/` with its 43 modules and `workflow.mk`; under
   `change_workflow/data/`: `change-outcome.schema.json`,
-  `change-workflow-handbook.md`, `guidance/` (the seven files of
-  `docs/guidance/workflow/`), `specification/` (`spec.md`, `index.md`, `README.md`,
-  and `diagrams/` with its four `.drawio` sources and four SVGs), and `skills/` (the
-  eleven skills' `SKILL.md`); and the `dist-info`'s `METADATA`, `WHEEL`,
+  `docs/change-workflow-handbook.md`, `docs/guidance/workflow/` (its seven files),
+  `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`, and
+  `diagrams/` with its four `.drawio` sources and four SVGs), each at its tree path so
+  its relative links resolve installed (30 F2, below), and `skills/` (the eleven
+  skills' `SKILL.md`); and the `dist-info`'s `METADATA`, `WHEEL`,
   `entry_points.txt`, and `RECORD`. A build with no `--out-dir` writes
   `scripts/change-workflow-wheel/dist/`, which `.gitignore`'s `dist/` covers.
 - A document added to the workflow's set needs a `force-include` line and a role in
   `documents`; `test_change_workflow_wheel.py` fails until both agree with the tree.
+- Implementation review 30's triage, F2 (outside the plan's letter, a fix of 1.1–1.2):
+  the handbook, the workflow guidance, and the specification set are packaged under
+  `data/` at their tree paths (`data/docs/…`, `data/openspec/specs/change-workflow/…`),
+  and `documents`' installed role paths follow, so the 16 relative links that resolved
+  in the tree but not in the wheel resolve in both; the schema and skills stay where
+  they were. `test_change_workflow_wheel.py` unpacks the built wheel and holds every
+  relative link of its documents to the set, and the tree's link test no longer skips
+  an installed distribution. Evidence under section 8's triage note.
   A skill added under `.agents/skills/` named `change-*` is the workflow's by
   `documents.skills()`'s rule, and the wheel test fails until its line is added.
 - The modules cite CW-5kl9, CW-lm42, and CW-d867, which only the change's delta holds
@@ -464,6 +473,10 @@ Section 3 notes (handoff):
   `uv tool`'s) can still add a `.pth` file or replace the entry script or the
   environment's interpreter beside them; section 8.3 should record this under the
   companion's "Current limits", or a later change protect the environment's root.
+- Implementation review 30's triage, F3: CW-sv3u now says an empty local file is
+  written as an absent one, with a scenario, and CW-1rhd's refusal and CW-d8de's
+  installed half are of an installed engine, the two judgments above, amended in the
+  delta and `spec.md` together, with their index summaries; no code changed.
 - Installing the workflow writes into the owner's real `~/.claude/skills/` and
   `~/.codex/skills/`; no session of this change did, the orchestrator's 4.1 does.
   Until then the tracked project links still load the skills from `.agents/skills/`.
@@ -662,6 +675,17 @@ their tests.
 
 Section 4 notes (handoff):
 
+- Implementation review 30's triage, 33 R1 (D25, outside the plan): from this
+  section's removal of the project links, every unattended Claude Code step ran
+  without the workflow's skills, since the adapter's `--setting-sources project` hides
+  the user skill directory. The adapter adds `--add-dir` of the home directory, whose
+  `.claude/skills/` Claude Code loads without the user's settings; the stream holds a
+  run of an installed engine to the skills its `init` event lists, and a step or a
+  Claude review whose harness did not load one is stopped there and its model passed
+  over as unavailable, naming each (`claude_code.shipped_skills`,
+  `stream.SkillsNotLoaded`, the wrapper's and the review's handling). CW-d8de gains the
+  stop and its scenario; the companion's adapter paragraph says both. Evidence under
+  section 8's triage note.
 - The orchestrator reinstalls before the next session runs a step, since the skills,
   the engine, and the fragment changed: `make install-workflow` in the workspace and
   in this clone. The installed stamp is the version, which this section keeps at
@@ -1305,6 +1329,47 @@ Touches `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`,
 
 Section 8 notes (handoff):
 
+- Implementation review 30's triage (30 F1–F3, 32 O1–O2, 33 R1; validation 31 passed,
+  nothing to triage): the fixes are recorded under sections 1, 3, and 4; 30 F1 is D1's
+  wording, `dev`'s checks and other changes' passing with this change's named index
+  check failing only on MCW-9k0c and MCW-iqh1 until 10.2; 32 O1 and O2 are D24's
+  condition and the handbook's procedure for the move, the workflow's repository
+  leaving no `force-include` table. R1's cause was checked on Claude Code 2.1.331 by
+  the `init` event's `skills`: none of the eleven with `--setting-sources project`, all
+  eleven with `user,project` or with `project` and `--add-dir` of the home directory.
+  Evidence: unit, `test_change_workflow_stream.py` (a run stopped at an `init` lacking a
+  skill, naming it, its line kept and nothing after it read; one listing every skill
+  going on; an `init` with no `skills` list or with skills in another form naming every
+  one), `test_change_workflow_harness.py` (`--add-dir` of the user's home and of a given
+  one; an installed distribution's skills required, the tree's none),
+  `test_change_workflow_documents.py`, `test_change_workflow_citations.py` (the link
+  test with no installed skip); library integration, `test_change_workflow_stream.py`'s
+  wrapper cases (a step whose harness loaded no skill stopped, its model passed over
+  naming both, `--add-dir` naming the wrapper's home; one that loaded them finishing)
+  and `test_change_workflow_review.py` (a Claude reviewer without `change-review`
+  passed over, nothing published); external process, `test_change_workflow_wheel.py`
+  (the built wheel's files at their tree paths under `data/`, and every relative link
+  of its documents, unpacked, resolving within the set): passed, with
+  `test_change_workflow_wrapper.py`. Run against `14fd37dc0` with the new tests: the
+  stream suite fails to import `SkillsNotLoaded`; the `--add-dir`, `shipped_skills`,
+  review, wheel-layout, link, and installed-documents tests fail. `change-workflow run
+  pre-commit`: `make lock` passed; `make validate-local` passed — packaging, and every
+  suite, the scripts' 3,746, its tree guard holding; the default checks passed but
+  `spec-index` (the two market ids, as D1 now says) and `decisions` (D25 had no bullet
+  in the proposal's "Knowledge to promote", now added); `make check-repository`
+  passed. After that inert edit: `check decisions`, `index`, `tasks`, `skills`, the
+  strict OpenSpec validation, and `make check-repository` passed, `spec-index` failing
+  on the same two ids. The tree committed differs from the one `validate-local`
+  passed only in `proposal.md` and `tasks.md`. The fresh-context check's findings
+  fixed: CW-d8de's stop scoped to Claude Code runs, whose `init` lists their skills,
+  in the delta and `spec.md` alike; a `skills` list of other forms read as naming
+  none rather than failing; tests of an `init` with no `skills`, of the tree's skills
+  asked none, and of the wrapper's home reaching `--add-dir`; the three modules'
+  `Contract:` lines naming CW-d8de; wrapping; the companion's adapter paragraph read as
+  one; D25 naming the owner's own user skills loading and the warned unconfined
+  fallback; a test that proved nothing new dropped. Declined: a Claude review that
+  loaded its skill going on, which the wrapper's case and the shared stream cover;
+  moving the link helpers the wheel test imports into the fixtures module.
 - For the round's triage: the delta reached `spec.md` as it is worded, so the
   judgments sections 3 and 4 recorded — CW-1rhd and CW-d8de of an installed engine,
   CW-4pm4's step naming its models only when unattended, CW-sv3u's empty local file —

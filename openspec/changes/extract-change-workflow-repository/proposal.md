@@ -240,7 +240,11 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
 - D22: no permanent destination — the cadence is this change's plan.
 - D24: no permanent destination — the `overrides` row in `AGENTS.md`, "Exceptions
   to shared guidance", and `make check-project-layout`'s admission of the wheel stand
-  only through the pause; (iii) removes both with the wheel.
+  only through the pause; (iii) removes both with the wheel. That the workflow's
+  repository leaves no `force-include` table goes to the handbook's procedure for the
+  move.
+- D25: the modified CW-d8de, its unattended stop and scenario, and `change-workflow`'s
+  companion, "Restrictions bind unattended runs only", its adapter paragraph.
 - D23: no permanent destination — how this change's own delta reaches the permanent
   specification and how it archives are recorded in its plan and closeout task.
 - `market-change-workflow`: MCW-9k0c and MCW-iqh1, and its companion's "This

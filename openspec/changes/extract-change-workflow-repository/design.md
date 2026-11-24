@@ -1,8 +1,9 @@
 # Design: extract the change workflow repository
 
 Status: design settled 2026-11-23 (D1–D24), amended by design review 15's triage
-(D4, D5, D6, D8, D14, D18, D21, D22, and D23 added) and by the owner's settlement of
-planning's question P1 (D24). The change has two halves in one
+(D4, D5, D6, D8, D14, D18, D21, D22, and D23 added), by the owner's settlement of
+planning's question P1 (D24), and by the triage of implementation review 30 (D1, D24,
+and D25 added). The change has two halves in one
 change: first the workflow becomes a self-contained, versioned, installable
 distribution that this repository runs installed from its own tree; then, once a
 coordinator has bootstrapped the workflow's own repository from that tree and
@@ -69,7 +70,10 @@ repository accepts, installs the release, removes the in-tree copy, and re-point
 this repository's documents. (i) may be merged to `dev` by a preliminary pull request
 while the change stays in implementation; `dev` then runs (i) for the whole pause, so
 (i) ends complete on its own: the workflow installed from the tree, every check and
-suite passing, and no citation half-rewritten.
+suite `dev` and other changes run passing — this change's own index check, run with
+the change named, failing only on the `market-change-workflow` delta's two added ids
+until 10.2 writes their entries, as every change's does until its entries are written
+(`pass-checks-at-every-commit`) — and no citation half-rewritten (30 F1).
 
 Rejected: a follow-up change for (iii), which costs a second design and closeout for
 what is mostly deletion and citation rewriting; (i) as a prerequisite, which would
@@ -560,7 +564,10 @@ capability. `make check-project-layout` admits that one project, naming the row.
 The exception lasts until (iii) removes the engine, the wheel's project, and the
 row together: it is short-lived, and restructuring the engine to the rule's layout
 is not worth doing in a repository it is about to leave. The workflow's repository
-may restructure to the rule, or keep an exception of its own, as its own change.
+restructures, as its own change, so that no `force-include` table remains: the
+owner's condition on 32 O1, "this list has to disappear on the arkhai-change-workflow
+repo", which the handbook's procedure for the move states. Until then the table is
+brittle but not silent: the wheel's test fails when the tree and the wheel disagree.
 
 Planning raised the question (P1) and the owner settled it, declining a return to
 design: "This is going to be a temporary exception until step (iii) removes the
@@ -570,6 +577,32 @@ we move it out of the repo anyway."
 Rejected: moving the engine to `src/change_workflow/` with each document linked into
 the package directory, a restructuring of code about to leave whose linked build was
 unproven; and a generated build tree, a build configuration by another name.
+
+### D25 — Unattended Claude Code runs load the installed skills, and stop without them
+
+The Claude Code adapter launches a step with `--setting-sources project`, so the
+owner's user settings never shape an unattended run, and Claude Code loads the user
+skill directory only with the user's settings: from section 4, which removed the
+project skill links, every unattended Claude Code step started with none of the
+workflow's skills (33 R1). The adapter adds the home directory as a working directory
+(`--add-dir`), whose `.claude/skills/` Claude Code loads without the user's settings;
+the engine's sandbox, not Claude Code's working directories, bounds what a run writes.
+Because that rests on a harness behaviour that may change between versions, the
+stream holds each run to the skills its opening `init` event lists: a run of an
+installed engine whose harness did not load a skill the engine ships is stopped there,
+before its first turn, and its model passed over as unavailable, naming each, in a
+step and in a Claude review alike (CW-d8de). Codex loads `~/.codex/skills/` and is
+unaffected; its events list no loaded skills, so it is not held to them. The owner's
+own user skills load beside the workflow's, carrying no rule or hook; and a run the
+engine starts unconfined, which it warns of, has the home directory as a working
+directory with no sandbox bounding it, a cost of that warned fallback.
+
+Rejected: loading the user's settings (`--setting-sources user,project`), the
+documented mechanism, which lets the owner's rules, hooks, and environment shape every
+unattended run, so runs differ between machines; and binding the installed skills
+into the project's skill directory inside the sandbox, whose mount points leave empty
+directories in the worktree, as the sandbox's empty protected files left 30 F3's empty
+local configuration.
 
 ## Principles
 

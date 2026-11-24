@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from change_workflow import documents
+from test_change_workflow_citations import document_set, links_leaving
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = ROOT / "scripts/change-workflow-wheel"
@@ -64,19 +65,15 @@ def test_the_wheel_ships_the_engine_and_every_document_of_the_tree(wheel: Path) 
     tree = documents.RUNNING
     expected = {f"change_workflow/{path.relative_to(tree.package).as_posix()}"
                 for path in tree.package.glob("*") if path.suffix in (".py", ".mk")}
-    shipped = {
-        "change_workflow/data/specification/spec.md": tree.path(documents.SPECIFICATION),
-        "change_workflow/data/specification/index.md": tree.path(documents.INDEX),
-        "change_workflow/data/specification/README.md": tree.path(documents.COMPANION),
-        "change_workflow/data/change-workflow-handbook.md": tree.path(documents.HANDBOOK),
-        "change_workflow/data/change-outcome.schema.json": tree.path(documents.SCHEMA),
-    }
-    for directory, source in (("data/specification/diagrams", documents.DIAGRAMS),
-                              ("data/guidance", documents.GUIDANCE)):
-        for path in tree.path(source).rglob("*"):
+    # The handbook, guidance, and specification at their tree paths under `data/`,
+    # so their relative links resolve installed; the schema at its top.
+    shipped = {"change_workflow/data/change-outcome.schema.json": tree.path(documents.SCHEMA)}
+    for role in (documents.SPECIFICATION, documents.INDEX, documents.COMPANION,
+                 documents.DIAGRAMS, documents.GUIDANCE, documents.HANDBOOK):
+        source = tree.path(role)
+        for path in [source] if source.is_file() else source.rglob("*"):
             if path.is_file():
-                shipped[f"change_workflow/{directory}/"
-                        f"{path.relative_to(tree.path(source)).as_posix()}"] = path
+                shipped[f"change_workflow/data/{path.relative_to(tree.tree).as_posix()}"] = path
     for name, source in tree.skills().items():
         for path in source.rglob("*"):
             if path.is_file():
@@ -87,6 +84,19 @@ def test_the_wheel_ships_the_engine_and_every_document_of_the_tree(wheel: Path) 
     assert packaged == expected | set(shipped)
     for name, source in shipped.items():
         assert zipfile.ZipFile(wheel).read(name) == source.read_bytes(), name
+
+
+def test_every_relative_link_of_the_wheels_documents_resolves_installed(
+        wheel: Path, tmp_path: Path) -> None:
+    """The distribution's documents, unpacked from the wheel as an installation lays
+    them out, link only within their set: each relative link the tree's test proves
+    resolves the same way in the installed copy."""
+    zipfile.ZipFile(wheel).extractall(tmp_path)
+    unpacked = documents.Distribution(tmp_path / "change_workflow")
+
+    assert unpacked.installed
+    assert document_set(unpacked), "the wheel ships no document"
+    assert links_leaving(unpacked) == []
 
 
 def test_the_installed_command_prints_its_version(installed: Path, tmp_path: Path) -> None:

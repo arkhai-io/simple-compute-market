@@ -1817,13 +1817,26 @@ through it, so coupling to a harness lives in its adapter alone. Claude Code run
 off, so nothing prompts a person nobody is watching; a tool that waits for a later
 turn — a monitor, a wake-up, a scheduled task — stays denied, since an unattended
 turn's end is its outcome, and its one command rule refuses `git push`, so its denial
-records mean what the adapter adds; it writes `~/.claude` and `~/.claude.json`, and loads `.claude/settings.json`,
-`.claude/settings.local.json`, and `~/.claude/settings.json`. Codex writes `~/.codex`
-and loads `~/.codex/config.toml` inside it. Auto mode was rejected because what a
-step may do would rest on a classifier's call per action, and a permission-prompt
-tool routing prompts to the orchestrating session would leave a long validation
-blocked while the owner is away. How Codex runs a review inside the sandbox is
-[Models are policy, with no same-vendor fallback](#models-are-policy-with-no-same-vendor-fallback).
+records mean what the adapter adds; it writes `~/.claude` and `~/.claude.json`, and
+its harness can load `.claude/settings.json`, `.claude/settings.local.json`, and
+`~/.claude/settings.json`, though a run loads only the project's settings, so the
+owner's own rules, hooks, and environment never shape it. Claude Code loads its user
+skill directory only with the user's settings, so the run adds the home directory as a
+working directory, whose `.claude/skills/` it loads without them, the engine's sandbox
+rather than Claude Code's working directories bounding what it writes; the owner's own
+user skills load beside the workflow's, carrying no rule or hook. The run's opening
+`init` event lists the skills its harness loaded, and a run of an installed engine
+missing one it ships is stopped there, its model passed over as unavailable, naming
+each (CW-d8de), so a harness that stops loading the installed skills fails a step
+rather than running it without its skill. Loading the user's settings was rejected,
+since the owner's rules would make runs differ between machines, and so was binding
+the installed skills into the project's skill directory inside the sandbox, whose
+mount points leave empty directories in the worktree. Codex writes `~/.codex` and
+loads `~/.codex/config.toml` inside it. Auto mode was rejected because what a step may
+do would rest on a classifier's call per action, and a permission-prompt tool routing
+prompts to the orchestrating session would leave a long validation blocked while the
+owner is away. How Codex runs a review inside the sandbox is [Models are policy, with
+no same-vendor fallback](#models-are-policy-with-no-same-vendor-fallback).
 
 ### Pushing is guarded, never repaired
 

@@ -38,17 +38,6 @@ GUIDANCE, HANDBOOK, SCHEMA, FRAGMENT = "guidance", "handbook", "schema", "fragme
 # them.
 ROLES = (SPECIFICATION, INDEX, COMPANION, DIAGRAMS, GUIDANCE, HANDBOOK, SCHEMA, FRAGMENT)
 
-# Each role's place inside an installed package's `data/`; the fragment is a file of
-# the package itself in either form.
-_INSTALLED = {
-    SPECIFICATION: "specification/spec.md",
-    INDEX: "specification/index.md",
-    COMPANION: "specification/README.md",
-    DIAGRAMS: "specification/diagrams",
-    GUIDANCE: "guidance",
-    HANDBOOK: "change-workflow-handbook.md",
-    SCHEMA: "change-outcome.schema.json",
-}
 # Each role's place in the source tree, from its root.
 _TREE = {
     SPECIFICATION: "openspec/specs/change-workflow/spec.md",
@@ -59,6 +48,11 @@ _TREE = {
     HANDBOOK: "docs/change-workflow-handbook.md",
     SCHEMA: ".agents/change-outcome.schema.json",
 }
+# Each role's place inside an installed package's `data/`; the fragment is a file of
+# the package itself in either form. The documents that link to one another keep
+# their places in the tree, so each relative link resolves installed as it does in
+# the tree; the schema, which links nothing, sits at the top.
+_INSTALLED = {**_TREE, SCHEMA: "change-outcome.schema.json"}
 FRAGMENT_FILE = "workflow.mk"
 # The skills' sources: an installed package's own, every one of which it ships; and
 # in the source tree, the directory the repository's own skills share, of which the

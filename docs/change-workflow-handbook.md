@@ -977,6 +977,13 @@ from its first commit; its configuration, local configuration template, change i
 root guidance, and CI are written there, and the archived changes that built the
 workflow stay in the repository they were archived in.
 
+The lifted engine keeps the paths it has here — its package under `scripts/`, its
+skills under `.agents/skills/`, and its project gathering them with a `force-include`
+table — which its first repository built under a temporary exception to the
+packaging rules. The new repository restructures itself, as its own change, into a
+project whose package holds the engine and the data it ships, so that no
+`force-include` table remains; it declares no exception of its own for that table.
+
 The new repository's own guidance carries the rule for what is local, as a rule for
 its own work: a setting of the workflow is local exactly when developers using the
 workflow on the same repository should be able to give it different values;

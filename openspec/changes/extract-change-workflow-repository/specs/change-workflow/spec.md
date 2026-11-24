@@ -76,11 +76,11 @@ version, and record the names it wrote in a manifest beside them; it MUST remove
 skill its manifest names that the installed version no longer ships, and MUST NOT
 touch a skill it did not write: it MUST refuse, naming it and writing nothing, when a
 skill of a name it ships is present in a user skill directory and its manifest does
-not record it. Every subcommand but `install` and `--version` MUST refuse when an
-installed skill's stamp differs from the engine's version, naming both and
-`change-workflow install`, and when a supported harness's user skill directory lacks
-a skill the version ships or the manifest, naming what is missing and `change-workflow
-install`.
+not record it. Every subcommand of an installed engine but `install` and `--version`
+MUST refuse when an installed skill's stamp differs from the engine's version, naming
+both and `change-workflow install`, and when a supported harness's user skill
+directory lacks a skill the version ships or the manifest, naming what is missing and
+`change-workflow install`.
 
 #### Scenario: The engine is upgraded without its skills
 
@@ -112,7 +112,9 @@ install`.
 `.agents/workflow.local.toml`, where none exists: from the repository's committed
 template, `.agents/workflow.local.template.toml`, when one exists, and otherwise as a
 skeleton naming each required local field. It MUST NOT overwrite a local
-configuration that exists.
+configuration that exists. An empty `.agents/workflow.local.toml`, the form the
+sandbox gives an absent protected file, is no local configuration: `install` MUST
+write it as it writes an absent one.
 
 #### Scenario: A developer installs in a repository with a template
 
@@ -123,7 +125,15 @@ configuration that exists.
 #### Scenario: A local configuration exists
 
 - **WHEN** `install` runs in a checkout whose `.agents/workflow.local.toml` exists
+  and holds anything
 - **THEN** the file is unchanged
+
+#### Scenario: The local configuration is empty
+
+- **WHEN** a step's sandbox left an empty `.agents/workflow.local.toml` in a checkout
+  with `.agents/workflow.local.template.toml`, and the developer runs `change-workflow
+  install` there
+- **THEN** the checkout's `.agents/workflow.local.toml` holds the template's content
 
 ### Requirement: CW-4pm4 Settings developers may vary live in the local configuration
 
@@ -329,11 +339,14 @@ directory, when run outside one.
 
 The workflow's skills MUST be the installed distribution's, stamped with its version
 (CW-1rhd), loaded from each supported harness's user skill directory, with no project
-skill entry of the same name. Each agent skill a repository commits itself MUST have
-exactly one source, under `.agents/skills/`, and MUST be loadable by every supported
-agent harness from that source. A skill MUST NOT be maintained as separate copies for different
-harnesses, and every harness entry for a skill MUST resolve. `check skills` MUST hold
-both.
+skill entry of the same name; an unattended Claude Code run of an installed engine,
+whose opening event lists the skills its harness loaded, MUST be stopped before its
+first turn when one of them is missing, naming each. Each agent skill a repository
+commits itself MUST have exactly one source, under `.agents/skills/`, and MUST be
+loadable by every supported agent harness from that source. A skill MUST NOT be
+maintained as separate copies for different harnesses, and every harness entry for a
+skill MUST resolve. `check skills` MUST hold both, the installed skills where the
+engine is installed.
 
 #### Scenario: A skill is edited
 
@@ -350,6 +363,13 @@ both.
 - **WHEN** an installed workflow skill is stamped with a version other than the
   engine's
 - **THEN** the skills check fails, naming the skill and both versions
+
+#### Scenario: A step's harness does not load an installed skill
+
+- **WHEN** an unattended step's harness starts and its opening event lists no
+  `change-design` among the skills it loaded
+- **THEN** the run is stopped before its first turn, its model passed over as
+  unavailable, naming `change-design`
 
 ### Requirement: CW-f3qk One configuration file states what the workflow assumes
 

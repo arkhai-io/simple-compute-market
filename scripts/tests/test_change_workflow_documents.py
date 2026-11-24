@@ -15,12 +15,13 @@ from change_workflow.documents import (COMPANION, DIAGRAMS, DISTRIBUTION, FRAGME
 
 ROOT = Path(__file__).resolve().parents[2]
 # Each role's file in a package's data, as the wheel's project file gathers it.
-INSTALLED = {SPECIFICATION: "data/specification/spec.md",
-             INDEX: "data/specification/index.md",
-             COMPANION: "data/specification/README.md",
-             DIAGRAMS: "data/specification/diagrams",
-             GUIDANCE: "data/guidance",
-             HANDBOOK: "data/change-workflow-handbook.md",
+# The documents linking one another keep their tree paths, so their links resolve.
+INSTALLED = {SPECIFICATION: "data/openspec/specs/change-workflow/spec.md",
+             INDEX: "data/openspec/specs/change-workflow/index.md",
+             COMPANION: "data/openspec/specs/change-workflow/README.md",
+             DIAGRAMS: "data/openspec/specs/change-workflow/diagrams",
+             GUIDANCE: "data/docs/guidance/workflow",
+             HANDBOOK: "data/docs/change-workflow-handbook.md",
              SCHEMA: "data/change-outcome.schema.json",
              FRAGMENT: "workflow.mk"}
 # The workflow's eleven skills.

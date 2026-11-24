@@ -16,7 +16,9 @@ build-backend = "hatchling.build"
 # The engine and the workflow's documents stay where the repository keeps them —
 # the engine under scripts/, its skills under .agents/, its specification in
 # OpenSpec's tree — so the wheel gathers them from there, each document under the
-# package's data/ directory, where `change_workflow.documents` finds it by role.
+# package's data/ directory, where `change_workflow.documents` finds it by role. The
+# handbook, guidance, and specification keep their tree paths there, so their
+# relative links to one another resolve in the installed copy.
 # This departs from the one-package src/ layout, as the repository's AGENTS.md
 # "Exceptions to shared guidance" admits for this project alone.
 [tool.hatch.build.targets.wheel]
@@ -25,12 +27,12 @@ bypass-selection = true
 [tool.hatch.build.targets.wheel.force-include]
 "../change_workflow" = "change_workflow"
 "../../.agents/change-outcome.schema.json" = "change_workflow/data/change-outcome.schema.json"
-"../../docs/change-workflow-handbook.md" = "change_workflow/data/change-workflow-handbook.md"
-"../../docs/guidance/workflow" = "change_workflow/data/guidance"
-"../../openspec/specs/change-workflow/spec.md" = "change_workflow/data/specification/spec.md"
-"../../openspec/specs/change-workflow/index.md" = "change_workflow/data/specification/index.md"
-"../../openspec/specs/change-workflow/README.md" = "change_workflow/data/specification/README.md"
-"../../openspec/specs/change-workflow/diagrams" = "change_workflow/data/specification/diagrams"
+"../../docs/change-workflow-handbook.md" = "change_workflow/data/docs/change-workflow-handbook.md"
+"../../docs/guidance/workflow" = "change_workflow/data/docs/guidance/workflow"
+"../../openspec/specs/change-workflow/spec.md" = "change_workflow/data/openspec/specs/change-workflow/spec.md"
+"../../openspec/specs/change-workflow/index.md" = "change_workflow/data/openspec/specs/change-workflow/index.md"
+"../../openspec/specs/change-workflow/README.md" = "change_workflow/data/openspec/specs/change-workflow/README.md"
+"../../openspec/specs/change-workflow/diagrams" = "change_workflow/data/openspec/specs/change-workflow/diagrams"
 "../../.agents/skills/change-archive-cleanup" = "change_workflow/data/skills/change-archive-cleanup"
 "../../.agents/skills/change-closeout" = "change_workflow/data/skills/change-closeout"
 "../../.agents/skills/change-design" = "change_workflow/data/skills/change-design"

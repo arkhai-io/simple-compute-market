@@ -6,15 +6,15 @@ the set is lifted whole and reads whole wherever it is kept.
 
 Unit tests over the distribution's document set, as `documents` finds it: the tree's
 when run from it, the package's when installed. A relative link is written for the
-tree's layout, which a lift keeps, so the links are read in the tree alone."""
+tree's layout, which a lift keeps and the installed package keeps for every document
+that links another, so the links read the same in either; the wheel's test reads them
+in the built wheel too."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
 from typing import Mapping
-
-import pytest
 
 from change_workflow import documents, sections
 
@@ -85,8 +85,6 @@ def links_leaving(distribution: documents.Distribution) -> list[str]:
 
 
 def test_the_workflows_documents_link_only_within_their_set() -> None:
-    if documents.RUNNING.installed:
-        pytest.skip("relative links are written for the tree's layout")
     assert document_set(documents.RUNNING), "the distribution ships no document"
 
     assert links_leaving(documents.RUNNING) == []

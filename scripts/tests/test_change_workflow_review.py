@@ -850,6 +850,24 @@ def test_a_review_with_no_reviewer_available_publishes_nothing(tmp_path: Path) -
     assert not [p for p in reviews_of(root).iterdir() if p.suffix == ".md"]
 
 
+def test_a_claude_reviewer_whose_harness_did_not_load_the_skill_is_unavailable(
+        tmp_path: Path) -> None:
+    """CW-d8de: a Claude reviewer whose `init` event lists no `change-review` is stopped
+    there and passed over, naming the skill, rather than reviewing without it."""
+    root = repository(tmp_path)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
+                          claude=claude_review(review_text()), head=lambda _: HEAD,
+                          echo=None, skills=lambda: frozenset({"change-review"}))
+
+    assert line["outcome"] == "stopped"
+    assert line["unavailable"][-1]["reason"] == (
+        "Claude Code did not load the workflow's skill change-review, which `change-workflow "
+        "install` writes into its user skill directory; the run was stopped before its "
+        "first turn")
+    assert not [p for p in reviews_of(root).iterdir() if p.suffix == ".md"]
+
+
 @pytest.mark.parametrize("lost", ["codex", "claude"])
 def test_a_file_the_reviewer_cannot_find_is_no_unavailability(tmp_path: Path,
                                                                lost: str) -> None:

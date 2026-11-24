@@ -11,6 +11,12 @@ each failed call whose result says a write failed as a read-only file system, or
 busy, with the call's tool, its command or path, and that line (CW-w3oa). A line's
 denials and refusals are always this record, never the step's own account of them.
 
+A run's `init` event lists the skills its harness loaded. A run given the skills it
+must load is stopped at that event when one is missing, before its session takes a
+turn: `feed` raises `SkillsNotLoaded`, naming each, and the caller passes the model
+over as unavailable, so a harness that stops loading the installed skills fails the
+run rather than running it without them (CW-d8de).
+
 Both files stay open from the run's first line to its end. Closeout archives the
 change it runs for, which renames the change's directory, `reviews/` with it, while
 the run is still writing; an open file moves with its directory, where a path
@@ -22,7 +28,7 @@ from __future__ import annotations
 import json
 from datetime import timezone
 from pathlib import Path
-from typing import Any, Callable, TextIO
+from typing import Any, Callable, Collection, TextIO
 
 from .common import Clock, utc_now
 from .harness import refused
@@ -86,11 +92,21 @@ def _refusal(call: dict[str, Any], error: str) -> dict[str, Any]:
     return {"tool": call.get("tool_name", "?"), **named, "error": error}
 
 
+def _is_init(event: dict[str, Any]) -> bool:
+    """Whether `event` is a turn's opening `init` event, which lists the skills its
+    harness loaded."""
+    return event.get("type") == "system" and event.get("subtype") == "init"
+
+
 def _denial_key(denial: dict[str, Any]) -> str:
     """What identifies a denied call: its tool use id, or the call itself."""
     if isinstance(denial.get("tool_use_id"), str):
         return denial["tool_use_id"]
     return json.dumps(denial, sort_keys=True, ensure_ascii=False)
+
+
+class SkillsNotLoaded(Exception):
+    """A run's harness did not load a skill the run must load; the message names each."""
 
 
 class Stream:
@@ -115,8 +131,13 @@ class Stream:
     """
 
     def __init__(self, transcript: Path, progress: Path, clock: Clock = utc_now,
-                 echo: Callable[[str], None] | None = None) -> None:
+                 echo: Callable[[str], None] | None = None,
+                 skills: Collection[str] = ()) -> None:
         self.transcript = transcript
+        # The skills the run's harness must load, and those its `init` event did not
+        # list.
+        self.skills = frozenset(skills)
+        self.unloaded: list[str] = []
         self.progress = progress
         self.clock = clock
         self.echo = echo
@@ -183,6 +204,12 @@ class Stream:
         if not isinstance(event, dict):
             return
         self.take(event)
+        if self.unloaded and _is_init(event):
+            raise SkillsNotLoaded(
+                "Claude Code did not load the workflow's "
+                + ("skill " if len(self.unloaded) == 1 else "skills ")
+                + ", ".join(self.unloaded) + ", which `change-workflow install` writes into "
+                "its user skill directory; the run was stopped before its first turn")
         for item in _tool_uses(event):
             at = self.clock().astimezone(timezone.utc).strftime("%H:%M:%SZ")
             shown = f"{at} {item.get('name', '?')} {tool_summary(item)}".rstrip()
@@ -195,6 +222,11 @@ class Stream:
         refusals."""
         if isinstance(event.get("session_id"), str):
             self.session = event["session_id"]
+        if self.skills and _is_init(event):
+            listed = event.get("skills")
+            loaded = {name for name in listed if isinstance(name, str)} \
+                if isinstance(listed, list) else set()
+            self.unloaded = sorted(self.skills - loaded)
         for item in _tool_uses(event):
             if isinstance(item.get("id"), str):
                 self.tool_use_ids.add(item["id"])

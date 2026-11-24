@@ -60,7 +60,7 @@ naming each, with `invariants` on its line; `after-review` does not run.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-p2b2, CW-2nb2, CW-5e24, CW-r9d2,
 CW-r8fb, CW-clhl, CW-d1sm, CW-gqav, CW-h3ks, CW-a4fl, CW-i9np, CW-q7ub, CW-f9le,
-CW-m8wq, CW-v5ny, CW-w3oa, and CW-t6mb.
+CW-m8wq, CW-v5ny, CW-w3oa, CW-t6mb, and CW-d8de.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ from .running import (drop_invocations, invocations_directory, kept_invocations,
                       refused_pushes, runs_directory, termination_deferred,
                       termination_ends_the_run)
 from .sandbox import BUBBLEWRAP, Confined, Confinement, confine, missing
-from .stream import Stream, transcript_denials, transcript_refusals
+from .stream import SkillsNotLoaded, Stream, transcript_denials, transcript_refusals
 
 SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
 # Each finding's fields, and the values each admits; None admits any non-empty
@@ -430,12 +430,14 @@ def _codex_attempt(model: Model, prompt: str, continuing: str | None, draft: Pat
 def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Path, log: Path,
                     root: Path, runner: Runner, clock: Clock,
                     echo: Callable[[str], None] | None, confined: Confined,
-                    confinement: Confinement) -> tuple[int | None, Reached, str | None]:
+                    confinement: Confinement, skills: frozenset[str] = frozenset(),
+                    home: Path | None = None) -> tuple[int | None, Reached, str | None]:
     """One run of the review on Claude, inside the review's sandbox, its final
-    message written to `draft`, as Codex writes its own."""
-    stream = Stream(log, log.with_suffix(".progress"), clock, echo)
+    message written to `draft`, as Codex writes its own; a run whose harness did not
+    load one of `skills` is stopped and its reviewer unavailable."""
+    stream = Stream(log, log.with_suffix(".progress"), clock, echo, skills)
     command = claude_code.command(prompt, None, model, session=continuing,
-                                  system=REVIEW_UNATTENDED)
+                                  system=REVIEW_UNATTENDED, home=home)
     try:
         with termination_ends_the_run(), \
                 confined.launch(confinement, model.harness, command) as launched:
@@ -444,6 +446,9 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
         if not missing_program(exc, command):
             raise
         return None, ("unavailable", f"{command[0]} is not installed"), None
+    except SkillsNotLoaded as exc:
+        # Stopped at its `init` event: this reviewer cannot run the review's skill.
+        return None, ("unavailable", str(exc)), None
     finally:
         stream.close()
     said = stream.failure_text(status)
@@ -520,7 +525,8 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
                invariants: Invariants | None = None,
                confinement: Confinement = BUBBLEWRAP, home: Path | None = None,
                temporary: Path | None = None, confined: Confined | None = None,
-               run_keys: list[str] | None = None) -> Path:
+               run_keys: list[str] | None = None,
+               skills: Callable[[], frozenset[str]] = claude_code.shipped_skills) -> Path:
     """Run the review on the first available of its models, and publish it.
 
     Each reviewer runs inside the review's sandbox, launched through its harness's
@@ -535,7 +541,9 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     reviewer's private `/tmp`, so the reviewer writes the file the engine moves.
     Codex names no session in its commands' environment, so, given `run_keys`, each
     Codex attempt's commands keep what they invoke under a key the engine makes for
-    the attempt, added to `run_keys`.
+    the attempt, added to `run_keys`. A Claude reviewer whose harness did not load
+    one of the `skills` an installed engine ships is stopped at its `init` event and
+    passed over as unavailable, naming them.
 
     Given the run's `hooks`, the engine's actions and `before-review` run once every
     guard has passed and before the reviewer starts, and the reviewer's first prompt
@@ -659,7 +667,8 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
             else:
                 claude_ran = True
                 result = _claude_attempt(model, prompt, continuing, draft, log, root,
-                                         claude, clock, echo, confined, confinement)
+                                         claude, clock, echo, confined, confinement,
+                                         skills(), home)
             if result[1] is None or result[1][0] != "network":
                 break
         return result
